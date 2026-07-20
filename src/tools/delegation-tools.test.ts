@@ -19,9 +19,32 @@ describe("createDelegationTools", () => {
         allowedToolsets: { type: "array" },
         allowedTools: { type: "array" },
         role: { enum: ["leaf", "orchestrator"] },
-        modelOverride: { required: ["model"] }
+        modelOverride: { required: ["model"] },
+        synthesis: { required: ["objective"] }
       }
     });
+  });
+
+  it("forwards an explicit synthesis objective as a fixed terminal Step request", async () => {
+    const create = vi.fn(() => ({
+      ...handle("task-synthesis", 3),
+      workerStepIds: ["step-a", "step-b"],
+      synthesisStepId: "step-synthesis",
+      primaryResultStepId: "step-synthesis"
+    }));
+    const [tool] = tools(create);
+    const result = await tool!.run({
+      tasks: [{ task: "A" }, { task: "B" }],
+      synthesis: {
+        objective: "Compare A and B.",
+        modelOverride: { model: "synth-model" }
+      }
+    }, { toolCallId: "provider-call-synthesis" });
+
+    expect(result.content).toContain("Synthesis Step: step-synthesis");
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      synthesis: { objective: "Compare A and B.", modelOverride: { model: "synth-model" } }
+    }));
   });
 
   it("creates one durable Step and returns the Task handle without waiting", async () => {
@@ -89,6 +112,8 @@ describe("createDelegationTools", () => {
     [{ tasks: "not-json" }, "invalid-json-string"],
     [{ tasks: [{ task: "" }] }, "empty-task-string"],
     [{ tasks: [{ task: "A", role: "invalid" }] }, "invalid-task-object"],
+    [{ task: "A", synthesis: {} }, "invalid-synthesis"],
+    [{ task: "A", synthesis: { objective: "S", extra: true } }, "invalid-synthesis"],
     [{ modelOverride: { model: "x".repeat(MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH + 1) }, task: "A" }, "invalid-model-override"],
     [{ modelOverride: { model: "m", provider: "x".repeat(MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH + 1) }, task: "A" }, "invalid-model-override"]
   ])("rejects malformed input %#", async (input, code) => {

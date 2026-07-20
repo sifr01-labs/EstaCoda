@@ -199,6 +199,23 @@ Single and batch inputs keep the same shape:
 
 A batch becomes one durable Task with one independent Step per item. The scheduler enforces configured concurrency, timeout, retry, cancellation, usage, approval, and result policies. The tool result contains the Task ID, queued status, Step count, and whether the call created a root or linked child Task.
 
+Add an explicit fixed synthesis Step when the Task should return one combined answer:
+
+```json
+{
+  "tasks": [
+    { "task": "Research option A." },
+    { "task": "Research option B." },
+    { "task": "Research option C." }
+  ],
+  "synthesis": {
+    "objective": "Compare the durable worker results and return one recommendation."
+  }
+}
+```
+
+The initial immutable plan contains all workers and one terminal synthesis Step. Synthesis waits for every worker, reads their bounded Result handles with `task.result.read`, and cannot delegate. If a worker fails, synthesis is skipped and the Task becomes `partial`. If it succeeds, its Result is shown as the primary Result and completion delivery expands only that answer; intermediate worker Results remain readable by handle.
+
 Delegated authority is deliberately narrower than the creating runtime. Parent-visible tools are intersected with the requested tools and default risk policy before the Step is persisted. Worker Steps cannot delegate. Orchestrator Steps may create linked child Tasks only while their persisted authority retains child depth; the child workspace, authority, and budget cannot exceed the active parent Step.
 
 Provider tool-call IDs make creation idempotent. Replaying the same call returns the existing Task; reusing the identity for a different definition fails closed. `delegate_task` is unavailable when profile-bound durable Task storage is unavailable—there is no in-memory fallback.

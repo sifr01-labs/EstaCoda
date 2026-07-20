@@ -29,6 +29,7 @@ type TaskCopy = {
   toolCategory: string;
   usageCost: string;
   results: string;
+  primaryResult: string;
   waitingReason: string;
   failureReason: string;
   none: string;
@@ -50,6 +51,7 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     toolCategory: "Current tool category",
     usageCost: "Usage and cost",
     results: "Results and artifacts",
+    primaryResult: "primary",
     waitingReason: "Waiting reason",
     failureReason: "Failure reason",
     none: "none",
@@ -69,6 +71,7 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     toolCategory: "فئة الأداة الحالية",
     usageCost: "الاستخدام والتكلفة",
     results: "النتائج والملفات",
+    primaryResult: "النتيجة الرئيسية",
     waitingReason: "سبب الانتظار",
     failureReason: "سبب الفشل",
     none: "لا يوجد",
@@ -168,7 +171,7 @@ export function taskInspectionContentLines(
   ]);
   addSection(lines, copy.results, card.results.length === 0
     ? [copy.none]
-    : card.results.map((result) => `${isolate(result.handle)} · ${result.kind} · ${formatBytes(result.byteLength)}${result.summary === undefined ? "" : ` · ${result.summary}`}`));
+    : card.results.map((result) => `${result.primary ? `${copy.primaryResult} · ` : ""}${isolate(result.handle)} · ${result.kind} · ${formatBytes(result.byteLength)}${result.summary === undefined ? "" : ` · ${result.summary}`}`));
   addSection(lines, copy.recentActivity, card.recentActivity.length === 0
     ? [copy.none]
     : card.recentActivity.map((activity) => `${formatTimestamp(activity.timestamp)} · ${activity.label}`));

@@ -24,6 +24,7 @@ import { taskUsageFromEntries } from "./task-agent-usage.js";
 import { FixedTaskService } from "./fixed-task-service.js";
 import type { TaskStore } from "./task-store.js";
 import { taskToolCategory } from "./task-safe-activity.js";
+import { orderTaskResults, taskPrimaryResult } from "./task-primary-result.js";
 
 const ACTIVE_ATTEMPT_STATUSES: readonly TaskAttemptStatus[] = [
   "leased",
@@ -61,7 +62,9 @@ export type TaskStatusProjection = {
   currentToolCategory?: string;
   elapsedMs: number;
   usage: TaskUsageTotals;
-  results: readonly Pick<TaskResult, "id" | "handle" | "kind" | "status" | "byteLength" | "mimeType" | "summary">[];
+  results: readonly (Pick<TaskResult, "id" | "handle" | "kind" | "status" | "byteLength" | "mimeType" | "summary"> & {
+    primary: boolean;
+  })[];
   waitReason?: string;
   failure?: Pick<NonNullable<Task["failure"]>, "class" | "retryable" | "uncertainSideEffects">;
   createdAt: string;
@@ -288,6 +291,8 @@ export class TaskOperatorService {
       : this.#store.getPlanRevision(task.activePlanRevisionId);
     const recentActivity = this.#recentActivity(task, steps);
     const currentToolCategory = this.#currentToolCategory(task, attempts, activityByAttempt);
+    const primaryResult = taskPrimaryResult(this.#store, task);
+    const projectedResults = orderTaskResults(this.#store.listResults(task.id), primaryResult);
     return {
       taskId: task.id,
       objective: safeText(task.objective, 240),
@@ -319,12 +324,13 @@ export class TaskOperatorService {
       ...(currentToolCategory === undefined ? {} : { currentToolCategory }),
       elapsedMs: elapsedMs(task.startedAt ?? task.createdAt, task.completedAt ?? task.cancelledAt, projectionNow),
       usage: taskUsageFromEntries(this.#store.listUsageEntries(task.id)),
-      results: this.#store.listResults(task.id).slice(0, MAX_PROJECTED_RESULTS).map((result) => ({
+      results: projectedResults.slice(0, MAX_PROJECTED_RESULTS).map((result) => ({
         id: result.id,
         handle: result.handle,
         kind: result.kind,
         status: result.status,
         byteLength: result.byteLength,
+        primary: result.id === primaryResult?.id,
         ...(result.mimeType === undefined ? {} : { mimeType: result.mimeType }),
         ...(result.summary === undefined ? {} : { summary: safeText(result.summary, 240) })
       })),

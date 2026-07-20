@@ -236,6 +236,9 @@ function renderTask(
     `${copy(locale, "Estimated cost", "التكلفة التقديرية")}: $${task.usage.estimatedCostUsd.toFixed(4)}${task.usage.pricingComplete ? "" : copy(locale, " (incomplete)", " (غير مكتمل)")}`,
     `${copy(locale, "Usage", "الاستخدام")}: ${task.usage.totalTokens} ${copy(locale, "tokens", "رمزًا")}${task.usage.usageComplete ? "" : copy(locale, " (incomplete)", " (غير مكتمل)")}`,
     `${copy(locale, "Results", "النتائج")}: ${task.results.length}`,
+    task.results.find((result) => result.primary) === undefined
+      ? undefined
+      : `${copy(locale, "Primary result", "النتيجة الرئيسية")}: ${technical(locale, task.results.find((result) => result.primary)!.handle)}`,
     workspaceTrusted === undefined ? undefined : `${copy(locale, "Workspace", "مساحة العمل")}: ${workspaceTrusted ? copy(locale, "trusted", "موثوقة") : copy(locale, "not trusted", "غير موثوقة")}`,
     backgroundHost === undefined ? undefined : `${copy(locale, "Background host", "المضيف الخلفي")}: ${technical(locale, backgroundHost)}`,
     task.waitReason === undefined ? undefined : `${copy(locale, "Waiting reason", "سبب الانتظار")}: ${oneLine(task.waitReason)}`,

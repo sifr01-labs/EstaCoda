@@ -57,6 +57,12 @@ export type DelegateTaskItem = {
   modelOverride?: DelegateModelOverride;
 };
 
+/** One fixed terminal Step that combines the durable results of every delegated worker. */
+export type DelegateSynthesis = {
+  objective: string;
+  modelOverride?: DelegateModelOverride;
+};
+
 export type DelegationStaleFileWarning = {
   kind: "stale-parent-file-read";
   normalizedPath: string;

@@ -424,7 +424,7 @@ function matchesInput(graph: FixedTaskGraph, input: NormalizedCreateFixedTaskInp
     key: step.key,
     title: step.title,
     objective: step.objective,
-    dependsOn: step.dependsOn.map((id) => keyById.get(id) ?? `missing:${id}`),
+    dependsOn: step.dependsOn.map((id) => keyById.get(id) ?? `missing:${id}`).sort(),
     executor: step.executor,
     childTaskPolicy: step.childTaskPolicy,
     authorityPolicy: step.authorityPolicy,
@@ -433,6 +433,10 @@ function matchesInput(graph: FixedTaskGraph, input: NormalizedCreateFixedTaskInp
     failurePolicy: step.failurePolicy,
     idempotency: step.idempotency,
     resultPolicy: step.resultPolicy
+  }));
+  const expectedSteps: FixedTaskStepInput[] = input.steps.map((step) => ({
+    ...step,
+    dependsOn: [...step.dependsOn].sort()
   }));
   const expectedActor = input.createdBy ?? { kind: "user", sessionId: input.creatorSessionId };
   const deliveryMatches = input.completionDelivery === undefined || (
@@ -457,7 +461,7 @@ function matchesInput(graph: FixedTaskGraph, input: NormalizedCreateFixedTaskInp
     isDeepStrictEqual(graph.task.workspace, input.workspace) &&
     isDeepStrictEqual(graph.task.authorityPolicy, input.authorityPolicy) &&
     isDeepStrictEqual(graph.task.budgetPolicy, input.budgetPolicy) &&
-    isDeepStrictEqual(actualSteps, input.steps);
+    isDeepStrictEqual(actualSteps, expectedSteps);
 }
 
 function normalizeCompletionDelivery(

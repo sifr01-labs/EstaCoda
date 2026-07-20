@@ -204,6 +204,23 @@ Batch input:
 }
 ```
 
+Fixed fan-out with synthesis:
+
+```json
+{
+  "tasks": [
+    { "task": "Research option A." },
+    { "task": "Research option B." },
+    { "task": "Research option C." }
+  ],
+  "synthesis": {
+    "objective": "Compare all three durable worker results and return one supported recommendation."
+  }
+}
+```
+
+When `synthesis` is present, revision 1 contains every independent worker Step plus one `synthesis` agent Step that depends on all of them. The graph is fixed before execution; no running worker may insert a dependency. The synthesis Step receives only bounded dependency metadata and opaque result handles, reads bodies through `task.result.read`, cannot delegate, and becomes runnable only after every worker completes. A terminal worker failure skips synthesis and settles the Task `partial`. The synthesis Result is marked primary on status/UI surfaces and is the only body expanded by completion delivery; intermediate Results remain available by handle.
+
 When `recoverJsonStringTasks` is enabled, `tasks` may be a JSON string containing an array of task objects. Recovery is strict: each object must contain only `task`, `context`, `allowedToolsets`, `allowedTools`, `role`, and `modelOverride`; `context` must be a string when present; tool lists must be arrays of strings; `role` must be `leaf` or `orchestrator`; model overrides must be bounded strings.
 
 Default Step capability is risk-class based. After intersecting with parent-visible tools, delegated Steps receive `read-only-local` and `read-only-network` tools unless exact names, prefixes, or excluded toolsets strip them. Browser, media, and MCP toolsets are excluded by default. Workspace-write, credential, process-control, memory/session search, skill mutation, config mutation, cron mutation, trust mutation, and dangerous shell/process tools are stripped before the authority policy is persisted. `terminal.run` is excluded by default. `terminal.inspect` may remain visible through the parent-visible read-only policy.
@@ -214,7 +231,7 @@ Worker runtimes use the Task approval policy. Hardline denies run first; an auth
 
 Batch delegation is bounded by `maxBatchTasks` and `maxConcurrentChildren`. The configured batch size is hard-capped at 10 Steps. Step order is stable, while the Task scheduler runs eligible Steps concurrently and derives `completed`, `partial`, `failed`, or `cancelled` terminal state. A per-turn `maxDelegateCallsPerTurn` cap bounds separate creation calls.
 
-The model-facing result is a bounded handle containing Task ID, queued status, Step count, root/child relationship, and replay status. Full Step outputs are stored by the Task result plane rather than copied into the creating provider turn.
+The model-facing result is a bounded handle containing Task ID, queued status, Step count, worker Step IDs, optional synthesis/primary-result Step ID, root/child relationship, and replay status. Full Step outputs are stored by the Task result plane rather than copied into the creating provider turn.
 
 Attempt heartbeat, timeout, lease, and progress diagnostics are structured and bounded. They do not make the creating provider turn the owner of background execution.
 

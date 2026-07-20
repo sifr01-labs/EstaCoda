@@ -2884,6 +2884,7 @@ function taskProjectionToCard(task: TaskStatusProjection): TaskCardState {
       kind: result.kind,
       status: result.status,
       byteLength: result.byteLength,
+      primary: result.primary,
       ...(result.summary === undefined ? {} : { summary: result.summary }),
     })),
     ...(task.waitReason === undefined ? {} : { waitReason: task.waitReason }),

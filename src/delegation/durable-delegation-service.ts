@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { DelegateTaskItem, DelegationConfig } from "../contracts/delegation.js";
+import type { DelegateSynthesis, DelegateTaskItem, DelegationConfig } from "../contracts/delegation.js";
 import type {
   TaskAuthorityDisposition,
   TaskAuthorityPolicy,
@@ -33,6 +33,7 @@ export type ActiveTaskExecution = {
 export type DurableDelegationRequest = {
   toolCallId: string;
   tasks: readonly DelegateTaskItem[];
+  synthesis?: DelegateSynthesis;
   trustedWorkspace: boolean;
   recoveredTasksFromJsonString?: boolean;
 };
@@ -41,6 +42,9 @@ export type DurableDelegationHandle = {
   taskId: string;
   status: "queued";
   stepCount: number;
+  workerStepIds: readonly string[];
+  synthesisStepId?: string;
+  primaryResultStepId?: string;
   childTask: boolean;
   parentTaskId?: string;
   recoveredTasksFromJsonString?: boolean;
@@ -90,14 +94,21 @@ export class DurableDelegationService {
     const existing = this.#store.getTaskByCreationKey(creationKey);
     const parent = this.#parentContext();
     const stepAuthorities = request.tasks.map((item) => this.#authorityFor(item, parent?.authority));
-    const taskAuthority = mergeAuthorities(stepAuthorities);
+    const synthesisAuthority = request.synthesis === undefined
+      ? undefined
+      : this.#synthesisAuthority(request.synthesis, parent?.authority);
+    const allAuthorities = synthesisAuthority === undefined
+      ? stepAuthorities
+      : [...stepAuthorities, synthesisAuthority];
+    const taskAuthority = mergeAuthorities(allAuthorities);
+    const totalStepCount = request.tasks.length + (request.synthesis === undefined ? 0 : 1);
     const budgets = delegationBudgets(
-      request.tasks.length,
+      totalStepCount,
       this.#config.maxConcurrentChildren,
       this.#config.childTimeoutSeconds,
       parent?.budget
     );
-    const steps = request.tasks.map((item, index): FixedTaskStepInput => ({
+    const workerSteps = request.tasks.map((item, index): FixedTaskStepInput => ({
       key: `delegated-${index + 1}`,
       title: request.tasks.length === 1 ? "Delegated work" : `Delegated work ${index + 1}`,
       objective: delegatedObjective(item),
@@ -127,17 +138,55 @@ export class DurableDelegationService {
         requireIdempotent: true
       },
       failurePolicy: {
-        onAttemptsExhausted: request.tasks.length === 1 ? "fail_task" : "mark_partial",
+        onAttemptsExhausted: request.tasks.length === 1 && request.synthesis === undefined ? "fail_task" : "mark_partial",
         optional: false
       },
       idempotency: "unknown",
       resultPolicy: { kind: "text", required: true, maxBytes: STEP_RESULT_BYTES }
     }));
+    const steps: FixedTaskStepInput[] = request.synthesis === undefined ? workerSteps : [
+      ...workerSteps,
+      {
+        key: "synthesis",
+        title: "Synthesize delegated results",
+        objective: synthesisObjective(request.synthesis),
+        dependsOn: workerSteps.map((step) => step.key),
+        executor: {
+          kind: "agent",
+          role: "synthesis",
+          ...(request.synthesis.modelOverride === undefined ? {} : {
+            model: {
+              ...(request.synthesis.modelOverride.provider === undefined
+                ? {}
+                : { provider: request.synthesis.modelOverride.provider }),
+              id: request.synthesis.modelOverride.model
+            }
+          })
+        },
+        childTaskPolicy: "forbid",
+        authorityPolicy: synthesisAuthority!,
+        budget: budgets.step,
+        retryPolicy: {
+          maxAttempts: 1,
+          initialBackoffMs: 0,
+          backoffMultiplier: 1,
+          maxBackoffMs: 0,
+          retryableFailureClasses: [],
+          nonRetryableFailureClasses: [],
+          requireIdempotent: true
+        },
+        failurePolicy: { onAttemptsExhausted: "fail_task", optional: false },
+        idempotency: "unknown",
+        resultPolicy: { kind: "text", required: true, maxBytes: STEP_RESULT_BYTES }
+      }
+    ];
     const graph = this.#fixedTasks.create({
       creatorSessionId: sessionId,
       source: "delegation",
       creationKey,
-      objective: request.tasks.length === 1
+      objective: request.synthesis !== undefined
+        ? synthesisObjective(request.synthesis)
+        : request.tasks.length === 1
         ? delegatedObjective(request.tasks[0]!)
         : `Complete ${request.tasks.length} delegated Steps as one durable Task.`,
       workspace: this.#workspace,
@@ -220,6 +269,20 @@ export class DurableDelegationService {
       maxChildDepth: mayCreateChildTasks ? remainingDepth : 0
     };
   }
+
+  #synthesisAuthority(synthesis: DelegateSynthesis, ceiling?: TaskAuthorityPolicy): TaskAuthorityPolicy {
+    const authority = this.#authorityFor({
+      task: synthesis.objective,
+      allowedToolsets: ["core"],
+      allowedTools: ["task.result.read"],
+      role: "leaf",
+      modelOverride: synthesis.modelOverride
+    }, ceiling);
+    if (!authority.allowedTools?.includes("task.result.read")) {
+      throw new Error("Durable synthesis requires the task.result.read tool within inherited authority.");
+    }
+    return authority;
+  }
 }
 
 function delegationBudgets(
@@ -290,16 +353,29 @@ function delegatedObjective(item: DelegateTaskItem): string {
   return objective;
 }
 
+function synthesisObjective(synthesis: DelegateSynthesis): string {
+  const objective = synthesis.objective.trim();
+  if (objective.length === 0 || objective.length > TASK_GRAPH_LIMITS.maxStepObjectiveChars || objective.includes("\u0000")) {
+    throw new Error(`A synthesis objective must be 1-${TASK_GRAPH_LIMITS.maxStepObjectiveChars} characters.`);
+  }
+  return objective;
+}
+
 function handle(
   graph: FixedTaskGraph,
   parent: { taskId: string } | undefined,
   request: DurableDelegationRequest,
   idempotentReplay: boolean
 ): DurableDelegationHandle {
+  const synthesisStep = graph.steps.find((step) => step.executor.role === "synthesis");
   return {
     taskId: graph.task.id,
     status: "queued",
     stepCount: graph.steps.length,
+    workerStepIds: graph.steps.filter((step) => step.executor.role !== "synthesis").map((step) => step.id),
+    ...(synthesisStep === undefined
+      ? {}
+      : { synthesisStepId: synthesisStep.id, primaryResultStepId: synthesisStep.id }),
     childTask: parent !== undefined,
     ...(parent === undefined ? {} : { parentTaskId: parent.taskId }),
     ...(request.recoveredTasksFromJsonString === true ? { recoveredTasksFromJsonString: true } : {}),

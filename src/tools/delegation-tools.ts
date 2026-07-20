@@ -1,5 +1,11 @@
 import type { RegisteredTool, SessionToolProvider, ToolExecutionContext, ToolsetName } from "../contracts/tool.js";
-import type { DelegateModelOverride, DelegateRole, DelegateTaskItem, DelegationConfig } from "../contracts/delegation.js";
+import type {
+  DelegateModelOverride,
+  DelegateRole,
+  DelegateSynthesis,
+  DelegateTaskItem,
+  DelegationConfig
+} from "../contracts/delegation.js";
 import {
   DELEGATE_TASK_MAX_RESULT_CHARS,
   MAX_DELEGATION_BATCH_TASKS,
@@ -23,6 +29,7 @@ type DelegateTaskInput = {
   allowedTools?: string[];
   role?: DelegateRole;
   modelOverride?: DelegateModelOverride;
+  synthesis?: unknown;
 };
 
 export function createDelegationTools(options: DelegationToolOptions): RegisteredTool[] {
@@ -38,6 +45,7 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
         "Create durable background Tasks for bounded subtasks with explicit context and tool access.",
         "Returns a Task handle immediately; use Task status and result surfaces to follow completion.",
         `Supports one task or up to ${delegationConfig.maxBatchTasks} batch tasks.`,
+        "An optional synthesis objective adds one fixed terminal Step after every worker.",
         `The durable scheduler runs at most ${delegationConfig.maxConcurrentChildren} Steps in parallel.`,
         `Child delegation depth is limited to ${delegationConfig.maxSpawnDepth}.`
       ].join(" "),
@@ -85,7 +93,16 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
             type: "string",
             enum: ["leaf", "orchestrator"]
           },
-          modelOverride: modelOverrideSchema()
+          modelOverride: modelOverrideSchema(),
+          synthesis: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              objective: { type: "string", minLength: 1 },
+              modelOverride: modelOverrideSchema()
+            },
+            required: ["objective"]
+          }
         }
       },
       riskClass: "shared-state-mutation",
@@ -115,6 +132,7 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
         const handle = options.service.create({
           toolCallId: context.toolCallId,
           tasks,
+          ...(parsed.synthesis === undefined ? {} : { synthesis: parsed.synthesis }),
           trustedWorkspace: await options.trustedWorkspace(),
           ...(parsed.mode === "batch" && parsed.recoveredTasksFromJsonString === true
             ? { recoveredTasksFromJsonString: true }
@@ -126,6 +144,10 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
             `Created durable Task ${handle.taskId}.`,
             `Status: ${handle.status}`,
             `Steps: ${handle.stepCount}`,
+            ...(handle.synthesisStepId === undefined ? [] : [
+              `Workers: ${handle.workerStepIds.length}`,
+              `Synthesis Step: ${handle.synthesisStepId}`
+            ]),
             handle.childTask ? `Parent Task: ${handle.parentTaskId}` : "Task will continue independently of this turn."
           ].join("\n"),
           metadata: handle
@@ -156,11 +178,15 @@ function requireProviderDependency<T>(provider: string, dependency: string, valu
 }
 
 type ParsedDelegateTaskInput =
-  | { ok: true; mode: "single"; task: string; modelOverride?: DelegateModelOverride }
-  | { ok: true; mode: "batch"; tasks: DelegateTaskItem[]; recoveredTasksFromJsonString?: boolean }
+  | { ok: true; mode: "single"; task: string; modelOverride?: DelegateModelOverride; synthesis?: DelegateSynthesis }
+  | { ok: true; mode: "batch"; tasks: DelegateTaskItem[]; synthesis?: DelegateSynthesis; recoveredTasksFromJsonString?: boolean }
   | { ok: false; error: { ok: false; content: string; metadata: Record<string, unknown> } };
 
 function parseDelegateTaskInput(input: DelegateTaskInput, config: DelegationConfig): ParsedDelegateTaskInput {
+  const synthesis = normalizeSynthesis(input.synthesis);
+  if (!synthesis.ok) {
+    return { ok: false, error: structuredValidationError(synthesis.message, synthesis.code) };
+  }
   if (input.tasks !== undefined) {
     const recovered = recoverTasks(input.tasks, config);
     if (!recovered.ok) {
@@ -180,6 +206,7 @@ function parseDelegateTaskInput(input: DelegateTaskInput, config: DelegationConf
       ok: true,
       mode: "batch",
       tasks: normalized.tasks,
+      synthesis: synthesis.value,
       recoveredTasksFromJsonString: recovered.recoveredTasksFromJsonString
     };
   }
@@ -211,7 +238,38 @@ function parseDelegateTaskInput(input: DelegateTaskInput, config: DelegationConf
     ok: true,
     mode: "single",
     task,
-    modelOverride: modelOverride.value
+    modelOverride: modelOverride.value,
+    synthesis: synthesis.value
+  };
+}
+
+function normalizeSynthesis(
+  value: unknown
+): { ok: true; value?: DelegateSynthesis } | { ok: false; code: string; message: string } {
+  if (value === undefined) return { ok: true };
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { ok: false, code: "invalid-synthesis", message: "delegate_task synthesis must be an object." };
+  }
+  const record = value as Record<string, unknown>;
+  const unknownKeys = Object.keys(record).filter((key) => key !== "objective" && key !== "modelOverride");
+  if (unknownKeys.length > 0) {
+    return {
+      ok: false,
+      code: "invalid-synthesis",
+      message: `delegate_task synthesis contains unknown fields: ${unknownKeys.join(", ")}.`
+    };
+  }
+  if (typeof record.objective !== "string" || record.objective.trim().length === 0) {
+    return { ok: false, code: "invalid-synthesis", message: "delegate_task synthesis.objective must be non-empty." };
+  }
+  const modelOverride = normalizeModelOverride(record.modelOverride, "delegate_task synthesis.modelOverride");
+  if (!modelOverride.ok) return modelOverride;
+  return {
+    ok: true,
+    value: {
+      objective: record.objective.trim(),
+      ...(modelOverride.value === undefined ? {} : { modelOverride: modelOverride.value })
+    }
   };
 }
 

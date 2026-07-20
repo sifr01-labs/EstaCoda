@@ -149,6 +149,7 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
       kind: "artifact",
       status: "available",
       byteLength: 2_048,
+      primary: true,
       summary: "Comparison table",
     }],
     createdAt: "2026-07-20T09:59:00.000Z",

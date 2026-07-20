@@ -84,6 +84,39 @@ describe("TaskCompletionDeliveryService", () => {
     expect(deliverText).toHaveBeenCalledTimes(1);
   });
 
+  it("delivers the synthesis Result as primary without expanding intermediate worker bodies", async () => {
+    store.createTaskGraph(makeSynthesisGraph());
+    resultService.record({
+      taskId: "task-synthesis",
+      stepId: "step-synthesis-worker",
+      kind: "text",
+      content: "Intermediate worker evidence that should stay behind its handle."
+    });
+    resultService.record({
+      taskId: "task-synthesis",
+      stepId: "step-synthesis-primary",
+      kind: "text",
+      content: "The final synthesized answer."
+    });
+    completeTask("task-synthesis");
+    const deliverText = vi.fn(async (_targets: DeliveryTarget[], _text: string) =>
+      new Map([["telegram:chat-1", { success: true }]]));
+    const service = createService(deliverText);
+    service.bind({
+      taskId: "task-synthesis",
+      authorizedSessionId: "creator-alpha",
+      deliveryKey: "synthesis",
+      destination: { platform: "telegram", chatId: "chat-1" }
+    });
+
+    await service.runOnce();
+    const text = deliverText.mock.calls[0]![1];
+    expect(text).toContain("Primary result result-2");
+    expect(text).toContain("The final synthesized answer.");
+    expect(text).toContain("1 intermediate result(s) remain available through task.result.read.");
+    expect(text).not.toContain("Intermediate worker evidence");
+  });
+
   it("keeps delivery pending until its Task reaches a terminal state", async () => {
     const deliverText = vi.fn(async (_targets: DeliveryTarget[], _text: string) =>
       new Map([["telegram:chat-1", { success: true }]]));
@@ -193,8 +226,8 @@ describe("TaskCompletionDeliveryService", () => {
     });
   }
 
-  function completeTask(): void {
-    const task = store.getTask("task-alpha")!;
+  function completeTask(taskId = "task-alpha"): void {
+    const task = store.getTask(taskId)!;
     const running = { ...task, status: "running" as const, startedAt: NOW, updatedAt: NOW };
     store.updateTask(running);
     store.updateTask({ ...running, status: "completed", completedAt: NOW, updatedAt: NOW });
@@ -273,6 +306,39 @@ function makeGraph(): { task: Task; revision: TaskPlanRevision; steps: TaskStep[
       updatedAt: NOW
     }]
   };
+}
+
+function makeSynthesisGraph(): { task: Task; revision: TaskPlanRevision; steps: TaskStep[] } {
+  const base = makeGraph();
+  const task: Task = {
+    ...base.task,
+    id: "task-synthesis",
+    rootTaskId: "task-synthesis",
+    creationKey: "create-synthesis",
+    activePlanRevisionId: "revision-synthesis"
+  };
+  const revision: TaskPlanRevision = {
+    ...base.revision,
+    id: "revision-synthesis",
+    taskId: task.id
+  };
+  const worker: TaskStep = {
+    ...base.steps[0]!,
+    id: "step-synthesis-worker",
+    taskId: task.id,
+    planRevisionId: revision.id
+  };
+  const synthesis: TaskStep = {
+    ...worker,
+    id: "step-synthesis-primary",
+    key: "synthesis",
+    position: 1,
+    title: "Synthesize result",
+    objective: "Return the primary terminal answer.",
+    dependsOn: [worker.id],
+    executor: { kind: "agent", role: "synthesis" }
+  };
+  return { task, revision, steps: [worker, synthesis] };
 }
 
 function authorityPolicy(): TaskAuthorityPolicy {

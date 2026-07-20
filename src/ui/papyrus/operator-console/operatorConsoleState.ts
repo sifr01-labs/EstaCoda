@@ -160,6 +160,7 @@ export type TaskCardState = {
     readonly kind: string;
     readonly status: string;
     readonly byteLength: number;
+    readonly primary: boolean;
     readonly summary?: string;
   }[];
   readonly waitReason?: string;

@@ -8,6 +8,7 @@ import type {
 import type { DeliveryTarget } from "../channels/delivery-router.js";
 import { TASK_RESULT_PAGE_MAX_CHARS, type TaskResultService } from "./task-result-service.js";
 import type { TaskStore } from "./task-store.js";
+import { taskPrimaryResult, taskPrimaryResultStepId } from "./task-primary-result.js";
 
 const MAX_DELIVERY_TEXT_CHARS = 100_000;
 const MAX_DELIVERY_RESULTS = 64;
@@ -181,9 +182,14 @@ export class TaskCompletionDeliveryService {
 
     const availableResults = this.#store.listResults(task.id)
       .filter((result) => result.status === "available");
-    const results = availableResults.slice(0, MAX_DELIVERY_RESULTS);
+    const primaryResultStepId = taskPrimaryResultStepId(this.#store, task);
+    const primaryResult = taskPrimaryResult(this.#store, task);
+    const results = (primaryResultStepId === undefined
+      ? availableResults
+      : primaryResult === undefined ? [] : [primaryResult])
+      .slice(0, MAX_DELIVERY_RESULTS);
     for (const result of results) {
-      lines.push("", resultHeading(result));
+      lines.push("", resultHeading(result, result.id === primaryResult?.id));
       if (result.kind === "artifact") {
         lines.push(`Artifact handle: ${result.handle}`);
         if (result.summary !== undefined) lines.push(boundText(result.summary, 1_000));
@@ -191,9 +197,14 @@ export class TaskCompletionDeliveryService {
       }
       lines.push(await this.#readTextResult(task.id, result, binding.authorizedSessionId));
     }
-    if (results.length === 0) lines.push("", "No durable results were produced.");
+    if (results.length === 0) {
+      lines.push("", primaryResultStepId === undefined
+        ? "No durable results were produced."
+        : "No durable primary result was produced.");
+    }
     if (availableResults.length > results.length) {
-      lines.push("", `${availableResults.length - results.length} additional result(s) remain available through task.result.read.`);
+      const label = primaryResultStepId === undefined ? "additional" : "intermediate";
+      lines.push("", `${availableResults.length - results.length} ${label} result(s) remain available through task.result.read.`);
     }
     return boundText(lines.join("\n"), MAX_DELIVERY_TEXT_CHARS);
   }
@@ -246,8 +257,8 @@ function toDeliveryTarget(destination: TaskDeliveryDestination): DeliveryTarget 
       };
 }
 
-function resultHeading(result: TaskResult): string {
-  return `Result ${result.id} (${result.kind}, ${result.byteLength} bytes, handle ${result.handle}):`;
+function resultHeading(result: TaskResult, primary: boolean): string {
+  return `${primary ? "Primary result" : "Result"} ${result.id} (${result.kind}, ${result.byteLength} bytes, handle ${result.handle}):`;
 }
 
 function boundedToken(value: string | undefined, label: string, maxChars: number): string {

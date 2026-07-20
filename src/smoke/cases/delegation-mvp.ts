@@ -56,24 +56,32 @@ async function smokeDurableCreation(context: SmokeContext): Promise<void> {
       visibleTools: () => [
         tool("file.read", "read-only-local", ["files"]),
         tool("web.search", "read-only-network", ["web"]),
+        tool("task.result.read", "read-only-local", ["core"]),
         tool("delegate_task", "shared-state-mutation", ["core", "research", "coding"])
       ]
     });
     const first = service.create({
       toolCallId: "provider-call-1",
       trustedWorkspace: true,
-      tasks: [{ task: "Inspect A" }, { task: "Inspect B", role: "orchestrator" }]
+      tasks: [{ task: "Inspect A" }, { task: "Inspect B", role: "orchestrator" }],
+      synthesis: { objective: "Combine both durable worker Results." }
     });
     const replay = service.create({
       toolCallId: "provider-call-1",
       trustedWorkspace: true,
-      tasks: [{ task: "Inspect A" }, { task: "Inspect B", role: "orchestrator" }]
+      tasks: [{ task: "Inspect A" }, { task: "Inspect B", role: "orchestrator" }],
+      synthesis: { objective: "Combine both durable worker Results." }
     });
     const task = store.getTask(first.taskId);
     assert(first.status === "queued", "delegate_task must return a queued handle immediately");
     assert(replay.taskId === first.taskId && replay.idempotentReplay, "provider call replay must reuse the durable Task");
     assert(task?.budgetPolicy.maxConcurrentAttempts === 2, "durable Task must preserve configured delegation concurrency");
-    assert(store.listSteps(first.taskId, task?.activePlanRevisionId ?? "missing").length === 2, "batch delegation must persist one independent Step per item");
+    const steps = store.listSteps(first.taskId, task?.activePlanRevisionId ?? "missing");
+    const synthesis = steps.find((step) => step.executor.role === "synthesis");
+    assert(steps.length === 3, "synthesized batch delegation must persist workers and one terminal Step");
+    assert(synthesis !== undefined, "synthesized batch delegation must include the synthesis Step");
+    assert(synthesis.id === first.primaryResultStepId, "synthesis must be the declared primary Result Step");
+    assert(synthesis.dependsOn.length === 2, "synthesis must depend on every fixed worker Step");
   } finally {
     sessionDb.close();
     rmSync(root, { recursive: true, force: true });
