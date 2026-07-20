@@ -22,7 +22,7 @@ import type {
 } from "../contracts/channel.js";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { SecurityAssessment, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
-import type { Runtime } from "../runtime/create-runtime.js";
+import type { Runtime, TaskCreationOrigin } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import { deriveAgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import { ActiveTurnRegistry } from "../gateway/active-turn-registry.js";
@@ -1347,6 +1347,63 @@ function compactResult(overrides: {
     userFacingMessage: "Session history compacted"
   };
 }
+
+describe("ChannelGateway Task completion origins", () => {
+  it("scopes the authorized channel destination around the production runtime turn", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const taskCreationOrigins: TaskCreationOrigin[] = [];
+    const withTaskCreationOrigin = async <T>(origin: TaskCreationOrigin, work: () => Promise<T>): Promise<T> => {
+      taskCreationOrigins.push(origin);
+      return work();
+    };
+    const runtimeForSession = vi.fn(async ({ sessionId }) => ({
+      ...createMinimalRuntime(),
+      sessionId,
+      withTaskCreationOrigin
+    }));
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession,
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+      trustedWorkspace: true
+    });
+
+    await gateway.receive(makeMessage("delegate this in the background", {
+      sessionKey: {
+        platform: "telegram",
+        chatId: "authorized-chat",
+        threadId: "authorized-thread"
+      },
+      metadata: {
+        taskCompletionDestination: { platform: "telegram", chatId: "spoofed-chat" }
+      }
+    }));
+
+    expect(runtimeForSession).toHaveBeenCalledOnce();
+    expect(runtimeForSession.mock.calls[0]?.[0]).toMatchObject({
+      sessionKey: {
+        platform: "telegram",
+        chatId: "authorized-chat",
+        threadId: "authorized-thread"
+      },
+      metadata: {
+        surfaceType: "telegram",
+        chatId: "authorized-chat",
+        userId: "user-1",
+        origin: "message"
+      }
+    });
+    expect(taskCreationOrigins).toEqual([{
+      source: "gateway",
+      completionDestination: {
+        platform: "telegram",
+        chatId: "authorized-chat",
+        threadId: "authorized-thread"
+      }
+    }]);
+  });
+});
 
 describe("ChannelGateway commands", () => {
   it("/memory populate uses the shared memory curation command path", async () => {

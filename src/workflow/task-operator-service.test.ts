@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskAttempt, TaskUsageTotals } from "../contracts/task.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { SQLiteTaskStore } from "./sqlite-task-store.js";
@@ -45,6 +45,7 @@ describe("TaskOperatorService", () => {
     expect(store.listSessionLinks(task.id)).toEqual([
       expect.objectContaining({ sessionId: "owner", relationship: "creator" })
     ]);
+    expect(store.listDeliveryBindings({ taskId: task.id })).toEqual([]);
     expect(step).toMatchObject({
       executor: { kind: "agent", role: "worker" },
       idempotency: "unknown",
@@ -53,6 +54,52 @@ describe("TaskOperatorService", () => {
     expect(step.authorityPolicy.riskClassPolicy["workspace-write"]).toBe("require_approval");
     expect(step.authorityPolicy.riskClassPolicy["external-side-effect"]).toBe("forbid");
     expect(step.authorityPolicy.blockedTools).toContain("terminal.run");
+  });
+
+  it("atomically binds an authorized gateway completion destination at creation", () => {
+    const created = service.begin({
+      objective: "Inspect the runtime and report back.",
+      workspace: workspace(),
+      creatorSessionId: "owner",
+      source: "gateway",
+      completionDestination: { platform: "discord", chatId: "channel-1", threadId: "thread-1" }
+    });
+    const task = store.getTask(created.taskId)!;
+
+    expect(task.source).toBe("gateway");
+    expect(store.listSessionLinks(task.id)).toEqual([
+      expect.objectContaining({ sessionId: "owner", relationship: "creator" })
+    ]);
+    expect(store.listDeliveryBindings({ taskId: task.id })).toEqual([
+      expect.objectContaining({
+        authorizedSessionId: "owner",
+        deliveryKey: "origin-completion",
+        destination: { platform: "discord", chatId: "channel-1", threadId: "thread-1" },
+        status: "pending"
+      })
+    ]);
+  });
+
+  it("rolls back the Task graph and session link when completion binding fails", () => {
+    const atomicWrite = store.atomicWrite.bind(store);
+    vi.spyOn(store, "atomicWrite").mockImplementation((work) => atomicWrite((transaction) => work(new Proxy(transaction, {
+      get(target, property, receiver) {
+        if (property === "createDeliveryBinding") {
+          return () => { throw new Error("injected delivery binding failure"); };
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+    }))));
+
+    expect(() => service.begin({
+      objective: "Inspect the runtime and report back.",
+      workspace: workspace(),
+      creatorSessionId: "owner",
+      source: "gateway",
+      completionDestination: { platform: "telegram", chatId: "chat-1" }
+    })).toThrow("injected delivery binding failure");
+    expect(store.listTasks()).toEqual([]);
   });
 
   it("rejects operator Task creation without a profile-local creator session", () => {

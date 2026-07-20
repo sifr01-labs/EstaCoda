@@ -4,10 +4,15 @@ import type {
   TaskAuthorityDisposition,
   TaskAuthorityPolicy,
   TaskBudgetPolicy,
+  TaskDeliveryDestination,
   TaskStepBudget,
   TaskWorkspaceBinding
 } from "../contracts/task.js";
-import { TASK_GRAPH_LIMITS, TASK_TOOL_RISK_CLASSES } from "../contracts/task.js";
+import {
+  TASK_GRAPH_LIMITS,
+  TASK_ORIGIN_COMPLETION_DELIVERY_KEY,
+  TASK_TOOL_RISK_CLASSES
+} from "../contracts/task.js";
 import type { ToolDefinition, ToolRiskClass } from "../contracts/tool.js";
 import { resolveChildToolAccess } from "./toolset-security.js";
 import { FixedTaskService, type FixedTaskGraph, type FixedTaskStepInput } from "../workflow/fixed-task-service.js";
@@ -51,6 +56,7 @@ export class DurableDelegationService {
   readonly #config: DelegationConfig;
   readonly #visibleTools: () => readonly ToolDefinition[];
   readonly #activeTaskExecution: ActiveTaskExecution | undefined;
+  readonly #completionDestination: (() => TaskDeliveryDestination | undefined) | undefined;
 
   constructor(options: {
     store: TaskStore;
@@ -59,6 +65,7 @@ export class DurableDelegationService {
     config: DelegationConfig;
     visibleTools: () => readonly ToolDefinition[];
     activeTaskExecution?: ActiveTaskExecution;
+    completionDestination?: () => TaskDeliveryDestination | undefined;
     fixedTasks?: FixedTaskService;
   }) {
     this.#store = options.store;
@@ -68,6 +75,7 @@ export class DurableDelegationService {
     this.#config = options.config;
     this.#visibleTools = options.visibleTools;
     this.#activeTaskExecution = options.activeTaskExecution;
+    this.#completionDestination = options.completionDestination;
   }
 
   create(request: DurableDelegationRequest): DurableDelegationHandle {
@@ -77,6 +85,7 @@ export class DurableDelegationService {
     }
     boundedToken(request.toolCallId, "provider tool call ID");
     const sessionId = boundedToken(this.#creatorSessionId(), "creator session ID");
+    const completionDestination = this.#completionDestination?.();
     const creationKey = delegationCreationKey(this.#store.profileId, sessionId, request.toolCallId);
     const existing = this.#store.getTaskByCreationKey(creationKey);
     const parent = this.#parentContext();
@@ -133,6 +142,12 @@ export class DurableDelegationService {
       budgetPolicy: budgets.task,
       steps,
       planReason: "Created by delegate_task as durable background work.",
+      ...(completionDestination === undefined ? {} : {
+        completionDelivery: {
+          deliveryKey: TASK_ORIGIN_COMPLETION_DELIVERY_KEY,
+          destination: completionDestination
+        }
+      }),
       ...(parent === undefined ? {} : {
         parent: { taskId: parent.taskId, attemptId: parent.attemptId },
         createdBy: {

@@ -5,6 +5,8 @@ import type {
   TaskActor,
   TaskAuthorityPolicy,
   TaskBudgetPolicy,
+  TaskDeliveryBinding,
+  TaskDeliveryDestination,
   TaskEvent,
   TaskGuidance,
   TaskPlanRevision,
@@ -12,7 +14,11 @@ import type {
   TaskStep,
   TaskWorkspaceBinding
 } from "../contracts/task.js";
-import { isChildTaskAuthorityAllowed, isTerminalTaskStatus } from "../contracts/task.js";
+import {
+  isChildTaskAuthorityAllowed,
+  isTaskDeliveryDestination,
+  isTerminalTaskStatus
+} from "../contracts/task.js";
 import type { TaskStore } from "./task-store.js";
 
 const MAX_GUIDANCE_RECORDS = 64;
@@ -46,6 +52,11 @@ export type CreateFixedTaskInput = {
   steps: readonly FixedTaskStepInput[];
   planReason?: string;
   createdBy?: TaskActor;
+  /** Optional completion outbox row, authorized by and bound to the creator session. */
+  completionDelivery?: {
+    deliveryKey: string;
+    destination: TaskDeliveryDestination;
+  };
   parent?: {
     taskId: string;
     attemptId: string;
@@ -56,9 +67,10 @@ export type FixedTaskGraph = {
   task: Task;
   revision: TaskPlanRevision;
   steps: readonly TaskStep[];
+  completionDelivery?: TaskDeliveryBinding;
 };
 
-type FixedTaskIdKind = "task" | "revision" | "step" | "event" | "guidance";
+type FixedTaskIdKind = "task" | "revision" | "step" | "event" | "guidance" | "delivery";
 
 export class FixedTaskCreationConflictError extends Error {
   constructor() {
@@ -143,12 +155,31 @@ export class FixedTaskService {
       createdAt: timestamp,
       updatedAt: timestamp
     }));
-    const graph = { task, revision, steps };
+    const completionDelivery: TaskDeliveryBinding | undefined = normalized.completionDelivery === undefined
+      ? undefined
+      : {
+          id: boundedToken(this.#id("delivery"), "Task Delivery ID", 256),
+          profileId: this.#store.profileId,
+          taskId,
+          authorizedSessionId: normalized.creatorSessionId,
+          deliveryKey: normalized.completionDelivery.deliveryKey,
+          destination: normalized.completionDelivery.destination,
+          status: "pending",
+          createdAt: timestamp,
+          updatedAt: timestamp
+        };
+    const graph: FixedTaskGraph = {
+      task,
+      revision,
+      steps,
+      ...(completionDelivery === undefined ? {} : { completionDelivery })
+    };
     const initialEvents = this.#creationEvents(graph, timestamp);
     try {
       this.#store.atomicWrite((store) => {
         if (normalized.parent !== undefined) this.#validateParent(normalized, store);
-        store.createTaskGraph({ ...graph, initialEvents });
+        store.createTaskGraph({ task, revision, steps, initialEvents });
+        if (completionDelivery !== undefined) store.createDeliveryBinding(completionDelivery);
       });
       return graph;
     } catch (error) {
@@ -226,8 +257,19 @@ export class FixedTaskService {
       : this.#store.getPlanRevision(task.activePlanRevisionId);
     if (revision === null) throw new FixedTaskCreationConflictError();
     const steps = this.#store.listSteps(task.id, revision.id);
-    if (!matchesInput({ task, revision, steps }, input)) throw new FixedTaskCreationConflictError();
-    return { task, revision, steps };
+    const completionDelivery = input.completionDelivery === undefined
+      ? undefined
+      : this.#store.listDeliveryBindings({ taskId: task.id }).find((binding) =>
+          binding.deliveryKey === input.completionDelivery!.deliveryKey
+        );
+    const graph: FixedTaskGraph = {
+      task,
+      revision,
+      steps,
+      ...(completionDelivery === undefined ? {} : { completionDelivery })
+    };
+    if (!matchesInput(graph, input)) throw new FixedTaskCreationConflictError();
+    return graph;
   }
 
   #creationEvents(graph: FixedTaskGraph, timestamp: string): TaskEvent[] {
@@ -270,11 +312,18 @@ export class FixedTaskService {
   }
 }
 
-type NormalizedCreateFixedTaskInput = Omit<CreateFixedTaskInput, "creationKey" | "objective" | "steps" | "planReason"> & {
+type NormalizedCreateFixedTaskInput = Omit<
+  CreateFixedTaskInput,
+  "creationKey" | "objective" | "steps" | "planReason" | "completionDelivery"
+> & {
   creationKey?: string;
   objective: string;
   steps: readonly FixedTaskStepInput[];
   planReason: string;
+  completionDelivery?: {
+    deliveryKey: string;
+    destination: TaskDeliveryDestination;
+  };
 };
 
 function normalizeCreateInput(input: CreateFixedTaskInput): NormalizedCreateFixedTaskInput {
@@ -292,6 +341,7 @@ function normalizeCreateInput(input: CreateFixedTaskInput): NormalizedCreateFixe
     };
   });
   const creatorSessionId = boundedToken(input.creatorSessionId, "creator session ID", 256);
+  const completionDelivery = normalizeCompletionDelivery(input.completionDelivery);
   let parent: CreateFixedTaskInput["parent"];
   if (input.parent === undefined) {
     const validSessionActor = input.createdBy === undefined || (
@@ -317,6 +367,7 @@ function normalizeCreateInput(input: CreateFixedTaskInput): NormalizedCreateFixe
     ...input,
     ...(parent === undefined ? {} : { parent }),
     creatorSessionId,
+    ...(completionDelivery === undefined ? {} : { completionDelivery }),
     ...(input.creationKey === undefined
       ? {}
       : { creationKey: boundedToken(input.creationKey, "Task creation key", 256) }),
@@ -342,7 +393,13 @@ function matchesInput(graph: FixedTaskGraph, input: NormalizedCreateFixedTaskInp
     resultPolicy: step.resultPolicy
   }));
   const expectedActor = input.createdBy ?? { kind: "user", sessionId: input.creatorSessionId };
-  return graph.task.creatorSessionId === input.creatorSessionId &&
+  const deliveryMatches = input.completionDelivery === undefined || (
+    graph.completionDelivery?.authorizedSessionId === input.creatorSessionId &&
+    graph.completionDelivery.deliveryKey === input.completionDelivery.deliveryKey &&
+    isDeepStrictEqual(graph.completionDelivery.destination, input.completionDelivery.destination)
+  );
+  return deliveryMatches &&
+    graph.task.creatorSessionId === input.creatorSessionId &&
     graph.task.parentTaskId === input.parent?.taskId &&
     graph.task.parentAttemptId === input.parent?.attemptId &&
     graph.task.source === input.source &&
@@ -354,6 +411,20 @@ function matchesInput(graph: FixedTaskGraph, input: NormalizedCreateFixedTaskInp
     isDeepStrictEqual(graph.task.authorityPolicy, input.authorityPolicy) &&
     isDeepStrictEqual(graph.task.budgetPolicy, input.budgetPolicy) &&
     isDeepStrictEqual(actualSteps, input.steps);
+}
+
+function normalizeCompletionDelivery(
+  input: CreateFixedTaskInput["completionDelivery"]
+): NormalizedCreateFixedTaskInput["completionDelivery"] {
+  if (input === undefined) return undefined;
+  const deliveryKey = boundedToken(input.deliveryKey, "Task Delivery key", 256);
+  if (!isTaskDeliveryDestination(input.destination)) {
+    throw new Error("Task completion delivery destination is invalid.");
+  }
+  return {
+    deliveryKey,
+    destination: structuredClone(input.destination)
+  };
 }
 
 function budgetNarrowerOrEqual(

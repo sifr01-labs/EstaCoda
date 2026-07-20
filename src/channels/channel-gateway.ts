@@ -17,7 +17,8 @@ import { assessSecurityPolicy, type SecurityApprovalMode, type SecurityAssessmen
 import { runCronCommand } from "../cron/cron-command.js";
 import { originFromSessionKey } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
-import type { Runtime } from "../runtime/create-runtime.js";
+import type { Runtime, TaskCreationOrigin } from "../runtime/create-runtime.js";
+import type { TaskDeliveryDestination } from "../contracts/task.js";
 import type { SessionFinalizationReason } from "../session/session-finalization-queue.js";
 import type {
   AgentLoopPythonCapabilitySetupApprovalRequest,
@@ -1338,7 +1339,7 @@ export class ChannelGateway {
       const streamCallbacksWired = streamHandle !== undefined;
 
       // Handle the turn
-      const response = await runtime.handle({
+      const handleTurn = () => runtime!.handle({
         text: message.text,
         attachments: message.attachments,
         channel: message.channel,
@@ -1377,6 +1378,10 @@ export class ChannelGateway {
           await this.#deliverProgress(adapter, normalizedSessionKey, event);
         }
       });
+      const taskCreationOrigin = this.#taskCreationOrigin(normalizedSessionKey, message.sender.id);
+      const response = runtime.withTaskCreationOrigin === undefined
+        ? await handleTurn()
+        : await runtime.withTaskCreationOrigin(taskCreationOrigin, handleTurn);
       sessionId = await this.#consumeRuntimeRotation({
         runtime,
         sessionKey: message.sessionKey,
@@ -1785,7 +1790,6 @@ export class ChannelGateway {
     if (this.#runtimeCache !== undefined && this.#runtimeFingerprint === undefined) {
       this.#logWarning?.("runtimeCache provided without runtimeFingerprint; falling back to runtimeForSession");
     }
-
     return this.#runtimeForSession({
       sessionId,
       sessionKey: normalizedSessionKey,
@@ -1820,6 +1824,14 @@ export class ChannelGateway {
         origin: "command"
       }
     });
+  }
+
+  #taskCreationOrigin(sessionKey: ChannelSessionKey, senderId: string): TaskCreationOrigin {
+    const completionDestination = completionDestinationForSession(sessionKey, senderId);
+    return {
+      source: "gateway",
+      ...(completionDestination === undefined ? {} : { completionDestination })
+    };
   }
 
   async #handleModelCommand(
@@ -4618,6 +4630,37 @@ function truncateForApprovalPreview(value: string, maxChars: number): string {
 function dateOrNow(value: string): Date {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? new Date() : date;
+}
+
+function completionDestinationForSession(
+  sessionKey: ChannelSessionKey,
+  senderId: string
+): TaskDeliveryDestination | undefined {
+  if (sessionKey.platform === "email") {
+    const address = (sessionKey.userId ?? senderId).trim();
+    return address.length === 0 ? undefined : { platform: "email", address };
+  }
+  switch (String(sessionKey.platform)) {
+    case "telegram":
+      return chatCompletionDestination("telegram", sessionKey);
+    case "discord":
+      return chatCompletionDestination("discord", sessionKey);
+    case "whatsapp":
+      return chatCompletionDestination("whatsapp", sessionKey);
+    default:
+      return undefined;
+  }
+}
+
+function chatCompletionDestination(
+  platform: "telegram" | "discord" | "whatsapp",
+  sessionKey: ChannelSessionKey
+): TaskDeliveryDestination {
+  return {
+    platform,
+    chatId: sessionKey.chatId,
+    ...(sessionKey.threadId === undefined ? {} : { threadId: sessionKey.threadId })
+  };
 }
 
 function toPendingApprovalChannel(channel: ChannelKind): PendingApprovalChannel {

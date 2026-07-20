@@ -9,6 +9,8 @@ import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { SQLiteTaskStore } from "../workflow/sqlite-task-store.js";
+import { TaskCompletionDeliveryService } from "../workflow/task-completion-delivery.js";
+import { TaskResultService } from "../workflow/task-result-service.js";
 import { SessionFinalizationQueue } from "../session/session-finalization-queue.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
@@ -16,6 +18,7 @@ import { WorkspaceApprovalController } from "../security/workspace-approval-cont
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import type { CdpFetchLike, CdpWebSocketEvent, CdpWebSocketLike } from "../browser/cdp-client.js";
 import type { BrowserBackend } from "../contracts/browser.js";
+import type { DeliveryTarget } from "../channels/delivery-router.js";
 import type { ModelProfile, ProviderAdapter, ProviderCompletionOptions, ProviderRequest } from "../contracts/provider.js";
 import type { SecurityApprovalMode, SecurityAssessment, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import type { SessionToolContext } from "../contracts/tool-context.js";
@@ -2869,6 +2872,97 @@ describe("createRuntime MCP trust gating", () => {
     } finally {
       await runtime.dispose();
     }
+  });
+
+  it("persists and delivers one terminal completion for a gateway-created Task after restart", async () => {
+    const options = await minimalRuntimeOptions();
+    const databasePath = join(options.workspaceRoot, "gateway-task-sessions.sqlite");
+    let sessionDb = await createSQLiteSessionDB({ path: databasePath });
+    const runtime = await createRuntime({
+      ...options,
+      sessionDb,
+      closeSessionDbOnDispose: false
+    });
+    await runtime.trustWorkspace?.();
+    const delegated = await runtime.withTaskCreationOrigin!({
+      source: "gateway",
+      completionDestination: {
+        platform: "telegram",
+        chatId: "authorized-chat",
+        threadId: "authorized-thread"
+      }
+    }, () => runtime.executeTool!({
+      tool: "delegate_task",
+      toolInput: { tasks: [{ task: "Inspect the production runtime and report the result." }] },
+      toolCallId: "gateway-production-task-1"
+    }));
+    const taskId = (delegated?.result?.metadata as { taskId?: string } | undefined)?.taskId;
+    const localDelegated = await runtime.executeTool!({
+      tool: "delegate_task",
+      toolInput: { tasks: [{ task: "Keep this local to the CLI runtime." }] },
+      toolCallId: "local-production-task-1"
+    });
+    const localTaskId = (localDelegated?.result?.metadata as { taskId?: string } | undefined)?.taskId;
+    expect(delegated?.result?.ok).toBe(true);
+    expect(localDelegated?.result?.ok).toBe(true);
+    const store = new SQLiteTaskStore({ db: sessionDb.db, profileId: "default" });
+    const queued = store.getTask(taskId ?? "missing")!;
+    const binding = store.listDeliveryBindings({ taskId: queued.id })[0]!;
+
+    expect(queued).toMatchObject({ source: "delegation", creatorSessionId: runtime.sessionId });
+    expect(binding).toMatchObject({
+      authorizedSessionId: runtime.sessionId,
+      deliveryKey: "origin-completion",
+      destination: {
+        platform: "telegram",
+        chatId: "authorized-chat",
+        threadId: "authorized-thread"
+      },
+      status: "pending"
+    });
+    expect(store.listDeliveryBindings({ taskId: localTaskId ?? "missing" })).toEqual([]);
+    store.atomicWrite((tx) => {
+      const startedAt = "2030-01-01T00:00:00.000Z";
+      const running = { ...queued, status: "running" as const, startedAt, updatedAt: startedAt };
+      tx.updateTask(running);
+      tx.updateTask({
+        ...running,
+        status: "completed",
+        completedAt: "2030-01-01T00:00:01.000Z",
+        updatedAt: "2030-01-01T00:00:01.000Z"
+      });
+    });
+    await runtime.dispose();
+    sessionDb.close();
+
+    sessionDb = await createSQLiteSessionDB({ path: databasePath });
+    const restartedStore = new SQLiteTaskStore({ db: sessionDb.db, profileId: "default" });
+    const resultService = new TaskResultService({
+      store: restartedStore,
+      profileId: "default",
+      contentRoot: join(options.workspaceRoot, "gateway-task-results"),
+      sessionDb
+    });
+    const deliverText = vi.fn(async (_targets: DeliveryTarget[], _text: string) => new Map([
+      ["telegram:authorized-chat:authorized-thread", { success: true }]
+    ]));
+    const delivery = new TaskCompletionDeliveryService({
+      store: restartedStore,
+      resultService,
+      router: { deliverText }
+    });
+
+    await expect(delivery.runOnce()).resolves.toEqual({ recovered: 0, claimed: 1, delivered: 1, failed: 0 });
+    await expect(delivery.runOnce()).resolves.toEqual({ recovered: 0, claimed: 0, delivered: 0, failed: 0 });
+    expect(deliverText).toHaveBeenCalledOnce();
+    expect(deliverText.mock.calls[0]?.[0]).toEqual([{
+      kind: "channel",
+      platform: "telegram",
+      chatId: "authorized-chat",
+      threadId: "authorized-thread"
+    }]);
+    expect(restartedStore.getDeliveryBinding(binding.id)?.status).toBe("delivered");
+    sessionDb.close();
   });
 
   it("reflects durable delegation limits in the registered tool schema", async () => {

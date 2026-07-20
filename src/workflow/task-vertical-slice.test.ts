@@ -52,7 +52,17 @@ describe("durable research-to-report vertical slice", () => {
       "plan-revision-validated",
       "plan-revision-activated"
     ]);
-    expect(taskService.create(definition).task.id).toBe(graph.task.id);
+    expect(taskService.create(definition)).toMatchObject({
+      task: { id: graph.task.id },
+      completionDelivery: { id: graph.completionDelivery?.id }
+    });
+    expect(() => taskService.create({
+      ...definition,
+      completionDelivery: {
+        deliveryKey: "origin-completion",
+        destination: { platform: "telegram", chatId: "different-origin" }
+      }
+    })).toThrow(FixedTaskCreationConflictError);
     expect(() => taskService.create({ ...definition, objective: "A conflicting objective." }))
       .toThrow(FixedTaskCreationConflictError);
     expect(() => taskService.steer({
@@ -76,11 +86,13 @@ describe("durable research-to-report vertical slice", () => {
       now,
       id: () => id("delivery")
     });
-    const binding = delivery.bind({
+    const binding = graph.completionDelivery!;
+    expect(binding).toMatchObject({
       taskId: graph.task.id,
       authorizedSessionId: "creator-alpha",
-      deliveryKey: "origin",
-      destination: { platform: "telegram", chatId: "research" }
+      deliveryKey: "origin-completion",
+      destination: { platform: "telegram", chatId: "research" },
+      status: "pending"
     });
 
     const firstExecutor = scriptedExecutor(store);
@@ -290,7 +302,11 @@ function researchReportDefinition(): CreateFixedTaskInput {
         maxBytes: 100_000
       })
     ],
-    planReason: "Deterministic research-to-report vertical slice."
+    planReason: "Deterministic research-to-report vertical slice.",
+    completionDelivery: {
+      deliveryKey: "origin-completion",
+      destination: { platform: "telegram", chatId: "research" }
+    }
   };
 }
 

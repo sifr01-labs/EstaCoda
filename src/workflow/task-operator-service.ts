@@ -5,6 +5,7 @@ import type {
   TaskAuthorityPolicy,
   TaskAttempt,
   TaskAttemptStatus,
+  TaskDeliveryDestination,
   TaskEvent,
   TaskResult,
   TaskStatus,
@@ -12,7 +13,12 @@ import type {
   TaskUsageTotals,
   TaskWorkspaceBinding
 } from "../contracts/task.js";
-import { TASK_GRAPH_LIMITS, TASK_TOOL_RISK_CLASSES, isTerminalTaskStatus } from "../contracts/task.js";
+import {
+  TASK_GRAPH_LIMITS,
+  TASK_ORIGIN_COMPLETION_DELIVERY_KEY,
+  TASK_TOOL_RISK_CLASSES,
+  isTerminalTaskStatus
+} from "../contracts/task.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import { taskUsageFromEntries } from "./task-agent-usage.js";
 import { FixedTaskService } from "./fixed-task-service.js";
@@ -93,12 +99,18 @@ export class TaskOperatorService {
     this.#eventId = options.eventId ?? randomUUID;
   }
 
-  begin(input: { objective: string; workspace: TaskWorkspaceBinding; creatorSessionId: string }): TaskStatusProjection {
+  begin(input: {
+    objective: string;
+    workspace: TaskWorkspaceBinding;
+    creatorSessionId: string;
+    source?: "cli" | "gateway" | "runtime";
+    completionDestination?: TaskDeliveryDestination;
+  }): TaskStatusProjection {
     const objective = normalizeTaskOperatorObjective(input.objective);
     const authority = operatorTaskAuthority();
     const graph = new FixedTaskService({ store: this.#store, now: this.#now }).create({
       creatorSessionId: input.creatorSessionId,
-      source: "cli",
+      source: input.source ?? "cli",
       objective,
       workspace: input.workspace,
       authorityPolicy: authority,
@@ -136,7 +148,13 @@ export class TaskOperatorService {
         idempotency: "unknown",
         resultPolicy: { kind: "text", required: true, maxBytes: 1_048_576 }
       }],
-      planReason: "Created by an explicit Task operator command."
+      planReason: "Created by an explicit Task operator command.",
+      ...(input.completionDestination === undefined ? {} : {
+        completionDelivery: {
+          deliveryKey: TASK_ORIGIN_COMPLETION_DELIVERY_KEY,
+          destination: input.completionDestination
+        }
+      })
     });
     return this.#project(graph.task);
   }

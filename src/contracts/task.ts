@@ -391,6 +391,9 @@ export type TaskApprovalLink = {
 
 export type TaskDeliveryStatus = "pending" | "delivering" | "delivered" | "failed";
 
+/** One completion binding for the authorized surface that originated a Task. */
+export const TASK_ORIGIN_COMPLETION_DELIVERY_KEY = "origin-completion";
+
 export type TaskDeliveryDestination = {
   platform: "telegram" | "discord" | "whatsapp" | "email";
   chatId?: string;

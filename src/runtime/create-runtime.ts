@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { AuxiliaryModelConfig, ModelProfile, ResolvedModelRoute } from "../contracts/provider.js";
@@ -97,6 +98,27 @@ import { readCachedUpdateInfo } from "../lifecycle/update-engine.js";
 import { detectInstallMethod } from "../lifecycle/install-method.js";
 import { buildStartupUpdateHint } from "../lifecycle/startup-update.js";
 import { createSessionId } from "../session/session-id.js";
+import { isTaskDeliveryDestination, type TaskDeliveryDestination, type TaskSource } from "../contracts/task.js";
+
+export type TaskCreationOrigin = {
+  source: Extract<TaskSource, "cli" | "gateway" | "runtime">;
+  completionDestination?: TaskDeliveryDestination;
+};
+
+function normalizeTaskCreationOrigin(origin: TaskCreationOrigin | undefined): TaskCreationOrigin {
+  if (origin === undefined) return { source: "cli" };
+  if (origin.source !== "cli" && origin.source !== "gateway" && origin.source !== "runtime") {
+    throw new Error("Task creation origin is invalid.");
+  }
+  if (origin.completionDestination === undefined) return { source: origin.source };
+  if (!isTaskDeliveryDestination(origin.completionDestination)) {
+    throw new Error("Task completion destination is invalid.");
+  }
+  return {
+    source: origin.source,
+    completionDestination: structuredClone(origin.completionDestination)
+  };
+}
 
 export type RuntimeOptions = {
   tokens: ResolvedTokens;
@@ -180,6 +202,8 @@ export type RuntimeOptions = {
   delegationConfig?: DelegationConfig;
   workspaceFsAdapter?: WorkspaceFsAdapter;
   sessionMetadata?: Record<string, unknown>;
+  /** Optional authorized origin for Tasks created outside the local CLI. */
+  taskCreationOrigin?: TaskCreationOrigin;
 };
 
 type RuntimeBranding = Pick<
@@ -285,6 +309,8 @@ export type Runtime = {
   taskAgentExecutor?: AgentStepExecutor;
   taskOperator?: TaskOperatorService;
   beginTask?(objective: string): Promise<TaskStatusProjection>;
+  /** Scopes Task provenance to one authorized surface invocation, including cached runtimes. */
+  withTaskCreationOrigin?<T>(origin: TaskCreationOrigin, work: () => Promise<T>): Promise<T>;
 };
 
 export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
@@ -298,6 +324,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
   const sessionId = options.sessionId ?? createSessionId();
   const sessionRuntimeContext = createSessionRuntimeContext(sessionId);
+  const defaultTaskCreationOrigin = normalizeTaskCreationOrigin(options.taskCreationOrigin);
+  const taskCreationOriginContext = new AsyncLocalStorage<TaskCreationOrigin>();
+  const currentTaskCreationOrigin = () => taskCreationOriginContext.getStore() ?? defaultTaskCreationOrigin;
   let observedRuntimeSessionId = sessionId;
   const sessionDb = options.sessionDb ?? new InMemorySessionDB();
   const taskStore = sessionDb instanceof SQLiteSessionDB
@@ -924,7 +953,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           creatorSessionId: () => sessionRuntimeContext.currentSessionId(),
           workspace: taskWorkspace,
           config: options.delegationConfig ?? DEFAULT_DELEGATION_CONFIG,
-          visibleTools: () => toolRegistry.list()
+          visibleTools: () => toolRegistry.list(),
+          completionDestination: () => currentTaskCreationOrigin().completionDestination
         }),
     trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot),
     disabledToolsets: options.disabledToolsets,
@@ -992,8 +1022,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           if (!activeTrustedWorkspace && !(await trustStore.isTrusted(workspaceRoot))) {
             throw new Error("Task creation requires a trusted workspace.");
           }
-          return taskOperatorService.begin({ objective, workspace: taskWorkspace, creatorSessionId: sessionRuntimeContext.currentSessionId() });
+          const origin = currentTaskCreationOrigin();
+          return taskOperatorService.begin({
+            objective,
+            workspace: taskWorkspace,
+            creatorSessionId: sessionRuntimeContext.currentSessionId(),
+            source: origin.source,
+            completionDestination: origin.completionDestination
+          });
         },
+    withTaskCreationOrigin(origin, work) {
+      return taskCreationOriginContext.run(normalizeTaskCreationOrigin(origin), work);
+    },
     agentEvolutionPolicy() {
       return agentEvolutionPolicy;
     },
