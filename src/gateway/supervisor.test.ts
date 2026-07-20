@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, readFile, realpath } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -342,6 +342,7 @@ describe("runGatewaySupervisor", () => {
   });
 
   it("runs and disposes the durable Task host in once mode", async () => {
+    let taskHostOptions: Parameters<NonNullable<import("./supervisor.js").SupervisorFactories["createTaskBackgroundHost"]>>[0] | undefined;
     const host = {
       runOnce: vi.fn(async () => ({ skipped: false })),
       hasPendingWork: vi.fn(() => false),
@@ -356,13 +357,18 @@ describe("runGatewaySupervisor", () => {
       once: true,
       factories: {
         tickCron: fakeTickCron().tickCron,
-        createTaskBackgroundHost: () => host,
+        createTaskBackgroundHost: (input) => {
+          taskHostOptions = input;
+          return host;
+        },
         createChannelGateway: () => fakeChannelGateway() as any,
         createDeliveryRouter: () => fakeDeliveryRouter() as any
       }
     });
 
     expect(result.ok).toBe(true);
+    await expect(taskHostOptions?.resolveWorkspace(tmpDir)).resolves.toMatchObject({ canonicalPath: await realpath(tmpDir) });
+    await expect(taskHostOptions?.isWorkspaceTrusted(tmpDir)).resolves.toBe(false);
     expect(host.runOnce).toHaveBeenCalledTimes(1);
     expect(host.dispose).toHaveBeenCalledTimes(1);
   });

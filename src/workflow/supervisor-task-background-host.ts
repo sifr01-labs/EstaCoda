@@ -1,4 +1,4 @@
-import type { Task, TaskHostLease } from "../contracts/task.js";
+import type { Task, TaskHostLease, TaskWorkspaceBinding } from "../contracts/task.js";
 import { isTerminalTaskStatus } from "../contracts/task.js";
 import type { AgentStepExecutor } from "./agent-step-executor.js";
 import {
@@ -22,6 +22,14 @@ export type TaskExecutorHostRuntime = {
   dispose(): Promise<void>;
 };
 
+type WorkspaceExecutorState = {
+  workspace: TaskWorkspaceBinding;
+  runtime?: TaskExecutorHostRuntime;
+  executor?: AgentStepExecutor;
+  creation?: Promise<void>;
+  nextCreationAt: number;
+};
+
 /**
  * Supervisor-owned Task host. The expensive agent runtime is created only when
  * runnable work exists; delivery recovery remains active from the first tick.
@@ -29,18 +37,17 @@ export type TaskExecutorHostRuntime = {
 export class SupervisorTaskBackgroundHost {
   readonly #store: TaskStore;
   readonly #host: TaskBackgroundHost;
-  readonly #createExecutorRuntime: () => Promise<TaskExecutorHostRuntime>;
+  readonly #createExecutorRuntime: (workspace: TaskWorkspaceBinding) => Promise<TaskExecutorHostRuntime>;
+  readonly #resolveWorkspace: (canonicalPath: string) => Promise<TaskWorkspaceBinding>;
+  readonly #isWorkspaceTrusted: (canonicalPath: string) => boolean | Promise<boolean>;
   readonly #logWarning: (message: string) => void;
   readonly #ownerId: string;
-  readonly #workspaceIdentityHash: string;
   readonly #leaseMs: number;
   readonly #heartbeatIntervalMs: number;
   readonly #now: () => Date;
   readonly #owned = new Map<string, TaskHostLease>();
-  #executorRuntime: TaskExecutorHostRuntime | undefined;
-  #executor: AgentStepExecutor | undefined;
-  #executorCreation: Promise<void> | undefined;
-  #nextExecutorCreationAt = 0;
+  readonly #workspaces = new Map<string, WorkspaceExecutorState>();
+  readonly #workspaceWarnings = new Set<string>();
   #heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   #disposed = false;
 
@@ -49,8 +56,9 @@ export class SupervisorTaskBackgroundHost {
     resultService: TaskResultService;
     router: TaskCompletionDeliveryRouter;
     ownerId: string;
-    workspaceIdentityHash: string;
-    createExecutorRuntime: () => Promise<TaskExecutorHostRuntime>;
+    resolveWorkspace: (canonicalPath: string) => Promise<TaskWorkspaceBinding>;
+    isWorkspaceTrusted: (canonicalPath: string) => boolean | Promise<boolean>;
+    createExecutorRuntime: (workspace: TaskWorkspaceBinding) => Promise<TaskExecutorHostRuntime>;
     approvalService?: TaskApprovalService;
     leaseMs?: number;
     heartbeatIntervalMs?: number;
@@ -59,9 +67,10 @@ export class SupervisorTaskBackgroundHost {
   }) {
     this.#store = options.store;
     this.#createExecutorRuntime = options.createExecutorRuntime;
+    this.#resolveWorkspace = options.resolveWorkspace;
+    this.#isWorkspaceTrusted = options.isWorkspaceTrusted;
     this.#logWarning = options.logWarning ?? (() => undefined);
     this.#ownerId = requireToken(options.ownerId, "background Task host owner ID");
-    this.#workspaceIdentityHash = requireToken(options.workspaceIdentityHash, "background Task host workspace identity");
     this.#leaseMs = positiveInteger(options.leaseMs ?? DEFAULT_HOST_LEASE_MS, "background Task host lease duration");
     this.#heartbeatIntervalMs = positiveInteger(
       options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS,
@@ -84,9 +93,12 @@ export class SupervisorTaskBackgroundHost {
       ownerId: options.ownerId,
       approvalService: options.approvalService,
       now: this.#now,
-      resolveExecutor: (task, step) => this.#executor?.canExecute(task, step) === true
-        ? this.#executor
-        : undefined
+      resolveExecutor: (task, step) => {
+        const executor = this.#workspaces.get(task.workspace.identityHash)?.executor;
+        return executor?.canExecute(task, step) === true
+          ? executor
+          : undefined;
+      }
     });
     const delivery = new TaskCompletionDeliveryService({
       store: options.store,
@@ -96,11 +108,13 @@ export class SupervisorTaskBackgroundHost {
     this.#host = new TaskBackgroundHost({
       scheduler: {
         runOnce: async () => {
+          await this.#revalidateOwnedWorkspaces();
           this.#renewOwnedTasks();
-          this.#claimAvailableTasks();
-          await this.#ensureExecutorForRunnableWork();
+          await this.#claimAvailableTasks();
+          await this.#ensureExecutorsForRunnableWork();
           const result = await scheduler.runOnce({ eligibleTaskIds: this.#eligibleTaskIds() });
           this.#renewOwnedTasks();
+          await this.#disposeUnusedWorkspaceRuntimes();
           return result;
         }
       },
@@ -122,7 +136,7 @@ export class SupervisorTaskBackgroundHost {
   }
 
   hasPendingWork(): boolean {
-    return this.#host.hasPendingWork() || this.#executorCreation !== undefined;
+    return this.#host.hasPendingWork() || [...this.#workspaces.values()].some((state) => state.creation !== undefined);
   }
 
   waitForIdle(): Promise<void> {
@@ -141,58 +155,79 @@ export class SupervisorTaskBackgroundHost {
       this.#heartbeatTimer = undefined;
     }
     await this.#host.waitForIdle().catch(() => undefined);
-    await this.#executorCreation?.catch(() => undefined);
+    await Promise.allSettled([...this.#workspaces.values()].map((state) => state.creation));
     this.#releaseOwnedTasks();
-    const runtime = this.#executorRuntime;
-    this.#executorRuntime = undefined;
-    this.#executor = undefined;
-    await runtime?.dispose().catch(() => undefined);
+    const runtimes = [...this.#workspaces.values()].map((state) => state.runtime);
+    this.#workspaces.clear();
+    await Promise.allSettled(runtimes.map((runtime) => runtime?.dispose()));
   }
 
-  async #ensureExecutorForRunnableWork(): Promise<void> {
-    if (this.#disposed || this.#executor !== undefined || Date.now() < this.#nextExecutorCreationAt) return;
-    if (this.#owned.size === 0) return;
-    if (this.#executorCreation !== undefined) return await this.#executorCreation;
+  async #ensureExecutorsForRunnableWork(): Promise<void> {
+    const workspaceIds = new Set([...this.#owned.values()].map((lease) => lease.workspaceIdentityHash));
+    await Promise.all([...workspaceIds].map(async (workspaceId) => {
+      const state = this.#workspaces.get(workspaceId);
+      if (state !== undefined) await this.#ensureWorkspaceExecutor(state);
+    }));
+  }
+
+  async #ensureWorkspaceExecutor(state: WorkspaceExecutorState): Promise<void> {
+    if (this.#disposed || state.executor !== undefined || Date.now() < state.nextCreationAt) return;
+    if (state.creation !== undefined) return await state.creation;
 
     const creation = (async () => {
       let runtime: TaskExecutorHostRuntime | undefined;
       try {
-        runtime = await this.#createExecutorRuntime();
+        runtime = await this.#createExecutorRuntime(state.workspace);
         if (runtime.taskAgentExecutor === undefined) {
           await runtime.dispose().catch(() => undefined);
-          this.#nextExecutorCreationAt = Date.now() + EXECUTOR_CREATION_RETRY_MS;
+          state.nextCreationAt = Date.now() + EXECUTOR_CREATION_RETRY_MS;
           this.#logWarning("Task executor host unavailable (executor-not-configured).");
+          return;
+        }
+        if (await this.#verifyWorkspace(state.workspace) === undefined) {
+          await runtime.dispose().catch(() => undefined);
+          this.#releaseWorkspaceOwnership(state.workspace.identityHash);
+          this.#workspaces.delete(state.workspace.identityHash);
           return;
         }
         if (this.#disposed) {
           await runtime.dispose().catch(() => undefined);
           return;
         }
-        this.#executorRuntime = runtime;
-        this.#executor = runtime.taskAgentExecutor;
+        state.runtime = runtime;
+        state.executor = runtime.taskAgentExecutor;
       } catch (error) {
         await runtime?.dispose().catch(() => undefined);
-        this.#nextExecutorCreationAt = Date.now() + EXECUTOR_CREATION_RETRY_MS;
+        state.nextCreationAt = Date.now() + EXECUTOR_CREATION_RETRY_MS;
         this.#logWarning(`Task executor host unavailable (${errorClass(error)}).`);
       }
     })();
-    this.#executorCreation = creation;
+    state.creation = creation;
     await creation;
-    if (this.#executorCreation === creation) this.#executorCreation = undefined;
+    if (state.creation === creation) state.creation = undefined;
   }
 
   #eligibleTaskIds(limit = 1_000): string[] {
     return [...this.#owned.keys()].slice(0, limit);
   }
 
-  #claimAvailableTasks(): void {
+  async #claimAvailableTasks(): Promise<void> {
     const tasks = this.#store.listTasks({ statuses: RUNNABLE_TASK_STATUSES, limit: 1_000 });
+    const verified = new Map<string, Promise<TaskWorkspaceBinding | undefined>>();
     for (const task of tasks) {
-      if (task.workspace.identityHash !== this.#workspaceIdentityHash || this.#owned.has(task.id)) continue;
+      if (this.#owned.has(task.id)) continue;
+      const workspaceKey = `${task.workspace.identityHash}:${task.workspace.canonicalPath}`;
+      let verification = verified.get(workspaceKey);
+      if (verification === undefined) {
+        verification = this.#verifyWorkspace(task.workspace);
+        verified.set(workspaceKey, verification);
+      }
+      const workspace = await verification;
+      if (workspace === undefined) continue;
       const now = this.#now();
       const acquired = this.#store.acquireTaskHostLease({
         taskId: task.id,
-        workspaceIdentityHash: this.#workspaceIdentityHash,
+        workspaceIdentityHash: workspace.identityHash,
         ownerId: this.#ownerId,
         kind: "background",
         acquiredAt: now.toISOString(),
@@ -200,15 +235,66 @@ export class SupervisorTaskBackgroundHost {
       });
       if (acquired?.ownerId === this.#ownerId && acquired.kind === "background") {
         this.#owned.set(task.id, acquired);
+        this.#workspaces.set(workspace.identityHash, this.#workspaces.get(workspace.identityHash) ?? {
+          workspace,
+          nextCreationAt: 0
+        });
       }
     }
+  }
+
+  async #revalidateOwnedWorkspaces(): Promise<void> {
+    for (const [workspaceId, state] of [...this.#workspaces]) {
+      if (await this.#verifyWorkspace(state.workspace) !== undefined) continue;
+      this.#releaseWorkspaceOwnership(workspaceId);
+      this.#workspaces.delete(workspaceId);
+      await state.creation?.catch(() => undefined);
+      await state.runtime?.dispose().catch(() => undefined);
+    }
+  }
+
+  #releaseWorkspaceOwnership(workspaceIdentityHash: string): void {
+    for (const [taskId, lease] of this.#owned) {
+      if (lease.workspaceIdentityHash !== workspaceIdentityHash) continue;
+      this.#releaseLease(lease);
+      this.#owned.delete(taskId);
+    }
+  }
+
+  async #verifyWorkspace(workspace: TaskWorkspaceBinding): Promise<TaskWorkspaceBinding | undefined> {
+    try {
+      const resolved = await this.#resolveWorkspace(workspace.canonicalPath);
+      if (resolved.canonicalPath !== workspace.canonicalPath || resolved.identityHash !== workspace.identityHash) {
+        this.#warnWorkspaceOnce(workspace.identityHash, "identity-mismatch");
+        return undefined;
+      }
+      if (!await this.#isWorkspaceTrusted(resolved.canonicalPath)) {
+        this.#warnWorkspaceOnce(workspace.identityHash, "untrusted");
+        return undefined;
+      }
+      this.#workspaceWarnings.delete(`${workspace.identityHash}:identity-mismatch`);
+      this.#workspaceWarnings.delete(`${workspace.identityHash}:untrusted`);
+      this.#workspaceWarnings.delete(`${workspace.identityHash}:unavailable`);
+      return resolved;
+    } catch {
+      this.#warnWorkspaceOnce(workspace.identityHash, "unavailable");
+      return undefined;
+    }
+  }
+
+  #warnWorkspaceOnce(workspaceIdentityHash: string, reason: string): void {
+    const key = `${workspaceIdentityHash}:${reason}`;
+    if (this.#workspaceWarnings.has(key)) return;
+    this.#workspaceWarnings.add(key);
+    this.#logWarning(`Task workspace is not eligible for background execution (${reason}).`);
   }
 
   #renewOwnedTasks(): void {
     const now = this.#now();
     for (const [taskId, lease] of this.#owned) {
       const task = this.#store.getTask(taskId);
-      if (task === null || task.workspace.identityHash !== this.#workspaceIdentityHash) {
+      if (task === null || task.workspace.identityHash !== lease.workspaceIdentityHash) {
+        this.#releaseLease(lease);
         this.#owned.delete(taskId);
         continue;
       }
@@ -228,6 +314,15 @@ export class SupervisorTaskBackgroundHost {
       });
       if (renewed === null) this.#owned.delete(taskId);
       else this.#owned.set(taskId, renewed);
+    }
+  }
+
+  async #disposeUnusedWorkspaceRuntimes(): Promise<void> {
+    const used = new Set([...this.#owned.values()].map((lease) => lease.workspaceIdentityHash));
+    for (const [workspaceId, state] of [...this.#workspaces]) {
+      if (used.has(workspaceId) || state.creation !== undefined) continue;
+      this.#workspaces.delete(workspaceId);
+      await state.runtime?.dispose().catch(() => undefined);
     }
   }
 

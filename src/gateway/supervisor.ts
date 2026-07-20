@@ -119,7 +119,7 @@ export type SupervisorFactories = {
   createWhatsAppAdapter?(input: ConstructorParameters<typeof WhatsAppAdapter>[0]): ChannelAdapter;
   createChannelGateway?(input: ConstructorParameters<typeof ChannelGateway>[0]): ChannelGateway;
   createDeliveryRouter?(input: ConstructorParameters<typeof DeliveryRouter>[0]): DeliveryRouter;
-  createTaskBackgroundHost?(): SupervisorTaskHost;
+  createTaskBackgroundHost?(input: ConstructorParameters<typeof SupervisorTaskBackgroundHost>[0]): SupervisorTaskHost;
   tickCron?(input: Parameters<typeof tickCron>[0]): ReturnType<typeof tickCron>;
   finalizeSessionJob?(job: SessionFinalizationJob, signal: AbortSignal): Promise<MemoryCurationCheckpointResult>;
   sleep?(ms: number): Promise<void>;
@@ -1269,7 +1269,6 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     const trustStore = new WorkspaceTrustStore({ path: trustStorePath });
     const workspaceTrusted = await trustStore.isTrusted(options.workspaceRoot);
     const taskStore = new SQLiteTaskStore({ db: sessionDb.db, profileId });
-    const taskWorkspace = await resolveTaskWorkspaceBinding(options.workspaceRoot);
     const taskResultService = new TaskResultService({
       store: taskStore,
       profileId,
@@ -1280,31 +1279,35 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       store: taskStore,
       queue: gatewayApprovalQueue
     });
-    state.taskBackgroundHost = options.factories?.createTaskBackgroundHost?.() ??
-      new SupervisorTaskBackgroundHost({
-        store: taskStore,
-        resultService: taskResultService,
-        router,
-        ownerId: `gateway-task-host-${process.pid}-${startedAt}`,
-        workspaceIdentityHash: taskWorkspace.identityHash,
-        approvalService: taskApprovalService,
-        logWarning,
-        createExecutorRuntime: async () => {
-          const latestConfig = await loadConfig();
-          return await createRuntime({
-            ...buildGatewayCronRuntimeOptions({
-              latestConfig,
-              workspaceRoot: options.workspaceRoot,
-              homeDir,
-              profileId,
-              sessionDb,
-              sessionId: createSessionId(),
-              workspaceTrusted: await trustStore.isTrusted(options.workspaceRoot)
-            }),
-            closeSessionDbOnDispose: false
-          });
-        }
-      });
+    const taskBackgroundHostOptions: ConstructorParameters<typeof SupervisorTaskBackgroundHost>[0] = {
+      store: taskStore,
+      resultService: taskResultService,
+      router,
+      ownerId: `gateway-task-host-${process.pid}-${startedAt}`,
+      resolveWorkspace: resolveTaskWorkspaceBinding,
+      isWorkspaceTrusted: (canonicalPath) => trustStore.isTrusted(canonicalPath),
+      approvalService: taskApprovalService,
+      logWarning,
+      createExecutorRuntime: async (workspace) => {
+        const workspaceTrusted = await trustStore.isTrusted(workspace.canonicalPath);
+        if (!workspaceTrusted) throw new Error("Task workspace trust was revoked before runtime creation.");
+        const latestConfig = await loadConfig();
+        return await createRuntime({
+          ...buildGatewayCronRuntimeOptions({
+            latestConfig,
+            workspaceRoot: workspace.canonicalPath,
+            homeDir,
+            profileId,
+            sessionDb,
+            sessionId: createSessionId(),
+            workspaceTrusted
+          }),
+          closeSessionDbOnDispose: false
+        });
+      }
+    };
+    state.taskBackgroundHost = options.factories?.createTaskBackgroundHost?.(taskBackgroundHostOptions) ??
+      new SupervisorTaskBackgroundHost(taskBackgroundHostOptions);
 
     const authPolicies: ChannelAuthPolicies = {};
     if (telegram.enabled === true) {

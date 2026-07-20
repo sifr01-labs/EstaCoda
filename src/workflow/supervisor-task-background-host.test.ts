@@ -57,7 +57,8 @@ describe("SupervisorTaskBackgroundHost Task ownership", () => {
       }),
       router: { deliverText: async () => new Map() },
       ownerId: "background-owner",
-      workspaceIdentityHash: "workspace-hash",
+      resolveWorkspace: async (canonicalPath) => ({ canonicalPath, identityHash: "workspace-hash" }),
+      isWorkspaceTrusted: () => true,
       createExecutorRuntime
     });
 
@@ -92,10 +93,167 @@ describe("SupervisorTaskBackgroundHost Task ownership", () => {
       skipped: false,
       scheduler: { dispatched: 1, completed: 1 }
     });
-    expect(createExecutorRuntime).toHaveBeenCalledOnce();
+    expect(createExecutorRuntime).toHaveBeenCalledTimes(2);
     expect(execute).toHaveBeenCalledTimes(2);
     expect(store.getTask(task.taskId)?.status).toBe("completed");
 
+    await host.dispose();
+    sessionDb.close();
+  });
+
+  it("creates isolated lazy executors for Tasks from different verified workspaces", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-supervisor-task-multi-workspace-"));
+    tempDirs.push(tempDir);
+    const sessionDb = new SQLiteSessionDB({ path: join(tempDir, "sessions.sqlite") });
+    await sessionDb.createSession({ id: "creator-alpha", profileId: "alpha" });
+    const store = new SQLiteTaskStore({ db: sessionDb.db, profileId: "alpha" });
+    const operator = new TaskOperatorService({ store });
+    const workspaceA = { canonicalPath: "/workspace/a", identityHash: "workspace-a" };
+    const workspaceB = { canonicalPath: "/workspace/b", identityHash: "workspace-b" };
+    const taskA = operator.begin({ objective: "Run in A.", workspace: workspaceA, creatorSessionId: "creator-alpha" });
+    const taskB = operator.begin({ objective: "Run in B.", workspace: workspaceB, creatorSessionId: "creator-alpha" });
+    const executions: Array<{ workspaceId: string; taskId: string }> = [];
+    const disposals: string[] = [];
+    const createExecutorRuntime = vi.fn(async (workspace: typeof workspaceA) => ({
+      taskAgentExecutor: {
+        kind: "agent" as const,
+        canExecute: (task: { workspace: typeof workspaceA }) => task.workspace.identityHash === workspace.identityHash,
+        execute: async (input: { task: { id: string } }) => {
+          executions.push({ workspaceId: workspace.identityHash, taskId: input.task.id });
+          return { outcome: "succeeded" as const, results: [{ kind: "text" as const, content: workspace.identityHash }] };
+        }
+      } as unknown as AgentStepExecutor,
+      dispose: async () => { disposals.push(workspace.identityHash); }
+    }));
+    const host = new SupervisorTaskBackgroundHost({
+      store,
+      resultService: new TaskResultService({
+        store,
+        profileId: "alpha",
+        contentRoot: join(tempDir, "results"),
+        sessionDb
+      }),
+      router: { deliverText: async () => new Map() },
+      ownerId: "multi-workspace-background",
+      resolveWorkspace: async (canonicalPath) => canonicalPath === workspaceA.canonicalPath ? workspaceA : workspaceB,
+      isWorkspaceTrusted: () => true,
+      createExecutorRuntime
+    });
+
+    await expect(host.runOnce()).resolves.toMatchObject({ scheduler: { dispatched: 2, completed: 2 } });
+    expect(createExecutorRuntime.mock.calls.map(([workspace]) => workspace.identityHash).sort()).toEqual([
+      workspaceA.identityHash,
+      workspaceB.identityHash
+    ]);
+    expect(executions.sort((left, right) => left.workspaceId.localeCompare(right.workspaceId))).toEqual([
+      { workspaceId: workspaceA.identityHash, taskId: taskA.taskId },
+      { workspaceId: workspaceB.identityHash, taskId: taskB.taskId }
+    ]);
+    expect(disposals.sort()).toEqual([workspaceA.identityHash, workspaceB.identityHash]);
+    expect(store.getTaskHostLease(taskA.taskId)).toBeNull();
+    expect(store.getTaskHostLease(taskB.taskId)).toBeNull();
+    await host.dispose();
+    sessionDb.close();
+  });
+
+  it("refuses ownership before runtime creation when workspace identity or trust validation fails", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-supervisor-task-workspace-deny-"));
+    tempDirs.push(tempDir);
+    const sessionDb = new SQLiteSessionDB({ path: join(tempDir, "sessions.sqlite") });
+    await sessionDb.createSession({ id: "creator-alpha", profileId: "alpha" });
+    const store = new SQLiteTaskStore({ db: sessionDb.db, profileId: "alpha" });
+    const operator = new TaskOperatorService({ store });
+    const mismatched = operator.begin({
+      objective: "Do not follow a changed workspace binding.",
+      workspace: { canonicalPath: "/workspace/changed", identityHash: "persisted-hash" },
+      creatorSessionId: "creator-alpha"
+    });
+    const untrusted = operator.begin({
+      objective: "Wait until trust is granted.",
+      workspace: { canonicalPath: "/workspace/untrusted", identityHash: "untrusted-hash" },
+      creatorSessionId: "creator-alpha"
+    });
+    const createExecutorRuntime = vi.fn();
+    const warnings: string[] = [];
+    const host = new SupervisorTaskBackgroundHost({
+      store,
+      resultService: new TaskResultService({
+        store,
+        profileId: "alpha",
+        contentRoot: join(tempDir, "results"),
+        sessionDb
+      }),
+      router: { deliverText: async () => new Map() },
+      ownerId: "workspace-deny-background",
+      resolveWorkspace: async (canonicalPath) => ({
+        canonicalPath,
+        identityHash: canonicalPath.endsWith("changed") ? "live-hash" : "untrusted-hash"
+      }),
+      isWorkspaceTrusted: (canonicalPath) => !canonicalPath.endsWith("untrusted"),
+      createExecutorRuntime,
+      logWarning: (message) => warnings.push(message)
+    });
+
+    await expect(host.runOnce()).resolves.toMatchObject({ scheduler: { dispatched: 0 } });
+    expect(createExecutorRuntime).not.toHaveBeenCalled();
+    expect(store.getTaskHostLease(mismatched.taskId)).toBeNull();
+    expect(store.getTaskHostLease(untrusted.taskId)).toBeNull();
+    expect(store.listAttempts(mismatched.taskId)).toHaveLength(0);
+    expect(store.listAttempts(untrusted.taskId)).toHaveLength(0);
+    expect(warnings).toEqual(expect.arrayContaining([
+      expect.stringContaining("identity-mismatch"),
+      expect.stringContaining("untrusted")
+    ]));
+    expect(warnings.join("\n")).not.toContain("/workspace/");
+    await host.dispose();
+    sessionDb.close();
+  });
+
+  it("releases ownership when workspace trust is revoked during lazy runtime creation", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-supervisor-task-trust-race-"));
+    tempDirs.push(tempDir);
+    const sessionDb = new SQLiteSessionDB({ path: join(tempDir, "sessions.sqlite") });
+    await sessionDb.createSession({ id: "creator-alpha", profileId: "alpha" });
+    const store = new SQLiteTaskStore({ db: sessionDb.db, profileId: "alpha" });
+    const workspace = { canonicalPath: "/workspace/revoked", identityHash: "revoked-hash" };
+    const task = new TaskOperatorService({ store }).begin({
+      objective: "Do not execute after trust revocation.",
+      workspace,
+      creatorSessionId: "creator-alpha"
+    });
+    let trusted = true;
+    const execute = vi.fn();
+    const dispose = vi.fn(async () => undefined);
+    const host = new SupervisorTaskBackgroundHost({
+      store,
+      resultService: new TaskResultService({
+        store,
+        profileId: "alpha",
+        contentRoot: join(tempDir, "results"),
+        sessionDb
+      }),
+      router: { deliverText: async () => new Map() },
+      ownerId: "trust-race-background",
+      resolveWorkspace: async () => workspace,
+      isWorkspaceTrusted: () => trusted,
+      createExecutorRuntime: async () => {
+        trusted = false;
+        return {
+          taskAgentExecutor: {
+            kind: "agent" as const,
+            canExecute: () => true,
+            execute
+          } as unknown as AgentStepExecutor,
+          dispose
+        };
+      }
+    });
+
+    await expect(host.runOnce()).resolves.toMatchObject({ scheduler: { dispatched: 0 } });
+    expect(execute).not.toHaveBeenCalled();
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(store.getTaskHostLease(task.taskId)).toBeNull();
+    expect(store.listAttempts(task.taskId)).toHaveLength(0);
     await host.dispose();
     sessionDb.close();
   });
@@ -135,7 +293,8 @@ describe("SupervisorTaskBackgroundHost Task ownership", () => {
       }),
       router: { deliverText: async () => new Map() },
       ownerId: "background-owner",
-      workspaceIdentityHash: "workspace-hash",
+      resolveWorkspace: async (canonicalPath) => ({ canonicalPath, identityHash: "workspace-hash" }),
+      isWorkspaceTrusted: () => true,
       createExecutorRuntime: async () => ({ taskAgentExecutor: executor, dispose: async () => undefined })
     });
 
@@ -201,7 +360,8 @@ describe("SupervisorTaskBackgroundHost Task ownership", () => {
       }),
       router: { deliverText: async () => new Map() },
       ownerId: "recovery-background",
-      workspaceIdentityHash: "workspace-hash",
+      resolveWorkspace: async (canonicalPath) => ({ canonicalPath, identityHash: "workspace-hash" }),
+      isWorkspaceTrusted: () => true,
       createExecutorRuntime: async () => ({ taskAgentExecutor: executor, dispose: async () => undefined }),
       leaseMs: 60_000,
       heartbeatIntervalMs: 30_000,
