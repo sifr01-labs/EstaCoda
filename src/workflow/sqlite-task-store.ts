@@ -1,5 +1,6 @@
 import type {
   Task,
+  TaskApprovalLink,
   TaskAttempt,
   TaskAttemptLease,
   TaskDeliveryBinding,
@@ -7,7 +8,8 @@ import type {
   TaskPlanRevision,
   TaskResult,
   TaskSessionLink,
-  TaskStep
+  TaskStep,
+  TaskUsageEntry
 } from "../contracts/task.js";
 import {
   TASK_GRAPH_LIMITS,
@@ -27,6 +29,7 @@ import type {
   AcquireTaskAttemptLeaseInput,
   CreateTaskGraphInput,
   ListTaskEventsOptions,
+  ListTaskApprovalLinksOptions,
   ListTaskDeliveryBindingsOptions,
   ListTasksOptions,
   ReleaseTaskAttemptLeaseInput,
@@ -348,13 +351,16 @@ export class SQLiteTaskStore implements TaskStore {
     this.#assertTransactionActive();
     this.#assertAttemptInput(attempt);
     this.atomicWrite(() => {
+      const persistedAttempt = attempt.lease === undefined
+        ? attempt
+        : { ...attempt, status: "queued" as const, lease: undefined };
       this.#db.query(
         `insert into task_attempts (
           id, profile_id, task_id, plan_revision_id, step_id, attempt_number, status,
           dispatch_key, worker_session_id, trajectory_id, usage_json, failure_json,
           created_at, updated_at, started_at, completed_at
         ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(...attemptValues(attempt));
+      ).run(...attemptValues(persistedAttempt));
       if (attempt.lease !== undefined) this.#insertLease(attempt.lease);
     });
   }
@@ -422,30 +428,25 @@ export class SQLiteTaskStore implements TaskStore {
   acquireAttemptLease(input: AcquireTaskAttemptLeaseInput): TaskAttemptLease | null {
     const ownerId = requireNonEmpty(input.ownerId, "Attempt lease owner ID");
     assertLeaseWindow(input.acquiredAt, input.expiresAt, "Attempt lease acquisition");
-    return this.atomicWrite(() => {
-      const attempt = this.getAttempt(input.attemptId);
-      if (attempt === null) throw new TaskStoreIntegrityError(`Attempt ${input.attemptId} was not found.`);
-      if (attempt.status === "leased" && attempt.lease?.ownerId === ownerId) return attempt.lease;
-      if (attempt.status !== "queued" || attempt.lease !== undefined) return null;
+    const existing = this.getAttempt(input.attemptId);
+    if (existing === null) throw new TaskStoreIntegrityError(`Attempt ${input.attemptId} was not found.`);
+    if (existing.status === "leased" && existing.lease?.ownerId === ownerId) return existing.lease;
 
-      const lease: TaskAttemptLease = {
-        attemptId: attempt.id,
-        profileId: this.#profileId,
-        taskId: attempt.taskId,
-        ownerId,
-        fencingToken: 1,
-        acquiredAt: input.acquiredAt,
-        heartbeatAt: input.acquiredAt,
-        expiresAt: input.expiresAt
-      };
-      this.#insertLease(lease);
-      const update = this.#db.query(
-        `update task_attempts set status = 'leased', updated_at = ?
-         where id = ? and profile_id = ? and status = 'queued'`
-      ).run(input.acquiredAt, attempt.id, this.#profileId);
-      this.#assertChanged(update.changes, "Attempt", attempt.id);
-      return lease;
-    });
+    const row = this.#db.query<LeaseRow>(
+      `insert into task_attempt_leases (
+         attempt_id, profile_id, task_id, owner_id, fencing_token,
+         acquired_at, heartbeat_at, expires_at, cancellation_requested_at
+       )
+       select a.id, a.profile_id, a.task_id, ?, a.lease_generation + 1, ?, ?, ?, null
+       from task_attempts a
+       where a.id = ? and a.profile_id = ? and a.status = 'queued'
+         and not exists (
+           select 1 from task_attempt_leases l
+           where l.attempt_id = a.id and l.profile_id = a.profile_id
+         )
+       returning *`
+    ).get(ownerId, input.acquiredAt, input.acquiredAt, input.expiresAt, input.attemptId, this.#profileId);
+    return row === null ? null : rowToLease(row);
   }
 
   renewAttemptLease(input: RenewTaskAttemptLeaseInput): TaskAttemptLease | null {
@@ -502,6 +503,48 @@ export class SQLiteTaskStore implements TaskStore {
       ).run(input.attemptId, this.#profileId, input.ownerId, input.fencingToken);
       return result.changes === 1;
     });
+  }
+
+  recordUsageEntry(entry: TaskUsageEntry): void {
+    this.#assertTransactionActive();
+    this.#assertProfile(entry.profileId, "TaskUsageEntry", entry.id);
+    this.#assertAttemptOwned(entry.attemptId, entry.taskId);
+    assertUsageEntry(entry);
+    this.#db.query(
+      `insert into task_usage_entries (
+        id, profile_id, task_id, plan_revision_id, step_id, attempt_id, request_key,
+        turn_id, provider_attempt_index, provider, model, route_role, route_index,
+        dispatched, input_tokens, output_tokens, reasoning_tokens, total_tokens,
+        estimated_cost_usd, usage_complete, pricing_complete, incomplete_reasons_json,
+        occurred_at
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      on conflict(profile_id, request_key) do nothing`
+    ).run(
+      entry.id, this.#profileId, entry.taskId, entry.planRevisionId, entry.stepId,
+      entry.attemptId, entry.requestKey, entry.turnId, entry.providerAttemptIndex,
+      entry.provider, entry.model, entry.routeRole, entry.routeIndex,
+      entry.dispatched ? 1 : 0, entry.inputTokens, entry.outputTokens,
+      entry.reasoningTokens, entry.totalTokens, entry.estimatedCostUsd,
+      entry.usageComplete ? 1 : 0, entry.pricingComplete ? 1 : 0,
+      stringify(entry.incompleteReasons), entry.occurredAt
+    );
+    const persisted = this.#db.query<UsageEntryRow>(
+      "select * from task_usage_entries where profile_id = ? and request_key = ?"
+    ).get(this.#profileId, entry.requestKey);
+    if (persisted === null || stringify(usageEntryValue(rowToUsageEntry(persisted))) !== stringify(usageEntryValue(entry))) {
+      throw new TaskStoreIntegrityError(`Task usage request key ${entry.requestKey} conflicts with another entry.`);
+    }
+  }
+
+  listUsageEntries(taskId: string, attemptId?: string): TaskUsageEntry[] {
+    if (this.getTask(taskId) === null) return [];
+    const sql = "select * from task_usage_entries where profile_id = ? and task_id = ?" +
+      (attemptId === undefined ? "" : " and attempt_id = ?") +
+      " order by occurred_at, turn_id, provider_attempt_index, id";
+    const rows = attemptId === undefined
+      ? this.#db.query<UsageEntryRow>(sql).all(this.#profileId, taskId)
+      : this.#db.query<UsageEntryRow>(sql).all(this.#profileId, taskId, attemptId);
+    return rows.map(rowToUsageEntry);
   }
 
   recordResult(result: TaskResult): void {
@@ -679,6 +722,95 @@ export class SQLiteTaskStore implements TaskStore {
       `select task_id, profile_id, session_id, relationship, step_id, attempt_id, created_at
        from task_session_links where profile_id = ? and task_id = ? order by created_at, id`
     ).all(this.#profileId, taskId).map(rowToSessionLink);
+  }
+
+  createApprovalLink(link: TaskApprovalLink): void {
+    this.#assertTransactionActive();
+    this.#assertProfile(link.profileId, "TaskApprovalLink", link.id);
+    this.#assertAttemptOwned(link.attemptId, link.taskId);
+    this.#assertSessionOwned(link.authorizedSessionId);
+    assertApprovalLink(link);
+    if (link.status !== "requesting" || link.pendingApprovalId !== undefined ||
+        link.resolvedAt !== undefined || link.consumedAt !== undefined) {
+      throw new TaskStoreIntegrityError("A new Task approval link must start in requesting state.");
+    }
+    const attempt = this.getAttempt(link.attemptId)!;
+    if (attempt.planRevisionId !== link.planRevisionId || attempt.stepId !== link.stepId) {
+      throw new TaskStoreIntegrityError("Task approval hierarchy does not match its Attempt.");
+    }
+    const linked = this.listSessionLinks(link.taskId).some((candidate) =>
+      candidate.sessionId === link.authorizedSessionId
+    );
+    if (!linked) {
+      throw new TaskStoreProfileError(
+        this.#profileId,
+        `Session ${link.authorizedSessionId} is not authorized for Task ${link.taskId}.`
+      );
+    }
+    this.#db.query(
+      `insert into task_approval_links (
+        id, profile_id, task_id, plan_revision_id, step_id, attempt_id,
+        authorized_session_id, pending_approval_id, tool_name, risk_class,
+        target_fingerprint, target_preview, status, requested_at, expires_at,
+        updated_at, resolved_at, consumed_at
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(...approvalLinkValues(link));
+  }
+
+  updateApprovalLink(link: TaskApprovalLink): void {
+    this.#assertTransactionActive();
+    this.#assertProfile(link.profileId, "TaskApprovalLink", link.id);
+    assertApprovalLink(link);
+    const existing = this.getApprovalLink(link.id);
+    if (existing === null) throw new TaskStoreIntegrityError(`Task approval ${link.id} was not found.`);
+    assertUnchanged("Task approval identity", {
+      taskId: existing.taskId, planRevisionId: existing.planRevisionId, stepId: existing.stepId,
+      attemptId: existing.attemptId, authorizedSessionId: existing.authorizedSessionId,
+      toolName: existing.toolName, riskClass: existing.riskClass,
+      targetFingerprint: existing.targetFingerprint, targetPreview: existing.targetPreview,
+      requestedAt: existing.requestedAt, expiresAt: existing.expiresAt
+    }, {
+      taskId: link.taskId, planRevisionId: link.planRevisionId, stepId: link.stepId,
+      attemptId: link.attemptId, authorizedSessionId: link.authorizedSessionId,
+      toolName: link.toolName, riskClass: link.riskClass,
+      targetFingerprint: link.targetFingerprint, targetPreview: link.targetPreview,
+      requestedAt: link.requestedAt, expiresAt: link.expiresAt
+    });
+    const allowed: Record<TaskApprovalLink["status"], readonly TaskApprovalLink["status"][]> = {
+      requesting: ["pending", "denied", "expired"], pending: ["approved", "denied", "expired"],
+      approved: ["consumed"], denied: [], expired: [], consumed: []
+    };
+    if (existing.status !== link.status && !allowed[existing.status].includes(link.status)) {
+      throw new TaskStoreIntegrityError(`Illegal Task approval transition: ${existing.status} -> ${link.status}.`);
+    }
+    const result = this.#db.query(
+      `update task_approval_links set pending_approval_id = ?, status = ?, updated_at = ?,
+       resolved_at = ?, consumed_at = ? where id = ? and profile_id = ?`
+    ).run(link.pendingApprovalId ?? null, link.status, link.updatedAt, link.resolvedAt ?? null,
+      link.consumedAt ?? null, link.id, this.#profileId);
+    this.#assertChanged(result.changes, "TaskApprovalLink", link.id);
+  }
+
+  getApprovalLink(id: string): TaskApprovalLink | null {
+    const row = this.#db.query<ApprovalLinkRow>(
+      "select * from task_approval_links where id = ? and profile_id = ?"
+    ).get(id, this.#profileId);
+    return row === null ? null : rowToApprovalLink(row);
+  }
+
+  listApprovalLinks(options: ListTaskApprovalLinksOptions = {}): TaskApprovalLink[] {
+    let sql = "select * from task_approval_links where profile_id = ?";
+    const params: SQLiteValue[] = [this.#profileId];
+    if (options.taskId !== undefined) { sql += " and task_id = ?"; params.push(options.taskId); }
+    if (options.attemptId !== undefined) { sql += " and attempt_id = ?"; params.push(options.attemptId); }
+    const statuses = [...(options.statuses ?? [])];
+    if (statuses.length > 0) {
+      sql += ` and status in (${statuses.map(() => "?").join(", ")})`;
+      params.push(...statuses);
+    }
+    sql += " order by requested_at, id limit ?";
+    params.push(boundedLimit(options.limit));
+    return this.#db.query<ApprovalLinkRow>(sql).all(...params).map(rowToApprovalLink);
   }
 
   createDeliveryBinding(binding: TaskDeliveryBinding): void {
@@ -1101,6 +1233,57 @@ function attemptValues(attempt: TaskAttempt): SQLiteValue[] {
   ];
 }
 
+function approvalLinkValues(link: TaskApprovalLink): SQLiteValue[] {
+  return [
+    link.id,
+    link.profileId,
+    link.taskId,
+    link.planRevisionId,
+    link.stepId,
+    link.attemptId,
+    link.authorizedSessionId,
+    link.pendingApprovalId ?? null,
+    link.toolName,
+    link.riskClass,
+    link.targetFingerprint,
+    link.targetPreview,
+    link.status,
+    link.requestedAt,
+    link.expiresAt,
+    link.updatedAt,
+    link.resolvedAt ?? null,
+    link.consumedAt ?? null
+  ];
+}
+
+function usageEntryValue(entry: TaskUsageEntry): unknown {
+  return {
+    id: entry.id,
+    profileId: entry.profileId,
+    taskId: entry.taskId,
+    planRevisionId: entry.planRevisionId,
+    stepId: entry.stepId,
+    attemptId: entry.attemptId,
+    requestKey: entry.requestKey,
+    turnId: entry.turnId,
+    providerAttemptIndex: entry.providerAttemptIndex,
+    provider: entry.provider,
+    model: entry.model,
+    routeRole: entry.routeRole,
+    routeIndex: entry.routeIndex,
+    dispatched: entry.dispatched,
+    inputTokens: entry.inputTokens,
+    outputTokens: entry.outputTokens,
+    reasoningTokens: entry.reasoningTokens,
+    totalTokens: entry.totalTokens,
+    estimatedCostUsd: entry.estimatedCostUsd,
+    usageComplete: entry.usageComplete,
+    pricingComplete: entry.pricingComplete,
+    incompleteReasons: [...entry.incompleteReasons],
+    occurredAt: entry.occurredAt
+  };
+}
+
 function deliveryBindingValues(binding: TaskDeliveryBinding): SQLiteValue[] {
   return [
     binding.id,
@@ -1222,6 +1405,73 @@ function rowToAttempt(row: AttemptWithLeaseRow, resultIds: readonly string[]): T
   };
 }
 
+function rowToLease(row: LeaseRow): TaskAttemptLease {
+  return {
+    attemptId: row.attempt_id,
+    profileId: row.profile_id,
+    taskId: row.task_id,
+    ownerId: row.owner_id,
+    fencingToken: row.fencing_token,
+    acquiredAt: row.acquired_at,
+    heartbeatAt: row.heartbeat_at,
+    expiresAt: row.expires_at,
+    ...(row.cancellation_requested_at === null
+      ? {}
+      : { cancellationRequestedAt: row.cancellation_requested_at })
+  };
+}
+
+function rowToUsageEntry(row: UsageEntryRow): TaskUsageEntry {
+  return {
+    id: row.id,
+    profileId: row.profile_id,
+    taskId: row.task_id,
+    planRevisionId: row.plan_revision_id,
+    stepId: row.step_id,
+    attemptId: row.attempt_id,
+    requestKey: row.request_key,
+    turnId: row.turn_id,
+    providerAttemptIndex: row.provider_attempt_index,
+    provider: row.provider,
+    model: row.model,
+    routeRole: row.route_role as TaskUsageEntry["routeRole"],
+    routeIndex: row.route_index,
+    dispatched: row.dispatched === 1,
+    inputTokens: row.input_tokens,
+    outputTokens: row.output_tokens,
+    reasoningTokens: row.reasoning_tokens,
+    totalTokens: row.total_tokens,
+    estimatedCostUsd: row.estimated_cost_usd,
+    usageComplete: row.usage_complete === 1,
+    pricingComplete: row.pricing_complete === 1,
+    incompleteReasons: parseJson(row.incomplete_reasons_json, "TaskUsageEntry.incompleteReasons"),
+    occurredAt: row.occurred_at
+  };
+}
+
+function rowToApprovalLink(row: ApprovalLinkRow): TaskApprovalLink {
+  return {
+    id: row.id,
+    profileId: row.profile_id,
+    taskId: row.task_id,
+    planRevisionId: row.plan_revision_id,
+    stepId: row.step_id,
+    attemptId: row.attempt_id,
+    authorizedSessionId: row.authorized_session_id,
+    ...(row.pending_approval_id === null ? {} : { pendingApprovalId: row.pending_approval_id }),
+    toolName: row.tool_name,
+    riskClass: row.risk_class as TaskApprovalLink["riskClass"],
+    targetFingerprint: row.target_fingerprint,
+    targetPreview: row.target_preview,
+    status: row.status as TaskApprovalLink["status"],
+    requestedAt: row.requested_at,
+    expiresAt: row.expires_at,
+    updatedAt: row.updated_at,
+    ...(row.resolved_at === null ? {} : { resolvedAt: row.resolved_at }),
+    ...(row.consumed_at === null ? {} : { consumedAt: row.consumed_at })
+  };
+}
+
 function rowToResult(row: ResultRow): TaskResult {
   return {
     id: row.id,
@@ -1333,6 +1583,48 @@ function assertLeaseWindow(start: string, end: string, label: string): void {
   }
 }
 
+function assertUsageEntry(entry: TaskUsageEntry): void {
+  requireBoundedText(entry.id, "Task usage entry ID", 256);
+  requireBoundedText(entry.requestKey, "Task usage request key", 512);
+  requireBoundedText(entry.turnId, "Task usage turn ID", 512);
+  requireBoundedText(entry.provider, "Task usage provider", 128);
+  requireBoundedText(entry.model, "Task usage model", 256);
+  const integers = [
+    entry.providerAttemptIndex,
+    entry.routeIndex,
+    entry.inputTokens,
+    entry.outputTokens,
+    entry.reasoningTokens,
+    entry.totalTokens
+  ];
+  if (integers.some((value) => !Number.isSafeInteger(value) || value < 0) ||
+      !Number.isFinite(entry.estimatedCostUsd) || entry.estimatedCostUsd < 0 ||
+      entry.totalTokens < entry.inputTokens + entry.outputTokens ||
+      !Array.isArray(entry.incompleteReasons) || entry.incompleteReasons.length > 32 ||
+      entry.incompleteReasons.some((reason) => typeof reason !== "string" || reason.length > 160)) {
+    throw new TaskStoreIntegrityError("Task usage entry contains invalid metering values.");
+  }
+  assertTimestamp(entry.occurredAt, "Task usage occurrence");
+}
+
+function assertApprovalLink(link: TaskApprovalLink): void {
+  requireBoundedText(link.id, "Task approval ID", 256);
+  requireBoundedText(link.authorizedSessionId, "Task approval authorized session ID", 256);
+  requireBoundedText(link.toolName, "Task approval tool name", 256);
+  requireBoundedText(link.targetPreview, "Task approval target preview", 500);
+  if (!/^sha256:[a-f0-9]{64}$/u.test(link.targetFingerprint)) {
+    throw new TaskStoreIntegrityError("Task approval target fingerprint is invalid.");
+  }
+  assertTimestamp(link.requestedAt, "Task approval request");
+  assertTimestamp(link.expiresAt, "Task approval expiry");
+  assertTimestamp(link.updatedAt, "Task approval update");
+  if (Date.parse(link.expiresAt) <= Date.parse(link.requestedAt)) {
+    throw new TaskStoreIntegrityError("Task approval expiry must be later than its request.");
+  }
+  if (link.resolvedAt !== undefined) assertTimestamp(link.resolvedAt, "Task approval resolution");
+  if (link.consumedAt !== undefined) assertTimestamp(link.consumedAt, "Task approval consumption");
+}
+
 function boundedLimit(limit: number | undefined): number {
   if (limit === undefined) return 500;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000) {
@@ -1423,6 +1715,66 @@ type AttemptRow = {
   updated_at: string;
   started_at: string | null;
   completed_at: string | null;
+  lease_generation: number;
+};
+
+type LeaseRow = {
+  attempt_id: string;
+  profile_id: string;
+  task_id: string;
+  owner_id: string;
+  fencing_token: number;
+  acquired_at: string;
+  heartbeat_at: string;
+  expires_at: string;
+  cancellation_requested_at: string | null;
+};
+
+type UsageEntryRow = {
+  id: string;
+  profile_id: string;
+  task_id: string;
+  plan_revision_id: string;
+  step_id: string;
+  attempt_id: string;
+  request_key: string;
+  turn_id: string;
+  provider_attempt_index: number;
+  provider: string;
+  model: string;
+  route_role: string;
+  route_index: number;
+  dispatched: number;
+  input_tokens: number;
+  output_tokens: number;
+  reasoning_tokens: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+  usage_complete: number;
+  pricing_complete: number;
+  incomplete_reasons_json: string;
+  occurred_at: string;
+};
+
+type ApprovalLinkRow = {
+  id: string;
+  profile_id: string;
+  task_id: string;
+  plan_revision_id: string;
+  step_id: string;
+  attempt_id: string;
+  authorized_session_id: string;
+  pending_approval_id: string | null;
+  tool_name: string;
+  risk_class: string;
+  target_fingerprint: string;
+  target_preview: string;
+  status: string;
+  requested_at: string;
+  expires_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+  consumed_at: string | null;
 };
 
 type AttemptWithLeaseRow = AttemptRow & {

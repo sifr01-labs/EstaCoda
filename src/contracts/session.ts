@@ -368,6 +368,7 @@ export type SessionEvent =
       attempts: Array<{
         provider: string;
         model: string;
+        dispatched?: boolean;
         credentialId?: string;
         ok: boolean;
         errorClass?: ProviderErrorClass | string;
@@ -390,6 +391,7 @@ export type SessionEvent =
       attempts: Array<{
         provider: string;
         model: string;
+        dispatched?: boolean;
         credentialId?: string;
         ok: boolean;
         errorClass?: ProviderErrorClass | string;

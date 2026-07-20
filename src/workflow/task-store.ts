@@ -1,5 +1,7 @@
 import type {
   Task,
+  TaskApprovalLink,
+  TaskApprovalStatus,
   TaskAttempt,
   TaskAttemptLease,
   TaskDeliveryBinding,
@@ -10,7 +12,8 @@ import type {
   TaskResult,
   TaskSessionLink,
   TaskStatus,
-  TaskStep
+  TaskStep,
+  TaskUsageEntry
 } from "../contracts/task.js";
 
 export type CreateTaskGraphInput = {
@@ -66,6 +69,13 @@ export type SettleTaskDeliveryInput = {
   failureMessage?: string;
 };
 
+export type ListTaskApprovalLinksOptions = {
+  taskId?: string;
+  attemptId?: string;
+  statuses?: readonly TaskApprovalStatus[];
+  limit?: number;
+};
+
 /** Profile-bound persistence contract. A store instance can never opt out of profile scoping. */
 export interface TaskStore {
   readonly profileId: string;
@@ -94,6 +104,9 @@ export interface TaskStore {
   requestAttemptCancellation(attemptId: string, requestedAt: string): TaskAttemptLease | null;
   releaseAttemptLease(input: ReleaseTaskAttemptLeaseInput): boolean;
 
+  recordUsageEntry(entry: TaskUsageEntry): void;
+  listUsageEntries(taskId: string, attemptId?: string): TaskUsageEntry[];
+
   recordResult(result: TaskResult): void;
   updateResult(result: TaskResult): void;
   getResult(id: string): TaskResult | null;
@@ -104,6 +117,11 @@ export interface TaskStore {
 
   linkSession(link: TaskSessionLink): void;
   listSessionLinks(taskId: string): TaskSessionLink[];
+
+  createApprovalLink(link: TaskApprovalLink): void;
+  updateApprovalLink(link: TaskApprovalLink): void;
+  getApprovalLink(id: string): TaskApprovalLink | null;
+  listApprovalLinks(options?: ListTaskApprovalLinksOptions): TaskApprovalLink[];
 
   createDeliveryBinding(binding: TaskDeliveryBinding): void;
   getDeliveryBinding(id: string): TaskDeliveryBinding | null;

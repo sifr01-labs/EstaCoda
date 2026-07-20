@@ -22,6 +22,7 @@ import type { SubagentRegistry } from "../delegation/subagent-registry.js";
 import {
   applyChildToolAccessResult,
   resolveChildToolAccess,
+  resolveTaskStepToolAccess,
   type ChildToolAccessResult
 } from "../delegation/toolset-security.js";
 import {
@@ -44,6 +45,7 @@ import { createSessionRuntimeContext, type SessionRuntimeContext } from "./sessi
 
 export const CHILD_DELEGATION_CONFIG_VERSION = "delegation.v0.1.0";
 export const CHILD_APPROVAL_MODE = "non-interactive-fail-closed";
+export const TASK_STEP_APPROVAL_MODE = "durable-task-approval";
 
 export type ChildRuntimeFeature =
   | "memoryRecall"
@@ -71,6 +73,7 @@ export type CreateChildAgentLoopInput = {
     stepId: string;
     attemptId: string;
   };
+  securityPolicy?: SecurityPolicy;
 };
 
 export type ChildAgentLoopRuntime = {
@@ -81,7 +84,7 @@ export type ChildAgentLoopRuntime = {
   agentLoop: AgentLoop;
   suppressedRuntimeFeatures: ChildRuntimeFeature[];
   enabledRuntimeFeatures: string[];
-  approvalMode: typeof CHILD_APPROVAL_MODE;
+  approvalMode: typeof CHILD_APPROVAL_MODE | typeof TASK_STEP_APPROVAL_MODE;
   toolAccess: ChildToolAccessResult;
   modelOverride?: DelegateModelOverrideMetadata;
   handle(input: AgentLoopInput): Promise<AgentLoopResponse>;
@@ -180,6 +183,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
     const role = input.role ?? "leaf";
     const allowedToolsets = input.allowedToolsets ?? [];
     const allowedTools = input.allowedTools ?? [];
+    const approvalMode = input.taskExecution === undefined ? CHILD_APPROVAL_MODE : TASK_STEP_APPROVAL_MODE;
     const modelOverride = await deriveChildRoutes({
       parentRoutes: this.#parentRoutes,
       providerRegistry: this.#providerRegistry,
@@ -212,7 +216,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
       responseLabel: this.#responseLabel,
       ui: this.#ui,
       agentProfile: this.#agentProfile,
-      securityPolicy: createChildFailClosedSecurityPolicy(),
+      securityPolicy: input.securityPolicy ?? createChildFailClosedSecurityPolicy(),
       delegationManagerFactory: () => new DelegationManager({
         sessionDb: this.#sessionDb,
         childFactory: this,
@@ -236,17 +240,19 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
       agentEvolutionPolicy: undefined as AgentEvolutionPolicy | undefined,
       providerRoutes: modelOverride.routes,
       toolRegistryFilter: ({ registry, availableTools }) => {
-        const result = resolveChildToolAccess({
-          parentVisibleTools: input.parentVisibleTools,
-          childCandidateTools: availableTools,
-          config: this.#delegationConfig,
-          request: {
-            allowedToolsets,
-            allowedTools,
-            role,
-            depth
-          }
-        });
+        const result = input.taskExecution === undefined
+          ? resolveChildToolAccess({
+              parentVisibleTools: input.parentVisibleTools,
+              childCandidateTools: availableTools,
+              config: this.#delegationConfig,
+              request: { allowedToolsets, allowedTools, role, depth }
+            })
+          : resolveTaskStepToolAccess({
+              parentVisibleTools: input.parentVisibleTools,
+              childCandidateTools: availableTools,
+              allowedToolsets,
+              allowedTools
+            });
         applyChildToolAccessResult(registry, result);
         toolAccess = result;
         return result;
@@ -283,7 +289,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
         delegationConfigVersion: CHILD_DELEGATION_CONFIG_VERSION,
         suppressedRuntimeFeatures,
         enabledRuntimeFeatures,
-        approvalMode: CHILD_APPROVAL_MODE,
+        approvalMode,
         workspaceRoot: this.#workspaceRoot,
         context: input.context ?? ""
       }
@@ -297,7 +303,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
       agentLoop: builtSession.agentLoop,
       suppressedRuntimeFeatures,
       enabledRuntimeFeatures,
-      approvalMode: CHILD_APPROVAL_MODE,
+      approvalMode,
       toolAccess: effectiveToolAccess,
       modelOverride: modelOverride.metadata,
       handle: async (handleInput) => await builtSession.agentLoop.handle(handleInput),

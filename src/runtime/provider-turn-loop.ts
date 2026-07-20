@@ -1485,6 +1485,7 @@ function estimateProviderToolFeedbackTokens(executions: ToolExecutionRecord[]): 
 function providerAttemptEventPayload(attempt: ProviderAttempt): {
   provider: string;
   model: string;
+  dispatched: boolean;
   credentialId?: string;
   ok: boolean;
   errorClass?: string;
@@ -1497,6 +1498,9 @@ function providerAttemptEventPayload(attempt: ProviderAttempt): {
   return {
     provider: attempt.provider,
     model: attempt.model,
+    dispatched: attempt.dispatched ?? (
+      attempt.errorClass !== "unsupported" && attempt.errorClass !== "missing-route" && attempt.errorClass !== "auth"
+    ),
     ok: attempt.ok,
     ...(attempt.credentialId === undefined ? {} : { credentialId: attempt.credentialId }),
     ...(attempt.errorClass === undefined ? {} : { errorClass: attempt.errorClass }),

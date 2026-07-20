@@ -26,6 +26,8 @@ import { refreshOAuthToken } from "./oauth/oauth-refresh.js";
 export type ProviderAttempt = {
   provider: string;
   model: string;
+  /** True only after invoking a provider adapter. Preflight route failures are not calls. */
+  dispatched?: boolean;
   credentialId?: string;
   ok: boolean;
   errorClass?: string;
@@ -138,6 +140,7 @@ export class ProviderExecutor {
           {
             provider: request.provider ?? "none",
             model: request.model ?? "none",
+            dispatched: false,
             ok: false,
             errorClass: "missing-route",
             content: "No explicit primary route is available. Production execution requires a resolved model route."
@@ -179,6 +182,7 @@ export class ProviderExecutor {
         attempts.push({
           provider: route.provider,
           model: route.id,
+          dispatched: false,
           ok: false,
           errorClass: "unsupported",
           content: preferenceFailure
@@ -204,6 +208,7 @@ export class ProviderExecutor {
         attempts.push({
           provider: route.provider,
           model: route.id,
+          dispatched: false,
           ok: false,
           errorClass: provider === undefined ? undefined : "unsupported",
           content: reason
@@ -228,6 +233,7 @@ export class ProviderExecutor {
         attempts.push({
           provider: route.provider,
           model: route.id,
+          dispatched: false,
           ok: false,
           errorClass: "unsupported",
           content: reason
@@ -256,6 +262,7 @@ export class ProviderExecutor {
         attempts.push({
           provider: route.provider,
           model: route.id,
+          dispatched: false,
           ok: false,
           errorClass: "unsupported",
           content: reason
@@ -286,6 +293,7 @@ export class ProviderExecutor {
         attempts.push({
           provider: route.provider,
           model: route.id,
+          dispatched: false,
           ok: false,
           errorClass: "auth",
           content: errorContent
@@ -362,6 +370,7 @@ export class ProviderExecutor {
         attempts.push({
           provider: route.provider,
           model: route.id,
+          dispatched: true,
           credentialId: credential?.id,
           ok: callResponse.ok,
           errorClass: callResponse.errorClass,

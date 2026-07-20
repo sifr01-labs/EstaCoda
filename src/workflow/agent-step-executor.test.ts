@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelProfile, ResolvedModelRoute } from "../contracts/provider.js";
+import { capabilityFirstDefaults } from "../contracts/security.js";
 import type {
   Task,
   TaskAuthorityDisposition,
@@ -23,6 +24,7 @@ import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { AgentStepExecutor } from "./agent-step-executor.js";
 import { SQLiteTaskStore } from "./sqlite-task-store.js";
 import { TaskResultService } from "./task-result-service.js";
+import { TaskApprovalService } from "./task-approval-service.js";
 import { WorkflowScheduler } from "./task-scheduler.js";
 
 describe("AgentStepExecutor", () => {
@@ -89,7 +91,9 @@ describe("AgentStepExecutor", () => {
       taskStore: store,
       hostWorkspace: graph.task.workspace,
       isWorkspaceTrusted: () => true,
-      parentVisibleTools: () => tools()
+      parentVisibleTools: () => tools(),
+      approvalService: new TaskApprovalService({ store }),
+      securityPolicy: capabilityFirstDefaults
     });
     const scheduler = new WorkflowScheduler({
       store,
@@ -158,7 +162,9 @@ describe("AgentStepExecutor", () => {
       taskStore: store,
       hostWorkspace: graph.task.workspace,
       isWorkspaceTrusted: () => false,
-      parentVisibleTools: () => tools()
+      parentVisibleTools: () => tools(),
+      approvalService: new TaskApprovalService({ store }),
+      securityPolicy: capabilityFirstDefaults
     });
 
     await expect(executor.execute({
@@ -225,7 +231,9 @@ describe("AgentStepExecutor", () => {
       hostWorkspace: graph.task.workspace,
       isWorkspaceTrusted: () => true,
       parentVisibleTools: () => tools(),
-      resolveArtifactContent
+      resolveArtifactContent,
+      approvalService: new TaskApprovalService({ store }),
+      securityPolicy: capabilityFirstDefaults
     });
     const scheduler = new WorkflowScheduler({
       store,

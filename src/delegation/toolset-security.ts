@@ -47,6 +47,62 @@ export type ResolveChildToolAccessInput = {
   request: ChildToolAccessRequest;
 };
 
+export type ResolveTaskStepToolAccessInput = {
+  parentVisibleTools: readonly ToolDefinition[];
+  childCandidateTools: readonly ToolDefinition[];
+  allowedToolsets: readonly ToolsetName[];
+  allowedTools?: readonly string[];
+};
+
+/**
+ * A durable Task Step has already been narrowed by its persisted authority policy.
+ * Keep the parent's visibility boundary, but do not apply delegation's read-only
+ * defaults a second time. The Task security policy still gates every execution.
+ */
+export function resolveTaskStepToolAccess(input: ResolveTaskStepToolAccessInput): ChildToolAccessResult {
+  const parentByName = new Map(input.parentVisibleTools.map((tool) => [tool.name, tool]));
+  const requestedTools = normalizeNames(input.allowedTools);
+  const requestedToolsets = normalizeToolsets(input.allowedToolsets);
+  const hasRequestedTools = requestedTools.size > 0;
+  const allowed: ToolDefinition[] = [];
+  const strippedTools: ChildToolDiagnostic[] = [];
+
+  for (const candidate of input.childCandidateTools) {
+    const parent = parentByName.get(candidate.name);
+    const tool = parent ?? candidate;
+    const reasons: ChildToolStripReason[] = [];
+    if (parent === undefined) reasons.push("not-parent-visible");
+    if (tool.name === "delegate_task") reasons.push("leaf-delegation-disabled");
+    if (hasRequestedTools && !requestedTools.has(tool.name)) reasons.push("outside-requested-allowed-tools");
+    if (!tool.toolsets.some((toolset) => requestedToolsets.has(toolset))) {
+      reasons.push("outside-requested-allowed-toolsets");
+    }
+    if (reasons.length === 0) allowed.push(tool);
+    else strippedTools.push(diagnostic(tool, uniqueReasons(reasons)));
+  }
+
+  const childNames = new Set(input.childCandidateTools.map((tool) => tool.name));
+  const rejectedRequestedTools = [...requestedTools]
+    .filter((name) => !childNames.has(name) || !parentByName.has(name))
+    .sort()
+    .map((name) => ({ name, reasons: ["not-parent-visible" as const] }));
+  const childToolsets = new Set(input.childCandidateTools.flatMap((tool) => tool.toolsets));
+  const parentToolsets = new Set(input.parentVisibleTools.flatMap((tool) => tool.toolsets));
+  const rejectedRequestedToolsets = [...requestedToolsets]
+    .filter((name) => !childToolsets.has(name) || !parentToolsets.has(name))
+    .sort()
+    .map((name) => ({ name, reasons: ["not-parent-visible" as const] }));
+
+  return {
+    effectiveAllowedTools: allowed.map((tool) => tool.name),
+    effectiveAllowedToolsets: sortedToolsets(new Set(allowed.flatMap((tool) => tool.toolsets))),
+    strippedTools,
+    blockedTools: strippedTools.filter((entry) => entry.reasons.includes("leaf-delegation-disabled")),
+    rejectedRequestedTools,
+    rejectedRequestedToolsets
+  };
+}
+
 export function resolveChildToolAccess(input: ResolveChildToolAccessInput): ChildToolAccessResult {
   const parentByName = new Map(input.parentVisibleTools.map((tool) => [tool.name, tool]));
   const explicitAllowedTools = normalizeNames(input.request.allowedTools);

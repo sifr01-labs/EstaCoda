@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
+import type { SessionEvent } from "../contracts/session.js";
 import type { AgentLoopRouteInput } from "../runtime/agent-loop-builder.js";
-import { taskUsageFromAgentResponse } from "./task-agent-usage.js";
+import {
+  taskUsageEntriesFromSessionEvents,
+  taskUsageFromAgentResponse,
+  taskUsageFromEntries
+} from "./task-agent-usage.js";
 
 describe("taskUsageFromAgentResponse", () => {
   it("counts every provider Attempt and applies each route's pricing", () => {
@@ -94,6 +99,60 @@ describe("taskUsageFromAgentResponse", () => {
       reasoningTokens: 15,
       estimatedCostUsd: 0.00028
     });
+  });
+});
+
+describe("task usage ledger", () => {
+  it("meters completion and continuation provider calls with stable request identities", () => {
+    const events: SessionEvent[] = [
+      {
+        kind: "provider-completion",
+        iteration: 1,
+        ok: true,
+        fallbackUsed: false,
+        attempts: [{
+          provider: "openai",
+          model: "primary",
+          ok: true,
+          usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 }
+        }]
+      },
+      {
+        kind: "provider-continuation",
+        iteration: 1,
+        ok: true,
+        toolPlans: [],
+        attempts: [{
+          provider: "deepseek",
+          model: "fallback",
+          ok: true,
+          usage: { inputTokens: 50, outputTokens: 10, totalTokens: 60 }
+        }]
+      }
+    ];
+    const entries = taskUsageEntriesFromSessionEvents(events, routes(), {
+      profileId: "alpha",
+      taskId: "task-alpha",
+      planRevisionId: "revision-alpha",
+      stepId: "step-alpha",
+      id: "attempt-alpha",
+      workerSessionId: "worker-alpha",
+      occurredAt: "2030-01-01T00:00:00.000Z"
+    });
+
+    expect(entries).toHaveLength(2);
+    expect(entries.map((entry) => [entry.routeRole, entry.routeIndex, entry.requestKey])).toEqual([
+      ["primary", 0, "worker-alpha:000000:provider-completion:1:0"],
+      ["fallback", 1, "worker-alpha:000001:provider-continuation:1:0"]
+    ]);
+    const totals = taskUsageFromEntries(entries);
+    expect(totals).toMatchObject({
+      providerCalls: 2,
+      totalTokens: 180,
+      usageComplete: true,
+      pricingComplete: true
+    });
+    expect(totals.estimatedCostUsd).toBeCloseTo(0.00035, 12);
   });
 });
 

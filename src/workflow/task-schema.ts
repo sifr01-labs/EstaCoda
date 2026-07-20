@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 
-export const TASK_SCHEMA_VERSION = 13;
+export const TASK_SCHEMA_VERSION = 14;
 
 const WORKFLOW_TABLES = [
   "workflow_event_summaries",
@@ -186,6 +186,7 @@ export function migrateTaskSchemaV10(db: SQLiteDatabase): void {
       updated_at text not null,
       started_at text,
       completed_at text,
+      lease_generation integer not null default 0 check(lease_generation >= 0),
       unique(profile_id, id),
       unique(profile_id, task_id, id),
       unique(profile_id, task_id, plan_revision_id, step_id, id),
@@ -220,6 +221,19 @@ export function migrateTaskSchemaV10(db: SQLiteDatabase): void {
 
     create index idx_task_attempt_leases_expiry
       on task_attempt_leases(profile_id, expires_at);
+
+    create trigger trg_task_attempt_lease_acquired
+    after insert on task_attempt_leases
+    begin
+      update task_attempts
+      set status = 'leased', lease_generation = new.fencing_token, updated_at = new.acquired_at
+      where id = new.attempt_id
+        and profile_id = new.profile_id
+        and task_id = new.task_id
+        and status = 'queued'
+        and lease_generation < new.fencing_token;
+      select case when changes() <> 1 then raise(abort, 'Task Attempt lease acquisition lost') end;
+    end;
 
     create table task_results (
       id text primary key,
@@ -411,5 +425,120 @@ export function migrateTaskBackgroundHostSchemaV13(db: SQLiteDatabase): void {
       on task_delivery_bindings(profile_id, status, updated_at, id);
     create index if not exists idx_task_delivery_bindings_task
       on task_delivery_bindings(profile_id, task_id, created_at, id);
+  `);
+}
+
+/** Adds durable Task approvals, canonical provider-call usage, and monotonic lease generations. */
+export function migrateTaskCorrectiveFoundationSchemaV14(db: SQLiteDatabase): void {
+  const attemptColumns = db.query<{ name: string }>("pragma table_info(task_attempts)").all();
+  if (!attemptColumns.some((column) => column.name === "lease_generation")) {
+    db.exec("alter table task_attempts add column lease_generation integer not null default 0 check(lease_generation >= 0)");
+  }
+
+  // Preserve the strongest known pre-v14 fence before the trigger begins issuing generations.
+  db.exec(`
+    update task_attempts
+    set lease_generation = max(
+      lease_generation,
+      coalesce((
+        select fencing_token from task_attempt_leases
+        where task_attempt_leases.attempt_id = task_attempts.id
+          and task_attempt_leases.profile_id = task_attempts.profile_id
+      ), 0)
+    );
+  `);
+
+  db.exec(`
+    drop trigger if exists trg_task_attempt_lease_acquired;
+    create trigger trg_task_attempt_lease_acquired
+    after insert on task_attempt_leases
+    begin
+      update task_attempts
+      set status = 'leased', lease_generation = new.fencing_token, updated_at = new.acquired_at
+      where id = new.attempt_id
+        and profile_id = new.profile_id
+        and task_id = new.task_id
+        and status = 'queued'
+        and lease_generation < new.fencing_token;
+      select case when changes() <> 1 then raise(abort, 'Task Attempt lease acquisition lost') end;
+    end;
+
+    create table if not exists task_usage_entries (
+      id text primary key,
+      profile_id text not null,
+      task_id text not null,
+      plan_revision_id text not null,
+      step_id text not null,
+      attempt_id text not null,
+      request_key text not null check(length(request_key) between 1 and 512),
+      turn_id text not null check(length(turn_id) between 1 and 512),
+      provider_attempt_index integer not null check(provider_attempt_index >= 0),
+      provider text not null check(length(provider) between 1 and 128),
+      model text not null check(length(model) between 1 and 256),
+      route_role text not null check(route_role in ('primary', 'fallback')),
+      route_index integer not null check(route_index >= 0),
+      dispatched integer not null check(dispatched in (0, 1)),
+      input_tokens integer not null check(input_tokens >= 0),
+      output_tokens integer not null check(output_tokens >= 0),
+      reasoning_tokens integer not null check(reasoning_tokens >= 0),
+      total_tokens integer not null check(total_tokens >= 0),
+      estimated_cost_usd real not null check(estimated_cost_usd >= 0),
+      usage_complete integer not null check(usage_complete in (0, 1)),
+      pricing_complete integer not null check(pricing_complete in (0, 1)),
+      incomplete_reasons_json text not null check(json_valid(incomplete_reasons_json)),
+      occurred_at text not null,
+      unique(profile_id, id),
+      unique(profile_id, request_key),
+      foreign key(profile_id, task_id, plan_revision_id, step_id, attempt_id)
+        references task_attempts(profile_id, task_id, plan_revision_id, step_id, id) on delete cascade
+    );
+    create index if not exists idx_task_usage_attempt
+      on task_usage_entries(profile_id, attempt_id, occurred_at, provider_attempt_index);
+    create index if not exists idx_task_usage_task
+      on task_usage_entries(profile_id, task_id, occurred_at);
+
+    create table if not exists task_approval_links (
+      id text primary key,
+      profile_id text not null,
+      task_id text not null,
+      plan_revision_id text not null,
+      step_id text not null,
+      attempt_id text not null,
+      authorized_session_id text not null,
+      pending_approval_id text,
+      tool_name text not null check(length(tool_name) between 1 and 256),
+      risk_class text not null check(risk_class in (
+        'read-only-local', 'read-only-network', 'workspace-write', 'external-side-effect',
+        'credential-access', 'destructive-local', 'shared-state-mutation', 'spend-money', 'sandbox-escape'
+      )),
+      target_fingerprint text not null check(length(target_fingerprint) = 71 and target_fingerprint like 'sha256:%'),
+      target_preview text not null check(length(target_preview) between 1 and 500),
+      status text not null check(status in ('requesting', 'pending', 'approved', 'denied', 'expired', 'consumed')),
+      requested_at text not null,
+      expires_at text not null,
+      updated_at text not null,
+      resolved_at text,
+      consumed_at text,
+      unique(profile_id, id),
+      unique(profile_id, pending_approval_id),
+      foreign key(profile_id, task_id, plan_revision_id, step_id, attempt_id)
+        references task_attempts(profile_id, task_id, plan_revision_id, step_id, id) on delete cascade,
+      foreign key(profile_id, authorized_session_id)
+        references sessions(profile_id, id) on delete restrict,
+      foreign key(pending_approval_id)
+        references pending_approvals(id) on delete restrict,
+      check(
+        (status = 'requesting' and pending_approval_id is null and resolved_at is null and consumed_at is null) or
+        (status = 'pending' and pending_approval_id is not null and resolved_at is null and consumed_at is null) or
+        (status in ('approved', 'denied', 'expired') and pending_approval_id is not null and resolved_at is not null and consumed_at is null) or
+        (status = 'consumed' and pending_approval_id is not null and resolved_at is not null and consumed_at is not null)
+      )
+    );
+    create index if not exists idx_task_approval_reconcile
+      on task_approval_links(profile_id, status, updated_at, id);
+    create index if not exists idx_task_approval_attempt
+      on task_approval_links(profile_id, attempt_id, status);
+    create index if not exists idx_task_approval_target
+      on task_approval_links(profile_id, attempt_id, target_fingerprint, status);
   `);
 }

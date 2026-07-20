@@ -102,6 +102,7 @@ import {
 import { SQLiteTaskStore } from "../workflow/sqlite-task-store.js";
 import { TaskResultService } from "../workflow/task-result-service.js";
 import { SupervisorTaskBackgroundHost } from "../workflow/supervisor-task-background-host.js";
+import { TaskApprovalService } from "../workflow/task-approval-service.js";
 
 export type { GatewayRunOptions, GatewayRunResult };
 
@@ -1273,12 +1274,17 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       contentRoot: profilePaths.taskResultsPath,
       sessionDb
     });
+    const taskApprovalService = new TaskApprovalService({
+      store: taskStore,
+      queue: gatewayApprovalQueue
+    });
     state.taskBackgroundHost = options.factories?.createTaskBackgroundHost?.() ??
       new SupervisorTaskBackgroundHost({
         store: taskStore,
         resultService: taskResultService,
         router,
         ownerId: `gateway-task-host-${process.pid}-${startedAt}`,
+        approvalService: taskApprovalService,
         logWarning,
         createExecutorRuntime: async () => {
           const latestConfig = await loadConfig();

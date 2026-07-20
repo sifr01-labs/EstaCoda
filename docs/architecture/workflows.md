@@ -13,6 +13,8 @@ Task
     └── Step
         └── Attempt
             ├── Lease
+            ├── Approval link
+            ├── Provider-call usage entries
             └── Result
 ```
 
@@ -21,13 +23,14 @@ This document describes the persistence, result, scheduler, agent-execution, and
 ## Source of truth
 
 - `src/contracts/task.ts` defines the durable records, legal state transitions, authority and budget policies, and deterministic graph validation.
-- `src/workflow/task-schema.ts` owns SQLite schema version 13.
+- `src/workflow/task-schema.ts` owns SQLite schema version 14.
 - `src/workflow/task-store.ts` defines the profile-bound storage contract.
 - `src/workflow/sqlite-task-store.ts` implements transactional SQLite persistence.
 - `src/workflow/task-result-service.ts` stores bounded result bodies under the selected profile and verifies them before reads.
 - `src/workflow/task-step-executor.ts` defines the narrow Attempt execution and settlement contract.
 - `src/workflow/agent-step-executor.ts` runs one agent Attempt in an isolated child session under narrowed authority.
 - `src/workflow/task-agent-usage.ts` accounts for every provider attempt, fallback, retry, token total, and known route price.
+- `src/workflow/task-approval-service.ts` narrows runtime policy with Task authority and bridges asks to the durable gateway approval queue.
 - `src/workflow/task-scheduler.ts` owns deterministic readiness, dispatch, fencing, retry, cancellation, acceptance, and restart reconciliation.
 - `src/workflow/task-background-host.ts` prevents overlapping scheduler/delivery ticks and performs one-time startup recovery.
 - `src/workflow/supervisor-task-background-host.ts` lazily creates the workspace-eligible agent runtime when runnable work exists.
@@ -52,7 +55,7 @@ Opaque Task and session identifiers are routing keys, not authorization boundari
 - Plan definitions are immutable after insertion. Replanning creates a new PlanRevision.
 - Task creation keys and Attempt dispatch keys have separate profile-scoped uniqueness constraints.
 - Only one PlanRevision can be active for a Task.
-- Attempt leases are stored separately and require a positive, monotonically managed fencing token.
+- Attempt leases are stored separately. Acquisition is one conditional SQLite mutation, and a persisted generation issues a strictly increasing fencing token whenever the same Attempt resumes.
 - Scheduler graph mutations are serialized by short `begin immediate` transactions; there is no second legacy run-lock subsystem to reconcile.
 - Event metadata and Result sizes are bounded before persistence.
 - A Step's available Results cannot exceed its declared aggregate result budget.
@@ -74,17 +77,21 @@ Executors return settlements; they cannot declare a Step or Task complete. The s
 
 Cancellation is durable on the Attempt lease and visible to its owner on heartbeat. Local work also receives an `AbortSignal`. A stale owner cannot write results or settle after expiry, cancellation, or fencing loss. Restart reconciliation preserves unexpired foreign leases, expires or interrupts abandoned Attempts, and retries only when policy permits. Terminal Task state is reconstructed from durable Step state; the scheduler can produce `completed`, `partial`, `failed`, and `cancelled` outcomes without provider inference.
 
+An approval ask is a normal non-terminal settlement. The scheduler records a profile- and Attempt-owned approval link, moves the Attempt, Step, and Task to `waiting_for_approval`, and releases the lease. The gateway queue authorizes resolution through the Task creator session. Approval returns the same Attempt to `queued`; the next acquisition receives a higher fencing token. Denial or expiry fails the waiting work without executing the gated tool. Waiting Attempts intentionally hold no lease and consume no concurrency slot.
+
 ## Agent Step executor
 
 `AgentStepExecutor` adapts the existing child-agent factory and runner to the durable Attempt contract; it does not create a parallel delegation lifecycle. Before constructing a child, it verifies the Task, Step, Attempt, profile, exact workspace binding, creator session, and current workspace trust. The scheduler resolver receives both Task and Step so a future host can expose the executor only for workspace-eligible work without embedding delegation or runtime policy in the scheduler.
 
-Task and Step authority are intersected with the parent session's visible tools. This phase admits only `read-only-local` and `read-only-network` tools whose risk disposition remains `runtime_policy`; blocked tools, non-shared toolsets, write/side-effect risk classes, and `delegate_task` are removed. The child factory's existing non-interactive fail-closed security policy still performs the live decision. Persisted Task authority never becomes an approval.
+Task and Step authority are intersected with the parent session's visible tools. Blocked tools, forbidden risk classes, non-shared toolsets, and `delegate_task` are removed. Authorized write and side-effect tools remain available, but Task authority can only narrow the active runtime security policy: a runtime denial remains a denial, `forbid` denies, and `require_approval` creates a durable ask. An approval is bound to the creator session, Attempt, tool, risk class, and SHA-256 target fingerprint; it cannot become a general grant or override the hardline floor.
 
 The child session is marked `task-step-worker` and carries Task, PlanRevision, Step, and Attempt ownership metadata. Its session is checkpointed under the current fencing token before provider work begins. Once the child trajectory is durably present, that trajectory is checkpointed under the same fence. These checkpoints renew the lease, create the worker `TaskSessionLink`, append a bounded `attempt-progressed` event, and cannot be replaced by a later checkpoint or settlement.
 
 The child runner sends progress through the normal runtime event sink while its heartbeat renews the Attempt lease. It suppresses legacy `delegation-heartbeat` persistence for Task execution because the Task journal is the sole lifecycle authority. Durable cancellation aborts the child; timeouts and provider, approval, security, tool, JSON, and artifact-capture failures return bounded classifications to the scheduler.
 
-Successful text and JSON results are captured in full. Artifact bodies are accepted only through an injected, bounded resolver and must match the artifact's declared byte count before the scheduler writes them to the result plane. Dependency context contains bounded result metadata and opaque handles, never raw bodies or filesystem paths; the child reads authorized content through `task.result.read`. Usage includes every provider attempt across retries and fallbacks. Missing token or price data is preserved as explicit incompleteness rather than silently reported as zero-cost complete usage.
+Successful text and JSON results are captured in full. Artifact bodies are accepted only through an injected, bounded resolver and must match the artifact's declared byte count before the scheduler writes them to the result plane. Dependency context contains bounded result metadata and opaque handles, never raw bodies or filesystem paths; the child reads authorized content through `task.result.read`.
+
+Usage is a canonical append-only ledger keyed by the worker session, provider turn, and provider-attempt index. It includes initial completions, continuation turns, fallbacks, and provider retries, while distinguishing preflight route failures from calls that actually reached an adapter. Settlement totals are re-derived from persisted entries, so scheduler replay and approval resume cannot overwrite or double-count earlier usage. Full-precision cost stays in storage; missing token or price data remains explicit incompleteness.
 
 ## Background host and restart recovery
 
@@ -106,7 +113,7 @@ External delivery is deliberately at-most-once after ambiguity. A crash may occu
 
 ## Migration behavior
 
-Opening a writable `SQLiteSessionDB` migrates it to schema version 13 under the existing migration lock and transaction. Version 10 performs the Task persistence cutover; version 11 adds the durable Attempt cancellation marker without replacing existing leases; version 12 extends the Task event journal with fenced Attempt progress checkpoints; version 13 adds the profile-owned completion-delivery outbox. The migrations preserve unrelated session, message, trajectory, approval, cron, finalization, and memory-curation data. A best-effort pre-migration backup is created by the session database migration runner.
+Opening a writable `SQLiteSessionDB` migrates it to schema version 14 under the existing migration lock and transaction. Version 10 performs the Task persistence cutover; version 11 adds the durable Attempt cancellation marker without replacing existing leases; version 12 extends the Task event journal with fenced Attempt progress checkpoints; version 13 adds the profile-owned completion-delivery outbox; version 14 adds monotonic lease generations, durable Task approval links, and canonical provider-call usage entries. The migrations preserve unrelated session, message, trajectory, approval, cron, finalization, and memory-curation data. A best-effort pre-migration backup is created by the session database migration runner.
 
 The migration is intentionally destructive only for the retired Workflow tables. There is no dual-read, dual-write, compatibility alias, or hidden legacy store.
 

@@ -54,12 +54,14 @@ describe("SQLiteTaskStore", () => {
     ).get()?.version;
     const foreignKeys = sessionDb.db.query<{ foreign_keys: number }>("pragma foreign_keys").get()?.foreign_keys;
     const leaseColumns = sessionDb.db.query<{ name: string }>("pragma table_info(task_attempt_leases)").all();
+    const attemptColumns = sessionDb.db.query<{ name: string }>("pragma table_info(task_attempts)").all();
 
     expect(version).toBe(TASK_SCHEMA_VERSION);
     expect(foreignKeys).toBe(1);
     expect([...TASK_TABLES].every((table) => tables.has(table))).toBe(true);
     expect([...WORKFLOW_TABLES].every((table) => !tables.has(table))).toBe(true);
     expect(leaseColumns.some((column) => column.name === "cancellation_requested_at")).toBe(true);
+    expect(attemptColumns.some((column) => column.name === "lease_generation")).toBe(true);
   });
 
   it("round-trips an immutable plan graph and creator session link atomically", () => {
@@ -315,6 +317,13 @@ describe("SQLiteTaskStore", () => {
     expect(store.releaseAttemptLease({ attemptId: "attempt-1", ownerId: "scheduler-1", fencingToken: 1 }))
       .toBe(true);
     expect(store.getAttempt("attempt-1")?.lease).toBeUndefined();
+    store.updateAttempt({ ...store.getAttempt("attempt-1")!, status: "queued", updatedAt: "2030-01-01T00:01:00.000Z" });
+    expect(store.acquireAttemptLease({
+      attemptId: "attempt-1",
+      ownerId: "scheduler-2",
+      acquiredAt: "2030-01-01T00:01:01.000Z",
+      expiresAt: "2030-01-01T00:02:01.000Z"
+    })).toMatchObject({ ownerId: "scheduler-2", fencingToken: 2 });
   });
 
   it("rejects in-place plan mutation after persistence", () => {
@@ -791,6 +800,8 @@ const TASK_TABLES = [
   "task_results",
   "task_events",
   "task_session_links",
+  "task_usage_entries",
+  "task_approval_links",
   "task_delivery_bindings"
 ] as const;
 

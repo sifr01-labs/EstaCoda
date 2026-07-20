@@ -1,6 +1,7 @@
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { DelegateModelOverride, DelegateRole, DelegationConfig } from "../contracts/delegation.js";
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
+import type { SecurityPolicy } from "../contracts/security.js";
 import type { SessionDB, SessionEvent } from "../contracts/session.js";
 import type { Task, TaskAttempt, TaskFailure, TaskStep, TaskWorkspaceBinding } from "../contracts/task.js";
 import type { ToolDefinition } from "../contracts/tool.js";
@@ -13,7 +14,12 @@ import {
   type ChildAgentLoopRuntime
 } from "../runtime/agent-loop-factory.js";
 import type { TaskStore } from "./task-store.js";
-import { taskUsageFromAgentResponse } from "./task-agent-usage.js";
+import { TaskApprovalService } from "./task-approval-service.js";
+import {
+  taskUsageEntriesFromSessionEvents,
+  taskUsageFromAgentResponse,
+  taskUsageFromEntries
+} from "./task-agent-usage.js";
 import type {
   TaskExecutorResultContent,
   TaskExecutorSettlement,
@@ -21,7 +27,6 @@ import type {
   TaskStepExecutor
 } from "./task-step-executor.js";
 
-const READ_ONLY_RISK_CLASSES = new Set(["read-only-local", "read-only-network"]);
 const MAX_DEPENDENCY_RESULT_REFERENCES = 64;
 const MAX_DEPENDENCY_CONTEXT_CHARS = 16_000;
 const MAX_ARTIFACT_RESULTS = 64;
@@ -47,6 +52,8 @@ export type AgentStepExecutorOptions = {
   resolveArtifactContent?: ResolveTaskArtifactContent;
   maxHeartbeatSeconds?: number;
   now?: () => Date;
+  approvalService: TaskApprovalService;
+  securityPolicy: SecurityPolicy;
 };
 
 /** Production agent executor for one durable Attempt. Scheduler state remains its only lifecycle authority. */
@@ -65,6 +72,8 @@ export class AgentStepExecutor implements TaskStepExecutor {
   readonly #resolveArtifactContent: ResolveTaskArtifactContent | undefined;
   readonly #maxHeartbeatSeconds: number;
   readonly #now: () => Date;
+  readonly #approvalService: TaskApprovalService;
+  readonly #securityPolicy: SecurityPolicy;
 
   constructor(options: AgentStepExecutorOptions) {
     if (options.taskStore.profileId.trim().length === 0) {
@@ -86,6 +95,8 @@ export class AgentStepExecutor implements TaskStepExecutor {
     this.#resolveArtifactContent = options.resolveArtifactContent;
     this.#maxHeartbeatSeconds = positiveInteger(options.maxHeartbeatSeconds ?? 5, "maximum heartbeat interval");
     this.#now = options.now ?? (() => new Date());
+    this.#approvalService = options.approvalService;
+    this.#securityPolicy = options.securityPolicy;
   }
 
   canExecute(task: Task, step: TaskStep): boolean {
@@ -145,6 +156,12 @@ export class AgentStepExecutor implements TaskStepExecutor {
         channel: "cli",
         trustedWorkspace: true,
         parentVisibleTools,
+        securityPolicy: this.#approvalService.securityPolicyFor(
+          input.task,
+          input.step,
+          input.attempt,
+          this.#securityPolicy
+        ),
         taskExecution: {
           taskId: input.task.id,
           planRevisionId: input.step.planRevisionId,
@@ -242,29 +259,53 @@ export class AgentStepExecutor implements TaskStepExecutor {
       const trajectoryId = child.agentLoop.trajectoryId;
       if (trajectoryId !== undefined) input.checkpoint({ trajectoryId });
       const common = { ...worker, ...(trajectoryId === undefined ? {} : { trajectoryId }) };
-      const usage = taskUsageFromAgentResponse(response.providerExecution, child.builtSession.providerRoutes);
       const events = await this.#sessionDb.listEvents(child.childSessionId);
+      const usageEntries = taskUsageEntriesFromSessionEvents(events, child.builtSession.providerRoutes, {
+        profileId: input.attempt.profileId,
+        taskId: input.attempt.taskId,
+        planRevisionId: input.attempt.planRevisionId,
+        stepId: input.attempt.stepId,
+        id: input.attempt.id,
+        workerSessionId: child.childSessionId,
+        occurredAt: this.#now().toISOString()
+      });
+      const usage = usageEntries.length === 0
+        ? taskUsageFromAgentResponse(response.providerExecution, child.builtSession.providerRoutes)
+        : taskUsageFromEntries(usageEntries);
+      const metering = { usage, usageEntries };
+      const approval = this.#approvalService.takeRequest(input.attempt.id);
+      if (approval !== undefined || response.toolExecutions.some((execution) => execution.decision === "ask")) {
+        if (approval === undefined) {
+          return { outcome: "failed", failure: taskFailure("approval-request-missing", false), ...metering, ...common };
+        }
+        endReason = "task-step-waiting-for-approval";
+        return { outcome: "waiting_for_approval", approval, ...metering, ...common };
+      }
+      for (const approved of this.#approvalService.takeApprovedRequests(input.attempt.id)) {
+        this.#approvalService.consumeApproved(input.attempt.id, approved);
+      }
       if (response.setupApprovals !== undefined && response.setupApprovals.length > 0) {
-        return { outcome: "failed", failure: taskFailure("approval-required", false), usage, ...common };
+        return { outcome: "failed", failure: taskFailure("approval-required", false), ...metering, ...common };
       }
       if (hasStructuredBlock(response, events)) {
-        return { outcome: "failed", failure: taskFailure("security-deny", false), usage, ...common };
+        return { outcome: "failed", failure: taskFailure("security-deny", false), ...metering, ...common };
       }
       if (response.providerExecution?.ok === false) {
         const providerFailure = classifyProviderFailure(response.providerExecution.attempts.at(-1)?.errorClass);
-        return { outcome: "failed", failure: providerFailure, usage, ...common };
+        return { outcome: "failed", failure: providerFailure, ...metering, ...common };
       }
       if (response.toolExecutions.some((execution) => execution.result?.ok === false)) {
-        return { outcome: "failed", failure: taskFailure("tool-error", true), usage, ...common };
+        return { outcome: "failed", failure: taskFailure("tool-error", true), ...metering, ...common };
       }
 
       const captured = await captureResults(response.text, response.artifacts, input, this.#resolveArtifactContent);
       if (captured.failure !== undefined) {
-        return { outcome: "failed", failure: captured.failure, usage, ...common };
+        return { outcome: "failed", failure: captured.failure, ...metering, ...common };
       }
       endReason = "task-step-completed";
-      return { outcome: "succeeded", results: captured.results, usage, ...common };
+      return { outcome: "succeeded", results: captured.results, ...metering, ...common };
     } finally {
+      this.#approvalService.clearAttempt(input.attempt.id);
       input.signal.removeEventListener("abort", abortChild);
       if (registered) this.#subagentRegistry.unregisterSubagent(input.attempt.id);
       await this.#sessionDb.endSession(child.childSessionId, endReason).catch(() => undefined);
@@ -292,9 +333,8 @@ function filterTaskStepTools(tools: readonly ToolDefinition[], task: Task, step:
   const blocked = new Set([...task.authorityPolicy.blockedTools, ...step.authorityPolicy.blockedTools]);
   return tools.filter((tool) =>
     tool.name !== "delegate_task" &&
-    READ_ONLY_RISK_CLASSES.has(tool.riskClass) &&
-    task.authorityPolicy.riskClassPolicy[tool.riskClass] === "runtime_policy" &&
-    step.authorityPolicy.riskClassPolicy[tool.riskClass] === "runtime_policy" &&
+    task.authorityPolicy.riskClassPolicy[tool.riskClass] !== "forbid" &&
+    step.authorityPolicy.riskClassPolicy[tool.riskClass] !== "forbid" &&
     !blocked.has(tool.name) &&
     (taskTools === undefined || taskTools.has(tool.name)) &&
     (stepTools === undefined || stepTools.has(tool.name)) &&

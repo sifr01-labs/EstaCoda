@@ -8,6 +8,7 @@ import type {
   TaskEventKind,
   TaskFailure,
   TaskStep,
+  TaskUsageEntry,
   TaskUsageTotals
 } from "../contracts/task.js";
 import {
@@ -18,6 +19,7 @@ import {
 } from "../contracts/task.js";
 import { TaskResultContentError, type TaskResultService } from "./task-result-service.js";
 import type { TaskStore } from "./task-store.js";
+import type { TaskApprovalService } from "./task-approval-service.js";
 import type {
   ResolveTaskStepExecutor,
   TaskAttemptCheckpoint,
@@ -33,6 +35,7 @@ const ACTIVE_ATTEMPT_STATUSES: readonly TaskAttemptStatus[] = [
   "waiting_for_input",
   "waiting_for_approval"
 ];
+const LEASE_OWNED_ATTEMPT_STATUSES: readonly TaskAttemptStatus[] = ["leased", "running"];
 const RECONCILABLE_TASK_STATUSES: readonly Task["status"][] = [
   "queued",
   "running",
@@ -62,6 +65,7 @@ export type TaskSchedulerOptions = {
   now?: () => Date;
   id?: () => string;
   eventId?: () => string;
+  approvalService?: TaskApprovalService;
 };
 
 export type TaskSchedulerRunResult = {
@@ -118,6 +122,7 @@ export class WorkflowScheduler {
   readonly #now: () => Date;
   readonly #id: () => string;
   readonly #eventId: () => string;
+  readonly #approvalService: TaskApprovalService | undefined;
   readonly #running = new Map<string, RunningExecution>();
 
   constructor(options: TaskSchedulerOptions) {
@@ -137,6 +142,7 @@ export class WorkflowScheduler {
     this.#now = options.now ?? (() => new Date());
     this.#id = options.id ?? randomUUID;
     this.#eventId = options.eventId ?? randomUUID;
+    this.#approvalService = options.approvalService;
   }
 
   get ownerId(): string {
@@ -145,6 +151,8 @@ export class WorkflowScheduler {
 
   async runOnce(): Promise<TaskSchedulerRunResult> {
     const result: MutableRunResult = emptyRunResult();
+    await this.#approvalService?.reconcile();
+    this.#reconcileApprovals(result);
     this.#reconcile(result);
 
     const tasks = this.#store.listTasks({
@@ -234,7 +242,8 @@ export class WorkflowScheduler {
       }
 
       for (const attempt of store.listAttempts(task.id)) {
-        if (attempt.status === "queued") {
+        if (attempt.status === "queued" ||
+            ((attempt.status === "waiting_for_input" || attempt.status === "waiting_for_approval") && attempt.lease === undefined)) {
           store.updateAttempt({ ...attempt, status: "cancelled", updatedAt: now, completedAt: now });
           store.appendEvent(this.#event(task, "attempt-cancelled", now, {
             attemptId: attempt.id,
@@ -351,6 +360,84 @@ export class WorkflowScheduler {
     return renewed;
   }
 
+  #reconcileApprovals(result: MutableRunResult): void {
+    const links = this.#store.listApprovalLinks({ statuses: ["approved", "denied", "expired"], limit: 1_000 });
+    for (const link of links) {
+      const task = this.#store.getTask(link.taskId);
+      const step = this.#store.getStep(link.stepId);
+      const attempt = this.#store.getAttempt(link.attemptId);
+      if (task?.status !== "waiting_for_approval" || step?.status !== "waiting_for_approval" ||
+          attempt?.status !== "waiting_for_approval") continue;
+      const now = this.#now().toISOString();
+      this.#store.atomicWrite((store) => {
+        const currentTask = store.getTask(link.taskId);
+        const currentStep = store.getStep(link.stepId);
+        const currentAttempt = store.getAttempt(link.attemptId);
+        if (currentTask?.status !== "waiting_for_approval" || currentStep?.status !== "waiting_for_approval" ||
+            currentAttempt?.status !== "waiting_for_approval") return;
+        if (link.status === "approved") {
+          store.updateAttempt({
+            ...currentAttempt,
+            status: "queued",
+            workerSessionId: undefined,
+            trajectoryId: undefined,
+            updatedAt: now
+          });
+          store.updateStep({ ...currentStep, status: "ready", updatedAt: now });
+          store.updateTask({ ...currentTask, status: "queued", waitReason: undefined, updatedAt: now });
+          store.appendEvent(this.#event(currentTask, "approval-resolved", now, {
+            attemptId: currentAttempt.id,
+            stepId: currentStep.id,
+            planRevisionId: currentStep.planRevisionId,
+            data: { approvalId: link.id, resolution: "approved" }
+          }));
+          store.appendEvent(this.#event(currentTask, "task-state-changed", now, {
+            data: { from: "waiting_for_approval", to: "queued", reasonCode: "approval-granted" }
+          }));
+          return;
+        }
+        const failureRecord = failure(
+          link.status === "denied" ? "approval-denied" : "approval-expired",
+          link.status === "denied" ? "The requested Task operation was denied." : "The requested Task approval expired.",
+          false,
+          false
+        );
+        store.updateAttempt({ ...currentAttempt, status: "failed", failure: failureRecord, updatedAt: now, completedAt: now });
+        store.updateStep({ ...currentStep, status: "failed", updatedAt: now });
+        store.updateTask({
+          ...currentTask,
+          status: "failed",
+          waitReason: undefined,
+          failure: failureRecord,
+          updatedAt: now,
+          completedAt: now
+        });
+        store.appendEvent(this.#event(currentTask, "approval-resolved", now, {
+          attemptId: currentAttempt.id,
+          stepId: currentStep.id,
+          planRevisionId: currentStep.planRevisionId,
+          data: { approvalId: link.id, resolution: link.status }
+        }));
+        store.appendEvent(this.#event(currentTask, "attempt-failed", now, {
+          attemptId: currentAttempt.id,
+          stepId: currentStep.id,
+          planRevisionId: currentStep.planRevisionId,
+          data: { failureClass: failureRecord.class, retryable: false, uncertainSideEffects: false }
+        }));
+        store.appendEvent(this.#event(currentTask, "step-state-changed", now, {
+          stepId: currentStep.id,
+          planRevisionId: currentStep.planRevisionId,
+          data: { from: "waiting_for_approval", to: "failed", reasonCode: failureRecord.class }
+        }));
+        store.appendEvent(this.#event(currentTask, "task-state-changed", now, {
+          data: { from: "waiting_for_approval", to: "failed", reasonCode: failureRecord.class }
+        }));
+      });
+      result.reconciled++;
+      if (link.status !== "approved") result.failed++;
+    }
+  }
+
   #reconcile(result: MutableRunResult): void {
     const now = this.#now();
     const tasks = this.#store.listTasks({ statuses: RECONCILABLE_TASK_STATUSES, limit: 1_000 });
@@ -358,6 +445,9 @@ export class WorkflowScheduler {
       for (const attempt of this.#store.listAttempts(task.id)) {
         if (!ACTIVE_ATTEMPT_STATUSES.includes(attempt.status)) continue;
         const lease = attempt.lease;
+        if (!LEASE_OWNED_ATTEMPT_STATUSES.includes(attempt.status) && lease === undefined && !isTerminalTaskStatus(task.status)) {
+          continue;
+        }
         const leaseExpired = lease !== undefined && Date.parse(lease.expiresAt) <= now.getTime();
         if (lease !== undefined && !leaseExpired) continue;
 
@@ -405,6 +495,7 @@ export class WorkflowScheduler {
         return true;
       }
 
+      if (!LEASE_OWNED_ATTEMPT_STATUSES.includes(attempt.status) && lease === undefined) return false;
       const status: TaskAttemptStatus = lease === undefined ? "interrupted" : "expired";
       const failure: TaskFailure = {
         class: lease === undefined ? "lease-missing" : "lease-expired",
@@ -659,7 +750,7 @@ export class WorkflowScheduler {
       const outcome = await this.#settle(task.id, step.id, attempt.id, lease, settlement);
       if (outcome === "completed") result.completed++;
       else if (outcome === "cancelled") result.cancelled++;
-      else result.failed++;
+      else if (outcome === "failed") result.failed++;
     } catch (error) {
       if (error instanceof TaskSchedulerCancellationError) {
         this.#settleCancelled(task.id, step.id, attempt.id, lease);
@@ -708,8 +799,9 @@ export class WorkflowScheduler {
     attemptId: string,
     lease: TaskAttemptLease,
     settlement: TaskExecutorSettlement
-  ): Promise<"completed" | "failed" | "cancelled"> {
-    if (settlement.outcome !== "succeeded" && settlement.outcome !== "failed" && settlement.outcome !== "cancelled") {
+  ): Promise<"completed" | "failed" | "cancelled" | "waiting"> {
+    if (settlement.outcome !== "succeeded" && settlement.outcome !== "failed" &&
+        settlement.outcome !== "cancelled" && settlement.outcome !== "waiting_for_approval") {
       this.#settleFailure(
         taskId,
         attemptId,
@@ -725,6 +817,20 @@ export class WorkflowScheduler {
         currentLease?.cancellationRequestedAt !== undefined || settlement.outcome === "cancelled") {
       this.#settleCancelled(taskId, stepId, attemptId, lease);
       return "cancelled";
+    }
+    if (settlement.outcome === "waiting_for_approval") {
+      if (this.#approvalService === undefined) {
+        this.#settleFailure(
+          taskId,
+          attemptId,
+          lease,
+          failure("approval-service-unavailable", "Durable approval service is unavailable.", false, false),
+          normalizeUsage(settlement.usage)
+        );
+        return "failed";
+      }
+      this.#settleWaitingForApproval(taskId, stepId, attemptId, lease, settlement);
+      return "waiting";
     }
     let usage: TaskUsageTotals;
     try {
@@ -746,7 +852,7 @@ export class WorkflowScheduler {
       } catch {
         normalizedFailure = failure("invalid-failure", "Executor returned an invalid failure record.", false, false);
       }
-      this.#settleFailure(taskId, attemptId, lease, normalizedFailure, usage);
+      this.#settleFailure(taskId, attemptId, lease, normalizedFailure, usage, settlement.usageEntries);
       return "failed";
     }
     const step = this.#store.getStep(stepId);
@@ -802,10 +908,11 @@ export class WorkflowScheduler {
           settlement.trajectoryId !== context.attempt.trajectoryId) {
         throw new Error("Task Attempt settlement cannot replace its checkpointed trajectory.");
       }
+      const finalUsage = this.#recordUsageEntries(store, context.attempt, settlement.usageEntries, usage);
       const completed: TaskAttempt = {
         ...context.attempt,
         status: "completed",
-        usage,
+        usage: finalUsage,
         workerSessionId: settlement.workerSessionId ?? context.attempt.workerSessionId,
         trajectoryId: settlement.trajectoryId ?? context.attempt.trajectoryId,
         updatedAt: now,
@@ -818,7 +925,7 @@ export class WorkflowScheduler {
         attemptId,
         stepId,
         planRevisionId: completed.planRevisionId,
-        data: usageEventData(usage)
+        data: usageEventData(finalUsage)
       }));
       store.appendEvent(this.#event(context.task, "attempt-completed", now, {
         attemptId,
@@ -833,6 +940,74 @@ export class WorkflowScheduler {
       }));
     });
     return "completed";
+  }
+
+  #settleWaitingForApproval(
+    taskId: string,
+    stepId: string,
+    attemptId: string,
+    lease: TaskAttemptLease,
+    settlement: Extract<TaskExecutorSettlement, { outcome: "waiting_for_approval" }>
+  ): void {
+    const service = this.#approvalService;
+    if (service === undefined) throw new Error("Durable approval service is unavailable.");
+    const usage = normalizeUsage(settlement.usage);
+    const now = this.#now().toISOString();
+    this.#store.atomicWrite((store) => {
+      const context = this.#assertCurrentLease(store, taskId, attemptId, lease, false);
+      const step = store.getStep(stepId);
+      if (step === null || step.status !== "running") throw new TaskSchedulerLeaseLostError();
+      const finalUsage = this.#recordUsageEntries(store, context.attempt, settlement.usageEntries, usage);
+      const link = service.createLink({ task: context.task, step, attempt: context.attempt, request: settlement.approval });
+      store.createApprovalLink(link);
+      store.updateAttempt({
+        ...context.attempt,
+        status: "waiting_for_approval",
+        usage: finalUsage,
+        workerSessionId: settlement.workerSessionId ?? context.attempt.workerSessionId,
+        trajectoryId: settlement.trajectoryId ?? context.attempt.trajectoryId,
+        updatedAt: now
+      });
+      store.updateStep({ ...step, status: "waiting_for_approval", updatedAt: now });
+      store.updateTask({
+        ...context.task,
+        status: "waiting_for_approval",
+        updatedAt: now,
+        waitReason: {
+          kind: "approval",
+          summary: `Approval required for ${link.toolName}.`,
+          requestedAt: now,
+          approvalId: link.id
+        }
+      });
+      if (!store.releaseAttemptLease(fenceInput(lease))) throw new TaskSchedulerLeaseLostError();
+      store.appendEvent(this.#event(context.task, "usage-recorded", now, {
+        attemptId,
+        stepId,
+        planRevisionId: step.planRevisionId,
+        data: usageEventData(finalUsage)
+      }));
+      store.appendEvent(this.#event(context.task, "approval-requested", now, {
+        attemptId,
+        stepId,
+        planRevisionId: step.planRevisionId,
+        data: { approvalId: link.id, toolName: link.toolName, riskClass: link.riskClass }
+      }));
+      store.appendEvent(this.#event(context.task, "attempt-waiting", now, {
+        attemptId,
+        stepId,
+        planRevisionId: step.planRevisionId,
+        data: { reasonCode: "approval-required", approvalId: link.id }
+      }));
+      store.appendEvent(this.#event(context.task, "step-state-changed", now, {
+        stepId,
+        planRevisionId: step.planRevisionId,
+        data: { from: "running", to: "waiting_for_approval", reasonCode: "approval-required" }
+      }));
+      store.appendEvent(this.#event(context.task, "task-state-changed", now, {
+        data: { from: "running", to: "waiting_for_approval", reasonCode: "approval-required" }
+      }));
+    });
   }
 
   #settleCancelled(taskId: string, stepId: string, attemptId: string, lease: TaskAttemptLease): void {
@@ -870,17 +1045,19 @@ export class WorkflowScheduler {
     attemptId: string,
     lease: TaskAttemptLease,
     failureRecord: TaskFailure,
-    usage: TaskUsageTotals
+    usage: TaskUsageTotals,
+    usageEntries?: readonly TaskUsageEntry[]
   ): void {
     const now = this.#now().toISOString();
     let abortTask = false;
     this.#store.atomicWrite((store) => {
       const context = this.#assertCurrentLease(store, taskId, attemptId, lease, false);
+      const finalUsage = this.#recordUsageEntries(store, context.attempt, usageEntries, usage);
       const failedAttempt: TaskAttempt = {
         ...context.attempt,
         status: "failed",
         failure: failureRecord,
-        usage,
+        usage: finalUsage,
         updatedAt: now,
         completedAt: now
       };
@@ -890,7 +1067,7 @@ export class WorkflowScheduler {
         attemptId,
         stepId: failedAttempt.stepId,
         planRevisionId: failedAttempt.planRevisionId,
-        data: usageEventData(usage)
+        data: usageEventData(finalUsage)
       }));
       store.appendEvent(this.#event(context.task, "attempt-failed", now, {
         attemptId,
@@ -905,6 +1082,23 @@ export class WorkflowScheduler {
       abortTask = this.#applyFailurePolicy(store, context.task, failedAttempt, now);
     });
     if (abortTask) this.#abortTaskExecutions(taskId, attemptId);
+  }
+
+  #recordUsageEntries(
+    store: TaskStore,
+    attempt: TaskAttempt,
+    entries: readonly TaskUsageEntry[] | undefined,
+    fallback: TaskUsageTotals
+  ): TaskUsageTotals {
+    for (const entry of entries ?? []) {
+      if (entry.attemptId !== attempt.id || entry.taskId !== attempt.taskId ||
+          entry.stepId !== attempt.stepId || entry.planRevisionId !== attempt.planRevisionId) {
+        throw new Error("Task usage entry does not belong to the settling Attempt.");
+      }
+      store.recordUsageEntry(entry);
+    }
+    const persisted = store.listUsageEntries(attempt.taskId, attempt.id);
+    return persisted.length === 0 ? fallback : usageTotalsFromEntries(persisted);
   }
 
   #applyFailurePolicy(store: TaskStore, task: Task, attempt: TaskAttempt, now: string): boolean {
@@ -1098,7 +1292,7 @@ export class WorkflowScheduler {
     const tasks = this.#store.listTasks({ statuses: RECONCILABLE_TASK_STATUSES, limit: 1_000 });
     for (const task of tasks) {
       for (const attempt of this.#store.listAttempts(task.id)) {
-        if (!ACTIVE_ATTEMPT_STATUSES.includes(attempt.status)) continue;
+        if (!LEASE_OWNED_ATTEMPT_STATUSES.includes(attempt.status)) continue;
         const step = this.#store.getStep(attempt.stepId);
         if (step === null) continue;
         incrementCapacity(state, task, step);
@@ -1121,7 +1315,7 @@ export class WorkflowScheduler {
     const tasks = store.listTasks({ statuses: RECONCILABLE_TASK_STATUSES, limit: 1_000 });
     for (const candidateTask of tasks) {
       for (const attempt of store.listAttempts(candidateTask.id)) {
-        if (!ACTIVE_ATTEMPT_STATUSES.includes(attempt.status)) continue;
+        if (!LEASE_OWNED_ATTEMPT_STATUSES.includes(attempt.status)) continue;
         const candidateStep = store.getStep(attempt.stepId);
         if (candidateStep !== null) incrementCapacity(state, candidateTask, candidateStep);
       }
@@ -1295,6 +1489,23 @@ function normalizeUsage(value: TaskUsageTotals | undefined): TaskUsageTotals {
 
 function sumUsage(values: readonly TaskUsageTotals[]): TaskUsageTotals {
   return values.reduce(addUsage, emptyUsage());
+}
+
+function usageTotalsFromEntries(entries: readonly TaskUsageEntry[]): TaskUsageTotals {
+  const dispatched = entries.filter((entry) => entry.dispatched);
+  const reasons = [...new Set(dispatched.flatMap((entry) => entry.incompleteReasons))].slice(0, 32);
+  if (dispatched.length === 0) reasons.push("provider-usage-unavailable");
+  return {
+    providerCalls: dispatched.length,
+    inputTokens: dispatched.reduce((sum, entry) => sum + entry.inputTokens, 0),
+    outputTokens: dispatched.reduce((sum, entry) => sum + entry.outputTokens, 0),
+    reasoningTokens: dispatched.reduce((sum, entry) => sum + entry.reasoningTokens, 0),
+    totalTokens: dispatched.reduce((sum, entry) => sum + entry.totalTokens, 0),
+    estimatedCostUsd: dispatched.reduce((sum, entry) => sum + entry.estimatedCostUsd, 0),
+    usageComplete: dispatched.length > 0 && dispatched.every((entry) => entry.usageComplete),
+    pricingComplete: dispatched.length > 0 && dispatched.every((entry) => entry.pricingComplete),
+    incompleteReasons: reasons
+  };
 }
 
 function attemptBudgetUsage(attempt: TaskAttempt): TaskUsageTotals {

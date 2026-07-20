@@ -72,6 +72,7 @@ import { availableToolsetsFromTools } from "../cron/cron-runtime-validation.js";
 import { SQLiteTaskStore } from "../workflow/sqlite-task-store.js";
 import { TaskResultService } from "../workflow/task-result-service.js";
 import { AgentStepExecutor } from "../workflow/agent-step-executor.js";
+import { TaskApprovalService } from "../workflow/task-approval-service.js";
 import { createTaskArtifactContentResolver } from "../workflow/task-artifact-content.js";
 import { resolveTaskWorkspaceBinding } from "../workflow/task-workspace.js";
 
@@ -727,6 +728,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         });
     }
   };
+  const taskBaseSecurityPolicy: SecurityPolicy = {
+    decide: (request) => baseSecurityPolicyForActiveMode().decide(request),
+    assess: async (request) => {
+      const policy = baseSecurityPolicyForActiveMode();
+      return await policy.assess?.(request) ?? {
+        decision: policy.decide(request),
+        mode: activeSecurityMode,
+        reason: "Decided by the active security policy.",
+        risk: "medium"
+      };
+    }
+  };
   const fileStateTracker = new FileStateTracker();
   const agentLoopRoutes = {
     model: options.model,
@@ -964,6 +977,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         childFactory,
         sessionDb,
         taskStore,
+        approvalService: new TaskApprovalService({ store: taskStore }),
+        securityPolicy: taskBaseSecurityPolicy,
         hostWorkspace: await resolveTaskWorkspaceBinding(workspaceRoot),
         isWorkspaceTrusted: (workspace) => trustStore.isTrusted(workspace.canonicalPath),
         parentVisibleTools: () => toolRegistry.list(),

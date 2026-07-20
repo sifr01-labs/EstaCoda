@@ -9,6 +9,8 @@ export type TaskAttemptId = string;
 export type TaskEventId = string;
 export type TaskResultId = string;
 export type TaskDeliveryId = string;
+export type TaskApprovalId = string;
+export type TaskUsageEntryId = string;
 
 export type TaskGraphLimits = {
   readonly maxSteps: number;
@@ -272,6 +274,33 @@ export type TaskUsageTotals = {
   incompleteReasons: readonly string[];
 };
 
+export type TaskUsageEntry = {
+  id: TaskUsageEntryId;
+  profileId: string;
+  taskId: TaskId;
+  planRevisionId: TaskPlanRevisionId;
+  stepId: TaskStepId;
+  attemptId: TaskAttemptId;
+  /** Stable provider-request identity; retries and scheduler replays cannot double count it. */
+  requestKey: string;
+  turnId: string;
+  providerAttemptIndex: number;
+  provider: string;
+  model: string;
+  routeRole: "primary" | "fallback";
+  routeIndex: number;
+  dispatched: boolean;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+  usageComplete: boolean;
+  pricingComplete: boolean;
+  incompleteReasons: readonly string[];
+  occurredAt: string;
+};
+
 export type TaskAttempt = {
   id: TaskAttemptId;
   profileId: string;
@@ -323,6 +352,30 @@ export type TaskSessionLink = {
   stepId?: TaskStepId;
   attemptId?: TaskAttemptId;
   createdAt: string;
+};
+
+export type TaskApprovalStatus = "requesting" | "pending" | "approved" | "denied" | "expired" | "consumed";
+
+export type TaskApprovalLink = {
+  id: TaskApprovalId;
+  profileId: string;
+  taskId: TaskId;
+  planRevisionId: TaskPlanRevisionId;
+  stepId: TaskStepId;
+  attemptId: TaskAttemptId;
+  authorizedSessionId: string;
+  pendingApprovalId?: string;
+  toolName: string;
+  riskClass: ToolRiskClass;
+  /** SHA-256 identity of the tool/risk/target tuple. Raw tool input is never retained here. */
+  targetFingerprint: string;
+  targetPreview: string;
+  status: TaskApprovalStatus;
+  requestedAt: string;
+  expiresAt: string;
+  updatedAt: string;
+  resolvedAt?: string;
+  consumedAt?: string;
 };
 
 export type TaskDeliveryStatus = "pending" | "delivering" | "delivered" | "failed";

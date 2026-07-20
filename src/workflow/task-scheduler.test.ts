@@ -12,10 +12,13 @@ import type {
 } from "../contracts/task.js";
 import { TASK_TOOL_RISK_CLASSES } from "../contracts/task.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
+import { GatewayApprovalQueue } from "../gateway/approval-queue.js";
+import { WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { FakeTaskStepExecutor } from "./fake-task-step-executor.js";
 import { SQLiteTaskStore } from "./sqlite-task-store.js";
 import { TaskResultService } from "./task-result-service.js";
+import { TaskApprovalService } from "./task-approval-service.js";
 import {
   WorkflowScheduler,
   classifyTaskRetry,
@@ -455,6 +458,84 @@ describe("WorkflowScheduler", () => {
     expect(store.getTask("task-alpha")).toMatchObject({ status: "paused", waitReason: { kind: "budget" } });
   });
 
+  it("durably pauses for approval, resumes the same Attempt with a higher fence, and preserves usage", async () => {
+    store.createTaskGraph(makeGraph([makeStep("approval", 0)]));
+    const queue = new GatewayApprovalQueue({
+      db: sessionDb.db,
+      controller: new WorkspaceApprovalController(),
+      now,
+      idFactory: () => nextId("pending-approval")
+    });
+    const approvals = new TaskApprovalService({
+      store,
+      queue,
+      now,
+      id: () => nextId("task-approval")
+    });
+    const executor = new FakeTaskStepExecutor(({ attempt }, executionNumber) => executionNumber === 1
+      ? {
+          outcome: "waiting_for_approval",
+          approval: {
+            toolName: "file.write",
+            riskClass: "workspace-write",
+            targetFingerprint: `sha256:${"a".repeat(64)}`,
+            targetPreview: "write workspace file"
+          },
+          usage: usage(1, 10, 0.1),
+          usageEntries: [usageEntry(attempt, "request-one", 10, 0.1)]
+        }
+      : {
+          outcome: "succeeded",
+          results: [{ kind: "text", content: "approved result" }],
+          usage: usage(1, 20, 0.2),
+          usageEntries: [usageEntry(attempt, "request-two", 20, 0.2)]
+        });
+    const scheduler = new WorkflowScheduler({
+      store,
+      resultService,
+      ownerId: "scheduler-alpha",
+      resolveExecutor: () => executor,
+      approvalService: approvals,
+      now,
+      id: () => nextId("attempt"),
+      eventId: () => nextId("scheduler-event")
+    });
+
+    expect(await scheduler.runOnce()).toMatchObject({ dispatched: 1, completed: 0, failed: 0 });
+    const attemptId = store.listAttempts("task-alpha")[0]!.id;
+    expect(store.getAttempt(attemptId)).toMatchObject({ status: "waiting_for_approval", usage: { providerCalls: 1 } });
+    expect(store.getTask("task-alpha")).toMatchObject({
+      status: "waiting_for_approval",
+      waitReason: { kind: "approval" }
+    });
+
+    await scheduler.runOnce();
+    const link = store.listApprovalLinks({ taskId: "task-alpha" })[0]!;
+    expect(link).toMatchObject({ status: "pending", authorizedSessionId: "creator-alpha" });
+    await queue.resolveApproval(link.pendingApprovalId!, "approved", "operator", {
+      profileId: "alpha",
+      sessionId: "creator-alpha"
+    });
+    await approvals.reconcile();
+    expect(store.getApprovalLink(link.id)?.status).toBe("approved");
+
+    const resumed = await scheduler.runOnce();
+    expect(resumed).toMatchObject({ dispatched: 1, completed: 1, failed: 0 });
+    expect(executor.executions).toHaveLength(2);
+    expect(executor.executions.map((execution) => execution.attempt.id)).toEqual([attemptId, attemptId]);
+    expect(executor.executions.map((execution) => execution.attempt.lease?.fencingToken)).toEqual([1, 2]);
+    expect(store.getAttempt(attemptId)).toMatchObject({
+      status: "completed",
+      usage: { providerCalls: 2, totalTokens: 30 }
+    });
+    expect(store.getAttempt(attemptId)!.usage.estimatedCostUsd).toBeCloseTo(0.3, 12);
+    expect(store.listUsageEntries("task-alpha", attemptId).map((entry) => entry.requestKey)).toEqual([
+      "request-one",
+      "request-two"
+    ]);
+    expect(store.getTask("task-alpha")?.status).toBe("completed");
+  });
+
   function now(): Date {
     return new Date(nowMs);
   }
@@ -615,6 +696,48 @@ function authorityPolicy(): TaskAuthorityPolicy {
     riskClassPolicy: riskPolicy({ "read-only-local": "runtime_policy" }),
     mayCreateChildTasks: false,
     maxChildDepth: 0
+  };
+}
+
+function usage(providerCalls: number, totalTokens: number, estimatedCostUsd: number) {
+  return {
+    providerCalls,
+    inputTokens: totalTokens,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    totalTokens,
+    estimatedCostUsd,
+    usageComplete: true,
+    pricingComplete: true,
+    incompleteReasons: []
+  };
+}
+
+function usageEntry(attempt: TaskAttempt, requestKey: string, totalTokens: number, estimatedCostUsd: number) {
+  return {
+    id: `usage-${requestKey}`,
+    profileId: attempt.profileId,
+    taskId: attempt.taskId,
+    planRevisionId: attempt.planRevisionId,
+    stepId: attempt.stepId,
+    attemptId: attempt.id,
+    requestKey,
+    turnId: requestKey,
+    providerAttemptIndex: 0,
+    provider: "test",
+    model: "test-model",
+    routeRole: "primary" as const,
+    routeIndex: 0,
+    dispatched: true,
+    inputTokens: totalTokens,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    totalTokens,
+    estimatedCostUsd,
+    usageComplete: true,
+    pricingComplete: true,
+    incompleteReasons: [],
+    occurredAt: NOW
   };
 }
 

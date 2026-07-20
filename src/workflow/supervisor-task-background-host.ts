@@ -9,6 +9,7 @@ import { TaskCompletionDeliveryService, type TaskCompletionDeliveryRouter } from
 import { WorkflowScheduler } from "./task-scheduler.js";
 import type { TaskResultService } from "./task-result-service.js";
 import type { TaskStore } from "./task-store.js";
+import type { TaskApprovalService } from "./task-approval-service.js";
 
 const RUNNABLE_TASK_STATUSES: readonly Task["status"][] = ["queued", "running", "waiting_for_host"];
 const EXECUTOR_CREATION_RETRY_MS = 30_000;
@@ -39,6 +40,7 @@ export class SupervisorTaskBackgroundHost {
     router: TaskCompletionDeliveryRouter;
     ownerId: string;
     createExecutorRuntime: () => Promise<TaskExecutorHostRuntime>;
+    approvalService?: TaskApprovalService;
     logWarning?: (message: string) => void;
   }) {
     this.#store = options.store;
@@ -48,6 +50,7 @@ export class SupervisorTaskBackgroundHost {
       store: options.store,
       resultService: options.resultService,
       ownerId: options.ownerId,
+      approvalService: options.approvalService,
       resolveExecutor: (task, step) => this.#executor?.canExecute(task, step) === true
         ? this.#executor
         : undefined

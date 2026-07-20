@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import type { DelegationConfig } from "../contracts/delegation.js";
 import type { ToolDefinition, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
-import { resolveChildToolAccess } from "./toolset-security.js";
+import { resolveChildToolAccess, resolveTaskStepToolAccess } from "./toolset-security.js";
 
 describe("resolveChildToolAccess", () => {
   it("defaults children to parent-visible read-only local and network tools", () => {
@@ -115,6 +115,28 @@ describe("resolveChildToolAccess", () => {
     }).blockedTools).toEqual([
       expect.objectContaining({ name: "delegate_task", reasons: expect.arrayContaining(["spawn-depth-exceeded"]) })
     ]);
+  });
+});
+
+describe("resolveTaskStepToolAccess", () => {
+  it("keeps Task-authorized write tools without inheriting delegation's read-only defaults", () => {
+    const candidates = [
+      tool("file.read", "read-only-local", ["files"]),
+      tool("file.write", "workspace-write", ["files"]),
+      tool("delegate_task", "shared-state-mutation", ["core"])
+    ];
+    const result = resolveTaskStepToolAccess({
+      parentVisibleTools: candidates,
+      childCandidateTools: candidates,
+      allowedToolsets: ["files"],
+      allowedTools: ["file.read", "file.write"]
+    });
+
+    expect(result.effectiveAllowedTools).toEqual(["file.read", "file.write"]);
+    expect(result.strippedTools).toContainEqual(expect.objectContaining({
+      name: "delegate_task",
+      reasons: expect.arrayContaining(["leaf-delegation-disabled"])
+    }));
   });
 });
 
