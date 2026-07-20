@@ -91,5 +91,5 @@ graph TB
 - Some implemented adapters and optional providers need operator validation before they should be treated as production surfaces in a deployment.
 - Gateway status emphasizes readiness and configured state; process/service liveness depends on the service manager path.
 - Native SQLite packaging remains a release validation requirement because `better-sqlite3` uses native bindings.
-- The profile gateway supervisor now hosts the durable Task scheduler and authority-bounded agent executor, including durable approvals, restart recovery, metering, and authorized completion delivery. Task creation and operator surfaces remain intentionally absent.
-- Exact semantic freshness across memory, session recall, web content, and delegation is bounded; current stale-file warnings cover tracked parent reads vs. child file writes.
+- The profile gateway supervisor hosts the durable Task scheduler and authority-bounded agent executor, including durable approvals, restart recovery, metering, and authorized completion delivery. `delegate_task` is the model-visible fixed-graph creation path; broader operator creation surfaces remain roadmap work.
+- Exact semantic freshness across memory, session recall, web content, and background Task workspace changes remains bounded. The removed synchronous delegation result path no longer emits parent-read versus child-write warnings.

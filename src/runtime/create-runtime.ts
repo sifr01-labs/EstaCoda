@@ -18,7 +18,7 @@ import { normalizeMemoryConfig } from "../config/memory-config.js";
 import { ContextReferenceExpander } from "../context/context-reference-expander.js";
 import { ProjectContextLoader, renderProjectContext } from "../context/project-context-loader.js";
 import { CronStore } from "../cron/cron-store.js";
-import { DelegationManager } from "../delegation/delegation-manager.js";
+import { DurableDelegationService } from "../delegation/durable-delegation-service.js";
 import { FileStateTracker } from "../delegation/file-state-tracker.js";
 import { SubagentRegistry, type OperatorSubagentStatus } from "../delegation/subagent-registry.js";
 import { MemoryFileCompactionService } from "../memory/memory-file-compaction-service.js";
@@ -237,6 +237,7 @@ export type Runtime = {
   executeTool?(input: {
     tool: string;
     toolInput: Record<string, unknown>;
+    toolCallId?: string;
     signal?: AbortSignal;
   }): Promise<import("../tools/tool-executor.js").ToolExecutionRecord | undefined>;
   transcribeAudio?(input: {
@@ -325,6 +326,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       });
   const closeSessionDbOnDispose = options.closeSessionDbOnDispose ?? true;
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
+  const taskWorkspace = taskStore === undefined ? undefined : await resolveTaskWorkspaceBinding(workspaceRoot);
   const localSkillsRoot = options.localSkillsRoot ?? profilePaths.skillsPath;
   const profileMemoryRoot = profilePaths.profileRoot;
   const memoryPersistenceService = new MemoryPersistenceService();
@@ -911,9 +913,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     skillConfig: options.skillConfig,
     ui: options.ui,
     agentProfile: options.agentProfile,
-    subagentRegistry,
-    diagnosticsRoot: profilePaths.tempPath,
-    fileStateTracker
+    taskStore,
+    taskWorkspace
   });
   const builtSession = await builder.buildSession({
     sessionId,
@@ -927,17 +928,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     ui: options.ui,
     agentProfile: options.agentProfile,
     securityPolicy,
-    delegationManagerFactory: ({ toolRegistry }) => new DelegationManager({
-      sessionDb,
-      childFactory,
-      trajectoryRecorder,
-      delegationConfig: options.delegationConfig,
-      currentDepth: 0,
-      subagentRegistry,
-      diagnosticsRoot: profilePaths.tempPath,
-      fileStateTracker,
-      parentVisibleTools: () => toolRegistry.list()
-    }),
+    delegationServiceFactory: taskStore === undefined || taskWorkspace === undefined
+      ? undefined
+      : ({ toolRegistry, sessionRuntimeContext }) => new DurableDelegationService({
+          store: taskStore,
+          creatorSessionId: () => sessionRuntimeContext.currentSessionId(),
+          workspace: taskWorkspace,
+          config: options.delegationConfig ?? DEFAULT_DELEGATION_CONFIG,
+          visibleTools: () => toolRegistry.list()
+        }),
     trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot),
     disabledToolsets: options.disabledToolsets,
     toolRegistryFilter: options.enabledToolsets === undefined
@@ -979,7 +978,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         taskStore,
         approvalService: new TaskApprovalService({ store: taskStore }),
         securityPolicy: taskBaseSecurityPolicy,
-        hostWorkspace: await resolveTaskWorkspaceBinding(workspaceRoot),
+        hostWorkspace: taskWorkspace!,
         isWorkspaceTrusted: (workspace) => trustStore.isTrusted(workspace.canonicalPath),
         parentVisibleTools: () => toolRegistry.list(),
         delegationConfig: options.delegationConfig,
@@ -1097,6 +1096,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         input: input.toolInput,
         trustedWorkspace,
         sessionId: sessionRuntimeContext.currentSessionId(),
+        toolCallId: input.toolCallId,
         signal: input.signal
       });
     },

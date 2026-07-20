@@ -846,6 +846,28 @@ describe("ToolExecutor input redaction", () => {
 });
 
 describe("ToolExecutor tool-call metadata persistence", () => {
+  it("passes the stable tool-call identity into the tool handler context", async () => {
+    let observedToolCallId: string | undefined;
+    const tool: RegisteredTool = {
+      ...createEchoTool("stateful"),
+      run: async (_input, context) => {
+        observedToolCallId = context?.toolCallId;
+        return { ok: true, content: "done" };
+      }
+    };
+    const { executor } = await setupExecutor({ tools: [tool] });
+
+    await executor.executeTool({
+      tool: "stateful",
+      input: {},
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      toolCallId: "provider-call-stable"
+    });
+
+    expect(observedToolCallId).toBe("provider-call-stable");
+  });
+
   it("persists stable tool-call metadata on tool events and tool result messages", async () => {
     const { executor, sessionDb } = await setupExecutor({
       tools: [createEchoTool("echo")]

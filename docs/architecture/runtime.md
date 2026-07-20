@@ -110,24 +110,24 @@ Gateway runtime construction receives the gateway-owned security policy and appr
 
 ### Delegation Runtime
 
-`createRuntime` owns a runtime-scoped `SubagentRegistry`, `DelegationManager`, and `DefaultChildAgentLoopFactory`. Child loops are built through `AgentLoopBuilder` so the parent and child construction paths share provider registry/executor, MCP registrations, skill metadata, memory stores, process manager, browser backend, artifact store, trust store, and loaded config without restarting parent-owned MCP servers.
+`delegate_task` is a durable Task-creation surface. It validates the request, persists one fixed Task graph, and returns the Task handle immediately. A single request creates one Step; a batch creates independent Steps in the same Task. The Task scheduler—not the provider turn or an in-memory delegation manager—owns concurrency, retries, cancellation, recovery, results, and settlement.
+
+`createRuntime` provides a profile-bound `DurableDelegationService` only when durable SQLite Task persistence is available. Provider tool-call identity becomes the Task creation key, so a replay returns the existing Task and a conflicting replay fails closed. Calls made from a running orchestrator Step create linked child Tasks with `parentTaskId` and `parentAttemptId`; their authority and budget must be strictly narrower than the active parent Step. Root and child Tasks retain the same canonical workspace binding and recheck live trust before execution.
 
 Child construction is still session-bound. Each child gets a fresh `SessionRuntimeContext`, `ToolRegistry`, `ToolExecutor`, `ToolCallPlanner`, `RunRecorder`, `ToolPlanRunner`, `ProviderTurnLoop`, `SkillPlaybookRunner`, `NativeToolExecutor`, `RuntimeRouter`, and `AgentLoop`. Parent session-bound services that capture session ID, such as recall and memory-file compaction, are created per built session rather than shared from the parent.
 
-The factory creates a child session with `parentSessionId`, role/depth metadata, effective tool metadata, stripped/blocked diagnostics, suppressed runtime features, and `approvalMode: "non-interactive-fail-closed"`. Child runtime suppression defaults disable memory recall, skill learning, and session compression, with bounded project context. Child transcripts are excluded from parent recall/search and prompt packing by default.
+`AgentStepExecutor` creates an isolated worker session only when the durable scheduler leases a Step. The session records Task, Step, and Attempt ownership; `SubagentRegistry` is ephemeral observability for that running Attempt, never the ownership source. Child runtime suppression defaults disable memory recall, skill learning, and session compression, with bounded project context. Child transcripts are excluded from parent recall/search and prompt packing by default.
 
 Tool authority is resolved before provider schemas are built:
 
 1. Start with tools visible to the parent.
 2. Intersect with child candidate tools.
-3. Keep only default read-only local/network risk classes unless a delegation-depth exception allows `delegate_task` for an orchestrator below `maxSpawnDepth`.
+3. Keep only default read-only local/network risk classes unless persisted orchestrator authority allows `delegate_task` with remaining child depth.
 4. Strip default blocked exact names and prefixes.
 5. Strip excluded toolsets: browser, media, and MCP by default.
 6. Apply explicit `allowedTools` / `allowedToolsets` as further narrowing, not expansion.
 
-The child approval policy evaluates hardline command denies first, then denies anything that would ask, consume parent approval grants, inherit pending approval queues, or depend on persisted/session approval behavior. Parent-mediated child approvals are not shipped.
-
-`DelegationManager` records `delegation-started` / `delegation-finished` events additively, registers active children while they run, relays bounded progress events, and cleans registry state on success, cancellation, timeout, or parent abort. Batch delegation runs children through a bounded concurrency runner and preserves input order. Aggregate batch status may be `failed`, while per-child metadata preserves `timeout` and `cancelled`. Parent-visible result metadata includes structured status/reason fields, child session ids, effective child tools/toolsets, stripped/blocked diagnostics, role/depth, task index/batch id, token usage where the provider reports it, and usage-unavailable flags where it does not.
+The Task approval policy evaluates hardline command denies first and persists any approval wait against the Task Attempt. It does not inherit a provider turn's pending approvals or treat Task handles as authorization.
 
 Gateway interrupt protection is runtime/session scoped. `ChannelGateway` checks the active runtime's `hasActiveSubagents(parentSessionId)` for the active turn; under interrupt busy policy, ordinary messages queue while subagents are active. `/stop`, `/approve`, `/deny`, `/status`, and existing control flows continue to bypass normal blocked-message queues.
 
@@ -135,13 +135,13 @@ Diagnostics for child timeout/stale heartbeat are written only under the configu
 
 Delegation outcomes are operational telemetry. They are recorded through session events and trajectory records, not canonical prompt memory. `MEMORY.md` is reserved for reviewed durable facts, preferences, conventions, and lessons.
 
-File-state tracking records structured reads and writes performed through tracked file tools. Before delegation, the parent read set is snapshotted with a monotonic tracker cursor. If a child later writes, replaces, or deletes a file the parent had already read, the parent result receives an advisory stale-file warning. The warning is metadata only and does not change delegation status. Shell/process writes are not claimed as tracked unless they flow through the file-state tracker.
+File-state tracking continues to record structured reads and writes for diagnostics, but the removed synchronous delegation path no longer maintains a second parent-result stale-read warning architecture. Durable Task results and workspace changes are inspected through Task result and status surfaces.
 
 Child model overrides are supported for same-provider routes and reviewed cross-provider routes. Cross-provider child routes are derived from normalized target provider config, preserve route fields such as `baseUrl`, `apiKeyEnv`, `apiMode`, `authMethod`, `enableNetwork`, `timeoutMs`, and `staleTimeoutMs`, and disable fallback routes for the overridden child. Credentials resolve through the existing provider config and `apiKeyEnv` path; credential pools are not introduced. `authMethod: "none"` does not require credentials, and `enableNetwork: false` rejects before child execution.
 
 `terminal.inspect` is shipped as a read-only-local inspection tool and may be visible to children only through the normal parent-visible, read-only child policy. It executes a narrow argv-only command set without a shell and keeps `terminal.run` excluded from default child schemas.
 
-This shipped delegation path completes MVP functional parity and the full delegation capability set described for this branch, with two explicit non-shipped boundaries: parent-mediated child approvals and durable or estimated USD cost accounting. Structured token usage rollup is shipped; session-level spend accounting is deferred until there is a stable cost-accounting contract.
+This delegation path is a full cutover: there is no synchronous `DelegationManager`, batch runner, or in-memory child ownership fallback. Existing Task usage accounting, approval links, result storage, delivery, and restart reconciliation apply to delegated work.
 
 ### Created subsystems
 
@@ -164,7 +164,7 @@ This shipped delegation path completes MVP functional parity and the full delega
 18. `SkillRegistry`
 19. `SkillLearningManager`
 20. `SkillEvolutionStore`
-21. `DelegationManager`
+21. `DurableDelegationService`
 22. `ProviderExecutor`
 23. `RunRecorder`
 24. `ToolPlanRunner`

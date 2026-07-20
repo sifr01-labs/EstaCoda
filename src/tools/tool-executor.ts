@@ -244,6 +244,7 @@ export class ToolExecutor {
     } else {
       try {
         result = await tool.run(request.input, {
+          toolCallId: request.toolCallId,
           signal: request.signal,
           environmentType,
           onEvent: request.onEvent

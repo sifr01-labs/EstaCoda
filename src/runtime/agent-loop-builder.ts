@@ -16,7 +16,7 @@ import type { CronStore } from "../cron/cron-store.js";
 import { availableToolsetsFromTools } from "../cron/cron-runtime-validation.js";
 import type { DelegationConfig } from "../contracts/delegation.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
-import type { DelegationManager } from "../delegation/delegation-manager.js";
+import type { DurableDelegationService } from "../delegation/durable-delegation-service.js";
 import type { FileStateTracker } from "../delegation/file-state-tracker.js";
 import type { MemoryFileCompactionService } from "../memory/memory-file-compaction-service.js";
 import type { MemoryIndexSync } from "../memory/memory-index-sync.js";
@@ -212,11 +212,10 @@ export type AgentLoopSessionInput = {
   ui?: AgentLoopOptions["ui"];
   agentProfile?: AgentLoopOptions["agentProfile"];
   securityPolicy: SecurityPolicy;
-  delegationManagerFactory: (input: {
-    toolExecutor: ToolExecutor;
+  delegationServiceFactory?: (input: {
     toolRegistry: ToolRegistry;
     sessionRuntimeContext: SessionRuntimeContext;
-  }) => DelegationManager;
+  }) => DurableDelegationService | undefined;
   trustedWorkspace: () => Promise<boolean>;
   disabledToolsets?: ToolsetName[];
   skillVisibilityStrategy?: AgentLoopSkillVisibilityStrategy;
@@ -244,7 +243,7 @@ export type BuiltAgentLoopSession = {
   sessionSkillCatalog: SkillCatalogEntry[];
   providerTools: OpenAICompatibleToolSchema[];
   providerRoutes: AgentLoopRouteInput;
-  delegationManager: DelegationManager;
+  delegationService?: DurableDelegationService;
   sessionRecallService: import("../session/session-recall-service.js").SessionRecallService;
   memoryFileCompactionService: MemoryFileCompactionService;
   memoryCurationService?: MemoryCurationService;
@@ -422,8 +421,7 @@ export class AgentLoopBuilder {
       trajectoryRecorder: input.trajectoryRecorder,
       workspaceRoot: substrate.workspaceRoot
     });
-    const delegationManager = input.delegationManagerFactory({
-      toolExecutor,
+    const delegationService = input.delegationServiceFactory?.({
       toolRegistry,
       sessionRuntimeContext
     });
@@ -438,7 +436,7 @@ export class AgentLoopBuilder {
         sessionId: input.sessionId,
         currentSessionId: () => sessionRuntimeContext.currentSessionId(),
         toolExecutor,
-        delegationManager,
+        delegationService,
         delegationConfig: substrate.delegationConfig ?? DEFAULT_DELEGATION_CONFIG,
         sessionDb: input.sessionDb,
         trajectoryRecorder: input.trajectoryRecorder,
@@ -605,7 +603,7 @@ export class AgentLoopBuilder {
       sessionSkillCatalog,
       providerTools: providerToolSchemaCatalog.tools,
       providerRoutes: routes,
-      delegationManager,
+      delegationService,
       sessionRecallService,
       memoryFileCompactionService,
       memoryCurationService,
@@ -787,7 +785,7 @@ function buildPostToolExecutorToolContext(input: SessionToolContext): SessionToo
     sessionId: input.sessionId,
     currentSessionId: input.currentSessionId,
     toolExecutor: input.toolExecutor,
-    delegationManager: input.delegationManager,
+    delegationService: input.delegationService,
     delegationConfig: input.delegationConfig,
     sessionDb: input.sessionDb,
     trajectoryRecorder: input.trajectoryRecorder,

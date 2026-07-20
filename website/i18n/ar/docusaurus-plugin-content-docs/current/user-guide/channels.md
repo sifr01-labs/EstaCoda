@@ -380,7 +380,7 @@ estacoda sessions detach telegram <chat-id>
 
 يستخدم Telegram `/memory ...` مسار التنظيم المشترك نفسه مثل `estacoda memory ...`: الوضع نفسه، وملفات الملف الشخصي نفسها، وسجل التنظيم، والماسح، وبوابات الميزانية نفسها. ناتج المحادثة مختصر، لكن سياسة الذاكرة ليست منفصلة في Telegram.
 
-إذا كان الدور النشط يحتوي على subagents قيد التشغيل، تُصفّ الرسائل العادية في الطابور تحت سياسة `interrupt` بدل إلغاء دور الأب. `/stop` ما زال يلغي دور الأب النشط وعمل الأطفال. `/approve` و`/deny` و`/status` وأوامر النموذج/التحكم تحافظ على سلوك تجاوز أوامر التحكم. يمكن أن يعرض `/status` ملخصات active-subagent محدودة دون كشف prompts، أو transcripts، أو raw provider token streams، أو credentials، أو tool arguments.
+لا تُبقي Tasks المفوضة الدائمة الدور المنشئ نشطًا، لذلك تتبع الرسائل اللاحقة سياسة busy-session المضبوطة. يلغي `/stop` الدور الأمامي، لكنه لا يلغي ضمنيًا Task أُعيد مقبضها بالفعل. تحافظ `/approve` و`/deny` و`/status` وأوامر النموذج/التحكم على سلوك تجاوز أوامر التحكم. يمكن أن يعرض `/status` أعداد Tasks الدائمة وملخصات عامل محدودة للمحاولات الجارية دون كشف prompts أو transcripts أو raw provider token streams أو credentials أو tool arguments.
 
 ---
 

@@ -44,7 +44,7 @@ The event-kind source of truth is the `TrajectoryEventKind` union in `src/contra
 
 ### User Corrections
 
-Delegation events are additive and bounded. `delegation-started` / `delegation-finished` are persisted session events for child lifecycle summaries. `delegation-heartbeat` keeps long-running child work visible to the parent without raw token streams. `delegation-diagnostic` points at bounded timeout/stale-heartbeat diagnostics. Runtime `delegation-progress` relays selected child activity such as tool start/result and provider attempt/result summaries with child metadata. After the manager resolves the structured child outcome, it emits a bounded `delegation-result` child event with only `completed`, `blocked`, `failed`, `timeout`, or `cancelled` status; prompt text, provider details, reasons, and tool arguments are excluded.
+Durable delegation lifecycle is recorded in the Task journal, fenced Attempt checkpoints, Task result metadata, and worker trajectories. `delegate_task` itself produces an ordinary bounded tool result containing the queued Task handle; it does not relay a synchronous child lifecycle into the creating turn. Legacy lifecycle/progress events remain readable as historical session data. A leased worker may still append a bounded `delegation-diagnostic` event for a timeout or stale heartbeat, but no delegation manager emits synchronous start, finish, result, or progress settlement.
 
 `user-correction` is a structured trajectory event kind. When the user provides corrective feedback (e.g., "no, do it this way"), the runtime records:
 

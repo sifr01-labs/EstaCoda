@@ -136,7 +136,7 @@ Returns exit code 1 if any warnings exist.
 - Memory-finalization queue counts: pending, running, retrying, and failed
 - Recent delivery errors
 - Missing config/env warnings
-- Bounded active-subagent summaries when the active runtime exposes delegated child work
+- Durable Task counts and bounded worker summaries when the active runtime exposes running Attempts
 
 The managed gateway service also owns durable Task wakeups and restart recovery, even when no channel adapter is enabled. A Task bound to another workspace remains `waiting_for_host`; the service does not rewrite its workspace identity. Graceful shutdown drains active Task work with channel turns. Terminal completion delivery uses a profile-owned, session-authorized outbox. If the process stops while an external send is ambiguous, restart marks that delivery failed instead of sending a possible duplicate.
 
@@ -194,7 +194,7 @@ When a user sends input while the agent is already processing:
 | `queue` | Buffer and process after the current turn |
 | `interrupt` | Abort the current turn and start a new one |
 
-If the active turn has running subagents, ordinary messages are queued under `interrupt` instead of aborting the parent turn. Control commands still bypass: `/stop` aborts the parent turn and child work, `/approve` and `/deny` resolve approvals, `/status` can report bounded active-subagent state, and model/control commands keep their existing bypass behavior.
+Durable delegated Tasks do not hold the creating turn open, so later messages follow the configured busy-session policy. Control commands still bypass it. `/stop` aborts the foreground turn but does not implicitly cancel a Task whose handle has already been returned. `/status` can report durable Task counts and bounded worker state for running Attempts.
 
 Configure per-channel in profile `config.json`:
 

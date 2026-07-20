@@ -51,6 +51,8 @@ export type ToolResult = {
 };
 
 export type ToolExecutionContext = {
+  /** Stable provider/native call identity for idempotent stateful tools. */
+  toolCallId?: string;
   signal?: AbortSignal;
   environmentType?: EnvironmentType;
   onEvent?: RuntimeEventSink;

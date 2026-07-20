@@ -227,7 +227,7 @@ model.staleTimeoutMs / model.fallbacks[].staleTimeoutMs
 | `maxDelegateCallsPerTurn` | `3` | سقف كل provider turn لاستدعاءات `delegate_task` المنفصلة. |
 | `maxBatchTasks` | `10` | أقصى طول لـ `tasks[]`. |
 | `childTimeoutSeconds` | `600` | حد timeout للطفل؛ الحد الأدنى 30 ثانية. |
-| `heartbeatSeconds` | `30` | فترة heartbeat للأب أثناء عمل الأطفال. |
+| `heartbeatSeconds` | `30` | فترة heartbeat للعامل أثناء تشغيل Attempt. |
 | `heartbeatStaleCyclesIdle` | `3` | عتبة stale-heartbeat عندما يكون الطفل idle. |
 | `heartbeatStaleCyclesInTool` | `6` | عتبة stale-heartbeat عندما يكون الطفل داخل أداة. |
 | `recoverJsonStringTasks` | `true` | استرداد صارم لمصفوفات `tasks` المرسلة كسلسلة JSON. |
@@ -237,11 +237,11 @@ model.staleTimeoutMs / model.fallbacks[].staleTimeoutMs
 | `defaultExcludedToolsets` | `browser`, `media`, `mcp` | toolsets تُزال من مخططات الأطفال الافتراضية. |
 | `defaultAllowedToolsets` | فارغ | لا يوجد grant افتراضي واسع لـ toolset. |
 | `blockedToolNames` / `blockedToolPrefixes` | deny list مدمجة | إزالة أدوات exact/prefix قبل بناء مخططات الطفل. |
-| `childRuntime` | recall/learning/compression معطلة، project context محدود | تعطيل ميزات runtime الشبيهة بالأب داخل حلقات الأطفال. |
+| `childRuntime` | recall/learning/compression معطلة، project context محدود | تعطيل ميزات runtime الشبيهة بالأب داخل حلقات العامل المحجوزة. |
 
 `terminal.run`، وأدوات الكتابة/التحكم بالعمليات، والذاكرة/بحث الجلسات، وتعديل المهارات/الإعداد/cron/الثقة، وأس surfaces بيانات الاعتماد تُزال افتراضيًا. `terminal.inspect` هي أداة `read-only-local` وقد تظهر للطفل فقط عندما تكون مرئية للأب وتسمح بها سياسة القراءة فقط. إعدادات التفويض تدخل في runtime fingerprint حتى تعيد تغييرات المخطط بناء provider tool schemas.
 
-نتائج التفويض هي telemetry تشغيلية تُسجل في أحداث الجلسة وسجلات trajectory. ليست كتابة ذاكرة canonical قابلة للإعداد، ولا تكتب في `MEMORY.md`.
+دورة حياة التفويض هي حالة Task دائمة وأحداث journal وmetadata للنتائج ومسارات worker trajectory. ليست كتابة ذاكرة canonical قابلة للإعداد، ولا تكتب في `MEMORY.md`.
 
 ### web
 

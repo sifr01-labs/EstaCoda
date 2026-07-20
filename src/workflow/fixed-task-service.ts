@@ -12,7 +12,7 @@ import type {
   TaskStep,
   TaskWorkspaceBinding
 } from "../contracts/task.js";
-import { isTerminalTaskStatus } from "../contracts/task.js";
+import { isChildTaskAuthorityAllowed, isTerminalTaskStatus } from "../contracts/task.js";
 import type { TaskStore } from "./task-store.js";
 
 const MAX_GUIDANCE_RECORDS = 64;
@@ -45,6 +45,10 @@ export type CreateFixedTaskInput = {
   steps: readonly FixedTaskStepInput[];
   planReason?: string;
   createdBy?: TaskActor;
+  parent?: {
+    taskId: string;
+    attemptId: string;
+  };
 };
 
 export type FixedTaskGraph = {
@@ -84,6 +88,7 @@ export class FixedTaskService {
       ? null
       : this.#store.getTaskByCreationKey(normalized.creationKey);
     if (existing !== null) return this.#existingGraph(existing, normalized);
+    const parent = normalized.parent;
 
     const timestamp = this.#now().toISOString();
     const taskId = boundedToken(this.#id("task"), "Task ID", 256);
@@ -97,6 +102,10 @@ export class FixedTaskService {
       id: taskId,
       profileId: this.#store.profileId,
       creatorSessionId: normalized.creatorSessionId,
+      ...(parent === undefined ? {} : {
+        parentTaskId: parent.taskId,
+        parentAttemptId: parent.attemptId
+      }),
       source: normalized.source,
       ...(normalized.creationKey === undefined ? {} : { creationKey: normalized.creationKey }),
       objective: normalized.objective,
@@ -136,7 +145,10 @@ export class FixedTaskService {
     const graph = { task, revision, steps };
     const initialEvents = this.#creationEvents(graph, timestamp);
     try {
-      this.#store.createTaskGraph({ ...graph, initialEvents });
+      this.#store.atomicWrite((store) => {
+        if (normalized.parent !== undefined) this.#validateParent(normalized, store);
+        store.createTaskGraph({ ...graph, initialEvents });
+      });
       return graph;
     } catch (error) {
       if (normalized.creationKey === undefined) throw error;
@@ -144,6 +156,34 @@ export class FixedTaskService {
       if (raced === null) throw error;
       return this.#existingGraph(raced, normalized);
     }
+  }
+
+  #validateParent(input: NormalizedCreateFixedTaskInput, store: TaskStore) {
+    const parent = input.parent!;
+    const task = store.getTask(parent.taskId);
+    const attempt = store.getAttempt(parent.attemptId);
+    if (task === null || attempt === null || attempt.taskId !== task.id) {
+      throw new Error("The parent Task Attempt was not found in this profile.");
+    }
+    const step = store.getStep(attempt.stepId);
+    if (step === null || step.taskId !== task.id || step.planRevisionId !== attempt.planRevisionId) {
+      throw new Error("The parent Task Attempt does not own a valid active Step.");
+    }
+    if (!isDeepStrictEqual(input.workspace, task.workspace)) {
+      throw new Error("A child Task must retain its parent Task workspace binding.");
+    }
+    if (isTerminalTaskStatus(task.status) || attempt.status !== "running" ||
+      task.activePlanRevisionId !== attempt.planRevisionId ||
+      input.createdBy?.sessionId !== attempt.workerSessionId) {
+      throw new Error("A child Task must be created by its active parent Task Attempt worker.");
+    }
+    if (!isChildTaskAuthorityAllowed(input.authorityPolicy, step.authorityPolicy)) {
+      throw new Error("Child Task authority exceeds the active parent Step authority.");
+    }
+    if (!budgetNarrowerOrEqual(input.budgetPolicy, step.budget)) {
+      throw new Error("Child Task budget exceeds the active parent Step budget.");
+    }
+    return { task, attempt, step };
   }
 
   steer(input: { taskId: string; authorizedSessionId: string; guidance: string }): TaskGuidance {
@@ -251,14 +291,29 @@ function normalizeCreateInput(input: CreateFixedTaskInput): NormalizedCreateFixe
     };
   });
   const creatorSessionId = boundedToken(input.creatorSessionId, "creator session ID", 256);
-  if (input.createdBy !== undefined && (
-    (input.createdBy.kind !== "system" && input.createdBy.sessionId !== creatorSessionId) ||
-    input.createdBy.taskId !== undefined || input.createdBy.attemptId !== undefined
-  )) {
-    throw new Error("A root fixed Task actor must be the creator session or the system actor.");
+  let parent: CreateFixedTaskInput["parent"];
+  if (input.parent === undefined) {
+    if (input.createdBy !== undefined && (
+      (input.createdBy.kind !== "system" && input.createdBy.sessionId !== creatorSessionId) ||
+      input.createdBy.taskId !== undefined || input.createdBy.attemptId !== undefined
+    )) {
+      throw new Error("A root fixed Task actor must be the creator session or the system actor.");
+    }
+  } else {
+    parent = {
+      taskId: boundedToken(input.parent.taskId, "parent Task ID", 256),
+      attemptId: boundedToken(input.parent.attemptId, "parent Attempt ID", 256)
+    };
+    if (input.createdBy?.kind !== "agent" ||
+      input.createdBy.sessionId !== creatorSessionId ||
+      input.createdBy.taskId !== parent.taskId ||
+      input.createdBy.attemptId !== parent.attemptId) {
+      throw new Error("A child fixed Task actor must identify its creator session and parent Task Attempt.");
+    }
   }
   return {
     ...input,
+    ...(parent === undefined ? {} : { parent }),
     creatorSessionId,
     ...(input.creationKey === undefined
       ? {}
@@ -286,6 +341,8 @@ function matchesInput(graph: FixedTaskGraph, input: NormalizedCreateFixedTaskInp
   }));
   const expectedActor = input.createdBy ?? { kind: "user", sessionId: input.creatorSessionId };
   return graph.task.creatorSessionId === input.creatorSessionId &&
+    graph.task.parentTaskId === input.parent?.taskId &&
+    graph.task.parentAttemptId === input.parent?.attemptId &&
     graph.task.source === input.source &&
     graph.task.creationKey === input.creationKey &&
     graph.task.objective === input.objective &&
@@ -295,6 +352,16 @@ function matchesInput(graph: FixedTaskGraph, input: NormalizedCreateFixedTaskInp
     isDeepStrictEqual(graph.task.authorityPolicy, input.authorityPolicy) &&
     isDeepStrictEqual(graph.task.budgetPolicy, input.budgetPolicy) &&
     isDeepStrictEqual(actualSteps, input.steps);
+}
+
+function budgetNarrowerOrEqual(
+  candidate: TaskBudgetPolicy,
+  ceiling: Omit<TaskBudgetPolicy, "maxConcurrentAttempts">
+): boolean {
+  return candidate.maxProviderCalls <= ceiling.maxProviderCalls &&
+    candidate.maxTotalTokens <= ceiling.maxTotalTokens &&
+    candidate.maxEstimatedCostUsd <= ceiling.maxEstimatedCostUsd &&
+    candidate.maxWallClockMs <= ceiling.maxWallClockMs;
 }
 
 function boundedToken(value: string, label: string, maxChars: number): string {

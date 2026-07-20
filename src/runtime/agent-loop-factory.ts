@@ -15,10 +15,10 @@ import { assessSecurityPolicy, capabilityFirstDefaults } from "../contracts/secu
 import type { SessionDB, SessionRecord } from "../contracts/session.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
-import type { FileStateTracker } from "../delegation/file-state-tracker.js";
 import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
-import { DelegationManager } from "../delegation/delegation-manager.js";
-import type { SubagentRegistry } from "../delegation/subagent-registry.js";
+import { DurableDelegationService } from "../delegation/durable-delegation-service.js";
+import type { TaskWorkspaceBinding } from "../contracts/task.js";
+import type { TaskStore } from "../workflow/task-store.js";
 import {
   applyChildToolAccessResult,
   resolveChildToolAccess,
@@ -120,9 +120,8 @@ export type DefaultChildAgentLoopFactoryOptions = {
   skillConfig?: Record<string, Record<string, unknown>>;
   ui?: ConstructorParameters<typeof AgentLoop>[0]["ui"];
   agentProfile?: ConstructorParameters<typeof AgentLoop>[0]["agentProfile"];
-  subagentRegistry?: SubagentRegistry;
-  diagnosticsRoot?: string;
-  fileStateTracker?: FileStateTracker;
+  taskStore?: TaskStore;
+  taskWorkspace?: TaskWorkspaceBinding;
   id?: () => string;
 };
 
@@ -151,9 +150,8 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
   readonly #skillConfig: Record<string, Record<string, unknown>> | undefined;
   readonly #ui: ConstructorParameters<typeof AgentLoop>[0]["ui"];
   readonly #agentProfile: ConstructorParameters<typeof AgentLoop>[0]["agentProfile"];
-  readonly #subagentRegistry: SubagentRegistry | undefined;
-  readonly #diagnosticsRoot: string | undefined;
-  readonly #fileStateTracker: FileStateTracker | undefined;
+  readonly #taskStore: TaskStore | undefined;
+  readonly #taskWorkspace: TaskWorkspaceBinding | undefined;
   readonly #id: () => string;
 
   constructor(options: DefaultChildAgentLoopFactoryOptions) {
@@ -171,9 +169,8 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
     this.#skillConfig = options.skillConfig;
     this.#ui = options.ui;
     this.#agentProfile = options.agentProfile;
-    this.#subagentRegistry = options.subagentRegistry;
-    this.#diagnosticsRoot = options.diagnosticsRoot;
-    this.#fileStateTracker = options.fileStateTracker;
+    this.#taskStore = options.taskStore;
+    this.#taskWorkspace = options.taskWorkspace;
     this.#id = options.id ?? (() => `child_${crypto.randomUUID()}`);
   }
 
@@ -217,17 +214,16 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
       ui: this.#ui,
       agentProfile: this.#agentProfile,
       securityPolicy: input.securityPolicy ?? createChildFailClosedSecurityPolicy(),
-      delegationManagerFactory: () => new DelegationManager({
-        sessionDb: this.#sessionDb,
-        childFactory: this,
-        trajectoryRecorder,
-        delegationConfig: this.#delegationConfig,
-        currentDepth: depth,
-        subagentRegistry: this.#subagentRegistry,
-        diagnosticsRoot: this.#diagnosticsRoot,
-        fileStateTracker: this.#fileStateTracker,
-        parentVisibleTools: () => builtSession?.toolRegistry.list() ?? []
-      }),
+      delegationServiceFactory: this.#taskStore === undefined || this.#taskWorkspace === undefined
+        ? undefined
+        : ({ toolRegistry, sessionRuntimeContext }) => new DurableDelegationService({
+            store: this.#taskStore!,
+            creatorSessionId: () => sessionRuntimeContext.currentSessionId(),
+            workspace: this.#taskWorkspace!,
+            config: this.#delegationConfig,
+            visibleTools: () => toolRegistry.list(),
+            activeTaskExecution: input.taskExecution
+          }),
       trustedWorkspace: async () => input.trustedWorkspace,
       memoryRecall: "disabled",
       sessionCompression: "disabled",
@@ -251,7 +247,8 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
               parentVisibleTools: input.parentVisibleTools,
               childCandidateTools: availableTools,
               allowedToolsets,
-              allowedTools
+              allowedTools,
+              allowDelegation: role === "orchestrator"
             });
         applyChildToolAccessResult(registry, result);
         toolAccess = result;

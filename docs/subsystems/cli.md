@@ -217,12 +217,10 @@ Operator Console region:
 ```
 
 Tool-start and tool-result events route through the Operator Console active-work
-model when available. Ordinary live tool rows remain hidden; a running
-`delegate_task` temporarily exposes bounded child rows in the active-work region.
-The region disappears when delegation settles or visible assistant streaming
-begins, and the completed surface retains only the parent delegation row with
-outcome counts. Plain and one-shot fallbacks print only child start and settlement
-lines, not intermediate child tool/provider activity. Active work is uncapped in
+model when available. Ordinary live tool rows remain hidden. `delegate_task`
+appears as a short Task-creation operation and returns a durable handle; worker
+Attempts are observed through Task/background-work surfaces rather than nested
+inside the creating turn. Active work is uncapped in
 model storage and viewport-limited in rendering. The persistent status rail
 contains only model, context usage/bar, and session timer; tools, approvals,
 workspace/trust, setup, steering, channel state, and active-turn noise must stay

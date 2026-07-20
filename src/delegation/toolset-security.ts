@@ -52,6 +52,7 @@ export type ResolveTaskStepToolAccessInput = {
   childCandidateTools: readonly ToolDefinition[];
   allowedToolsets: readonly ToolsetName[];
   allowedTools?: readonly string[];
+  allowDelegation?: boolean;
 };
 
 /**
@@ -72,7 +73,7 @@ export function resolveTaskStepToolAccess(input: ResolveTaskStepToolAccessInput)
     const tool = parent ?? candidate;
     const reasons: ChildToolStripReason[] = [];
     if (parent === undefined) reasons.push("not-parent-visible");
-    if (tool.name === "delegate_task") reasons.push("leaf-delegation-disabled");
+    if (tool.name === "delegate_task" && input.allowDelegation !== true) reasons.push("leaf-delegation-disabled");
     if (hasRequestedTools && !requestedTools.has(tool.name)) reasons.push("outside-requested-allowed-tools");
     if (!tool.toolsets.some((toolset) => requestedToolsets.has(toolset))) {
       reasons.push("outside-requested-allowed-toolsets");

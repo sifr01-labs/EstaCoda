@@ -322,69 +322,17 @@ Attachments:
 - file excerpt · src/cli/session-loop.ts · 184 lines
 ```
 
-### Phase E: Delegated Active Work
+### Phase E: Durable Task Creation
 
-Normal tool activity remains in the compact turn status while work is live. A
-running `delegate_task` is the exception: its bounded child rows use the active
-work region so the operator can see that isolated subagents are still running.
+`delegate_task` is a short Task-creation operation in the active turn. It
+persists a fixed graph and returns a queued Task handle; it does not keep the
+turn open while worker Steps execute. Running Attempts belong to the Task host
+and use Task/background-work surfaces rather than nested child cards owned by
+the creating tool row.
 
-```text
-Delegated work · 2 active · 1 done · 00:53
-╭─ • Worker 1 · inspect delegation ───────╮  ╭─ ● Worker 2 · inspect tools ───────────╮
-│ ✓ Search Files  src/delegation           │  │ · Read File  src/tools/delegation...   │
-│ · Read File     progress-relay.ts        │  │                                         │
-│                                         │  │                                         │
-│                                         │  │                                         │
-│                                         │  │                                         │
-│                                         │  │                                         │
-├─────────────────────────────────────────┤  ├─────────────────────────────────────────┤
-│ running · 2 activities · 00:53          │  │ running · 1 activity · 00:53           │
-╰─────────────────────────────────────────╯  ╰─────────────────────────────────────────╯
-╭─ ✓ Worker 3 · inspect docs ─────────────╮
-│ ✓ Search Files  docs/**/*delegation*     │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-├─────────────────────────────────────────┤
-│ completed · 1 activity · 00:47          │
-╰─────────────────────────────────────────╯
-╭─ Prompt ─────────────────────────────────────────────────────────────╮
-│ ›                                                                     │
-╰──────────────────────────────────────────────────────────────────────╯
-kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 7% │ session 01:12
-```
-
-Assistant prose emitted before `delegate_task` remains visible above the
-delegated-work region. When the parent delegation settles, or a new live
-assistant tail begins streaming, the child rows leave the live frame. The
-durable turn-end surface keeps one parent tool row with the bounded outcome
-counts:
-
-Each worker card keeps a rolling maximum of six bounded activity rows. Cards
-render two per row when two minimum-width cards fit and stack on narrower
-terminals. At most three cards are visible: active workers take precedence and
-recent completions fill remaining slots, while the header reports aggregate
-active, completed, failed, and not-yet-observed queue counts for the whole
-batch. Constrained layouts reduce activity rows before falling back to compact
-worker lines. Running workers use the phase-shifted `worker` pulse token; plain
-mode uses a stable ASCII marker with animation disabled. Worker timers begin
-when each child starts, completion recency follows settlement time, and card
-footers preserve distinct completed, blocked, failed, timed-out, and cancelled
-outcomes.
-
-```text
-╭─ Tools completed ─────────────────────────────────────────────────────╮
-│ ✗ Delegate Task    1 completed · 1 timed out · 1 failed        00:10  │
-╰───────────────────────────────────────────────────────────────────────╯
-```
-
-Child prompts, transcripts, raw tool arguments, provider/model identifiers,
-cancellation reasons, and child session identifiers are not rendered. Plain and
-one-shot CLI modes emit at most two lifecycle lines per child, for example
-`Worker 1: started` and `Worker 1: completed`; intermediate child
-tool and provider events remain silent.
+The completed turn retains the ordinary `delegate_task` row and its bounded
+handle metadata. Task progress, approval waits, cancellation, result bodies,
+and terminal settlement are sourced from the durable Task journal.
 
 ### Phase E2: Live Assistant Streaming
 

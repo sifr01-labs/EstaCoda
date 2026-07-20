@@ -424,13 +424,13 @@ If the index is disabled, missing, or unavailable, `memory.read`, `memory.search
 
 ---
 
-## Delegation Outcome Telemetry
+## Delegation and Memory
 
-Delegation outcomes are separate from child transcript recall and canonical prompt memory. They are recorded as operational telemetry in session events and trajectory records.
+Durable delegation state is separate from worker transcript recall and canonical prompt memory. Task graphs, journal events, Attempt state, result metadata, and linked worker sessions remain in the profile-owned Task plane.
 
-Recorded outcome telemetry can include bounded status metadata such as parent session id, child session id, role, depth, task index, status, reason, timestamp, token usage, and a bounded task preview.
+Worker trajectories and Task records can include bounded status, authority, usage, and result metadata required for scheduling and review.
 
-It does not write to `MEMORY.md`, and it does not store raw child output, prompts, transcripts, tool arguments, file contents, diagnostic payloads, or credentials in canonical memory. Child transcripts remain excluded from promotion evidence.
+Delegation does not write raw worker output, prompts, transcripts, tool arguments, file contents, diagnostic payloads, or credentials to `MEMORY.md`. Worker transcripts remain excluded from promotion evidence.
 
 ---
 

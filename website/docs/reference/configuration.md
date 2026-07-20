@@ -227,7 +227,7 @@ Subagent delegation config is normalized with defaults when omitted.
 | `maxDelegateCallsPerTurn` | `3` | Per-provider-turn cap for separate `delegate_task` calls. |
 | `maxBatchTasks` | `10` | Maximum `tasks[]` length. |
 | `childTimeoutSeconds` | `600` | Child timeout floor is 30 seconds. |
-| `heartbeatSeconds` | `30` | Parent heartbeat interval while child work runs. |
+| `heartbeatSeconds` | `30` | Worker heartbeat interval while an agent Attempt runs. |
 | `heartbeatStaleCyclesIdle` | `3` | Idle stale-heartbeat threshold. |
 | `heartbeatStaleCyclesInTool` | `6` | In-tool stale-heartbeat threshold. |
 | `recoverJsonStringTasks` | `true` | Strictly recover JSON-string `tasks` arrays. |
@@ -237,11 +237,11 @@ Subagent delegation config is normalized with defaults when omitted.
 | `defaultExcludedToolsets` | `browser`, `media`, `mcp` | Toolsets stripped from default child schemas. |
 | `defaultAllowedToolsets` | empty | No broad default toolset grant. |
 | `blockedToolNames` / `blockedToolPrefixes` | built-in deny list | Exact/prefix tool stripping before child schemas are built. |
-| `childRuntime` | recall/learning/compression disabled, project context bounded | Suppresses parent-like runtime features in child loops. |
+| `childRuntime` | recall/learning/compression disabled, project context bounded | Suppresses parent-like runtime features in leased worker loops. |
 
 `terminal.run`, write/process control, memory/session search, skill/config/cron/trust mutation, and credential surfaces are stripped by default. `terminal.inspect` is read-only-local and may be child-visible only when parent-visible and allowed by the read-only policy. Delegation config participates in the runtime fingerprint so schema-affecting changes rebuild provider tool schemas.
 
-Delegation outcomes are operational telemetry recorded in session events and trajectory records. They are not configurable canonical memory writes and do not write into `MEMORY.md`.
+Delegation lifecycle is durable Task state, journal events, result metadata, and worker trajectories. It is not a configurable canonical memory write and does not write into `MEMORY.md`.
 
 ### web
 

@@ -380,7 +380,7 @@ Model control commands bypass busy-session queues so the operator can change mod
 
 Telegram `/memory ...` uses the same shared curation path as `estacoda memory ...`: the same mode, profile-local files, curation history, scanner, and budget gates. Chat output is compact, but memory policy is not separate for Telegram.
 
-If the active turn has running subagents, ordinary messages queue under interrupt busy policy instead of aborting the parent turn. `/stop` still aborts the active parent turn and child work. `/approve`, `/deny`, `/status`, and model/control commands keep their control-command bypass behavior. `/status` can show bounded active-subagent summaries without exposing prompts, transcripts, raw provider token streams, credentials, or tool arguments.
+Durable delegated Tasks do not keep the creating turn active, so later messages follow the configured busy-session policy. `/stop` aborts the foreground turn but does not implicitly cancel a Task whose handle has already been returned. `/approve`, `/deny`, `/status`, and model/control commands keep their control-command bypass behavior. `/status` can show durable Task counts and bounded worker summaries for running Attempts without exposing prompts, transcripts, raw provider token streams, credentials, or tool arguments.
 
 ---
 

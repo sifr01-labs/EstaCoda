@@ -4,7 +4,6 @@ import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SessionDB } from "../contracts/session.js";
 import type { AgentLoopResponse } from "../runtime/agent-loop.js";
 import type { ChildAgentLoopRuntime } from "../runtime/agent-loop-factory.js";
-import type { DelegationSummary } from "./delegation-manager.js";
 import type { SubagentRegistry } from "./subagent-registry.js";
 import {
   type DelegationDiagnosticResult,
@@ -194,42 +193,6 @@ export async function runDelegatedChild(input: ChildRunnerInput): Promise<ChildR
       input.subagentRegistry.unregisterSubagent(input.subagentId);
     }
   }
-}
-
-export function timeoutDelegationSummary(input: {
-  childSessionId: string;
-  task: string;
-  summary: string;
-  role: DelegateRole;
-  depth: number;
-  batchId?: string;
-  taskIndex?: number;
-  allowedToolsets: DelegationSummary["allowedToolsets"];
-  allowedTools: DelegationSummary["allowedTools"];
-  child: ChildAgentLoopRuntime;
-  diagnostic?: DelegationDiagnosticResult;
-}): DelegationSummary {
-  return {
-    childSessionId: input.childSessionId,
-    status: "failed",
-    reason: "timeout",
-    task: input.task,
-    summary: input.summary,
-    role: input.role,
-    depth: input.depth,
-    batchId: input.batchId,
-    taskIndex: input.taskIndex,
-    allowedToolsets: input.allowedToolsets,
-    allowedTools: input.allowedTools,
-    effectiveAllowedToolsets: input.child.toolAccess.effectiveAllowedToolsets,
-    effectiveAllowedTools: input.child.toolAccess.effectiveAllowedTools,
-    strippedTools: input.child.toolAccess.strippedTools,
-    blockedTools: input.child.toolAccess.blockedTools,
-    rejectedRequestedTools: input.child.toolAccess.rejectedRequestedTools,
-    rejectedRequestedToolsets: input.child.toolAccess.rejectedRequestedToolsets,
-    toolExecutions: [],
-    diagnosticPath: input.diagnostic?.path
-  };
 }
 
 type ActivityState = {

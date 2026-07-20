@@ -184,51 +184,26 @@ Controls are intentionally small:
 
 ## Delegating Tasks
 
-`delegate_task` lets EstaCoda start bounded child agents for subtasks while the parent turn continues to own the final answer. Use it when a task can be split into independent inspection or research work.
+`delegate_task` creates background Tasks for independent inspection, research, or coding work. It returns a Task handle immediately, so the creating conversation does not have to stay open until the work finishes.
 
-Single task:
-
-```json
-{
-  "task": "Read the runtime tests and report the risky assumptions.",
-  "context": "Focus on behavior, not style.",
-  "role": "leaf"
-}
-```
-
-Batch tasks:
+Single and batch inputs keep the same shape:
 
 ```json
 {
   "tasks": [
     { "task": "Inspect config defaults." },
-    { "task": "Inspect gateway interrupt behavior." },
-    { "task": "Inspect delegation timeout behavior." }
+    { "task": "Inspect gateway behavior.", "allowedTools": ["file.read", "file.grep"] }
   ]
 }
 ```
 
-Batch results come back in the same order as the input tasks. Parallelism is bounded by runtime config, so a batch can run more than one child at once without exceeding `maxConcurrentChildren`.
+A batch becomes one durable Task with one independent Step per item. The scheduler enforces configured concurrency, timeout, retry, cancellation, usage, approval, and result policies. The tool result contains the Task ID, queued status, Step count, and whether the call created a root or linked child Task.
 
-Child agents are intentionally narrower than the parent. By default they can use parent-visible read-only local and read-only network tools, such as file reads/searches, process logs/listing, web research, and `terminal.inspect` when that tool is parent-visible. They do not receive workspace-write, memory/session search, skill mutation, config mutation, cron mutation, trust mutation, browser, media, MCP, credential, process-control, or general shell execution tools. `terminal.run` is excluded by default.
+Delegated authority is deliberately narrower than the creating runtime. Parent-visible tools are intersected with the requested tools and default risk policy before the Step is persisted. Worker Steps cannot delegate. Orchestrator Steps may create linked child Tasks only while their persisted authority retains child depth; the child workspace, authority, and budget cannot exceed the active parent Step.
 
-`leaf` children cannot spawn more children. `orchestrator` children may delegate only while under the configured depth limit. Requests beyond the depth limit fail before a new child session is created.
+Provider tool-call IDs make creation idempotent. Replaying the same call returns the existing Task; reusing the identity for a different definition fails closed. `delegate_task` is unavailable when profile-bound durable Task storage is unavailable—there is no in-memory fallback.
 
-Child approvals are non-interactive and fail closed. A child does not inherit parent approval grants or pending approval queues. If an action would need approval, the child denies it instead of asking.
-
-If a child times out or is cancelled, the result is structured. Timeout diagnostics are written under profile-local diagnostics paths when enabled. Prompt previews are off by default, and diagnostics are bounded and redacted. Long-running child work emits bounded progress and heartbeat metadata so the parent turn stays observable without exposing raw provider token streams.
-
-Gateway behavior is also protected: if a remote channel is configured to interrupt active turns, ordinary messages are queued while the active turn has child work running. Explicit control commands such as `/stop` still cancel the active turn and active child work.
-
-Delegation results include structured status/reason metadata, child session ids where created, effective child tool metadata, timeout/cancelled details, batch indexes, stale-file warnings, and provider token usage when available. Batch token usage rolls up numeric usage fields and marks unavailable usage explicitly. Durable or estimated USD cost accounting is not shipped.
-
-Child model overrides are supported through `modelOverride`. Same-provider overrides and reviewed cross-provider child routes use existing configured providers only; they do not create credential pools. Cross-provider overrides preserve target provider config, reject disabled-network routes before child execution, and disable fallbacks for the overridden child.
-
-Delegation outcome telemetry is recorded in session events and trajectory records. It includes bounded task preview and deterministic status/reason metadata only, and it does not write to canonical prompt memory. It does not store raw child output, prompts, transcripts, tool arguments, file contents, or diagnostic payloads in `MEMORY.md`.
-
-Stale-file warnings are advisory. EstaCoda snapshots parent file reads before delegation; if a child writes, replaces, or deletes a tracked file the parent already read, the result includes a warning. The warning does not change success/failure status. Shell/process writes are not detected unless represented through the file-state tracker.
-
-Parent-mediated child approvals are not shipped. Children remain non-interactive and fail closed for approval-required actions.
+Worker sessions are created only after the scheduler leases a Step. They remain isolated from parent prompt packing, recall, session search, and canonical memory. Model overrides are stored on the Step and validated through the existing configured provider and credential path when the worker is constructed.
 
 ## Read-Only Terminal Inspection
 

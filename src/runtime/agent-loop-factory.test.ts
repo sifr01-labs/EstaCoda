@@ -918,7 +918,7 @@ function fakeBuiltSession(): BuiltAgentLoopSession {
     sessionSkillCatalog: [],
     providerTools: [],
     providerRoutes: {},
-    delegationManager: {},
+    delegationService: {},
     sessionRecallService: {},
     memoryFileCompactionService: {}
   } as never;

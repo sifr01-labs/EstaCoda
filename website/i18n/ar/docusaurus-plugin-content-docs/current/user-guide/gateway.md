@@ -141,7 +141,7 @@ estacoda gateway approvals deny <id> [--session <session-id>] [--profile <profil
 
 يُخزَّن `/model --global` كمسار أساسي للملف الشخصي فقط عندما تمر المصادقة والثقة في مساحة العمل وإثبات مسار الإعدادات. يفشل مغلقًا (fail closed). `/model --global clear` مرفوض.
 
-عندما يحتوي الدور النشط على subagents قيد التشغيل، فإن سياسة `interrupt` تضع الرسائل العادية في الطابور بدل إلغاء دور الأب. أوامر التحكم ما زالت تتجاوز هذا الطابور. `/stop` يلغي دور الأب النشط وعمل الأطفال النشط. `/approve` و`/deny` و`/status` وأوامر النموذج/التحكم تحافظ على سلوك التجاوز الحالي. يمكن أن يعرض `/status` ملخصات active-subagent محدودة دون prompts الأطفال، أو raw transcripts، أو provider token streams، أو credentials، أو tool arguments.
+لا تُبقي Tasks المفوضة الدائمة الدور المنشئ نشطًا، لذلك تتبع الرسائل اللاحقة سياسة busy-session المضبوطة. تبقى أوامر التحكم متجاوزة للطابور. يلغي `/stop` الدور الأمامي، لكنه لا يلغي ضمنيًا Task أُعيد مقبضها بالفعل. يمكن أن يعرض `/status` أعداد Tasks الدائمة وملخصات عامل محدودة للمحاولات الجارية دون prompts أو raw transcripts أو provider token streams أو credentials أو tool arguments.
 
 ## الأعطال الشائعة وكيفية قراءتها
 

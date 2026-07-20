@@ -138,6 +138,23 @@ describe("resolveTaskStepToolAccess", () => {
       reasons: expect.arrayContaining(["leaf-delegation-disabled"])
     }));
   });
+
+  it("retains delegate_task only when the persisted orchestrator authority allows it", () => {
+    const candidates = [tool("delegate_task", "shared-state-mutation", ["core", "research", "coding"])];
+    expect(resolveTaskStepToolAccess({
+      parentVisibleTools: candidates,
+      childCandidateTools: candidates,
+      allowedToolsets: ["core"],
+      allowedTools: ["delegate_task"],
+      allowDelegation: true
+    }).effectiveAllowedTools).toEqual(["delegate_task"]);
+    expect(resolveTaskStepToolAccess({
+      parentVisibleTools: candidates,
+      childCandidateTools: candidates,
+      allowedToolsets: ["core"],
+      allowedTools: ["delegate_task"]
+    }).effectiveAllowedTools).toEqual([]);
+  });
 });
 
 function inventory(): ToolDefinition[] {

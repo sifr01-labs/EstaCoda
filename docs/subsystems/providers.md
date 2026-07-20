@@ -316,11 +316,11 @@ Scoped overrides persist with the session and are revalidated whenever a runtime
 
 ## Delegated Child Model Overrides
 
-`delegate_task` may request a child `modelOverride`. Same-provider model overrides and reviewed cross-provider child routes are supported. Overrides are request-local: they affect only the child loop being constructed and do not mutate profile config, session model overrides, parent fallback routes, auxiliary routes, or provider preferences outside that child.
+`delegate_task` may persist a Step `modelOverride`. Same-provider model overrides and reviewed cross-provider worker routes are supported. Overrides are Task-local: they affect only the leased worker Step and do not mutate profile config, session model overrides, parent fallback routes, auxiliary routes, or provider preferences outside that worker.
 
-Cross-provider child routes are derived from the normalized target provider config, not from parent route internals. The executable child route preserves target `baseUrl`, `apiKeyEnv`, `apiMode`, `authMethod`, `enableNetwork`, `timeoutMs`, and `staleTimeoutMs` where configured. Provider preference for the child is set to the target provider only, and fallback routes are disabled with `fallbackBehavior: "disabled-for-override"`.
+Cross-provider worker routes are derived from the normalized target provider config when the scheduler constructs the worker, not during Task creation and not from parent route internals. The executable route preserves target `baseUrl`, `apiKeyEnv`, `apiMode`, `authMethod`, `enableNetwork`, `timeoutMs`, and `staleTimeoutMs` where configured. Provider preference for the worker is set to the target provider only, and fallback routes are disabled with `fallbackBehavior: "disabled-for-override"`.
 
-Credential handling uses the existing provider config and `apiKeyEnv` path. Credential pools are not introduced. `authMethod: "none"` does not require credentials when configured for the target provider. Env-backed missing credentials reject before child session/provider execution. `enableNetwork: false` rejects before child execution with structured override metadata. Literal credential routes or unsupported credential forms are rejected rather than copied into child metadata.
+Credential handling uses the existing provider config and `apiKeyEnv` path. Credential pools are not introduced. `authMethod: "none"` does not require credentials when configured for the target provider. Env-backed missing credentials and `enableNetwork: false` fail the worker before provider execution. Literal credential routes or unsupported credential forms are rejected rather than copied into worker metadata.
 
 Override metadata is bounded and redacted. It must not include raw API keys, env values, raw route objects, private config paths, prompts, diagnostics payloads, or transcripts.
 

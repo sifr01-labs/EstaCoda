@@ -111,7 +111,7 @@ Construction order:
 6. Prompt dependencies: prompt cache, project context, context expansion, and memory context
 7. Runtime execution components such as `ProviderTurnLoop`, `ToolPlanRunner`, `SkillPlaybookRunner`, and native tool execution
 8. `AgentLoopBuilder`, which assembles session-scoped loop dependencies
-9. `DefaultChildAgentLoopFactory`, which builds child loops for delegated subagent work
+9. `DefaultChildAgentLoopFactory`, which builds isolated worker loops after the scheduler leases agent Steps
 10. `AgentLoop`, which coordinates turn boundaries, runtime events, continuation, cancellation, and persistence
 
 Key composition rules:
@@ -205,22 +205,21 @@ Setup writes profile-local configuration and secrets. It shows a review before a
 
 ### Delegation and subagents
 
-Delegation lets a parent session spawn bounded child agent sessions. Child work is constrained by toolset policy, model route policy, timeout and budget settings, and file-state checks.
+Delegation creates durable Tasks and returns their handles immediately. A single request becomes one Step; a batch becomes independent Steps governed by the durable scheduler. Tool authority, model routes, budgets, workspace trust, cancellation, results, and restart recovery are persisted Task behavior rather than provider-turn state.
 
 | Component | Role |
 |---|---|
-| `DelegationManager` | Starts and tracks delegated child work |
-| `SubagentRegistry` | Tracks active subagents |
-| `ChildRunner` and `BatchRunner` | Execute one or more child sessions |
-| `ProgressRelay` | Relays safe child progress to the parent |
-| `file-state-guard` and `file-state-tracker` | Warn when parent file reads may be stale after child writes |
-| `toolset-security` | Enforces child tool boundaries |
+| `DurableDelegationService` | Validates delegation and atomically creates root or linked child Tasks |
+| `TaskScheduler` | Owns dependency order, bounded concurrency, retries, cancellation, and settlement |
+| `AgentStepExecutor` | Runs a leased Step in an isolated worker session |
+| `SubagentRegistry` | Provides ephemeral visibility for currently running Attempts |
+| `toolset-security` | Narrows persisted Task and Step tool authority |
 
-Child sessions use `DefaultChildAgentLoopFactory` so delegated work goes through the same runtime construction path as normal sessions.
+Provider tool-call IDs are idempotency keys: replay returns the existing Task, while a different definition under the same key fails closed. Orchestrator Steps may create linked child Tasks only when their persisted authority retains child depth, and the child authority and budget must be narrower than the active parent Step.
 
 ### Durable Task foundation
 
-The Task foundation stores profile-owned multi-step execution graphs and durable result bodies independently of a provider turn. The profile gateway supervisor hosts deterministic dependency resolution, fenced Attempts, concurrency, retry, cancellation, acceptance, restart reconciliation, and authorized completion delivery. Ordinary user paths still cannot create Tasks in this build.
+The Task foundation stores profile-owned multi-step execution graphs and durable result bodies independently of a provider turn. The profile gateway supervisor hosts deterministic dependency resolution, fenced Attempts, concurrency, retry, cancellation, acceptance, restart reconciliation, and authorized completion delivery. `delegate_task` is the first model-visible creation path and uses the same governed substrate.
 
 | Component | Role |
 |---|---|
@@ -376,7 +375,7 @@ A turn can also attach to larger orchestration:
 | Security policy | `live-proven` | Adaptive mode with hardline floor. |
 | Gateway | `live-proven` | Channel auth, routing, approvals, and delivery. |
 | Setup and verification | `live-proven` | Onboarding, setup editor, and readiness checks. |
-| Delegation | `implemented` | Bounded child sessions and subagent tracking. |
+| Delegation | `implemented` | Durable root/child Tasks with bounded worker execution and Attempt visibility. |
 | Workflow | `implemented` | Durable multi-step execution with SQLite-backed state. |
 | Packs | `implemented` | Pack validation, install, risk, and permission checks. |
 | Lifecycle | `implemented` | Install, update, uninstall support, and state preservation. |

@@ -27,7 +27,7 @@ Tools are functions that extend the agent's capabilities. They are organized int
 | `src/tools/media-tools.ts` | Media handling |
 | `src/tools/session-search-tool.ts` | Deterministic raw historical session browse/search/scroll |
 | `src/tools/skill-tools.ts` | Agent-facing skill listing, review, proposal, edit, import, export, and rollback tools |
-| `src/tools/delegation-tools.ts` | Isolated child-session delegation |
+| `src/tools/delegation-tools.ts` | Durable Task creation for delegated work |
 | `src/tools/memory-file-compaction-tools.ts` | Manual memory-file compaction and restore tools |
 | `src/tools/workspace-trust-tools.ts` | Workspace trust inspection and grant/revoke tools |
 
@@ -178,7 +178,7 @@ Output is bounded, redacted, source-labeled, and explicitly marked as untrusted 
 
 ## Delegation Tool
 
-`delegate_task` creates real child agent loops for bounded subtasks. A child is recorded as a session with `parentSessionId` and delegated-child metadata. The parent receives the structured child result and final answer; child transcripts are not pulled into parent recall, session search, memory, or prompt packing by default.
+`delegate_task` creates a fixed durable Task graph and returns its handle immediately. It does not run or await a child inside the provider turn. A single request creates one Step; a batch creates independent Steps under one Task. The durable scheduler owns execution, concurrency, cancellation, recovery, results, usage, and settlement.
 
 Single-task input:
 
@@ -204,23 +204,23 @@ Batch input:
 
 When `recoverJsonStringTasks` is enabled, `tasks` may be a JSON string containing an array of task objects. Recovery is strict: each object must contain only `task`, `context`, `allowedToolsets`, `allowedTools`, `role`, and `modelOverride`; `context` must be a string when present; tool lists must be arrays of strings; `role` must be `leaf` or `orchestrator`; model overrides must be bounded strings.
 
-Default child capability is risk-class based. After intersecting with parent-visible tools, children receive tools with `riskClass: "read-only-local"` or `riskClass: "read-only-network"` unless exact names, prefixes, or excluded toolsets strip them. Browser, media, and MCP toolsets are excluded by default. Workspace-write, shared-state mutation, credential, process-control, memory/session search, skill mutation, config mutation, cron mutation, trust mutation, and dangerous shell/process tools are stripped before provider schemas are built. `terminal.run` is excluded by default. `terminal.inspect` is shipped as a read-only-local inspection tool and may be child-visible only when the parent can see it and the child read-only policy keeps it.
+Default Step capability is risk-class based. After intersecting with parent-visible tools, delegated Steps receive `read-only-local` and `read-only-network` tools unless exact names, prefixes, or excluded toolsets strip them. Browser, media, and MCP toolsets are excluded by default. Workspace-write, credential, process-control, memory/session search, skill mutation, config mutation, cron mutation, trust mutation, and dangerous shell/process tools are stripped before the authority policy is persisted. `terminal.run` is excluded by default. `terminal.inspect` may remain visible through the parent-visible read-only policy.
 
-Roles and depth are enforced before child creation and again at tool-schema construction. `leaf` children cannot see `delegate_task`. `orchestrator` children can see `delegate_task` only while their depth remains below `maxSpawnDepth`. Over-depth delegation fails before a child session is created.
+Roles and depth are enforced at Task creation and again before worker schemas are built. A worker Step cannot see `delegate_task`. An orchestrator Step may retain it only with persisted child-creation authority and remaining depth. A nested call creates a linked child Task whose authority, budget, workspace, parent Task, and parent Attempt are validated atomically.
 
-Child runtimes use non-interactive fail-closed approval policy. Hardline denies run first. Any action that would ask, consume parent approval grants, inherit pending approval queues, or depend on persisted/session approvals is denied instead of prompting.
+Worker runtimes use the Task approval policy. Hardline denies run first; an authorized ask is persisted against the Task, Step, and Attempt and releases the lease while waiting.
 
-Batch delegation is bounded by `maxBatchTasks` and `maxConcurrentChildren`. The configured batch size is hard-capped at 10 tasks. Results are returned in input order, while per-child status preserves `timeout` and `cancelled` even when the aggregate batch status is `failed`. `delegate_task` schema text is generated from the active delegation config, including batch size, concurrency, and spawn-depth limits. A per-turn `maxDelegateCallsPerTurn` cap bounds multiple separate `delegate_task` tool calls from one provider turn.
+Batch delegation is bounded by `maxBatchTasks` and `maxConcurrentChildren`. The configured batch size is hard-capped at 10 Steps. Step order is stable, while the Task scheduler runs eligible Steps concurrently and derives `completed`, `partial`, `failed`, or `cancelled` terminal state. A per-turn `maxDelegateCallsPerTurn` cap bounds separate creation calls.
 
-Model-facing `delegate_task` results are bounded to 8,000 characters in initial, flat-continuation, and native tool-history prompts. Batch rendering reserves a heading for every child, caps unsuccessful child detail at 800 characters, distributes the remaining budget fairly across successful children, and redistributes unused shares from short reports. Truncated child detail carries an explicit total-character marker. Continuation prompts include each executed result through one representation. The delegation-specific exception does not change the standard initial and flat-continuation limits for other tools.
+The model-facing result is a bounded handle containing Task ID, queued status, Step count, root/child relationship, and replay status. Full Step outputs are stored by the Task result plane rather than copied into the creating provider turn.
 
-Timeout and heartbeat diagnostics are structured and bounded. Diagnostics default to enabled with `includePromptPreview: false`; timeout files are written under the profile-local diagnostics root when available, include task hashes/previews and safe event summaries, and do not include full prompts by default. Progress relay and heartbeat events are bounded and parent-visible without exposing raw provider token streams.
+Attempt heartbeat, timeout, lease, and progress diagnostics are structured and bounded. They do not make the creating provider turn the owner of background execution.
 
-Delegation results include structured status/reason metadata, child session ids where created, effective child tools/toolsets, stripped/blocked diagnostics, role/depth, batch indexes, timeout/cancelled details, and provider token usage when available. Batch usage rolls up numeric token fields and reports unavailable usage per child. Durable or estimated USD cost accounting is not shipped.
+Task status, result bodies, approval waits, worker-session links, and structured provider usage remain profile-owned durable records. Worker sessions are created only after the scheduler leases a Step.
 
-Delegation outcomes are recorded as operational telemetry in session events and trajectory records. They are not written to canonical prompt memory.
+Delegation outcomes are recorded in the Task journal and worker trajectories. They are not written to canonical prompt memory.
 
-Tracked file tools record structured read/write operations. Before delegation, the parent read set is snapshotted; if a child later writes, replaces, or deletes a previously read path, the result includes an advisory stale-file warning. The warning does not change status. Shell/process writes are not detected unless represented through the file-state tracker.
+Tracked file tools continue to record structured reads and writes for diagnostics. The removed synchronous parent-result stale-file warning path is not retained as a second lifecycle architecture.
 
 Child model overrides support same-provider model selection and reviewed cross-provider routes. Target provider config is preserved, credentials resolve through the existing `apiKeyEnv` path, `authMethod: "none"` is allowed when configured, `enableNetwork: false` rejects before child execution, and child fallbacks are disabled for overrides. Metadata is bounded/redacted.
 
@@ -254,7 +254,7 @@ Allowed commands are:
 
 `git show` is not allowed. Git commands are hardened against repo/global/system helper execution, run with disabled prompts/pagers/editors, and reject revision/object path syntax that could escape the workspace.
 
-The tool rejects shell wrappers, command chaining, pipes, redirection, command substitution, environment assignment, package scripts, interpreters, arbitrary binaries, mutating commands, unsupported glob arguments, and paths outside the workspace root. Output is bounded and redacted before it is returned or persisted. `terminal.inspect` does not make shell/process writes visible to stale-file warnings.
+The tool rejects shell wrappers, command chaining, pipes, redirection, command substitution, environment assignment, package scripts, interpreters, arbitrary binaries, mutating commands, unsupported glob arguments, and paths outside the workspace root. Output is bounded and redacted before it is returned or persisted.
 
 ## Tool Execution
 

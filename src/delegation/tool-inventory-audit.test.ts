@@ -7,6 +7,7 @@ import type { ModelProfile } from "../contracts/provider.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import { createRuntime } from "../runtime/create-runtime.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { resolveTokens } from "../theme/token-resolver.js";
 import { resolveChildToolAccess, type ChildToolDiagnostic } from "./toolset-security.js";
 
@@ -140,7 +141,8 @@ async function registeredRuntimeTools(): Promise<ToolDefinition[]> {
     providerRegistry: registry,
     workspaceRoot,
     localSkillsRoot: join(workspaceRoot, "skills"),
-    sessionId: "delegation-tool-audit"
+    sessionId: "delegation-tool-audit",
+    sessionDb: await createSQLiteSessionDB({ path: join(workspaceRoot, "sessions.sqlite") })
   });
 
   try {

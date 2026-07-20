@@ -86,11 +86,11 @@ Profile root: `~/.estacoda/profiles/<id>/`
 | `audio-cache/` | Audio cache | Voice tools |
 | `image-cache/` | Generated and edited image cache | `image.generate`, `image.edit` |
 | `temp/` | Temporary files | Various operations |
-| `temp/delegation/` | Bounded delegation timeout/stale-heartbeat diagnostics when enabled | Delegation runtime |
+| `temp/delegation/` | Bounded worker timeout/heartbeat diagnostics when enabled | Task worker runtime |
 | `temp/audio/` | CLI recordings, auto-TTS temps, Telegram conversion, Discord receive audio | Voice operations |
 | `external-memory/` | File-backed external memory records | External memory (if enabled) |
 
-Delegation also writes session rows/events to `sessions.sqlite`. Child sessions are linked with `parentSessionId`. Delegation outcomes are stored as bounded session/result and trajectory telemetry, not through canonical prompt memory. Stale-file warnings are session/result metadata and do not store file contents or diffs.
+Delegation writes profile-owned Task graphs, journal events, Attempts, session links, and bounded result metadata to `sessions.sqlite`. Worker sessions are created only after a Step lease and link back to the Task and Attempt. Full result bodies remain in the profile-owned result store rather than canonical prompt memory.
 
 Session-finalization jobs also live in `sessions.sqlite`. They store profile/session identifiers, an immutable message cutoff, reason, status, attempts, leases, timestamps, and bounded outcome/error codes. They do not store a transcript copy. The managed gateway processes jobs for its selected profile using the originating session workspace. The worker retains the latest 1,000 terminal rows per profile; local CLI commands can inspect, retry, or prune the metadata.
 

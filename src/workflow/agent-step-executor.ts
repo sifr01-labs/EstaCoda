@@ -333,7 +333,12 @@ function filterTaskStepTools(tools: readonly ToolDefinition[], task: Task, step:
   const stepTools = step.authorityPolicy.allowedTools === undefined ? undefined : new Set(step.authorityPolicy.allowedTools);
   const blocked = new Set([...task.authorityPolicy.blockedTools, ...step.authorityPolicy.blockedTools]);
   return tools.filter((tool) =>
-    tool.name !== "delegate_task" &&
+    (tool.name !== "delegate_task" || (
+      step.executor.role === "orchestrator" &&
+      task.authorityPolicy.mayCreateChildTasks &&
+      step.authorityPolicy.mayCreateChildTasks &&
+      step.authorityPolicy.maxChildDepth > 0
+    )) &&
     task.authorityPolicy.riskClassPolicy[tool.riskClass] !== "forbid" &&
     step.authorityPolicy.riskClassPolicy[tool.riskClass] !== "forbid" &&
     !blocked.has(tool.name) &&
