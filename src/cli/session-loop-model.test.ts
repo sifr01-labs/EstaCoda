@@ -1380,27 +1380,6 @@ describe("session-loop /task", () => {
     expect(outputChunks.join("")).toContain("Status: queued");
   });
 
-  it("does not retain the retired /workflow command", async () => {
-    const outputChunks: string[] = [];
-    const output = { write: (chunk: string | Buffer) => { outputChunks.push(String(chunk)); } } as NodeJS.WritableStream;
-    await handleSlashCommand({
-      text: "/workflow status old-run",
-      runtime: fakeRuntime({
-        provider: "local",
-        model: "test",
-        contextWindowTokens: 4096,
-        supportsTools: false,
-        supportsVision: false,
-        supportsStructuredOutput: true
-      }),
-      output,
-      renderer: { render: renderPlain },
-      workspaceRoot: "/workspace",
-      homeDir: "/tmp"
-    });
-    expect(outputChunks.join("")).toContain("Unknown command: /workflow");
-  });
-
   it("renders unavailable Task controls in Arabic for Arabic sessions", async () => {
     const outputChunks: string[] = [];
     const output = { write: (chunk: string | Buffer) => { outputChunks.push(String(chunk)); } } as NodeJS.WritableStream;

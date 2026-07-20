@@ -148,32 +148,7 @@ describe("runDelegatedChild", () => {
     expect(harness.registry.listActiveSubagents()).toEqual([]);
   });
 
-  it("emits parent heartbeat events while the child runs and stops after completion", async () => {
-    vi.useFakeTimers();
-    let resolveChild: ((response: AgentLoopResponse) => void) | undefined;
-    const harness = await createHarness({
-      configOverrides: { heartbeatSeconds: 0.001 },
-      handle: async () => await new Promise<AgentLoopResponse>((resolve) => {
-        resolveChild = resolve;
-      })
-    });
-
-    const pending = runDelegatedChild(harness.input());
-    await vi.advanceTimersByTimeAsync(3);
-    resolveChild?.(response());
-    await pending;
-    const before = (await harness.db.listEvents("parent")).filter((event) => event.kind === "delegation-heartbeat").length;
-    await vi.runOnlyPendingTimersAsync();
-    await Promise.resolve();
-    await vi.runOnlyPendingTimersAsync();
-    await Promise.resolve();
-    const after = (await harness.db.listEvents("parent")).filter((event) => event.kind === "delegation-heartbeat").length;
-
-    expect(before).toBeGreaterThan(0);
-    expect(after).toBe(before);
-  });
-
-  it("uses Task metadata and renews an external heartbeat without delegation lifecycle events", async () => {
+  it("uses Task metadata and renews the Attempt heartbeat", async () => {
     vi.useFakeTimers();
     let resolveChild: ((response: AgentLoopResponse) => void) | undefined;
     let handledInput: AgentLoopInput | undefined;
@@ -192,8 +167,7 @@ describe("runDelegatedChild", () => {
       ...harness.input(),
       prompt: "Durable Task prompt",
       inputMetadata: { durableTask: true, attemptId: "attempt-1" },
-      onHeartbeat,
-      persistDelegationHeartbeat: false
+      onHeartbeat
     });
     await vi.advanceTimersByTimeAsync(3);
     resolveChild?.(response());
@@ -204,8 +178,6 @@ describe("runDelegatedChild", () => {
       inputMetadata: { durableTask: true, attemptId: "attempt-1" }
     });
     expect(onHeartbeat.mock.calls.length).toBeGreaterThan(2);
-    expect((await harness.db.listEvents("parent")).filter((event) => event.kind === "delegation-heartbeat"))
-      .toEqual([]);
   });
 
   it("stops heartbeat touches and writes diagnostics for stale idle children", async () => {
@@ -224,7 +196,6 @@ describe("runDelegatedChild", () => {
     await sleep(20);
 
     const events = await harness.db.listEvents("parent");
-    expect(events.filter((event) => event.kind === "delegation-heartbeat")).toHaveLength(0);
     expect(events).toContainEqual(expect.objectContaining({
       kind: "delegation-diagnostic",
       reason: "stale-heartbeat",

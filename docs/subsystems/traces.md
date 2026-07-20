@@ -37,14 +37,13 @@ The event-kind source of truth is the `TrajectoryEventKind` union in `src/contra
 | Memory | `memory-write`, `memory-conclusion`, `memory-promotion`, `memory-promotion-failed`, `memory-file-compaction`, `session-recall-decision`, `external-memory-recall`, `external-memory-mirror-write` |
 | Security | `security-risk-escalated` |
 | Artifacts | `artifact-created` |
-| Delegation | `delegation-started`, `delegation-finished` |
 | Prompt and history | `prompt-assembled`, `session-history-packed`, `session-history-compressed`, `session-compression-state` |
 | Progress | `progress`, `fallback`, `assistant-output`, `user-correction` |
 | Cancel | `agent-cancelled` |
 
 ### User Corrections
 
-Durable delegation lifecycle is recorded in the Task journal, fenced Attempt checkpoints, Task result metadata, and worker trajectories. `delegate_task` itself produces an ordinary bounded tool result containing the queued Task handle; it does not relay a synchronous child lifecycle into the creating turn. Legacy lifecycle/progress events remain readable as historical session data. A leased worker may still append a bounded `delegation-diagnostic` event for a timeout or stale heartbeat, but no delegation manager emits synchronous start, finish, result, or progress settlement.
+Durable delegation lifecycle is recorded in the Task journal, fenced Attempt checkpoints, Task result metadata, and worker trajectories. `delegate_task` itself produces an ordinary bounded tool result containing the queued Task handle; it does not relay a synchronous child lifecycle into the creating turn. A leased worker may append a bounded `delegation-diagnostic` session event for a timeout or stale heartbeat; Task state and settlement remain authoritative in the Task journal.
 
 `user-correction` is a structured trajectory event kind. When the user provides corrective feedback (e.g., "no, do it this way"), the runtime records:
 

@@ -243,7 +243,6 @@ export class AgentStepExecutor implements TaskStepExecutor {
           parentSessionId
         },
         onHeartbeat: input.heartbeat,
-        persistDelegationHeartbeat: false,
         now: this.#now
       });
 

@@ -41,7 +41,6 @@ export type ChildRunnerInput = {
   prompt?: string;
   inputMetadata?: Record<string, unknown>;
   onHeartbeat?: () => void;
-  persistDelegationHeartbeat?: boolean;
   now?: () => Date;
 };
 
@@ -270,19 +269,6 @@ async function emitHeartbeat(input: {
     return;
   }
 
-  if (input.input.persistDelegationHeartbeat === false) {
-    return;
-  }
-  await input.input.sessionDb.appendEvent(input.input.parentSessionId, {
-    kind: "delegation-heartbeat",
-    childSessionId: input.input.childSessionId,
-    activeChildCount: 1,
-    completedCount: 0,
-    failedCount: 0,
-    lastActivityAt: input.state.lastActivityAt,
-    taskIndex: input.input.taskIndex,
-    batchId: input.input.batchId
-  });
 }
 
 async function writeTimeoutDiagnostic(

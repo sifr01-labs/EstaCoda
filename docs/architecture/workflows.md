@@ -18,7 +18,7 @@ Task
             └── Result
 ```
 
-This document describes the persistence, result, scheduler, agent-execution, background-host, delegation, and operator-control foundation currently present in the codebase. The profile gateway supervisor runs a durable Task tick beside cron and channel work, recovers abandoned Attempts after restart, and delivers terminal results through a fail-closed completion outbox. Trusted users can create Tasks through `estacoda task`, `/task`, and `delegate_task`; the retired Workflow engine and command surface have been removed rather than retained as a compatibility layer.
+This document describes the persistence, result, scheduler, agent-execution, background-host, delegation, and operator-control foundation currently present in the codebase. The profile gateway supervisor runs a durable Task tick beside cron and channel work, recovers abandoned Attempts after restart, and delivers terminal results through a fail-closed completion outbox. Trusted users can create Tasks through `estacoda task`, `/task`, and `delegate_task`.
 
 ## Source of truth
 
@@ -45,7 +45,7 @@ This document describes the persistence, result, scheduler, agent-execution, bac
 - `src/tools/task-result-tools.ts` exposes authorized, paged `task.result.read` access.
 - `src/session/sqlite-session-db.ts` runs the migration and enables SQLite foreign-key enforcement.
 
-There is one durable persistence model. Schema version 10 removes the former `workflow_*` tables; it does not translate those records because the required Task authority, immutable plan revision, Attempt, workspace binding, and profile ownership cannot be derived safely.
+There is one durable persistence model. Schema version 10 drops obsolete pre-Task execution tables instead of attempting to infer Task authority, immutable plan revisions, Attempts, workspace bindings, or profile ownership from incompatible records.
 
 ## Profile isolation
 
@@ -62,7 +62,7 @@ Opaque Task and session identifiers are routing keys, not authorization boundari
 - Task creation keys and Attempt dispatch keys have separate profile-scoped uniqueness constraints.
 - Only one PlanRevision can be active for a Task.
 - Attempt leases are stored separately. Acquisition is one conditional SQLite mutation, and a persisted generation issues a strictly increasing fencing token whenever the same Attempt resumes.
-- Scheduler graph mutations are serialized by short `begin immediate` transactions; there is no second legacy run-lock subsystem to reconcile.
+- Scheduler graph mutations are serialized by short `begin immediate` transactions; Attempt leases and fencing are the sole execution-concurrency authority.
 - Event metadata and Result sizes are bounded before persistence.
 - A Step's available Results cannot exceed its declared aggregate result budget.
 - SQLite check constraints reject unknown states, invalid JSON, negative sizes, invalid attempt numbers, and self-dependencies.
@@ -93,7 +93,7 @@ Task and Step authority are intersected with the parent session's visible tools.
 
 The child session is marked `task-step-worker` and carries Task, PlanRevision, Step, and Attempt ownership metadata. Its session is checkpointed under the current fencing token before provider work begins. Once the child trajectory is durably present, that trajectory is checkpointed under the same fence. These checkpoints renew the lease, create the worker `TaskSessionLink`, append a bounded `attempt-progressed` event, and cannot be replaced by a later checkpoint or settlement.
 
-The child runner sends progress through the normal runtime event sink while its heartbeat renews the Attempt lease. It suppresses legacy `delegation-heartbeat` persistence for Task execution because the Task journal is the sole lifecycle authority. Durable cancellation aborts the child; timeouts and provider, approval, security, tool, JSON, and artifact-capture failures return bounded classifications to the scheduler.
+The child runner sends progress through the normal runtime event sink while its heartbeat renews the Attempt lease. The Task journal is the sole durable lifecycle authority. Durable cancellation aborts the child; timeouts and provider, approval, security, tool, JSON, and artifact-capture failures return bounded classifications to the scheduler.
 
 Successful text and JSON results are captured in full. Artifact bodies are accepted only through an injected, bounded resolver and must match the artifact's declared byte count before the scheduler writes them to the result plane. Dependency context contains bounded result metadata and opaque handles, never raw bodies or filesystem paths; the child reads authorized content through `task.result.read`. Authorized steering is stored outside the conversation transcript and injected as bounded context at safe Attempt boundaries, so transcript compaction or terminal closure cannot discard it. Guidance is user context, not policy: it cannot override Task authority, repository instructions, or runtime security.
 
@@ -121,7 +121,7 @@ External delivery is deliberately at-most-once after ambiguity. A crash or trans
 
 Opening a writable `SQLiteSessionDB` migrates it to schema version 15 under the existing migration lock and transaction. Version 10 performs the Task persistence cutover; version 11 adds the durable Attempt cancellation marker without replacing existing leases; version 12 extends the Task event journal with fenced Attempt progress checkpoints; version 13 adds the profile-owned completion-delivery outbox; version 14 adds monotonic lease generations, durable Task approval links, and canonical provider-call usage entries; version 15 adds profile-owned steering context and its bounded audit event. The migrations preserve unrelated session, message, trajectory, approval, cron, finalization, and memory-curation data. A best-effort pre-migration backup is created by the session database migration runner.
 
-The migration is intentionally destructive only for the retired Workflow tables. There is no dual-read, dual-write, compatibility alias, or hidden legacy store.
+The cutover migration is intentionally destructive only for obsolete execution tables. There is no dual-read, dual-write, compatibility alias, or alternate store.
 
 ## Current boundary
 

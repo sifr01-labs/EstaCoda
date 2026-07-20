@@ -15,7 +15,7 @@ describe("semantic compression deterministic evals", () => {
       "Fix provider-turn semantic compression smoke regression.",
       "## Constraints & Preferences",
       "- Keep compression gated by experimental config.",
-      "- Do not change Workflow event summaries.",
+      "- Do not change durable Task state.",
       "## Completed Actions",
       "- Ran pnpm run typecheck.",
       "- Inspected src/runtime/provider-turn-loop.ts.",
@@ -309,7 +309,7 @@ function compressorWith(harness: ReturnType<typeof auxiliaryHarness>): SemanticC
 function realisticCodingTranscript(): SessionMessage[] {
   return [
     msg("objective", "user", "Current objective: fix provider-turn semantic compression smoke regression. ".repeat(5)),
-    msg("constraint", "user", "Constraint: keep compression gated by experimental config and do not change Workflow event summaries. ".repeat(4), { explicitConstraint: true }),
+    msg("constraint", "user", "Constraint: keep compression gated by experimental config and do not change durable Task state. ".repeat(4), { explicitConstraint: true }),
     msg("inspect", "agent", "Inspected src/runtime/provider-turn-loop.ts and src/prompt/semantic-compressor.ts. ".repeat(5)),
     msg("command", "tool", "Command pnpm run typecheck failed with TS2345 in src/runtime/provider-turn-loop.ts:612. ".repeat(4), { tool_call_id: "call-typecheck", tool_call_name: "terminal.run" }),
     msg("decision", "agent", "Key decision: use auxiliary route compression, not memory_compaction. Preserve deterministic history packing fallback. ".repeat(4)),

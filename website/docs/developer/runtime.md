@@ -111,7 +111,7 @@ MCP-discovered tools are added to the session-visible tool registry during sessi
 
 `SQLiteSessionDB` installs the profile-owned Task schema and `SQLiteTaskStore` provides transactional graph storage. SQLite runtimes also create a profile-local `TaskResultService`: result bodies remain outside SQLite, carry verified hashes and opaque handles, and are available to linked sessions through bounded `task.result.read` pages. Binary results are never injected through that text tool. `createRuntime()` now exposes a production `AgentStepExecutor` for profile-backed SQLite runtimes. The executor rechecks profile, exact workspace binding and trust, narrows the child to read-only capabilities, checkpoints worker ownership under the Attempt fence, captures complete results, and accounts for every provider attempt.
 
-The profile gateway supervisor runs the deterministic scheduler beside cron, including startup lease reconciliation, disconnect/restart survival, and graceful drain. It creates the full Task executor runtime only when runnable work exists. Terminal completion is sent through a session-linked delivery outbox; ambiguous in-flight external sends are marked failed after restart instead of being retried and duplicated. Status surfaces show bounded Task host/count information. `delegate_task`, `estacoda task`, and `/task` create or control fixed durable Task graphs, while `task.status` and `task.result.read` expose bounded authorized reads. The retired Workflow engine and command surface are removed rather than initialized as a compatibility store.
+The profile gateway supervisor runs the deterministic scheduler beside cron, including startup lease reconciliation, disconnect/restart survival, and graceful drain. It creates the full Task executor runtime only when runnable work exists. Terminal completion is sent through a session-linked delivery outbox; ambiguous in-flight external sends are marked failed after restart instead of being retried and duplicated. Status surfaces show bounded Task host/count information. `delegate_task`, `estacoda task`, and `/task` create or control fixed durable Task graphs, while `task.status` and `task.result.read` expose bounded authorized reads.
 
 ---
 
@@ -287,7 +287,7 @@ The prompt assembly pipeline includes:
 6. Live user message
 7. Channel attachments
 8. Intent, skill instructions, skill setup, and skill resources
-9. Workflow plan
+9. Skill playbook plan
 10. Tool menu
 11. Explicit reference context
 12. Tool results or continuation feedback

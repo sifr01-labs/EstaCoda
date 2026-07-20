@@ -32,7 +32,6 @@ sidebar_position: 5
 | ضغط الجلسة | `compression.enabled` و`compression.experimental` كلاهما `true` | تجريبي فقط. معطل افتراضيًا. |
 | استقلالية Agent Evolution فوق `suggest` | أوضاع `skills.autonomy` فوق `suggest` | يسجّل أدلة وproposal قابلة للمراجعة وقرارات في وضع ظل فقط. الترقية التلقائية، والاسترجاع التلقائي، وإنشاء المهارات المحلية تلقائيًا ليست مفعّلة. |
 | سير عمل تطور/مقترح/ترقية المهارات | `skill.propose_patch`، `skill.rollback` | محكوم لكن ليس مستقلًا بالكامل. الترقية تُشغّل بوابات eval. |
-| تكامل وقت تشغيل Workflow | يتطلب قاعدة بيانات جلسات SQLite | أفضل جهد. يتصل فقط عندما تكون قاعدة بيانات الجلسة SQLite. |
 | مزودا TTS المحليان `neutts` و `kittentts` | مؤجل | مزودا TTS المحليان/offline غير منفذين. Edge TTS منفذ بشكل منفصل كمزود شبكي. |
 | Mistral TTS/STT | مؤجل | غير منفذ. |
 | auto-TTS في البوابة | `voice.autoTts: true` | تُطبق حدود لكل رد ولكل ساعة. |

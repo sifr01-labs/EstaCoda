@@ -146,7 +146,6 @@ The default corpus is defined in `src/eval/fixtures/index.ts` and currently cove
 - Memory curation, promotion, deactivation, selective rendering, and safety-file protection
 - Code dependency graph lookup and cache invalidation
 - Agent Evolution manifests, proposals, user-correction capture, routing metadata, routing baseline, semantic-routing readiness gates, and export shape
-- Workflow run state, locking, migration, store atomicity, engine lifecycle, restart recovery, command control, event summaries, and integration
 
 Prefer category descriptions in docs over hard-coding fixture counts. Fixture IDs change as the eval corpus grows.
 

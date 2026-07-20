@@ -98,7 +98,7 @@ function moduleContext(overrides: SetupModuleContext = {}): SetupModuleContext {
 }
 
 describe("setup review manifest", () => {
-  it("includes config file write/update lines for provider/model/security/workflow drafts", () => {
+  it("includes config file write/update lines for provider, model, security, and Agent Evolution drafts", () => {
     const manifest = buildSetupReviewManifest([onboardingBundle()]);
     const fileLines = manifest.sections["files-to-write-update"];
 

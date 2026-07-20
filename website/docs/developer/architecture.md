@@ -313,7 +313,7 @@ Prompt assembly is layered. Key context groups include:
 6. Live user message and attachments
 7. Intent and skill instructions
 8. Skill setup and resources
-9. Workflow plan
+9. Skill playbook plan
 10. Tool menu
 11. Explicit reference context
 12. Tool results or continuation feedback
@@ -350,10 +350,10 @@ A turn can also attach to larger orchestration:
 |---|---|
 | Direct provider/tool loop | Normal chat and tool use |
 | Delegation | Parent session spawns bounded child agent sessions |
-| Workflow | Durable multi-step execution is started or resumed |
+| Durable Tasks | Durable multi-step execution is started or resumed |
 | Channel gateway | Remote surfaces route messages, progress, approvals, and final delivery |
 
-`AgentLoop.handle()` coordinates the turn boundary. Provider iteration, tool planning, skill playbooks, child loop construction, and workflow execution live in specialized components.
+`AgentLoop.handle()` coordinates the turn boundary. Provider iteration, tool planning, skill playbooks, child loop construction, and Task execution live in specialized components.
 
 ---
 
@@ -376,7 +376,7 @@ A turn can also attach to larger orchestration:
 | Gateway | `live-proven` | Channel auth, routing, approvals, and delivery. |
 | Setup and verification | `live-proven` | Onboarding, setup editor, and readiness checks. |
 | Delegation | `implemented` | Durable root/child Tasks with bounded worker execution and Attempt visibility. |
-| Workflow | `implemented` | Durable multi-step execution with SQLite-backed state. |
+| Durable Tasks | `implemented` | Durable multi-step execution with SQLite-backed state. |
 | Packs | `implemented` | Pack validation, install, risk, and permission checks. |
 | Lifecycle | `implemented` | Install, update, uninstall support, and state preservation. |
 | Agent Evolution | `implemented` | Candidate lifecycle, gates, and export format. |

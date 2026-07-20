@@ -60,7 +60,7 @@ describe("SQLiteTaskStore", () => {
     expect(version).toBe(TASK_SCHEMA_VERSION);
     expect(foreignKeys).toBe(1);
     expect([...TASK_TABLES].every((table) => tables.has(table))).toBe(true);
-    expect([...WORKFLOW_TABLES].every((table) => !tables.has(table))).toBe(true);
+    expect([...OBSOLETE_EXECUTION_TABLES].every((table) => !tables.has(table))).toBe(true);
     expect(leaseColumns.some((column) => column.name === "cancellation_requested_at")).toBe(true);
     expect(attemptColumns.some((column) => column.name === "lease_generation")).toBe(true);
   });
@@ -388,7 +388,7 @@ describe("SQLiteTaskStore", () => {
 });
 
 describe("Task schema migrations", () => {
-  it("drops Workflow persistence while preserving unrelated session data", async () => {
+  it("drops obsolete execution persistence while preserving unrelated session data", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "estacoda-task-migration-"));
     const dbPath = join(tempDir, "sessions.sqlite");
     const legacy = openDefaultSQLiteDatabase({ path: dbPath });
@@ -891,7 +891,7 @@ const TASK_TABLES = [
   "task_delivery_bindings"
 ] as const;
 
-const WORKFLOW_TABLES = [
+const OBSOLETE_EXECUTION_TABLES = [
   "workflow_runs",
   "workflow_steps",
   "workflow_events",

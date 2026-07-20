@@ -567,7 +567,7 @@ class SkillLearningStore {
     await this.#reconcileCreatedPathsLoaded();
     const existing = this.#records.get(key);
     if (existing === undefined) {
-      throw new Error(`Workflow candidate not found: ${key}`);
+      throw new Error(`Skill learning candidate not found: ${key}`);
     }
     if (existing.status === "stale") {
       return existing;
@@ -614,7 +614,7 @@ class SkillLearningStore {
     await this.#ensureLoaded();
     const existing = this.#records.get(key);
     if (existing === undefined) {
-      throw new Error(`Workflow record not found: ${key}`);
+      throw new Error(`Skill learning record not found: ${key}`);
     }
     const updated: SkillLearningRecord = {
       ...existing,

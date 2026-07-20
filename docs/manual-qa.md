@@ -578,7 +578,7 @@ HOME=/tmp/estacoda-qa-broken-config pnpm run dev -- setup --interactive
 
 **Verify:**
 - Output shows EstaCoda Doctor with the config syntax/load error.
-- Normal provider/model/security/workflow edits are not offered.
+- Normal provider, model, security, and Agent Evolution edits are not offered.
 - Only EstaCoda Doctor and exit are available.
 - No normal config patch is drafted while config is unsafe.
 

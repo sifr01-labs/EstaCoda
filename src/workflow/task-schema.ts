@@ -2,7 +2,7 @@ import type { SQLiteDatabase } from "../storage/sqlite.js";
 
 export const TASK_SCHEMA_VERSION = 15;
 
-const WORKFLOW_TABLES = [
+const OBSOLETE_EXECUTION_TABLES = [
   "workflow_event_summaries",
   "workflow_approval_gates",
   "workflow_operator_events",
@@ -27,13 +27,9 @@ const WORKFLOW_TABLES = [
   "flows"
 ] as const;
 
-/**
- * Replaces the pre-Task Workflow persistence model. Legacy Workflow rows are
- * intentionally not converted: Task authority, immutable plans, attempts, and
- * profile ownership cannot be inferred safely from those records.
- */
+/** Drops incompatible pre-Task state before installing the authoritative Task schema. */
 export function migrateTaskSchemaV10(db: SQLiteDatabase): void {
-  for (const table of WORKFLOW_TABLES) {
+  for (const table of OBSOLETE_EXECUTION_TABLES) {
     db.exec(`drop table if exists ${table}`);
   }
 

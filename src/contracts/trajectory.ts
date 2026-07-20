@@ -15,8 +15,6 @@ export type TrajectoryEventKind =
   | "memory-promotion"
   | "memory-promotion-failed"
   | "memory-file-compaction"
-  | "delegation-started"
-  | "delegation-finished"
   | "provider-completion"
   | "provider-continuation"
   | "provider-iteration"

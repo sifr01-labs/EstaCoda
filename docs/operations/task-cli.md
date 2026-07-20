@@ -18,7 +18,7 @@ estacoda task retry <task-id> [step-id]
 estacoda task result <task-id>
 ```
 
-`begin` requires a trusted workspace. Without `--session`, it creates an explicit system-owned root Task and does not invent a hidden session. With `--session`, that session must exist in the selected profile and becomes the creator. The initial graph is one conservative agent Step with bounded authority and budget; later planning can extend durable Task capabilities without reviving the retired Workflow engine.
+`begin` requires a trusted workspace. Without `--session`, it creates an explicit system-owned root Task and does not invent a hidden session. With `--session`, that session must exist in the selected profile and becomes the creator. The initial graph is one conservative agent Step with bounded authority and budget; later planning can extend durable Task capabilities through immutable PlanRevisions.
 
 `list` defaults to 20 entries and accepts a limit from 1 to 100. `show` reports status, Step progress, running and waiting counts, estimated cost and usage completeness, result count, workspace trust, and background-host state. `result` lists bounded opaque result handles and summaries; it does not print result bodies.
 

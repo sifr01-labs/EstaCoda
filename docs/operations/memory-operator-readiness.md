@@ -273,7 +273,7 @@ Before merge or release, inspect:
 - Memory File Compaction creates backups and scans generated content before writes.
 - Semantic compression is experimental/default-off and preserves protected head/tail/latest-user/tool-pair context. Tool-result pruning is compression-input-only and must not mutate persisted history.
 - Transcript-preserving semantic compaction must create the child transcript before marking the parent ended; audit/event write failures may warn but must not corrupt parent or child transcript state.
-- Workflow event summaries remain separate from bare `/compact`.
+- Durable Task state remains separate from bare `/compact`.
 
 ## Rollout Guidance
 

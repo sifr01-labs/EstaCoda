@@ -21,7 +21,6 @@ import {
 import { DEFAULT_DELEGATION_CONFIG } from "./delegation-defaults.js";
 import { DEFAULT_MEMORY_CONFIG } from "./memory-config.js";
 import { resolveProfileStateHome } from "./profile-home.js";
-import type { SessionEvent } from "../contracts/session.js";
 
 function profileConfigPath(homeDir: string): string {
   return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
@@ -313,47 +312,6 @@ describe("normalizeDelegationConfig", () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
-  it("keeps delegation session events backward-compatible", () => {
-    const legacyEvents: SessionEvent[] = [
-      {
-        kind: "delegation-started",
-        childSessionId: "child-1",
-        task: "Inspect files",
-        allowedToolsets: []
-      },
-      {
-        kind: "delegation-finished",
-        childSessionId: "child-1",
-        summary: "Done",
-        status: "completed"
-      }
-    ];
-    const extendedEvents: SessionEvent[] = [
-      {
-        kind: "delegation-started",
-        childSessionId: "child-2",
-        task: "Inspect files",
-        allowedToolsets: [],
-        role: "leaf",
-        depth: 1,
-        taskIndex: 0,
-        batchId: "batch-1"
-      },
-      {
-        kind: "delegation-finished",
-        childSessionId: "child-2",
-        summary: "Timed out",
-        status: "failed",
-        durationMs: 600_000,
-        error: "timeout",
-        taskIndex: 0,
-        batchId: "batch-1"
-      }
-    ];
-
-    expect(legacyEvents).toHaveLength(2);
-    expect(extendedEvents).toHaveLength(2);
-  });
 });
 
 describe("normalizeExternalMemoryConfig", () => {

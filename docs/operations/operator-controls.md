@@ -283,7 +283,7 @@ Sessions are **separate by default**. A CLI session and a channel session for th
 
 `sessions recall` is bounded historical recall. It is profile-scoped, workspace-scoped when workspace metadata is available, and labeled as untrusted context. It uses auxiliary `session_search` summarization when configured and deterministic snippets as fallback.
 
-`sessions compact` is semantic session compression. It compacts older history for the target session through the active runtime service. It is separate from Workflow event summaries and Memory File Compaction. The top-level CLI command is non-rotating in this implementation; it does not adopt a compacted child session.
+`sessions compact` is semantic session compression. It compacts older history for the target session through the active runtime service. It does not rewrite durable Task state or run Memory File Compaction. The top-level CLI command is non-rotating in this implementation; it does not adopt a compacted child session.
 
 ## Channel Slash Commands
 

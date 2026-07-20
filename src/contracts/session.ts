@@ -16,7 +16,7 @@ import type {
   CompiledSkillPlaybook
 } from "./skill.js";
 import type { FailureRecord } from "./failure.js";
-import type { DelegateModelOverrideMetadata, DelegateRole, DelegationStaleFileWarning } from "./delegation.js";
+import type { DelegateRole } from "./delegation.js";
 import type {
   ModelProfile,
   ProviderApiMode,
@@ -276,47 +276,6 @@ export type SessionEvent =
         warnings: string[];
       }>;
       warnings: string[];
-    }
-  | {
-      kind: "delegation-started";
-      childSessionId: string;
-      task: string;
-      allowedToolsets: string[];
-      allowedTools?: string[];
-      role?: DelegateRole;
-      depth?: number;
-      taskIndex?: number;
-      batchId?: string;
-      modelOverride?: DelegateModelOverrideMetadata;
-    }
-  | {
-      kind: "delegation-finished";
-      childSessionId: string;
-      summary: string;
-      status: "completed" | "blocked" | "failed";
-      reason?: "cancelled" | "blocked" | "provider-error" | "runtime-error" | "construction-error" | "spawn-depth-exceeded" | "spawn-paused" | "timeout" | "model-override-unsupported";
-      durationMs?: number;
-      error?: string;
-      taskIndex?: number;
-      batchId?: string;
-      diagnosticPath?: string;
-      usage?: ProviderUsage;
-	      aggregateUsage?: ProviderUsage;
-	      usageUnavailable?: boolean;
-        modelOverride?: DelegateModelOverrideMetadata;
-	      staleFileWarnings?: DelegationStaleFileWarning[];
-	      staleFileWarningCount?: number;
-	    }
-  | {
-      kind: "delegation-heartbeat";
-      childSessionId?: string;
-      activeChildCount: number;
-      completedCount: number;
-      failedCount: number;
-      lastActivityAt: string;
-      stale?: boolean;
-      taskIndex?: number;
-      batchId?: string;
     }
   | {
       kind: "delegation-diagnostic";

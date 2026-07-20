@@ -131,7 +131,7 @@ Prompt assembly is layered and partly cacheable. Key context groups:
 9. Skill instructions
 10. Skill setup
 11. Skill resources
-12. Workflow plan
+12. Skill playbook plan
 13. Tool menu
 14. Explicit reference context
 15. Tool results / continuation feedback
