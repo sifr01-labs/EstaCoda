@@ -92,6 +92,89 @@ describe("TaskScheduler", () => {
     expect(new Set(attempts.map((attempt) => attempt.dispatchKey)).size).toBe(2);
   });
 
+  it("confirms durable dispatch before Attempt execution settles", async () => {
+    store.createTaskGraph(makeGraph([makeStep("long", 0)]));
+    let finish: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    const executor = new FakeTaskStepExecutor(async () => {
+      await gate;
+      return { outcome: "succeeded", results: [{ kind: "text", content: "done" }] };
+    });
+    const scheduler = makeScheduler(executor);
+
+    const dispatch = await scheduler.dispatchOnce({ eligibleTaskIds: ["task-alpha"] });
+
+    expect(dispatch).toMatchObject({ dispatched: 1, completed: 0, failed: 0 });
+    expect(executor.executions).toHaveLength(1);
+    expect(store.listAttempts("task-alpha")[0]).toMatchObject({ status: "running" });
+    expect(scheduler.hasPendingWork()).toBe(true);
+
+    finish!();
+    await expect(dispatch.completion).resolves.toMatchObject({ dispatched: 1, completed: 1, failed: 0 });
+    expect(store.getTask("task-alpha")?.status).toBe("completed");
+    expect(scheduler.hasPendingWork()).toBe(false);
+  });
+
+  it("dispatches and reconciles only Tasks selected by the owning host", async () => {
+    const excluded = makeGraph([makeStep("excluded", 0)]);
+    excluded.task.status = "running";
+    excluded.task.startedAt = NOW;
+    excluded.steps[0]!.status = "running";
+    store.createTaskGraph(excluded);
+    store.createAttempt(makeRunningAttempt(
+      excluded.steps[0]!,
+      "attempt-excluded",
+      "2029-12-31T23:59:00.000Z"
+    ));
+    store.createTaskGraph(makeGraphFor("task-selected", "selected"));
+    const executor = new FakeTaskStepExecutor(({ task }) => ({
+      outcome: "succeeded",
+      results: [{ kind: "text", content: task.id }]
+    }));
+    const scheduler = makeScheduler(executor);
+
+    const dispatch = await scheduler.dispatchOnce({ eligibleTaskIds: ["task-selected"] });
+    await expect(dispatch.completion).resolves.toMatchObject({ dispatched: 1, completed: 1 });
+
+    expect(executor.executions.map(({ task }) => task.id)).toEqual(["task-selected"]);
+    expect(store.listAttempts("task-alpha")).toEqual([
+      expect.objectContaining({ id: "attempt-excluded", status: "leased" })
+    ]);
+    expect(store.getTask("task-alpha")?.status).toBe("running");
+    expect(store.listEvents("task-alpha", { kinds: ["attempt-expired"] })).toHaveLength(0);
+    expect(store.getTask("task-selected")?.status).toBe("completed");
+  });
+
+  it("stops admitting new work and drains the final durable settlement on shutdown", async () => {
+    store.createTaskGraph(makeGraph([makeStep("active", 0)]));
+    store.createTaskGraph(makeGraphFor("task-waiting", "waiting"));
+    let finish: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    const executor = new FakeTaskStepExecutor(async ({ task }) => {
+      if (task.id === "task-alpha") await gate;
+      return { outcome: "succeeded", results: [{ kind: "text", content: task.id }] };
+    });
+    const scheduler = makeScheduler(executor);
+    const active = await scheduler.dispatchOnce({ eligibleTaskIds: ["task-alpha"] });
+
+    let shutdownFinished = false;
+    const shutdown = scheduler.shutdown().then(() => { shutdownFinished = true; });
+    expect(scheduler.isAcceptingDispatch()).toBe(false);
+    expect((await scheduler.dispatchOnce({ eligibleTaskIds: ["task-waiting"] })).dispatched).toBe(0);
+    await Promise.resolve();
+    expect(shutdownFinished).toBe(false);
+
+    finish!();
+    await active.completion;
+    await shutdown;
+
+    expect(shutdownFinished).toBe(true);
+    expect(scheduler.hasPendingWork()).toBe(false);
+    expect(store.getTask("task-alpha")?.status).toBe("completed");
+    expect(store.getTask("task-waiting")?.status).toBe("queued");
+    expect(store.listAttempts("task-waiting")).toHaveLength(0);
+  });
+
   it("enforces profile and Task concurrency without duplicate dispatch", async () => {
     store.createTaskGraph(makeGraph([
       makeStep("one", 0),
@@ -723,6 +806,30 @@ function makeGraph(
     activatedAt: NOW
   };
   return { task, revision, steps };
+}
+
+function makeGraphFor(
+  taskId: string,
+  stepKey: string
+): { task: Task; revision: TaskPlanRevision; steps: TaskStep[] } {
+  const revisionId = `revision-${taskId}`;
+  const step = makeStep(stepKey, 0, {
+    id: `step-${taskId}-${stepKey}`,
+    taskId,
+    planRevisionId: revisionId
+  });
+  const graph = makeGraph([step]);
+  return {
+    task: {
+      ...graph.task,
+      id: taskId,
+      rootTaskId: taskId,
+      creationKey: `create-${taskId}`,
+      activePlanRevisionId: revisionId
+    },
+    revision: { ...graph.revision, id: revisionId, taskId },
+    steps: [step]
+  };
 }
 
 function makeStep(

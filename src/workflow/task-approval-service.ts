@@ -121,9 +121,10 @@ export class TaskApprovalService {
     };
   }
 
-  async reconcile(): Promise<void> {
+  async reconcile(options: { eligibleTaskIds?: ReadonlySet<string> } = {}): Promise<void> {
     const links = this.#store.listApprovalLinks({ statuses: ["requesting", "pending"], limit: 1_000 });
     for (const link of links) {
+      if (options.eligibleTaskIds !== undefined && !options.eligibleTaskIds.has(link.taskId)) continue;
       if (link.status === "requesting") await this.#enqueue(link);
       else await this.#refresh(link);
     }

@@ -89,6 +89,16 @@ export type TaskSchedulerRunResult = {
   warnings: readonly string[];
 };
 
+export type TaskSchedulerDispatchOptions = {
+  /** Exact Task IDs whose host ownership has already been established by the caller. */
+  eligibleTaskIds?: readonly string[];
+};
+
+/** Durable dispatch confirmation plus the independently settling execution batch. */
+export type TaskSchedulerDispatchResult = TaskSchedulerRunResult & {
+  completion: Promise<TaskSchedulerRunResult>;
+};
+
 export type TaskRetryDecision = {
   retry: boolean;
   delayMs: number;
@@ -143,6 +153,9 @@ export class TaskScheduler {
   readonly #eventId: () => string;
   readonly #approvalService: TaskApprovalService | undefined;
   readonly #running = new Map<string, RunningExecution>();
+  readonly #activeDispatches = new Set<Promise<TaskSchedulerDispatchResult>>();
+  readonly #activeBatches = new Set<Promise<TaskSchedulerRunResult>>();
+  #acceptingDispatch = true;
 
   constructor(options: TaskSchedulerOptions) {
     this.#store = options.store;
@@ -168,16 +181,35 @@ export class TaskScheduler {
     return this.#ownerId;
   }
 
-  async runOnce(): Promise<TaskSchedulerRunResult> {
+  async runOnce(options: TaskSchedulerDispatchOptions = {}): Promise<TaskSchedulerRunResult> {
+    const dispatch = await this.dispatchOnce(options);
+    return await dispatch.completion;
+  }
+
+  /**
+   * Claims and starts eligible Attempts, then returns without waiting for their
+   * provider or tool work to finish. The completion promise is always observed
+   * internally and may be awaited by hosts that need settlement details.
+   */
+  dispatchOnce(options: TaskSchedulerDispatchOptions = {}): Promise<TaskSchedulerDispatchResult> {
+    if (!this.#acceptingDispatch) return Promise.resolve(completedDispatch(emptyRunResult()));
+    const dispatch = this.#dispatchEligibleTasks(options);
+    this.#trackDispatch(dispatch);
+    return dispatch;
+  }
+
+  async #dispatchEligibleTasks(options: TaskSchedulerDispatchOptions): Promise<TaskSchedulerDispatchResult> {
     const result: MutableRunResult = emptyRunResult();
-    await this.#approvalService?.reconcile();
-    this.#reconcileApprovals(result);
-    this.#reconcile(result);
+    const eligibleTaskIds = normalizeEligibleTaskIds(options.eligibleTaskIds);
+    await this.#approvalService?.reconcile({ eligibleTaskIds });
+    if (!this.#acceptingDispatch) return completedDispatch(result);
+    this.#reconcileApprovals(result, eligibleTaskIds);
+    this.#reconcile(result, eligibleTaskIds);
 
     const tasks = this.#store.listTasks({
       statuses: ["queued", "running", "waiting_for_host"],
       limit: 1_000
-    }).sort(compareTasks);
+    }).filter((task) => isEligibleTask(task.id, eligibleTaskIds)).sort(compareTasks);
     const prepared: Task[] = [];
     for (const task of tasks) {
       const resumed = task.status === "waiting_for_host" ? this.#resumeForAvailableHost(task) : task;
@@ -224,7 +256,8 @@ export class TaskScheduler {
         result.dispatched++;
         touchedTaskIds.add(task.id);
         incrementCapacity(capacity, task, step);
-        launches.push(this.#execute(task, step, started, executor, result));
+        const launch = Promise.resolve().then(() => this.#execute(task, step, started, executor, result));
+        launches.push(launch);
       }
       if (missingExecutor && !hasEligibleExecutor && (capacity.task.get(task.id) ?? 0) === 0) {
         this.#waitForEligibleHost(task.id);
@@ -232,9 +265,38 @@ export class TaskScheduler {
       }
     }
 
-    await Promise.all(launches);
-    for (const taskId of touchedTaskIds) this.#finalizeTaskIfSettled(taskId);
-    return result;
+    const completion = Promise.all(launches).then(() => {
+      for (const taskId of touchedTaskIds) this.#finalizeTaskIfSettled(taskId);
+      return snapshotRunResult(result);
+    });
+    this.#trackBatch(completion);
+    void completion.catch(() => undefined);
+    return { ...snapshotRunResult(result), completion };
+  }
+
+  /** Prevents this process from claiming additional Steps. Existing Attempts continue settling. */
+  stopDispatching(): void {
+    this.#acceptingDispatch = false;
+  }
+
+  isAcceptingDispatch(): boolean {
+    return this.#acceptingDispatch;
+  }
+
+  hasPendingWork(): boolean {
+    return this.#activeDispatches.size > 0 || this.#activeBatches.size > 0;
+  }
+
+  /** Waits for work already owned by this scheduler without admitting new work. */
+  async shutdown(): Promise<void> {
+    this.stopDispatching();
+    await this.waitForIdle();
+  }
+
+  async waitForIdle(): Promise<void> {
+    while (this.#activeDispatches.size > 0 || this.#activeBatches.size > 0) {
+      await Promise.allSettled([...this.#activeDispatches, ...this.#activeBatches]);
+    }
   }
 
   cancelTask(taskId: string, reasonCode = "operator-request"): Task {
@@ -345,9 +407,10 @@ export class TaskScheduler {
     return renewed;
   }
 
-  #reconcileApprovals(result: MutableRunResult): void {
+  #reconcileApprovals(result: MutableRunResult, eligibleTaskIds: ReadonlySet<string> | undefined): void {
     const links = this.#store.listApprovalLinks({ statuses: ["approved", "denied", "expired"], limit: 1_000 });
     for (const link of links) {
+      if (!isEligibleTask(link.taskId, eligibleTaskIds)) continue;
       const task = this.#store.getTask(link.taskId);
       const step = this.#store.getStep(link.stepId);
       const attempt = this.#store.getAttempt(link.attemptId);
@@ -423,9 +486,10 @@ export class TaskScheduler {
     }
   }
 
-  #reconcile(result: MutableRunResult): void {
+  #reconcile(result: MutableRunResult, eligibleTaskIds: ReadonlySet<string> | undefined): void {
     const now = this.#now();
-    const tasks = this.#store.listTasks({ statuses: RECONCILABLE_TASK_STATUSES, limit: 1_000 });
+    const tasks = this.#store.listTasks({ statuses: RECONCILABLE_TASK_STATUSES, limit: 1_000 })
+      .filter((task) => isEligibleTask(task.id, eligibleTaskIds));
     for (const task of tasks) {
       for (const attempt of this.#store.listAttempts(task.id)) {
         if (!ACTIVE_ATTEMPT_STATUSES.includes(attempt.status)) continue;
@@ -1408,6 +1472,22 @@ export class TaskScheduler {
     }
   }
 
+  #trackBatch(completion: Promise<TaskSchedulerRunResult>): void {
+    this.#activeBatches.add(completion);
+    void completion.then(
+      () => { this.#activeBatches.delete(completion); },
+      () => { this.#activeBatches.delete(completion); }
+    );
+  }
+
+  #trackDispatch(dispatch: Promise<TaskSchedulerDispatchResult>): void {
+    this.#activeDispatches.add(dispatch);
+    void dispatch.then(
+      () => { this.#activeDispatches.delete(dispatch); },
+      () => { this.#activeDispatches.delete(dispatch); }
+    );
+  }
+
   #event(
     task: Task,
     kind: TaskEventKind,
@@ -1637,6 +1717,32 @@ function fenceInput(lease: TaskAttemptLease): {
 
 function emptyRunResult(): MutableRunResult {
   return { reconciled: 0, dispatched: 0, completed: 0, failed: 0, cancelled: 0, leaseLost: 0, warnings: [] };
+}
+
+function snapshotRunResult(result: MutableRunResult): TaskSchedulerRunResult {
+  return {
+    reconciled: result.reconciled,
+    dispatched: result.dispatched,
+    completed: result.completed,
+    failed: result.failed,
+    cancelled: result.cancelled,
+    leaseLost: result.leaseLost,
+    warnings: [...result.warnings]
+  };
+}
+
+function completedDispatch(result: MutableRunResult): TaskSchedulerDispatchResult {
+  const snapshot = snapshotRunResult(result);
+  return { ...snapshot, completion: Promise.resolve(snapshot) };
+}
+
+function normalizeEligibleTaskIds(taskIds: readonly string[] | undefined): ReadonlySet<string> | undefined {
+  if (taskIds === undefined) return undefined;
+  return new Set(taskIds.map((taskId) => requireToken(taskId, "eligible Task ID")));
+}
+
+function isEligibleTask(taskId: string, eligibleTaskIds: ReadonlySet<string> | undefined): boolean {
+  return eligibleTaskIds?.has(taskId) ?? true;
 }
 
 function incrementCapacity(state: CapacityState, task: Task, step: TaskStep): void {
