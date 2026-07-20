@@ -153,7 +153,7 @@ function renderRegionLines(
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "statusRail") {
-    return [{ region: region.kind, text: renderStatusRailSurface(state.status, { width: region.width, style: state.style }) }];
+    return [{ region: region.kind, text: renderStatusRailSurface(state.status, { width: region.width, style: state.style, locale: state.locale }) }];
   }
   const lines: OperatorConsoleRenderedLine[] = [];
   for (let row = 0; row < region.height; row += 1) {
@@ -197,7 +197,7 @@ function regionLabel(
     case "slashMenu":
       return `Slash menu: ${state.slash?.query ?? ""}`;
     case "statusRail":
-      return renderStatusRailSurface(state.status, { width: region.width, style: state.style });
+      return renderStatusRailSurface(state.status, { width: region.width, style: state.style, locale: state.locale });
     case "activeWork":
       return "";
   }

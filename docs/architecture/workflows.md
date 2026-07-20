@@ -110,6 +110,14 @@ Successful text and JSON results are captured in full. Artifact bodies are accep
 
 Usage is one profile-owned, append-only provider-request ledger for ordinary turns and Task workers. Every row uses the persisted user-message ID as its visible turn, a deterministic request key, the exact resolved provider/model route, route role and attempt index, dispatch time, input/output/reasoning/cache-read/cache-write tokens, full-precision known estimated cost, and explicit usage/pricing completeness. Optional root Task, Task, PlanRevision, Step, and Attempt fields provide durable worker attribution. Initial calls, continuations, fallbacks, retries, and failed requests that reached an adapter are included; preflight failures that never dispatched are excluded. Deterministic keys make runtime replay and approval resume idempotent. The same rows project to Attempt, Step, Task subtree, visible turn, or session—there is no separate delegation-cost or session-cost ledger.
 
+Turn and session UX reads projections rather than maintaining counters. A
+session projection includes direct requests from the current session and its
+verified transcript-compression ancestors, plus root Task trees whose immutable
+origin session is in that lineage. It does not follow ordinary session parents
+or worker/delegation parents. Request keys are deduplicated across the direct
+and Task queries. Complete pricing is approximate, partial known pricing is a
+lower bound, and a projection with no usable price is unavailable.
+
 ## Background host and restart recovery
 
 The selected profile's gateway supervisor owns the Task host. It runs even when no channel adapter is configured, so service mode is now a general background host for Tasks and cron rather than a cron-only process. Each supervisor tick starts at most one Task pass; overlapping ticks are skipped. Shutdown drain waits for active Task work as well as channel turns, and the shared session database remains open until active Task/finalization work settles.

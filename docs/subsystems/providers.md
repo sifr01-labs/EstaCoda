@@ -129,6 +129,12 @@ Provider usage metadata is normalized as:
 
 Every dispatched main-turn request is recorded in the profile-owned canonical provider-request ledger. Ordinary turns and durable Task workers use the same writer. Pricing uses the exact resolved route and separates uncached input, output, reasoning, cache-read, and cache-write rates; unknown components remain explicitly incomplete instead of being treated as zero. Preflight route and credential failures that never call an adapter are not ledger requests.
 
+UI cost is a read projection of that ledger. A complete projection renders an
+approximate estimate, a projection with some known price components renders a
+lower bound, and a projection with no usable price renders unavailable. Ledger
+read failure does not discard an otherwise completed model response and is not
+reported as zero cost.
+
 Operators can inspect provider final-state behavior through runtime `provider-result` events and session `provider-completion` / `provider-continuation` events. These events include finish reason, incomplete reason, usage, safe reasoning metadata, fallback status, and safe `runtimeMetadata` for truncation or continuation. They do not include raw provider payloads, raw reasoning, or discarded truncated tool arguments.
 
 ## Native Tool-Call Replay

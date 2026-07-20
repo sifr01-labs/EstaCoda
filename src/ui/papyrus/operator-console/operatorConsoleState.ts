@@ -5,6 +5,7 @@ import {
 } from "./focusModel.js";
 import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
 import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
+import type { UsageCostSummary } from "../../../contracts/usage-cost.js";
 
 export type OperatorConsoleMode = "session" | "setup";
 
@@ -42,6 +43,7 @@ export type StatusRailState = {
     readonly elapsedMs: number;
     readonly startedAtMs?: number;
   };
+  readonly sessionCost?: Pick<UsageCostSummary, "estimatedCostUsd" | "costComplete">;
   readonly security?: {
     readonly yolo: boolean;
   };
@@ -151,7 +153,7 @@ export type TaskCardState = {
   readonly usage: {
     readonly providerCalls: number;
     readonly totalTokens: number;
-    readonly estimatedCostUsd: number;
+    readonly estimatedCostUsd?: number;
     readonly usageComplete: boolean;
     readonly pricingComplete: boolean;
   };

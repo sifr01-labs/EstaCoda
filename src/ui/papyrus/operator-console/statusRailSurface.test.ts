@@ -55,6 +55,29 @@ describe("Papyrus operator console status rail surface", () => {
     expect(minimal).toBe("kimi ● 7% 01:12");
   });
 
+  it("keeps complete and partial session cost visible in narrow layouts", () => {
+    const complete = status({
+      sessionCost: { estimatedCostUsd: 0.73, costComplete: true },
+    });
+    const partial = status({
+      sessionCost: { estimatedCostUsd: 0.84, costComplete: false },
+    });
+
+    expect(renderStatusRailSurface(complete, { width: 80 })).toContain("session ≈ $0.73");
+    expect(renderStatusRailSurface(complete, { width: 30 })).toContain("≈ $0.73");
+    expect(renderStatusRailSurface(partial, { width: 30 })).toContain("≥ $0.84");
+    expect(renderStatusRailSurface(partial, { width: 16 })).toContain("≥ $0.84");
+  });
+
+  it("uses isolated Arabic cost text", () => {
+    const output = renderStatusRailSurface(status({
+      sessionCost: { estimatedCostUsd: 0.84, costComplete: false },
+    }), { width: 80, locale: "ar" });
+
+    expect(output).toContain("الجلسة");
+    expect(output).toContain("\u2066≥ $0.84\u2069");
+  });
+
   it("never exceeds the terminal width", () => {
     for (const width of [0, 1, 8, 16, 30, 55, 80]) {
       expect(stringWidth(renderStatusRailSurface(status(), { width }))).toBeLessThanOrEqual(width);

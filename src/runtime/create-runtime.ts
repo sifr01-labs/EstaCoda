@@ -50,8 +50,10 @@ import { ProviderRegistry } from "../providers/provider-registry.js";
 import { getDefaultApiKeyEnv, getProviderMetadata } from "../providers/provider-metadata.js";
 import type { SecurityApprovalMode, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import type { SessionContextWindowUsage, SessionDB } from "../contracts/session.js";
+import type { SessionCostSummary } from "../contracts/usage-cost.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { loadSessionContextWindowUsage } from "../session/session-context-window-usage.js";
+import { loadSessionCostUsage } from "../session/session-cost-usage.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import {
   SessionFinalizationQueue,
@@ -241,6 +243,7 @@ export type Runtime = {
   resolveSkill?(name: string): LoadedSkill | SkillDefinition | undefined;
   latestResumeNote(): Promise<string | undefined>;
   currentContextWindowUsage?(): Promise<SessionContextWindowUsage | undefined>;
+  currentSessionCost?(): Promise<SessionCostSummary | undefined>;
   inspectMemoryPromotions(): Promise<MemoryPromotionRecord[]>;
   recallSession?(query: string): Promise<SessionRecallResult>;
   compactSession?(input?: {
@@ -1073,6 +1076,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     async currentContextWindowUsage() {
       return await loadSessionContextWindowUsage({
         sessionDb,
+        sessionId: sessionRuntimeContext.currentSessionId(),
+        profileId
+      });
+    },
+    async currentSessionCost() {
+      return await loadSessionCostUsage({
+        sessionDb,
+        taskStore,
         sessionId: sessionRuntimeContext.currentSessionId(),
         profileId
       });

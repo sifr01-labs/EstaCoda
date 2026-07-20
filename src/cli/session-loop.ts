@@ -123,6 +123,10 @@ import { isMemoryCurationModeMutation, runMemoryOperatorCommand } from "../memor
 import type { SessionFinalizationReason } from "../session/session-finalization-queue.js";
 import type { TaskStatusProjection } from "../workflow/task-operator-service.js";
 import type { TaskCardState } from "../ui/papyrus/operator-console/operatorConsoleState.js";
+import type { SessionCostSummary, TurnUsageSummary, UsageCostSummary } from "../contracts/usage-cost.js";
+import { mergeUsageCostSummaries, unavailableUsageCostSummary } from "../providers/provider-usage-projection.js";
+import { formatUsageCost } from "../ui/usage-cost-format.js";
+import { isolateLtr, isolateRtl } from "../ui/bidi.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -155,6 +159,7 @@ export type SessionLoopOptions = {
 
 const OPERATOR_CONSOLE_FALLBACK_TERMINAL_HEIGHT = 24;
 const OPERATOR_CONSOLE_TASK_REFRESH_INTERVAL_MS = 750;
+const SESSION_COST_REFRESH_INTERVAL_MS = 750;
 const COMPACTION_PROMPT_PLACEHOLDER = "Compacting session history... Ctrl+C to cancel";
 
 type StatusRailTimerMode = "idle" | "active-turn" | "last-turn";
@@ -335,6 +340,31 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     : undefined;
   operatorConsoleRuntimeHost?.setStyle(operatorConsoleStyle);
   let latestContextUsage: ContextUsageSnapshot | undefined;
+  let latestSessionCost: SessionCostSummary | undefined;
+  let sessionCostRefresh: Promise<void> | undefined;
+  let sessionCostRefreshedAtMs = Number.NEGATIVE_INFINITY;
+  const refreshSessionCost = (force = false): Promise<void> => {
+    if (sessionCostRefresh !== undefined) {
+      return force ? sessionCostRefresh.then(() => refreshSessionCost(true)) : sessionCostRefresh;
+    }
+    const timestamp = Date.now();
+    if (!force && timestamp - sessionCostRefreshedAtMs < SESSION_COST_REFRESH_INTERVAL_MS) {
+      return Promise.resolve();
+    }
+    const targetRuntime = runtime;
+    sessionCostRefresh = (async () => {
+      try {
+        const cost = await targetRuntime.currentSessionCost?.();
+        if (runtime === targetRuntime) latestSessionCost = cost;
+      } catch {
+        if (runtime === targetRuntime) latestSessionCost = unavailableUsageCostSummary("session-cost-read-failed");
+      }
+    })().finally(() => {
+      if (runtime === targetRuntime) sessionCostRefreshedAtMs = Date.now();
+      sessionCostRefresh = undefined;
+    });
+    return sessionCostRefresh;
+  };
   let timerMode: StatusRailTimerMode = "idle";
   let activeTurnStartedAtMs: number | undefined;
   let lastCompletedTurnSeconds: number | undefined;
@@ -348,17 +378,22 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     activeTurnStartedAtMs,
     lastCompletedTurnSeconds
   });
-  const getOperatorConsoleStatus = () => operatorConsoleStatusRailState({
-    runtime,
-    renderer,
-    contextUsage: latestContextUsage,
-    timing: railTiming(),
-    providerExecutionSummary: lastProviderExecutionSummary
-  });
+  const getOperatorConsoleStatus = () => {
+    void refreshSessionCost();
+    return operatorConsoleStatusRailState({
+      runtime,
+      renderer,
+      contextUsage: latestContextUsage,
+      sessionCost: latestSessionCost,
+      timing: railTiming(),
+      providerExecutionSummary: lastProviderExecutionSummary
+    });
+  };
   let cachedTaskRuntime: Runtime | undefined;
   let cachedTaskCards: readonly TaskCardState[] = [];
   let cachedTaskCardsAtMs = Number.NEGATIVE_INFINITY;
   const getOperatorConsoleTasks = () => {
+    void refreshSessionCost();
     const timestamp = Date.now();
     if (cachedTaskRuntime === runtime && timestamp - cachedTaskCardsAtMs < OPERATOR_CONSOLE_TASK_REFRESH_INTERVAL_MS) {
       return cachedTaskCards;
@@ -410,6 +445,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 
   try {
     latestContextUsage = await initialContextUsageForRuntime(runtime);
+    await refreshSessionCost(true);
     const resetTurnRailState = () => {
       timerMode = "idle";
       activeTurnStartedAtMs = undefined;
@@ -442,10 +478,12 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     let idleStatusTicker: ReturnType<typeof setInterval> | undefined;
     const writeSessionStatusRail = () => {
       if (!managedTty || operatorConsoleRuntimeHost !== undefined) return;
+      void refreshSessionCost();
       output.write(`${renderer.render(sessionStatusRailViewModel({
         runtime,
         renderer,
         contextUsage: latestContextUsage,
+        sessionCost: latestSessionCost,
         timing: railTiming(),
         providerExecutionSummary: lastProviderExecutionSummary
       }))}\n`);
@@ -597,9 +635,13 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         }
 
         if (typeof shouldExit !== "boolean") {
+          await sessionCostRefresh;
           await runtime.dispose();
           runtime = shouldExit.runtime;
           latestContextUsage = await initialContextUsageForRuntime(runtime);
+          latestSessionCost = undefined;
+          sessionCostRefreshedAtMs = Number.NEGATIVE_INFINITY;
+          await refreshSessionCost(true);
           lastProviderExecutionSummary = undefined;
           providerServingState = undefined;
           resetTurnRailState();
@@ -629,6 +671,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       let wroteUserPromptRail = false;
       let pendingSteeringNote: string | undefined;
       let steeringRetryUsed = false;
+      const mainAgentUsageParts: UsageCostSummary[] = [];
+      const totalUsageParts: UsageCostSummary[] = [];
       while (retryText !== undefined) {
         activeTurn = new AbortController();
         activeTurnCancelMessage = "Cancelling current turn. Press Ctrl+C again or type /exit to leave.";
@@ -929,12 +973,21 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	            clearActiveTurnChrome = () => undefined;
 	          });
         const response = await responsePromise;
+        if (response.turnUsage !== undefined) {
+          mainAgentUsageParts.push(response.turnUsage.mainAgent);
+          totalUsageParts.push(response.turnUsage.total);
+        }
+        const deliveredTurnUsage = combinedTurnUsage(response.turnUsage, mainAgentUsageParts, totalUsageParts);
+        await refreshSessionCost(true);
+        const willRetryForSteering = pendingSteeringNote !== undefined && !steeringRetryUsed;
         const completedActiveWork = operatorConsoleLiveFrame?.completeActiveWork();
-        if (completedActiveWork !== undefined) {
+        const completedCostRendered = completedActiveWork !== undefined && !willRetryForSteering;
+        if (completedCostRendered && completedActiveWork !== undefined) {
           const completedRows = renderCompletedActiveWorkSurface(completedActiveWork, {
             width: termWidth,
             locale: renderer.locale,
             style: operatorConsoleStyle,
+            turnUsage: deliveredTurnUsage,
           });
           writeTurnBoundaryRows(completedRows.length === 0 ? [] : completedRows);
           operatorConsoleLiveFrame?.resetActiveWork();
@@ -953,7 +1006,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	          timerMode = "last-turn";
 	        }
 	        writeSessionStatusRail();
-	        if (pendingSteeringNote !== undefined && !steeringRetryUsed) {
+	        if (willRetryForSteering && pendingSteeringNote !== undefined) {
 	          operatorConsoleLiveFrame?.resetStreaming();
 	          const steeringNote = pendingSteeringNote;
 	          pendingSteeringNote = undefined;
@@ -985,6 +1038,14 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	          output.write(`${providerServingAlert}\n`);
 	        }
 	        output.write(renderer.render(assistantVm));
+        if (!completedCostRendered && deliveredTurnUsage !== undefined) {
+          output.write(`\n${formatTurnCostLine(deliveredTurnUsage, renderer.locale === "ar" ? "ar" : "en")}\n`);
+        }
+        for (const notice of delegatedTaskNotices(response.toolExecutions, runtime, renderer.locale === "ar" ? "ar" : "en")) {
+          output.write(`${notice}\n`);
+        }
+        mainAgentUsageParts.length = 0;
+        totalUsageParts.length = 0;
         if (turnVoiceMode === "tts") {
           const playback = await playCliResponseIfEnabled({
             runtime,
@@ -2727,6 +2788,67 @@ function truncateSingleLine(value: string, maxLength: number): string {
   return `${singleLine.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
+function combinedTurnUsage(
+  current: TurnUsageSummary | undefined,
+  mainAgentParts: readonly UsageCostSummary[],
+  totalParts: readonly UsageCostSummary[]
+): TurnUsageSummary | undefined {
+  if (mainAgentParts.length === 0 || totalParts.length === 0) return undefined;
+  return {
+    turnId: current?.turnId ?? "combined-turn",
+    mainAgent: mergeUsageCostSummaries(mainAgentParts),
+    total: mergeUsageCostSummaries(totalParts),
+  };
+}
+
+function formatTurnCostLine(usage: TurnUsageSummary, locale: "en" | "ar"): string {
+  const cost = formatUsageCost(usage.total, { locale });
+  return locale === "ar"
+    ? isolateRtl(`تكلفة الدور ${cost}`)
+    : `Turn cost ${cost}`;
+}
+
+function delegatedTaskNotices(
+  executions: readonly ToolExecutionRecord[],
+  runtime: Runtime,
+  locale: "en" | "ar"
+): readonly string[] {
+  const notices: string[] = [];
+  const seen = new Set<string>();
+  for (const execution of executions) {
+    if (execution.tool.name !== "delegate_task" || execution.result?.ok !== true) continue;
+    const taskId = execution.result.metadata?.taskId;
+    if (typeof taskId !== "string" || taskId.length === 0 || seen.has(taskId)) continue;
+    seen.add(taskId);
+    const metadataStatus = execution.result.metadata?.status;
+    let status = typeof metadataStatus === "string" ? metadataStatus : "queued";
+    try {
+      status = runtime.taskOperator?.status(taskId, runtime.sessionId).status ?? status;
+    } catch {
+      // The durable handle is still valid when its retained card has not refreshed yet.
+    }
+    notices.push(locale === "ar"
+      ? isolateRtl(`مهمة مفوضة ${isolateLtr(taskId)} · ${localizedTaskStatus(status, "ar")}`)
+      : `Delegated Task ${taskId} · ${status}`);
+  }
+  return notices;
+}
+
+function localizedTaskStatus(status: string, locale: "en" | "ar"): string {
+  if (locale === "en") return status;
+  switch (status) {
+    case "queued": return "قيد الانتظار";
+    case "running": return "قيد التنفيذ";
+    case "completed": return "مكتملة";
+    case "partial": return "مكتملة جزئياً";
+    case "failed": return "فشلت";
+    case "cancelled": return "ملغاة";
+    case "paused": return "متوقفة مؤقتاً";
+    case "waiting-for-approval": return "بانتظار الموافقة";
+    default: return isolateLtr(status);
+  }
+}
+
 async function initialContextUsageForRuntime(runtime: Runtime): Promise<ContextUsageSnapshot | undefined> {
   const actual = await runtime.currentContextWindowUsage?.();
   return actual === undefined
@@ -2875,7 +2997,9 @@ function taskProjectionToCard(task: TaskStatusProjection): TaskCardState {
     usage: {
       providerCalls: task.usage.providerCalls,
       totalTokens: task.usage.totalTokens,
-      estimatedCostUsd: task.usage.estimatedCostUsd,
+      ...(task.usage.pricingComplete || task.usage.estimatedCostUsd > 0
+        ? { estimatedCostUsd: task.usage.estimatedCostUsd }
+        : {}),
       usageComplete: task.usage.usageComplete,
       pricingComplete: task.usage.pricingComplete,
     },

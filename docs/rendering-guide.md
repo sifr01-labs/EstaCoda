@@ -376,7 +376,7 @@ Operator Console region:
 
 The transcript area is append-oriented. The Operator Console region is
 cursor-managed and composed from `OperatorConsoleState`. Its persistent status
-rail contains only model, context usage/bar, and session timer. Tools,
+rail contains only model, context usage/bar, session cost, and session timer. Tools,
 approvals, workspace/trust, setup, steering, channel state, and active-turn
 noise belong in contextual surfaces, not in the rail.
 

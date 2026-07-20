@@ -554,6 +554,7 @@ export interface BuildSessionStatusRailInput {
   readonly sessionElapsedMs?: number;
   readonly currentTurnSeconds?: number;
   readonly contextUsage?: { readonly filled?: number; readonly total: number };
+  readonly sessionCost?: SessionStatusRailViewModel["sessionCost"];
 }
 
 export function buildSessionStatusRailViewModel(
@@ -570,6 +571,7 @@ export function buildSessionStatusRailViewModel(
     sessionElapsedMs: input.sessionElapsedMs,
     currentTurnSeconds: input.currentTurnSeconds,
     contextUsage: input.contextUsage,
+    sessionCost: input.sessionCost,
   };
 }
 

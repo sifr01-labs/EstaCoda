@@ -2,6 +2,8 @@
 // Pure structured data types for all CLI output surfaces.
 // No ANSI, formatting, terminal-width, or rendering logic.
 
+import type { UsageCostSummary } from "./usage-cost.js";
+
 export type ViewModelSeverity = "ok" | "warn" | "error" | "info";
 
 // ─────────────────────────────────────────────────────────────
@@ -402,6 +404,7 @@ export interface SessionStatusRailViewModel {
     readonly filled?: number;
     readonly total: number;
   };
+  readonly sessionCost?: Pick<UsageCostSummary, "estimatedCostUsd" | "costComplete">;
 }
 
 // ─────────────────────────────────────────────────────────────

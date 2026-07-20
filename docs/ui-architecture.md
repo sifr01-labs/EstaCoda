@@ -214,15 +214,24 @@ status rail
 setup/select panels where applicable
 ```
 
-The persistent status rail contains only model, context usage/bar, and session
-timer. Tools, approvals, workspace/trust, setup, steering, channel state, and
-active-turn noise belong in contextual surfaces and must not be smuggled into
-the rail.
+The persistent status rail contains only model, context usage/bar, session
+cost, and session timer. Cost is projected from the canonical provider-request
+ledger and remains visible when the layout narrows. Tools, approvals,
+workspace/trust, setup, steering, channel state, and active-turn noise belong
+in contextual surfaces and must not be smuggled into the rail.
 
 The context bar uses only the active session's last provider-reported input
 token count. It holds that value across turns and usage-less responses and
 shows `--/total` before the first measurement or after compaction/model changes.
 Live and assembled-prompt estimates are not rail state.
+
+Delivered responses show their visible-turn estimate. Completed active-work
+cards split this into `Main agent` and `Turn total`; a turn without a completed
+work card uses the compact `Turn cost` line. CLI steering retries are combined
+into the one response ultimately delivered to the transcript. Complete,
+partial, and unavailable pricing render as `≈`, `at least ≈` (or compact `≥`),
+and `unavailable`; unknown pricing is never formatted as an incomplete zero.
+Arabic currency fragments remain LTR-isolated.
 
 Do not manually combine removed transient-region calls with Papyrus prompt
 rendering. The raw prompt render loop is only a terminal diff/write/cursor

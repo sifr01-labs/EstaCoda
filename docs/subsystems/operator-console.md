@@ -71,11 +71,18 @@ The persistent status rail contains only:
 
 - model
 - context usage / context bar
+- session cost
 - session timer
 
 Tools, approvals, attachments, steering, workspace/trust, setup state, channel
 state, and active-turn noise must not be added to the persistent rail. They get
 contextual surfaces.
+
+Session cost is a projection of persisted canonical provider-request rows. The
+rail prioritizes the cost segment over context detail in narrow layouts. It is
+restored after restart and follows only verified transcript-compression
+ancestry; an ordinary parent or delegated worker-session relationship does not
+join session totals.
 
 ## State Model Sketch
 
@@ -334,6 +341,12 @@ The completed turn retains the ordinary `delegate_task` row and its bounded
 handle metadata. Task progress, approval waits, cancellation, result bodies,
 and terminal settlement are sourced from the durable Task journal.
 
+The delivered response also prints the durable Task handle and current bounded
+status. As asynchronous work settles, its retained Task card and the current
+session total refresh from persisted accounting; old assistant transcript
+messages are not rewritten. Task cards use the same complete/lower-bound/
+unavailable cost language as turns and never present missing pricing as zero.
+
 Linked Tasks also render as retained Task cards in the interactive console.
 Cards remain available after completion, failure, partial settlement, or
 cancellation; they are not transient worker rows. `Tab` (when no higher-priority
@@ -361,6 +374,11 @@ a failed provider route cannot remain visible as accepted worker output; the
 Task result becomes readable only through the verified result surface after
 settlement. Tool-call transitions update the safe activity checkpoint without
 persisting tool arguments, previews, or result bodies.
+
+For a completed synchronous turn, the active-work footer shows `Main agent`
+and `Turn total`. When there is no completed-work card, the response receives a
+compact `Turn cost` line. Multiple runtime turns caused by one CLI steering
+submission are summed before the final visible response is delivered.
 
 Interactive input precedence is centralized as: modal Task inspection,
 approval prompt, autocomplete/typeahead, attachment selection, then ordinary

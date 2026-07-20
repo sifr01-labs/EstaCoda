@@ -51,6 +51,38 @@ describe("durable Task surfaces", () => {
     expect(text).not.toContain("worker-session-secret");
   });
 
+  it("keeps retained Task card cost honest for partial and unavailable accounting", () => {
+    const partial = makeCard({
+      usage: {
+        providerCalls: 3,
+        totalTokens: 2_400,
+        estimatedCostUsd: 0.84,
+        usageComplete: true,
+        pricingComplete: false,
+      },
+    });
+    const unavailable = makeCard({
+      taskId: "T-105",
+      usage: {
+        providerCalls: 1,
+        totalTokens: 0,
+        usageComplete: false,
+        pricingComplete: false,
+      },
+    });
+
+    expect(renderTaskCardSurface({ cards: [partial], scrollOffset: 0 }, { width: 72, isTty: true }).join("\n"))
+      .toContain("≥ $0.84");
+    const inspection = renderTaskInspectionSurface({
+      cards: [unavailable],
+      selectedTaskId: unavailable.taskId,
+      inspectedTaskId: unavailable.taskId,
+      scrollOffset: 0,
+    }, { width: 72, height: 40, isTty: true }).join("\n");
+    expect(inspection).toContain("unavailable");
+    expect(inspection).not.toContain("$0.0000 · incomplete");
+  });
+
   it("uses the Task inspection as a modal region and supports complete keyboard navigation", () => {
     let state = createInitialOperatorConsoleState({
       terminal: { width: 48, height: 10, isTty: true },
@@ -159,5 +191,5 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
 }
 
 function visibleWidth(value: string): number {
-  return [...value.replace(/[\u2068\u2069]/gu, "")].length;
+  return [...value.replace(/[\u2066-\u2069]/gu, "")].length;
 }

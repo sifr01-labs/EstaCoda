@@ -275,12 +275,14 @@ async function createAgentLoop(input: {
   sessionRecallService?: Pick<SessionRecallService, "recall">;
   failSessionRecallDecisionEvent?: boolean;
   failSessionEventKinds?: string[];
+  failProviderUsageRead?: boolean;
   sessionCompressionService?: Pick<SessionCompressionService, "compactIfNeeded">;
   memoryCurationService?: Pick<MemoryCurationService, "observeCompletedTurn" | "checkpoint">;
   compressionConfig?: SessionCompressionConfig;
   memoryProvider?: MemoryProvider;
   trajectoryStore?: Pick<TrajectoryStore, "saveTrajectory">;
   providerExecution?: ProviderExecutionResult;
+  providerUsageCostUsd?: number;
   skillLearningManager?: SkillLearningManager;
   skillRouteShadowReranker?: SkillRouteShadowReranker;
   agentEvolutionPolicy?: ReturnType<typeof deriveAgentEvolutionPolicy>;
@@ -293,9 +295,12 @@ async function createAgentLoop(input: {
     ...(input.failSessionRecallDecisionEvent ? ["session-recall-decision"] : []),
     ...(input.failSessionEventKinds ?? [])
   ]);
-  const runtimeSessionDb = failingEventKinds.size > 0
+  const runtimeSessionDb = failingEventKinds.size > 0 || input.failProviderUsageRead === true
     ? new Proxy(sessionDb, {
         get(target, property, receiver) {
+          if (property === "listProviderUsageEntries" && input.failProviderUsageRead === true) {
+            return async () => { throw new Error("provider usage unavailable"); };
+          }
           if (property === "appendEvent") {
             return async (eventSessionId: string, event: { kind: string }) => {
               if (failingEventKinds.has(event.kind)) {
@@ -343,11 +348,42 @@ async function createAgentLoop(input: {
     canRunProvider: vi.fn(() => input.canRunProvider),
     lastPromptTokens: vi.fn(() => 77),
     lastActualPromptTokens: vi.fn(() => 88),
-    run: vi.fn(async () => ({
-      providerExecution: input.providerExecution,
-      toolExecutions: [],
-      iterations: input.providerExecution === undefined ? 0 : 1
-    }))
+    run: vi.fn(async () => {
+      if (input.providerUsageCostUsd !== undefined) {
+        const currentSessionId = sessionRuntimeContext.currentSessionId();
+        const visibleTurn = [...await sessionDb.listMessages(currentSessionId)].reverse()
+          .find((message) => message.role === "user");
+        if (visibleTurn === undefined) throw new Error("Expected a visible user turn before provider execution.");
+        await sessionDb.recordProviderUsageEntries([{
+          id: `usage-${visibleTurn.id}`,
+          profileId: "default",
+          sessionId: currentSessionId,
+          visibleTurnId: visibleTurn.id,
+          requestKey: `request-${visibleTurn.id}`,
+          provider: "test-provider",
+          model: "test-model",
+          routeRole: "primary",
+          routeIndex: 0,
+          providerAttemptIndex: 0,
+          inputTokens: 100,
+          outputTokens: 20,
+          reasoningTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 120,
+          estimatedCostUsd: input.providerUsageCostUsd,
+          usageComplete: true,
+          pricingComplete: true,
+          incompleteReasons: [],
+          dispatchedAt: "2030-01-01T00:00:00.000Z",
+        }]);
+      }
+      return {
+        providerExecution: input.providerExecution,
+        toolExecutions: [],
+        iterations: input.providerExecution === undefined ? 0 : 1
+      };
+    })
   } as unknown as ProviderTurnLoop;
 
   const skillPlaybookRunner = {
@@ -401,6 +437,48 @@ async function createAgentLoop(input: {
 }
 
 describe("AgentLoop provider availability gating", () => {
+  it("projects persisted request accounting onto the delivered visible turn", async () => {
+    const { loop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      providerUsageCostUsd: 0.14,
+    });
+
+    const response = await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true,
+    });
+
+    expect(response.turnUsage).toMatchObject({
+      mainAgent: { providerCalls: 1, estimatedCostUsd: 0.14, costComplete: true },
+      total: { providerCalls: 1, estimatedCostUsd: 0.14, costComplete: true },
+    });
+  });
+
+  it("keeps a completed answer and reports unavailable cost when accounting cannot be read", async () => {
+    const { loop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      failProviderUsageRead: true,
+    });
+
+    const response = await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true,
+    });
+
+    expect(response.text).toBe("done");
+    expect(response.turnUsage?.total).toMatchObject({
+      costComplete: false,
+      incompleteReasons: ["turn-usage-read-failed"],
+    });
+    expect(response.turnUsage?.total).not.toHaveProperty("estimatedCostUsd");
+  });
+
   it("emits staged context estimates", async () => {
     const { loop } = await createAgentLoop({
       canRunProvider: true,

@@ -2,10 +2,13 @@ import { stringWidth } from "../screen/stringWidth.js";
 import { truncateVisible } from "../../renderers/layout.js";
 import type { StatusRailState } from "./operatorConsoleState.js";
 import { styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
+import { formatUsageCost } from "../../usage-cost-format.js";
+import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
 
 export type StatusRailRenderOptions = {
   readonly width: number;
   readonly style?: OperatorConsoleStyle;
+  readonly locale?: OperatorConsoleLocale;
 };
 
 const CONTEXT_BAR_CELLS = 10;
@@ -31,20 +34,29 @@ export function renderStatusRailSurface(
   const symbol = modelStateSymbol(state.model.state, state.model.route, options.style);
   const securityBadge = formatSecurityBadge(state, options.style);
   const securitySegment = securityBadge === undefined ? "" : ` │ ${securityBadge}`;
+  const cost = state.sessionCost === undefined
+    ? undefined
+    : formatUsageCost(state.sessionCost, { locale: options.locale, compact: true });
+  const costLabel = options.locale === "ar" ? "الجلسة" : "session";
+  const costSegment = cost === undefined ? "" : ` │ ${costLabel} ${cost}`;
 
-  const full = `${model}${securitySegment} │ ctx ${bar} ${numbers} ${percent} │ ${sessionIcon} ${timer}`;
+  const full = `${model}${securitySegment} │ ctx ${bar} ${numbers} ${percent}${costSegment} │ ${sessionIcon} ${timer}`;
   if (stringWidth(full) <= width) return full;
 
-  const compact = `${model}${securitySegment} │ ctx ${bar} ${percent} │ ${sessionIcon} ${timer}`;
+  const compact = `${model}${securitySegment} │ ctx ${bar} ${percent}${costSegment} │ ${sessionIcon} ${timer}`;
   if (stringWidth(compact) <= width) return compact;
 
-  const compactWithoutSecurity = `${model} │ ctx ${bar} ${percent} │ ${sessionIcon} ${timer}`;
+  const compactWithoutSecurity = `${model} │ ctx ${bar} ${percent}${costSegment} │ ${sessionIcon} ${timer}`;
   if (stringWidth(compactWithoutSecurity) <= width) return compactWithoutSecurity;
 
-  const narrow = `${narrowModel} ${symbol} │ ctx ${percent} │ ${timer}`;
+  const narrow = cost === undefined
+    ? `${narrowModel} ${symbol} │ ctx ${percent} │ ${timer}`
+    : `${narrowModel} ${symbol} │ ${cost} │ ${timer}`;
   if (stringWidth(narrow) <= width) return narrow;
 
-  const minimal = `${minimalModel} ${symbol} ${percent} ${timer}`;
+  const minimal = cost === undefined
+    ? `${minimalModel} ${symbol} ${percent} ${timer}`
+    : `${cost} ${timer}`;
   return truncateVisibleCells(minimal, width);
 }
 

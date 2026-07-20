@@ -10,6 +10,7 @@ import type {
   TaskCardStepState,
   TaskSurfaceState,
 } from "./operatorConsoleState.js";
+import { formatUsageCost } from "../../usage-cost-format.js";
 
 const MAX_CARD_STEPS = 4;
 const LTR_START = "\u2068";
@@ -113,7 +114,11 @@ export function renderTaskCardSurface(
   }
   const hidden = Math.max(0, card.steps.length - MAX_CARD_STEPS);
   if (hidden > 0) rows.push(`  +${hidden} more steps`);
-  rows.push(`${formatStatus(card.status)} · ${formatDuration(card.elapsedMs)} · ${copy.inspectHint}`);
+  const cost = formatUsageCost({
+    estimatedCostUsd: card.usage.estimatedCostUsd,
+    costComplete: card.usage.pricingComplete
+  }, { locale: options.locale, compact: true });
+  rows.push(`${formatStatus(card.status)} · ${formatDuration(card.elapsedMs)} · ${cost} · ${copy.inspectHint}`);
   return rows.slice(0, height).map((row) => padVisibleEnd(truncateVisible(row, width, "…"), width));
 }
 
@@ -166,8 +171,10 @@ export function taskInspectionContentLines(
   addSection(lines, copy.activeAttempt, activeAttemptLines(card, copy.none));
   addSection(lines, copy.toolCategory, [card.currentToolCategory === undefined ? copy.none : isolate(card.currentToolCategory)]);
   addSection(lines, copy.usageCost, [
-    `${card.usage.providerCalls} calls · ${card.usage.totalTokens} tokens · $${card.usage.estimatedCostUsd.toFixed(4)}` +
-      `${card.usage.usageComplete && card.usage.pricingComplete ? "" : " · incomplete"}`,
+    `${card.usage.providerCalls} calls · ${card.usage.totalTokens} tokens · ${formatUsageCost({
+      estimatedCostUsd: card.usage.estimatedCostUsd,
+      costComplete: card.usage.pricingComplete
+    }, { locale })}` + `${card.usage.usageComplete ? "" : " · usage incomplete"}`,
   ]);
   addSection(lines, copy.results, card.results.length === 0
     ? [copy.none]

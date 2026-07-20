@@ -702,6 +702,62 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     expect(rendered).not.toContain("received prompt -> ready for direct response");
   });
 
+  it("renders delivered turn cost and a durable delegated Task handle", async () => {
+    const outputChunks: string[] = [];
+    const usage = usageSummary(0.04);
+    const runtime = createMockRuntime({
+      handle: async () => mockResponse({
+        turnUsage: { turnId: "turn-1", mainAgent: usage, total: usage },
+        toolExecutions: [{
+          tool: {
+            name: "delegate_task",
+            description: "Create a durable Task.",
+            inputSchema: {},
+            riskClass: "shared-state-mutation",
+            toolsets: ["core"],
+            progressLabel: "delegating task",
+            maxResultSizeChars: 1_000,
+          },
+          decision: "allow",
+          riskClass: "shared-state-mutation",
+          result: { ok: true, content: "created", metadata: { taskId: "T-104", status: "running" } },
+        }],
+      }),
+    });
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: false,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ isTTY: false, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => ["delegate this", "/exit"][promptIndex++] ?? "/exit",
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("Turn cost ≈ $0.04");
+    expect(rendered).toContain("Delegated Task T-104 · running");
+  });
+
+  it("restores persisted session cost onto the status rail", async () => {
+    const runtime = createMockRuntime({
+      currentSessionCost: async () => usageSummary(0.73),
+    });
+    const { raw } = await captureStartupSession({ runtime });
+
+    expect(stripAnsi(raw)).toContain("session ≈ $0.73");
+  });
+
   it("shows assistant response progress when enabled", async () => {
     const outputChunks: string[] = [];
     const runtime = {
@@ -1801,6 +1857,22 @@ function mockResponse(overrides: Partial<AgentLoopResponse> = {}): AgentLoopResp
     projectContext: undefined,
     progress: [],
     ...overrides,
+  };
+}
+
+function usageSummary(estimatedCostUsd: number) {
+  return {
+    providerCalls: 1,
+    inputTokens: 100,
+    outputTokens: 20,
+    reasoningTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    totalTokens: 120,
+    estimatedCostUsd,
+    usageComplete: true,
+    costComplete: true,
+    incompleteReasons: [],
   };
 }
 

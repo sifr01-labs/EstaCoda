@@ -18,6 +18,7 @@ import { dirname, join, resolve } from "node:path";
 import type { TaskAttemptLease, TaskResult, TaskResultKind } from "../contracts/task.js";
 import { TASK_GRAPH_LIMITS } from "../contracts/task.js";
 import type { SessionDB } from "../contracts/session.js";
+import { verifiedCompressionLineage } from "../session/session-lineage.js";
 import type { TaskStore } from "./task-store.js";
 
 export const TASK_RESULT_PAGE_DEFAULT_CHARS = 4_000;
@@ -582,22 +583,8 @@ export class TaskResultService {
     const linkedSessionIds = new Set(this.#store.listSessionLinks(taskId).map((link) => link.sessionId));
     if (linkedSessionIds.has(sessionId)) return true;
     if (this.#sessionDb === undefined) return false;
-
-    const visited = new Set<string>();
-    let currentSessionId = sessionId;
-    for (let depth = 0; depth < 32; depth++) {
-      if (visited.has(currentSessionId)) return false;
-      visited.add(currentSessionId);
-      const current = await this.#sessionDb.getSession(currentSessionId);
-      if (current === undefined || current.profileId !== this.#profileId) return false;
-      const parentSessionId = current.parentSessionId;
-      if (parentSessionId === undefined || current.metadata?.compactedFromSessionId !== parentSessionId) return false;
-      const parent = await this.#sessionDb.getSession(parentSessionId);
-      if (parent === undefined || parent.profileId !== this.#profileId || parent.endReason !== "compression") return false;
-      if (linkedSessionIds.has(parentSessionId)) return true;
-      currentSessionId = parentSessionId;
-    }
-    return false;
+    const lineage = await verifiedCompressionLineage(this.#sessionDb, sessionId, this.#profileId);
+    return lineage?.slice(1).some((session) => linkedSessionIds.has(session.id)) === true;
   }
 }
 

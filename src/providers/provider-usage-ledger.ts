@@ -73,9 +73,13 @@ export function providerUsageEntriesFromExecution(input: {
   });
 }
 
-export function providerUsageTotals(entries: readonly ProviderUsageEntry[]): ProviderUsageTotals {
+export function providerUsageTotals(
+  entries: readonly ProviderUsageEntry[],
+  options: { readonly emptyUsageIsComplete?: boolean } = {}
+): ProviderUsageTotals {
   const reasons = new Set(entries.flatMap((entry) => entry.incompleteReasons));
-  if (entries.length === 0) reasons.add("provider-usage-unavailable");
+  const emptyComplete = entries.length === 0 && options.emptyUsageIsComplete === true;
+  if (entries.length === 0 && !emptyComplete) reasons.add("provider-usage-unavailable");
   return {
     providerCalls: entries.length,
     inputTokens: sum(entries, "inputTokens"),
@@ -85,8 +89,8 @@ export function providerUsageTotals(entries: readonly ProviderUsageEntry[]): Pro
     cacheWriteTokens: sum(entries, "cacheWriteTokens"),
     totalTokens: sum(entries, "totalTokens"),
     estimatedCostUsd: entries.reduce((total, entry) => total + entry.estimatedCostUsd, 0),
-    usageComplete: entries.length > 0 && entries.every((entry) => entry.usageComplete),
-    pricingComplete: entries.length > 0 && entries.every((entry) => entry.pricingComplete),
+    usageComplete: emptyComplete || (entries.length > 0 && entries.every((entry) => entry.usageComplete)),
+    pricingComplete: emptyComplete || (entries.length > 0 && entries.every((entry) => entry.pricingComplete)),
     incompleteReasons: [...reasons].slice(0, 32)
   };
 }

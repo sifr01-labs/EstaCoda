@@ -11,6 +11,8 @@ import type {
   ToolActivityState,
 } from "./operatorConsoleState.js";
 import { styleBold, styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
+import type { TurnUsageSummary } from "../../../contracts/usage-cost.js";
+import { formatUsageCost } from "../../usage-cost-format.js";
 
 export type ActiveWorkSurfaceRenderOptions = {
   readonly width: number;
@@ -18,6 +20,7 @@ export type ActiveWorkSurfaceRenderOptions = {
   readonly locale?: OperatorConsoleLocale;
   readonly style?: OperatorConsoleStyle;
   readonly motionElapsedMs?: number;
+  readonly turnUsage?: TurnUsageSummary;
 };
 
 export type ActiveWorkSummaryOptions = {
@@ -79,10 +82,13 @@ export function getActiveWorkSurfaceDesiredHeight(state: ToolActivityState, widt
   return Math.max(3, activeWorkItemsForLiveSurface(state).length + 2);
 }
 
-export function getCompletedActiveWorkSurfaceDesiredHeight(state: ToolActivityState): number {
+export function getCompletedActiveWorkSurfaceDesiredHeight(
+  state: ToolActivityState,
+  turnUsage?: TurnUsageSummary
+): number {
   const durableItems = activeWorkItemsForCompletedSurface(state);
   if (durableItems.length === 0) return 0;
-  return durableItems.length + 4;
+  return durableItems.length + 4 + (turnUsage === undefined ? 0 : 2);
 }
 
 export function renderActiveWorkSurface(
@@ -367,14 +373,22 @@ export function renderCompletedActiveWorkSurface(
   };
   if (width <= 0 || !hasActiveWork(visibleState)) return [];
 
-  const height = normalizeDimension(options.height ?? getCompletedActiveWorkSurfaceDesiredHeight(visibleState));
+  const height = normalizeDimension(options.height ?? getCompletedActiveWorkSurfaceDesiredHeight(visibleState, options.turnUsage));
   if (height <= 0) return [];
   const copy = resolveActiveWorkCopy(options.locale);
   if (height < 3) return [truncateVisibleCells(formatActiveWorkSummary(visibleState, { locale: options.locale }), width)];
 
   const contentWidth = Math.max(0, width - 4);
   const contentRows = Math.max(1, height - 2);
-  const visibleRows = renderCompletedActiveWorkContentRows(visibleState, contentRows, contentWidth, options.locale, options.style, options.motionElapsedMs);
+  const visibleRows = renderCompletedActiveWorkContentRows(
+    visibleState,
+    contentRows,
+    contentWidth,
+    options.locale,
+    options.style,
+    options.motionElapsedMs,
+    options.turnUsage
+  );
 
   return [
     renderTopBorder(copy.toolsCompleted, width),
@@ -454,9 +468,10 @@ function renderCompletedActiveWorkContentRows(
   contentWidth: number,
   locale: OperatorConsoleLocale | undefined,
   style: OperatorConsoleStyle | undefined,
-  motionElapsedMs: number | undefined
+  motionElapsedMs: number | undefined,
+  turnUsage: TurnUsageSummary | undefined
 ): readonly string[] {
-  const footer = formatCompletionFooterRows(state, contentWidth, locale);
+  const footer = formatCompletionFooterRows(state, contentWidth, locale, turnUsage);
   if (contentRows <= footer.length) return footer.slice(0, contentRows);
 
   const itemRows = Math.max(0, contentRows - footer.length);
@@ -472,10 +487,18 @@ function renderCompletedActiveWorkContentRows(
 function formatCompletionFooterRows(
   state: ToolActivityState,
   contentWidth: number,
-  locale: OperatorConsoleLocale | undefined
+  locale: OperatorConsoleLocale | undefined,
+  turnUsage: TurnUsageSummary | undefined
 ): readonly string[] {
   const summary = formatActiveWorkSummary(state, { locale, includeActive: false });
-  return [truncateVisibleCells(summary, contentWidth)];
+  if (turnUsage === undefined) return [truncateVisibleCells(summary, contentWidth)];
+  const mainLabel = locale === "ar" ? "الوكيل الرئيسي" : "Main agent";
+  const totalLabel = locale === "ar" ? "إجمالي الدور" : "Turn total";
+  return [
+    truncateVisibleCells(summary, contentWidth),
+    truncateVisibleCells(`${mainLabel} · ${formatUsageCost(turnUsage.mainAgent, { locale })}`, contentWidth),
+    truncateVisibleCells(`${totalLabel} · ${formatUsageCost(turnUsage.total, { locale })}`, contentWidth)
+  ];
 }
 
 function renderActiveWorkContentRows(

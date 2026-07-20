@@ -9,6 +9,7 @@ import type { ContextEstimateStage, RuntimeEvent, RuntimeEventSink } from "../co
 import type { SecurityDecision, SecurityPolicy } from "../contracts/security.js";
 import { assessSecurityPolicy, capabilityFirstDefaults } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
+import type { TurnUsageSummary, UsageCostSummary } from "../contracts/usage-cost.js";
 import type {
   LoadedSkill,
   SelectedSkillPromptContent,
@@ -61,6 +62,7 @@ import { estimateMessagesTokensRough, estimateTextTokensRough } from "../prompt/
 import { redactSensitiveText } from "../utils/redaction.js";
 import type { MemoryCurationService } from "../memory/memory-curation-service.js";
 import { emitContextEstimate } from "./context-usage-events.js";
+import { unavailableUsageCostSummary, usageCostSummaryFromEntries } from "../providers/provider-usage-projection.js";
 
 export type AgentLoopInput = {
   text: string;
@@ -88,6 +90,7 @@ export type AgentLoopResponse = {
   context: ContextExpansionResult | undefined;
   projectContext: ProjectContextSnapshot | undefined;
   providerExecution?: ProviderExecutionResult;
+  turnUsage?: TurnUsageSummary;
   progress: string[];
   setupApprovals?: AgentLoopSetupApprovalRequest[];
 };
@@ -398,7 +401,7 @@ export class AgentLoop {
       }), {
         success: false,
         summary: "Turn cancelled before routing."
-      });
+      }, visibleTurn.id);
     }
 
     if (route.attachmentFailureResponse !== undefined) {
@@ -474,7 +477,7 @@ export class AgentLoop {
       }, {
         success: false,
         summary: "Attachment preflight failed."
-      });
+      }, visibleTurn.id);
     }
 
     await emit(input.onEvent, {
@@ -738,7 +741,7 @@ export class AgentLoop {
       return await this.#completeAndReturn(response, {
         success: false,
         summary: "Turn cancelled during provider/tool loop."
-      });
+      }, visibleTurn.id);
     }
     const skillOutcomes = await this.#runRecorder.recordSkillOutcomes({
       selectedSkill,
@@ -910,7 +913,7 @@ export class AgentLoop {
       onEvent: input.onEvent
     }).catch(() => undefined);
 
-    return await this.#completeAndReturn(response, outcomeFromResponse(response));
+    return await this.#completeAndReturn(response, outcomeFromResponse(response), visibleTurn.id);
   }
 
 
@@ -1290,13 +1293,39 @@ export class AgentLoop {
     return this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
   }
 
-  async #completeAndReturn<T extends AgentLoopResponse>(response: T, outcome: {
+  async #completeAndReturn(response: AgentLoopResponse, outcome: {
     success: boolean;
     summary: string;
     userAccepted?: boolean;
-  }): Promise<T> {
+  }, visibleTurnId?: string): Promise<AgentLoopResponse> {
+    const completedResponse = visibleTurnId === undefined
+      ? response
+      : await this.#withTurnUsage(response, visibleTurnId);
     await this.#runRecorder.completeTrajectory(outcome, { bestEffort: true });
-    return response;
+    return completedResponse;
+  }
+
+  async #withTurnUsage(response: AgentLoopResponse, visibleTurnId: string): Promise<AgentLoopResponse> {
+    let mainAgent: UsageCostSummary;
+    try {
+      const entries = await this.#sessionDb.listProviderUsageEntries(this.#profileId, {
+        visibleTurnId
+      });
+      const dispatchedProviderRequest = response.providerExecution?.attempts.some((attempt) => attempt.dispatched) === true;
+      mainAgent = usageCostSummaryFromEntries(entries, {
+        emptyUsageIsComplete: !dispatchedProviderRequest
+      });
+    } catch {
+      mainAgent = unavailableUsageCostSummary("turn-usage-read-failed");
+    }
+    return {
+      ...response,
+      turnUsage: {
+        turnId: visibleTurnId,
+        mainAgent,
+        total: mainAgent
+      }
+    };
   }
 
 

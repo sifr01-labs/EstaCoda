@@ -1959,6 +1959,21 @@ describe("PlainRenderer — prompt chrome rails", () => {
     assertNoAnsi(out);
   });
 
+  it("renders complete and partial session cost on the persistent rail", () => {
+    expect(renderSessionStatusRail(buildSessionStatusRailViewModel({
+      modelLabel: "gpt-5.5",
+      turnState: "idle",
+      sessionCost: { estimatedCostUsd: 0.73, costComplete: true },
+      showTurnState: false,
+    }))).toBe("* gpt-5.5 | session ≈ $0.73");
+    expect(renderSessionStatusRail(buildSessionStatusRailViewModel({
+      modelLabel: "gpt-5.5",
+      turnState: "idle",
+      sessionCost: { estimatedCostUsd: 0.84, costComplete: false },
+      showTurnState: false,
+    }))).toContain("session ≥ $0.84");
+  });
+
   it("renders only the visible model label for fallback-serving state", () => {
     const vm = buildSessionStatusRailViewModel({
       modelLabel: "deepseek-v4-pro",
@@ -1999,6 +2014,16 @@ describe("PlainRenderer — prompt chrome rails", () => {
     expect(out).toContain(isolateLtr(`* ${isolateLtr("openai/gpt-4.1")} | ${isolateRtl("السياق")} ${isolateLtr("1.0k/128k")} | 1% | ${isolateLtr("الجلسة 1د 26ث")} | ${isolateRtl("خامل")}`));
     expect(out).not.toContain("1m 26s");
     assertNoAnsi(out);
+  });
+
+  it("LTR-isolates Arabic session currency", () => {
+    const out = renderSessionStatusRail(buildSessionStatusRailViewModel({
+      modelLabel: "gpt-5.5",
+      turnState: "idle",
+      sessionCost: { estimatedCostUsd: 0.73, costComplete: true },
+    }), "ar");
+    expect(out).toContain(isolateLtr("≈ $0.73"));
+    expect(out).toContain(isolateRtl("الجلسة"));
   });
 
   it("renders Arabic shortcut rail labels when locale is ar", () => {

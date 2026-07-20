@@ -42,6 +42,7 @@ import { closeOpenBidiIsolates, isolateLtr, isolateRtl } from "../../ui/bidi.js"
 import type { TextDirection } from "../../contracts/ui.js";
 import { formatSessionDisplayId } from "../../session/session-id.js";
 import { semanticMotionForPhase, semanticMotionFrame } from "../semantic-motion.js";
+import { formatUsageCost } from "../usage-cost-format.js";
 
 const STARTUP_TITLE_SEPARATOR = "  𓂀  ";
 const STARTUP_TITLE_SEPARATOR_ASCII = "  *  ";
@@ -2053,6 +2054,10 @@ export class StandardRenderer {
         : this.#contextBeads(vm.contextUsage.filled, vm.contextUsage.total));
     }
 
+    if (vm.sessionCost !== undefined) {
+      parts.push(`session ${formatUsageCost(vm.sessionCost, { compact: true })}`);
+    }
+
     if (vm.sessionElapsedMs !== undefined) {
       const glyph = this.#useUnicode ? "◷" : "session";
       parts.push(`${glyph} ${formatRailDuration(vm.sessionElapsedMs)}`);
@@ -2069,6 +2074,13 @@ export class StandardRenderer {
     const rail = parts.length > 0
       ? `${modelPart}${this.#secondary(` | ${parts.join(" | ")}`)}`
       : modelPart;
+    if (vm.sessionCost !== undefined && measureVisibleWidth(rail) > this.#capabilities.terminalWidth) {
+      const cost = formatUsageCost(vm.sessionCost, { compact: true });
+      const labeledCost = `session ${cost}`;
+      const narrowParts = [measureVisibleWidth(labeledCost) <= this.#capabilities.terminalWidth ? labeledCost : cost];
+      if (vm.sessionElapsedMs !== undefined) narrowParts.push(formatRailDuration(vm.sessionElapsedMs));
+      return this.#truncateVisibleStable(this.#secondary(narrowParts.join(" | ")), this.#capabilities.terminalWidth);
+    }
     return this.#truncateVisibleStable(rail, this.#capabilities.terminalWidth);
   }
 
@@ -2084,6 +2096,10 @@ export class StandardRenderer {
       parts.push(vm.contextUsage.filled === undefined
         ? this.#unknownContextBeads()
         : this.#contextBeads(vm.contextUsage.filled, vm.contextUsage.total));
+    }
+
+    if (vm.sessionCost !== undefined) {
+      parts.push(`${isolateRtl("الجلسة")} ${formatUsageCost(vm.sessionCost, { locale: "ar", compact: true })}`);
     }
 
     if (vm.sessionElapsedMs !== undefined) {
@@ -2103,6 +2119,13 @@ export class StandardRenderer {
     const rail = parts.length > 0
       ? `${modelPart}${this.#secondary(` | ${parts.join(" | ")}`)}`
       : modelPart;
+    if (vm.sessionCost !== undefined && measureVisibleWidth(rail) > this.#capabilities.terminalWidth) {
+      const cost = formatUsageCost(vm.sessionCost, { locale: "ar", compact: true });
+      const labeledCost = `${isolateRtl("الجلسة")} ${cost}`;
+      const narrowParts = [measureVisibleWidth(labeledCost) <= this.#capabilities.terminalWidth ? labeledCost : cost];
+      if (vm.sessionElapsedMs !== undefined) narrowParts.push(isolateLtr(formatRailDuration(vm.sessionElapsedMs, "ar")));
+      return this.#truncateVisibleStable(isolateLtr(this.#secondary(narrowParts.join(" | "))), this.#capabilities.terminalWidth);
+    }
     return this.#truncateVisibleStable(isolateLtr(rail), this.#capabilities.terminalWidth);
   }
 

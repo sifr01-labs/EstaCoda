@@ -2517,6 +2517,27 @@ describe("StandardRenderer — prompt chrome rails", () => {
     expect(out.split("\n")).toHaveLength(1);
   });
 
+  it("prioritizes session cost when a narrow rail cannot retain every segment", () => {
+    const r = renderer("dark", { ...narrowCaps(), terminalWidth: 20 });
+    const out = stripAnsi(r.render(buildSessionStatusRailViewModel({
+      modelLabel: "openrouter/deepseek-reasoner",
+      turnState: "idle",
+      contextUsage: { filled: 98_765, total: 128_000 },
+      sessionCost: { estimatedCostUsd: 0.84, costComplete: false },
+      sessionElapsedMs: 125_000,
+    })));
+
+    expect(out).toContain("session ≥ $0.84");
+    expect(measureVisibleWidth(out)).toBeLessThanOrEqual(20);
+
+    const minimal = stripAnsi(renderer("dark", { ...narrowCaps(), terminalWidth: 8 }).render(buildSessionStatusRailViewModel({
+      modelLabel: "openrouter/deepseek-reasoner",
+      turnState: "idle",
+      sessionCost: { estimatedCostUsd: 0.84, costComplete: false },
+    })));
+    expect(minimal).toContain("≥ $0.84");
+  });
+
   it("renders only the visible model label for fallback-serving state", () => {
     const tokens = resolveTokens("standard", "dark", "kemetBlue");
     const r = new StandardRenderer({ tokens, capabilities: fullCaps() });

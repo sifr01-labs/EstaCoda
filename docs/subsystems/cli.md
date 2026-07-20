@@ -222,9 +222,12 @@ appears as a short Task-creation operation and returns a durable handle; worker
 Attempts are observed through Task/background-work surfaces rather than nested
 inside the creating turn. Active work is uncapped in
 model storage and viewport-limited in rendering. The persistent status rail
-contains only model, context usage/bar, and session timer; tools, approvals,
-workspace/trust, setup, steering, channel state, and active-turn noise must stay
-out of it.
+contains only model, context usage/bar, session cost, and session timer; tools,
+approvals, workspace/trust, setup, steering, channel state, and active-turn
+noise must stay out of it. Narrow rendering preserves cost before dropping
+context detail. Delivered responses show their visible-turn cost, while durable
+delegation prints the Task handle and lets the retained Task card/session rail
+reflect later asynchronous settlement without rewriting transcript history.
 
 Bracketed paste is enabled only for TTY prompts that run through the paste interceptor. Small single-line pastes remain inline. Multiline and large pastes display as compact `[Pasted text #...]` references when a paste reference store is available. Paste files are written under the active profile temp state, not the workspace, and are temporary operational artifacts, not a permanent knowledge store. The submitted runtime input restores the original pasted content. Secret prompts bypass paste preview and paste reference storage; pasted secret content must not be logged, echoed in chrome/status text, or mirrored outside the prompt answer path.
 

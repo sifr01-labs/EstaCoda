@@ -6,6 +6,7 @@ import { measureTextWidth, measureVisibleWidth, padVisibleAlign, padVisibleEnd, 
 import type { UiLocale } from "../../ui/cli-ui-copy.js";
 import { chromeCopy } from "../../ui/cli-ui-copy.js";
 import { closeOpenBidiIsolates, isolateLtr, isolateRtl } from "../../ui/bidi.js";
+import { formatUsageCost } from "../usage-cost-format.js";
 import type {
   ActiveTurnSpinnerViewModel,
   ActivityTimelineViewModel,
@@ -1220,6 +1221,10 @@ export function renderSessionStatusRail(vm: SessionStatusRailViewModel, locale?:
       : `${vm.contextUsage.total > 0 ? Math.round((vm.contextUsage.filled / vm.contextUsage.total) * 100) : 0}%`);
   }
 
+  if (vm.sessionCost !== undefined) {
+    parts.push(`session ${formatUsageCost(vm.sessionCost, { compact: true })}`);
+  }
+
   if (vm.sessionElapsedMs !== undefined) {
     parts.push(`session ${formatRailDuration(vm.sessionElapsedMs)}`);
   }
@@ -1247,6 +1252,10 @@ function renderArabicSessionStatusRail(
     parts.push(vm.contextUsage.filled === undefined
       ? "--%"
       : `${vm.contextUsage.total > 0 ? Math.round((vm.contextUsage.filled / vm.contextUsage.total) * 100) : 0}%`);
+  }
+
+  if (vm.sessionCost !== undefined) {
+    parts.push(`${isolateRtl("الجلسة")} ${formatUsageCost(vm.sessionCost, { locale: "ar", compact: true })}`);
   }
 
   if (vm.sessionElapsedMs !== undefined) {
