@@ -23,6 +23,7 @@ import type { TaskApprovalService } from "./task-approval-service.js";
 import { cancelTaskInStore } from "./task-operator-service.js";
 import type {
   ResolveTaskStepExecutor,
+  TaskAttemptActivity,
   TaskAttemptCheckpoint,
   TaskExecutorSettlement,
   TaskStepExecutor
@@ -259,7 +260,8 @@ export class TaskScheduler {
     const trajectoryId = checkpoint.trajectoryId === undefined
       ? undefined
       : requireToken(checkpoint.trajectoryId, "trajectory ID");
-    if (workerSessionId === undefined && trajectoryId === undefined) {
+    const activity = checkpoint.activity === undefined ? undefined : normalizeCheckpointActivity(checkpoint.activity);
+    if (workerSessionId === undefined && trajectoryId === undefined && activity === undefined) {
       throw new Error("Task Attempt checkpoint must contain worker progress.");
     }
 
@@ -317,7 +319,8 @@ export class TaskScheduler {
         planRevisionId: context.attempt.planRevisionId,
         data: {
           ...(workerSessionId === undefined ? {} : { workerSessionId }),
-          ...(trajectoryId === undefined ? {} : { trajectoryId })
+          ...(trajectoryId === undefined ? {} : { trajectoryId }),
+          ...(activity === undefined ? {} : { activity })
         }
       }));
       return lease;
@@ -1552,6 +1555,24 @@ function requireToken(value: string, label: string): string {
     throw new Error(`Task ${label} must be a bounded stable token.`);
   }
   return normalized;
+}
+
+function normalizeCheckpointActivity(activity: TaskAttemptActivity): TaskAttemptActivity {
+  if (activity.kind !== "worker" && activity.kind !== "provider" && activity.kind !== "tool") {
+    throw new Error("Task Attempt activity kind is invalid.");
+  }
+  const label = activity.label.replace(/\s+/gu, " ").trim();
+  if (label.length === 0 || label.length > 160 || /[\u0000-\u001F\u007F]/u.test(label)) {
+    throw new Error("Task Attempt activity label must be bounded display-safe text.");
+  }
+  const toolCategory = activity.toolCategory === undefined
+    ? undefined
+    : requireToken(activity.toolCategory, "activity tool category");
+  return {
+    kind: activity.kind,
+    label,
+    ...(toolCategory === undefined ? {} : { toolCategory })
+  };
 }
 
 function positiveInteger(value: number, label: string): number {

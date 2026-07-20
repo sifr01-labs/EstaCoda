@@ -20,7 +20,7 @@ import type {
   TypeaheadProviderRouter,
   TypeaheadProviderSelection,
 } from "../ui/papyrus/input/typeaheadProviderRouter.js";
-import type { AttachmentCardState } from "../ui/papyrus/operator-console/index.js";
+import type { AttachmentCardState, TaskCardState } from "../ui/papyrus/operator-console/index.js";
 
 const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
@@ -211,6 +211,26 @@ function startPendingOperatorConsoleRead(options: Partial<RawPromptControllerOpt
 }
 
 describe("raw prompt controller", () => {
+  it("gives the modal Task inspector first input priority and returns safely to the prompt", async () => {
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        getTasks: () => [promptTaskCard()],
+      },
+    });
+
+    expect(read.output.writes.join("")).toContain("Retained Task card");
+    read.input.send("\t");
+    read.input.send("\r");
+    read.input.send("ignored while modal");
+    read.input.send("\t");
+    read.input.send("ok\r");
+
+    expect(await read.pending).toEqual({ type: "submit", text: "ok" });
+    expect(read.output.writes.join("")).toContain("Plan revision");
+  });
+
   it("submits ASCII text", async () => {
     const { result, output, lifecycle } = await readWithFakeInput("hello\r");
 
@@ -1862,6 +1882,29 @@ describe("raw prompt controller", () => {
     expect(output.writes.join("")).toContain("Slash suggestions unavailable: provider failed");
   });
 });
+
+function promptTaskCard(): TaskCardState {
+  return {
+    taskId: "T-raw-1",
+    objective: "Retained Task card",
+    status: "completed",
+    progress: { completed: 1, skipped: 0, total: 1 },
+    planRevision: { revision: 1, status: "active" },
+    steps: [{ stepId: "step-1", title: "Finish work", status: "completed", dependsOn: [] }],
+    recentActivity: [{ kind: "attempt-completed", label: "Attempt completed", timestamp: "2026-07-20T10:00:00.000Z" }],
+    elapsedMs: 1_000,
+    usage: {
+      providerCalls: 1,
+      totalTokens: 10,
+      estimatedCostUsd: 0.001,
+      usageComplete: true,
+      pricingComplete: true,
+    },
+    results: [],
+    createdAt: "2026-07-20T09:59:59.000Z",
+    updatedAt: "2026-07-20T10:00:00.000Z",
+  };
+}
 
 function providerFor(
   id: string,

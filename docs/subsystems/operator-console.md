@@ -334,6 +334,37 @@ The completed turn retains the ordinary `delegate_task` row and its bounded
 handle metadata. Task progress, approval waits, cancellation, result bodies,
 and terminal settlement are sourced from the durable Task journal.
 
+Linked Tasks also render as retained Task cards in the interactive console.
+Cards remain available after completion, failure, partial settlement, or
+cancellation; they are not transient worker rows. `Tab` (when no higher-priority
+typeahead or attachment surface owns it) or `Ctrl+T` focuses the Task cards,
+arrow keys change the selected Task, and `Enter` opens the modal inspection
+surface. In inspection, `Up`/`Down`, `Page Up`/`Page Down`, `Home`, and `End`
+scroll, while `Escape` returns to the selected card and `Tab` returns to the
+prompt.
+
+The inspection view reads only the session-authorized Task projection: bounded
+objective and Step labels, status, plan revision, dependencies, active Attempt
+metadata, elapsed time, whitelisted activity labels, coarse tool category,
+usage/cost totals, opaque result handles, and bounded wait/failure classes. It
+never reads raw session events, worker transcripts, provider token streams,
+tool input/output, result bodies, workspace paths, credentials, lease-owner
+identities, or unbounded child text.
+
+Worker progress persists only categorical, bounded transition labels (for
+example provider wait/fallback and tool category). Child provider-token text is
+not buffered into Task cards or inspection. Consequently, abandoned text from
+a failed provider route cannot remain visible as accepted worker output; the
+Task result becomes readable only through the verified result surface after
+settlement. Tool-call transitions update the safe activity checkpoint without
+persisting tool arguments, previews, or result bodies.
+
+Interactive input precedence is centralized as: modal Task inspection,
+approval prompt, autocomplete/typeahead, attachment selection, then ordinary
+prompt or steering input. Plain, CI, dumb-terminal, and non-TTY Task inspection
+continues through deterministic `task` and `/task` text commands without
+animation or cursor-managed UI.
+
 ### Phase E2: Live Assistant Streaming
 
 Live assistant streaming is the Operator Console view of visible provider text

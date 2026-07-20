@@ -330,7 +330,11 @@ describe("TaskScheduler", () => {
       events: []
     });
     const scheduler = makeScheduler(new FakeTaskStepExecutor((input) => {
-      input.checkpoint({ workerSessionId: "worker-alpha", trajectoryId: "trajectory-alpha" });
+      input.checkpoint({
+        workerSessionId: "worker-alpha",
+        trajectoryId: "trajectory-alpha",
+        activity: { kind: "tool", label: "Using browser.navigate", toolCategory: "browser" }
+      });
       return { outcome: "succeeded", results: [{ kind: "text", content: "checkpointed" }] };
     }));
 
@@ -347,7 +351,13 @@ describe("TaskScheduler", () => {
       stepId: "step-checkpoint",
       attemptId: store.listAttempts("task-alpha")[0]?.id
     }));
-    expect(store.listEvents("task-alpha", { kinds: ["attempt-progressed"] })).toHaveLength(1);
+    expect(store.listEvents("task-alpha", { kinds: ["attempt-progressed"] })).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          activity: { kind: "tool", label: "Using browser.navigate", toolCategory: "browser" }
+        })
+      })
+    ]);
   });
 
   it("reconciles an expired running Attempt after restart and retries only through policy", async () => {

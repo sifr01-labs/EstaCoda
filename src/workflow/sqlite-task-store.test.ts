@@ -185,11 +185,22 @@ describe("SQLiteTaskStore", () => {
       timestamp: NOW,
       data: { resultId: result.id }
     });
+    store.appendEvent({
+      id: "event-older",
+      profileId: "alpha",
+      taskId: graph.task.id,
+      kind: "task-created",
+      timestamp: "2029-12-31T23:59:59.000Z",
+      data: {}
+    });
 
     expect(store.getAttempt(attempt.id)).toEqual({ ...attempt, resultIds: [result.id] });
     expect(store.getResult(result.id)).toEqual(result);
     expect(store.listEvents(graph.task.id, { attemptId: attempt.id })).toEqual([
       expect.objectContaining({ id: "event-result", data: { resultId: result.id } })
+    ]);
+    expect(store.listEvents(graph.task.id, { order: "desc", limit: 1 })).toEqual([
+      expect.objectContaining({ id: "event-result" })
     ]);
   });
 

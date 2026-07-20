@@ -160,6 +160,13 @@ describe("AgentStepExecutor", () => {
       sessionId: "creator-alpha"
     })).resolves.toMatchObject({ content: FULL_RESULT, hasMore: false });
     await expect(sessionDb.getSession("worker-alpha")).resolves.toMatchObject({ endReason: "task-step-completed" });
+    expect(store.listEvents(graph.task.id, { kinds: ["attempt-progressed"] })).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          activity: { kind: "tool", label: "Using file.read", toolCategory: "files" }
+        })
+      })
+    );
     expect(cleanup).toHaveBeenCalledOnce();
   });
 

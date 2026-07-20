@@ -1,6 +1,6 @@
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { DelegateModelOverride, DelegateRole, DelegationConfig } from "../contracts/delegation.js";
-import type { RuntimeEventSink } from "../contracts/runtime-event.js";
+import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityPolicy } from "../contracts/security.js";
 import type { SessionDB, SessionEvent } from "../contracts/session.js";
 import type { Task, TaskAttempt, TaskFailure, TaskStep, TaskWorkspaceBinding } from "../contracts/task.js";
@@ -26,6 +26,7 @@ import type {
   TaskStepExecutionInput,
   TaskStepExecutor
 } from "./task-step-executor.js";
+import { taskActivityFromDelegationProgress } from "./task-safe-activity.js";
 
 const MAX_DEPENDENCY_RESULT_REFERENCES = 64;
 const MAX_TASK_GUIDANCE_RECORDS_IN_CONTEXT = 16;
@@ -232,7 +233,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
         provider: childProvider(child),
         model: childModel(child),
         effectiveAllowedTools: child.toolAccess.effectiveAllowedTools,
-        parentOnEvent: this.#onEvent,
+        parentOnEvent: this.#taskProgressSink(input),
         inputMetadata: {
           durableTask: true,
           taskId: input.task.id,
@@ -312,6 +313,16 @@ export class AgentStepExecutor implements TaskStepExecutor {
       await this.#sessionDb.endSession(child.childSessionId, endReason).catch(() => undefined);
       await child.cleanup().catch(() => undefined);
     }
+  }
+
+  #taskProgressSink(input: TaskStepExecutionInput): RuntimeEventSink {
+    return async (event: RuntimeEvent) => {
+      if (event.kind === "delegation-progress") {
+        const activity = taskActivityFromDelegationProgress(event);
+        if (activity !== undefined) input.checkpoint({ activity });
+      }
+      await this.#onEvent?.(event);
+    };
   }
 }
 

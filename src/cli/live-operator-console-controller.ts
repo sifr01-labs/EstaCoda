@@ -16,6 +16,7 @@ import {
   type StreamingSegment,
   type StreamingState,
   type TerminalMetrics,
+  type TaskCardState,
   type ToolActivityState,
   type TranscriptBlock,
   type TurnActivityState,
@@ -34,6 +35,7 @@ export type LiveOperatorConsoleControllerOptions = {
   readonly animationIntervalMs?: number;
   readonly streamingRefreshIntervalMs?: number;
   readonly getStatus: () => StatusRailState;
+  readonly getTasks?: () => readonly TaskCardState[];
   readonly turnStartedAtMs?: number;
   readonly promptPlaceholder?: string;
   readonly now?: () => number;
@@ -57,6 +59,7 @@ export class LiveOperatorConsoleController {
   readonly #animationIntervalMs: number;
   readonly #streamingRefreshIntervalMs: number;
   readonly #getStatus: () => StatusRailState;
+  readonly #getTasks: (() => readonly TaskCardState[]) | undefined;
   readonly #turnStartedAtMs: number | undefined;
   readonly #promptPlaceholder: string | undefined;
   readonly #now: () => number;
@@ -90,6 +93,7 @@ export class LiveOperatorConsoleController {
       DEFAULT_STREAMING_REFRESH_INTERVAL_MS
     );
     this.#getStatus = options.getStatus;
+    this.#getTasks = options.getTasks;
     this.#turnStartedAtMs = options.turnStartedAtMs;
     this.#promptPlaceholder = options.promptPlaceholder;
     this.#now = options.now ?? Date.now;
@@ -261,6 +265,10 @@ export class LiveOperatorConsoleController {
         enabled: true,
         terminal: this.#terminalSnapshotForRender(activeWork),
         status: this.#getStatus(),
+        tasks: {
+          cards: this.#getTasks?.() ?? [],
+          scrollOffset: 0,
+        },
         transcript: this.#transcript,
         turnActivity: this.#turnActivity,
         activeWork,

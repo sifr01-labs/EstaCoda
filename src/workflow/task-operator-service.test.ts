@@ -112,6 +112,58 @@ describe("TaskOperatorService", () => {
       reasonCode: "operator-request"
     });
   });
+
+  it("projects bounded inspection data without exposing event payloads or internal result metadata", () => {
+    const created = service.begin({
+      objective: "Inspect sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ123456 and summarize",
+      workspace: workspace(),
+      creatorSessionId: "owner"
+    });
+    const task = store.getTask(created.taskId)!;
+    const step = store.listSteps(task.id, task.activePlanRevisionId!)[0]!;
+    store.atomicWrite((tx) => {
+      tx.appendEvent({
+        id: "safe-event",
+        profileId: "alpha",
+        taskId: task.id,
+        planRevisionId: step.planRevisionId,
+        stepId: step.id,
+        kind: "attempt-progressed",
+        timestamp: now(),
+        data: {
+          rawToolInput: "must-not-project",
+          activity: { kind: "tool", label: "Using browser.navigate", toolCategory: "browser" }
+        }
+      });
+      tx.recordResult({
+        id: "result-safe",
+        profileId: "alpha",
+        taskId: task.id,
+        stepId: step.id,
+        kind: "summary",
+        status: "available",
+        handle: "task-result://safe",
+        byteLength: 42,
+        contentHash: "a".repeat(64),
+        summary: "Bearer abcdefghijklmnopqrstuvwxyz123456",
+        createdAt: now()
+      });
+    });
+
+    const projection = service.status(task.id, "owner");
+    expect(projection.objective).toContain("[REDACTED]");
+    expect(projection.planRevision).toEqual({ revision: 1, status: "active" });
+    expect(projection.steps).toEqual([
+      expect.objectContaining({ stepId: step.id, title: "Complete Task", dependsOn: [] })
+    ]);
+    expect(projection.recentActivity[0]).toMatchObject({
+      kind: "attempt-progressed",
+      label: "Using browser.navigate · Complete Task"
+    });
+    expect(JSON.stringify(projection)).not.toContain("must-not-project");
+    expect(projection.results[0]?.summary).toBe("Bearer [REDACTED]");
+    expect(projection.results[0]).not.toHaveProperty("contentHash");
+  });
 });
 
 function workspace() {

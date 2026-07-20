@@ -108,6 +108,72 @@ export type AttachmentCardState = {
   };
 };
 
+export type TaskCardStepState = {
+  readonly stepId: string;
+  readonly title: string;
+  readonly status: "pending" | "ready" | "running" | "waiting_for_input" | "waiting_for_approval" | "completed" | "failed" | "skipped" | "cancelled";
+  readonly dependsOn: readonly string[];
+  readonly activeAttempt?: {
+    readonly attemptNumber: number;
+    readonly status: "queued" | "leased" | "running" | "waiting_for_input" | "waiting_for_approval" | "completed" | "failed" | "cancelled" | "interrupted" | "expired";
+    readonly elapsedMs: number;
+    readonly currentActivity?: string;
+    readonly currentToolCategory?: string;
+  };
+};
+
+export type TaskCardActivityState = {
+  readonly kind: string;
+  readonly label: string;
+  readonly timestamp: string;
+  readonly stepId?: string;
+};
+
+export type TaskCardState = {
+  readonly taskId: string;
+  readonly objective: string;
+  readonly status: "planning" | "queued" | "running" | "waiting_for_host" | "waiting_for_input" | "waiting_for_approval" | "paused" | "completed" | "partial" | "failed" | "cancelled";
+  readonly progress: {
+    readonly completed: number;
+    readonly skipped: number;
+    readonly total: number;
+  };
+  readonly planRevision?: { readonly revision: number; readonly status: string };
+  readonly steps: readonly TaskCardStepState[];
+  readonly recentActivity: readonly TaskCardActivityState[];
+  readonly currentToolCategory?: string;
+  readonly elapsedMs: number;
+  readonly usage: {
+    readonly providerCalls: number;
+    readonly totalTokens: number;
+    readonly estimatedCostUsd: number;
+    readonly usageComplete: boolean;
+    readonly pricingComplete: boolean;
+  };
+  readonly results: readonly {
+    readonly handle: string;
+    readonly kind: string;
+    readonly status: string;
+    readonly byteLength: number;
+    readonly summary?: string;
+  }[];
+  readonly waitReason?: string;
+  readonly failure?: {
+    readonly class: string;
+    readonly retryable: boolean;
+    readonly uncertainSideEffects: boolean;
+  };
+  readonly createdAt: string;
+  readonly updatedAt: string;
+};
+
+export type TaskSurfaceState = {
+  readonly cards: readonly TaskCardState[];
+  readonly selectedTaskId?: string;
+  readonly inspectedTaskId?: string;
+  readonly scrollOffset: number;
+};
+
 export type ActiveWorkItemStatus =
   | "queued"
   | "running"
@@ -308,6 +374,7 @@ export type OperatorConsoleState = {
   readonly status: StatusRailState;
   readonly turnActivity?: TurnActivityState;
   readonly attachments: readonly AttachmentCardState[];
+  readonly tasks: TaskSurfaceState;
   readonly activeWork: ToolActivityState;
   readonly streaming?: StreamingState;
   readonly approvals: readonly ApprovalCardState[];
@@ -327,6 +394,8 @@ export type OperatorConsoleSurface =
   | "turnActivity"
   | "activeWork"
   | "queuedSteer"
+  | "taskCards"
+  | "taskInspection"
   | "attachments"
   | "prompt"
   | "slashMenu"
@@ -341,6 +410,8 @@ export const OPERATOR_CONSOLE_SURFACE_ORDER: readonly OperatorConsoleSurface[] =
   "turnActivity",
   "activeWork",
   "queuedSteer",
+  "taskCards",
+  "taskInspection",
   "attachments",
   "prompt",
   "slashMenu",
@@ -357,6 +428,7 @@ export type CreateInitialOperatorConsoleStateInput = {
   readonly status?: StatusRailState;
   readonly turnActivity?: TurnActivityState;
   readonly attachments?: readonly AttachmentCardState[];
+  readonly tasks?: TaskSurfaceState;
   readonly activeWork?: ToolActivityState;
   readonly streaming?: StreamingState;
   readonly approvals?: readonly ApprovalCardState[];
@@ -384,6 +456,7 @@ export function createInitialOperatorConsoleState(
     status: input.status ?? createDefaultStatusRailState(),
     ...(input.turnActivity === undefined ? {} : { turnActivity: input.turnActivity }),
     attachments: input.attachments ?? [],
+    tasks: input.tasks ?? createDefaultTaskSurfaceState(),
     activeWork: input.activeWork ?? createDefaultToolActivityState(),
     ...(input.streaming === undefined ? {} : { streaming: input.streaming }),
     approvals: input.approvals ?? [],
@@ -423,6 +496,13 @@ export function createDefaultToolActivityState(): ToolActivityState {
     items: [],
     scrollOffset: 0,
     expanded: false,
+  };
+}
+
+export function createDefaultTaskSurfaceState(): TaskSurfaceState {
+  return {
+    cards: [],
+    scrollOffset: 0,
   };
 }
 

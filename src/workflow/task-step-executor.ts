@@ -54,6 +54,13 @@ export type TaskExecutorSettlement =
 export type TaskAttemptCheckpoint = {
   workerSessionId?: string;
   trajectoryId?: string;
+  activity?: TaskAttemptActivity;
+};
+
+export type TaskAttemptActivity = {
+  kind: "worker" | "provider" | "tool";
+  label: string;
+  toolCategory?: string;
 };
 
 export type TaskStepExecutionInput = {

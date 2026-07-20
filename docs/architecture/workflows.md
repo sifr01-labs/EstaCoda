@@ -39,6 +39,7 @@ This document describes the persistence, result, scheduler, agent-execution, bac
 - `src/workflow/task-workspace.ts` derives the canonical workspace identity shared by Task creation and hosts.
 - `src/workflow/task-artifact-content.ts` constrains artifact capture to reviewed workspace/profile roots.
 - `src/workflow/task-operator-service.ts` owns profile-bound status and lifecycle controls with explicit session authorization.
+- `src/ui/papyrus/operator-console/taskSurface.ts` renders retained cards and modal inspection exclusively from that bounded projection; it does not query raw session or tool records.
 - `src/cli/task-commands.ts` exposes deterministic local CLI and in-session Task controls.
 - `src/tools/task-tools.ts` exposes the bounded, read-only `task.status` tool.
 - `src/tools/task-result-tools.ts` exposes authorized, paged `task.result.read` access.

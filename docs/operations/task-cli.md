@@ -28,4 +28,6 @@ All commands are profile scoped. A global `--profile <id>` or `-p <id>` override
 
 Inside an active session, use the same forms under `/task`. In-session reads require a Task/session link, while mutations require the creator link. `/task begin` automatically links the new Task to the current session.
 
-The status and result surfaces are intentionally bounded. They do not expose workspace paths, prompts, tool inputs, credentials, full results, or raw failure messages. If no background host is active, `begin` still succeeds durably and reports that the Task is queued.
+In a supported interactive TTY, linked Tasks also appear as retained cards in the Operator Console, including after settlement. Use `Ctrl+T` or an available `Tab` transition to focus the cards, arrow keys to select, and `Enter` to inspect. The modal view supports arrow scrolling, `Page Up`/`Page Down`, `Home`/`End`, and `Escape` to return. It shows the active plan, Step dependencies and Attempts, elapsed time, safe activity labels, coarse tool category, metering, result handles, and bounded wait/failure information. Plain and non-TTY users use `task list`, `task show`, and `task result` for the same durable state.
+
+The status, card, inspection, and result surfaces are intentionally bounded. They do not expose workspace paths, prompts, worker transcripts, raw Task or SessionEvent payloads, tool inputs or outputs, credentials, lease-owner identities, full results, or raw failure messages. If no background host is active, `begin` still succeeds durably and reports that the Task is queued.

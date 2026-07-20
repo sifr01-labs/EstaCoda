@@ -21,6 +21,7 @@ import { renderStatusRailSurface } from "./statusRailSurface.js";
 import { renderStreamingSurface } from "./streamingSurface.js";
 import { renderTranscriptSurface } from "./transcriptSurface.js";
 import { renderTurnActivitySurface } from "./turnActivitySurface.js";
+import { renderTaskCardSurface, renderTaskInspectionSurface } from "./taskSurface.js";
 
 export type OperatorConsoleRenderedLine = {
   readonly region: OperatorConsoleRegion["kind"];
@@ -80,6 +81,23 @@ function renderRegionLines(
       width: region.width,
       height: region.height,
       focusedAttachmentId: state.focus.target.kind === "attachment" ? state.focus.target.attachmentId : undefined,
+    }).map((text) => ({ region: region.kind, text }));
+  }
+  if (region.kind === "taskCards") {
+    return renderTaskCardSurface(state.tasks, {
+      width: region.width,
+      height: region.height,
+      locale: state.locale,
+      isTty: state.terminal.isTty,
+      focusedTaskId: state.focus.target.kind === "taskCard" ? state.focus.target.taskId : undefined,
+    }).map((text) => ({ region: region.kind, text }));
+  }
+  if (region.kind === "taskInspection") {
+    return renderTaskInspectionSurface(state.tasks, {
+      width: region.width,
+      height: region.height,
+      locale: state.locale,
+      isTty: state.terminal.isTty,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "activeWork") {
@@ -165,6 +183,10 @@ function regionLabel(
       return `Turn activity: ${state.turnActivity?.phase ?? ""}`;
     case "queuedSteer":
       return `Queued steer: ${state.steer?.queued?.text ?? ""}`;
+    case "taskCards":
+      return `Tasks: ${state.tasks.cards.length}`;
+    case "taskInspection":
+      return `Task: ${state.tasks.inspectedTaskId ?? ""}`;
     case "attachments":
       return `Attachments: ${state.attachments.length}`;
     case "prompt":

@@ -708,7 +708,9 @@ export class SQLiteTaskStore implements TaskStore {
       sql += " and attempt_id = ?";
       params.push(options.attemptId);
     }
-    sql += " order by timestamp, id limit ?";
+    sql += options.order === "desc"
+      ? " order by timestamp desc, id desc limit ?"
+      : " order by timestamp, id limit ?";
     params.push(boundedLimit(options.limit));
     return this.#db.query<EventRow>(sql).all(...params).map(rowToEvent);
   }

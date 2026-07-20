@@ -37,9 +37,12 @@ import {
   formatSubmittedPromptWithAttachmentPreview,
   removeAttachmentAndRepairFocus,
   routeAttachmentKey,
+  resolveOperatorConsoleInputSurface,
+  routeTaskSurfaceKey,
   type AttachmentCardState,
   type FocusState,
   type SlashMenuState,
+  type TaskSurfaceState,
 } from "../ui/papyrus/operator-console/index.js";
 
 type RawPromptDataListener = (chunk: string | Buffer | Uint8Array) => void;
@@ -131,6 +134,7 @@ export class RawPromptController {
     let attachmentSequence = 0;
     let attachments: readonly AttachmentCardState[] = [];
     let attachmentFocus: FocusState = createInitialFocusState();
+    let taskSurface: TaskSurfaceState = { cards: [], scrollOffset: 0 };
     let vimKeymapState: PapyrusVimKeymapState | undefined =
       this.#keymap?.mode === "vim" ? createPapyrusVimKeymapState() : undefined;
     let typeaheadState: TypeaheadState<SlashCommandSuggestionMetadata> = createTypeaheadControllerState();
@@ -141,6 +145,19 @@ export class RawPromptController {
       statusTicker = undefined;
     };
     const render = () => {
+      const cards = this.#operatorConsole?.getTasks?.() ?? this.#operatorConsole?.tasks?.cards ?? taskSurface.cards;
+      const selectedTaskId = cards.some((card) => card.taskId === taskSurface.selectedTaskId)
+        ? taskSurface.selectedTaskId
+        : cards[0]?.taskId;
+      const inspectedTaskId = cards.some((card) => card.taskId === taskSurface.inspectedTaskId)
+        ? taskSurface.inspectedTaskId
+        : undefined;
+      taskSurface = {
+        cards,
+        ...(selectedTaskId === undefined ? {} : { selectedTaskId }),
+        ...(inspectedTaskId === undefined ? {} : { inspectedTaskId }),
+        scrollOffset: inspectedTaskId === undefined ? 0 : taskSurface.scrollOffset,
+      };
       const slashMenu = this.#operatorConsole?.enabled === true
         ? typeaheadStateToSlashMenu(typeaheadState)
         : undefined;
@@ -159,6 +176,7 @@ export class RawPromptController {
               isTty: this.#operatorConsole.terminal?.isTty ?? this.#output.isTTY ?? true,
             },
             attachments,
+            tasks: taskSurface,
             slash: slashMenu,
             placeholder: options?.placeholder,
             focus: attachmentFocus,
@@ -178,7 +196,8 @@ export class RawPromptController {
       this.#lifecycle.stop();
       throw error;
     }
-    if (this.#operatorConsole?.enabled === true && this.#operatorConsole.getStatus !== undefined) {
+    if (this.#operatorConsole?.enabled === true &&
+        (this.#operatorConsole.getStatus !== undefined || this.#operatorConsole.getTasks !== undefined)) {
       statusTicker = setInterval(render, 1000);
     }
 
@@ -407,6 +426,29 @@ export class RawPromptController {
         return true;
       };
 
+      const handleTaskKeypress = (event: ParsedKeypress, modalOnly = false) => {
+        if (this.#operatorConsole?.enabled !== true || taskSurface.cards.length === 0) return false;
+        const inspectionOpen = taskSurface.inspectedTaskId !== undefined;
+        if (modalOnly && !inspectionOpen) return false;
+        if (inspectionOpen && event.type !== "key") return true;
+        const routed = routeTaskSurfaceKey(createInitialOperatorConsoleState({
+          locale: this.#operatorConsole.locale,
+          terminal: {
+            width: this.#operatorConsole.terminal?.width ?? this.#output.columns ?? 80,
+            height: this.#operatorConsole.terminal?.height ?? this.#output.rows ?? 24,
+            isTty: this.#operatorConsole.terminal?.isTty ?? this.#output.isTTY ?? true,
+          },
+          attachments,
+          tasks: taskSurface,
+          focus: attachmentFocus,
+        }), event);
+        if (!routed.handled) return false;
+        taskSurface = routed.state.tasks;
+        attachmentFocus = routed.state.focus;
+        render();
+        return true;
+      };
+
       const formatSubmittedText = (text: string): RawPromptResult => {
         if (this.#operatorConsole?.enabled !== true || attachments.length === 0) {
           return { type: "submit", text };
@@ -421,13 +463,22 @@ export class RawPromptController {
       const dispatchParsedEvents = (events: readonly ParsedKeypress[]) => {
         if (settled) return;
         for (const event of events) {
+          if (handleTaskKeypress(event, true)) continue;
           if (this.#operatorConsole?.enabled === true && event.type === "paste") {
             addPasteAttachment(event.text);
             continue;
           }
           if (handleEmptyPromptAttachmentClear(event)) continue;
-          if (handleAttachmentKeypress(event)) continue;
-          if (handleTypeaheadKeypress(event)) continue;
+          const inputSurface = resolveOperatorConsoleInputSurface({
+            taskInspection: false,
+            approval: false,
+            typeahead: isTypeaheadActive(),
+            attachment: attachmentFocus.target.kind === "attachment" ||
+              (attachments.length > 0 && event.type === "key" && event.key === "tab"),
+          });
+          if (inputSurface === "typeahead" && handleTypeaheadKeypress(event)) continue;
+          if (inputSurface === "attachment" && handleAttachmentKeypress(event)) continue;
+          if (handleTaskKeypress(event)) continue;
           if (vimKeymapState !== undefined) {
             const vimResult = applyPapyrusVimKeymap(vimKeymapState, state, event);
             vimKeymapState = vimResult.state;

@@ -166,6 +166,7 @@ The live TTY frame is composed from these surfaces:
 - approvals
 - active work
 - queued steer
+- retained durable Task cards and modal Task inspection
 - attachments
 - prompt / steer input
 - slash menu
@@ -193,6 +194,21 @@ prompt; full pasted content is stored for submission and is not dumped into
 prompt chrome. Active work is uncapped in model storage and viewport-limited in
 rendering. Approval cards emit approve/reject/inspect intent only; approval and
 security policy remain authoritative.
+
+Durable Tasks linked to the active session remain visible as cards after their
+creating turn and after terminal settlement. Use `Ctrl+T` or an available `Tab`
+transition to focus them, arrow keys to select a Task, and `Enter` to inspect.
+The inspection page supports arrow scrolling, `Page Up`/`Page Down`,
+`Home`/`End`, and `Escape` to return. It shows bounded plan, Step, Attempt,
+elapsed-time, safe-activity, tool-category, usage/cost, result-handle, and
+wait/failure metadata. It does not show raw worker text, provider streams, raw
+event payloads, tool arguments/results, credentials, private paths, or result
+bodies. Plain, CI, dumb-terminal, and non-TTY sessions use the deterministic
+`task` and `/task` command output instead.
+
+Input ownership is deterministic: modal Task inspection, then approval prompts,
+then autocomplete/typeahead, then attachment selection, then ordinary prompt or
+steering input.
 
 Bracketed paste is enabled only for supported TTY prompts. Small single-line
 pastes remain inline. Multiline and large pastes become attachment cards. Secret

@@ -20,6 +20,8 @@ import type {
   SteerState,
   StreamingState,
   ToolActivityState,
+  TaskCardState,
+  TaskSurfaceState,
   TranscriptBlock,
   TurnActivityState,
 } from "../ui/papyrus/operator-console/operatorConsoleState.js";
@@ -58,6 +60,8 @@ export type RawPromptOperatorConsoleOptions = Omit<OperatorConsoleRawPromptSnaps
   readonly onAttachmentsChange?: (attachments: readonly AttachmentCardState[]) => void;
   readonly onAttachmentPreview?: (attachment: AttachmentCardState) => void;
   readonly getStatus?: () => OperatorConsoleRawPromptSnapshot["status"];
+  readonly getTasks?: () => readonly TaskCardState[];
+  readonly tasks?: TaskSurfaceState;
   readonly focus?: FocusState;
   readonly slash?: SlashMenuState;
   readonly activeWork?: ToolActivityState;
@@ -124,6 +128,7 @@ export class RawPromptRenderLoop {
     const frame = snapshot.operatorConsole?.enabled === true
       ? buildOperatorConsoleRawPromptFrameWithRuntimeHost(this.#getOperatorConsoleHost(), {
         mode: snapshot.operatorConsole.mode,
+        locale: snapshot.operatorConsole.locale,
         prompt: snapshot.prompt,
         state: snapshot.state,
         status: snapshot.operatorConsole.getStatus?.() ?? snapshot.operatorConsole.status,
@@ -132,6 +137,7 @@ export class RawPromptRenderLoop {
         turnActivity: snapshot.operatorConsole.turnActivity,
         terminal: snapshot.operatorConsole.terminal,
         attachments: snapshot.operatorConsole.attachments,
+        tasks: snapshot.operatorConsole.tasks,
         slash: snapshot.operatorConsole.slash,
         activeWork: snapshot.operatorConsole.activeWork,
         streaming: snapshot.operatorConsole.streaming,

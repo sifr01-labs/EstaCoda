@@ -35,6 +35,7 @@ export type ListTaskEventsOptions = {
   stepId?: string;
   attemptId?: string;
   limit?: number;
+  order?: "asc" | "desc";
 };
 
 export type AcquireTaskAttemptLeaseInput = {

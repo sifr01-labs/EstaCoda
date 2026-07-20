@@ -12,6 +12,7 @@ import {
   type SteerState,
   type StreamingState,
   type TerminalMetrics,
+  type TaskSurfaceState,
   type ToolActivityState,
   type TranscriptBlock,
   type TurnActivityState,
@@ -28,6 +29,7 @@ import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
 export type OperatorConsoleRawPromptSnapshot = {
   readonly mode?: OperatorConsoleMode;
+  readonly locale?: import("./activeWorkCopy.js").OperatorConsoleLocale;
   readonly prompt: string;
   readonly state: LineEditorState;
   readonly status?: StatusRailState;
@@ -35,6 +37,7 @@ export type OperatorConsoleRawPromptSnapshot = {
   readonly terminal?: Partial<TerminalMetrics>;
   readonly transcript?: readonly TranscriptBlock[];
   readonly attachments?: readonly AttachmentCardState[];
+  readonly tasks?: TaskSurfaceState;
   readonly turnActivity?: TurnActivityState;
   readonly slash?: SlashMenuState;
   readonly activeWork?: ToolActivityState;
@@ -66,6 +69,7 @@ export function buildOperatorConsoleStateFromRawPrompt(
   const terminal = normalizeTerminal(snapshot.terminal);
   return createInitialOperatorConsoleState({
     mode: snapshot.mode,
+    locale: snapshot.locale,
     terminal,
     setupPanel: snapshot.setupPanel,
     prompt: {
@@ -80,6 +84,7 @@ export function buildOperatorConsoleStateFromRawPrompt(
     transcript: snapshot.transcript ?? [],
     turnActivity: snapshot.turnActivity,
     attachments: snapshot.attachments ?? [],
+    tasks: snapshot.tasks,
     activeWork: snapshot.activeWork,
     streaming: snapshot.streaming,
     steer: snapshot.steer,
@@ -116,12 +121,14 @@ export function buildOperatorConsoleRawPromptFrameWithRuntimeHost(
   const terminal = normalizeTerminal(snapshot.terminal);
   host.clear();
   host.setMode(snapshot.mode ?? "session");
+  host.setLocale(snapshot.locale ?? host.getState().locale);
   host.setTerminal(terminal);
   host.setStatus(snapshot.status ?? createDefaultOperatorConsoleRawPromptStatus());
   host.setSetupPanel(snapshot.setupPanel);
   host.setTranscript(snapshot.transcript ?? []);
   host.setTurnActivity(snapshot.turnActivity);
   host.setAttachments(snapshot.attachments ?? []);
+  host.setTasks(snapshot.tasks ?? createInitialOperatorConsoleState().tasks);
   host.setSlash(snapshot.slash);
   host.setActiveWork(snapshot.activeWork ?? createInitialOperatorConsoleState().activeWork);
   host.setStreaming(snapshot.streaming);

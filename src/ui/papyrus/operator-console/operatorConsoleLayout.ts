@@ -27,6 +27,11 @@ import {
   isSteerInputActive,
 } from "./steerSurface.js";
 import { getTranscriptSurfaceDesiredHeight } from "./transcriptSurface.js";
+import {
+  getTaskCardSurfaceDesiredHeight,
+  getTaskInspectionSurfaceDesiredHeight,
+  hasTaskCards,
+} from "./taskSurface.js";
 
 export type OperatorConsoleRegionKind = OperatorConsoleSurface;
 
@@ -62,6 +67,7 @@ const STREAMING_PRIORITY = 5;
 const ATTACHMENTS_PRIORITY = 5;
 const TRANSCRIPT_PRIORITY = 6;
 const STARTUP_PRIORITY = 7;
+const TASK_CARD_PRIORITY = 4;
 const SHOW_LIVE_ACTIVE_WORK_REGION = false;
 
 export function createOperatorConsoleLayout(
@@ -101,6 +107,15 @@ function createRegionDescriptors(
 ): readonly RegionDescriptor[] {
   if (state.mode === "setup") {
     return createSetupRegionDescriptors(state, terminal);
+  }
+
+  if (state.tasks.inspectedTaskId !== undefined) {
+    return [{
+      kind: "taskInspection",
+      priority: PROMPT_PRIORITY,
+      minHeight: 1,
+      desiredHeight: getTaskInspectionSurfaceDesiredHeight(terminal.height),
+    }];
   }
 
   const descriptors: RegionDescriptor[] = [];
@@ -177,6 +192,15 @@ function createRegionDescriptors(
       priority: INTERACTIVE_OPTIONAL_PRIORITY,
       minHeight: 1,
       desiredHeight: getQueuedSteerSurfaceDesiredHeight(state.steer.queued),
+    });
+  }
+
+  if (hasTaskCards(state.tasks)) {
+    descriptors.push({
+      kind: "taskCards",
+      priority: TASK_CARD_PRIORITY,
+      minHeight: 1,
+      desiredHeight: getTaskCardSurfaceDesiredHeight(state.tasks),
     });
   }
 
@@ -297,14 +321,18 @@ function surfaceOrderIndex(kind: OperatorConsoleRegionKind): number {
       return 6;
     case "queuedSteer":
       return 7;
-    case "attachments":
+    case "taskCards":
       return 8;
-    case "prompt":
+    case "taskInspection":
       return 9;
-    case "slashMenu":
+    case "attachments":
       return 10;
-    case "statusRail":
+    case "prompt":
       return 11;
+    case "slashMenu":
+      return 12;
+    case "statusRail":
+      return 13;
   }
 }
 

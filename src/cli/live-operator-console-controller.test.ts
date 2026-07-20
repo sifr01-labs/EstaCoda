@@ -108,6 +108,43 @@ describe("LiveOperatorConsoleController", () => {
     expect(completed?.completedAtMs).toBe(9_000);
   });
 
+  it("renders retained durable Task cards while the foreground turn is active", () => {
+    const output = createOutput();
+    const { controller, runtimeHost } = createControllerFixture(output, {
+      getTasks: () => [{
+        taskId: "T-live-1",
+        objective: "Research competitor",
+        status: "running",
+        progress: { completed: 0, skipped: 0, total: 1 },
+        steps: [{
+          stepId: "step-1",
+          title: "Research Company A",
+          status: "running",
+          dependsOn: [],
+          activeAttempt: { attemptNumber: 1, status: "running", elapsedMs: 3_000 },
+        }],
+        recentActivity: [],
+        currentToolCategory: "browser",
+        elapsedMs: 3_000,
+        usage: {
+          providerCalls: 1,
+          totalTokens: 100,
+          estimatedCostUsd: 0.001,
+          usageComplete: true,
+          pricingComplete: true,
+        },
+        results: [],
+        createdAt: "2026-07-20T10:00:00.000Z",
+        updatedAt: "2026-07-20T10:00:03.000Z",
+      }],
+    });
+
+    controller.setTurnActivity({ phase: "provider" });
+
+    expect(runtimeHost.getState().tasks.cards[0]?.taskId).toBe("T-live-1");
+    expect(stripAnsi(output.text())).toContain("Research competitor");
+  });
+
   it("batches streaming text into the live frame", () => {
     vi.useFakeTimers();
     const output = createOutput();
@@ -478,6 +515,7 @@ function createController(
   options: Pick<
     ConstructorParameters<typeof LiveOperatorConsoleController>[0],
     "animationIntervalMs" | "now" | "streamingRefreshIntervalMs" | "turnStartedAtMs"
+      | "getTasks"
   > = {}
 ): LiveOperatorConsoleController {
   return createControllerFixture(output, options).controller;
@@ -488,6 +526,7 @@ function createControllerFixture(
   options: Pick<
     ConstructorParameters<typeof LiveOperatorConsoleController>[0],
     "animationIntervalMs" | "now" | "streamingRefreshIntervalMs" | "turnStartedAtMs"
+      | "getTasks"
   > = {}
 ): {
   readonly controller: LiveOperatorConsoleController;

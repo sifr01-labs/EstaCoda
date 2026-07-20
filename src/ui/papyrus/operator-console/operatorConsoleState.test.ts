@@ -45,6 +45,8 @@ describe("Papyrus operator console state model", () => {
       "turnActivity",
       "activeWork",
       "queuedSteer",
+      "taskCards",
+      "taskInspection",
       "attachments",
       "prompt",
       "slashMenu",
@@ -187,6 +189,7 @@ describe("Papyrus operator console state model", () => {
 
     expect(state.mode).toBe("session");
     expect(state.attachments).toEqual([]);
+    expect(state.tasks).toEqual({ cards: [], scrollOffset: 0 });
     expect(state.activeWork).toEqual({
       items: [],
       scrollOffset: 0,

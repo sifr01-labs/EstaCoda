@@ -121,6 +121,8 @@ import { buildProvidersStatusViewModel } from "./provider-status-view-models.js"
 import { selectProviderModelRoute } from "../setup/provider-model-route-prompt.js";
 import { isMemoryCurationModeMutation, runMemoryOperatorCommand } from "../memory/memory-operator-commands.js";
 import type { SessionFinalizationReason } from "../session/session-finalization-queue.js";
+import type { TaskStatusProjection } from "../workflow/task-operator-service.js";
+import type { TaskCardState } from "../ui/papyrus/operator-console/operatorConsoleState.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -152,6 +154,7 @@ export type SessionLoopOptions = {
 };
 
 const OPERATOR_CONSOLE_FALLBACK_TERMINAL_HEIGHT = 24;
+const OPERATOR_CONSOLE_TASK_REFRESH_INTERVAL_MS = 750;
 const COMPACTION_PROMPT_PLACEHOLDER = "Compacting session history... Ctrl+C to cancel";
 
 type StatusRailTimerMode = "idle" | "active-turn" | "last-turn";
@@ -352,6 +355,19 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     timing: railTiming(),
     providerExecutionSummary: lastProviderExecutionSummary
   });
+  let cachedTaskRuntime: Runtime | undefined;
+  let cachedTaskCards: readonly TaskCardState[] = [];
+  let cachedTaskCardsAtMs = Number.NEGATIVE_INFINITY;
+  const getOperatorConsoleTasks = () => {
+    const timestamp = Date.now();
+    if (cachedTaskRuntime === runtime && timestamp - cachedTaskCardsAtMs < OPERATOR_CONSOLE_TASK_REFRESH_INTERVAL_MS) {
+      return cachedTaskCards;
+    }
+    cachedTaskRuntime = runtime;
+    cachedTaskCardsAtMs = timestamp;
+    cachedTaskCards = operatorConsoleTaskCards(runtime);
+    return cachedTaskCards;
+  };
   const prompt = options.prompt ?? createInteractivePrompt({
     input: cliInput,
     output: output as NodeJS.WriteStream,
@@ -363,12 +379,14 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       : {
         operatorConsole: {
           enabled: true,
+          locale: renderer.locale === "ar" ? "ar" : "en",
           terminal: {
             width: renderer.capabilities.terminalWidth,
             height: operatorConsoleTerminalHeight(output),
             isTty: renderer.capabilities.isTTY,
           },
           getStatus: getOperatorConsoleStatus,
+          getTasks: getOperatorConsoleTasks,
           style: operatorConsoleStyle,
         },
       }),
@@ -514,6 +532,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
               supportsAnimation: renderer.capabilities.supportsAnimation,
             },
             getStatus: getOperatorConsoleStatus,
+            getTasks: getOperatorConsoleTasks,
             turnStartedAtMs: now(),
             promptPlaceholder: COMPACTION_PROMPT_PLACEHOLDER,
           });
@@ -636,6 +655,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
               supportsAnimation: renderer.capabilities.supportsAnimation,
             },
             getStatus: getOperatorConsoleStatus,
+            getTasks: getOperatorConsoleTasks,
             turnStartedAtMs,
           });
         let turnWasCancelled = false;
@@ -2807,6 +2827,65 @@ function operatorConsoleTerminalHeight(output: NodeJS.WritableStream): number {
   const rows = (output as { readonly rows?: number }).rows;
   if (rows === undefined || !Number.isFinite(rows)) return OPERATOR_CONSOLE_FALLBACK_TERMINAL_HEIGHT;
   return Math.max(1, Math.floor(rows));
+}
+
+function operatorConsoleTaskCards(runtime: Runtime): readonly TaskCardState[] {
+  if (runtime.taskOperator === undefined) return [];
+  try {
+    return runtime.taskOperator.list({ authorizedSessionId: runtime.sessionId, limit: 12 }).map(taskProjectionToCard);
+  } catch {
+    return [];
+  }
+}
+
+function taskProjectionToCard(task: TaskStatusProjection): TaskCardState {
+  return {
+    taskId: task.taskId,
+    objective: task.objective,
+    status: task.status,
+    progress: {
+      completed: task.progress.completed,
+      skipped: task.progress.skipped,
+      total: task.progress.total,
+    },
+    ...(task.planRevision === undefined ? {} : { planRevision: { ...task.planRevision } }),
+    steps: task.steps.map((step) => ({
+      stepId: step.stepId,
+      title: step.title,
+      status: step.status,
+      dependsOn: [...step.dependsOn],
+      ...(step.activeAttempt === undefined ? {} : {
+        activeAttempt: {
+          attemptNumber: step.activeAttempt.attemptNumber,
+          status: step.activeAttempt.status,
+          elapsedMs: step.activeAttempt.elapsedMs,
+          ...(step.activeAttempt.currentActivity === undefined ? {} : { currentActivity: step.activeAttempt.currentActivity }),
+          ...(step.activeAttempt.currentToolCategory === undefined ? {} : { currentToolCategory: step.activeAttempt.currentToolCategory }),
+        },
+      }),
+    })),
+    recentActivity: task.recentActivity.map((activity) => ({ ...activity })),
+    ...(task.currentToolCategory === undefined ? {} : { currentToolCategory: task.currentToolCategory }),
+    elapsedMs: task.elapsedMs,
+    usage: {
+      providerCalls: task.usage.providerCalls,
+      totalTokens: task.usage.totalTokens,
+      estimatedCostUsd: task.usage.estimatedCostUsd,
+      usageComplete: task.usage.usageComplete,
+      pricingComplete: task.usage.pricingComplete,
+    },
+    results: task.results.map((result) => ({
+      handle: result.handle,
+      kind: result.kind,
+      status: result.status,
+      byteLength: result.byteLength,
+      ...(result.summary === undefined ? {} : { summary: result.summary }),
+    })),
+    ...(task.waitReason === undefined ? {} : { waitReason: task.waitReason }),
+    ...(task.failure === undefined ? {} : { failure: { ...task.failure } }),
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+  };
 }
 
 function ansiColor(text: string, hex: string): string {

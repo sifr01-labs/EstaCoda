@@ -24,6 +24,7 @@ import {
   type StreamingSegment,
   type StreamingState,
   type TerminalMetrics,
+  type TaskSurfaceState,
   type ToolActivityState,
   type TurnActivityState,
   type TranscriptBlock,
@@ -56,6 +57,14 @@ export class OperatorConsoleRuntimeHost {
     this.#state = {
       ...this.#state,
       mode,
+    };
+  }
+
+  setLocale(locale: OperatorConsoleState["locale"]): void {
+    if (this.#disposed) return;
+    this.#state = {
+      ...this.#state,
+      locale,
     };
   }
 
@@ -126,6 +135,14 @@ export class OperatorConsoleRuntimeHost {
     this.#state = {
       ...this.#state,
       attachments: attachments.map(cloneAttachmentCardState),
+    };
+  }
+
+  setTasks(tasks: TaskSurfaceState): void {
+    if (this.#disposed) return;
+    this.#state = {
+      ...this.#state,
+      tasks: cloneTaskSurfaceState(tasks),
     };
   }
 
@@ -235,6 +252,7 @@ function cloneOperatorConsoleState(state: OperatorConsoleState): OperatorConsole
     status: cloneStatusRailState(state.status),
     turnActivity: state.turnActivity === undefined ? undefined : cloneTurnActivityState(state.turnActivity),
     attachments: state.attachments.map(cloneAttachmentCardState),
+    tasks: cloneTaskSurfaceState(state.tasks),
     activeWork: cloneToolActivityState(state.activeWork),
     streaming: state.streaming === undefined ? undefined : cloneStreamingState(state.streaming),
     approvals: state.approvals.map(cloneApprovalCardState),
@@ -315,6 +333,28 @@ function cloneTranscriptBlock(block: TranscriptBlock): TranscriptBlock {
     ...block,
     ...(block.attachmentIds === undefined ? {} : { attachmentIds: [...block.attachmentIds] }),
     ...(block.toolTrail === undefined ? {} : { toolTrail: block.toolTrail.map(cloneInlineToolTrailEntry) }),
+  };
+}
+
+function cloneTaskSurfaceState(tasks: TaskSurfaceState): TaskSurfaceState {
+  return {
+    cards: tasks.cards.map((card) => ({
+      ...card,
+      progress: { ...card.progress },
+      ...(card.planRevision === undefined ? {} : { planRevision: { ...card.planRevision } }),
+      steps: card.steps.map((step) => ({
+        ...step,
+        dependsOn: [...step.dependsOn],
+        ...(step.activeAttempt === undefined ? {} : { activeAttempt: { ...step.activeAttempt } }),
+      })),
+      recentActivity: card.recentActivity.map((activity) => ({ ...activity })),
+      usage: { ...card.usage },
+      results: card.results.map((result) => ({ ...result })),
+      ...(card.failure === undefined ? {} : { failure: { ...card.failure } }),
+    })),
+    ...(tasks.selectedTaskId === undefined ? {} : { selectedTaskId: tasks.selectedTaskId }),
+    ...(tasks.inspectedTaskId === undefined ? {} : { inspectedTaskId: tasks.inspectedTaskId }),
+    scrollOffset: normalizeNonNegativeInteger(tasks.scrollOffset),
   };
 }
 
