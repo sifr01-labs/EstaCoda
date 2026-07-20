@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 
-export const TASK_SCHEMA_VERSION = 10;
+export const TASK_SCHEMA_VERSION = 11;
 
 const WORKFLOW_TABLES = [
   "workflow_event_summaries",
@@ -311,4 +311,12 @@ export function migrateTaskSchemaV10(db: SQLiteDatabase): void {
     create index idx_task_session_links_session
       on task_session_links(profile_id, session_id, created_at);
   `);
+}
+
+/** Adds the durable cancellation signal consumed by the Task scheduler lease owner. */
+export function migrateTaskSchedulerSchemaV11(db: SQLiteDatabase): void {
+  const columns = db.query<{ name: string }>("pragma table_info(task_attempt_leases)").all();
+  if (!columns.some((column) => column.name === "cancellation_requested_at")) {
+    db.exec("alter table task_attempt_leases add column cancellation_requested_at text");
+  }
 }

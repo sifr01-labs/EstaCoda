@@ -255,6 +255,8 @@ export type TaskAttemptLease = {
   acquiredAt: string;
   heartbeatAt: string;
   expiresAt: string;
+  /** Durable cancellation signal observed by the lease owner during heartbeat. */
+  cancellationRequestedAt?: string;
 };
 
 export type TaskUsageTotals = {
@@ -383,7 +385,7 @@ const PLAN_REVISION_TRANSITIONS: Readonly<Record<TaskPlanRevisionStatus, readonl
 const STEP_TRANSITIONS: Readonly<Record<TaskStepStatus, readonly TaskStepStatus[]>> = {
   pending: ["ready", "skipped", "cancelled"],
   ready: ["running", "skipped", "cancelled"],
-  running: ["ready", "waiting_for_input", "waiting_for_approval", "completed", "failed", "cancelled"],
+  running: ["ready", "waiting_for_input", "waiting_for_approval", "completed", "failed", "skipped", "cancelled"],
   waiting_for_input: ["ready", "failed", "cancelled"],
   waiting_for_approval: ["ready", "failed", "cancelled"],
   completed: [],

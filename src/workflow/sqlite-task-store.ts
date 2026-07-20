@@ -22,9 +22,12 @@ import {
 } from "../contracts/task.js";
 import type { SQLiteDatabase, SQLiteValue } from "../storage/sqlite.js";
 import type {
+  AcquireTaskAttemptLeaseInput,
   CreateTaskGraphInput,
   ListTaskEventsOptions,
   ListTasksOptions,
+  ReleaseTaskAttemptLeaseInput,
+  RenewTaskAttemptLeaseInput,
   TaskStore
 } from "./task-store.js";
 
@@ -362,13 +365,11 @@ export class SQLiteTaskStore implements TaskStore {
     assertUnchanged("Attempt identity", {
       attemptNumber: existing.attemptNumber,
       dispatchKey: existing.dispatchKey,
-      createdAt: existing.createdAt,
-      lease: existing.lease
+      createdAt: existing.createdAt
     }, {
       attemptNumber: attempt.attemptNumber,
       dispatchKey: attempt.dispatchKey,
-      createdAt: attempt.createdAt,
-      lease: attempt.lease
+      createdAt: attempt.createdAt
     });
     const result = this.#db.query(
       `update task_attempts set attempt_number = ?, status = ?, dispatch_key = ?,
@@ -412,6 +413,91 @@ export class SQLiteTaskStore implements TaskStore {
       ? this.#db.query<AttemptWithLeaseRow>(sql).all(this.#profileId, taskId)
       : this.#db.query<AttemptWithLeaseRow>(sql).all(this.#profileId, taskId, stepId);
     return rows.map((row) => this.#rowToAttempt(row));
+  }
+
+  acquireAttemptLease(input: AcquireTaskAttemptLeaseInput): TaskAttemptLease | null {
+    const ownerId = requireNonEmpty(input.ownerId, "Attempt lease owner ID");
+    assertLeaseWindow(input.acquiredAt, input.expiresAt, "Attempt lease acquisition");
+    return this.atomicWrite(() => {
+      const attempt = this.getAttempt(input.attemptId);
+      if (attempt === null) throw new TaskStoreIntegrityError(`Attempt ${input.attemptId} was not found.`);
+      if (attempt.status === "leased" && attempt.lease?.ownerId === ownerId) return attempt.lease;
+      if (attempt.status !== "queued" || attempt.lease !== undefined) return null;
+
+      const lease: TaskAttemptLease = {
+        attemptId: attempt.id,
+        profileId: this.#profileId,
+        taskId: attempt.taskId,
+        ownerId,
+        fencingToken: 1,
+        acquiredAt: input.acquiredAt,
+        heartbeatAt: input.acquiredAt,
+        expiresAt: input.expiresAt
+      };
+      this.#insertLease(lease);
+      const update = this.#db.query(
+        `update task_attempts set status = 'leased', updated_at = ?
+         where id = ? and profile_id = ? and status = 'queued'`
+      ).run(input.acquiredAt, attempt.id, this.#profileId);
+      this.#assertChanged(update.changes, "Attempt", attempt.id);
+      return lease;
+    });
+  }
+
+  renewAttemptLease(input: RenewTaskAttemptLeaseInput): TaskAttemptLease | null {
+    assertLeaseWindow(input.heartbeatAt, input.expiresAt, "Attempt lease renewal");
+    return this.atomicWrite(() => {
+      const attempt = this.getAttempt(input.attemptId);
+      const lease = attempt?.lease;
+      if (
+        attempt === null ||
+        lease === undefined ||
+        lease.ownerId !== input.ownerId ||
+        lease.fencingToken !== input.fencingToken ||
+        Date.parse(lease.expiresAt) <= Date.parse(input.heartbeatAt)
+      ) {
+        return null;
+      }
+      if (lease.cancellationRequestedAt !== undefined) return lease;
+
+      const update = this.#db.query(
+        `update task_attempt_leases set heartbeat_at = ?, expires_at = ?
+         where attempt_id = ? and profile_id = ? and owner_id = ? and fencing_token = ?`
+      ).run(
+        input.heartbeatAt,
+        input.expiresAt,
+        input.attemptId,
+        this.#profileId,
+        input.ownerId,
+        input.fencingToken
+      );
+      this.#assertChanged(update.changes, "AttemptLease", input.attemptId);
+      return { ...lease, heartbeatAt: input.heartbeatAt, expiresAt: input.expiresAt };
+    });
+  }
+
+  requestAttemptCancellation(attemptId: string, requestedAt: string): TaskAttemptLease | null {
+    assertTimestamp(requestedAt, "Attempt cancellation request");
+    return this.atomicWrite(() => {
+      const attempt = this.getAttempt(attemptId);
+      if (attempt === null) throw new TaskStoreIntegrityError(`Attempt ${attemptId} was not found.`);
+      if (attempt.lease === undefined) return null;
+      this.#db.query(
+        `update task_attempt_leases set cancellation_requested_at = coalesce(cancellation_requested_at, ?)
+         where attempt_id = ? and profile_id = ?`
+      ).run(requestedAt, attemptId, this.#profileId);
+      return this.getAttempt(attemptId)?.lease ?? null;
+    });
+  }
+
+  releaseAttemptLease(input: ReleaseTaskAttemptLeaseInput): boolean {
+    return this.atomicWrite(() => {
+      const result = this.#db.query(
+        `delete from task_attempt_leases
+         where attempt_id = ? and profile_id = ? and owner_id = ? and fencing_token = ?`
+      ).run(input.attemptId, this.#profileId, input.ownerId, input.fencingToken);
+      return result.changes === 1;
+    });
   }
 
   recordResult(result: TaskResult): void {
@@ -672,8 +758,9 @@ export class SQLiteTaskStore implements TaskStore {
     this.#assertProfile(lease.profileId, "AttemptLease", lease.attemptId);
     this.#db.query(
       `insert into task_attempt_leases (
-        attempt_id, profile_id, task_id, owner_id, fencing_token, acquired_at, heartbeat_at, expires_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?)`
+        attempt_id, profile_id, task_id, owner_id, fencing_token, acquired_at, heartbeat_at,
+        expires_at, cancellation_requested_at
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       lease.attemptId,
       this.#profileId,
@@ -682,7 +769,8 @@ export class SQLiteTaskStore implements TaskStore {
       lease.fencingToken,
       lease.acquiredAt,
       lease.heartbeatAt,
-      lease.expiresAt
+      lease.expiresAt,
+      lease.cancellationRequestedAt ?? null
     );
   }
 
@@ -801,7 +889,8 @@ const ATTEMPT_SELECT = `select a.*,
   l.fencing_token as lease_fencing_token,
   l.acquired_at as lease_acquired_at,
   l.heartbeat_at as lease_heartbeat_at,
-  l.expires_at as lease_expires_at
+  l.expires_at as lease_expires_at,
+  l.cancellation_requested_at as lease_cancellation_requested_at
  from task_attempts a
  left join task_attempt_leases l
    on l.attempt_id = a.id and l.profile_id = a.profile_id`;
@@ -973,7 +1062,10 @@ function rowToAttempt(row: AttemptWithLeaseRow, resultIds: readonly string[]): T
     fencingToken: row.lease_fencing_token!,
     acquiredAt: row.lease_acquired_at!,
     heartbeatAt: row.lease_heartbeat_at!,
-    expiresAt: row.lease_expires_at!
+    expiresAt: row.lease_expires_at!,
+    ...(row.lease_cancellation_requested_at === null
+      ? {}
+      : { cancellationRequestedAt: row.lease_cancellation_requested_at })
   };
   return {
     id: row.id,
@@ -1058,6 +1150,26 @@ function parseJson<T>(value: string, field: string): T {
     return JSON.parse(value) as T;
   } catch (error) {
     throw new TaskStoreIntegrityError(`Stored ${field} is not valid JSON.`, { cause: error });
+  }
+}
+
+function requireNonEmpty(value: string, label: string): string {
+  const normalized = value.trim();
+  if (normalized.length === 0) throw new TaskStoreIntegrityError(`${label} must not be empty.`);
+  return normalized;
+}
+
+function assertTimestamp(value: string, label: string): void {
+  if (!Number.isFinite(Date.parse(value))) {
+    throw new TaskStoreIntegrityError(`${label} must be an ISO-compatible timestamp.`);
+  }
+}
+
+function assertLeaseWindow(start: string, end: string, label: string): void {
+  assertTimestamp(start, label);
+  assertTimestamp(end, label);
+  if (Date.parse(end) <= Date.parse(start)) {
+    throw new TaskStoreIntegrityError(`${label} expiry must be later than its start.`);
   }
 }
 
@@ -1159,6 +1271,7 @@ type AttemptWithLeaseRow = AttemptRow & {
   lease_acquired_at: string | null;
   lease_heartbeat_at: string | null;
   lease_expires_at: string | null;
+  lease_cancellation_requested_at: string | null;
 };
 
 type ResultRow = {

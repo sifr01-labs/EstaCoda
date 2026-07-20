@@ -1,6 +1,7 @@
 import type {
   Task,
   TaskAttempt,
+  TaskAttemptLease,
   TaskEvent,
   TaskEventKind,
   TaskPlanRevision,
@@ -28,6 +29,27 @@ export type ListTaskEventsOptions = {
   limit?: number;
 };
 
+export type AcquireTaskAttemptLeaseInput = {
+  attemptId: string;
+  ownerId: string;
+  acquiredAt: string;
+  expiresAt: string;
+};
+
+export type RenewTaskAttemptLeaseInput = {
+  attemptId: string;
+  ownerId: string;
+  fencingToken: number;
+  heartbeatAt: string;
+  expiresAt: string;
+};
+
+export type ReleaseTaskAttemptLeaseInput = {
+  attemptId: string;
+  ownerId: string;
+  fencingToken: number;
+};
+
 /** Profile-bound persistence contract. A store instance can never opt out of profile scoping. */
 export interface TaskStore {
   readonly profileId: string;
@@ -51,6 +73,10 @@ export interface TaskStore {
   updateAttempt(attempt: TaskAttempt): void;
   getAttempt(id: string): TaskAttempt | null;
   listAttempts(taskId: string, stepId?: string): TaskAttempt[];
+  acquireAttemptLease(input: AcquireTaskAttemptLeaseInput): TaskAttemptLease | null;
+  renewAttemptLease(input: RenewTaskAttemptLeaseInput): TaskAttemptLease | null;
+  requestAttemptCancellation(attemptId: string, requestedAt: string): TaskAttemptLease | null;
+  releaseAttemptLease(input: ReleaseTaskAttemptLeaseInput): boolean;
 
   recordResult(result: TaskResult): void;
   updateResult(result: TaskResult): void;

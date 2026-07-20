@@ -218,9 +218,9 @@ Delegation lets a parent session spawn bounded child agent sessions. Child work 
 
 Child sessions use `DefaultChildAgentLoopFactory` so delegated work goes through the same runtime construction path as normal sessions.
 
-### Durable Task and result foundation
+### Durable Task foundation
 
-The Task foundation stores profile-owned multi-step execution graphs and durable result bodies independently of a provider turn. Task scheduling is not wired into the runtime in this build.
+The Task foundation stores profile-owned multi-step execution graphs and durable result bodies independently of a provider turn. An internal scheduler core handles deterministic dependency resolution, fenced Attempts, concurrency, retry, cancellation, acceptance, and restart reconciliation with a fake executor. It is not wired into the runtime or ordinary user paths in this build.
 
 | Component | Role |
 |---|---|
@@ -229,9 +229,11 @@ The Task foundation stores profile-owned multi-step execution graphs and durable
 | `sqlite-task-store.ts` | Persists Tasks, plan revisions, Steps, Attempts, Results, Events, and session links |
 | `task-result-service.ts` | Stores profile-local result bodies and verifies size and content hashes |
 | `task-result-tools.ts` | Provides linked sessions with bounded `task.result.read` pages |
+| `task-step-executor.ts` | Defines the Attempt execution and settlement boundary |
+| `task-scheduler.ts` | Owns deterministic orchestration and fenced settlement |
 | `contracts/task.ts` | Defines Task records, transitions, authority, budgets, and graph validation |
 
-Normal chat turns remain independent of durable Task storage. Result IDs and session links are checked before reads; raw bodies and filesystem paths do not enter Task events.
+Normal chat turns remain independent of durable Task scheduling. Result IDs and session links are checked before reads; raw bodies and filesystem paths do not enter Task events. The scheduler cannot grant tool authority, and no production executor is registered yet.
 
 ### Packs and distribution
 

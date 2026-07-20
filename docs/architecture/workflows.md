@@ -1,9 +1,9 @@
 ---
-title: "Task persistence and results"
-description: "Profile-owned durable Task metadata, result content, and the Workflow persistence cutover."
+title: "Durable Task foundation"
+description: "Profile-owned Task persistence, results, and the dormant scheduler core."
 ---
 
-# Task persistence and durable results
+# Durable Task foundation
 
 EstaCoda's durable execution records use the Task domain model:
 
@@ -16,15 +16,17 @@ Task
             └── Result
 ```
 
-This document describes the persistence and result foundation currently present in the codebase. The Task scheduler, executor integration, and Task operator commands are not wired in this build. The retired Workflow commands fail explicitly instead of falling back to an in-memory or partially initialized implementation.
+This document describes the persistence, result, and scheduler foundation currently present in the codebase. `WorkflowScheduler` is an internal core exercised with a fake executor; it is not constructed by `createRuntime`, and no ordinary user path can start it. Agent execution, Task operator commands, delivery, and supervisor wiring remain outside this build. The retired Workflow commands fail explicitly instead of falling back to an in-memory or partially initialized implementation.
 
 ## Source of truth
 
 - `src/contracts/task.ts` defines the durable records, legal state transitions, authority and budget policies, and deterministic graph validation.
-- `src/workflow/task-schema.ts` owns SQLite schema version 10.
+- `src/workflow/task-schema.ts` owns SQLite schema version 11.
 - `src/workflow/task-store.ts` defines the profile-bound storage contract.
 - `src/workflow/sqlite-task-store.ts` implements transactional SQLite persistence.
 - `src/workflow/task-result-service.ts` stores bounded result bodies under the selected profile and verifies them before reads.
+- `src/workflow/task-step-executor.ts` defines the narrow Attempt execution and settlement contract.
+- `src/workflow/task-scheduler.ts` owns deterministic readiness, dispatch, fencing, retry, cancellation, acceptance, and restart reconciliation.
 - `src/tools/task-result-tools.ts` exposes authorized, paged `task.result.read` access.
 - `src/session/sqlite-session-db.ts` runs the migration and enables SQLite foreign-key enforcement.
 
@@ -44,6 +46,7 @@ Opaque Task and session identifiers are routing keys, not authorization boundari
 - Task creation keys and Attempt dispatch keys have separate profile-scoped uniqueness constraints.
 - Only one PlanRevision can be active for a Task.
 - Attempt leases are stored separately and require a positive, monotonically managed fencing token.
+- Scheduler graph mutations are serialized by short `begin immediate` transactions; there is no second legacy run-lock subsystem to reconcile.
 - Event metadata and Result sizes are bounded before persistence.
 - A Step's available Results cannot exceed its declared aggregate result budget.
 - SQLite check constraints reject unknown states, invalid JSON, negative sizes, invalid attempt numbers, and self-dependencies.
@@ -56,12 +59,20 @@ Result creation writes the content first, then records metadata and the bounded 
 
 `task.result.read` requires both the Task and Result IDs. The active session must have a profile-owned `TaskSessionLink` to that Task. Access survives transcript-preserving compaction only when every lineage hop has the same profile, a matching `parentSessionId` and `compactedFromSessionId`, and a parent ended for compression; ordinary parent/child session relationships grant nothing. Missing, cross-profile, and unauthorized records share the same error. Text and JSON are returned in bounded Unicode-character pages; binary artifacts remain durable but are not transported through a text tool. Pruned and expired Results are unavailable.
 
+## Scheduler core
+
+`WorkflowScheduler.runOnce()` performs one bounded reconciliation and dispatch pass. It derives ready Steps from completed dependencies, creates deterministic dispatch keys, acquires fenced Attempt leases, starts available executors within profile, Task, executor, and provider concurrency limits, and accepts settlement only while the same unexpired lease is current. Every agent Attempt reserves at least one provider call for budget enforcement even if an executor reports incomplete usage.
+
+Executors return settlements; they cannot declare a Step or Task complete. The scheduler validates required result kind and presence, writes result bodies through the fenced durable result plane, validates aggregate Task and Step usage and wall-clock budgets, and then settles the Attempt and logical Step. Retry classification is deterministic: failure-class policy, attempt limits, backoff, idempotency, and uncertain side effects are evaluated before a Step can return to `ready`.
+
+Cancellation is durable on the Attempt lease and visible to its owner on heartbeat. Local work also receives an `AbortSignal`. A stale owner cannot write results or settle after expiry, cancellation, or fencing loss. Restart reconciliation preserves unexpired foreign leases, expires or interrupts abandoned Attempts, and retries only when policy permits. Terminal Task state is reconstructed from durable Step state; the scheduler can produce `completed`, `partial`, `failed`, and `cancelled` outcomes without provider inference.
+
 ## Migration behavior
 
-Opening a writable `SQLiteSessionDB` migrates it to schema version 10 under the existing migration lock and transaction. The migration preserves unrelated session, message, trajectory, approval, cron, finalization, and memory-curation data. A best-effort pre-migration backup is created by the session database migration runner.
+Opening a writable `SQLiteSessionDB` migrates it to schema version 11 under the existing migration lock and transaction. Version 10 performs the Task persistence cutover; version 11 adds the durable Attempt cancellation marker without replacing existing leases. The migrations preserve unrelated session, message, trajectory, approval, cron, finalization, and memory-curation data. A best-effort pre-migration backup is created by the session database migration runner.
 
 The migration is intentionally destructive only for the retired Workflow tables. There is no dual-read, dual-write, compatibility alias, or hidden legacy store.
 
 ## Current boundary
 
-The persistence and result layers do not execute Tasks and do not grant authority. Future execution code must still recheck workspace trust, hardline command policy, approvals, profile ownership, budget, and lease fencing at the point of action. Persisted authority can only narrow runtime policy; it cannot approve an operation by itself.
+The scheduler core is deliberately dormant and uses no production executor. It does not grant authority: a future `AgentStepExecutor` must still recheck workspace trust, hardline command policy, approvals, profile ownership, budget, and lease fencing at the point of action. Persisted authority can only narrow runtime policy; it cannot approve an operation by itself.

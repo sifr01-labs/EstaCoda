@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, statSync, existsSync, mkdirSync, openSync, closeSy
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { prepareSessionDbFile, createSQLiteSessionDB } from "./session-setup.js";
+import { TASK_SCHEMA_VERSION } from "../workflow/task-schema.js";
 
 type ChildRunResult = {
   exitCode: number | null;
@@ -218,7 +219,8 @@ describe("createSQLiteSessionDB", () => {
     const sessionPath = join(stateDir, "sessions.sqlite");
     const initial = await createSQLiteSessionDB({ path: sessionPath });
     try {
-      expect(initial.db.query<{ version: number }>("select max(version) as version from schema_version").get()).toEqual({ version: 10 });
+      expect(initial.db.query<{ version: number }>("select max(version) as version from schema_version").get())
+        .toEqual({ version: TASK_SCHEMA_VERSION });
     } finally {
       initial.close();
     }
@@ -228,7 +230,8 @@ describe("createSQLiteSessionDB", () => {
     for (const _ of Array.from({ length: 3 })) {
       const reopened = await createSQLiteSessionDB({ path: sessionPath });
       try {
-        expect(reopened.db.query<{ version: number }>("select max(version) as version from schema_version").get()).toEqual({ version: 10 });
+        expect(reopened.db.query<{ version: number }>("select max(version) as version from schema_version").get())
+          .toEqual({ version: TASK_SCHEMA_VERSION });
       } finally {
         reopened.close();
       }

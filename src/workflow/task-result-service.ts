@@ -14,7 +14,7 @@ import {
   writeFileSync
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import type { TaskResult, TaskResultKind } from "../contracts/task.js";
+import type { TaskAttemptLease, TaskResult, TaskResultKind } from "../contracts/task.js";
 import { TASK_GRAPH_LIMITS } from "../contracts/task.js";
 import type { SessionDB } from "../contracts/session.js";
 import type { TaskStore } from "./task-store.js";
@@ -33,6 +33,11 @@ export type RecordTaskResultInput = {
   mimeType?: string;
   summary?: string;
   expiresAt?: string;
+  /** Scheduler-only settlement fence. Result writes fail when the Attempt lease is stale or cancelled. */
+  expectedLease?: {
+    ownerId: string;
+    fencingToken: number;
+  };
 };
 
 export type ReadTaskResultPageInput = {
@@ -148,6 +153,12 @@ export class TaskResultService {
     if (input.attemptId !== undefined && (attempt === null || attempt.taskId !== taskId)) {
       throw new TaskResultContentError("attempt-task-mismatch", "Result Attempt does not belong to its Task.");
     }
+    if (input.expectedLease !== undefined) {
+      if (attempt === null) {
+        throw new TaskResultContentError("result-fence-missing-attempt", "A fenced Result requires an Attempt.");
+      }
+      assertCurrentResultLease(attempt.lease, input.expectedLease, this.#now().getTime());
+    }
     const effectiveStepId = input.stepId ?? attempt?.stepId;
     const step = effectiveStepId === undefined
       ? null
@@ -197,6 +208,12 @@ export class TaskResultService {
         const persistedAttempt = result.attemptId === undefined ? null : store.getAttempt(result.attemptId);
         if (result.attemptId !== undefined && (persistedAttempt === null || persistedAttempt.taskId !== result.taskId)) {
           throw new TaskResultContentError("attempt-task-mismatch", "Result Attempt does not belong to its Task.");
+        }
+        if (input.expectedLease !== undefined) {
+          if (persistedAttempt === null) {
+            throw new TaskResultContentError("result-fence-missing-attempt", "A fenced Result requires an Attempt.");
+          }
+          assertCurrentResultLease(persistedAttempt.lease, input.expectedLease, this.#now().getTime());
         }
         if (persistedAttempt !== null && result.stepId !== undefined && persistedAttempt.stepId !== result.stepId) {
           throw new TaskResultContentError("attempt-step-mismatch", "Result Attempt does not belong to its Step.");
@@ -458,6 +475,22 @@ function assertResultMatchesStepPolicy(
       "result-policy-mismatch",
       `Task result kind ${actual} does not match the Step result policy ${expected}.`
     );
+  }
+}
+
+function assertCurrentResultLease(
+  lease: TaskAttemptLease | undefined,
+  expected: { ownerId: string; fencingToken: number },
+  nowMs: number
+): void {
+  if (
+    lease === undefined ||
+    lease.ownerId !== expected.ownerId ||
+    lease.fencingToken !== expected.fencingToken ||
+    Date.parse(lease.expiresAt) <= nowMs ||
+    lease.cancellationRequestedAt !== undefined
+  ) {
+    throw new TaskResultContentError("result-fence-lost", "Task result settlement lease is no longer current.");
   }
 }
 

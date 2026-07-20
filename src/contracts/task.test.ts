@@ -49,6 +49,7 @@ describe("durable Task state transitions", () => {
 
   it("separates logical Step retries from terminal Attempt outcomes", () => {
     expect(isTaskStepTransitionAllowed("running", "ready")).toBe(true);
+    expect(isTaskStepTransitionAllowed("running", "skipped")).toBe(true);
     expect(isTaskAttemptTransitionAllowed("running", "failed")).toBe(true);
     expect(isTaskAttemptTransitionAllowed("failed", "queued")).toBe(false);
     expect(() => assertTaskStepTransition("completed", "ready")).toThrow(IllegalTaskTransitionError);

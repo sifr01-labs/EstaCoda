@@ -16,7 +16,7 @@ import type { ToolRiskClass } from "../contracts/tool.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 import { SQLiteTaskStore, TaskStoreProfileError } from "./sqlite-task-store.js";
-import { TASK_SCHEMA_VERSION } from "./task-schema.js";
+import { migrateTaskSchedulerSchemaV11, TASK_SCHEMA_VERSION } from "./task-schema.js";
 
 describe("SQLiteTaskStore", () => {
   let tempDir: string;
@@ -47,11 +47,13 @@ describe("SQLiteTaskStore", () => {
       "select max(version) as version from schema_version"
     ).get()?.version;
     const foreignKeys = sessionDb.db.query<{ foreign_keys: number }>("pragma foreign_keys").get()?.foreign_keys;
+    const leaseColumns = sessionDb.db.query<{ name: string }>("pragma table_info(task_attempt_leases)").all();
 
     expect(version).toBe(TASK_SCHEMA_VERSION);
     expect(foreignKeys).toBe(1);
     expect([...TASK_TABLES].every((table) => tables.has(table))).toBe(true);
     expect([...WORKFLOW_TABLES].every((table) => !tables.has(table))).toBe(true);
+    expect(leaseColumns.some((column) => column.name === "cancellation_requested_at")).toBe(true);
   });
 
   it("round-trips an immutable plan graph and creator session link atomically", () => {
@@ -182,6 +184,59 @@ describe("SQLiteTaskStore", () => {
     ]);
   });
 
+  it("acquires, renews, cancellation-marks, and releases Attempt leases with fencing", () => {
+    store.createTaskGraph(makeGraph("alpha"));
+    store.createAttempt(makeAttempt("attempt-1"));
+
+    const lease = store.acquireAttemptLease({
+      attemptId: "attempt-1",
+      ownerId: "scheduler-1",
+      acquiredAt: NOW,
+      expiresAt: "2030-01-01T00:01:00.000Z"
+    });
+    expect(lease).toMatchObject({ ownerId: "scheduler-1", fencingToken: 1 });
+    expect(store.getAttempt("attempt-1")).toMatchObject({ status: "leased", lease });
+    expect(store.acquireAttemptLease({
+      attemptId: "attempt-1",
+      ownerId: "scheduler-2",
+      acquiredAt: NOW,
+      expiresAt: "2030-01-01T00:01:00.000Z"
+    })).toBeNull();
+
+    expect(store.renewAttemptLease({
+      attemptId: "attempt-1",
+      ownerId: "scheduler-1",
+      fencingToken: 1,
+      heartbeatAt: "2030-01-01T00:00:30.000Z",
+      expiresAt: "2030-01-01T00:02:00.000Z"
+    })).toMatchObject({ heartbeatAt: "2030-01-01T00:00:30.000Z", expiresAt: "2030-01-01T00:02:00.000Z" });
+    expect(store.renewAttemptLease({
+      attemptId: "attempt-1",
+      ownerId: "scheduler-2",
+      fencingToken: 1,
+      heartbeatAt: "2030-01-01T00:00:31.000Z",
+      expiresAt: "2030-01-01T00:02:01.000Z"
+    })).toBeNull();
+
+    expect(store.requestAttemptCancellation("attempt-1", "2030-01-01T00:00:40.000Z"))
+      .toMatchObject({ cancellationRequestedAt: "2030-01-01T00:00:40.000Z" });
+    expect(store.renewAttemptLease({
+      attemptId: "attempt-1",
+      ownerId: "scheduler-1",
+      fencingToken: 1,
+      heartbeatAt: "2030-01-01T00:00:50.000Z",
+      expiresAt: "2030-01-01T00:03:00.000Z"
+    })).toMatchObject({
+      cancellationRequestedAt: "2030-01-01T00:00:40.000Z",
+      expiresAt: "2030-01-01T00:02:00.000Z"
+    });
+    expect(store.releaseAttemptLease({ attemptId: "attempt-1", ownerId: "scheduler-2", fencingToken: 1 }))
+      .toBe(false);
+    expect(store.releaseAttemptLease({ attemptId: "attempt-1", ownerId: "scheduler-1", fencingToken: 1 }))
+      .toBe(true);
+    expect(store.getAttempt("attempt-1")?.lease).toBeUndefined();
+  });
+
   it("rejects in-place plan mutation after persistence", () => {
     const graph = makeGraph("alpha");
     store.createTaskGraph(graph);
@@ -231,7 +286,7 @@ describe("SQLiteTaskStore", () => {
   });
 });
 
-describe("Task schema v10 migration", () => {
+describe("Task schema migrations", () => {
   it("drops Workflow persistence while preserving unrelated session data", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "estacoda-task-migration-"));
     const dbPath = join(tempDir, "sessions.sqlite");
@@ -322,6 +377,41 @@ describe("Task schema v10 migration", () => {
       ).get()?.version).toBe(TASK_SCHEMA_VERSION);
     } finally {
       migrated.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("Task scheduler schema v11 migration", () => {
+  it("adds cancellation requests idempotently without replacing existing leases", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-task-scheduler-migration-"));
+    const database = openDefaultSQLiteDatabase({ path: join(tempDir, "scheduler.sqlite") });
+    try {
+      database.exec(`
+        create table task_attempt_leases (
+          attempt_id text primary key,
+          profile_id text not null,
+          task_id text not null,
+          owner_id text not null,
+          fencing_token integer not null,
+          acquired_at text not null,
+          heartbeat_at text not null,
+          expires_at text not null
+        );
+        insert into task_attempt_leases values (
+          'attempt-1', 'alpha', 'task-1', 'scheduler-1', 3,
+          '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:10.000Z', '2030-01-01T00:01:00.000Z'
+        );
+      `);
+
+      migrateTaskSchedulerSchemaV11(database);
+      migrateTaskSchedulerSchemaV11(database);
+
+      expect(database.query<{ owner_id: string; fencing_token: number; cancellation_requested_at: string | null }>(
+        "select owner_id, fencing_token, cancellation_requested_at from task_attempt_leases"
+      ).get()).toEqual({ owner_id: "scheduler-1", fencing_token: 3, cancellation_requested_at: null });
+    } finally {
+      database.close();
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
