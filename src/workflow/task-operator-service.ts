@@ -93,13 +93,11 @@ export class TaskOperatorService {
     this.#eventId = options.eventId ?? randomUUID;
   }
 
-  begin(input: { objective: string; workspace: TaskWorkspaceBinding; creatorSessionId?: string }): TaskStatusProjection {
-    const objective = boundedObjective(input.objective);
+  begin(input: { objective: string; workspace: TaskWorkspaceBinding; creatorSessionId: string }): TaskStatusProjection {
+    const objective = normalizeTaskOperatorObjective(input.objective);
     const authority = operatorTaskAuthority();
     const graph = new FixedTaskService({ store: this.#store, now: this.#now }).create({
-      ...(input.creatorSessionId === undefined
-        ? { createdBy: { kind: "system" as const } }
-        : { creatorSessionId: input.creatorSessionId }),
+      creatorSessionId: input.creatorSessionId,
       source: "cli",
       objective,
       workspace: input.workspace,
@@ -571,7 +569,7 @@ function eventActivity(event: TaskEvent): { readonly label: string; readonly too
   };
 }
 
-function boundedObjective(value: string): string {
+export function normalizeTaskOperatorObjective(value: string): string {
   const objective = value.trim();
   if (objective.length === 0 || objective.length > TASK_GRAPH_LIMITS.maxStepObjectiveChars || objective.includes("\u0000")) {
     throw new Error(`Task objective must be 1-${TASK_GRAPH_LIMITS.maxStepObjectiveChars} characters.`);

@@ -35,8 +35,8 @@ export type FixedTaskStepInput = Pick<
 };
 
 export type CreateFixedTaskInput = {
-  /** Omit only for an explicit system-owned operator Task with no conversation owner. */
-  creatorSessionId?: string;
+  /** Every executable fixed Task has an explicit profile-owned authorization root. */
+  creatorSessionId: string;
   source: TaskSource;
   creationKey?: string;
   objective: string;
@@ -102,7 +102,7 @@ export class FixedTaskService {
     const task: Task = {
       id: taskId,
       profileId: this.#store.profileId,
-      ...(normalized.creatorSessionId === undefined ? {} : { creatorSessionId: normalized.creatorSessionId }),
+      creatorSessionId: normalized.creatorSessionId,
       ...(parent === undefined ? {} : {
         parentTaskId: parent.taskId,
         parentAttemptId: parent.attemptId
@@ -291,19 +291,15 @@ function normalizeCreateInput(input: CreateFixedTaskInput): NormalizedCreateFixe
       dependsOn: step.dependsOn.map((dependency) => boundedToken(dependency, "Step dependency key", 128))
     };
   });
-  const creatorSessionId = input.creatorSessionId === undefined
-    ? undefined
-    : boundedToken(input.creatorSessionId, "creator session ID", 256);
+  const creatorSessionId = boundedToken(input.creatorSessionId, "creator session ID", 256);
   let parent: CreateFixedTaskInput["parent"];
   if (input.parent === undefined) {
-    const validSystemActor = creatorSessionId === undefined && input.createdBy?.kind === "system" &&
-      input.createdBy.sessionId === undefined && input.createdBy.taskId === undefined && input.createdBy.attemptId === undefined;
-    const validSessionActor = creatorSessionId !== undefined && (input.createdBy === undefined || (
+    const validSessionActor = input.createdBy === undefined || (
       input.createdBy.kind !== "system" && input.createdBy.sessionId === creatorSessionId &&
       input.createdBy.taskId === undefined && input.createdBy.attemptId === undefined
-    ));
-    if (!validSystemActor && !validSessionActor) {
-      throw new Error("A root fixed Task actor must be the creator session or the system actor.");
+    );
+    if (!validSessionActor) {
+      throw new Error("A root fixed Task actor must be its creator session.");
     }
   } else {
     parent = {

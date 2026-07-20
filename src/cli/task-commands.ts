@@ -5,7 +5,11 @@ import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { readGatewayState } from "../gateway/supervisor-state.js";
 import { isStalePid } from "../gateway/pid-file.js";
 import { SQLiteTaskStore } from "../workflow/sqlite-task-store.js";
-import { TaskOperatorService, type TaskStatusProjection } from "../workflow/task-operator-service.js";
+import {
+  normalizeTaskOperatorObjective,
+  TaskOperatorService,
+  type TaskStatusProjection
+} from "../workflow/task-operator-service.js";
 import { resolveTaskWorkspaceBinding } from "../workflow/task-workspace.js";
 import { readConfig } from "../config/runtime-config.js";
 import { isolateLtr } from "../ui/bidi.js";
@@ -17,10 +21,15 @@ export type TaskCommandContext = {
   args: readonly string[];
   service: TaskOperatorService;
   authorizedSessionId?: string;
-  begin?: (objective: string, creatorSessionId?: string) => Promise<TaskStatusProjection>;
+  begin?: (objective: string, creatorSessionId?: string) => Promise<TaskBeginOutcome>;
   workspaceTrusted?: (projection: TaskStatusProjection) => Promise<boolean>;
   backgroundHost?: () => Promise<"active" | "inactive">;
   locale?: TaskCommandLocale;
+};
+
+export type TaskBeginOutcome = {
+  task: TaskStatusProjection;
+  creatorSessionId: string;
 };
 
 export async function taskCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
@@ -41,18 +50,33 @@ export async function taskCommand(options: CliOptions, args: string[]): Promise<
       service,
       locale,
       begin: async (objective, creatorSessionId) => {
-        if (creatorSessionId !== undefined) {
-          const session = await db!.getSessionForProfile(creatorSessionId, profileId);
-          if (session === undefined) throw new Error(`Session ${creatorSessionId} was not found in this profile.`);
-        }
         if (!(await trust.isTrusted(options.workspaceRoot))) {
           throw new Error("Task creation requires a trusted workspace.");
         }
-        return service.begin({
-          objective,
-          workspace: await resolveTaskWorkspaceBinding(options.workspaceRoot),
-          ...(creatorSessionId === undefined ? {} : { creatorSessionId })
+        const workspace = await resolveTaskWorkspaceBinding(options.workspaceRoot);
+        const normalizedObjective = normalizeTaskOperatorObjective(objective);
+        const existingSession = creatorSessionId === undefined
+          ? undefined
+          : await db!.getSessionForProfile(creatorSessionId, profileId);
+        if (creatorSessionId !== undefined && existingSession === undefined) {
+          throw new Error(`Session ${creatorSessionId} was not found in this profile.`);
+        }
+        const creatorSession = existingSession ?? await db!.createSession({
+          profileId,
+          title: taskCreatorSessionTitle(normalizedObjective),
+          metadata: { kind: "task-operator-origin", source: "cli" }
         });
+        try {
+          return {
+            task: service.begin({ objective: normalizedObjective, workspace, creatorSessionId: creatorSession.id }),
+            creatorSessionId: creatorSession.id
+          };
+        } catch (error) {
+          if (existingSession === undefined) {
+            await db!.endSession(creatorSession.id, "task-creation-failed").catch(() => undefined);
+          }
+          throw error;
+        }
       },
       workspaceTrusted: async (projection) => {
         const task = store.getTask(projection.taskId);
@@ -102,10 +126,14 @@ export async function executeTaskCommand(context: TaskCommandContext): Promise<{
           "إنشاء المهام غير متاح في بيئة التشغيل هذه."));
         const parsed = parseBegin(rest, locale, context.authorizedSessionId === undefined);
         if (!parsed.ok) return fail(parsed.message);
-        const task = await context.begin(parsed.objective, parsed.sessionId ?? context.authorizedSessionId);
+        const created = await context.begin(parsed.objective, parsed.sessionId ?? context.authorizedSessionId);
+        const task = created.task;
         const host = await context.backgroundHost?.() ?? "unknown";
         return ok([
           `${copy(locale, "Created Task", "تم إنشاء المهمة")}: ${technical(locale, task.taskId)}`,
+          context.authorizedSessionId === undefined
+            ? `${copy(locale, "Creator session", "جلسة المنشئ")}: ${technical(locale, created.creatorSessionId)}`
+            : undefined,
           `${copy(locale, "Status", "الحالة")}: ${technical(locale, task.status)}`,
           `${copy(locale, "Steps", "الخطوات")}: ${task.progress.total}`,
           `${copy(locale, "Background host", "المضيف الخلفي")}: ${technical(locale, host)}`,
@@ -258,6 +286,11 @@ function commandPrefix(context: TaskCommandContext): string {
 
 function oneLine(value: string): string {
   return value.replace(/\s+/gu, " ").trim();
+}
+
+function taskCreatorSessionTitle(objective: string): string {
+  const summary = [...oneLine(objective)].slice(0, 120).join("");
+  return `Task: ${summary}`;
 }
 
 function copy(locale: TaskCommandLocale, english: string, arabic: string): string {

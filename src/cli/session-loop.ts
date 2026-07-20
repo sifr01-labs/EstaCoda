@@ -1567,7 +1567,10 @@ export async function handleSlashCommand(input: {
         authorizedSessionId: input.runtime.sessionId,
         begin: input.runtime.beginTask === undefined
           ? undefined
-          : async (objective) => input.runtime.beginTask!(objective),
+          : async (objective) => ({
+              task: await input.runtime.beginTask!(objective),
+              creatorSessionId: input.runtime.sessionId
+            }),
         workspaceTrusted: async () => input.runtime.isWorkspaceTrusted(),
         backgroundHost: async () => detectTaskBackgroundHost({
           homeDir: input.homeDir,

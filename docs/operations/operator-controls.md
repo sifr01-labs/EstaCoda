@@ -37,7 +37,7 @@ estacoda task retry <task-id> [step-id]
 estacoda task result <task-id>
 ```
 
-Standalone `task begin` creates a system-owned root Task unless `--session` names an existing session in the selected profile. It requires a trusted workspace and does not create a hidden session. `--profile` remains command-local. The status surface reports bounded progress, running/waiting counts, usage and pricing completeness, workspace trust, result count, and background-host state without printing workspace paths, prompts, tool arguments, credentials, or full result bodies.
+Standalone `task begin` requires a trusted workspace and always creates an executable, session-owned Task. Without `--session`, it creates and prints a visible profile-owned creator session; with `--session`, it validates and uses that existing session. `--profile` remains command-local. The status surface reports bounded progress, running/waiting counts, usage and pricing completeness, workspace trust, result count, and background-host state without printing workspace paths, prompts, tool arguments, credentials, or full result bodies.
 
 ## Gateway Operator Commands
 

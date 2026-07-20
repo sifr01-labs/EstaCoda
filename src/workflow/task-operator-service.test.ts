@@ -55,10 +55,13 @@ describe("TaskOperatorService", () => {
     expect(step.authorityPolicy.blockedTools).toContain("terminal.run");
   });
 
-  it("supports profile-local system-owned Tasks without inventing a session", () => {
-    const created = service.begin({ objective: "Inspect status", workspace: workspace() });
-    expect(store.getTask(created.taskId)).toMatchObject({ createdBy: { kind: "system" } });
-    expect(store.listSessionLinks(created.taskId)).toEqual([]);
+  it("rejects operator Task creation without a profile-local creator session", () => {
+    expect(() => service.begin({
+      objective: "Inspect status",
+      workspace: workspace(),
+      creatorSessionId: "missing"
+    })).toThrow();
+    expect(store.listTasks()).toEqual([]);
   });
 
   it("enforces session-scoped reads and creator-only mutation", () => {

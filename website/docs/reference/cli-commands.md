@@ -378,7 +378,7 @@ estacoda task result <task-id>
 
 **State touched:** Profile-scoped durable Task records in the global session SQLite database; Task result bodies remain in the selected profile's private result store.
 
-**Behavior:** `begin` requires a trusted workspace and creates one conservative agent Step. Without `--session`, the root Task is explicitly system-owned; no hidden session is created. `show` reports bounded progress, running/waiting counts, usage/pricing completeness, workspace trust, result count, and background-host state. `pause`, `resume`, `cancel`, and explicit `retry` mutate durable state. `result` lists opaque handles and summaries, not full bodies or local paths. A command-local `--profile` override never changes the active profile.
+**Behavior:** `begin` requires a trusted workspace and creates one conservative agent Step. Without `--session`, it creates a visible profile-owned creator session and prints that session ID with the Task handle. With `--session`, the named session must already exist in the selected profile. `show` reports bounded progress, running/waiting counts, usage/pricing completeness, workspace trust, result count, and background-host state. `pause`, `resume`, `cancel`, and explicit `retry` mutate durable state. `result` lists opaque handles and summaries, not full bodies or local paths. A command-local `--profile` override never changes the active profile.
 
 ---
 
