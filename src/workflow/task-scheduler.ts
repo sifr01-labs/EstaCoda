@@ -20,6 +20,7 @@ import {
 import { TaskResultContentError, type TaskResultService } from "./task-result-service.js";
 import type { TaskStore } from "./task-store.js";
 import type { TaskApprovalService } from "./task-approval-service.js";
+import { cancelTaskInStore } from "./task-operator-service.js";
 import type {
   ResolveTaskStepExecutor,
   TaskAttemptCheckpoint,
@@ -112,7 +113,7 @@ type RunningExecution = {
   controller: AbortController;
 };
 
-export class WorkflowScheduler {
+export class TaskScheduler {
   readonly #store: TaskStore;
   readonly #resultService: TaskResultService;
   readonly #ownerId: string;
@@ -219,49 +220,13 @@ export class WorkflowScheduler {
   }
 
   cancelTask(taskId: string, reasonCode = "operator-request"): Task {
-    const reason = requireToken(reasonCode, "cancellation reason code");
     const now = this.#now().toISOString();
-    const cancelled = this.#store.atomicWrite((store) => {
-      const task = store.getTask(taskId);
-      if (task === null) throw new Error(`Task ${taskId} was not found.`);
-      if (isTerminalTaskStatus(task.status)) return task;
-
-      const revisionId = task.activePlanRevisionId;
-      if (revisionId !== undefined) {
-        for (const step of store.listSteps(task.id, revisionId)) {
-          if (step.status === "pending" || step.status === "ready" ||
-              step.status === "waiting_for_input" || step.status === "waiting_for_approval") {
-            store.updateStep({ ...step, status: "cancelled", updatedAt: now });
-            store.appendEvent(this.#event(task, "step-state-changed", now, {
-              stepId: step.id,
-              planRevisionId: step.planRevisionId,
-              data: { from: step.status, to: "cancelled", reasonCode: reason }
-            }));
-          }
-        }
-      }
-
-      for (const attempt of store.listAttempts(task.id)) {
-        if (attempt.status === "queued" ||
-            ((attempt.status === "waiting_for_input" || attempt.status === "waiting_for_approval") && attempt.lease === undefined)) {
-          store.updateAttempt({ ...attempt, status: "cancelled", updatedAt: now, completedAt: now });
-          store.appendEvent(this.#event(task, "attempt-cancelled", now, {
-            attemptId: attempt.id,
-            stepId: attempt.stepId,
-            planRevisionId: attempt.planRevisionId,
-            data: { reasonCode: reason }
-          }));
-        } else if (ACTIVE_ATTEMPT_STATUSES.includes(attempt.status)) {
-          store.requestAttemptCancellation(attempt.id, now);
-        }
-      }
-
-      const next: Task = { ...task, status: "cancelled", updatedAt: now, cancelledAt: now };
-      store.updateTask(next);
-      store.appendEvent(this.#event(task, "task-state-changed", now, {
-        data: { from: task.status, to: "cancelled", reasonCode: reason }
-      }));
-      return next;
+    const cancelled = cancelTaskInStore({
+      store: this.#store,
+      taskId,
+      reasonCode,
+      timestamp: now,
+      eventId: this.#eventId
     });
 
     for (const execution of this.#running.values()) {

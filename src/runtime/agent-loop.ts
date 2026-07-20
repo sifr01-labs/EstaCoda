@@ -59,7 +59,6 @@ import { summarizeProviderFailure } from "../providers/provider-diagnostics.js";
 import type { SessionCompressionService } from "../prompt/session-compression-service.js";
 import { estimateMessagesTokensRough, estimateTextTokensRough } from "../prompt/token-estimator.js";
 import { redactSensitiveText } from "../utils/redaction.js";
-import type { WorkflowRuntimeContext } from "../contracts/workflow-context.js";
 import type { MemoryCurationService } from "../memory/memory-curation-service.js";
 import { emitContextEstimate } from "./context-usage-events.js";
 
@@ -74,7 +73,6 @@ export type AgentLoopInput = {
   onSegmentBreak?: (reason?: string) => void | Promise<void>;
   signal?: AbortSignal;
   inputMetadata?: Record<string, unknown>;
-  workflow?: WorkflowRuntimeContext;
 };
 
 export type AgentLoopResponse = {
@@ -338,7 +336,6 @@ export class AgentLoop {
       channel: input.channel,
       metadata: {
         ...input.inputMetadata,
-        ...(input.workflow === undefined ? {} : { workflow: input.workflow }),
         attachments: summarizeAttachments(attachments),
         contextReferences: context?.references.map((reference) => reference.raw) ?? [],
         projectContextFiles: this.#projectContext?.files.map((file) => file.source) ?? []
@@ -348,8 +345,7 @@ export class AgentLoop {
       text: effectiveText,
       channel: input.channel,
       attachments: summarizeAttachments(attachments),
-      contextReferences: context?.references.map((reference) => reference.raw) ?? [],
-      ...(input.workflow === undefined ? {} : { workflow: input.workflow })
+      contextReferences: context?.references.map((reference) => reference.raw) ?? []
     });
     await this.#emitLiveContextUsageEstimate({
       onEvent: input.onEvent,

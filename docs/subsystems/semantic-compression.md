@@ -213,10 +213,10 @@ Memory File Compaction:
 - never compacts `SOUL.md` or `AGENTS.md`
 - does not create session child lineage
 
-Workflow event summaries:
+Durable Task history:
 
-- belongs to Workflow state and `/workflow summarize <runId>`
-- is not invoked by semantic session compression or `/compact`
+- belongs to the Task event journal
+- is not rewritten by semantic session compression or `/compact`
 - does not use semantic session lineage
 
 Deterministic history packing:

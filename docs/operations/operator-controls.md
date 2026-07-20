@@ -1,77 +1,43 @@
 ---
 title: "Operator Controls"
-description: "Slash commands and CLI commands for controlling Workflow, gateway, cron, sessions, and channels."
+description: "Slash commands and CLI commands for controlling durable Tasks, gateway, cron, sessions, and channels."
 ---
 
 # Operator Controls
 
-## Workflow Commands
+## Durable Task Commands
 
 ### In-Session Slash Commands
 
-Available when Workflow is wired (requires SQLite session persistence):
-
-- `/workflow begin <objective>` — Create, start, and activate a conservative one-step workflow run for this interactive session.
-- `/workflow begin --skill <skillName> <objective>` — Create, start, and activate a workflow run from the named skill's playbook.
-- `/workflow status [runId]` — Show workflow status, progress, pending approvals, elapsed time, and available actions.
-- `/workflow pause <runId> [reason]` — Request pause at next safe boundary.
-- `/workflow resume <runId>` — Resume a paused, interrupted, or waiting workflow run.
-- `/workflow interrupt <runId> [reason]` — Interrupt immediately; terminates active processes.
-- `/workflow cancel <runId> [reason]` — Cancel a workflow run; terminal state.
-- `/workflow steer <runId> <guidance>` — Inject operator guidance for next turn.
-- `/workflow approve <stepId>` — Approve a pending approval gate.
-- `/workflow reject <stepId> [reason]` — Reject a pending approval gate.
-- `/workflow retry <stepId>` — Retry a failed step (if idempotent or safeToRetry).
-- `/workflow skip <stepId> [reason]` — Skip a pending skippable step.
-- `/workflow checkpoint <runId> <name>` — Create a named checkpoint.
-- `/workflow trace [runId] [limit]` — Show event timeline.
-- `/workflow summarize <runId>` — Summarize workflow events.
-- `/workflow activate <runId>` — Activate a workflow run for this session.
-- `/workflow deactivate` — Clear the active workflow run.
-
-If `runId` is omitted for `status` and `trace`, the active workflow run is used.
-
-`/workflow begin <objective>` records explicit provenance and outputs:
+The interactive command operates only on Tasks linked to the current session. Reads allow any session link; pause, resume, cancel, and retry require the creator link.
 
 ```text
-Created workflow: <runId>
-Started workflow: <runId>
-Activated workflow: <runId>
+/task begin <objective>
+/task list [limit]
+/task show <task-id>
+/task pause <task-id>
+/task resume <task-id>
+/task cancel <task-id>
+/task retry <task-id> [step-id]
+/task result <task-id>
 ```
 
-`/workflow begin --skill <skillName> <objective>` is opt-in. It resolves the named skill through the current runtime skill registry, compiles the playbook, converts it into a `WorkflowPlan`, then creates, starts, and activates the run. Unknown skills and missing objectives return usage/error text. Plain `/workflow begin <objective>` does not call the playbook converter.
+`/task begin` creates a conservative, fixed one-Step Task owned by the current session. It never grants broader authority than the runtime policy. Pause stops new work from being claimed at a safe boundary; cancellation is durable and requests cancellation of active Attempts. Retry is explicit and creates a new Attempt for the existing Step when budget remains.
 
 ### Top-Level CLI Commands
 
 ```bash
-estacoda workflow begin --session <sessionId> <objective>
-estacoda workflow begin --skill <skillName> --session <sessionId> <objective>
-estacoda workflow list                          # List active workflow runs
-estacoda workflow show <runId>                 # Show workflow run details and steps
-estacoda workflow status <runId>               # Show formatted status
-estacoda workflow trace <runId> [limit]        # Show event trace
-estacoda workflow pause <runId> [reason]       # Request pause
-estacoda workflow resume <runId>               # Resume workflow run
-estacoda workflow interrupt <runId> [reason]   # Interrupt workflow run
-estacoda workflow cancel <runId> [reason]      # Cancel workflow run
-estacoda workflow steer <runId> <instruction>  # Inject guidance
-estacoda workflow approve <stepId>              # Approve gate
-estacoda workflow reject <stepId> [reason]      # Reject gate
-estacoda workflow retry <stepId>                # Retry step
-estacoda workflow skip <stepId> [reason]        # Skip step
-estacoda workflow checkpoint <runId> <name>    # Create checkpoint
-estacoda workflow summarize <runId>            # Summarize workflow events
+estacoda task begin [--session <session-id>] <objective>
+estacoda task list [limit]
+estacoda task show <task-id>
+estacoda task pause <task-id>
+estacoda task resume <task-id>
+estacoda task cancel <task-id>
+estacoda task retry <task-id> [step-id]
+estacoda task result <task-id>
 ```
 
-Standalone `estacoda workflow begin` creates and starts only for an existing session ID. It does not activate future interactive sessions and does not create hidden sessions. Successful standalone begin prints:
-
-```text
-Created workflow: <runId>
-Started workflow: <runId>
-Not activated. Use /workflow activate <runId> inside an interactive session.
-```
-
-Workflow begin does not include automatic workflow promotion, complex-request auto-detection, Agent Evolution, automatic retry/fallback policy inference, or automatic workflow creation from normal AgentLoop skill selection. `--skill` is the explicit playbook bridge. `--use-selected-playbook` is not supported.
+Standalone `task begin` creates a system-owned root Task unless `--session` names an existing session in the selected profile. It requires a trusted workspace and does not create a hidden session. `--profile` remains command-local. The status surface reports bounded progress, running/waiting counts, usage and pricing completeness, workspace trust, result count, and background-host state without printing workspace paths, prompts, tool arguments, credentials, or full result bodies.
 
 ## Gateway Operator Commands
 
@@ -338,51 +304,9 @@ Available in Telegram gateway (and applicable Discord/WhatsApp where supported):
 
 `/status` includes durable Task counts and may include bounded worker rows for currently running Attempts. It does not include worker prompts, raw transcripts, provider token streams, credentials, or tool arguments. `/stop` cancels the foreground turn; a Task returned by `delegate_task` has an independent durable lifecycle and is cancelled through Task controls.
 
-## /steer Semantics
+## Session Steering and Compression
 
-`/steer` and `/workflow steer` record an `OperatorEvent` with `kind: "operator-steered"`. The event is **unconsumed** until the adapter processes the next turn.
-
-On the next adapter turn:
-1. All unconsumed steer events are loaded.
-2. Guidance is prefixed to the user text in a structured block:
-   ```
-   --- OPERATOR GUIDANCE (eventIds: <id1>, <id2>) ---
-   1. <guidance 1>
-   2. <guidance 2>
-   --- END OPERATOR GUIDANCE ---
-   
-   <original user text>
-   ```
-3. Events are marked `consumedAt`, `consumedByStepId`, `consumedByRunId`.
-4. Consumption is visible in `/workflow trace`.
-
-Steer is rejected for workflow runs in terminal states.
-
-## Workflow /workflow summarize and Automatic Workflow Event Summaries
-
-**Manual:** `/workflow summarize <runId>` or `estacoda workflow summarize <runId>` summarizes workflow events immediately if at a safe boundary.
-
-**Automatic:** Disabled by default. Enable by passing a custom `WorkflowEventSummaryConfig` to `WorkflowEventSummaryService`:
-
-```typescript
-{
-  enabled: true,
-  mode: "conservative",
-  eventThreshold: 50,
-  minTurnsBeforeCompact: 3
-}
-```
-
-Automatic workflow event summaries check the boundary at the end of each adapter turn. They only run when:
-- no active processes,
-- no active steps,
-- no pending approvals,
-- event count ≥ threshold,
-- completed steps ≥ minTurnsBeforeCompact.
-
-Workflow event summaries create a `WorkflowEventSummary` and append `compacted` / `operator-compacted` events. Original events are preserved.
-
-Workflow event summaries are unrelated to bare `/compact`. Bare `/compact [topic]` is semantic session compression for the current in-session context; `/workflow summarize <runId>` and `estacoda workflow summarize <runId>` summarize Workflow events.
+`/steer <note>` redirects the active foreground turn. It is separate from durable Task control. Bare `/compact [topic]` performs semantic compression for the current session; it does not rewrite Task history.
 
 Gateway `/compact [topic]` preserves the parent transcript when compaction succeeds by creating a compacted child session and switching the channel pointer to that child. Interactive CLI `/compact [topic]` remains non-rotating until the CLI grows equivalent child-session adoption.
 
@@ -440,27 +364,9 @@ Finalization queue administration is local-CLI-only. It exposes bounded profile-
 
 Telegram parity is intentional. `/memory ...` in Telegram should follow the same mode, policy, profile-local files, and curation history as the CLI, with only output formatting compacted for chat delivery.
 
-## Process Ownership
+## Task Cancellation and Approval Waits
 
-On `/interrupt` and `/cancel`, the dispatcher:
-1. Lists active processes for the workflow run.
-2. Sends `SIGTERM` with 5s timeout to each.
-3. Records `process-exited` or `process-orphaned` events.
-4. Then transitions the workflow run state.
-
-Process cleanup results are visible in `/workflow status` and `/workflow trace`.
-
-## Approval Gates
-
-Approval gates are created by the security layer when a tool call requires explicit approval. Gates have:
-- `status`: `pending` | `approved` | `rejected`
-- `riskClass`: `low` | `medium` | `high` | `critical`
-- `toolName`, `targetKey`, `targetSummary`
-- `controllerGrantId`: links to the runtime approval system
-- `toolExecutorDecision`: `approve` | `reject` | `ask`
-- `deterministicRule`: which rule triggered the gate
-
-`/workflow approve` and `/workflow reject` resolve gates and emit `OperatorEvent` records.
+Task cancellation is durable. The scheduler marks pending work cancelled, requests cancellation for active leased Attempts, and uses fencing so stale workers cannot settle newer work. Approval waits remain owned by the existing security and gateway approval systems; Task commands do not bypass or duplicate those controls.
 
 ## Busy Policy Configuration
 
@@ -496,15 +402,3 @@ Configure per-channel in the selected profile `config.json`:
 - Each channel configures its own policy independently. There is no top-level global busy policy setting.
 - Omitted values normalize to `"reject"` and `3`.
 - Invalid `busyPolicy` values fall back to `"reject"` with a runtime warning.
-
-## Retry and Skip Safety Rules
-
-**Retry:**
-- Only if `idempotent` or `safeToRetry` is true.
-- Only if `retryCount < maxRetries`.
-- Creates a new step linked via `retryOfStepId`.
-
-**Skip:**
-- Only if `failurePolicy.allowSkipIfSkippable` is true.
-- Only if the step has not started (`startedAt` is null).
-- A step that has started must be interrupted or cancelled.

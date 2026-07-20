@@ -271,11 +271,24 @@ Manage local browser/CDP connection.
 
 ---
 
-## Workflow
+## Durable Tasks
 
-The `/workflow` command is retired after the durable Task persistence cutover. It reports that Task operator commands are not available in this build and does not mutate state.
+### `/task <subcommand>`
 
-**State touched:** None.
+```text
+/task begin <objective>
+/task list [limit]
+/task show <task-id>
+/task pause <task-id>
+/task resume <task-id>
+/task cancel <task-id>
+/task retry <task-id> [step-id]
+/task result <task-id>
+```
+
+**State touched:** Profile-scoped durable Task records. Result bodies remain in the profile's private result store.
+
+**Behavior:** `/task begin` creates and links a conservative Task to the active session. In-session reads require a Task/session link; lifecycle mutations require the creator link. Status and result output is bounded and omits workspace paths, prompts, tool inputs, credentials, and full result bodies.
 
 ---
 

@@ -20,13 +20,13 @@ import { SQLiteTaskStore } from "./sqlite-task-store.js";
 import { TaskResultService } from "./task-result-service.js";
 import { TaskApprovalService } from "./task-approval-service.js";
 import {
-  WorkflowScheduler,
+  TaskScheduler,
   classifyTaskRetry,
   taskDispatchKey,
   type TaskSchedulerLimits
 } from "./task-scheduler.js";
 
-describe("WorkflowScheduler", () => {
+describe("TaskScheduler", () => {
   let tempDir: string;
   let sessionDb: SQLiteSessionDB;
   let store: SQLiteTaskStore;
@@ -401,7 +401,7 @@ describe("WorkflowScheduler", () => {
 
   it("waits for an eligible host and pauses before exceeding a zero provider-call budget", async () => {
     store.createTaskGraph(makeGraph([makeStep("host", 0)]));
-    const unavailable = new WorkflowScheduler({
+    const unavailable = new TaskScheduler({
       store,
       resultService,
       ownerId: "scheduler-alpha",
@@ -434,7 +434,7 @@ describe("WorkflowScheduler", () => {
       outcome: "succeeded",
       results: [{ kind: "text", content: step.key }]
     }));
-    const scheduler = new WorkflowScheduler({
+    const scheduler = new TaskScheduler({
       store,
       resultService,
       ownerId: "scheduler-alpha",
@@ -506,7 +506,7 @@ describe("WorkflowScheduler", () => {
           usage: usage(1, 20, 0.2),
           usageEntries: [usageEntry(attempt, "request-two", 20, 0.2)]
         });
-    const scheduler = new WorkflowScheduler({
+    const scheduler = new TaskScheduler({
       store,
       resultService,
       ownerId: "scheduler-alpha",
@@ -565,8 +565,8 @@ describe("WorkflowScheduler", () => {
     limits?: TaskSchedulerLimits,
     leaseMs?: number,
     ownerId = "scheduler-alpha"
-  ): WorkflowScheduler {
-    return new WorkflowScheduler({
+  ): TaskScheduler {
+    return new TaskScheduler({
       store,
       resultService,
       ownerId,

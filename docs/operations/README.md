@@ -16,4 +16,4 @@ description: "How to set up, test, maintain, and hand off work on EstaCoda."
 | [Memory Operator Readiness](./memory-operator-readiness.md) | Operator guide for Memory Hardening phases 0-10 |
 | [Agent Handoff](./agent-handoff.md) | Short operational note for incoming coding agents |
 | [Operator Controls](./operator-controls.md) | Slash commands and CLI commands for Workflow |
-| [Workflow CLI](./workflow-cli.md) | Command reference for `estacoda workflow` |
+| [Durable Task CLI](./task-cli.md) | Command reference for `estacoda task` and `/task` |

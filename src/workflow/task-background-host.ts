@@ -1,4 +1,4 @@
-import type { TaskSchedulerRunResult, WorkflowScheduler } from "./task-scheduler.js";
+import type { TaskSchedulerRunResult, TaskScheduler } from "./task-scheduler.js";
 import type {
   TaskCompletionDeliveryRunResult,
   TaskCompletionDeliveryService
@@ -20,7 +20,7 @@ export type TaskBackgroundHostStatus = {
 
 /** Long-lived supervisor projection around the deterministic scheduler and delivery outbox. */
 export class TaskBackgroundHost {
-  readonly #scheduler: Pick<WorkflowScheduler, "runOnce">;
+  readonly #scheduler: Pick<TaskScheduler, "runOnce">;
   readonly #delivery: Pick<TaskCompletionDeliveryService, "recoverInterrupted" | "runOnce">;
   readonly #now: () => Date;
   #activeRun: Promise<TaskBackgroundHostRunResult> | undefined;
@@ -31,7 +31,7 @@ export class TaskBackgroundHost {
   #recovered = false;
 
   constructor(options: {
-    scheduler: Pick<WorkflowScheduler, "runOnce">;
+    scheduler: Pick<TaskScheduler, "runOnce">;
     delivery: Pick<TaskCompletionDeliveryService, "recoverInterrupted" | "runOnce">;
     now?: () => Date;
   }) {

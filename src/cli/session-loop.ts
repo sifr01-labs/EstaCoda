@@ -95,7 +95,7 @@ import {
   type CliVoiceMode
 } from "./voice-mode.js";
 import { createFilePasteReferenceStore } from "./paste-interceptor.js";
-import { beginExplicitWorkflowRun, beginSkillPlaybookWorkflowRun } from "../workflow/workflow-begin.js";
+import { detectTaskBackgroundHost, executeTaskCommand } from "./task-commands.js";
 import { summarizeProviderExecution } from "../runtime/provider-execution-summary.js";
 import { LiveOperatorConsoleController } from "./live-operator-console-controller.js";
 import {
@@ -1196,6 +1196,7 @@ export async function handleSlashCommand(input: {
   output: NodeJS.WritableStream;
   renderer: {
     render(viewModel: import("../contracts/view-model.js").ViewModel): string;
+    locale?: "en" | "ar";
     capabilities?: TerminalCapabilities;
     tokens?: ResolvedTokens;
   };
@@ -1531,9 +1532,29 @@ export async function handleSlashCommand(input: {
     case "doctor":
       input.output.write(`${await renderRuntimeDoctor(input.runtime)}\n\n`);
       return false;
-    case "workflow": {
-      const result = await handleWorkflowCommand(input, args);
-      input.output.write(`${result}\n\n`);
+    case "task": {
+      if (input.runtime.taskOperator === undefined) {
+        input.output.write(input.renderer.locale === "ar"
+          ? "أوامر المهام الدائمة غير متاحة في بيئة التشغيل هذه.\n\n"
+          : "Durable Task commands are unavailable in this runtime.\n\n");
+        return false;
+      }
+      const taskProfileId = await runtimeProfileId(input.runtime);
+      const result = await executeTaskCommand({
+        args,
+        service: input.runtime.taskOperator,
+        locale: input.renderer.locale === "ar" ? "ar" : "en",
+        authorizedSessionId: input.runtime.sessionId,
+        begin: input.runtime.beginTask === undefined
+          ? undefined
+          : async (objective) => input.runtime.beginTask!(objective),
+        workspaceTrusted: async () => input.runtime.isWorkspaceTrusted(),
+        backgroundHost: async () => detectTaskBackgroundHost({
+          homeDir: input.homeDir,
+          profileId: taskProfileId
+        })
+      });
+      input.output.write(`${result.output}\n\n`);
       return false;
     }
     case "handoff": {
@@ -1971,270 +1992,6 @@ function createNoticeLabelFormatter(
     !capabilities.isDumb;
   if (!supportsStyledNotice) return (value) => value;
   return (value) => `\u001b[1m${value}\u001b[22m`;
-}
-
-async function handleWorkflowCommand(input: {
-  runtime: Runtime;
-  output: NodeJS.WritableStream;
-}, args: string[]): Promise<string> {
-  if (input.runtime.workflow === undefined) {
-    return "Workflow commands have been retired. Durable Task commands are not available in this build yet.";
-  }
-
-  const { workflow } = input.runtime;
-  const [subcommand = "", ...rest] = args;
-
-  switch (subcommand) {
-    case "":
-    case "help":
-      return [
-        "Workflow operator commands (v0.8)",
-        "  /workflow begin <objective>        Create, start, and activate a workflow",
-        "  /workflow begin --skill <name> <objective>",
-        "                                      Create a workflow from a skill playbook",
-        "  /workflow status [runId]           Show workflow status (active workflow if omitted)",
-        "  /workflow pause <runId> [reason]   Request pause at next safe boundary",
-        "  /workflow resume <runId>           Resume a paused/interrupted/waiting workflow",
-        "  /workflow interrupt <runId> [r]    Interrupt a running workflow",
-        "  /workflow cancel <runId> [reason]  Cancel a workflow",
-        "  /workflow steer <runId> <text...>  Inject operator guidance into a workflow",
-        "  /workflow approve <stepId>         Approve a pending approval gate",
-        "  /workflow reject <stepId> [reason] Reject a pending approval gate",
-        "  /workflow retry <stepId>           Retry a failed step",
-        "  /workflow skip <stepId> [reason]   Skip a skippable step",
-        "  /workflow checkpoint <runId> <n>   Create a named checkpoint",
-        "  /workflow trace [runId] [limit]    Show workflow trace",
-        "  /workflow summarize <runId>        Summarize workflow events",
-        "  /workflow activate <runId>         Activate workflow for this session",
-        "  /workflow deactivate               Clear active workflow"
-      ].join("\n");
-
-    case "begin": {
-      const parsed = parseInteractiveWorkflowBeginArgs(rest);
-      if (parsed.error !== undefined) return parsed.error;
-      if (parsed.objective.length === 0) {
-        return parsed.skillName === undefined
-          ? "Usage: /workflow begin <objective>"
-          : "Usage: /workflow begin --skill <skillName> <objective>";
-      }
-      const resolveSkill = input.runtime.resolveSkill;
-      if (parsed.skillName !== undefined && resolveSkill === undefined) {
-        return "Skill-backed workflow begin is not available in this runtime.";
-      }
-      const skill = parsed.skillName === undefined ? undefined : resolveSkill?.(parsed.skillName);
-      if (parsed.skillName !== undefined && skill === undefined) return `Skill not found: ${parsed.skillName}`;
-      const result = skill === undefined
-        ? await beginExplicitWorkflowRun({
-            engine: workflow.engine,
-            sessionId: input.runtime.sessionId,
-            objective: parsed.objective
-          })
-        : await beginSkillPlaybookWorkflowRun({
-            engine: workflow.engine,
-            sessionId: input.runtime.sessionId,
-            objective: parsed.objective,
-            skill
-          });
-      workflow.setActiveRunId(result.run.id);
-      return [
-        `Created workflow: ${result.run.id}`,
-        `Started workflow: ${result.run.id}`,
-        `Activated workflow: ${result.run.id}`
-      ].join("\n");
-    }
-
-    case "status": {
-      const runId = rest[0] ?? workflow.activeRunId ?? undefined;
-      if (runId === undefined) return "No active workflow. Use /workflow activate <runId> or pass a run ID.";
-      const result = await workflow.dispatcher.dispatch({ command: "/status", runId: runId });
-      return result.ok ? result.message : `Error: ${result.error}`;
-    }
-
-    case "pause": {
-      const runId = rest[0];
-      if (runId === undefined) return "Usage: /workflow pause <runId> [reason]";
-      const result = await workflow.dispatcher.dispatch({
-        command: "/pause",
-        runId: runId,
-        reason: rest.slice(1).join(" ") || undefined,
-        operator: "cli"
-      });
-      return result.ok ? result.message : `Error: ${result.error}`;
-    }
-
-    case "resume": {
-      const runId = rest[0];
-      if (runId === undefined) return "Usage: /workflow resume <runId>";
-      const result = await workflow.dispatcher.dispatch({
-        command: "/resume",
-        runId: runId,
-        operator: "cli"
-      });
-      return result.ok ? result.message : `Error: ${result.error}`;
-    }
-
-    case "interrupt": {
-      const runId = rest[0];
-      if (runId === undefined) return "Usage: /workflow interrupt <runId> [reason]";
-      const result = await workflow.dispatcher.dispatch({
-        command: "/interrupt",
-        runId: runId,
-        reason: rest.slice(1).join(" ") || undefined,
-        operator: "cli"
-      });
-      return result.ok ? result.message : `Error: ${result.error}`;
-    }
-
-    case "cancel": {
-      const runId = rest[0];
-      if (runId === undefined) return "Usage: /workflow cancel <runId> [reason]";
-      const result = await workflow.dispatcher.dispatch({
-        command: "/cancel",
-        runId: runId,
-        reason: rest.slice(1).join(" ") || undefined,
-        operator: "cli"
-      });
-      return result.ok ? result.message : `Error: ${result.error}`;
-    }
-
-    case "steer": {
-      const runId = rest[0];
-      if (runId === undefined) return "Usage: /workflow steer <runId> <guidance>";
-      const guidance = rest.slice(1).join(" ");
-      if (guidance.length === 0) return "Usage: /workflow steer <runId> <guidance>";
-      const result = await workflow.dispatcher.dispatch({
-        command: "/steer",
-        runId: runId,
-        guidance,
-        operator: "cli"
-      });
-      return result.ok ? result.message : `Error: ${result.error}`;
-    }
-
-    case "approve": {
-      const stepId = rest[0];
-      if (stepId === undefined) return "Usage: /workflow approve <stepId>";
-      const result = await workflow.dispatcher.dispatch({
-        command: "/approve",
-        stepId,
-        operator: "cli"
-      });
-      return result.ok ? result.message : `Error: ${result.error}`;
-    }
-
-    case "reject": {
-      const stepId = rest[0];
-      if (stepId === undefined) return "Usage: /workflow reject <stepId> [reason]";
-      const result = await workflow.dispatcher.dispatch({
-        command: "/reject",
-        stepId,
-        reason: rest.slice(1).join(" ") || undefined,
-        operator: "cli"
-      });
-      return result.ok ? result.message : `Error: ${result.error}`;
-    }
-
-    case "retry": {
-      const stepId = rest[0];
-      if (stepId === undefined) return "Usage: /workflow retry <stepId>";
-      const result = await workflow.dispatcher.dispatch({
-        command: "/retry",
-        stepId,
-        operator: "cli"
-      });
-      return result.ok ? result.message : `Error: ${result.error}`;
-    }
-
-    case "skip": {
-      const stepId = rest[0];
-      if (stepId === undefined) return "Usage: /workflow skip <stepId> [reason]";
-      const result = await workflow.dispatcher.dispatch({
-        command: "/skip",
-        stepId,
-        reason: rest.slice(1).join(" ") || undefined,
-        operator: "cli"
-      });
-      return result.ok ? result.message : `Error: ${result.error}`;
-    }
-
-    case "checkpoint": {
-      const runId = rest[0];
-      if (runId === undefined) return "Usage: /workflow checkpoint <runId> <name>";
-      const name = rest.slice(1).join(" ");
-      if (name.length === 0) return "Usage: /workflow checkpoint <runId> <name>";
-      const result = await workflow.dispatcher.dispatch({
-        command: "/checkpoint",
-        runId: runId,
-        name,
-        operator: "cli"
-      });
-      return result.ok ? result.message : `Error: ${result.error}`;
-    }
-
-    case "trace": {
-      const runId = rest[0] ?? workflow.activeRunId ?? undefined;
-      const limit = runId !== undefined && rest[1] !== undefined ? parseInt(rest[1], 10) : undefined;
-      if (runId === undefined) return "No active workflow. Use /workflow activate <runId> or pass a run ID.";
-      const result = await workflow.dispatcher.dispatch({
-        command: "/trace",
-        runId: runId,
-        limit: Number.isNaN(limit) ? undefined : limit
-      });
-      return result.ok ? result.message : `Error: ${result.error}`;
-    }
-
-    case "summarize": {
-      const runId = rest[0];
-      if (runId === undefined) return "Usage: /workflow summarize <runId>";
-      const result = await workflow.dispatcher.dispatch({
-        command: "/compact",
-        runId: runId,
-        operator: "cli"
-      });
-      return result.ok ? result.message : `Error: ${result.error}`;
-    }
-
-    case "activate": {
-      const runId = rest[0];
-      if (runId === undefined) return "Usage: /workflow activate <runId>";
-      const run = await workflow.store.getWorkflowRun(runId);
-      if (run === null) return `Workflow run not found: ${runId}`;
-      workflow.setActiveRunId(runId);
-      return `Activated workflow: ${runId}`;
-    }
-
-    case "deactivate": {
-      workflow.setActiveRunId(null);
-      return "Active workflow cleared. Normal agent mode.";
-    }
-
-    default:
-      return `Unknown workflow command: ${subcommand}\nUse /workflow help for available commands.`;
-  }
-}
-
-function parseInteractiveWorkflowBeginArgs(args: string[]): { skillName?: string; objective: string; error?: string } {
-  const objectiveParts: string[] = [];
-  let skillName: string | undefined;
-
-  for (let index = 0; index < args.length; index++) {
-    const arg = args[index];
-    if (arg === "--skill") {
-      const value = args[index + 1];
-      if (value === undefined || value.startsWith("-")) {
-        return { objective: "", error: "Usage: /workflow begin --skill <skillName> <objective>" };
-      }
-      skillName = value;
-      index++;
-      continue;
-    }
-    objectiveParts.push(arg);
-  }
-
-  return {
-    skillName,
-    objective: objectiveParts.join(" ").trim()
-  };
 }
 
 async function renderSecurityAudit(

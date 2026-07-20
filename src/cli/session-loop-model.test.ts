@@ -8,14 +8,9 @@ import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
-import { FakeWorkflowStore } from "../workflow/fake-workflow-store.js";
-import { WorkflowEngine } from "../workflow/workflow-engine.js";
-import { WorkflowLockService } from "../workflow/workflow-lock-service.js";
-import type { WorkflowStep } from "../workflow/types.js";
 import type { Prompt } from "./prompt-contract.js";
 import type { SelectPromptInput } from "./interactive-select.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
-import type { SkillDefinition } from "../contracts/skill.js";
 import { CODEX_OAUTH_AUTH_METHOD } from "../providers/oauth/codex-setup.js";
 
 function fakeRuntime(modelInfo: {
@@ -1315,8 +1310,8 @@ describe("session-loop session compaction", () => {
     expect(text).toContain("Focus topic: billing topic");
   });
 
-  it("/compact stays separate from /workflow summarize", async () => {
-    let workflowDispatched = false;
+  it("/compact stays separate from durable Task controls", async () => {
+    let taskStatusRead = false;
     let compactCalled = false;
     const runtime = {
       ...fakeRuntime({
@@ -1331,12 +1326,10 @@ describe("session-loop session compaction", () => {
         compactCalled = true;
         return compactResult();
       },
-      workflow: {
-        dispatcher: {
-          dispatch: async () => {
-            workflowDispatched = true;
-            return { ok: true, message: "workflow summarized" };
-          }
+      taskOperator: {
+        status: () => {
+          taskStatusRead = true;
+          throw new Error("not expected");
         }
       }
     };
@@ -1351,9 +1344,122 @@ describe("session-loop session compaction", () => {
     });
 
     expect(compactCalled).toBe(true);
-    expect(workflowDispatched).toBe(false);
+    expect(taskStatusRead).toBe(false);
   });
 });
+
+describe("session-loop /task", () => {
+  it("creates a durable Task through the active runtime and returns its handle", async () => {
+    const outputChunks: string[] = [];
+    const output = { write: (chunk: string | Buffer) => { outputChunks.push(String(chunk)); } } as NodeJS.WritableStream;
+    const projection = taskProjection();
+    const runtime = {
+      ...fakeRuntime({
+        provider: "local",
+        model: "test",
+        contextWindowTokens: 4096,
+        supportsTools: false,
+        supportsVision: false,
+        supportsStructuredOutput: true
+      }),
+      taskOperator: {},
+      beginTask: async (objective: string) => ({ ...projection, objective })
+    };
+
+    const result = await handleSlashCommand({
+      text: "/task begin inspect the runtime",
+      runtime: runtime as any,
+      output,
+      renderer: { render: renderPlain },
+      workspaceRoot: "/workspace",
+      homeDir: "/tmp"
+    });
+
+    expect(result).toBe(false);
+    expect(outputChunks.join("")).toContain("Created Task: task-1");
+    expect(outputChunks.join("")).toContain("Status: queued");
+  });
+
+  it("does not retain the retired /workflow command", async () => {
+    const outputChunks: string[] = [];
+    const output = { write: (chunk: string | Buffer) => { outputChunks.push(String(chunk)); } } as NodeJS.WritableStream;
+    await handleSlashCommand({
+      text: "/workflow status old-run",
+      runtime: fakeRuntime({
+        provider: "local",
+        model: "test",
+        contextWindowTokens: 4096,
+        supportsTools: false,
+        supportsVision: false,
+        supportsStructuredOutput: true
+      }),
+      output,
+      renderer: { render: renderPlain },
+      workspaceRoot: "/workspace",
+      homeDir: "/tmp"
+    });
+    expect(outputChunks.join("")).toContain("Unknown command: /workflow");
+  });
+
+  it("renders unavailable Task controls in Arabic for Arabic sessions", async () => {
+    const outputChunks: string[] = [];
+    const output = { write: (chunk: string | Buffer) => { outputChunks.push(String(chunk)); } } as NodeJS.WritableStream;
+
+    await handleSlashCommand({
+      text: "/task list",
+      runtime: fakeRuntime({
+        provider: "local",
+        model: "test",
+        contextWindowTokens: 4096,
+        supportsTools: false,
+        supportsVision: false,
+        supportsStructuredOutput: true
+      }),
+      output,
+      renderer: { render: renderPlain, locale: "ar" },
+      workspaceRoot: "/workspace",
+      homeDir: "/tmp"
+    });
+
+    expect(outputChunks.join("")).toContain("أوامر المهام الدائمة غير متاحة");
+  });
+});
+
+function taskProjection() {
+  return {
+    taskId: "task-1",
+    objective: "inspect",
+    status: "queued" as const,
+    source: "cli" as const,
+    progress: {
+      pending: 1,
+      ready: 0,
+      running: 0,
+      waiting_for_input: 0,
+      waiting_for_approval: 0,
+      completed: 0,
+      failed: 0,
+      skipped: 0,
+      cancelled: 0,
+      total: 1
+    },
+    activeAttempts: 0,
+    usage: {
+      providerCalls: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      reasoningTokens: 0,
+      totalTokens: 0,
+      estimatedCostUsd: 0,
+      usageComplete: false,
+      pricingComplete: false,
+      incompleteReasons: ["provider-usage-unavailable"]
+    },
+    results: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z"
+  };
+}
 
 describe("session-loop memory curation commands", () => {
   let tempHome: string;
@@ -1464,252 +1570,6 @@ describe("session-loop memory curation commands", () => {
     });
   });
 });
-
-describe("session-loop /workflow begin", () => {
-  let tempHome: string;
-  let outputChunks: string[];
-  let output: NodeJS.WritableStream;
-
-  beforeEach(() => {
-    tempHome = mkdtempSync(join(tmpdir(), "estacoda-session-workflow-test-"));
-    outputChunks = [];
-    output = {
-      write: (chunk: string | Buffer) => { outputChunks.push(String(chunk)); },
-      end: () => {}
-    } as NodeJS.WritableStream;
-  });
-
-  afterEach(() => {
-    rmSync(tempHome, { recursive: true, force: true });
-  });
-
-  it("/workflow begin rejects an empty objective with usage", async () => {
-    const runtime = workflowRuntime();
-
-    const result = await handleSlashCommand({
-      text: "/workflow begin",
-      runtime: runtime as any,
-      output,
-      renderer: { render: renderPlain },
-      workspaceRoot: tempHome,
-      homeDir: tempHome
-    });
-
-    expect(result).toBe(false);
-    expect(outputChunks.join("")).toContain("Usage: /workflow begin <objective>");
-  });
-
-  it("/workflow begin reports unavailable when workflow is not wired", async () => {
-    const runtime = fakeRuntime({
-      provider: "local",
-      model: "test",
-      contextWindowTokens: 4096,
-      supportsTools: false,
-      supportsVision: false,
-      supportsStructuredOutput: true
-    });
-
-    const result = await handleSlashCommand({
-      text: "/workflow begin refactor auth module",
-      runtime,
-      output,
-      renderer: { render: renderPlain },
-      workspaceRoot: tempHome,
-      homeDir: tempHome
-    });
-
-    expect(result).toBe(false);
-    expect(outputChunks.join("")).toContain("Workflow commands have been retired.");
-  });
-
-  it("/workflow begin creates, starts, and activates a conservative workflow run", async () => {
-    const runtime = workflowRuntime();
-
-    const result = await handleSlashCommand({
-      text: "/workflow begin refactor the auth module",
-      runtime: runtime as any,
-      output,
-      renderer: { render: renderPlain },
-      workspaceRoot: tempHome,
-      homeDir: tempHome
-    });
-
-    expect(result).toBe(false);
-    const outputText = outputChunks.join("");
-    expect(outputText).toContain("Created workflow: ");
-    expect(outputText).toContain("Started workflow: ");
-    expect(outputText).toContain("Activated workflow: ");
-    expect(runtime.workflow.activeRunId).toMatch(/^[-\w]+/u);
-    const activeRunId = runtime.workflow.activeRunId;
-    if (activeRunId === null) throw new Error("expected active workflow run");
-
-    const run = await runtime.workflow.store.getWorkflowRun(activeRunId);
-    expect(run).toEqual(expect.objectContaining({
-      id: activeRunId,
-      sessionId: "test-session",
-      status: "running",
-      metadata: {
-        activationReason: "explicit",
-        objective: "refactor the auth module"
-      }
-    }));
-
-    const steps = await runtime.workflow.store.listWorkflowSteps(activeRunId);
-    expect(steps).toHaveLength(1);
-    expect(steps[0]).toMatchObject({
-      name: "Work on objective",
-      description: "Continue the requested work through AgentLoop",
-      status: "running",
-      maxRetries: 0,
-      idempotent: false,
-      failurePolicy: expect.objectContaining({
-        allowSkipIfSkippable: false,
-        defaultAction: "stop"
-      })
-    });
-  });
-
-  it("/workflow begin --skill creates, starts, and activates a skill playbook workflow run", async () => {
-    const runtime = workflowRuntime([workflowSkill()]);
-
-    const result = await handleSlashCommand({
-      text: "/workflow begin --skill research-skill research auth options",
-      runtime: runtime as any,
-      output,
-      renderer: { render: renderPlain },
-      workspaceRoot: tempHome,
-      homeDir: tempHome
-    });
-
-    expect(result).toBe(false);
-    const outputText = outputChunks.join("");
-    expect(outputText).toContain("Created workflow: ");
-    expect(outputText).toContain("Started workflow: ");
-    expect(outputText).toContain("Activated workflow: ");
-
-    const activeRunId = runtime.workflow.activeRunId;
-    if (activeRunId === null) throw new Error("expected active workflow run");
-    const run = await runtime.workflow.store.getWorkflowRun(activeRunId);
-    expect(run).toEqual(expect.objectContaining({
-      id: activeRunId,
-      sessionId: "test-session",
-      status: "running",
-      selectedSkill: "research-skill",
-      metadata: {
-        activationReason: "playbook",
-        objective: "research auth options",
-        skillName: "research-skill",
-        playbook: {
-          source: "skill-playbook",
-          skill: "research-skill"
-        }
-      }
-    }));
-
-    const steps = await runtime.workflow.store.listWorkflowSteps(activeRunId);
-    expect(steps.map((step: WorkflowStep) => step.name)).toEqual(["inspect", "summarize"]);
-    expect(steps.map((step: WorkflowStep) => step.description)).toEqual([
-      "Inspect the target material",
-      "Summarize the findings"
-    ]);
-    expect(steps[0]).toMatchObject({
-      status: "running",
-      maxRetries: 0,
-      idempotent: false,
-      failurePolicy: expect.objectContaining({
-        allowSkipIfSkippable: false,
-        defaultAction: "stop"
-      })
-    });
-  });
-
-  it("/workflow begin --skill rejects missing skill values and unknown skills", async () => {
-    const missingRuntime = workflowRuntime([workflowSkill()]);
-
-    const missingResult = await handleSlashCommand({
-      text: "/workflow begin --skill",
-      runtime: missingRuntime as any,
-      output,
-      renderer: { render: renderPlain },
-      workspaceRoot: tempHome,
-      homeDir: tempHome
-    });
-
-    expect(missingResult).toBe(false);
-    expect(outputChunks.join("")).toContain("Usage: /workflow begin --skill <skillName> <objective>");
-
-    outputChunks = [];
-    const unknownRuntime = workflowRuntime([workflowSkill()]);
-    const unknownResult = await handleSlashCommand({
-      text: "/workflow begin --skill missing-skill research auth",
-      runtime: unknownRuntime as any,
-      output,
-      renderer: { render: renderPlain },
-      workspaceRoot: tempHome,
-      homeDir: tempHome
-    });
-
-    expect(unknownResult).toBe(false);
-    expect(outputChunks.join("")).toContain("Skill not found: missing-skill");
-    expect(unknownRuntime.workflow.activeRunId).toBeNull();
-  });
-});
-
-function workflowRuntime(skills: SkillDefinition[] = []) {
-  const store = new FakeWorkflowStore();
-  const lockService = new WorkflowLockService({ store });
-  const engine = new WorkflowEngine({ store, lockService, ownerId: "test" });
-  const skillByName = new Map(skills.map((skill) => [skill.name, skill]));
-  const runtime = {
-    ...fakeRuntime({
-      provider: "local",
-      model: "test",
-      contextWindowTokens: 4096,
-      supportsTools: false,
-      supportsVision: false,
-      supportsStructuredOutput: true
-    }),
-    workflow: {
-      engine,
-      store,
-      activeRunId: null as string | null,
-      setActiveRunId(runId: string | null) {
-        this.activeRunId = runId;
-      }
-    },
-    resolveSkill(name: string) {
-      return skillByName.get(name);
-    }
-  };
-  return runtime;
-}
-
-function workflowSkill(): SkillDefinition {
-  return {
-    name: "research-skill",
-    description: "Research skill",
-    version: "0.1.0",
-    whenToUse: ["research"],
-    requiredToolsets: ["files"],
-    playbook: [
-      {
-        id: "inspect",
-        description: "Inspect the target material",
-        toolsets: ["files"],
-        fallbackTo: ["summarize"],
-        successCriteria: ["source inspected"]
-      },
-      {
-        id: "summarize",
-        description: "Summarize the findings",
-        successCriteria: ["findings summarized"]
-      }
-    ],
-    permissionExpectations: ["auto-read"],
-    examples: [],
-    evaluations: []
-  };
-}
 
 function compactResult() {
   return {

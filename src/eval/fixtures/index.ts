@@ -17,13 +17,6 @@ import { toolDescriptionProposalCase } from "./tool-description-proposal.js";
 import { routingMetadataProposalCase } from "./routing-metadata-proposal.js";
 import { routingEvolutionBaselineCase } from "./routing-evolution-baseline.js";
 import { evolutionExportShapeCase } from "./evolution-export-shape.js";
-import { workflowRunStateTransitionsCase } from "./workflow-run-state-transitions.js";
-import { workflowLockingCase } from "./workflow-locking.js";
-import { workflowEngineLifecycleCase } from "./workflow-engine-lifecycle.js";
-import { workflowRestartRecoveryCase } from "./workflow-restart-recovery.js";
-import { workflowCommandControlCase } from "./workflow-command-control.js";
-import { workflowEventSummaryCase } from "./workflow-event-summary.js";
-import { workflowIntegrationCase } from "./workflow-integration.js";
 
 export const defaultEvalFixtures = [
   providerTextResponseCase,
@@ -44,12 +37,5 @@ export const defaultEvalFixtures = [
   toolDescriptionProposalCase,
   routingMetadataProposalCase,
   routingEvolutionBaselineCase,
-  evolutionExportShapeCase,
-  workflowRunStateTransitionsCase,
-  workflowLockingCase,
-  workflowEngineLifecycleCase,
-  workflowRestartRecoveryCase,
-  workflowCommandControlCase,
-  workflowEventSummaryCase,
-  workflowIntegrationCase
+  evolutionExportShapeCase
 ];

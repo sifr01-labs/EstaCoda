@@ -328,6 +328,7 @@ Output is redacted, source-labeled, marked as local memory context, and treated 
 | Tool | Risk | State touched |
 |------|------|---------------|
 | `delegate_task` | `shared-state-mutation` | Profile-owned Task graph, creator/parent links, Task journal |
+| `task.status` | `read-only-local` | Bounded status for a Task linked to the active session |
 | `terminal.inspect` | `read-only-local` | Bounded command output only |
 
 **Behavior:** Atomically creates a fixed durable Task graph and returns its handle immediately. One task becomes one Step; a batch becomes independent Steps under one Task. Provider tool-call identity prevents duplicate creation. No synchronous child execution or in-memory persistence fallback remains.
@@ -335,6 +336,8 @@ Output is redacted, source-labeled, marked as local memory context, and treated 
 The default Step policy keeps parent-visible read-only local/network tools and applies exact blocks, prefix blocks, excluded toolsets, and explicit tool/toolset requests as further narrowing. Worker Steps cannot delegate. Orchestrator Steps may retain `delegate_task` only with persisted child authority and remaining depth. A linked child Task must keep the parent workspace and receive narrower authority and budget.
 
 Task scheduling owns concurrency, retries, cancellation, approvals, usage, results, restart recovery, and settlement. Worker sessions and model overrides are constructed only after a Step is leased. The returned creation result is a bounded handle, not the worker's final answer.
+
+`task.status` reports bounded Task status, Step progress, active Attempts, usage/pricing completeness, and opaque result metadata. It does not expose workspace paths, prompts, tool inputs, credentials, full result bodies, or raw failure messages. Missing and unauthorized identifiers return the same failure.
 
 ### Config tools
 

@@ -123,7 +123,6 @@ Implemented interactive slash surfaces where the runtime exposes them:
 /session recall <query>
 /sessions recall <query>
 /compact [topic]
-/workflow summarize <runId>
 /memory mode [auto|review|manual]
 /memory recent [limit]
 /memory review [limit]

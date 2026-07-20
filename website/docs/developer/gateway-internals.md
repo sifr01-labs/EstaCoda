@@ -61,7 +61,7 @@ It wires:
 | Message/session routing | `ChannelGateway` |
 | Delivery normalization | `DeliveryRouter` |
 | Cron execution | `tickCron` with `CronStore` |
-| Durable Task execution | `SupervisorTaskBackgroundHost` with `WorkflowScheduler` |
+| Durable Task execution | `SupervisorTaskBackgroundHost` with `TaskScheduler` |
 | Task completion delivery | `TaskCompletionDeliveryService` with `DeliveryRouter` |
 | Session hygiene | `SessionHygieneService` |
 | Voice state | `VoiceStateManager` |

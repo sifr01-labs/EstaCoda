@@ -61,7 +61,7 @@ sidebar_position: 6
 | توجيه الرسائل/الجلسات | `ChannelGateway` |
 | توحيد التسليم | `DeliveryRouter` |
 | تنفيذ cron | `tickCron` مع `CronStore` |
-| تنفيذ المهام الدائمة | `SupervisorTaskBackgroundHost` مع `WorkflowScheduler` |
+| تنفيذ المهام الدائمة | `SupervisorTaskBackgroundHost` مع `TaskScheduler` |
 | تسليم إكمال المهام | `TaskCompletionDeliveryService` مع `DeliveryRouter` |
 | نظافة الجلسات | `SessionHygieneService` |
 | حالة الصوت | `VoiceStateManager` |

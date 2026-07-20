@@ -395,7 +395,7 @@ Provider failures, missing `memory_compaction` routes, scanner blocks, invalid t
 
 Memory File Compaction is separate from:
 
-- Workflow event summaries (`/workflow summarize <runId>` / `estacoda workflow summarize <runId>`)
+- durable Task state and event history
 - semantic session compression (`/compact` / `estacoda sessions compact ...`)
 - deterministic history packing
 

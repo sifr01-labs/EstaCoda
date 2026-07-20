@@ -423,8 +423,6 @@ export class StandardRenderer {
       this.#rail(`skills: ${vm.skillCount}${vm.skillAutonomy !== undefined ? ` (${vm.skillAutonomy})` : ""}`),
       this.#rail(`tools: ${vm.toolCount}`),
       this.#rail(`mcp: ${vm.mcp.active}/${vm.mcp.total}`),
-      this.#rail(`workflow: ${vm.workflowAvailable ? this.#severity("available", "ok") : this.#dim("unavailable")}`),
-      this.#rail(`workflow run: ${vm.workflowRunActive ? this.#severity("active", "ok") : this.#dim("inactive")}`),
     ].filter((line): line is string => line !== undefined);
 
     for (const warning of vm.warnings) {

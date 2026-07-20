@@ -21,7 +21,7 @@ This page maps the current source directories and the main dependency flow betwe
 | Session | `src/session/sqlite-session-db.ts`, `src/session/session-recall-service.ts`, `src/session/session-search-service.ts` | Global SQLite session persistence, recall/search, compression state, and profile isolation. |
 | Memory | `src/memory/*` | Profile-local identity/memory files, shared memory, curation, promotion, indexing, recall orchestration, and memory pressure controls. |
 | Skills | `src/skills/*`, `skills/official/**` | Skill loading, registry, playbooks, usage telemetry, proposals, mutation policy, bundled sync, and catalog generation. |
-| Workflow | `src/workflow/*`, `src/cli/workflow-commands.ts` | Explicit durable workflow runs, steps, events, checkpoints, locks, process registry, restart recovery, and operator commands. |
+| Durable Tasks | `src/contracts/task.ts`, `src/workflow/task-*`, `src/cli/task-commands.ts` | Profile-scoped Tasks, Steps, Attempts, events, results, scheduler recovery, background execution, and operator controls. |
 | CLI/UI | `src/cli/*`, `src/ui/*`, `src/theme/*` | Command dispatch, interactive session loop, setup commands, view models, renderers, Operator Console surfaces, bidi handling, and theme tokens. |
 | Setup | `src/setup/**` | Onboarding Wizard, Setup Editor, review/apply pipeline, optional capability setup, verification, and setup copy. |
 | Browser/Web | `src/browser/**`, `src/tools/web-*.ts` | URL safety, local CDP, Browserbase backend, web extraction/search providers, and debug redaction. |

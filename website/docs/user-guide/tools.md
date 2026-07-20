@@ -203,6 +203,8 @@ Delegated authority is deliberately narrower than the creating runtime. Parent-v
 
 Provider tool-call IDs make creation idempotent. Replaying the same call returns the existing Task; reusing the identity for a different definition fails closed. `delegate_task` is unavailable when profile-bound durable Task storage is unavailable—there is no in-memory fallback.
 
+Use `task.status` with the returned Task ID to inspect bounded progress from a linked session. It reports Step counts, active work, usage completeness, and result handles without exposing local paths, prompts, tool inputs, credentials, or full result bodies.
+
 Worker sessions are created only after the scheduler leases a Step. They remain isolated from parent prompt packing, recall, session search, and canonical memory. Model overrides are stored on the Step and validated through the existing configured provider and credential path when the worker is constructed.
 
 ## Read-Only Terminal Inspection

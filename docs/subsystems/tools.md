@@ -28,6 +28,7 @@ Tools are functions that extend the agent's capabilities. They are organized int
 | `src/tools/session-search-tool.ts` | Deterministic raw historical session browse/search/scroll |
 | `src/tools/skill-tools.ts` | Agent-facing skill listing, review, proposal, edit, import, export, and rollback tools |
 | `src/tools/delegation-tools.ts` | Durable Task creation for delegated work |
+| `src/tools/task-tools.ts` | Bounded, session-authorized durable Task status |
 | `src/tools/memory-file-compaction-tools.ts` | Manual memory-file compaction and restore tools |
 | `src/tools/workspace-trust-tools.ts` | Workspace trust inspection and grant/revoke tools |
 
@@ -60,6 +61,7 @@ The runtime assembles tools from provider modules at startup. Treat this table a
 | `session_search` | `read-only-local` | `smoke-tested` |
 | `skill.*` | `safe` | `smoke-tested` |
 | `delegate_task` | `shared-state-mutation` | `smoke-tested` |
+| `task.status` | `read-only-local` | `smoke-tested` |
 | `workspace.trust.*` | `read-only-local` / `shared-state-mutation` | `smoke-tested` |
 | `cronjob` | `caution` | `smoke-tested` |
 
@@ -215,6 +217,10 @@ Batch delegation is bounded by `maxBatchTasks` and `maxConcurrentChildren`. The 
 The model-facing result is a bounded handle containing Task ID, queued status, Step count, root/child relationship, and replay status. Full Step outputs are stored by the Task result plane rather than copied into the creating provider turn.
 
 Attempt heartbeat, timeout, lease, and progress diagnostics are structured and bounded. They do not make the creating provider turn the owner of background execution.
+
+### `task.status`
+
+`task.status` accepts a Task ID and returns a bounded profile-scoped projection for a session linked to that Task. It includes status, Step counts, active Attempt count, usage/pricing completeness, and opaque result metadata. It excludes workspace paths, prompts, tool inputs, credentials, full result bodies, and raw failure messages. Missing, cross-profile, and unauthorized Tasks share the same error so identifiers do not become an authorization oracle.
 
 Task status, result bodies, approval waits, worker-session links, and structured provider usage remain profile-owned durable records. Worker sessions are created only after the scheduler leases a Step.
 

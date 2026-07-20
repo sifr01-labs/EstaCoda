@@ -25,7 +25,7 @@ exports[`Session surfaces — /help > renders in narrow width > help-narrow widt
 • /untrust: Revoke workspace trust
 • /workspace.trust.status: Show whether the current workspace is trusted
 • /doctor: Run a quick in-session health check
-• /workflow: Workflow operator commands (status, pause, resume, steer, trace, etc.)
+• /task: Durable Task controls (begin, list, show, pause, resume, cancel, retry, result)
 • /handoff: Generate a handoff code to share this session with Telegram
 • /clear: Clear the terminal
 • /exit: End the session
@@ -59,7 +59,7 @@ exports[`Session surfaces — /help > renders in no Unicode > help-no Unicode 1`
 - /untrust: Revoke workspace trust
 - /workspace.trust.status: Show whether the current workspace is trusted
 - /doctor: Run a quick in-session health check
-- /workflow: Workflow operator commands (status, pause, resume, steer, trace, etc.)
+- /task: Durable Task controls (begin, list, show, pause, resume, cancel, retry, result)
 - /handoff: Generate a handoff code to share this session with Telegram
 - /clear: Clear the terminal
 - /exit: End the session
@@ -93,7 +93,7 @@ exports[`Session surfaces — /help > renders in no color > help-no color 1`] = 
 • /untrust: Revoke workspace trust
 • /workspace.trust.status: Show whether the current workspace is trusted
 • /doctor: Run a quick in-session health check
-• /workflow: Workflow operator commands (status, pause, resume, steer, trace, etc.)
+• /task: Durable Task controls (begin, list, show, pause, resume, cancel, retry, result)
 • /handoff: Generate a handoff code to share this session with Telegram
 • /clear: Clear the terminal
 • /exit: End the session
@@ -127,7 +127,7 @@ exports[`Session surfaces — /help > renders in plain > help-plain 1`] = `
 - /untrust: Revoke workspace trust
 - /workspace.trust.status: Show whether the current workspace is trusted
 - /doctor: Run a quick in-session health check
-- /workflow: Workflow operator commands (status, pause, resume, steer, trace, etc.)
+- /task: Durable Task controls (begin, list, show, pause, resume, cancel, retry, result)
 - /handoff: Generate a handoff code to share this session with Telegram
 - /clear: Clear the terminal
 - /exit: End the session
@@ -161,7 +161,7 @@ exports[`Session surfaces — /help > renders in standard dark > help-standard d
 • /untrust: Revoke workspace trust
 • /workspace.trust.status: Show whether the current workspace is trusted
 • /doctor: Run a quick in-session health check
-• /workflow: Workflow operator commands (status, pause, resume, steer, trace, etc.)
+• /task: Durable Task controls (begin, list, show, pause, resume, cancel, retry, result)
 • /handoff: Generate a handoff code to share this session with Telegram
 • /clear: Clear the terminal
 • /exit: End the session
@@ -195,7 +195,7 @@ exports[`Session surfaces — /help > renders in standard light > help-standard 
 • /untrust: Revoke workspace trust
 • /workspace.trust.status: Show whether the current workspace is trusted
 • /doctor: Run a quick in-session health check
-• /workflow: Workflow operator commands (status, pause, resume, steer, trace, etc.)
+• /task: Durable Task controls (begin, list, show, pause, resume, cancel, retry, result)
 • /handoff: Generate a handoff code to share this session with Telegram
 • /clear: Clear the terminal
 • /exit: End the session
@@ -258,9 +258,7 @@ exports[`Session surfaces — /status > renders in narrow width > status-narrow 
 │ security: [38;2;76;175;80madaptive[0m
 │ skills: 3 (suggest)
 │ tools: 12
-│ mcp: 1/2
-│ workflow: [2munavailable[0m
-│ workflow run: [2minactive[0m"
+│ mcp: 1/2"
 `;
 
 exports[`Session surfaces — /status > renders in no Unicode > status-no Unicode 1`] = `
@@ -269,9 +267,7 @@ exports[`Session surfaces — /status > renders in no Unicode > status-no Unicod
 | security: [38;2;76;175;80madaptive[0m
 | skills: 3 (suggest)
 | tools: 12
-| mcp: 1/2
-| workflow: [2munavailable[0m
-| workflow run: [2minactive[0m"
+| mcp: 1/2"
 `;
 
 exports[`Session surfaces — /status > renders in no color > status-no color 1`] = `
@@ -280,9 +276,7 @@ exports[`Session surfaces — /status > renders in no color > status-no color 1`
 │ security: adaptive
 │ skills: 3 (suggest)
 │ tools: 12
-│ mcp: 1/2
-│ workflow: unavailable
-│ workflow run: inactive"
+│ mcp: 1/2"
 `;
 
 exports[`Session surfaces — /status > renders in plain > status-plain 1`] = `
@@ -291,9 +285,7 @@ model: unconfigured/smoke-model
 security: adaptive
 skills: 3 (suggest)
 tools: 12
-mcp: 1/2
-workflow: unavailable
-workflow run: inactive"
+mcp: 1/2"
 `;
 
 exports[`Session surfaces — /status > renders in standard dark > status-standard dark 1`] = `
@@ -302,9 +294,7 @@ exports[`Session surfaces — /status > renders in standard dark > status-standa
 │ security: [38;2;76;175;80madaptive[0m
 │ skills: 3 (suggest)
 │ tools: 12
-│ mcp: 1/2
-│ workflow: [2munavailable[0m
-│ workflow run: [2minactive[0m"
+│ mcp: 1/2"
 `;
 
 exports[`Session surfaces — /status > renders in standard light > status-standard light 1`] = `
@@ -313,9 +303,7 @@ exports[`Session surfaces — /status > renders in standard light > status-stand
 │ security: [38;2;46;125;50madaptive[0m
 │ skills: 3 (suggest)
 │ tools: 12
-│ mcp: 1/2
-│ workflow: [2munavailable[0m
-│ workflow run: [2minactive[0m"
+│ mcp: 1/2"
 `;
 
 exports[`Session surfaces — /tools > renders in narrow width > tools-narrow width 1`] = `"• No tools are available."`;
@@ -483,8 +471,8 @@ exports[`Session surfaces — slash menu > renders in narrow width > slash-menu-
 "[38;2;76;175;80m[OK][0m [1m[0m
 
 [1mCommands[0m
-[38;2;67;137;215mName                   [0m  [38;2;67;137;215mDescription                                                           [0m
-[2m───────────────────────  ──────────────────────────────────────────────────────────────────────[0m
+[38;2;67;137;215mName                   [0m  [38;2;67;137;215mDescription                                                                    [0m
+[2m───────────────────────  ───────────────────────────────────────────────────────────────────────────────[0m
 /help                    Show command help
 /status                  Show runtime, model, context, trust, memory, and skill status
 /model                   Show the active model and provider without changing saved setup state.
@@ -508,7 +496,7 @@ exports[`Session surfaces — slash menu > renders in narrow width > slash-menu-
 /untrust                 Revoke workspace trust
 /workspace.trust.status  Show whether the current workspace is trusted
 /doctor                  Run a quick in-session health check
-/workflow                Workflow operator commands (status, pause, resume, steer, trace, etc.)
+/task                    Durable Task controls (begin, list, show, pause, resume, cancel, retry, result)
 /handoff                 Generate a handoff code to share this session with Telegram
 /clear                   Clear the terminal
 /exit                    End the session
@@ -519,8 +507,8 @@ exports[`Session surfaces — slash menu > renders in no Unicode > slash-menu-no
 "[38;2;76;175;80m[OK][0m [1m[0m
 
 [1mCommands[0m
-[38;2;67;137;215mName                   [0m  [38;2;67;137;215mDescription                                                           [0m
-[2m-----------------------  ----------------------------------------------------------------------[0m
+[38;2;67;137;215mName                   [0m  [38;2;67;137;215mDescription                                                                    [0m
+[2m-----------------------  -------------------------------------------------------------------------------[0m
 /help                    Show command help
 /status                  Show runtime, model, context, trust, memory, and skill status
 /model                   Show the active model and provider without changing saved setup state.
@@ -544,7 +532,7 @@ exports[`Session surfaces — slash menu > renders in no Unicode > slash-menu-no
 /untrust                 Revoke workspace trust
 /workspace.trust.status  Show whether the current workspace is trusted
 /doctor                  Run a quick in-session health check
-/workflow                Workflow operator commands (status, pause, resume, steer, trace, etc.)
+/task                    Durable Task controls (begin, list, show, pause, resume, cancel, retry, result)
 /handoff                 Generate a handoff code to share this session with Telegram
 /clear                   Clear the terminal
 /exit                    End the session
@@ -556,7 +544,7 @@ exports[`Session surfaces — slash menu > renders in no color > slash-menu-no c
 
 Commands
 Name                     Description
-───────────────────────  ──────────────────────────────────────────────────────────────────────
+───────────────────────  ───────────────────────────────────────────────────────────────────────────────
 /help                    Show command help
 /status                  Show runtime, model, context, trust, memory, and skill status
 /model                   Show the active model and provider without changing saved setup state.
@@ -580,7 +568,7 @@ Name                     Description
 /untrust                 Revoke workspace trust
 /workspace.trust.status  Show whether the current workspace is trusted
 /doctor                  Run a quick in-session health check
-/workflow                Workflow operator commands (status, pause, resume, steer, trace, etc.)
+/task                    Durable Task controls (begin, list, show, pause, resume, cancel, retry, result)
 /handoff                 Generate a handoff code to share this session with Telegram
 /clear                   Clear the terminal
 /exit                    End the session
@@ -592,7 +580,7 @@ exports[`Session surfaces — slash menu > renders in plain > slash-menu-plain 1
 
 Commands
 Name                     Description
------------------------  ----------------------------------------------------------------------
+-----------------------  -------------------------------------------------------------------------------
 /help                    Show command help
 /status                  Show runtime, model, context, trust, memory, and skill status
 /model                   Show the active model and provider without changing saved setup state.
@@ -616,7 +604,7 @@ Name                     Description
 /untrust                 Revoke workspace trust
 /workspace.trust.status  Show whether the current workspace is trusted
 /doctor                  Run a quick in-session health check
-/workflow                Workflow operator commands (status, pause, resume, steer, trace, etc.)
+/task                    Durable Task controls (begin, list, show, pause, resume, cancel, retry, result)
 /handoff                 Generate a handoff code to share this session with Telegram
 /clear                   Clear the terminal
 /exit                    End the session
@@ -627,8 +615,8 @@ exports[`Session surfaces — slash menu > renders in standard dark > slash-menu
 "[38;2;76;175;80m[OK][0m [1m[0m
 
 [1mCommands[0m
-[38;2;67;137;215mName                   [0m  [38;2;67;137;215mDescription                                                           [0m
-[2m───────────────────────  ──────────────────────────────────────────────────────────────────────[0m
+[38;2;67;137;215mName                   [0m  [38;2;67;137;215mDescription                                                                    [0m
+[2m───────────────────────  ───────────────────────────────────────────────────────────────────────────────[0m
 /help                    Show command help
 /status                  Show runtime, model, context, trust, memory, and skill status
 /model                   Show the active model and provider without changing saved setup state.
@@ -652,7 +640,7 @@ exports[`Session surfaces — slash menu > renders in standard dark > slash-menu
 /untrust                 Revoke workspace trust
 /workspace.trust.status  Show whether the current workspace is trusted
 /doctor                  Run a quick in-session health check
-/workflow                Workflow operator commands (status, pause, resume, steer, trace, etc.)
+/task                    Durable Task controls (begin, list, show, pause, resume, cancel, retry, result)
 /handoff                 Generate a handoff code to share this session with Telegram
 /clear                   Clear the terminal
 /exit                    End the session
@@ -663,8 +651,8 @@ exports[`Session surfaces — slash menu > renders in standard light > slash-men
 "[38;2;46;125;50m[OK][0m [1m[0m
 
 [1mCommands[0m
-[38;2;67;137;215mName                   [0m  [38;2;67;137;215mDescription                                                           [0m
-[2m───────────────────────  ──────────────────────────────────────────────────────────────────────[0m
+[38;2;67;137;215mName                   [0m  [38;2;67;137;215mDescription                                                                    [0m
+[2m───────────────────────  ───────────────────────────────────────────────────────────────────────────────[0m
 /help                    Show command help
 /status                  Show runtime, model, context, trust, memory, and skill status
 /model                   Show the active model and provider without changing saved setup state.
@@ -688,7 +676,7 @@ exports[`Session surfaces — slash menu > renders in standard light > slash-men
 /untrust                 Revoke workspace trust
 /workspace.trust.status  Show whether the current workspace is trusted
 /doctor                  Run a quick in-session health check
-/workflow                Workflow operator commands (status, pause, resume, steer, trace, etc.)
+/task                    Durable Task controls (begin, list, show, pause, resume, cancel, retry, result)
 /handoff                 Generate a handoff code to share this session with Telegram
 /clear                   Clear the terminal
 /exit                    End the session

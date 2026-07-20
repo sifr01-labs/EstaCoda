@@ -18,7 +18,7 @@ Task
             └── Result
 ```
 
-This document describes the persistence, result, scheduler, agent-execution, and background-host foundation currently present in the codebase. The profile gateway supervisor now runs a durable Task tick beside cron and channel work, recovers abandoned Attempts after restart, and delivers terminal results through a fail-closed completion outbox. The internal fixed-graph service can atomically create idempotent Tasks and persist authorized steering, but no ordinary user path invokes it yet: operator commands and user-facing delegation semantics remain outside this build. The retired Workflow commands fail explicitly instead of falling back to an in-memory or partially initialized implementation.
+This document describes the persistence, result, scheduler, agent-execution, background-host, delegation, and operator-control foundation currently present in the codebase. The profile gateway supervisor runs a durable Task tick beside cron and channel work, recovers abandoned Attempts after restart, and delivers terminal results through a fail-closed completion outbox. Trusted users can create Tasks through `estacoda task`, `/task`, and `delegate_task`; the retired Workflow engine and command surface have been removed rather than retained as a compatibility layer.
 
 ## Source of truth
 
@@ -38,6 +38,9 @@ This document describes the persistence, result, scheduler, agent-execution, and
 - `src/workflow/task-completion-delivery.ts` owns authorized, terminal-only completion delivery.
 - `src/workflow/task-workspace.ts` derives the canonical workspace identity shared by Task creation and hosts.
 - `src/workflow/task-artifact-content.ts` constrains artifact capture to reviewed workspace/profile roots.
+- `src/workflow/task-operator-service.ts` owns profile-bound status and lifecycle controls with explicit session authorization.
+- `src/cli/task-commands.ts` exposes deterministic local CLI and in-session Task controls.
+- `src/tools/task-tools.ts` exposes the bounded, read-only `task.status` tool.
 - `src/tools/task-result-tools.ts` exposes authorized, paged `task.result.read` access.
 - `src/session/sqlite-session-db.ts` runs the migration and enables SQLite foreign-key enforcement.
 
@@ -73,7 +76,7 @@ Result creation writes the content first, then records metadata and the bounded 
 
 ## Scheduler core
 
-`WorkflowScheduler.runOnce()` performs one bounded reconciliation and dispatch pass. It derives ready Steps from completed dependencies, creates deterministic dispatch keys, acquires fenced Attempt leases, starts available executors within profile, Task, executor, and provider concurrency limits, and accepts settlement only while the same unexpired lease is current. Every agent Attempt reserves at least one provider call for budget enforcement even if an executor reports incomplete usage.
+`TaskScheduler.runOnce()` performs one bounded reconciliation and dispatch pass. It derives ready Steps from completed dependencies, creates deterministic dispatch keys, acquires fenced Attempt leases, starts available executors within profile, Task, executor, and provider concurrency limits, and accepts settlement only while the same unexpired lease is current. Every agent Attempt reserves at least one provider call for budget enforcement even if an executor reports incomplete usage.
 
 Executors return settlements; they cannot declare a Step or Task complete. The scheduler validates required result kind and presence, writes result bodies through the fenced durable result plane, validates aggregate Task and Step usage and wall-clock budgets, and then settles the Attempt and logical Step. Retry classification is deterministic: failure-class policy, attempt limits, backoff, idempotency, and uncertain side effects are evaluated before a Step can return to `ready`.
 
@@ -121,4 +124,4 @@ The migration is intentionally destructive only for the retired Workflow tables.
 
 ## Current boundary
 
-The execution host and internal fixed-graph creation path are live, but the product creation surface is not. Durable Tasks can be created idempotently by trusted runtime code, steered by a linked creator or observer session, recovered, dispatched by an eligible workspace host, and delivered through a creator- or observer-authorized binding. Worker sessions cannot authorize steering or delivery. No CLI command, channel command, or model-visible tool creates a Task or delivery binding in this build. Operator controls and the replacement `delegate_task` experience must land before ordinary users can start durable execution.
+Durable Tasks can be created by trusted local operator commands or `delegate_task`, recovered, dispatched by an eligible workspace host, inspected through bounded status/result surfaces, and delivered through an authorized binding. Worker sessions cannot authorize lifecycle mutations, steering, or delivery. In-session reads require a Task/session link; operator mutations require the creator link. Task controls do not bypass workspace trust, runtime security, approval, authority, budget, profile, or result-access boundaries.

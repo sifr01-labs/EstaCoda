@@ -6,7 +6,7 @@ import {
   type TaskBackgroundHostStatus
 } from "./task-background-host.js";
 import { TaskCompletionDeliveryService, type TaskCompletionDeliveryRouter } from "./task-completion-delivery.js";
-import { WorkflowScheduler } from "./task-scheduler.js";
+import { TaskScheduler } from "./task-scheduler.js";
 import type { TaskResultService } from "./task-result-service.js";
 import type { TaskStore } from "./task-store.js";
 import type { TaskApprovalService } from "./task-approval-service.js";
@@ -46,7 +46,7 @@ export class SupervisorTaskBackgroundHost {
     this.#store = options.store;
     this.#createExecutorRuntime = options.createExecutorRuntime;
     this.#logWarning = options.logWarning ?? (() => undefined);
-    const scheduler = new WorkflowScheduler({
+    const scheduler = new TaskScheduler({
       store: options.store,
       resultService: options.resultService,
       ownerId: options.ownerId,

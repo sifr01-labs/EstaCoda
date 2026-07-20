@@ -15,7 +15,7 @@ All statements here are grounded in the current codebase. If a feature is not im
 |-----|---------|
 | [Overview](./overview.md) | High-level system map, entrypoints, composition root, and data flow |
 | [Runtime](./runtime.md) | Breakdown of the runtime: AgentLoop, createRuntime, registries, executors |
-| [Workflow](./workflows.md) | Durable multi-step execution, state machine, and runtime integration |
+| [Durable Tasks](./workflows.md) | Durable multi-step execution, state machine, and runtime integration |
 | [Evolution](./evolution.md) | Governed skill evolution, AHE alignment, and self-improvement loop |
 | [Dependency Map](./dependency-map.md) | Module-level dependency graph with Mermaid visualization |
 | [Knowledge Map](./knowledge-map.md) | Runtime concept map with Mermaid visualization |

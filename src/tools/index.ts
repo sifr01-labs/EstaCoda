@@ -19,6 +19,7 @@ import { pythonToolProvider } from "./python-tools.js";
 import { sessionSearchToolProvider } from "./session-search-tool.js";
 import { skillToolProvider } from "./skill-tools.js";
 import { taskResultToolProvider } from "./task-result-tools.js";
+import { taskToolProvider } from "./task-tools.js";
 import { visionToolProvider } from "./vision-tools.js";
 import { voiceToolProvider } from "./voice-tools.js";
 import { webToolProvider } from "./web-tools.js";
@@ -46,6 +47,7 @@ export {
   sessionSearchToolProvider,
   skillToolProvider,
   taskResultToolProvider,
+  taskToolProvider,
   visionToolProvider,
   voiceToolProvider,
   webToolProvider,
@@ -86,6 +88,7 @@ export const toolRegistrationPlan: readonly ToolRegistrationEntry[] = [
   { provider: memoryFileCompactionToolProvider, phase: "pre-skill-visibility" },
   { provider: sessionSearchToolProvider, phase: "pre-skill-visibility" },
   { provider: taskResultToolProvider, phase: "pre-skill-visibility" },
+  { provider: taskToolProvider, phase: "pre-skill-visibility" },
   { provider: skillToolProvider, phase: "post-skill-visibility" },
   { provider: knowledgeMemoryToolProvider, phase: "post-memory-provider" },
   {

@@ -12,7 +12,7 @@ import { SQLiteTaskStore } from "./sqlite-task-store.js";
 import { TaskBackgroundHost } from "./task-background-host.js";
 import { TaskCompletionDeliveryService } from "./task-completion-delivery.js";
 import { TaskResultService } from "./task-result-service.js";
-import { WorkflowScheduler } from "./task-scheduler.js";
+import { TaskScheduler } from "./task-scheduler.js";
 import type { TaskStepExecutionInput, TaskStepExecutor } from "./task-step-executor.js";
 
 const NOW = "2030-01-01T00:00:00.000Z";
@@ -164,7 +164,7 @@ function createHost(
   ownerId: string,
   id: (kind: string) => string
 ): TaskBackgroundHost {
-  const scheduler = new WorkflowScheduler({
+  const scheduler = new TaskScheduler({
     store,
     resultService,
     ownerId,

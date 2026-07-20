@@ -195,8 +195,6 @@ describe("StandardRenderer — dispatch", () => {
         toolCount: 1,
         mcpActive: 0,
         mcpTotal: 0,
-        workflowAvailable: false,
-        workflowRunActive: false,
       }),
       buildTableViewModel({ columns: [], rows: [] }),
       buildKeyValueBlockViewModel({ entries: [] }),
@@ -291,8 +289,6 @@ describe("StandardRenderer — dark theme", () => {
       toolCount: 34,
       mcpActive: 2,
       mcpTotal: 3,
-      workflowAvailable: true,
-      workflowRunActive: true,
     });
     const out = r.renderStatus(vm);
     expect(out).toContain("EstaCoda is ready");
@@ -1587,8 +1583,6 @@ describe("StandardRenderer — light theme", () => {
       toolCount: 1,
       mcpActive: 0,
       mcpTotal: 0,
-      workflowAvailable: false,
-      workflowRunActive: false,
     });
     const out = r.renderStatus(vm);
     expect(out).toContain("EstaCoda is ready");
@@ -1607,8 +1601,6 @@ describe("StandardRenderer — light theme", () => {
       toolCount: 1,
       mcpActive: 0,
       mcpTotal: 0,
-      workflowAvailable: false,
-      workflowRunActive: false,
     });
 
     const darkOut = darkR.renderStatus(vm);
@@ -1632,8 +1624,6 @@ describe("StandardRenderer — no-color fallback", () => {
       toolCount: 1,
       mcpActive: 0,
       mcpTotal: 0,
-      workflowAvailable: false,
-      workflowRunActive: false,
     });
     const out = r.renderStatus(vm);
     assertNoAnsi(out);
@@ -1745,8 +1735,6 @@ describe("StandardRenderer — plain mode fallback", () => {
       toolCount: 1,
       mcpActive: 0,
       mcpTotal: 0,
-      workflowAvailable: false,
-      workflowRunActive: false,
     });
     const out = r.renderStatus(vm);
     assertNoAnsi(out);
@@ -1773,8 +1761,6 @@ describe("StandardRenderer — narrow width", () => {
       toolCount: 1,
       mcpActive: 0,
       mcpTotal: 0,
-      workflowAvailable: false,
-      workflowRunActive: false,
     });
     const out = r.renderStatus(vm);
     expect(typeof out).toBe("string");
@@ -1808,8 +1794,6 @@ describe("StandardRenderer — visual primitives", () => {
       toolCount: 1,
       mcpActive: 0,
       mcpTotal: 0,
-      workflowAvailable: false,
-      workflowRunActive: false,
     });
     const out = r.renderStatus(vm);
     // Rail uses toolPrefix glyph ("│" in Unicode mode)
@@ -2311,8 +2295,6 @@ describe("StandardRenderer — deterministic output", () => {
       toolCount: 1,
       mcpActive: 0,
       mcpTotal: 0,
-      workflowAvailable: false,
-      workflowRunActive: false,
     });
     const a = r.render(vm);
     const b = r.render(vm);

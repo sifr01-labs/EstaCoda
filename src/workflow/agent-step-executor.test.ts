@@ -25,7 +25,7 @@ import { AgentStepExecutor } from "./agent-step-executor.js";
 import { SQLiteTaskStore } from "./sqlite-task-store.js";
 import { TaskResultService } from "./task-result-service.js";
 import { TaskApprovalService } from "./task-approval-service.js";
-import { WorkflowScheduler } from "./task-scheduler.js";
+import { TaskScheduler } from "./task-scheduler.js";
 
 describe("AgentStepExecutor", () => {
   let tempDir: string;
@@ -103,7 +103,7 @@ describe("AgentStepExecutor", () => {
       approvalService: new TaskApprovalService({ store }),
       securityPolicy: capabilityFirstDefaults
     });
-    const scheduler = new WorkflowScheduler({
+    const scheduler = new TaskScheduler({
       store,
       resultService,
       ownerId: "scheduler-alpha",
@@ -245,7 +245,7 @@ describe("AgentStepExecutor", () => {
       approvalService: new TaskApprovalService({ store }),
       securityPolicy: capabilityFirstDefaults
     });
-    const scheduler = new WorkflowScheduler({
+    const scheduler = new TaskScheduler({
       store,
       resultService,
       ownerId: "scheduler-alpha",

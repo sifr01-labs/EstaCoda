@@ -53,8 +53,6 @@ describe("PlainLogSurfaceAdapter", () => {
       toolCount: 10,
       mcpActive: 1,
       mcpTotal: 2,
-      workflowAvailable: true,
-      workflowRunActive: true,
     });
     const out = adapter.render(vm);
     expect(out).toContain("EstaCoda is ready");
@@ -183,8 +181,6 @@ describe("TelegramSurfaceAdapter", () => {
       toolCount: 10,
       mcpActive: 1,
       mcpTotal: 2,
-      workflowAvailable: true,
-      workflowRunActive: true,
     });
     const out = adapter.render(vm);
     assertNoAnsi(out);
@@ -383,8 +379,6 @@ describe("Cross-adapter ANSI safety", () => {
     toolCount: 10,
     mcpActive: 1,
     mcpTotal: 2,
-    workflowAvailable: true,
-    workflowRunActive: true,
   });
 
   for (const adapter of adapters) {

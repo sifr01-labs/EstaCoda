@@ -11,6 +11,7 @@ import type { RuntimeToolContext, SessionToolContext } from "../contracts/tool-c
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import type { TaskResultService } from "../workflow/task-result-service.js";
+import type { TaskOperatorService } from "../workflow/task-operator-service.js";
 import type { ContextReferenceExpander } from "../context/context-reference-expander.js";
 import type { CronStore } from "../cron/cron-store.js";
 import { availableToolsetsFromTools } from "../cron/cron-runtime-validation.js";
@@ -163,6 +164,7 @@ export type AgentLoopRuntimeSubstrate = {
   browserConfig: SessionToolContext["browserConfig"];
   artifactStore: ArtifactStore;
   taskResultService?: TaskResultService;
+  taskOperatorService?: TaskOperatorService;
   trustStore: WorkspaceTrustStore;
   cronStore: CronStore;
   disableCronTools?: boolean;
@@ -336,6 +338,7 @@ export class AgentLoopBuilder {
         processManager: substrate.processManager,
         artifactStore: substrate.artifactStore,
         taskResultService: substrate.taskResultService,
+        taskOperatorService: substrate.taskOperatorService,
         sessionDb: input.sessionDb,
         trajectoryRecorder: input.trajectoryRecorder,
         memoryStore: substrate.memoryStore,
@@ -725,6 +728,7 @@ function buildPreSkillVisibilityToolContext(input: SessionToolContext): SessionT
     processManager: input.processManager,
     artifactStore: input.artifactStore,
     taskResultService: input.taskResultService,
+    taskOperatorService: input.taskOperatorService,
     sessionDb: input.sessionDb,
     trajectoryRecorder: input.trajectoryRecorder,
     memoryStore: input.memoryStore,

@@ -42,6 +42,6 @@ skills/
 
 ## Current Priority
 
-Keep this note aligned with the release-current architecture, setup, and operations docs. Durable Workflow is implemented as an explicit operator surface; use [Workflow CLI](./workflow-cli.md) and [Workflow Architecture](../architecture/workflows.md) for current behavior.
+Keep this note aligned with the release-current architecture, setup, and operations docs. Durable Tasks are the explicit operator surface; use [Durable Task CLI](./task-cli.md) and [Durable Task Architecture](../architecture/workflows.md) for current behavior.
 
 See the Docusaurus operations docs for current public operator guidance.

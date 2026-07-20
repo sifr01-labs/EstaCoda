@@ -363,11 +363,22 @@ estacoda memory finalization prune [--keep N]
 
 ---
 
-## Workflow
+## Durable Tasks
 
-The `estacoda workflow ...` command family is retired after the durable Task persistence cutover. Every subcommand exits non-zero with explicit guidance. Task operator commands are not available in this build.
+```bash
+estacoda task begin [--session <session-id>] <objective>
+estacoda task list [limit]
+estacoda task show <task-id>
+estacoda task pause <task-id>
+estacoda task resume <task-id>
+estacoda task cancel <task-id>
+estacoda task retry <task-id> [step-id]
+estacoda task result <task-id>
+```
 
-**State touched:** None.
+**State touched:** Profile-scoped durable Task records in the global session SQLite database; Task result bodies remain in the selected profile's private result store.
+
+**Behavior:** `begin` requires a trusted workspace and creates one conservative agent Step. Without `--session`, the root Task is explicitly system-owned; no hidden session is created. `show` reports bounded progress, running/waiting counts, usage/pricing completeness, workspace trust, result count, and background-host state. `pause`, `resume`, `cancel`, and explicit `retry` mutate durable state. `result` lists opaque handles and summaries, not full bodies or local paths. A command-local `--profile` override never changes the active profile.
 
 ---
 

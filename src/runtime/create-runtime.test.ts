@@ -26,6 +26,7 @@ import {
   memoryToolProvider,
   sessionSearchToolProvider,
   taskResultToolProvider,
+  taskToolProvider,
   toolRegistrationPlan
 } from "../tools/index.js";
 import * as pythonEnvManager from "../python-env/manager.js";
@@ -391,6 +392,7 @@ const providerToolNameGroups = [
   { providerName: "memoryFileCompaction", toolNames: ["memory.file_compact", "memory.file_compaction_restore"] },
   { providerName: "sessionSearch", toolNames: ["session_search"] },
   { providerName: "taskResult", toolNames: [] },
+  { providerName: "task", toolNames: [] },
   {
     providerName: "skill",
     toolNames: [
@@ -4078,7 +4080,9 @@ describe("createRuntime SQLite session lifecycle", () => {
       const runtime = await createRuntime({ ...options, sessionDb, closeSessionDbOnDispose: false });
       try {
         expect(taskResultToolProvider.name).toBe("taskResult");
+        expect(taskToolProvider.name).toBe("task");
         expect(runtime.tools().map((tool) => tool.name)).toContain("task.result.read");
+        expect(runtime.tools().map((tool) => tool.name)).toContain("task.status");
       } finally {
         await runtime.dispose();
       }

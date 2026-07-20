@@ -146,8 +146,6 @@ export function renderStatus(vm: StatusViewModel): string {
     `skills: ${vm.skillCount}${vm.skillAutonomy !== undefined ? ` (${vm.skillAutonomy})` : ""}`,
     `tools: ${vm.toolCount}`,
     `mcp: ${vm.mcp.active}/${vm.mcp.total}`,
-    `workflow: ${vm.workflowAvailable ? "available" : "unavailable"}`,
-    `workflow run: ${vm.workflowRunActive ? "active" : "inactive"}`,
   ].filter((line): line is string => line !== undefined);
 
   for (const warning of vm.warnings) {

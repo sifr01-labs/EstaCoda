@@ -309,10 +309,10 @@ function registerAll(): void {
     scope: "both",
   });
   commandRegistry.register({
-    name: "workflow",
+    name: "task",
     aliases: [],
-    category: "Workflow",
-    description: "Workflow operator commands (status, pause, resume, steer, trace, etc.)",
+    category: "Tasks",
+    description: "Durable Task controls (begin, list, show, pause, resume, cancel, retry, result)",
     visibility: "public",
     scope: "both",
   });

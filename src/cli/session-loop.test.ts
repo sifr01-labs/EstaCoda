@@ -102,8 +102,6 @@ function createMockRuntime(overrides: Partial<Runtime> = {}): Runtime {
       skillCount: 0,
       toolCount: 0,
       mcp: { active: 0, total: 0 },
-      workflowAvailable: false,
-      workflowRunActive: false,
       warnings: [],
     }),
     getModelInfo: () => ({
@@ -4454,8 +4452,6 @@ describe("runSessionLoop — active turn spinner", () => {
         skillAutonomy: "autonomous",
         toolCount: 96,
         mcp: { active: 0, total: 0 },
-        workflowAvailable: false,
-        workflowRunActive: false,
         warnings: [],
       }),
     });

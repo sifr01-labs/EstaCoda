@@ -71,6 +71,7 @@ import { SkillLearningManager, type SkillAutonomy } from "../skills/skill-learni
 import { availableToolsetsFromTools } from "../cron/cron-runtime-validation.js";
 import { SQLiteTaskStore } from "../workflow/sqlite-task-store.js";
 import { TaskResultService } from "../workflow/task-result-service.js";
+import { TaskOperatorService, type TaskStatusProjection } from "../workflow/task-operator-service.js";
 import { AgentStepExecutor } from "../workflow/agent-step-executor.js";
 import { TaskApprovalService } from "../workflow/task-approval-service.js";
 import { createTaskArtifactContentResolver } from "../workflow/task-artifact-content.js";
@@ -282,22 +283,8 @@ export type Runtime = {
 
   /** Available only for profile-backed runtimes that can host durable agent Steps. */
   taskAgentExecutor?: AgentStepExecutor;
-
-  // Workflow module v0.8 integration (available when SQLiteSessionDB is used)
-  workflow?: {
-    engine: import("../workflow/workflow-engine.js").WorkflowEngine;
-    store: import("../workflow/workflow-store.js").WorkflowStore;
-    dispatcher: import("../workflow/workflow-command-dispatcher.js").WorkflowCommandDispatcher;
-    processRegistry: import("../workflow/workflow-process-registry.js").WorkflowProcessRegistry;
-    compactionService: import("../workflow/workflow-event-summary-service.js").WorkflowEventSummaryService;
-    adapter: import("../workflow/workflow-agent-loop-adapter.js").WorkflowAgentLoopAdapter;
-    activeRunId: string | null;
-    setActiveRunId(runId: string | null): void;
-    recoverFromRestart(): Promise<{
-      interruptedFlows: number;
-      recoveredLocks: number;
-    }>;
-  };
+  taskOperator?: TaskOperatorService;
+  beginTask?(objective: string): Promise<TaskStatusProjection>;
 };
 
 export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
@@ -324,6 +311,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         contentRoot: profilePaths.taskResultsPath,
         sessionDb
       });
+  const taskOperatorService = taskStore === undefined ? undefined : new TaskOperatorService({ store: taskStore });
   const closeSessionDbOnDispose = options.closeSessionDbOnDispose ?? true;
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
   const taskWorkspace = taskStore === undefined ? undefined : await resolveTaskWorkspaceBinding(workspaceRoot);
@@ -862,6 +850,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       browserConfig: options.browser,
       artifactStore,
       taskResultService,
+      taskOperatorService,
       trustStore,
       cronStore,
       disableCronTools: options.disableCronTools,
@@ -996,6 +985,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   return {
     sessionDb,
     taskAgentExecutor,
+    taskOperator: taskOperatorService,
+    beginTask: taskOperatorService === undefined || taskWorkspace === undefined
+      ? undefined
+      : async (objective) => {
+          if (!activeTrustedWorkspace && !(await trustStore.isTrusted(workspaceRoot))) {
+            throw new Error("Task creation requires a trusted workspace.");
+          }
+          return taskOperatorService.begin({ objective, workspace: taskWorkspace, creatorSessionId: sessionRuntimeContext.currentSessionId() });
+        },
     agentEvolutionPolicy() {
       return agentEvolutionPolicy;
     },
@@ -1276,8 +1274,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         toolCount: toolRegistry.list().length,
         mcpActive: loadedMcpServers.filter((server) => server.snapshot.available).length,
         mcpTotal: loadedMcpServers.length,
-        workflowAvailable: false,
-        workflowRunActive: false,
         warnings: skillLoadWarnings.map((message) =>
           buildWarningErrorViewModel({ severity: "warn", title: "Skill load", message })
         ),

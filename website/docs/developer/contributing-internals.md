@@ -44,7 +44,7 @@ EstaCoda is organized by runtime domain. Common top-level directories include:
 | `src/gateway/` | Gateway supervisor, hooks, resilience, service lifecycle |
 | `src/cron/` | Cron job tools and storage |
 | `src/delegation/` | Subagent delegation, child runners, delegation diagnostics |
-| `src/workflow/` | Durable workflow execution and workflow state |
+| `src/workflow/` | Durable Task execution, scheduling, results, and operator state |
 | `src/evolution/` | Agent evolution review, proposals, constraints, export surfaces |
 | `src/knowledge/` | Code graph and knowledge cache support |
 | `src/lifecycle/` | Install, update, uninstall, and state preservation helpers |

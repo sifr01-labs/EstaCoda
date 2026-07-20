@@ -107,7 +107,7 @@ import { manifestCommand } from "./manifest-commands.js";
 import { curatorCommand } from "./curator-commands.js";
 import { knowledge } from "./knowledge-commands.js";
 import { evolutionCommand } from "./evolution-commands.js";
-import { workflowCommand } from "./workflow-commands.js";
+import { taskCommand } from "./task-commands.js";
 import { packCommand } from "./pack-commands.js";
 import { skillsCommand } from "./skill-commands.js";
 import { benchCommand } from "./bench-command.js";
@@ -327,8 +327,8 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return runPythonEnvCommand(options, args);
     case "trace":
       return trace(options, args);
-    case "workflow":
-      return workflowCommand(options, args);
+    case "task":
+      return taskCommand(options, args);
     case "eval":
       return evalCommand(options, args);
     case "proposal":
