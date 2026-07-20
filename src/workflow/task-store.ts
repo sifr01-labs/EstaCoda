@@ -2,6 +2,8 @@ import type {
   Task,
   TaskAttempt,
   TaskAttemptLease,
+  TaskDeliveryBinding,
+  TaskDeliveryStatus,
   TaskEvent,
   TaskEventKind,
   TaskPlanRevision,
@@ -50,6 +52,20 @@ export type ReleaseTaskAttemptLeaseInput = {
   fencingToken: number;
 };
 
+export type ListTaskDeliveryBindingsOptions = {
+  taskId?: string;
+  statuses?: readonly TaskDeliveryStatus[];
+  limit?: number;
+};
+
+export type SettleTaskDeliveryInput = {
+  id: string;
+  status: "delivered" | "failed";
+  settledAt: string;
+  failureClass?: string;
+  failureMessage?: string;
+};
+
 /** Profile-bound persistence contract. A store instance can never opt out of profile scoping. */
 export interface TaskStore {
   readonly profileId: string;
@@ -88,6 +104,12 @@ export interface TaskStore {
 
   linkSession(link: TaskSessionLink): void;
   listSessionLinks(taskId: string): TaskSessionLink[];
+
+  createDeliveryBinding(binding: TaskDeliveryBinding): void;
+  getDeliveryBinding(id: string): TaskDeliveryBinding | null;
+  listDeliveryBindings(options?: ListTaskDeliveryBindingsOptions): TaskDeliveryBinding[];
+  claimDeliveryBinding(id: string, startedAt: string): TaskDeliveryBinding | null;
+  settleDeliveryBinding(input: SettleTaskDeliveryInput): TaskDeliveryBinding;
 
   atomicWrite<T>(work: (store: TaskStore) => T): T;
 }

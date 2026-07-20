@@ -123,7 +123,13 @@ describe("gateway state primitives", () => {
 
   describe("State file", () => {
     it("write/read roundtrip", async () => {
-      const state = { lifecycle: "running" as const, startedAt: "2026-05-07T10:00:00.000Z", pid: 12345, version: "0.0.5" };
+      const state = {
+        lifecycle: "running" as const,
+        startedAt: "2026-05-07T10:00:00.000Z",
+        pid: 12345,
+        version: "0.0.5",
+        backgroundServices: { tasks: "running" as const, cron: "running" as const }
+      };
       await writeGatewayState(tmpDir, state);
       const read = await readGatewayState(tmpDir);
       expect(read).toEqual(state);

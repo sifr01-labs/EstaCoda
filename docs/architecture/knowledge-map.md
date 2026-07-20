@@ -83,7 +83,7 @@ graph TB
 | Why did a channel accept/reject a message? | Adapter file, `src/channels/channel-gateway.ts`, `src/channels/adapter-capability.ts` |
 | Why did recall or memory appear? | `src/memory/memory-recall-orchestrator.ts`, `src/session/session-recall-service.ts`, prompt assembly tests |
 | Why did a skill load or route? | `src/skills/skill-loader.ts`, `src/skills/skill-registry.ts`, `src/runtime/runtime-router.ts` |
-| How is durable Task state persisted, executed, scheduled, and read? | `src/contracts/task.ts`, `src/workflow/task-schema.ts`, `src/workflow/sqlite-task-store.ts`, `src/workflow/task-scheduler.ts`, `src/workflow/agent-step-executor.ts`, `src/workflow/task-result-service.ts` |
+| How is durable Task state persisted, executed, scheduled, hosted, delivered, and read? | `src/contracts/task.ts`, `src/workflow/task-schema.ts`, `src/workflow/sqlite-task-store.ts`, `src/workflow/task-scheduler.ts`, `src/workflow/agent-step-executor.ts`, `src/workflow/task-background-host.ts`, `src/workflow/supervisor-task-background-host.ts`, `src/workflow/task-completion-delivery.ts`, `src/workflow/task-result-service.ts`, `src/gateway/supervisor.ts` |
 | How are traces persisted? | `src/session/sqlite-session-db.ts`, `src/trajectory/trajectory-recorder.ts`, `src/cli/trace-commands.ts` |
 
 ## Current Limitations
@@ -91,5 +91,5 @@ graph TB
 - Some implemented adapters and optional providers need operator validation before they should be treated as production surfaces in a deployment.
 - Gateway status emphasizes readiness and configured state; process/service liveness depends on the service manager path.
 - Native SQLite packaging remains a release validation requirement because `better-sqlite3` uses native bindings.
-- The durable Task scheduler and production read-only agent executor are tested together but remain dormant until supervisor and product-surface wiring are added.
+- The profile gateway supervisor now hosts the durable Task scheduler and production read-only agent executor, including restart recovery and authorized completion delivery. Task creation and operator surfaces remain intentionally absent.
 - Exact semantic freshness across memory, session recall, web content, and delegation is bounded; current stale-file warnings cover tracked parent reads vs. child file writes.

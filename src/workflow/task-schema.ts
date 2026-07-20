@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 
-export const TASK_SCHEMA_VERSION = 12;
+export const TASK_SCHEMA_VERSION = 13;
 
 const WORKFLOW_TABLES = [
   "workflow_event_summaries",
@@ -372,5 +372,44 @@ export function migrateTaskAgentExecutorSchemaV12(db: SQLiteDatabase): void {
       on task_events(profile_id, task_id, timestamp, id);
     create index idx_task_events_attempt
       on task_events(profile_id, attempt_id, timestamp);
+  `);
+}
+
+/** Adds the durable, profile-owned completion-delivery outbox used by the supervisor host. */
+export function migrateTaskBackgroundHostSchemaV13(db: SQLiteDatabase): void {
+  db.exec(`
+    create table if not exists task_delivery_bindings (
+      id text primary key check(length(id) between 1 and 256),
+      profile_id text not null,
+      task_id text not null,
+      authorized_session_id text not null check(length(authorized_session_id) between 1 and 256),
+      delivery_key text not null check(length(delivery_key) between 1 and 256),
+      destination_json text not null check(json_valid(destination_json) and length(destination_json) <= 2048),
+      status text not null check(status in ('pending', 'delivering', 'delivered', 'failed')),
+      failure_class text check(failure_class is null or length(failure_class) between 1 and 128),
+      failure_message text check(failure_message is null or length(failure_message) between 1 and 1000),
+      created_at text not null,
+      updated_at text not null,
+      started_at text,
+      delivered_at text,
+      failed_at text,
+      check(
+        (status = 'pending' and started_at is null and delivered_at is null and failed_at is null and failure_class is null and failure_message is null) or
+        (status = 'delivering' and started_at is not null and delivered_at is null and failed_at is null and failure_class is null and failure_message is null) or
+        (status = 'delivered' and started_at is not null and delivered_at is not null and failed_at is null and failure_class is null and failure_message is null) or
+        (status = 'failed' and started_at is not null and delivered_at is null and failed_at is not null and failure_class is not null)
+      ),
+      unique(profile_id, id),
+      unique(profile_id, task_id, delivery_key),
+      foreign key(profile_id, task_id)
+        references tasks(profile_id, id) on delete cascade,
+      foreign key(profile_id, authorized_session_id)
+        references sessions(profile_id, id) on delete restrict
+    );
+
+    create index if not exists idx_task_delivery_bindings_pending
+      on task_delivery_bindings(profile_id, status, updated_at, id);
+    create index if not exists idx_task_delivery_bindings_task
+      on task_delivery_bindings(profile_id, task_id, created_at, id);
   `);
 }

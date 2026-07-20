@@ -127,6 +127,7 @@ Returns exit code 1 if any warnings exist.
 
 - Service manager state
 - Process state
+- Durable Task and cron host state
 - All configured channels with ready/configured/disabled state
 - Delivery router platforms
 - Active surface pointers
@@ -136,6 +137,8 @@ Returns exit code 1 if any warnings exist.
 - Recent delivery errors
 - Missing config/env warnings
 - Bounded active-subagent summaries when the active runtime exposes delegated child work
+
+The managed gateway service also owns durable Task wakeups and restart recovery, even when no channel adapter is enabled. A Task bound to another workspace remains `waiting_for_host`; the service does not rewrite its workspace identity. Graceful shutdown drains active Task work with channel turns. Terminal completion delivery uses a profile-owned, session-authorized outbox. If the process stops while an external send is ambiguous, restart marks that delivery failed instead of sending a possible duplicate.
 
 Session-finalization rows live in global `~/.estacoda/sessions.sqlite` with `profile_id` scope and an immutable message cutoff. They store no transcript copy and use the originating session workspace. If the managed service is stopped, queued work stays durable; it is not tied to the next interactive CLI launch. First-run setup can install the service for CLI-only use. Failed jobs can be inspected and retried with `estacoda memory finalization`; automatic retention keeps the latest 1,000 terminal rows per profile.
 

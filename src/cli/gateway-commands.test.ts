@@ -282,6 +282,8 @@ describe("gateway commands", () => {
       const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
       expect(result.ok).toBe(true);
       expect(result.output).toContain("EstaCoda gateway status");
+      expect(result.output).toContain("Durable tasks");
+      expect(result.output).toContain("Active: 0");
       expect(result.output).toContain("Process");
       expect(result.output).toContain("Channels");
       expect(result.output).toContain("Telegram:");
@@ -425,7 +427,13 @@ describe("gateway commands", () => {
     });
 
     it("shows Supervisor block with PID and lifecycle when state exists", async () => {
-      await writeGatewayState(profilePaths, { lifecycle: "running", startedAt: new Date().toISOString(), pid: process.pid, version: "0.0.5" });
+      await writeGatewayState(profilePaths, {
+        lifecycle: "running",
+        startedAt: new Date().toISOString(),
+        pid: process.pid,
+        version: "0.0.5",
+        backgroundServices: { tasks: "running", cron: "running" }
+      });
       await writeGatewayPid(profilePaths, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
 
       const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
@@ -434,6 +442,8 @@ describe("gateway commands", () => {
       expect(result.output).toContain(`PID: ${process.pid}`);
       expect(result.output).toContain("State: running");
       expect(result.output).toContain("Version: 0.0.5");
+      expect(result.output).toContain("Task host: running");
+      expect(result.output).toContain("Cron host: running");
     });
 
     it("shows Supervisor block as stopped when no state", async () => {

@@ -8,6 +8,7 @@ export type TaskStepId = string;
 export type TaskAttemptId = string;
 export type TaskEventId = string;
 export type TaskResultId = string;
+export type TaskDeliveryId = string;
 
 export type TaskGraphLimits = {
   readonly maxSteps: number;
@@ -323,6 +324,52 @@ export type TaskSessionLink = {
   attemptId?: TaskAttemptId;
   createdAt: string;
 };
+
+export type TaskDeliveryStatus = "pending" | "delivering" | "delivered" | "failed";
+
+export type TaskDeliveryDestination = {
+  platform: "telegram" | "discord" | "whatsapp" | "email";
+  chatId?: string;
+  threadId?: string;
+  address?: string;
+};
+
+/** Durable, profile-owned completion destination authorized by a Task-linked session. */
+export type TaskDeliveryBinding = {
+  id: TaskDeliveryId;
+  profileId: string;
+  taskId: TaskId;
+  authorizedSessionId: string;
+  /** Caller-supplied idempotency key for one logical destination binding. */
+  deliveryKey: string;
+  destination: TaskDeliveryDestination;
+  status: TaskDeliveryStatus;
+  failureClass?: string;
+  failureMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  deliveredAt?: string;
+  failedAt?: string;
+};
+
+export function isTaskDeliveryDestination(value: unknown): value is TaskDeliveryDestination {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<TaskDeliveryDestination>;
+  if (candidate.platform === "email") {
+    return isBoundedDeliveryToken(candidate.address, 320) &&
+      candidate.chatId === undefined && candidate.threadId === undefined;
+  }
+  return (candidate.platform === "telegram" || candidate.platform === "discord" || candidate.platform === "whatsapp") &&
+    isBoundedDeliveryToken(candidate.chatId, 256) &&
+    (candidate.threadId === undefined || isBoundedDeliveryToken(candidate.threadId, 256)) &&
+    candidate.address === undefined;
+}
+
+function isBoundedDeliveryToken(value: unknown, maxChars: number): value is string {
+  return typeof value === "string" && value.trim().length > 0 && value.trim().length <= maxChars &&
+    !/[\u0000-\u001F\u007F]/u.test(value);
+}
 
 export type TaskEventKind =
   | "task-created"

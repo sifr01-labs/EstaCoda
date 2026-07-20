@@ -16,12 +16,12 @@ Task
             └── Result
 ```
 
-This document describes the persistence, result, scheduler, and agent-execution foundation currently present in the codebase. `WorkflowScheduler` and `AgentStepExecutor` are production implementations exercised together in integration tests, but they are not constructed by `createRuntime`, and no ordinary user path can start them. Task operator commands, delivery, and supervisor wiring remain outside this build. The retired Workflow commands fail explicitly instead of falling back to an in-memory or partially initialized implementation.
+This document describes the persistence, result, scheduler, agent-execution, and background-host foundation currently present in the codebase. The profile gateway supervisor now runs a durable Task tick beside cron and channel work, recovers abandoned Attempts after restart, and delivers terminal results through a fail-closed completion outbox. No ordinary user path creates Tasks yet: Task creation, operator commands, and user-facing delegation semantics remain outside this build. The retired Workflow commands fail explicitly instead of falling back to an in-memory or partially initialized implementation.
 
 ## Source of truth
 
 - `src/contracts/task.ts` defines the durable records, legal state transitions, authority and budget policies, and deterministic graph validation.
-- `src/workflow/task-schema.ts` owns SQLite schema version 12.
+- `src/workflow/task-schema.ts` owns SQLite schema version 13.
 - `src/workflow/task-store.ts` defines the profile-bound storage contract.
 - `src/workflow/sqlite-task-store.ts` implements transactional SQLite persistence.
 - `src/workflow/task-result-service.ts` stores bounded result bodies under the selected profile and verifies them before reads.
@@ -29,6 +29,11 @@ This document describes the persistence, result, scheduler, and agent-execution 
 - `src/workflow/agent-step-executor.ts` runs one agent Attempt in an isolated child session under narrowed authority.
 - `src/workflow/task-agent-usage.ts` accounts for every provider attempt, fallback, retry, token total, and known route price.
 - `src/workflow/task-scheduler.ts` owns deterministic readiness, dispatch, fencing, retry, cancellation, acceptance, and restart reconciliation.
+- `src/workflow/task-background-host.ts` prevents overlapping scheduler/delivery ticks and performs one-time startup recovery.
+- `src/workflow/supervisor-task-background-host.ts` lazily creates the workspace-eligible agent runtime when runnable work exists.
+- `src/workflow/task-completion-delivery.ts` owns authorized, terminal-only completion delivery.
+- `src/workflow/task-workspace.ts` derives the canonical workspace identity shared by Task creation and hosts.
+- `src/workflow/task-artifact-content.ts` constrains artifact capture to reviewed workspace/profile roots.
 - `src/tools/task-result-tools.ts` exposes authorized, paged `task.result.read` access.
 - `src/session/sqlite-session-db.ts` runs the migration and enables SQLite foreign-key enforcement.
 
@@ -81,12 +86,30 @@ The child runner sends progress through the normal runtime event sink while its 
 
 Successful text and JSON results are captured in full. Artifact bodies are accepted only through an injected, bounded resolver and must match the artifact's declared byte count before the scheduler writes them to the result plane. Dependency context contains bounded result metadata and opaque handles, never raw bodies or filesystem paths; the child reads authorized content through `task.result.read`. Usage includes every provider attempt across retries and fallbacks. Missing token or price data is preserved as explicit incompleteness rather than silently reported as zero-cost complete usage.
 
+## Background host and restart recovery
+
+The selected profile's gateway supervisor owns the Task host. It runs even when no channel adapter is configured, so service mode is now a general background host for Tasks and cron rather than a cron-only process. Each supervisor tick starts at most one Task pass; overlapping ticks are skipped. Shutdown drain waits for active Task work as well as channel turns, and the shared session database remains open until active Task/finalization work settles.
+
+The host is cheap while idle. It constructs the full agent runtime only when a queued, running, or `waiting_for_host` Task exists. `createRuntime()` exposes an `AgentStepExecutor` only when backed by the profile SQLite database. The executor is bound to the host's canonical workspace identity and rechecks workspace trust immediately before each Attempt. A Task for another workspace remains `waiting_for_host`; the host never rewrites its workspace binding or widens its authority.
+
+Startup reconciliation stays scheduler-owned. Expired or abandoned Attempt leases are reconciled from durable state, while current foreign leases are preserved. The scheduler is the only component that may settle an Attempt, Step, or Task, so a process disconnect or restart cannot manufacture success from an incomplete child run.
+
+Gateway state records the Task and cron hosts as `starting` or `running`. `estacoda gateway status` shows those services, and normal runtime `/status` output includes profile-scoped durable Task counts without exposing objectives or result bodies.
+
+## Authorized completion delivery
+
+Completion delivery is a profile-owned SQLite outbox linked to both a Task and a session already authorized through `TaskSessionLink`. A binding records one explicit channel destination and a profile/Task-scoped delivery key. It can be claimed only after the Task reaches `completed`, `partial`, `failed`, or `cancelled`.
+
+Delivery renders bounded Task status and durable Results. Text/JSON bodies are read through `TaskResultService` using the authorized session; artifacts are represented by opaque handles and summaries, never local paths. Transport errors are reduced to bounded static failure metadata so provider, adapter, or user content is not copied into the outbox.
+
+External delivery is deliberately at-most-once after ambiguity. A crash may occur after an adapter accepts a message but before the process records success. Any binding found in `delivering` state on restart is therefore marked `delivery-outcome-unknown` and is not retried automatically. This avoids duplicate external messages; a later operator surface may expose explicit, reviewable redelivery.
+
 ## Migration behavior
 
-Opening a writable `SQLiteSessionDB` migrates it to schema version 12 under the existing migration lock and transaction. Version 10 performs the Task persistence cutover; version 11 adds the durable Attempt cancellation marker without replacing existing leases; version 12 extends the Task event journal with fenced Attempt progress checkpoints while preserving existing Task events. The migrations preserve unrelated session, message, trajectory, approval, cron, finalization, and memory-curation data. A best-effort pre-migration backup is created by the session database migration runner.
+Opening a writable `SQLiteSessionDB` migrates it to schema version 13 under the existing migration lock and transaction. Version 10 performs the Task persistence cutover; version 11 adds the durable Attempt cancellation marker without replacing existing leases; version 12 extends the Task event journal with fenced Attempt progress checkpoints; version 13 adds the profile-owned completion-delivery outbox. The migrations preserve unrelated session, message, trajectory, approval, cron, finalization, and memory-curation data. A best-effort pre-migration backup is created by the session database migration runner.
 
 The migration is intentionally destructive only for the retired Workflow tables. There is no dual-read, dual-write, compatibility alias, or hidden legacy store.
 
 ## Current boundary
 
-The scheduler and production agent executor are deliberately dormant at the application boundary. `createRuntime()` does not construct a scheduler host, so no CLI, gateway, cron, or background path dispatches durable Tasks yet. Commit-level integration tests prove the execution boundary without creating a partially live product surface. Supervisor ownership, restart activation, operator commands, delivery, and user-facing status remain required before Task execution is enabled for ordinary users.
+The execution host is live, but the product creation surface is not. Existing durable Tasks can be recovered, dispatched by an eligible workspace host, inspected through status, and delivered through a pre-authorized binding. No CLI command, channel command, or model-visible tool creates a Task or a delivery binding in this build. Task creation, operator controls, and the replacement `delegate_task` experience must land before ordinary users can start durable execution.

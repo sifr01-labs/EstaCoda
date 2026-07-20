@@ -71,6 +71,9 @@ import { SkillLearningManager, type SkillAutonomy } from "../skills/skill-learni
 import { availableToolsetsFromTools } from "../cron/cron-runtime-validation.js";
 import { SQLiteTaskStore } from "../workflow/sqlite-task-store.js";
 import { TaskResultService } from "../workflow/task-result-service.js";
+import { AgentStepExecutor } from "../workflow/agent-step-executor.js";
+import { createTaskArtifactContentResolver } from "../workflow/task-artifact-content.js";
+import { resolveTaskWorkspaceBinding } from "../workflow/task-workspace.js";
 
 import type { ImageGenerationFetchLike } from "../tools/image-generation-tools.js";
 import { defaultImageGenerationConfig, verifyImageGeneration, type ImageGenerationVerification } from "../tools/image-generation-verify.js";
@@ -275,6 +278,9 @@ export type Runtime = {
   readonly trajectoryId: string | undefined;
   consumeSessionRotation?(): { originalSessionId: string; activeSessionId: string } | undefined;
 
+  /** Available only for profile-backed runtimes that can host durable agent Steps. */
+  taskAgentExecutor?: AgentStepExecutor;
+
   // Workflow module v0.8 integration (available when SQLiteSessionDB is used)
   workflow?: {
     engine: import("../workflow/workflow-engine.js").WorkflowEngine;
@@ -305,14 +311,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const sessionRuntimeContext = createSessionRuntimeContext(sessionId);
   let observedRuntimeSessionId = sessionId;
   const sessionDb = options.sessionDb ?? new InMemorySessionDB();
-  const taskResultService = sessionDb instanceof SQLiteSessionDB
-    ? new TaskResultService({
-        store: new SQLiteTaskStore({ db: sessionDb.db, profileId }),
+  const taskStore = sessionDb instanceof SQLiteSessionDB
+    ? new SQLiteTaskStore({ db: sessionDb.db, profileId })
+    : undefined;
+  const taskResultService = taskStore === undefined
+    ? undefined
+    : new TaskResultService({
+        store: taskStore,
         profileId,
         contentRoot: profilePaths.taskResultsPath,
         sessionDb
-      })
-    : undefined;
+      });
   const closeSessionDbOnDispose = options.closeSessionDbOnDispose ?? true;
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
   const localSkillsRoot = options.localSkillsRoot ?? profilePaths.skillsPath;
@@ -949,9 +958,30 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     sessionRecallService,
     memoryCurationService
   } = builtSession;
+  const taskAgentExecutor = taskStore === undefined
+    ? undefined
+    : new AgentStepExecutor({
+        childFactory,
+        sessionDb,
+        taskStore,
+        hostWorkspace: await resolveTaskWorkspaceBinding(workspaceRoot),
+        isWorkspaceTrusted: (workspace) => trustStore.isTrusted(workspace.canonicalPath),
+        parentVisibleTools: () => toolRegistry.list(),
+        delegationConfig: options.delegationConfig,
+        subagentRegistry,
+        diagnosticsRoot: profilePaths.tempPath,
+        resolveArtifactContent: await createTaskArtifactContentResolver([
+          workspaceRoot,
+          channelMediaRoot,
+          audioCacheRoot,
+          imageCacheRoot,
+          profilePaths.tempPath
+        ])
+      });
 
   return {
     sessionDb,
+    taskAgentExecutor,
     agentEvolutionPolicy() {
       return agentEvolutionPolicy;
     },
@@ -1178,6 +1208,49 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     getStatus() {
       const activeSubagents = subagentRegistry.operatorStatus({ parentSessionId: sessionId });
+      const sections = [];
+      if (taskStore !== undefined) {
+        const tasks = taskStore.listTasks({ limit: 1_000 });
+        const active = tasks.filter((task) => !["completed", "partial", "failed", "cancelled"].includes(task.status));
+        sections.push(buildKeyValueBlockViewModel({
+          title: "Durable tasks",
+          entries: [
+            kv("Active", active.length),
+            kv("Queued", tasks.filter((task) => task.status === "queued").length),
+            kv("Running", tasks.filter((task) => task.status === "running").length),
+            kv("Waiting", active.filter((task) => task.status.startsWith("waiting_")).length)
+          ]
+        }));
+      }
+      if (activeSubagents.activeCount > 0) {
+        sections.push(buildTableViewModel({
+          title: activeSubagents.omittedCount === 0
+            ? `Active subagents (${activeSubagents.activeCount})`
+            : `Active subagents (${activeSubagents.activeCount}, ${activeSubagents.omittedCount} omitted)`,
+          columns: [
+            { key: "child", header: "Child" },
+            { key: "parent", header: "Parent" },
+            { key: "role", header: "Role" },
+            { key: "depth", header: "Depth", alignment: "right" },
+            { key: "model", header: "Model" },
+            { key: "status", header: "Status" },
+            { key: "duration", header: "Duration" },
+            { key: "batch", header: "Batch" }
+          ],
+          rows: activeSubagents.subagents.map((subagent) => ({
+            child: subagent.childSessionId,
+            parent: subagent.parentSessionId,
+            role: subagent.role,
+            depth: subagent.depth,
+            model: `${subagent.provider}/${subagent.model}`,
+            status: subagent.cancellationState === undefined
+              ? subagent.status
+              : `${subagent.status} (${subagent.cancellationState})`,
+            duration: formatSubagentDuration(subagent.durationMs),
+            batch: formatSubagentBatch(subagent.batchId, subagent.taskIndex)
+          }))
+        }));
+      }
       return buildStatusViewModel({
         agentName: runtimeBranding.responseLabel,
         model: { provider: options.model.provider, id: options.model.id },
@@ -1193,37 +1266,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         warnings: skillLoadWarnings.map((message) =>
           buildWarningErrorViewModel({ severity: "warn", title: "Skill load", message })
         ),
-        sections: activeSubagents.activeCount === 0
-          ? undefined
-          : [
-              buildTableViewModel({
-                title: activeSubagents.omittedCount === 0
-                  ? `Active subagents (${activeSubagents.activeCount})`
-                  : `Active subagents (${activeSubagents.activeCount}, ${activeSubagents.omittedCount} omitted)`,
-                columns: [
-                  { key: "child", header: "Child" },
-                  { key: "parent", header: "Parent" },
-                  { key: "role", header: "Role" },
-                  { key: "depth", header: "Depth", alignment: "right" },
-                  { key: "model", header: "Model" },
-                  { key: "status", header: "Status" },
-                  { key: "duration", header: "Duration" },
-                  { key: "batch", header: "Batch" }
-                ],
-                rows: activeSubagents.subagents.map((subagent) => ({
-                  child: subagent.childSessionId,
-                  parent: subagent.parentSessionId,
-                  role: subagent.role,
-                  depth: subagent.depth,
-                  model: `${subagent.provider}/${subagent.model}`,
-                  status: subagent.cancellationState === undefined
-                    ? subagent.status
-                    : `${subagent.status} (${subagent.cancellationState})`,
-                  duration: formatSubagentDuration(subagent.durationMs),
-                  batch: formatSubagentBatch(subagent.batchId, subagent.taskIndex)
-                }))
-              })
-            ],
+        sections: sections.length === 0 ? undefined : sections,
       });
     },
     getModelInfo() {

@@ -317,7 +317,7 @@ describe("runGatewaySupervisor", () => {
     await rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("startup with no adapters configured (cron-only)", async () => {
+  it("startup with no adapters configured (background tasks and cron)", async () => {
     const tick = fakeTickCron();
     const sleeper = fakeSleep();
     const result = await runGatewaySupervisor({
@@ -339,6 +339,32 @@ describe("runGatewaySupervisor", () => {
 
     const pid = await readGatewayPid(profilePaths);
     expect(pid).toBeUndefined();
+  });
+
+  it("runs and disposes the durable Task host in once mode", async () => {
+    const host = {
+      runOnce: vi.fn(async () => ({ skipped: false })),
+      hasPendingWork: vi.fn(() => false),
+      waitForIdle: vi.fn(async () => undefined),
+      status: vi.fn(() => ({ running: false, runs: 1 })),
+      dispose: vi.fn(async () => undefined)
+    };
+
+    const result = await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        tickCron: fakeTickCron().tickCron,
+        createTaskBackgroundHost: () => host,
+        createChannelGateway: () => fakeChannelGateway() as any,
+        createDeliveryRouter: () => fakeDeliveryRouter() as any
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(host.runOnce).toHaveBeenCalledTimes(1);
+    expect(host.dispose).toHaveBeenCalledTimes(1);
   });
 
   it("cron runtime options preserve primary and fallback model routes", () => {
@@ -423,7 +449,7 @@ describe("runGatewaySupervisor", () => {
       },
     });
 
-    // With no adapters enabled, this should succeed in cron-only mode
+    // With no adapters enabled, the background tasks+cron host still succeeds.
     expect(result.ok).toBe(true);
   });
 
@@ -2724,7 +2750,7 @@ describe("supervisor lifecycle hooks", () => {
       expect(typeof payload.startedAt).toBe("string");
       expect(typeof payload.version).toBe("string");
       expect(payload.adapterKinds).toEqual(["telegram"]);
-      expect(payload.mode).toBe("adapters");
+      expect(payload.mode).toBe("adapters+background");
     } finally {
       HookRegistry.prototype.emit = originalEmit;
     }

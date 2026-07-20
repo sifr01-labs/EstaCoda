@@ -9,6 +9,10 @@ export type SupervisorState = {
   pid: number;
   version: string;
   profileId?: string;
+  backgroundServices?: {
+    tasks: "starting" | "running";
+    cron: "starting" | "running";
+  };
 };
 
 type GatewayStateHome = string | { gatewayStatePath: string };
@@ -37,12 +41,22 @@ export async function readGatewayState(stateHome: GatewayStateHome): Promise<Sup
         pid: parsed.pid,
         version: parsed.version,
         profileId: parsed.profileId,
+        backgroundServices: isBackgroundServices(parsed.backgroundServices)
+          ? parsed.backgroundServices
+          : undefined,
       };
     }
     return undefined;
   } catch {
     return undefined;
   }
+}
+
+function isBackgroundServices(value: unknown): value is NonNullable<SupervisorState["backgroundServices"]> {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as { tasks?: unknown; cron?: unknown };
+  return (candidate.tasks === "starting" || candidate.tasks === "running") &&
+    (candidate.cron === "starting" || candidate.cron === "running");
 }
 
 export async function writeGatewayState(stateHome: GatewayStateHome, state: SupervisorState): Promise<void> {

@@ -7,6 +7,7 @@ import type {
   TaskAttempt,
   TaskAuthorityDisposition,
   TaskAuthorityPolicy,
+  TaskDeliveryBinding,
   TaskPlanRevision,
   TaskResult,
   TaskStep
@@ -18,6 +19,7 @@ import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 import { SQLiteTaskStore, TaskStoreProfileError } from "./sqlite-task-store.js";
 import {
   migrateTaskAgentExecutorSchemaV12,
+  migrateTaskBackgroundHostSchemaV13,
   migrateTaskSchedulerSchemaV11,
   TASK_SCHEMA_VERSION
 } from "./task-schema.js";
@@ -186,6 +188,80 @@ describe("SQLiteTaskStore", () => {
     expect(store.listEvents(graph.task.id, { attemptId: attempt.id })).toEqual([
       expect.objectContaining({ id: "event-result", data: { resultId: result.id } })
     ]);
+  });
+
+  it("persists authorized completion delivery and claims it only after Task settlement", () => {
+    const graph = makeGraph("alpha");
+    store.createTaskGraph(graph);
+    const binding: TaskDeliveryBinding = {
+      id: "delivery-alpha",
+      profileId: "alpha",
+      taskId: graph.task.id,
+      authorizedSessionId: "session-alpha",
+      deliveryKey: "origin-completion",
+      destination: { platform: "telegram", chatId: "chat-1", threadId: "thread-1" },
+      status: "pending",
+      createdAt: NOW,
+      updatedAt: NOW
+    };
+
+    store.atomicWrite((tx) => tx.createDeliveryBinding(binding));
+    expect(store.getDeliveryBinding(binding.id)).toEqual(binding);
+    expect(store.claimDeliveryBinding(binding.id, "2030-01-01T00:00:01.000Z")).toBeNull();
+
+    const running = { ...graph.task, status: "running" as const, startedAt: NOW, updatedAt: NOW };
+    store.updateTask(running);
+    store.updateTask({
+      ...running,
+      status: "completed",
+      completedAt: "2030-01-01T00:00:02.000Z",
+      updatedAt: "2030-01-01T00:00:02.000Z"
+    });
+    expect(store.claimDeliveryBinding(binding.id, "2030-01-01T00:00:03.000Z"))
+      .toMatchObject({ status: "delivering", startedAt: "2030-01-01T00:00:03.000Z" });
+    expect(store.settleDeliveryBinding({
+      id: binding.id,
+      status: "delivered",
+      settledAt: "2030-01-01T00:00:04.000Z"
+    })).toMatchObject({ status: "delivered", deliveredAt: "2030-01-01T00:00:04.000Z" });
+    expect(store.claimDeliveryBinding(binding.id, "2030-01-01T00:00:05.000Z")).toBeNull();
+    expect(new SQLiteTaskStore({ db: sessionDb.db, profileId: "beta" }).getDeliveryBinding(binding.id)).toBeNull();
+  });
+
+  it("rejects unlinked, malformed, and duplicate completion delivery bindings", () => {
+    const graph = makeGraph("alpha");
+    store.createTaskGraph(graph);
+    const binding: TaskDeliveryBinding = {
+      id: "delivery-alpha",
+      profileId: "alpha",
+      taskId: graph.task.id,
+      authorizedSessionId: "worker-alpha",
+      deliveryKey: "completion",
+      destination: { platform: "telegram", chatId: "chat-1" },
+      status: "pending",
+      createdAt: NOW,
+      updatedAt: NOW
+    };
+    expect(() => store.atomicWrite((tx) => tx.createDeliveryBinding(binding))).toThrow(TaskStoreProfileError);
+
+    store.linkSession({
+      taskId: graph.task.id,
+      profileId: "alpha",
+      sessionId: "worker-alpha",
+      relationship: "observer",
+      createdAt: NOW
+    });
+    store.atomicWrite((tx) => tx.createDeliveryBinding(binding));
+    expect(() => store.atomicWrite((tx) => tx.createDeliveryBinding({
+      ...binding,
+      id: "delivery-duplicate-key"
+    }))).toThrow(/unique/i);
+    expect(() => store.atomicWrite((tx) => tx.createDeliveryBinding({
+      ...binding,
+      id: "delivery-malformed",
+      deliveryKey: "malformed",
+      destination: { platform: "telegram", chatId: "" }
+    }))).toThrow(/destination/i);
   });
 
   it("acquires, renews, cancellation-marks, and releases Attempt leases with fencing", () => {
@@ -489,6 +565,29 @@ describe("Task agent executor schema v12 migration", () => {
   });
 });
 
+describe("Task background host schema v13 migration", () => {
+  it("adds the completion delivery outbox idempotently", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-task-host-migration-"));
+    const database = openDefaultSQLiteDatabase({ path: join(tempDir, "host.sqlite") });
+    try {
+      database.exec(`
+        pragma foreign_keys = on;
+        create table sessions(id text primary key, profile_id text not null, unique(profile_id, id));
+        create table tasks(id text primary key, profile_id text not null, unique(profile_id, id));
+      `);
+      migrateTaskBackgroundHostSchemaV13(database);
+      migrateTaskBackgroundHostSchemaV13(database);
+      expect(database.query<{ name: string }>(
+        "select name from sqlite_master where type = 'table' and name = 'task_delivery_bindings'"
+      ).get()).toEqual({ name: "task_delivery_bindings" });
+      expect(database.query("pragma foreign_key_check").all()).toEqual([]);
+    } finally {
+      database.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
 const NOW = "2030-01-01T00:00:00.000Z";
 
 function makeGraph(profileId: "alpha" | "beta") {
@@ -691,7 +790,8 @@ const TASK_TABLES = [
   "task_attempt_leases",
   "task_results",
   "task_events",
-  "task_session_links"
+  "task_session_links",
+  "task_delivery_bindings"
 ] as const;
 
 const WORKFLOW_TABLES = [

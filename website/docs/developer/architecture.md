@@ -220,7 +220,7 @@ Child sessions use `DefaultChildAgentLoopFactory` so delegated work goes through
 
 ### Durable Task foundation
 
-The Task foundation stores profile-owned multi-step execution graphs and durable result bodies independently of a provider turn. An internal scheduler core handles deterministic dependency resolution, fenced Attempts, concurrency, retry, cancellation, acceptance, and restart reconciliation with a fake executor. It is not wired into the runtime or ordinary user paths in this build.
+The Task foundation stores profile-owned multi-step execution graphs and durable result bodies independently of a provider turn. The profile gateway supervisor hosts deterministic dependency resolution, fenced Attempts, concurrency, retry, cancellation, acceptance, restart reconciliation, and authorized completion delivery. Ordinary user paths still cannot create Tasks in this build.
 
 | Component | Role |
 |---|---|
@@ -232,9 +232,12 @@ The Task foundation stores profile-owned multi-step execution graphs and durable
 | `task-step-executor.ts` | Defines the Attempt execution and settlement boundary |
 | `task-scheduler.ts` | Owns deterministic orchestration and fenced settlement |
 | `agent-step-executor.ts` | Runs an isolated read-only child agent and captures complete results and usage |
+| `task-background-host.ts` | Runs non-overlapping scheduler and completion-delivery ticks with startup recovery |
+| `supervisor-task-background-host.ts` | Lazily creates the workspace-eligible agent runtime when work exists |
+| `task-completion-delivery.ts` | Delivers terminal Results through a session-authorized, profile-owned outbox |
 | `contracts/task.ts` | Defines Task records, transitions, authority, budgets, and graph validation |
 
-Normal chat turns remain independent of durable Task scheduling. Result IDs and session links are checked before reads; raw bodies and filesystem paths do not enter Task events. The scheduler cannot grant tool authority. A production read-only agent executor now exists and is integration-tested, but no scheduler host is registered with `createRuntime()` yet.
+Normal chat turns remain independent of durable Task scheduling. Result IDs and session links are checked before reads; raw bodies and filesystem paths do not enter Task events or completion bindings. The scheduler cannot grant tool authority. `createRuntime()` exposes the production read-only executor only for profile-backed SQLite runtimes, and the supervisor creates it lazily for runnable work in the exact trusted workspace. Gateway and session status expose bounded host/Task counts. Task creation and operator controls remain intentionally absent.
 
 ### Packs and distribution
 

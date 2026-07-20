@@ -24,6 +24,7 @@ Use this page when you need to inspect:
 - how channel-mediated approvals are queued and resolved
 - where gateway state files live
 - which hooks and diagnostics should exist for a gateway run
+- whether the durable Task host is running, draining, or recovering work
 
 The gateway is not a separate agent runtime. It uses the same runtime creation path as local sessions, but with a different lifecycle: the gateway is long-running, channel-driven, and may reuse runtime instances across incoming turns.
 
@@ -35,7 +36,7 @@ The gateway process is built from three layers:
 
 | Layer | Role |
 |---|---|
-| Supervisor | Owns process lifecycle, locks, adapters, runtime cache, active turns, cron ticks, and shutdown. |
+| Supervisor | Owns process lifecycle, locks, adapters, runtime cache, active turns, Task and cron ticks, and shutdown. |
 | Channel gateway | Maps channel messages to sessions, checks channel authorization, routes approvals, and delivers responses. |
 | Runtime | Runs the normal agent loop for the resolved session and profile. |
 
@@ -60,11 +61,15 @@ It wires:
 | Message/session routing | `ChannelGateway` |
 | Delivery normalization | `DeliveryRouter` |
 | Cron execution | `tickCron` with `CronStore` |
+| Durable Task execution | `SupervisorTaskBackgroundHost` with `WorkflowScheduler` |
+| Task completion delivery | `TaskCompletionDeliveryService` with `DeliveryRouter` |
 | Session hygiene | `SessionHygieneService` |
 | Voice state | `VoiceStateManager` |
 | Lifecycle observation | `HookRegistry` |
 
-The supervisor owns process-level concerns. It does not make provider or tool safety decisions directly; those remain in runtime, tool execution, security policy, and the channel approval queue.
+The supervisor owns process-level concerns. It does not make provider or tool safety decisions directly; those remain in runtime, tool execution, security policy, Task authority, and the channel approval queue. The Task host is active even with no channel adapters, so this process is a general background host rather than a cron-only gateway.
+
+The Task executor runtime is lazy: it is created only when a queued, running, or `waiting_for_host` Task exists. It is bound to the supervisor workspace's canonical identity and rechecks current workspace trust before an Attempt. Shutdown drain includes active Task work. After restart, the scheduler reconciles expired leases, while completion bindings left in ambiguous `delivering` state are failed without automatic redelivery to avoid duplicate external messages.
 
 ---
 
@@ -82,7 +87,7 @@ Important files include:
 |---|---|
 | `gateway.pid` | Foreground/unmanaged gateway PID record. |
 | `gateway.lock` | Process lock that prevents multiple gateways for the same profile state. |
-| `gateway-state.json` | Supervisor lifecycle snapshot. |
+| `gateway-state.json` | Supervisor lifecycle plus Task/cron host snapshot. |
 | `adapter-runtime-state.json` | Adapter runtime state snapshot. |
 | `runtime-cache-state.json` | Runtime cache and active-turn diagnostics. |
 | `.clean_shutdown` | Marker written after a graceful shutdown path. |

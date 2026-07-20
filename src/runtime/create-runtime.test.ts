@@ -463,6 +463,31 @@ function schemaAliasOrder(inputSchema: unknown): string[] {
 }
 
 describe("createRuntime token branding", () => {
+  it("exposes the durable agent Step executor only for profile-backed SQLite runtimes", async () => {
+    const options = await minimalRuntimeOptions();
+    const memoryRuntime = await createRuntime({ ...options, sessionDb: new InMemorySessionDB() });
+    const sqliteDb = await createSQLiteSessionDB({ path: join(options.workspaceRoot, "sessions.sqlite") });
+    const sqliteRuntime = await createRuntime({
+      ...options,
+      sessionId: `${options.sessionId}-sqlite`,
+      homeDir: options.workspaceRoot,
+      profileId: "default",
+      sessionDb: sqliteDb
+    });
+
+    try {
+      expect(memoryRuntime.taskAgentExecutor).toBeUndefined();
+      expect(sqliteRuntime.taskAgentExecutor).toBeDefined();
+      expect(sqliteRuntime.getStatus().sections).toContainEqual(expect.objectContaining({
+        kind: "kv",
+        title: "Durable tasks"
+      }));
+    } finally {
+      await memoryRuntime.dispose();
+      await sqliteRuntime.dispose();
+    }
+  });
+
   it("generates a non-scaffold session id and default title when omitted", async () => {
     const { sessionId: _sessionId, ...options } = await minimalRuntimeOptions();
     const sessionDb = new InMemorySessionDB();

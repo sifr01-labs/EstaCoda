@@ -39,6 +39,10 @@ export type SupervisorSnapshot = {
   readonly startedAt?: string;
   readonly version?: string;
   readonly profileId?: string;
+  readonly backgroundServices?: {
+    readonly tasks: "starting" | "running";
+    readonly cron: "starting" | "running";
+  };
 };
 
 export type IdentityLockStatus = {
@@ -75,6 +79,13 @@ export type GatewayStatusData = {
   readonly runtimeState?: PersistedRuntimeState;
   readonly runtimeCacheState?: RuntimeCacheState;
   readonly sessionFinalization?: SessionFinalizationQueueSummary;
+  readonly durableTasks?: {
+    readonly active: number;
+    readonly queued: number;
+    readonly running: number;
+    readonly waiting: number;
+    readonly terminal: number;
+  };
 };
 
 export function buildGatewayStatusViewModel(data: GatewayStatusData): CommandResultViewModel {
@@ -104,6 +115,7 @@ export function buildGatewayStatusViewModel(data: GatewayStatusData): CommandRes
     }),
     buildChannelsOverviewBlock(data.channels),
     buildDeliveryBlock(data.channels, data.recentDeliveryErrors),
+    ...(data.durableTasks === undefined ? [] : [buildDurableTasksBlock(data.durableTasks)]),
     ...(data.sessionFinalization === undefined ? [] : [buildSessionFinalizationBlock(data.sessionFinalization)]),
     buildSurfacePointersBlock(data.surfacePointers),
     buildKeyValueBlockViewModel({
@@ -129,6 +141,19 @@ export function buildGatewayStatusViewModel(data: GatewayStatusData): CommandRes
     ok: true,
     title: "EstaCoda gateway status",
     blocks,
+  });
+}
+
+function buildDurableTasksBlock(summary: NonNullable<GatewayStatusData["durableTasks"]>): ViewModel {
+  return buildKeyValueBlockViewModel({
+    title: "Durable tasks",
+    entries: [
+      kv("Active", summary.active),
+      kv("Queued", summary.queued),
+      kv("Running", summary.running),
+      kv("Waiting", summary.waiting),
+      kv("Terminal", summary.terminal)
+    ]
   });
 }
 
@@ -209,6 +234,11 @@ function buildSupervisorBlock(supervisor: GatewayStatusData["supervisor"]): View
 
   if (supervisor.version !== undefined) {
     entries.push(kv("Version", supervisor.version));
+  }
+
+  if (supervisor.backgroundServices !== undefined) {
+    entries.push(kv("Task host", supervisor.backgroundServices.tasks));
+    entries.push(kv("Cron host", supervisor.backgroundServices.cron));
   }
 
   return buildKeyValueBlockViewModel({

@@ -33,6 +33,7 @@ import { RuntimeCache } from "../runtime/runtime-cache.js";
 import { computeRuntimeFingerprint, stableJsonHash, type RuntimeFingerprint } from "../runtime/runtime-fingerprint.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
+import { createSessionId } from "../session/session-id.js";
 import {
   SessionFinalizationQueue,
   type SessionFinalizationJob,
@@ -98,8 +99,16 @@ import {
   clearGatewayRestartPlannedMarker,
   readGatewayRestartPlannedMarker,
 } from "../runtime/gateway-restart-marker.js";
+import { SQLiteTaskStore } from "../workflow/sqlite-task-store.js";
+import { TaskResultService } from "../workflow/task-result-service.js";
+import { SupervisorTaskBackgroundHost } from "../workflow/supervisor-task-background-host.js";
 
 export type { GatewayRunOptions, GatewayRunResult };
+
+export type SupervisorTaskHost = Pick<
+  SupervisorTaskBackgroundHost,
+  "runOnce" | "hasPendingWork" | "waitForIdle" | "status" | "dispose"
+>;
 
 export type SupervisorFactories = {
   createTelegramAdapter?(input: ConstructorParameters<typeof TelegramAdapter>[0]): ChannelAdapter;
@@ -108,6 +117,7 @@ export type SupervisorFactories = {
   createWhatsAppAdapter?(input: ConstructorParameters<typeof WhatsAppAdapter>[0]): ChannelAdapter;
   createChannelGateway?(input: ConstructorParameters<typeof ChannelGateway>[0]): ChannelGateway;
   createDeliveryRouter?(input: ConstructorParameters<typeof DeliveryRouter>[0]): DeliveryRouter;
+  createTaskBackgroundHost?(): SupervisorTaskHost;
   tickCron?(input: Parameters<typeof tickCron>[0]): ReturnType<typeof tickCron>;
   finalizeSessionJob?(job: SessionFinalizationJob, signal: AbortSignal): Promise<MemoryCurationCheckpointResult>;
   sleep?(ms: number): Promise<void>;
@@ -333,6 +343,7 @@ export type SupervisorInternalState = {
   sessionFinalizationWorker?: Pick<SessionFinalizationWorker, "runOnce">;
   sessionFinalizationAbort?: AbortController;
   sessionFinalizationRun?: Promise<SessionFinalizationWorkerResult>;
+  taskBackgroundHost?: SupervisorTaskHost;
 };
 
 function logInfo(message: string): void {
@@ -466,6 +477,7 @@ function createInitialState(
     sessionFinalizationWorker: undefined,
     sessionFinalizationAbort: undefined,
     sessionFinalizationRun: undefined,
+    taskBackgroundHost: undefined,
   };
 }
 
@@ -497,7 +509,21 @@ async function cleanupSupervisorStartupResources(state: SupervisorInternalState)
     try { await state.channelGateway.stop(); } catch { /* ignore */ }
   }
 
-  // 2a. Stop claiming finalization work and give the active provider call a short abort grace.
+  // 2a. Stop accepting Task ticks and preserve the shared DB until active work settles.
+  const taskBackgroundHost = state.taskBackgroundHost;
+  state.taskBackgroundHost = undefined;
+  let taskHostSettled = taskBackgroundHost === undefined || !taskBackgroundHost.hasPendingWork();
+  if (taskBackgroundHost !== undefined && !taskHostSettled) {
+    taskHostSettled = await Promise.race([
+      taskBackgroundHost.waitForIdle().then(() => true, () => true),
+      sleep(state.drainCancelled ? 250 : 5_000).then(() => false)
+    ]);
+  }
+  if (taskBackgroundHost !== undefined && taskHostSettled) {
+    try { await taskBackgroundHost.dispose(); } catch { /* ignore */ }
+  }
+
+  // 2b. Stop claiming finalization work and give the active provider call a short abort grace.
   state.sessionFinalizationAbort?.abort(new Error("gateway-shutdown"));
   const activeFinalization = state.sessionFinalizationRun;
   let finalizationSettled = activeFinalization === undefined;
@@ -535,8 +561,16 @@ async function cleanupSupervisorStartupResources(state: SupervisorInternalState)
   if (state.sessionDb !== undefined) {
     const sessionDb = state.sessionDb;
     state.sessionDb = undefined;
-    if (activeFinalization !== undefined && !finalizationSettled) {
-      void activeFinalization.finally(() => {
+    if ((activeFinalization !== undefined && !finalizationSettled) || !taskHostSettled) {
+      const pending = [
+        activeFinalization?.then(() => undefined, () => undefined),
+        taskBackgroundHost === undefined || taskHostSettled
+          ? undefined
+          : taskBackgroundHost.waitForIdle()
+              .then(() => taskBackgroundHost.dispose(), () => taskBackgroundHost.dispose())
+              .catch(() => undefined)
+      ].filter((value): value is Promise<void> => value !== undefined);
+      void Promise.all(pending).then(() => {
         try { sessionDb.close(); } catch { /* ignore */ }
       });
     } else {
@@ -650,7 +684,14 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
 
   // 3. PID / state write
   await writeGatewayPid(profilePaths, { pid: process.pid, startedAt, version, profileId });
-  await writeGatewayState(profilePaths, { lifecycle: "running", startedAt, pid: process.pid, version, profileId });
+  await writeGatewayState(profilePaths, {
+    lifecycle: "running",
+    startedAt,
+    pid: process.pid,
+    version,
+    profileId,
+    backgroundServices: { tasks: "starting", cron: "starting" }
+  });
 
   // 4. Signal handlers (installed EARLY)
   const shutdown = (signalName?: string) => {
@@ -674,7 +715,14 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     logInfo(`Shutting down${signalName ? ` (${signalName})` : ""}...`);
 
     state.signalExit = (async () => {
-      await writeGatewayState(profilePaths, { lifecycle: "draining", startedAt, pid: process.pid, version, profileId });
+      await writeGatewayState(profilePaths, {
+        lifecycle: "draining",
+        startedAt,
+        pid: process.pid,
+        version,
+        profileId,
+        backgroundServices: { tasks: "running", cron: "running" }
+      });
       logInfo("Draining, waiting for active turns...");
 
       emitSupervisorHook(state.hookRegistry, "supervisor:drain:start", {
@@ -693,7 +741,8 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       let drained = false;
 
       while (Date.now() < deadline) {
-        const hasPending = state.channelGateway?.hasPendingWork() ?? false;
+        const hasPending = (state.channelGateway?.hasPendingWork() ?? false) ||
+          (state.taskBackgroundHost?.hasPendingWork() ?? false);
         if (!hasPending) {
           drained = true;
           break;
@@ -825,7 +874,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
 
     if (configured.length === 0) {
       logInfo("Adapters: none");
-      logInfo("Mode: cron-only");
+      logInfo("Mode: background (tasks+cron)");
     }
 
     // 6. Identity derivation + lock acquisition per adapter
@@ -1217,6 +1266,36 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
 
     const trustStore = new WorkspaceTrustStore({ path: trustStorePath });
     const workspaceTrusted = await trustStore.isTrusted(options.workspaceRoot);
+    const taskStore = new SQLiteTaskStore({ db: sessionDb.db, profileId });
+    const taskResultService = new TaskResultService({
+      store: taskStore,
+      profileId,
+      contentRoot: profilePaths.taskResultsPath,
+      sessionDb
+    });
+    state.taskBackgroundHost = options.factories?.createTaskBackgroundHost?.() ??
+      new SupervisorTaskBackgroundHost({
+        store: taskStore,
+        resultService: taskResultService,
+        router,
+        ownerId: `gateway-task-host-${process.pid}-${startedAt}`,
+        logWarning,
+        createExecutorRuntime: async () => {
+          const latestConfig = await loadConfig();
+          return await createRuntime({
+            ...buildGatewayCronRuntimeOptions({
+              latestConfig,
+              workspaceRoot: options.workspaceRoot,
+              homeDir,
+              profileId,
+              sessionDb,
+              sessionId: createSessionId(),
+              workspaceTrusted: await trustStore.isTrusted(options.workspaceRoot)
+            }),
+            closeSessionDbOnDispose: false
+          });
+        }
+      });
 
     const authPolicies: ChannelAuthPolicies = {};
     if (telegram.enabled === true) {
@@ -1487,6 +1566,14 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     // 12. Start adapters through ChannelGateway (wrappers swallow errors)
     await gateway.start();
     state.startupComplete = true;
+    await writeGatewayState(profilePaths, {
+      lifecycle: "running",
+      startedAt,
+      pid: process.pid,
+      version,
+      profileId,
+      backgroundServices: { tasks: "running", cron: "running" }
+    });
     await maybeSendGatewayOnlineNotification({
       profilePaths,
       router,
@@ -1503,7 +1590,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       startedAt,
       version,
       adapterKinds: configured.map((c) => c.kind),
-      mode: configured.length === 0 ? "cron-only" : "adapters",
+      mode: configured.length === 0 ? "background" : "adapters+background",
     });
 
     // 12a. Start background timers
@@ -1586,6 +1673,19 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           },
         }),
       });
+      }
+
+      const taskTick = state.draining
+        ? undefined
+        : state.taskBackgroundHost?.runOnce();
+      if (taskTick !== undefined) {
+        if (options.once === true) {
+          await taskTick;
+        } else {
+          void taskTick.catch((error) => {
+            logWarning(`Task background tick failed (${error instanceof Error ? error.name : "task-host-error"}).`);
+          });
+        }
       }
 
       const finalizationTick = runSessionFinalizationTick(state, sessionFinalizationGuard);

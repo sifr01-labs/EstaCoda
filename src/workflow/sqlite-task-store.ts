@@ -2,6 +2,7 @@ import type {
   Task,
   TaskAttempt,
   TaskAttemptLease,
+  TaskDeliveryBinding,
   TaskEvent,
   TaskPlanRevision,
   TaskResult,
@@ -14,6 +15,7 @@ import {
   assertTaskPlanRevisionTransition,
   assertTaskStepTransition,
   assertTaskTransition,
+  isTaskDeliveryDestination,
   isTerminalTaskAttemptStatus,
   isTerminalTaskPlanRevisionStatus,
   isTerminalTaskStatus,
@@ -25,9 +27,11 @@ import type {
   AcquireTaskAttemptLeaseInput,
   CreateTaskGraphInput,
   ListTaskEventsOptions,
+  ListTaskDeliveryBindingsOptions,
   ListTasksOptions,
   ReleaseTaskAttemptLeaseInput,
   RenewTaskAttemptLeaseInput,
+  SettleTaskDeliveryInput,
   TaskStore
 } from "./task-store.js";
 
@@ -677,6 +681,116 @@ export class SQLiteTaskStore implements TaskStore {
     ).all(this.#profileId, taskId).map(rowToSessionLink);
   }
 
+  createDeliveryBinding(binding: TaskDeliveryBinding): void {
+    this.#assertTransactionActive();
+    this.#assertProfile(binding.profileId, "TaskDeliveryBinding", binding.id);
+    this.#assertTaskOwned(binding.taskId);
+    this.#assertSessionOwned(binding.authorizedSessionId);
+    if (binding.status !== "pending" || binding.startedAt !== undefined || binding.deliveredAt !== undefined ||
+        binding.failedAt !== undefined || binding.failureClass !== undefined || binding.failureMessage !== undefined) {
+      throw new TaskStoreIntegrityError("A new Task Delivery binding must start pending without settlement metadata.");
+    }
+    requireBoundedText(binding.id, "Task Delivery ID", 256);
+    requireBoundedText(binding.deliveryKey, "Task Delivery key", 256);
+    requireBoundedText(binding.authorizedSessionId, "Task Delivery authorized session ID", 256);
+    if (!isTaskDeliveryDestination(binding.destination) || Buffer.byteLength(stringify(binding.destination), "utf8") > 2_048) {
+      throw new TaskStoreIntegrityError("Task Delivery destination is invalid or exceeds its persistence limit.");
+    }
+    const linked = this.listSessionLinks(binding.taskId)
+      .some((link) => link.sessionId === binding.authorizedSessionId);
+    if (!linked) {
+      throw new TaskStoreProfileError(
+        this.#profileId,
+        `Session ${binding.authorizedSessionId} is not authorized for Task ${binding.taskId}.`
+      );
+    }
+    assertTimestamp(binding.createdAt, "Task Delivery creation");
+    assertTimestamp(binding.updatedAt, "Task Delivery update");
+    this.#db.query(
+      `insert into task_delivery_bindings (
+        id, profile_id, task_id, authorized_session_id, delivery_key, destination_json,
+        status, failure_class, failure_message, created_at, updated_at, started_at,
+        delivered_at, failed_at
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(...deliveryBindingValues(binding));
+  }
+
+  getDeliveryBinding(id: string): TaskDeliveryBinding | null {
+    const row = this.#db.query<DeliveryBindingRow>(
+      "select * from task_delivery_bindings where id = ? and profile_id = ?"
+    ).get(id, this.#profileId);
+    return row === null ? null : rowToDeliveryBinding(row);
+  }
+
+  listDeliveryBindings(options: ListTaskDeliveryBindingsOptions = {}): TaskDeliveryBinding[] {
+    const statuses = [...(options.statuses ?? [])];
+    let sql = "select * from task_delivery_bindings where profile_id = ?";
+    const params: SQLiteValue[] = [this.#profileId];
+    if (options.taskId !== undefined) {
+      if (this.getTask(options.taskId) === null) return [];
+      sql += " and task_id = ?";
+      params.push(options.taskId);
+    }
+    if (statuses.length > 0) {
+      sql += ` and status in (${statuses.map(() => "?").join(", ")})`;
+      params.push(...statuses);
+    }
+    sql += " order by updated_at, id limit ?";
+    params.push(boundedLimit(options.limit));
+    return this.#db.query<DeliveryBindingRow>(sql).all(...params).map(rowToDeliveryBinding);
+  }
+
+  claimDeliveryBinding(id: string, startedAt: string): TaskDeliveryBinding | null {
+    assertTimestamp(startedAt, "Task Delivery start");
+    return this.atomicWrite(() => {
+      const binding = this.getDeliveryBinding(id);
+      if (binding === null || binding.status !== "pending") return null;
+      const task = this.getTask(binding.taskId);
+      if (task === null || !isTerminalTaskStatus(task.status)) return null;
+      const result = this.#db.query(
+        `update task_delivery_bindings set status = 'delivering', started_at = ?, updated_at = ?
+         where id = ? and profile_id = ? and status = 'pending'`
+      ).run(startedAt, startedAt, id, this.#profileId);
+      if (result.changes !== 1) return null;
+      return this.getDeliveryBinding(id);
+    });
+  }
+
+  settleDeliveryBinding(input: SettleTaskDeliveryInput): TaskDeliveryBinding {
+    assertTimestamp(input.settledAt, "Task Delivery settlement");
+    return this.atomicWrite(() => {
+      const binding = this.getDeliveryBinding(input.id);
+      if (binding === null || binding.status !== "delivering") {
+        throw new TaskStoreIntegrityError(`Task Delivery ${input.id} is not in delivering state.`);
+      }
+      if (input.status === "delivered" && (input.failureClass !== undefined || input.failureMessage !== undefined)) {
+        throw new TaskStoreIntegrityError("A delivered Task Delivery cannot carry failure metadata.");
+      }
+      if (input.status === "failed" && input.failureClass === undefined) {
+        throw new TaskStoreIntegrityError("A failed Task Delivery requires a bounded failure class.");
+      }
+      if (input.failureClass !== undefined) requireBoundedText(input.failureClass, "Task Delivery failure class", 128);
+      if (input.failureMessage !== undefined) requireBoundedText(input.failureMessage, "Task Delivery failure message", 1_000);
+      const updated = this.#db.query(
+        `update task_delivery_bindings set
+          status = ?, failure_class = ?, failure_message = ?, updated_at = ?,
+          delivered_at = ?, failed_at = ?
+         where id = ? and profile_id = ? and status = 'delivering'`
+      ).run(
+        input.status,
+        input.failureClass ?? null,
+        input.failureMessage ?? null,
+        input.settledAt,
+        input.status === "delivered" ? input.settledAt : null,
+        input.status === "failed" ? input.settledAt : null,
+        input.id,
+        this.#profileId
+      );
+      this.#assertChanged(updated.changes, "TaskDeliveryBinding", input.id);
+      return this.getDeliveryBinding(input.id)!;
+    });
+  }
+
   atomicWrite<T>(work: (store: TaskStore) => T): T {
     this.#assertTransactionActive();
     if (this.#transactional) return work(this);
@@ -987,6 +1101,25 @@ function attemptValues(attempt: TaskAttempt): SQLiteValue[] {
   ];
 }
 
+function deliveryBindingValues(binding: TaskDeliveryBinding): SQLiteValue[] {
+  return [
+    binding.id,
+    binding.profileId,
+    binding.taskId,
+    binding.authorizedSessionId,
+    binding.deliveryKey,
+    stringify(binding.destination),
+    binding.status,
+    binding.failureClass ?? null,
+    binding.failureMessage ?? null,
+    binding.createdAt,
+    binding.updatedAt,
+    binding.startedAt ?? null,
+    binding.deliveredAt ?? null,
+    binding.failedAt ?? null
+  ];
+}
+
 function rowToTask(row: TaskRow): Task {
   return {
     id: row.id,
@@ -1135,6 +1268,25 @@ function rowToSessionLink(row: SessionLinkRow): TaskSessionLink {
   };
 }
 
+function rowToDeliveryBinding(row: DeliveryBindingRow): TaskDeliveryBinding {
+  return {
+    id: row.id,
+    profileId: row.profile_id,
+    taskId: row.task_id,
+    authorizedSessionId: row.authorized_session_id,
+    deliveryKey: row.delivery_key,
+    destination: parseJson(row.destination_json, "TaskDeliveryBinding.destination"),
+    status: row.status as TaskDeliveryBinding["status"],
+    ...(row.failure_class === null ? {} : { failureClass: row.failure_class }),
+    ...(row.failure_message === null ? {} : { failureMessage: row.failure_message }),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    ...(row.started_at === null ? {} : { startedAt: row.started_at }),
+    ...(row.delivered_at === null ? {} : { deliveredAt: row.delivered_at }),
+    ...(row.failed_at === null ? {} : { failedAt: row.failed_at })
+  };
+}
+
 function stringify(value: unknown): string {
   const result = JSON.stringify(value);
   if (result === undefined) throw new TaskStoreIntegrityError("Task persistence value is not JSON serializable.");
@@ -1156,6 +1308,14 @@ function parseJson<T>(value: string, field: string): T {
 function requireNonEmpty(value: string, label: string): string {
   const normalized = value.trim();
   if (normalized.length === 0) throw new TaskStoreIntegrityError(`${label} must not be empty.`);
+  return normalized;
+}
+
+function requireBoundedText(value: string, label: string, maxChars: number): string {
+  const normalized = requireNonEmpty(value, label);
+  if (normalized.length > maxChars || /[\u0000-\u001F\u007F]/u.test(normalized)) {
+    throw new TaskStoreIntegrityError(`${label} is invalid or exceeds ${maxChars} characters.`);
+  }
   return normalized;
 }
 
@@ -1312,4 +1472,21 @@ type SessionLinkRow = {
   step_id: string | null;
   attempt_id: string | null;
   created_at: string;
+};
+
+type DeliveryBindingRow = {
+  id: string;
+  profile_id: string;
+  task_id: string;
+  authorized_session_id: string;
+  delivery_key: string;
+  destination_json: string;
+  status: string;
+  failure_class: string | null;
+  failure_message: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  delivered_at: string | null;
+  failed_at: string | null;
 };
