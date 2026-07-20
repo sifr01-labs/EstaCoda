@@ -97,6 +97,14 @@ export class OperatorConsoleRuntimeHost {
     };
   }
 
+  setMotionElapsedMs(motionElapsedMs: number): void {
+    if (this.#disposed) return;
+    this.#state = {
+      ...this.#state,
+      motionElapsedMs: Number.isFinite(motionElapsedMs) ? Math.max(0, motionElapsedMs) : 0,
+    };
+  }
+
   setTurnActivity(turnActivity: TurnActivityState | undefined): void {
     if (this.#disposed) return;
     this.#state = {
@@ -250,6 +258,7 @@ function cloneOperatorConsoleState(state: OperatorConsoleState): OperatorConsole
     transcript: state.transcript.map(cloneTranscriptBlock),
     prompt: clonePromptSurfaceState(state.prompt),
     status: cloneStatusRailState(state.status),
+    motionElapsedMs: state.motionElapsedMs,
     turnActivity: state.turnActivity === undefined ? undefined : cloneTurnActivityState(state.turnActivity),
     attachments: state.attachments.map(cloneAttachmentCardState),
     tasks: cloneTaskSurfaceState(state.tasks),

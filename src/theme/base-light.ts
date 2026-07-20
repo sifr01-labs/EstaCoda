@@ -33,6 +33,15 @@ export const lightTheme: UiTokenContract = {
     selected: "#0057D9",
     selectedBg: "#E3F2FD",
   },
+  motion: {
+    waiting: { frames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], cadenceMs: 85, color: "#666666" },
+    thinking: { frames: ["◜", "◠", "◝", "◞", "◡", "◟"], cadenceMs: 120, color: "#666666" },
+    routing: { frames: ["›", "»", "›", "·"], cadenceMs: 95, color: "#666666" },
+    tool: { frames: ["◴", "◷", "◶", "◵"], cadenceMs: 90, color: "#666666" },
+    worker: { frames: ["·", "∙", "•", "●", "•", "∙"], cadenceMs: 105, color: "#666666" },
+    finalizing: { frames: ["◇", "◈", "◆", "◈"], cadenceMs: 120, color: "#666666" },
+    background: { frames: ["⠁", "⠂", "⠄", "⡀", "⢀", "⠠", "⠐", "⠈"], cadenceMs: 160, color: "#757575" },
+  },
   glyph: {
     prompt: "›",
     toolPrefix: "│",
@@ -41,13 +50,6 @@ export const lightTheme: UiTokenContract = {
     check: "✓",
     cross: "✗",
     arrow: "→",
-    spinner: {
-      waiting: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
-      thinking: ["⣾⣷", "⣽⣯", "⣻⣟", "⢿⡿", "⡿⢿", "⣟⣻", "⣯⣽", "⣷⣾"],
-      tool: ["⣾⣷", "⣽⣯", "⣻⣟", "⢿⡿", "⡿⢿", "⣟⣻", "⣯⣽", "⣷⣾"],
-      worker: ["·", "∙", "•", "●", "•", "∙"],
-      background: ["⡀", "⠄", "⠂", "⠁", "⠈", "⠐", "⠠", "⢀"],
-    },
     progress: {
       filled: "█",
       empty: "░",

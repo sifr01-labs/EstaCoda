@@ -37,6 +37,7 @@ export type AssistantMessageFrameRenderOptions = {
   readonly width: number;
   readonly height?: number;
   readonly style?: OperatorConsoleStyle;
+  readonly motionElapsedMs?: number;
 };
 
 const DEFAULT_ASSISTANT_NAME = "EstaCoda";
@@ -65,7 +66,7 @@ export function renderAssistantMessageFrame(
   if (height <= 0) return [];
 
   const title = normalizeTitle(input.title, options.style);
-  const contentRows = renderWrappedContentRows(input, contentWidthFor(width), options.style);
+  const contentRows = renderWrappedContentRows(input, contentWidthFor(width), options.style, options.motionElapsedMs);
   if (height < 3) return [truncateVisible(`${title}: ${summarizeContentRows(contentRows)}`, width)];
 
   const visibleContentRows = Math.max(1, height - 2);
@@ -82,10 +83,11 @@ export function renderAssistantMessageFrame(
 function renderWrappedContentRows(
   input: AssistantMessageFrameInput,
   width: number,
-  style?: OperatorConsoleStyle
+  style?: OperatorConsoleStyle,
+  motionElapsedMs?: number
 ): readonly string[] {
   const rows = contentBlocksForInput(input).flatMap((block, index, blocks) =>
-    renderContentBlockRows(block, index, blocks, width, style)
+    renderContentBlockRows(block, index, blocks, width, style, motionElapsedMs)
   );
   return rows.length === 0 ? [""] : rows;
 }
@@ -108,7 +110,8 @@ function renderContentBlockRows(
   index: number,
   blocks: readonly AssistantMessageFrameBlock[],
   width: number,
-  style: OperatorConsoleStyle | undefined
+  style: OperatorConsoleStyle | undefined,
+  motionElapsedMs: number | undefined
 ): readonly string[] {
   if (block.kind === "text") {
     const lines = withOptionalCursor(normalizeFrameLines(block.lines), block.cursor);
@@ -117,7 +120,7 @@ function renderContentBlockRows(
 
   const entries = [...block.entries].sort((left, right) => left.sequence - right.sequence);
   if (entries.length === 0) return [];
-  const rows = entries.map((entry) => formatInlineToolTrailRow(entry, width, { style }));
+  const rows = entries.map((entry) => formatInlineToolTrailRow(entry, width, { style, motionElapsedMs }));
   return [
     ...(shouldSeparateFromPreviousBlock(index, blocks) ? [""] : []),
     ...rows,

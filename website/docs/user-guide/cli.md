@@ -289,7 +289,7 @@ Environment variables that affect rendering:
 | `ESTACODA_MODE` | `plain` or `standard` |
 | `ESTACODA_SKIN` | `kemetBlue` |
 
-Standard mode uses Unicode box-drawing for panels, ANSI colors from the theme, and spinner frames for running tasks. Plain mode uses ASCII-only markers and semantic text labels.
+Standard mode uses Unicode box-drawing and a small semantic motion language: Braille for waits, soft arcs for thinking, chevrons for routing, quarter turns for tools, pulses for delegated workers, diamonds for finalizing, and an orbit for background maintenance. Each motion has its own theme color and cadence. Approval, queued, success, failure, cancellation, and blocked states remain static. Plain mode uses non-animated ASCII markers and semantic text labels.
 
 ---
 

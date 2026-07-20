@@ -2,10 +2,19 @@ import type { TokenOverlay } from "../contracts/ui-tokens.js";
 
 // Plain mode overlay.
 // Forces ASCII-safe symbols, disables ANSI color, disables emoji,
-// disables animation, and uses minimal spinner frames.
+// disables animation, and uses minimal ASCII motion frames.
 // This overlay is applied last, after base theme and skin.
 
 export const plainOverlay: TokenOverlay = {
+  motion: {
+    waiting: { frames: ["|", "/", "-", "\\"] },
+    thinking: { frames: ["o", "O", "o", "."] },
+    routing: { frames: [">", ">>", ">", "."] },
+    tool: { frames: ["|", "/", "-", "\\"] },
+    worker: { frames: ["."] },
+    finalizing: { frames: ["o", "O", "o", "."] },
+    background: { frames: [".", "..", "...", "...."] },
+  },
   glyph: {
     prompt: ">",
     toolPrefix: "|",
@@ -14,13 +23,6 @@ export const plainOverlay: TokenOverlay = {
     check: "[OK]",
     cross: "[X]",
     arrow: ">>",
-    spinner: {
-      waiting: ["|", "/", "-", "\\"],
-      thinking: ["o", "O", "o", "."],
-      tool: ["|", "/", "-", "\\"],
-      worker: ["."],
-      background: [".", "..", "...", "...."],
-    },
     progress: {
       filled: "#",
       empty: "-",

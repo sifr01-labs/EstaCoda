@@ -12,18 +12,71 @@ describe("LiveOperatorConsoleController", () => {
     vi.useRealTimers();
   });
 
-  it("advances visible spinner frames on a timer while activity is active", () => {
+  it("advances visible motion from elapsed time and the token cadence", () => {
+    vi.useFakeTimers();
+    const output = createOutput();
+    const { controller, runtimeHost } = createControllerFixture(output);
+
+    controller.setTurnActivity({ phase: "thinking" });
+    expect(stripAnsi(output.text())).toContain("◜");
+
+    output.clear();
+    vi.advanceTimersByTime(120);
+
+    expect(stripAnsi(output.text())).toContain("◠");
+    expect(runtimeHost.getState().motionElapsedMs).toBe(120);
+  });
+
+  it("does not redraw between visible frame changes", () => {
     vi.useFakeTimers();
     const output = createOutput();
     const controller = createController(output);
 
     controller.setTurnActivity({ phase: "thinking" });
-    expect(stripAnsi(output.text())).toContain("⣾⣷");
+    output.clear();
+    vi.advanceTimersByTime(105);
 
+    expect(output.text()).toBe("");
+  });
+
+  it("retries a frame change that was temporarily coalesced", () => {
+    vi.useFakeTimers();
+    const output = createOutput();
+    const controller = createController(output);
+
+    controller.setTurnActivity({ phase: "thinking" });
+    vi.advanceTimersByTime(115);
+    controller.refresh();
+    output.clear();
+
+    vi.advanceTimersByTime(20);
+
+    expect(stripAnsi(output.text())).toContain("◠");
+  });
+
+  it("does not run the motion clock for hidden tool activity", () => {
+    vi.useFakeTimers();
+    const output = createOutput();
+    const controller = createController(output);
+
+    controller.applyActiveWorkEvent({ id: "read", toolName: "read_file", status: "running" });
+    output.clear();
+    vi.advanceTimersByTime(180);
+
+    expect(output.text()).toBe("");
+  });
+
+  it("animates a running tool once its inline trail is visible", () => {
+    vi.useFakeTimers();
+    const output = createOutput();
+    const controller = createController(output);
+
+    controller.appendStreamingText("I will inspect this first.");
+    controller.applyActiveWorkEvent({ id: "read", toolName: "read_file", status: "running" });
     output.clear();
     vi.advanceTimersByTime(90);
 
-    expect(stripAnsi(output.text())).toContain("⣽⣯");
+    expect(stripAnsi(output.text())).toContain("◷");
   });
 
   it("stops the animation timer when the live frame is cleared", () => {
@@ -547,7 +600,7 @@ function createControllerFixture(
     runtimeHost,
     terminal: { width: 80, height: 12, isTty: true },
     capabilities: { supportsAnimation: true },
-    animationIntervalMs: 90,
+    animationIntervalMs: 15,
     getStatus: () => status,
     ...options,
   });

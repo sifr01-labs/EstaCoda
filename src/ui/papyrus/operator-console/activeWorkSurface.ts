@@ -1,5 +1,6 @@
 import { stringWidth } from "../screen/stringWidth.js";
 import { truncateVisible } from "../../renderers/layout.js";
+import { semanticMotionFrame } from "../../semantic-motion.js";
 import {
   resolveActiveWorkCopy,
   type OperatorConsoleLocale,
@@ -16,6 +17,7 @@ export type ActiveWorkSurfaceRenderOptions = {
   readonly height?: number;
   readonly locale?: OperatorConsoleLocale;
   readonly style?: OperatorConsoleStyle;
+  readonly motionElapsedMs?: number;
 };
 
 export type ActiveWorkSummaryOptions = {
@@ -120,7 +122,7 @@ export function renderActiveWorkSurface(
 
   return [
     renderTopBorder(title, width),
-    ...renderActiveWorkContentRows(visibleState, sorted, contentRows, contentWidth, options.locale, options.style)
+    ...renderActiveWorkContentRows(visibleState, sorted, contentRows, contentWidth, options.locale, options.style, options.motionElapsedMs)
       .map((row) => renderContentRow(row, contentWidth, width)),
     renderBottomBorder(width),
   ];
@@ -131,7 +133,7 @@ function renderDelegationWorkerCards(
   workerItems: readonly ActiveWorkItem[],
   options: ActiveWorkSurfaceRenderOptions & { readonly height: number }
 ): readonly string[] {
-  const { width, height, locale, style } = options;
+  const { width, height, locale, style, motionElapsedMs } = options;
   const copy = resolveActiveWorkCopy(locale);
   const visibleItems = selectVisibleWorkerItems(workerItems);
   const columns = resolveWorkerCardColumns(width);
@@ -147,7 +149,7 @@ function renderDelegationWorkerCards(
 
   if (cardHeight < WORKER_CARD_FIXED_ROWS) {
     const compactRows = visibleItems.slice(0, Math.max(0, height - 1)).map((item) =>
-      padVisibleEnd(truncateVisibleCells(formatCompactWorkerRow(item, state, locale, style), width), width)
+      padVisibleEnd(truncateVisibleCells(formatCompactWorkerRow(item, state, locale, style, motionElapsedMs), width), width)
     );
     return padRows([header, ...compactRows], height).map((line) => padVisibleEnd(line, width));
   }
@@ -157,7 +159,7 @@ function renderDelegationWorkerCards(
   for (let rowIndex = 0; rowIndex < gridRows; rowIndex += 1) {
     const rowItems = visibleItems.slice(rowIndex * columns, (rowIndex + 1) * columns);
     const cards = rowItems.map((item, columnIndex) =>
-      renderWorkerCard(item, state, cardWidths[columnIndex] ?? cardWidths[0] ?? width, cardHeight, locale, style)
+      renderWorkerCard(item, state, cardWidths[columnIndex] ?? cardWidths[0] ?? width, cardHeight, locale, style, motionElapsedMs)
     );
     for (let lineIndex = 0; lineIndex < cardHeight; lineIndex += 1) {
       const line = cardWidths.map((cardWidth, columnIndex) =>
@@ -176,11 +178,12 @@ function renderWorkerCard(
   width: number,
   height: number,
   locale: OperatorConsoleLocale | undefined,
-  style: OperatorConsoleStyle | undefined
+  style: OperatorConsoleStyle | undefined,
+  motionElapsedMs: number | undefined
 ): readonly string[] {
   const contentWidth = Math.max(0, width - 4);
   const activityRows = Math.max(0, height - WORKER_CARD_FIXED_ROWS);
-  const title = formatWorkerCardTitle(item, state, locale, style);
+  const title = formatWorkerCardTitle(item, state, locale, style, motionElapsedMs);
   const activities = (item.activityLog ?? []).slice(-activityRows).map((activity) => {
     const symbol = workerActivitySymbol(activity.status, style);
     const detail = activity.detail === undefined ? "" : `  ${isolateIfNeeded(activity.detail, locale)}`;
@@ -223,9 +226,10 @@ function formatWorkerCardTitle(
   item: ActiveWorkItem,
   state: ToolActivityState,
   locale: OperatorConsoleLocale | undefined,
-  style: OperatorConsoleStyle | undefined
+  style: OperatorConsoleStyle | undefined,
+  motionElapsedMs: number | undefined
 ): string {
-  const symbol = workerStatusSymbol(item, state.frameIndex, style);
+  const symbol = workerStatusSymbol(item, motionElapsedMs, style);
   const worker = styleBold(style, isolateIfNeeded(item.displayLabel?.trim() || "Worker", locale));
   const task = item.taskLabel?.trim();
   return task === undefined || task.length === 0
@@ -237,9 +241,10 @@ function formatCompactWorkerRow(
   item: ActiveWorkItem,
   state: ToolActivityState,
   locale: OperatorConsoleLocale | undefined,
-  style: OperatorConsoleStyle | undefined
+  style: OperatorConsoleStyle | undefined,
+  motionElapsedMs: number | undefined
 ): string {
-  const title = formatWorkerCardTitle(item, state, locale, style);
+  const title = formatWorkerCardTitle(item, state, locale, style, motionElapsedMs);
   const footer = formatWorkerCardFooter(item, state, Number.MAX_SAFE_INTEGER, locale, style);
   return `${title}  ${footer}`;
 }
@@ -295,22 +300,15 @@ function styleWorkerStatus(
 
 function workerStatusSymbol(
   item: ActiveWorkItem,
-  frameIndex: number | undefined,
+  motionElapsedMs: number | undefined,
   style: OperatorConsoleStyle | undefined
 ): string {
-  if (item.status !== "running") return activeWorkStatusSymbol(item.status, frameIndex, style);
-  const frames = style?.tokens.contract.glyph.spinner.worker ?? ["·", "∙", "•", "●", "•", "∙"];
-  const phase = (frameIndex ?? 0) + (item.taskIndex ?? stableWorkerPhase(item.id)) * 2;
-  const frame = spinnerFrameIndex(phase, frames.length);
-  const symbol = frames[frame] ?? "·";
-  const tokens = style?.tokens.contract;
-  if (tokens === undefined) return symbol;
-  const color = frame === 3
-    ? tokens.palette.accent
-    : frame === 2 || frame === 4
-      ? tokens.palette.action
-      : tokens.text.muted;
-  return styleColor(style, symbol, color);
+  if (item.status !== "running") return activeWorkStatusSymbol(item.status, motionElapsedMs, style);
+  const definition = style?.tokens.contract.motion.worker;
+  if (definition === undefined) return ".";
+  const phaseOffset = (item.taskIndex ?? stableWorkerPhase(item.id)) * 2;
+  const elapsed = style?.tokens.contract.behavior.allowAnimation === false ? 0 : motionElapsedMs;
+  return styleColor(style, semanticMotionFrame(definition, elapsed, phaseOffset), definition.color);
 }
 
 function workerActivitySymbol(
@@ -376,7 +374,7 @@ export function renderCompletedActiveWorkSurface(
 
   const contentWidth = Math.max(0, width - 4);
   const contentRows = Math.max(1, height - 2);
-  const visibleRows = renderCompletedActiveWorkContentRows(visibleState, contentRows, contentWidth, options.locale, options.style);
+  const visibleRows = renderCompletedActiveWorkContentRows(visibleState, contentRows, contentWidth, options.locale, options.style, options.motionElapsedMs);
 
   return [
     renderTopBorder(copy.toolsCompleted, width),
@@ -455,14 +453,15 @@ function renderCompletedActiveWorkContentRows(
   contentRows: number,
   contentWidth: number,
   locale: OperatorConsoleLocale | undefined,
-  style: OperatorConsoleStyle | undefined
+  style: OperatorConsoleStyle | undefined,
+  motionElapsedMs: number | undefined
 ): readonly string[] {
   const footer = formatCompletionFooterRows(state, contentWidth, locale);
   if (contentRows <= footer.length) return footer.slice(0, contentRows);
 
   const itemRows = Math.max(0, contentRows - footer.length);
   const visibleItems = state.items.slice(0, itemRows);
-  const rows = visibleItems.map((item) => formatActiveWorkRow(item, state, contentWidth, locale, style));
+  const rows = visibleItems.map((item) => formatActiveWorkRow(item, state, contentWidth, locale, style, motionElapsedMs));
 
   return [
     ...padRows(rows, itemRows),
@@ -485,10 +484,11 @@ function renderActiveWorkContentRows(
   contentRows: number,
   contentWidth: number,
   locale: OperatorConsoleLocale | undefined,
-  style: OperatorConsoleStyle | undefined
+  style: OperatorConsoleStyle | undefined,
+  motionElapsedMs: number | undefined
 ): readonly string[] {
   const visibleItems = sortedItems.slice(0, contentRows);
-  const rows = visibleItems.map((item) => formatActiveWorkRow(item, state, contentWidth, locale, style));
+  const rows = visibleItems.map((item) => formatActiveWorkRow(item, state, contentWidth, locale, style, motionElapsedMs));
   return padRows(rows, contentRows);
 }
 
@@ -497,12 +497,13 @@ function formatActiveWorkRow(
   state: ToolActivityState,
   contentWidth: number,
   locale: OperatorConsoleLocale | undefined,
-  style: OperatorConsoleStyle | undefined
+  style: OperatorConsoleStyle | undefined,
+  motionElapsedMs: number | undefined
 ): string {
   const width = normalizeDimension(contentWidth);
   if (width <= 0) return "";
 
-  const symbol = activeWorkStatusSymbol(item.status, state.frameIndex, style);
+  const symbol = activeWorkStatusSymbol(item.status, motionElapsedMs, style);
   const renderedTool = item.displayLabel ?? item.toolName;
   const rawTool = renderedTool.trim().length === 0 ? "tool" : renderedTool.trim();
   const rawDetail = (item.target ?? item.summary).trim();
@@ -570,16 +571,21 @@ function formatArabicActiveWorkRow(input: {
 
 export function activeWorkStatusSymbol(
   status: ActiveWorkItemStatus,
-  frameIndex: number | undefined,
+  motionElapsedMs: number | undefined,
   style: OperatorConsoleStyle | undefined
 ): string {
-  const symbol = status === "running"
-    ? style?.tokens.contract.glyph.spinner.tool[spinnerFrameIndex(frameIndex, style?.tokens.contract.glyph.spinner.tool.length ?? 0)] ?? ACTIVE_WORK_STATUS_SYMBOLS.running
+  const toolMotion = style?.tokens.contract.motion.tool;
+  const symbol = status === "running" && toolMotion !== undefined
+    ? semanticMotionFrame(
+      toolMotion,
+      style?.tokens.contract.behavior.allowAnimation === false ? 0 : motionElapsedMs
+    )
     : ACTIVE_WORK_STATUS_SYMBOLS[status];
   const tokens = style?.tokens.contract;
   if (tokens === undefined) return symbol;
   switch (status) {
     case "running":
+      return styleColor(style, symbol, tokens.motion.tool.color);
     case "queued":
       return styleColor(style, symbol, tokens.palette.action);
     case "succeeded":
@@ -590,12 +596,6 @@ export function activeWorkStatusSymbol(
     case "awaitingApproval":
       return styleColor(style, symbol, tokens.palette.caution);
   }
-}
-
-function spinnerFrameIndex(input: number | undefined, length: number): number {
-  if (length <= 0) return 0;
-  if (input === undefined || !Number.isFinite(input)) return 0;
-  return Math.abs(Math.floor(input)) % length;
 }
 
 function isActiveStatusItem(item: ActiveWorkItem): boolean {

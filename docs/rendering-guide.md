@@ -465,7 +465,7 @@ When `StandardRenderer` encounters restricted capabilities, it falls back automa
 |--------------------|--------------------|
 | `!supportsColor` | `#color()`, `#bold()`, `#dim()` return raw text. |
 | `!supportsUnicode` | `#glyph()` returns ASCII from `#asciiFallback()`. Box drawing becomes `+|-`. |
-| `!supportsAnimation` | `#spinnerFrame()` returns first frame statically. No timer started. |
+| `!supportsAnimation` | Semantic motion resolves its first frame statically. No timer starts. |
 | `terminalWidth < 40` | `#framedPanel()` truncates content. Tables may overflow. |
 
 ---

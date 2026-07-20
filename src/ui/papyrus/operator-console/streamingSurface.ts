@@ -11,6 +11,7 @@ export type StreamingSurfaceRenderOptions = {
   readonly height?: number;
   readonly terminalHeight?: number;
   readonly style?: OperatorConsoleStyle;
+  readonly motionElapsedMs?: number;
 };
 
 export function hasStreamingSurface(state: StreamingState | undefined): state is StreamingState {
@@ -49,7 +50,7 @@ export function renderStreamingSurface(
   return renderAssistantMessageFrame({
     lines: [],
     blocks: streamingContentBlocks(state),
-  }, { width, height, style: options.style });
+  }, { width, height, style: options.style, motionElapsedMs: options.motionElapsedMs });
 }
 
 function streamingContentBlocks(state: StreamingState): readonly AssistantMessageFrameBlock[] {

@@ -34,13 +34,14 @@ import type {
   ToolActivityRailViewModel,
   ToolActivityRailEvent,
 } from "../../contracts/view-model.js";
-import type { ResolvedTokens, TokenGlyph } from "../../contracts/ui-tokens.js";
+import type { ResolvedTokens, SemanticMotionToken, TokenGlyph } from "../../contracts/ui-tokens.js";
 import { measureTextWidth, measureVisibleWidth, padVisibleEnd, padVisibleStart, padVisibleAlign, truncateVisible, wrapText } from "./layout.js";
 import type { UiLocale } from "../../ui/cli-ui-copy.js";
 import { chromeCopy } from "../../ui/cli-ui-copy.js";
 import { closeOpenBidiIsolates, isolateLtr, isolateRtl } from "../../ui/bidi.js";
 import type { TextDirection } from "../../contracts/ui.js";
 import { formatSessionDisplayId } from "../../session/session-id.js";
+import { semanticMotionForPhase, semanticMotionFrame } from "../semantic-motion.js";
 
 const STARTUP_TITLE_SEPARATOR = "  𓂀  ";
 const STARTUP_TITLE_SEPARATOR_ASCII = "  *  ";
@@ -71,17 +72,23 @@ export class StandardRenderer {
   }
 
   // ──────────────────────────────────────
-  // Spinner / animation primitives
+  // Semantic motion primitives
   // ──────────────────────────────────────
 
-  /** Returns a time-based spinner frame when animation is supported, otherwise the first frame. */
-  #spinnerFrame(frames: readonly string[]): string {
+  /** Resolves one themed semantic motion from elapsed time and its own cadence. */
+  #motion(token: SemanticMotionToken, elapsedMs = Date.now()): string {
+    const definition = this.#tokens.contract.motion[token];
+    const frame = semanticMotionFrame(
+      definition,
+      this.#capabilities.supportsAnimation ? elapsedMs : 0
+    );
+    return this.#color(frame, definition.color);
+  }
+
+  #asciiMotion(frames: readonly string[], cadenceMs: number, elapsedMs = Date.now()): string {
     if (frames.length === 0) return "";
-    if (!this.#capabilities.supportsAnimation) {
-      return frames[0] ?? "";
-    }
-    const index = Math.floor(Date.now() / 80) % frames.length;
-    return frames[index] ?? "";
+    if (!this.#capabilities.supportsAnimation) return frames[0] ?? "";
+    return frames[Math.floor(Math.max(0, elapsedMs) / cadenceMs) % frames.length] ?? "";
   }
 
   // ──────────────────────────────────────
@@ -1264,7 +1271,7 @@ export class StandardRenderer {
       case "pending":
         return this.#dim("○");
       case "running":
-        return this.#action(this.#spinnerFrame(this.#tokens.contract.glyph.spinner.waiting));
+        return this.#motion("waiting");
       case "done":
         return this.#severity("✓", "ok");
       case "failed":
@@ -1337,7 +1344,7 @@ export class StandardRenderer {
       case "pending":
         return this.#dim("○");
       case "active":
-        return this.#action(this.#spinnerFrame(this.#tokens.contract.glyph.spinner.waiting));
+        return this.#motion("waiting");
       case "done":
         return this.#severity("✓", "ok");
       case "failed":
@@ -1391,10 +1398,12 @@ export class StandardRenderer {
       return this.#useUnicode ? this.#caution("⚠") : "[?]";
     }
     if (event.status === "running") {
-      const frames = this.#useUnicode
-        ? this.#tokens.contract.glyph.spinner.tool
-        : ["[>]", "[>.]", "[>..]", "[>...]", "[>..]", "[>.]"];
-      return this.#action(this.#spinnerFrame(frames));
+      return this.#useUnicode
+        ? this.#motion("tool")
+        : this.#color(
+          this.#asciiMotion(["[>]", "[>.]", "[>..]", "[>...]", "[>..]", "[>.]"], 90),
+          this.#tokens.contract.motion.tool.color
+        );
     }
     const icon = this.#tokens.contract.toolIcon[event.tool];
     if (icon) {
@@ -2132,15 +2141,19 @@ export class StandardRenderer {
   }
 
   renderActiveTurnSpinner(vm: ActiveTurnSpinnerViewModel): string {
-    const eyeFrames = this.#useUnicode
-      ? this.#tokens.contract.glyph.spinner.thinking
-      : ["*", "*.", "*..", "*...", "*..", "*."];
-    const eye = this.#spinnerFrame(eyeFrames);
+    const token = semanticMotionForPhase(vm.phase);
+    const elapsedMs = vm.elapsedMs ?? Date.now();
+    const eye = this.#useUnicode
+      ? this.#motion(token, elapsedMs)
+      : this.#color(
+        this.#asciiMotion(["*", "*.", "*..", "*...", "*..", "*."], this.#tokens.contract.motion[token].cadenceMs, elapsedMs),
+        this.#tokens.contract.motion[token].color
+      );
     const label = vm.label ?? (vm.phase !== undefined ? ((this.#copy as unknown) as Record<string, string>)[vm.phase] : undefined);
     if (label !== undefined) {
-      return `${this.#brand(eye)} ${this.#action(label)}`;
+      return `${eye} ${this.#action(label)}`;
     }
-    return this.#brand(eye);
+    return eye;
   }
 
   #turnStateLabel(state: SessionStatusRailViewModel["turnState"]): string {

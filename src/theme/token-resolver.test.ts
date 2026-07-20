@@ -30,7 +30,7 @@ describe("resolveTokens", () => {
     expect(r.mode).toBe("plain");
     expect(r.skin).toBe("kemetBlue");
     expect(r.contract.glyph.prompt).toBe(">");
-    expect(r.contract.glyph.spinner.waiting).toEqual(["|", "/", "-", "\\"]);
+    expect(r.contract.motion.waiting.frames).toEqual(["|", "/", "-", "\\"]);
     expect(r.contract.behavior.allowAnsiColor).toBe(false);
     expect(r.contract.behavior.allowAnimation).toBe(false);
     expect(r.contract.behavior.allowEmoji).toBe(false);
@@ -109,13 +109,18 @@ describe("plain mode invariants", () => {
   it("plain forces ASCII spinner", () => {
     const r = resolveTokens("plain", "dark", "kemetBlue");
     const frames = [
-      ...r.contract.glyph.spinner.waiting,
-      ...r.contract.glyph.spinner.worker,
+      ...r.contract.motion.waiting.frames,
+      ...r.contract.motion.thinking.frames,
+      ...r.contract.motion.routing.frames,
+      ...r.contract.motion.tool.frames,
+      ...r.contract.motion.worker.frames,
+      ...r.contract.motion.finalizing.frames,
+      ...r.contract.motion.background.frames,
     ];
     for (const f of frames) {
       expect(f.charCodeAt(0)).toBeLessThan(128);
     }
-    expect(r.contract.glyph.spinner.worker).toEqual(["."]);
+    expect(r.contract.motion.worker.frames).toEqual(["."]);
   });
 
   it("plain forces ASCII tool icons", () => {
@@ -180,10 +185,27 @@ describe("kemetBlue skin overlay", () => {
     );
   });
 
-  it("overrides spinner glyphs", () => {
+  it("resolves the semantic motion language", () => {
     const r = resolveTokens("standard", "light", "kemetBlue");
-    expect(r.contract.glyph.spinner.waiting).toContain("\u2326");
-    expect(r.contract.glyph.spinner.worker).toEqual(["·", "∙", "•", "●", "•", "∙"]);
+    expect(r.contract.motion.waiting.frames[0]).toBe("⠋");
+    expect(r.contract.motion.thinking.frames).toEqual(["◜", "◠", "◝", "◞", "◡", "◟"]);
+    expect(r.contract.motion.routing.frames).toEqual(["›", "»", "›", "·"]);
+    expect(r.contract.motion.tool.frames).toEqual(["◴", "◷", "◶", "◵"]);
+    expect(r.contract.motion.worker.frames).toEqual(["·", "∙", "•", "●", "•", "∙"]);
+    expect(r.contract.motion.finalizing.frames).toEqual(["◇", "◈", "◆", "◈"]);
+    expect(r.contract.motion.background.frames[0]).toBe("⠁");
+  });
+
+  it("gives every motion token its own cadence and themeable color", () => {
+    const light = resolveTokens("standard", "light", "kemetBlue").contract.motion;
+    const dark = resolveTokens("standard", "dark", "kemetBlue").contract.motion;
+    for (const token of Object.values(dark)) {
+      expect(token.cadenceMs).toBeGreaterThan(0);
+      expect(token.color).toMatch(/^#[0-9A-F]{6}$/u);
+    }
+    expect(new Set(Object.values(dark).map((token) => token.color)).size).toBe(7);
+    expect(new Set(Object.values(light).map((token) => token.color)).size).toBe(7);
+    expect(light.thinking.color).not.toBe(dark.thinking.color);
   });
 
   it("overrides tool icons", () => {

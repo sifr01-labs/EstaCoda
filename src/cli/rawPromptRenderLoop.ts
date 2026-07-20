@@ -132,6 +132,7 @@ export class RawPromptRenderLoop {
         prompt: snapshot.prompt,
         state: snapshot.state,
         status: snapshot.operatorConsole.getStatus?.() ?? snapshot.operatorConsole.status,
+        motionElapsedMs: snapshot.operatorConsole.motionElapsedMs,
         setupPanel: snapshot.operatorConsole.setupPanel,
         transcript: snapshot.operatorConsole.transcript,
         turnActivity: snapshot.operatorConsole.turnActivity,

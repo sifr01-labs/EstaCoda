@@ -106,6 +106,7 @@ function renderRegionLines(
       height: region.height,
       locale: state.locale,
       style: state.style,
+      motionElapsedMs: state.motionElapsedMs,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "streaming") {
@@ -113,6 +114,7 @@ function renderRegionLines(
       width: region.width,
       height: region.height,
       style: state.style,
+      motionElapsedMs: state.motionElapsedMs,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "transcript") {
@@ -128,6 +130,7 @@ function renderRegionLines(
       locale: state.locale,
       activeWork: state.activeWork,
       style: state.style,
+      motionElapsedMs: state.motionElapsedMs,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "approvals") {

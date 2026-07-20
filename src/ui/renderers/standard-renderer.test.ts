@@ -2754,13 +2754,29 @@ describe("StandardRenderer — prompt chrome rails", () => {
     expect(stripAnsi(out)).toBe("↳ line one\n  line two");
   });
 
-  it("renders active turn spinner with brand eye and localized label", () => {
+  it("renders active turn thinking motion with its localized label", () => {
     const r = renderer("dark", { ...fullCaps(), supportsAnimation: false });
     const vm = buildActiveTurnSpinnerViewModel({ phase: "thinking" });
     const out = stripAnsi(r.render(vm));
-    expect(out).toContain("⣾⣷");
+    expect(out).toContain("◜");
     expect(out).not.toContain("𓇠");
     expect(out).toContain("contemplating");
+  });
+
+  it("maps runtime phases to distinct semantic motions and colors", () => {
+    const r = renderer("dark", { ...fullCaps(), supportsAnimation: false });
+    const cases = [
+      ["thinking", "◜", "38;2;184;153;255"],
+      ["routing", "›", "38;2;94;208;230"],
+      ["provider", "⠋", "38;2;90;172;255"],
+      ["finalizing", "◇", "38;2;215;167;255"],
+      ["background", "⠁", "38;2;136;136;136"],
+    ] as const;
+    for (const [phase, frame, color] of cases) {
+      const out = r.render(buildActiveTurnSpinnerViewModel({ phase, elapsedMs: 0 }));
+      expect(stripAnsi(out)).toContain(frame);
+      expect(out).toContain(color);
+    }
   });
 
   it("renders active turn spinner with explicit label overriding phase", () => {
@@ -2794,7 +2810,7 @@ describe("StandardRenderer — prompt chrome rails", () => {
       events: [toolActivityRailEvent("readFile", "running", { label: "preparing" })],
     });
     const out = stripAnsi(r.render(vm));
-    expect(out).toContain("⣾⣷");
+    expect(out).toContain("◴");
     expect(out).not.toContain("𓇠");
     expect(out).toContain("preparing");
   });

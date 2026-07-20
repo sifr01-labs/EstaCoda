@@ -11,6 +11,7 @@ const TOOL_DETAIL_GAP_CELLS = 3;
 
 export type InlineToolTrailRowOptions = {
   readonly style?: OperatorConsoleStyle;
+  readonly motionElapsedMs?: number;
 };
 
 export function formatInlineToolTrailRow(
@@ -21,7 +22,7 @@ export function formatInlineToolTrailRow(
   const normalizedWidth = normalizeDimension(width);
   if (normalizedWidth <= 0) return "";
 
-  const symbol = activeWorkStatusSymbol(entry.status, undefined, options.style);
+  const symbol = activeWorkStatusSymbol(entry.status, options.motionElapsedMs, options.style);
   const tool = normalizeText(entry.displayLabel ?? entry.toolName, "tool");
   const detail = normalizeText(entry.target ?? entry.summary, entry.status);
   const duration = formatActiveWorkDuration(resolveEntryDurationMs(entry));

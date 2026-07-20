@@ -100,8 +100,8 @@ standard mode is chosen when ALL of:
 - Uses true-color ANSI (`38;2;R;G;B`) when `supportsTrueColor`, otherwise ANSI 256.
 - Uses Unicode box-drawing for framed panels (`┌─┐│└─┘`, `╭─╮│╰─╯`).
 - Falls back to ASCII `+|-` when `!supportsUnicode`.
-- Timeline markers use `○`, `✓`, `✗`, `⚠` with spinner frames for `running`.
-- Spinner frames are read from `tokens.contract.glyph.spinner.waiting`.
+- Timeline markers use `○`, `✓`, `✗`, `⚠` with semantic motion for `running`.
+- Motion definitions are read from `tokens.contract.motion`; every token owns frames, cadence, and color.
 - Animation is **never** started when `!capabilities.supportsAnimation`.
 
 ### 3.5 Layout Utilities

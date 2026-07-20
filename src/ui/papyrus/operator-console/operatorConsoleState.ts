@@ -68,7 +68,6 @@ export type TurnActivityState = {
   readonly phase: TurnActivityPhase;
   readonly backgroundKind?: BackgroundActivityKind;
   readonly label?: string;
-  readonly frameIndex?: number;
 };
 
 export type StartupDashboardState = {
@@ -228,7 +227,6 @@ export type ToolActivityState = {
   readonly startedAtMs?: number;
   readonly updatedAtMs?: number;
   readonly completedAtMs?: number;
-  readonly frameIndex?: number;
 };
 
 export type StreamingSegment = {
@@ -372,6 +370,8 @@ export type OperatorConsoleState = {
   readonly transcript: readonly TranscriptBlock[];
   readonly prompt: PromptSurfaceState;
   readonly status: StatusRailState;
+  /** One elapsed-time clock shared by every animated surface. */
+  readonly motionElapsedMs: number;
   readonly turnActivity?: TurnActivityState;
   readonly attachments: readonly AttachmentCardState[];
   readonly tasks: TaskSurfaceState;
@@ -426,6 +426,7 @@ export type CreateInitialOperatorConsoleStateInput = {
   readonly transcript?: readonly TranscriptBlock[];
   readonly prompt?: PromptSurfaceState;
   readonly status?: StatusRailState;
+  readonly motionElapsedMs?: number;
   readonly turnActivity?: TurnActivityState;
   readonly attachments?: readonly AttachmentCardState[];
   readonly tasks?: TaskSurfaceState;
@@ -454,6 +455,7 @@ export function createInitialOperatorConsoleState(
     transcript: input.transcript ?? [],
     prompt: input.prompt ?? createDefaultPromptSurfaceState(),
     status: input.status ?? createDefaultStatusRailState(),
+    motionElapsedMs: normalizeMotionElapsedMs(input.motionElapsedMs),
     ...(input.turnActivity === undefined ? {} : { turnActivity: input.turnActivity }),
     attachments: input.attachments ?? [],
     tasks: input.tasks ?? createDefaultTaskSurfaceState(),
@@ -466,6 +468,11 @@ export function createInitialOperatorConsoleState(
     terminal: input.terminal ?? createDefaultTerminalMetrics(),
     ...(input.style === undefined ? {} : { style: input.style }),
   };
+}
+
+function normalizeMotionElapsedMs(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) return 0;
+  return Math.max(0, value);
 }
 
 export function createDefaultPromptSurfaceState(): PromptSurfaceState {

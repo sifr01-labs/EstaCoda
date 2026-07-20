@@ -626,6 +626,22 @@ kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ se
 | Setup/select panels | `src/ui/papyrus/operator-console/setupPanelSurface.ts`, `src/ui/papyrus/operator-console/setupSelectRuntimeMapper.ts`, `src/cli/interactive-select.ts` |
 | Session integration | `src/cli/session-loop.ts`, `src/cli/create-interactive-prompt.ts`, `src/cli/rawPromptController.ts`, `src/cli/rawPromptRenderLoop.ts` |
 
+## Semantic Motion
+
+The live console uses one elapsed-time animation clock. Surfaces calculate their visible frame from the selected token's cadence and redraw only when that visible frame changes. There are no per-spinner timers.
+
+| Runtime activity | Motion token |
+|------------------|--------------|
+| Provider or generic wait | `waiting` |
+| Thinking | `thinking` |
+| Intent routing | `routing` |
+| Tool execution | `tool` |
+| Delegated worker | `worker` |
+| Finalizing | `finalizing` |
+| Background maintenance | `background` |
+
+Each token has its own frames, cadence, and theme-specific foreground color under `UiTokenContract.motion`. Approval, queued, success, failure, cancellation, and blocked states remain static status symbols. Plain, CI, dumb-terminal, and non-TTY paths remain non-animated and color-free.
+
 `src/cli/rawPromptRenderLoop.ts` is now a terminal diff adapter. It may write
 cursor movement and clear-line escape sequences as part of the managed TTY
 adapter, but it does not own prompt/status/slash/attachment composition.
