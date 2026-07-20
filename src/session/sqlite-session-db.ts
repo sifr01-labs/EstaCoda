@@ -19,7 +19,11 @@ import type { TrajectoryStore } from "../contracts/trajectory-store.js";
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 import { toFtsQuery } from "../search/fts-query.js";
-import { migrateTaskSchedulerSchemaV11, migrateTaskSchemaV10 } from "../workflow/task-schema.js";
+import {
+  migrateTaskAgentExecutorSchemaV12,
+  migrateTaskSchedulerSchemaV11,
+  migrateTaskSchemaV10
+} from "../workflow/task-schema.js";
 
 type SessionRow = {
   id: string;
@@ -699,6 +703,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     this.#runMigrationStep(9, "v0.9-schema-v9-memory-curation-lease", () => this.#migrateV9());
     this.#runMigrationStep(10, "v0.10-schema-v10-task-persistence", () => migrateTaskSchemaV10(this.#db));
     this.#runMigrationStep(11, "v0.10-schema-v11-task-scheduler", () => migrateTaskSchedulerSchemaV11(this.#db));
+    this.#runMigrationStep(12, "v0.10-schema-v12-task-agent-executor", () => migrateTaskAgentExecutorSchemaV12(this.#db));
   }
 
   #withMigrationLock(migrate: () => void): void {

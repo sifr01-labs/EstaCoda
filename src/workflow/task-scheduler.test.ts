@@ -295,6 +295,42 @@ describe("WorkflowScheduler", () => {
     expect(renewedExpiry).toBe("2030-01-01T00:00:40.000Z");
   });
 
+  it("checkpoints and links durable worker progress under the Attempt fence", async () => {
+    store.createTaskGraph(makeGraph([makeStep("checkpoint", 0)]));
+    await sessionDb.createSession({
+      id: "worker-alpha",
+      profileId: "alpha",
+      parentSessionId: "creator-alpha",
+      metadata: { kind: "task-step-worker" }
+    });
+    await sessionDb.saveTrajectory({
+      id: "trajectory-alpha",
+      profileId: "alpha",
+      sessionId: "worker-alpha",
+      modelId: "test-model",
+      events: []
+    });
+    const scheduler = makeScheduler(new FakeTaskStepExecutor((input) => {
+      input.checkpoint({ workerSessionId: "worker-alpha", trajectoryId: "trajectory-alpha" });
+      return { outcome: "succeeded", results: [{ kind: "text", content: "checkpointed" }] };
+    }));
+
+    const run = await scheduler.runOnce();
+    expect(store.listAttempts("task-alpha")[0]).toMatchObject({
+      status: "completed",
+      workerSessionId: "worker-alpha",
+      trajectoryId: "trajectory-alpha"
+    });
+    expect(run).toMatchObject({ dispatched: 1, completed: 1, leaseLost: 0 });
+    expect(store.listSessionLinks("task-alpha")).toContainEqual(expect.objectContaining({
+      sessionId: "worker-alpha",
+      relationship: "worker",
+      stepId: "step-checkpoint",
+      attemptId: store.listAttempts("task-alpha")[0]?.id
+    }));
+    expect(store.listEvents("task-alpha", { kinds: ["attempt-progressed"] })).toHaveLength(1);
+  });
+
   it("reconciles an expired running Attempt after restart and retries only through policy", async () => {
     const graph = makeGraph([makeStep("recover", 0)]);
     graph.task.status = "running";
@@ -383,7 +419,7 @@ describe("WorkflowScheduler", () => {
       store,
       resultService,
       ownerId: "scheduler-alpha",
-      resolveExecutor: (step) => step.key === "supported" ? executor : undefined,
+      resolveExecutor: (_task, step) => step.key === "supported" ? executor : undefined,
       now,
       id: () => nextId("attempt"),
       eventId: () => nextId("scheduler-event")

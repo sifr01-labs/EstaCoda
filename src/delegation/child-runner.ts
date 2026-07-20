@@ -39,6 +39,10 @@ export type ChildRunnerInput = {
   batchTaskCount?: number;
   batchId?: string;
   parentOnEvent?: RuntimeEventSink;
+  prompt?: string;
+  inputMetadata?: Record<string, unknown>;
+  onHeartbeat?: () => void;
+  persistDelegationHeartbeat?: boolean;
   now?: () => Date;
 };
 
@@ -62,12 +66,31 @@ export type ChildRunnerResult =
 
 export async function runDelegatedChild(input: ChildRunnerInput): Promise<ChildRunnerResult> {
   const state = createActivityState(input.now);
-  const prompt = delegatedPrompt(input.task, input.context);
+  const prompt = input.prompt ?? delegatedPrompt(input.task, input.context);
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   let heartbeatId: ReturnType<typeof setInterval> | undefined;
   let staleDiagnosticWritten = false;
   let timedOut = false;
   let cleanupRegistry = false;
+  const pulse = (): boolean => {
+    try {
+      input.onHeartbeat?.();
+      return true;
+    } catch {
+      if (!input.childAbortController.signal.aborted) {
+        input.childAbortController.abort("child-heartbeat-failed");
+      }
+      return false;
+    }
+  };
+
+  if (!pulse()) {
+    return {
+      kind: "cancelled",
+      summary: "Child execution could not renew its owner heartbeat.",
+      lastActivityAt: state.lastActivityAt
+    };
+  }
 
   const relay = createDelegationProgressRelay({
     metadata: {
@@ -84,6 +107,7 @@ export async function runDelegatedChild(input: ChildRunnerInput): Promise<ChildR
     parentOnEvent: input.parentOnEvent,
     onActivity: (_event, summary) => {
       state.record(summary);
+      pulse();
       input.subagentRegistry.updateSubagent(input.subagentId, {
         lastActivityAt: state.lastActivityAt
       });
@@ -100,6 +124,7 @@ export async function runDelegatedChild(input: ChildRunnerInput): Promise<ChildR
     void emitHeartbeat({
       input,
       state,
+      pulse,
       staleDiagnosticWritten,
       markStaleDiagnosticWritten: () => {
         staleDiagnosticWritten = true;
@@ -113,7 +138,7 @@ export async function runDelegatedChild(input: ChildRunnerInput): Promise<ChildR
     trustedWorkspace: input.trustedWorkspace,
     signal: input.childAbortController.signal,
     onEvent: relay,
-    inputMetadata: {
+    inputMetadata: input.inputMetadata ?? {
       delegated: true,
       parentSessionId: input.parentSessionId
     }
@@ -250,10 +275,19 @@ function createActivityState(now: (() => Date) | undefined): ActivityState {
 async function emitHeartbeat(input: {
   input: ChildRunnerInput;
   state: ActivityState;
+  pulse: () => boolean;
   staleDiagnosticWritten: boolean;
   markStaleDiagnosticWritten: () => void;
 }): Promise<void> {
-  if (input.state.completed || input.state.stale) {
+  if (input.state.completed) {
+    return;
+  }
+
+  if (!input.pulse()) {
+    return;
+  }
+
+  if (input.state.stale) {
     return;
   }
 
@@ -273,6 +307,9 @@ async function emitHeartbeat(input: {
     return;
   }
 
+  if (input.input.persistDelegationHeartbeat === false) {
+    return;
+  }
   await input.input.sessionDb.appendEvent(input.input.parentSessionId, {
     kind: "delegation-heartbeat",
     childSessionId: input.input.childSessionId,

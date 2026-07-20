@@ -16,7 +16,11 @@ import type { ToolRiskClass } from "../contracts/tool.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 import { SQLiteTaskStore, TaskStoreProfileError } from "./sqlite-task-store.js";
-import { migrateTaskSchedulerSchemaV11, TASK_SCHEMA_VERSION } from "./task-schema.js";
+import {
+  migrateTaskAgentExecutorSchemaV12,
+  migrateTaskSchedulerSchemaV11,
+  TASK_SCHEMA_VERSION
+} from "./task-schema.js";
 
 describe("SQLiteTaskStore", () => {
   let tempDir: string;
@@ -410,6 +414,74 @@ describe("Task scheduler schema v11 migration", () => {
       expect(database.query<{ owner_id: string; fencing_token: number; cancellation_requested_at: string | null }>(
         "select owner_id, fencing_token, cancellation_requested_at from task_attempt_leases"
       ).get()).toEqual({ owner_id: "scheduler-1", fencing_token: 3, cancellation_requested_at: null });
+    } finally {
+      database.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("Task agent executor schema v12 migration", () => {
+  it("preserves existing Task events and admits fenced progress events idempotently", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-task-agent-migration-"));
+    const database = openDefaultSQLiteDatabase({ path: join(tempDir, "agent.sqlite") });
+    try {
+      database.exec(`
+        pragma foreign_keys = on;
+        create table tasks(id text primary key, profile_id text not null, unique(profile_id, id));
+        create table task_plan_revisions(
+          id text primary key, profile_id text not null, task_id text not null,
+          unique(profile_id, task_id, id)
+        );
+        create table task_steps(
+          id text primary key, profile_id text not null, task_id text not null,
+          unique(profile_id, task_id, id)
+        );
+        create table task_attempts(
+          id text primary key, profile_id text not null, task_id text not null,
+          unique(profile_id, task_id, id)
+        );
+        create table task_events (
+          id text primary key,
+          profile_id text not null,
+          task_id text not null,
+          plan_revision_id text,
+          step_id text,
+          attempt_id text,
+          kind text not null check(kind in ('task-created', 'attempt-started')),
+          timestamp text not null,
+          data_json text not null check(json_valid(data_json)),
+          unique(profile_id, id),
+          foreign key(profile_id, task_id) references tasks(profile_id, id),
+          foreign key(profile_id, task_id, plan_revision_id)
+            references task_plan_revisions(profile_id, task_id, id),
+          foreign key(profile_id, task_id, step_id)
+            references task_steps(profile_id, task_id, id),
+          foreign key(profile_id, task_id, attempt_id)
+            references task_attempts(profile_id, task_id, id)
+        );
+        create index idx_task_events_task on task_events(profile_id, task_id, timestamp, id);
+        create index idx_task_events_attempt on task_events(profile_id, attempt_id, timestamp);
+        insert into tasks values ('task-1', 'alpha');
+        insert into task_events values (
+          'event-1', 'alpha', 'task-1', null, null, null,
+          'task-created', '${NOW}', '{"preserved":true}'
+        );
+      `);
+
+      migrateTaskAgentExecutorSchemaV12(database);
+      migrateTaskAgentExecutorSchemaV12(database);
+      database.query(
+        `insert into task_events values (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run("event-2", "alpha", "task-1", null, null, null, "attempt-progressed", NOW, "{}");
+
+      expect(database.query<{ id: string; kind: string; data_json: string }>(
+        "select id, kind, data_json from task_events order by id"
+      ).all()).toEqual([
+        { id: "event-1", kind: "task-created", data_json: '{"preserved":true}' },
+        { id: "event-2", kind: "attempt-progressed", data_json: "{}" }
+      ]);
+      expect(database.query("pragma foreign_key_check").all()).toEqual([]);
     } finally {
       database.close();
       rmSync(tempDir, { recursive: true, force: true });

@@ -38,6 +38,11 @@ export type TaskExecutorSettlement =
       trajectoryId?: string;
     };
 
+export type TaskAttemptCheckpoint = {
+  workerSessionId?: string;
+  trajectoryId?: string;
+};
+
 export type TaskStepExecutionInput = {
   task: Task;
   step: TaskStep;
@@ -45,6 +50,8 @@ export type TaskStepExecutionInput = {
   signal: AbortSignal;
   /** Renews the fenced lease. A cancellation request aborts the signal and is returned to the executor. */
   heartbeat: () => TaskAttemptLease;
+  /** Durably links worker progress to the Attempt while renewing the same fenced lease. */
+  checkpoint: (checkpoint: TaskAttemptCheckpoint) => TaskAttemptLease;
 };
 
 /** An executor performs one Attempt. It never decides Step or Task completion. */
@@ -53,4 +60,4 @@ export interface TaskStepExecutor {
   execute(input: TaskStepExecutionInput): Promise<TaskExecutorSettlement>;
 }
 
-export type ResolveTaskStepExecutor = (step: TaskStep) => TaskStepExecutor | undefined;
+export type ResolveTaskStepExecutor = (task: Task, step: TaskStep) => TaskStepExecutor | undefined;

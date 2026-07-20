@@ -231,9 +231,10 @@ The Task foundation stores profile-owned multi-step execution graphs and durable
 | `task-result-tools.ts` | Provides linked sessions with bounded `task.result.read` pages |
 | `task-step-executor.ts` | Defines the Attempt execution and settlement boundary |
 | `task-scheduler.ts` | Owns deterministic orchestration and fenced settlement |
+| `agent-step-executor.ts` | Runs an isolated read-only child agent and captures complete results and usage |
 | `contracts/task.ts` | Defines Task records, transitions, authority, budgets, and graph validation |
 
-Normal chat turns remain independent of durable Task scheduling. Result IDs and session links are checked before reads; raw bodies and filesystem paths do not enter Task events. The scheduler cannot grant tool authority, and no production executor is registered yet.
+Normal chat turns remain independent of durable Task scheduling. Result IDs and session links are checked before reads; raw bodies and filesystem paths do not enter Task events. The scheduler cannot grant tool authority. A production read-only agent executor now exists and is integration-tested, but no scheduler host is registered with `createRuntime()` yet.
 
 ### Packs and distribution
 

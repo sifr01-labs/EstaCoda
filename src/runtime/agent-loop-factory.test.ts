@@ -79,6 +79,44 @@ describe("DefaultChildAgentLoopFactory", () => {
     ]));
   });
 
+  it("records durable Task ownership in Task Step worker sessions", async () => {
+    const db = new InMemorySessionDB();
+    const factory = new DefaultChildAgentLoopFactory({
+      builder: fakeBuilder(fakeBuiltSession()) as never,
+      parentRoutes: parentRoutes(),
+      sessionDb: db,
+      trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
+      responseLabel: "EstaCoda",
+      workspaceRoot: "/workspace",
+      id: () => "task-child-1"
+    });
+
+    await factory.createChild({
+      parentSessionId: "parent-1",
+      profileId: "default",
+      task: "Run the durable Step",
+      trustedWorkspace: true,
+      parentVisibleTools: readOnlyParentTools(),
+      taskExecution: {
+        taskId: "task-1",
+        planRevisionId: "revision-1",
+        stepId: "step-1",
+        attemptId: "attempt-1"
+      }
+    });
+
+    await expect(db.getSession("task-child-1")).resolves.toMatchObject({
+      title: "Task Step: Run the durable Step",
+      metadata: {
+        kind: "task-step-worker",
+        taskId: "task-1",
+        planRevisionId: "revision-1",
+        stepId: "step-1",
+        attemptId: "attempt-1"
+      }
+    });
+  });
+
   it("builds a runnable child loop without parent recall, compression, learning, or full project context", async () => {
     const db = new InMemorySessionDB();
     const built = fakeBuiltSession();

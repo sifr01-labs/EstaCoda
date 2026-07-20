@@ -65,6 +65,12 @@ export type CreateChildAgentLoopInput = {
   channel?: ChannelKind;
   trustedWorkspace: boolean;
   parentVisibleTools: readonly ToolDefinition[];
+  taskExecution?: {
+    taskId: string;
+    planRevisionId: string;
+    stepId: string;
+    attemptId: string;
+  };
 };
 
 export type ChildAgentLoopRuntime = {
@@ -258,10 +264,11 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
       id: childSessionId,
       profileId: input.profileId,
       parentSessionId: input.parentSessionId,
-      title: `Delegated: ${input.task.slice(0, 60)}`,
+      title: `${input.taskExecution === undefined ? "Delegated" : "Task Step"}: ${input.task.slice(0, 60)}`,
       metadata: {
-        kind: "delegated-child",
+        kind: input.taskExecution === undefined ? "delegated-child" : "task-step-worker",
         parentSessionId: input.parentSessionId,
+        ...(input.taskExecution ?? {}),
         role,
         depth,
         allowedToolsets,

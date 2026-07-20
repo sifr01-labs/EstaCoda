@@ -1,6 +1,6 @@
 ---
 title: "Durable Task foundation"
-description: "Profile-owned Task persistence, results, and the dormant scheduler core."
+description: "Profile-owned Task persistence, results, scheduling, and isolated agent execution."
 ---
 
 # Durable Task foundation
@@ -16,16 +16,18 @@ Task
             └── Result
 ```
 
-This document describes the persistence, result, and scheduler foundation currently present in the codebase. `WorkflowScheduler` is an internal core exercised with a fake executor; it is not constructed by `createRuntime`, and no ordinary user path can start it. Agent execution, Task operator commands, delivery, and supervisor wiring remain outside this build. The retired Workflow commands fail explicitly instead of falling back to an in-memory or partially initialized implementation.
+This document describes the persistence, result, scheduler, and agent-execution foundation currently present in the codebase. `WorkflowScheduler` and `AgentStepExecutor` are production implementations exercised together in integration tests, but they are not constructed by `createRuntime`, and no ordinary user path can start them. Task operator commands, delivery, and supervisor wiring remain outside this build. The retired Workflow commands fail explicitly instead of falling back to an in-memory or partially initialized implementation.
 
 ## Source of truth
 
 - `src/contracts/task.ts` defines the durable records, legal state transitions, authority and budget policies, and deterministic graph validation.
-- `src/workflow/task-schema.ts` owns SQLite schema version 11.
+- `src/workflow/task-schema.ts` owns SQLite schema version 12.
 - `src/workflow/task-store.ts` defines the profile-bound storage contract.
 - `src/workflow/sqlite-task-store.ts` implements transactional SQLite persistence.
 - `src/workflow/task-result-service.ts` stores bounded result bodies under the selected profile and verifies them before reads.
 - `src/workflow/task-step-executor.ts` defines the narrow Attempt execution and settlement contract.
+- `src/workflow/agent-step-executor.ts` runs one agent Attempt in an isolated child session under narrowed authority.
+- `src/workflow/task-agent-usage.ts` accounts for every provider attempt, fallback, retry, token total, and known route price.
 - `src/workflow/task-scheduler.ts` owns deterministic readiness, dispatch, fencing, retry, cancellation, acceptance, and restart reconciliation.
 - `src/tools/task-result-tools.ts` exposes authorized, paged `task.result.read` access.
 - `src/session/sqlite-session-db.ts` runs the migration and enables SQLite foreign-key enforcement.
@@ -67,12 +69,24 @@ Executors return settlements; they cannot declare a Step or Task complete. The s
 
 Cancellation is durable on the Attempt lease and visible to its owner on heartbeat. Local work also receives an `AbortSignal`. A stale owner cannot write results or settle after expiry, cancellation, or fencing loss. Restart reconciliation preserves unexpired foreign leases, expires or interrupts abandoned Attempts, and retries only when policy permits. Terminal Task state is reconstructed from durable Step state; the scheduler can produce `completed`, `partial`, `failed`, and `cancelled` outcomes without provider inference.
 
+## Agent Step executor
+
+`AgentStepExecutor` adapts the existing child-agent factory and runner to the durable Attempt contract; it does not create a parallel delegation lifecycle. Before constructing a child, it verifies the Task, Step, Attempt, profile, exact workspace binding, creator session, and current workspace trust. The scheduler resolver receives both Task and Step so a future host can expose the executor only for workspace-eligible work without embedding delegation or runtime policy in the scheduler.
+
+Task and Step authority are intersected with the parent session's visible tools. This phase admits only `read-only-local` and `read-only-network` tools whose risk disposition remains `runtime_policy`; blocked tools, non-shared toolsets, write/side-effect risk classes, and `delegate_task` are removed. The child factory's existing non-interactive fail-closed security policy still performs the live decision. Persisted Task authority never becomes an approval.
+
+The child session is marked `task-step-worker` and carries Task, PlanRevision, Step, and Attempt ownership metadata. Its session is checkpointed under the current fencing token before provider work begins. Once the child trajectory is durably present, that trajectory is checkpointed under the same fence. These checkpoints renew the lease, create the worker `TaskSessionLink`, append a bounded `attempt-progressed` event, and cannot be replaced by a later checkpoint or settlement.
+
+The child runner sends progress through the normal runtime event sink while its heartbeat renews the Attempt lease. It suppresses legacy `delegation-heartbeat` persistence for Task execution because the Task journal is the sole lifecycle authority. Durable cancellation aborts the child; timeouts and provider, approval, security, tool, JSON, and artifact-capture failures return bounded classifications to the scheduler.
+
+Successful text and JSON results are captured in full. Artifact bodies are accepted only through an injected, bounded resolver and must match the artifact's declared byte count before the scheduler writes them to the result plane. Dependency context contains bounded result metadata and opaque handles, never raw bodies or filesystem paths; the child reads authorized content through `task.result.read`. Usage includes every provider attempt across retries and fallbacks. Missing token or price data is preserved as explicit incompleteness rather than silently reported as zero-cost complete usage.
+
 ## Migration behavior
 
-Opening a writable `SQLiteSessionDB` migrates it to schema version 11 under the existing migration lock and transaction. Version 10 performs the Task persistence cutover; version 11 adds the durable Attempt cancellation marker without replacing existing leases. The migrations preserve unrelated session, message, trajectory, approval, cron, finalization, and memory-curation data. A best-effort pre-migration backup is created by the session database migration runner.
+Opening a writable `SQLiteSessionDB` migrates it to schema version 12 under the existing migration lock and transaction. Version 10 performs the Task persistence cutover; version 11 adds the durable Attempt cancellation marker without replacing existing leases; version 12 extends the Task event journal with fenced Attempt progress checkpoints while preserving existing Task events. The migrations preserve unrelated session, message, trajectory, approval, cron, finalization, and memory-curation data. A best-effort pre-migration backup is created by the session database migration runner.
 
 The migration is intentionally destructive only for the retired Workflow tables. There is no dual-read, dual-write, compatibility alias, or hidden legacy store.
 
 ## Current boundary
 
-The scheduler core is deliberately dormant and uses no production executor. It does not grant authority: a future `AgentStepExecutor` must still recheck workspace trust, hardline command policy, approvals, profile ownership, budget, and lease fencing at the point of action. Persisted authority can only narrow runtime policy; it cannot approve an operation by itself.
+The scheduler and production agent executor are deliberately dormant at the application boundary. `createRuntime()` does not construct a scheduler host, so no CLI, gateway, cron, or background path dispatches durable Tasks yet. Commit-level integration tests prove the execution boundary without creating a partially live product surface. Supervisor ownership, restart activation, operator commands, delivery, and user-facing status remain required before Task execution is enabled for ordinary users.

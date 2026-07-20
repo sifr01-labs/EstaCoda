@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 
-export const TASK_SCHEMA_VERSION = 11;
+export const TASK_SCHEMA_VERSION = 12;
 
 const WORKFLOW_TABLES = [
   "workflow_event_summaries",
@@ -263,7 +263,7 @@ export function migrateTaskSchemaV10(db: SQLiteDatabase): void {
         'task-created', 'task-state-changed', 'plan-revision-created',
         'plan-revision-validated', 'plan-revision-activated', 'plan-revision-rejected',
         'plan-revision-superseded', 'step-state-changed', 'attempt-created',
-        'attempt-leased', 'attempt-started', 'attempt-waiting', 'attempt-completed',
+        'attempt-leased', 'attempt-started', 'attempt-progressed', 'attempt-waiting', 'attempt-completed',
         'attempt-failed', 'attempt-cancelled', 'attempt-interrupted', 'attempt-expired',
         'approval-requested', 'approval-resolved', 'usage-recorded', 'result-recorded'
       )),
@@ -319,4 +319,58 @@ export function migrateTaskSchedulerSchemaV11(db: SQLiteDatabase): void {
   if (!columns.some((column) => column.name === "cancellation_requested_at")) {
     db.exec("alter table task_attempt_leases add column cancellation_requested_at text");
   }
+}
+
+/** Extends the Task journal with fenced worker-session and trajectory checkpoints. */
+export function migrateTaskAgentExecutorSchemaV12(db: SQLiteDatabase): void {
+  const definition = db.query<{ sql: string | null }>(
+    "select sql from sqlite_master where type = 'table' and name = 'task_events'"
+  ).get()?.sql;
+  if (definition?.includes("attempt-progressed")) return;
+
+  db.exec(`
+    alter table task_events rename to task_events_v11;
+
+    create table task_events (
+      id text primary key,
+      profile_id text not null,
+      task_id text not null,
+      plan_revision_id text,
+      step_id text,
+      attempt_id text,
+      kind text not null check(kind in (
+        'task-created', 'task-state-changed', 'plan-revision-created',
+        'plan-revision-validated', 'plan-revision-activated', 'plan-revision-rejected',
+        'plan-revision-superseded', 'step-state-changed', 'attempt-created',
+        'attempt-leased', 'attempt-started', 'attempt-progressed', 'attempt-waiting',
+        'attempt-completed', 'attempt-failed', 'attempt-cancelled', 'attempt-interrupted',
+        'attempt-expired', 'approval-requested', 'approval-resolved', 'usage-recorded',
+        'result-recorded'
+      )),
+      timestamp text not null,
+      data_json text not null check(json_valid(data_json)),
+      unique(profile_id, id),
+      foreign key(profile_id, task_id)
+        references tasks(profile_id, id) on delete cascade,
+      foreign key(profile_id, task_id, plan_revision_id)
+        references task_plan_revisions(profile_id, task_id, id) on delete cascade,
+      foreign key(profile_id, task_id, step_id)
+        references task_steps(profile_id, task_id, id) on delete cascade,
+      foreign key(profile_id, task_id, attempt_id)
+        references task_attempts(profile_id, task_id, id) on delete cascade
+    );
+
+    insert into task_events (
+      id, profile_id, task_id, plan_revision_id, step_id, attempt_id, kind, timestamp, data_json
+    ) select
+      id, profile_id, task_id, plan_revision_id, step_id, attempt_id, kind, timestamp, data_json
+    from task_events_v11;
+
+    drop table task_events_v11;
+
+    create index idx_task_events_task
+      on task_events(profile_id, task_id, timestamp, id);
+    create index idx_task_events_attempt
+      on task_events(profile_id, attempt_id, timestamp);
+  `);
 }

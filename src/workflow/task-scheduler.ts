@@ -20,6 +20,7 @@ import { TaskResultContentError, type TaskResultService } from "./task-result-se
 import type { TaskStore } from "./task-store.js";
 import type {
   ResolveTaskStepExecutor,
+  TaskAttemptCheckpoint,
   TaskExecutorSettlement,
   TaskStepExecutor
 } from "./task-step-executor.js";
@@ -171,7 +172,7 @@ export class WorkflowScheduler {
       let hasEligibleExecutor = false;
       for (const step of steps) {
         if (step.status !== "ready") continue;
-        const executor = this.#resolveExecutor(step);
+        const executor = this.#resolveExecutor(task, step);
         if (executor === undefined || executor.kind !== step.executor.kind) {
           missingExecutor = true;
           continue;
@@ -277,6 +278,79 @@ export class WorkflowScheduler {
     return renewed;
   }
 
+  checkpoint(attemptId: string, fencingToken: number, checkpoint: TaskAttemptCheckpoint): TaskAttemptLease {
+    const workerSessionId = checkpoint.workerSessionId === undefined
+      ? undefined
+      : requireToken(checkpoint.workerSessionId, "worker session ID");
+    const trajectoryId = checkpoint.trajectoryId === undefined
+      ? undefined
+      : requireToken(checkpoint.trajectoryId, "trajectory ID");
+    if (workerSessionId === undefined && trajectoryId === undefined) {
+      throw new Error("Task Attempt checkpoint must contain worker progress.");
+    }
+
+    const now = this.#now();
+    const timestamp = now.toISOString();
+    const renewed = this.#store.atomicWrite((store) => {
+      const attempt = store.getAttempt(attemptId);
+      if (attempt === null || attempt.lease === undefined ||
+          attempt.lease.ownerId !== this.#ownerId || attempt.lease.fencingToken !== fencingToken) {
+        throw new TaskSchedulerLeaseLostError();
+      }
+      const context = this.#assertCurrentLease(store, attempt.taskId, attemptId, attempt.lease, false);
+      if (workerSessionId !== undefined && context.attempt.workerSessionId !== undefined &&
+          context.attempt.workerSessionId !== workerSessionId) {
+        throw new Error("Task Attempt worker session cannot be replaced after it is linked.");
+      }
+      if (trajectoryId !== undefined && context.attempt.trajectoryId !== undefined &&
+          context.attempt.trajectoryId !== trajectoryId) {
+        throw new Error("Task Attempt trajectory cannot be replaced after it is linked.");
+      }
+
+      const next: TaskAttempt = {
+        ...context.attempt,
+        ...(workerSessionId === undefined ? {} : { workerSessionId }),
+        ...(trajectoryId === undefined ? {} : { trajectoryId }),
+        updatedAt: timestamp
+      };
+      store.updateAttempt(next);
+      if (workerSessionId !== undefined && !store.listSessionLinks(context.task.id).some((link) =>
+        link.relationship === "worker" && link.sessionId === workerSessionId && link.attemptId === attemptId
+      )) {
+        store.linkSession({
+          taskId: context.task.id,
+          profileId: this.#store.profileId,
+          sessionId: workerSessionId,
+          relationship: "worker",
+          stepId: context.attempt.stepId,
+          attemptId,
+          createdAt: timestamp
+        });
+      }
+      const lease = store.renewAttemptLease({
+        attemptId,
+        ownerId: this.#ownerId,
+        fencingToken,
+        heartbeatAt: timestamp,
+        expiresAt: new Date(now.getTime() + this.#leaseMs).toISOString()
+      });
+      if (lease === null || lease.cancellationRequestedAt !== undefined) {
+        throw new TaskSchedulerLeaseLostError();
+      }
+      store.appendEvent(this.#event(context.task, "attempt-progressed", timestamp, {
+        attemptId,
+        stepId: context.attempt.stepId,
+        planRevisionId: context.attempt.planRevisionId,
+        data: {
+          ...(workerSessionId === undefined ? {} : { workerSessionId }),
+          ...(trajectoryId === undefined ? {} : { trajectoryId })
+        }
+      }));
+      return lease;
+    });
+    return renewed;
+  }
+
   #reconcile(result: MutableRunResult): void {
     const now = this.#now();
     const tasks = this.#store.listTasks({ statuses: RECONCILABLE_TASK_STATUSES, limit: 1_000 });
@@ -366,7 +440,7 @@ export class WorkflowScheduler {
     const revisionId = task.activePlanRevisionId;
     if (revisionId === undefined) return task;
     const hasAvailable = this.#store.listSteps(task.id, revisionId)
-      .some((step) => step.status === "ready" && this.#resolveExecutor(step)?.kind === step.executor.kind);
+      .some((step) => step.status === "ready" && this.#resolveExecutor(task, step)?.kind === step.executor.kind);
     if (!hasAvailable) return task;
     const now = this.#now().toISOString();
     return this.#store.atomicWrite((store) => {
@@ -562,7 +636,8 @@ export class WorkflowScheduler {
           step,
           attempt,
           signal: controller.signal,
-          heartbeat: () => this.heartbeat(attempt.id, lease.fencingToken)
+          heartbeat: () => this.heartbeat(attempt.id, lease.fencingToken),
+          checkpoint: (checkpoint) => this.checkpoint(attempt.id, lease.fencingToken, checkpoint)
         });
       } catch (error) {
         if (error instanceof TaskSchedulerLeaseLostError) throw error;
@@ -719,12 +794,20 @@ export class WorkflowScheduler {
       const context = this.#assertCurrentLease(store, taskId, attemptId, lease, false);
       const currentStep = store.getStep(stepId);
       if (currentStep === null || currentStep.status !== "running") throw new TaskSchedulerLeaseLostError();
+      if (settlement.workerSessionId !== undefined && context.attempt.workerSessionId !== undefined &&
+          settlement.workerSessionId !== context.attempt.workerSessionId) {
+        throw new Error("Task Attempt settlement cannot replace its checkpointed worker session.");
+      }
+      if (settlement.trajectoryId !== undefined && context.attempt.trajectoryId !== undefined &&
+          settlement.trajectoryId !== context.attempt.trajectoryId) {
+        throw new Error("Task Attempt settlement cannot replace its checkpointed trajectory.");
+      }
       const completed: TaskAttempt = {
         ...context.attempt,
         status: "completed",
         usage,
-        workerSessionId: settlement.workerSessionId,
-        trajectoryId: settlement.trajectoryId,
+        workerSessionId: settlement.workerSessionId ?? context.attempt.workerSessionId,
+        trajectoryId: settlement.trajectoryId ?? context.attempt.trajectoryId,
         updatedAt: now,
         completedAt: now
       };

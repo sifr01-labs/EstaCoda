@@ -336,6 +336,7 @@ export type TaskEventKind =
   | "attempt-created"
   | "attempt-leased"
   | "attempt-started"
+  | "attempt-progressed"
   | "attempt-waiting"
   | "attempt-completed"
   | "attempt-failed"
