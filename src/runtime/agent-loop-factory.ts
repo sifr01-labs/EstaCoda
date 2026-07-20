@@ -123,6 +123,7 @@ export type DefaultChildAgentLoopFactoryOptions = {
   agentProfile?: ConstructorParameters<typeof AgentLoop>[0]["agentProfile"];
   taskStore?: TaskStore;
   taskWorkspace?: TaskWorkspaceBinding;
+  onTaskCreated?: (taskId: string) => Promise<void>;
   id?: () => string;
 };
 
@@ -153,6 +154,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
   readonly #agentProfile: ConstructorParameters<typeof AgentLoop>[0]["agentProfile"];
   readonly #taskStore: TaskStore | undefined;
   readonly #taskWorkspace: TaskWorkspaceBinding | undefined;
+  readonly #onTaskCreated: ((taskId: string) => Promise<void>) | undefined;
   readonly #id: () => string;
 
   constructor(options: DefaultChildAgentLoopFactoryOptions) {
@@ -172,6 +174,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
     this.#agentProfile = options.agentProfile;
     this.#taskStore = options.taskStore;
     this.#taskWorkspace = options.taskWorkspace;
+    this.#onTaskCreated = options.onTaskCreated;
     this.#id = options.id ?? (() => `child_${crypto.randomUUID()}`);
   }
 
@@ -223,7 +226,8 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
             workspace: this.#taskWorkspace!,
             config: this.#delegationConfig,
             visibleTools: () => toolRegistry.list(),
-            activeTaskExecution: input.taskExecution
+            activeTaskExecution: input.taskExecution,
+            onTaskCreated: this.#onTaskCreated
           }),
       trustedWorkspace: async () => input.trustedWorkspace,
       memoryRecall: "disabled",

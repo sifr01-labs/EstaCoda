@@ -136,7 +136,7 @@ describe("createDelegationTools", () => {
 
 function tools(create: ReturnType<typeof vi.fn>) {
   return createDelegationTools({
-    service: { create } as unknown as DurableDelegationService,
+    service: { createAndActivate: create } as unknown as DurableDelegationService,
     trustedWorkspace: () => true
   });
 }

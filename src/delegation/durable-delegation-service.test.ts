@@ -71,6 +71,28 @@ describe("DurableDelegationService", () => {
     ]);
   });
 
+  it("activates a Task only after its durable graph is visible", async () => {
+    const activated = vi.fn(async (taskId: string) => {
+      expect(store.getTask(taskId)).toMatchObject({ id: taskId, status: "queued" });
+    });
+    const service = new DurableDelegationService({
+      store,
+      creatorSessionId: () => "parent",
+      workspace: workspace(),
+      config: DEFAULT_DELEGATION_CONFIG,
+      visibleTools,
+      onTaskCreated: activated
+    });
+
+    const handle = await service.createAndActivate({
+      toolCallId: "call-activate",
+      trustedWorkspace: true,
+      tasks: [{ task: "Start foreground work" }]
+    });
+
+    expect(activated).toHaveBeenCalledWith(handle.taskId);
+  });
+
   it("creates one immutable fan-out graph with a terminal synthesis primary Result Step", () => {
     const service = rootService(store);
     const request = {

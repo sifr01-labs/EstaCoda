@@ -61,6 +61,7 @@ export class DurableDelegationService {
   readonly #visibleTools: () => readonly ToolDefinition[];
   readonly #activeTaskExecution: ActiveTaskExecution | undefined;
   readonly #completionDestination: (() => TaskDeliveryDestination | undefined) | undefined;
+  readonly #onTaskCreated: ((taskId: string) => Promise<void>) | undefined;
 
   constructor(options: {
     store: TaskStore;
@@ -70,6 +71,7 @@ export class DurableDelegationService {
     visibleTools: () => readonly ToolDefinition[];
     activeTaskExecution?: ActiveTaskExecution;
     completionDestination?: () => TaskDeliveryDestination | undefined;
+    onTaskCreated?: (taskId: string) => Promise<void>;
     fixedTasks?: FixedTaskService;
   }) {
     this.#store = options.store;
@@ -80,6 +82,13 @@ export class DurableDelegationService {
     this.#visibleTools = options.visibleTools;
     this.#activeTaskExecution = options.activeTaskExecution;
     this.#completionDestination = options.completionDestination;
+    this.#onTaskCreated = options.onTaskCreated;
+  }
+
+  async createAndActivate(request: DurableDelegationRequest): Promise<DurableDelegationHandle> {
+    const handle = this.create(request);
+    await this.#onTaskCreated?.(handle.taskId);
+    return handle;
   }
 
   create(request: DurableDelegationRequest): DurableDelegationHandle {

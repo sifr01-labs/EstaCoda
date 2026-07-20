@@ -206,6 +206,8 @@ export type RuntimeOptions = {
   sessionMetadata?: Record<string, unknown>;
   /** Optional authorized origin for Tasks created outside the local CLI. */
   taskCreationOrigin?: TaskCreationOrigin;
+  /** Process-level activation hook invoked after a durable Task graph is committed. */
+  onTaskCreated?: (taskId: string) => Promise<void>;
 };
 
 type RuntimeBranding = Pick<
@@ -935,7 +937,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     ui: options.ui,
     agentProfile: options.agentProfile,
     taskStore,
-    taskWorkspace
+    taskWorkspace,
+    onTaskCreated: options.onTaskCreated
   });
   const builtSession = await builder.buildSession({
     sessionId,
@@ -957,7 +960,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           workspace: taskWorkspace,
           config: options.delegationConfig ?? DEFAULT_DELEGATION_CONFIG,
           visibleTools: () => toolRegistry.list(),
-          completionDestination: () => currentTaskCreationOrigin().completionDestination
+          completionDestination: () => currentTaskCreationOrigin().completionDestination,
+          onTaskCreated: options.onTaskCreated
         }),
     trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot),
     disabledToolsets: options.disabledToolsets,
@@ -1026,13 +1030,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             throw new Error("Task creation requires a trusted workspace.");
           }
           const origin = currentTaskCreationOrigin();
-          return taskOperatorService.begin({
+          const task = taskOperatorService.begin({
             objective,
             workspace: taskWorkspace,
             creatorSessionId: sessionRuntimeContext.currentSessionId(),
             source: origin.source,
             completionDestination: origin.completionDestination
           });
+          await options.onTaskCreated?.(task.taskId);
+          return task;
         },
     withTaskCreationOrigin(origin, work) {
       return taskCreationOriginContext.run(normalizeTaskCreationOrigin(origin), work);

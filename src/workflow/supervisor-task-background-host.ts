@@ -71,7 +71,7 @@ export class SupervisorTaskBackgroundHost {
       scheduler: {
         runOnce: async () => {
           await this.#ensureExecutorForRunnableWork();
-          return await scheduler.runOnce();
+          return await scheduler.runOnce({ eligibleTaskIds: this.#eligibleTaskIds() });
         }
       },
       delivery
@@ -108,7 +108,7 @@ export class SupervisorTaskBackgroundHost {
 
   async #ensureExecutorForRunnableWork(): Promise<void> {
     if (this.#disposed || this.#executor !== undefined || Date.now() < this.#nextExecutorCreationAt) return;
-    if (this.#store.listTasks({ statuses: RUNNABLE_TASK_STATUSES, limit: 1 }).length === 0) return;
+    if (this.#eligibleTaskIds(1).length === 0) return;
     if (this.#executorCreation !== undefined) return await this.#executorCreation;
 
     const creation = (async () => {
@@ -136,6 +136,17 @@ export class SupervisorTaskBackgroundHost {
     this.#executorCreation = creation;
     await creation;
     if (this.#executorCreation === creation) this.#executorCreation = undefined;
+  }
+
+  #eligibleTaskIds(limit = 1_000): string[] {
+    const now = Date.now();
+    return this.#store.listTasks({ statuses: RUNNABLE_TASK_STATUSES, limit: 1_000 })
+      .filter((task) => {
+        const lease = this.#store.getTaskHostLease(task.id);
+        return lease === null || Date.parse(lease.expiresAt) <= now;
+      })
+      .slice(0, limit)
+      .map((task) => task.id);
   }
 }
 

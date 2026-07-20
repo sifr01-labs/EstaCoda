@@ -129,7 +129,7 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
           role: input.role ?? "leaf",
           modelOverride: parsed.modelOverride
         }];
-        const handle = options.service.create({
+        const handle = await options.service.createAndActivate({
           toolCallId: context.toolCallId,
           tasks,
           ...(parsed.synthesis === undefined ? {} : { synthesis: parsed.synthesis }),

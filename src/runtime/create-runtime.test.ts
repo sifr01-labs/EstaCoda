@@ -2840,7 +2840,8 @@ describe("createRuntime MCP trust gating", () => {
       listModels: () => [mockModel],
       complete: provider
     });
-    const runtime = await createRuntime({ ...options, providerRegistry: registry, sessionDb });
+    const onTaskCreated = vi.fn(async () => undefined);
+    const runtime = await createRuntime({ ...options, providerRegistry: registry, sessionDb, onTaskCreated });
     try {
       await runtime.trustWorkspace?.();
       const request = {
@@ -2867,8 +2868,27 @@ describe("createRuntime MCP trust gating", () => {
       expect(task).toMatchObject({ source: "delegation", status: "queued", creatorSessionId: runtime.sessionId });
       expect(steps.map((step) => step.executor.role)).toEqual(["worker", "orchestrator"]);
       expect(steps[1]?.executor.model).toEqual({ id: "mock-model" });
+      expect(onTaskCreated).toHaveBeenCalledTimes(2);
+      expect(onTaskCreated).toHaveBeenNthCalledWith(1, firstHandle?.taskId);
       expect(provider).not.toHaveBeenCalled();
       expect((await sessionDb.listSessions("default")).map((session) => session.id)).toEqual([runtime.sessionId]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("activates operator-created Tasks through the process hook", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = await createSQLiteSessionDB({ path: join(options.workspaceRoot, "operator-task-sessions.sqlite") });
+    await sessionDb.createSession({ id: options.sessionId, profileId: "default" });
+    const onTaskCreated = vi.fn(async () => undefined);
+    const runtime = await createRuntime({ ...options, sessionDb, onTaskCreated });
+    try {
+      await runtime.trustWorkspace?.();
+      const task = await runtime.beginTask?.("Execute this Task in the foreground.");
+
+      expect(task?.status).toBe("queued");
+      expect(onTaskCreated).toHaveBeenCalledWith(task?.taskId);
     } finally {
       await runtime.dispose();
     }

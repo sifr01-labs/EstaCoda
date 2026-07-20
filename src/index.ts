@@ -2,7 +2,7 @@
 import { resolveHomeDir } from "./config/home-dir.js";
 import { loadRuntimeConfig, type LoadedRuntimeConfig } from "./config/runtime-config.js";
 import { resolveStateHome } from "./config/state-home.js";
-import { defaultProfileId, readActiveProfile } from "./config/profile-home.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "./config/profile-home.js";
 import { PersistentCliSessionStore } from "./cli/cli-session-store.js";
 import { parseGlobalCliOptions, runCliCommand } from "./cli/cli.js";
 import type { SessionDB } from "./contracts/session.js";
@@ -23,6 +23,10 @@ import { createSQLiteSessionDB } from "./session/session-setup.js";
 import { scheduleStartupUpdatePrefetch, shouldScheduleStartupUpdatePrefetch } from "./lifecycle/startup-update.js";
 import { resolveSetupCopy } from "./setup/setup-copy.js";
 import { createSessionId, resolveStartupSessionId } from "./session/session-id.js";
+import { ForegroundTaskHost } from "./workflow/foreground-task-host.js";
+import { SQLiteTaskStore } from "./workflow/sqlite-task-store.js";
+import { TaskResultService } from "./workflow/task-result-service.js";
+import { resolveTaskWorkspaceBinding } from "./workflow/task-workspace.js";
 
 async function main(): Promise<void> {
   const rawArgv = process.argv.slice(2);
@@ -186,9 +190,16 @@ async function main(): Promise<void> {
     throw error;
   }
 
+  let foregroundTaskHost: ForegroundTaskHost | undefined;
+  const activateForegroundTask = async (taskId: string): Promise<void> => {
+    await foregroundTaskHost?.startTask(taskId);
+  };
+
   async function buildRuntime(input: {
     sessionId?: string;
     sessionDb?: SessionDB;
+    closeSessionDbOnDispose?: boolean;
+    sessionMetadata?: Record<string, unknown>;
   } = {}) {
     const nowTrusted = await trustStore.isTrusted(workspaceRoot);
     const latestConfig = await loadRuntimeConfig({ workspaceRoot, homeDir, profileId });
@@ -213,6 +224,8 @@ async function main(): Promise<void> {
       workspaceRoot,
       sessionId: input.sessionId,
       sessionDb,
+      closeSessionDbOnDispose: input.closeSessionDbOnDispose,
+      sessionMetadata: input.sessionMetadata,
       externalSkillRoots: latestConfig.skills.externalDirs,
       skillAutonomy: latestConfig.skills.autonomy,
       skillConfig: latestConfig.skills.config,
@@ -246,7 +259,8 @@ async function main(): Promise<void> {
       securityMode: latestConfig.security.approvalMode,
       securityAssessor: latestConfig.security.assessor,
       approvalController: cliApprovalController,
-      workspaceTrusted: nowTrusted
+      workspaceTrusted: nowTrusted,
+      onTaskCreated: activateForegroundTask
     });
   }
 
@@ -258,7 +272,7 @@ async function main(): Promise<void> {
     };
   }
 
-  async function openLocalSessionDb(): Promise<SessionDB> {
+  async function openLocalSessionDb() {
     return createSQLiteSessionDB({ path: stateHome.sessionsSqlitePath });
   }
 
@@ -310,30 +324,68 @@ async function main(): Promise<void> {
   }
 
   if (argv.length === 0 && canRunInteractive()) {
-    await runSessionLoop({
-      runtime,
-      workspaceRoot,
-      locale: launchLocale ?? (config.ui.language === "ar" ? "ar" : "en"),
-      showResponseProgress: config.ui.showResponseProgress,
-      operatorConsole: { enabled: true },
-      refreshRuntime: async (options) => {
-        const nextRuntime = await buildRuntime({
-          sessionId: options?.preserveSession === true ? runtime.sessionId : createSessionId(),
-          sessionDb: await openLocalSessionDb()
+    const foregroundSessionDb = await openLocalSessionDb();
+    const foregroundStore = new SQLiteTaskStore({ db: foregroundSessionDb.db, profileId });
+    const foregroundWorkspace = await resolveTaskWorkspaceBinding(workspaceRoot);
+    const profilePaths = resolveProfileStateHome({ homeDir, profileId });
+    const host = new ForegroundTaskHost({
+      store: foregroundStore,
+      resultService: new TaskResultService({
+        store: foregroundStore,
+        profileId,
+        contentRoot: profilePaths.taskResultsPath,
+        sessionDb: foregroundSessionDb
+      }),
+      ownerId: `foreground-task-host-${process.pid}-${Date.now()}`,
+      workspaceIdentityHash: foregroundWorkspace.identityHash,
+      createExecutorRuntime: async () => {
+        const executorRuntime = await buildRuntime({
+          sessionId: createSessionId(),
+          sessionDb: foregroundSessionDb,
+          closeSessionDbOnDispose: false,
+          sessionMetadata: { kind: "task-foreground-host" }
         });
-        await cliSessionStore.setSessionId(workspaceRoot, nextRuntime.sessionId);
-        return nextRuntime;
+        const executor = executorRuntime.taskAgentExecutor;
+        if (executor === undefined) {
+          await executorRuntime.dispose();
+          throw new Error("Interactive durable Task executor is unavailable for this runtime.");
+        }
+        return { executor, dispose: () => executorRuntime.dispose() };
       },
-      switchRuntime: async (sessionId) => {
-        const nextRuntime = await buildRuntime({
-          sessionId,
-          sessionDb: await openLocalSessionDb()
-        });
-        await cliSessionStore.setSessionId(workspaceRoot, nextRuntime.sessionId);
-        return nextRuntime;
-      },
-      modelSwitchContext
+      logWarning: (message) => console.warn(message)
     });
+    foregroundTaskHost = host;
+    try {
+      await host.start();
+      await runSessionLoop({
+        runtime,
+        workspaceRoot,
+        locale: launchLocale ?? (config.ui.language === "ar" ? "ar" : "en"),
+        showResponseProgress: config.ui.showResponseProgress,
+        operatorConsole: { enabled: true },
+        refreshRuntime: async (options) => {
+          const nextRuntime = await buildRuntime({
+            sessionId: options?.preserveSession === true ? runtime.sessionId : createSessionId(),
+            sessionDb: await openLocalSessionDb()
+          });
+          await cliSessionStore.setSessionId(workspaceRoot, nextRuntime.sessionId);
+          return nextRuntime;
+        },
+        switchRuntime: async (sessionId) => {
+          const nextRuntime = await buildRuntime({
+            sessionId,
+            sessionDb: await openLocalSessionDb()
+          });
+          await cliSessionStore.setSessionId(workspaceRoot, nextRuntime.sessionId);
+          return nextRuntime;
+        },
+        modelSwitchContext
+      });
+    } finally {
+      await host.shutdown();
+      foregroundTaskHost = undefined;
+      foregroundSessionDb.close();
+    }
     await runtime.dispose();
     process.exit(0);
   }
