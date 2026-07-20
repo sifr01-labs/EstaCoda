@@ -9,6 +9,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   renameSync,
   unlinkSync,
   writeFileSync
@@ -57,6 +58,35 @@ export type TaskResultPage = {
   hasMore: boolean;
 };
 
+/** Opaque handle for bodies prepared on disk but not yet published in Task metadata. */
+export type PreparedTaskResultBatch = {
+  id: string;
+  results: readonly TaskResult[];
+};
+
+export type TaskResultPreparationRecovery = {
+  removed: number;
+  finalized: number;
+  unresolved: number;
+};
+
+type PreparedTaskResultEntry = {
+  result: TaskResult;
+  bytes: Uint8Array;
+  eventId: string;
+  expectedLease?: {
+    ownerId: string;
+    fencingToken: number;
+  };
+  contentPath: string;
+  markerPath: string;
+};
+
+type PreparedTaskResultState = {
+  batch: PreparedTaskResultBatch;
+  entries: readonly PreparedTaskResultEntry[];
+};
+
 export type TaskResultServiceOptions = {
   store: TaskStore;
   profileId: string;
@@ -98,6 +128,7 @@ export class TaskResultService {
   readonly #handleId: () => string;
   readonly #eventId: () => string;
   readonly #now: () => Date;
+  readonly #prepared = new Map<string, PreparedTaskResultState>();
 
   constructor(options: TaskResultServiceOptions) {
     const profileId = options.profileId.trim();
@@ -124,6 +155,140 @@ export class TaskResultService {
   }
 
   record(input: RecordTaskResultInput): TaskResult {
+    const batch = this.prepare([input]);
+    try {
+      const published = this.#store.atomicWrite((store) => this.publishPrepared(batch, store));
+      this.finalizePrepared(batch);
+      return published[0]!;
+    } catch (error) {
+      this.discardPrepared(batch);
+      throw error;
+    }
+  }
+
+  /** Writes and verifies bodies while keeping their metadata absent from the TaskStore. */
+  prepare(inputs: readonly RecordTaskResultInput[]): PreparedTaskResultBatch {
+    const entries = inputs.map((input) => this.#prepareEntry(input));
+    this.#validatePreparedEntries(this.#store, entries);
+    const ids = new Set<string>();
+    const handles = new Set<string>();
+    for (const entry of entries) {
+      if (ids.has(entry.result.id) || handles.has(entry.result.handle)) {
+        throw new TaskResultContentError("duplicate-prepared-result", "Prepared Task result identities must be unique.");
+      }
+      ids.add(entry.result.id);
+      handles.add(entry.result.handle);
+    }
+
+    const written: PreparedTaskResultEntry[] = [];
+    try {
+      for (const entry of entries) {
+        this.#writePreparedContent(entry);
+        this.#readVerifiedContent(entry.result);
+        written.push(entry);
+      }
+    } catch (error) {
+      for (const entry of [...written, ...entries.slice(written.length)]) this.#removePreparedEntry(entry, false);
+      throw error;
+    }
+
+    let id = randomUUID();
+    while (this.#prepared.has(id)) id = randomUUID();
+    const batch = { id, results: entries.map((entry) => entry.result) } satisfies PreparedTaskResultBatch;
+    this.#prepared.set(id, { batch, entries });
+    return batch;
+  }
+
+  /**
+   * Inserts prepared metadata and journal events into the caller's active transaction.
+   * The caller must settle the Attempt/Step/Task in that same transaction, then call finalizePrepared.
+   */
+  publishPrepared(batch: PreparedTaskResultBatch, store: TaskStore): readonly TaskResult[] {
+    const state = this.#preparedState(batch);
+    this.#validatePreparedEntries(store, state.entries);
+    for (const entry of state.entries) {
+      const result = entry.result;
+      const persistedAttempt = result.attemptId === undefined ? null : store.getAttempt(result.attemptId);
+      const persistedStep = result.stepId === undefined ? null : store.getStep(result.stepId);
+      store.recordResult(result);
+      store.appendEvent({
+        id: entry.eventId,
+        profileId: this.#profileId,
+        taskId: result.taskId,
+        ...(persistedAttempt === null
+          ? persistedStep === null ? {} : { planRevisionId: persistedStep.planRevisionId }
+          : { planRevisionId: persistedAttempt.planRevisionId }),
+        ...(result.stepId === undefined ? {} : { stepId: result.stepId }),
+        ...(result.attemptId === undefined ? {} : { attemptId: result.attemptId }),
+        kind: "result-recorded",
+        timestamp: result.createdAt,
+        data: {
+          resultId: result.id,
+          kind: result.kind,
+          handle: result.handle,
+          byteLength: result.byteLength,
+          contentHash: result.contentHash
+        }
+      });
+    }
+    return state.batch.results;
+  }
+
+  /** Removes preparation markers after the enclosing SQLite transaction commits. */
+  finalizePrepared(batch: PreparedTaskResultBatch): void {
+    const state = this.#prepared.get(batch.id);
+    if (state === undefined || state.batch !== batch) return;
+    this.#prepared.delete(batch.id);
+    for (const entry of state.entries) removeFileBestEffort(entry.markerPath);
+  }
+
+  /** Removes uncommitted bodies; committed bodies are preserved if the transaction did succeed. */
+  discardPrepared(batch: PreparedTaskResultBatch): void {
+    const state = this.#prepared.get(batch.id);
+    if (state === undefined || state.batch !== batch) return;
+    this.#prepared.delete(batch.id);
+    for (const entry of state.entries) this.#removePreparedEntry(entry, true);
+  }
+
+  /** Reconciles preparation markers left by a process crash before or after SQLite commit. */
+  recoverPrepared(): TaskResultPreparationRecovery {
+    const recovery: TaskResultPreparationRecovery = { removed: 0, finalized: 0, unresolved: 0 };
+    if (!existsSync(this.#contentRoot)) return recovery;
+    assertPrivateDirectory(this.#contentRoot);
+    for (const shard of readdirSync(this.#contentRoot, { withFileTypes: true })) {
+      if (!/^[0-9a-f]{2}$/u.test(shard.name) || !shard.isDirectory()) continue;
+      const shardPath = join(this.#contentRoot, shard.name);
+      assertPrivateDirectory(shardPath);
+      for (const file of readdirSync(shardPath, { withFileTypes: true })) {
+        if (!file.isFile()) continue;
+        if (/^\.[A-Za-z0-9._-]+\.tmp$/u.test(file.name)) {
+          removeFileIfPresent(join(shardPath, file.name));
+          recovery.removed++;
+          continue;
+        }
+        const marker = /^([0-9a-f]{64})\.pending$/u.exec(file.name);
+        if (marker === null) continue;
+        const markerPath = join(shardPath, file.name);
+        const contentPath = join(shardPath, `${marker[1]}.bin`);
+        const resultId = readPreparedResultId(markerPath);
+        if (resultId === undefined) {
+          recovery.unresolved++;
+          continue;
+        }
+        const result = this.#store.getResult(resultId);
+        const committed = result !== null && contentDigest(result.handle) === marker[1];
+        if (committed) recovery.finalized++;
+        else {
+          removeFileIfPresent(contentPath);
+          recovery.removed++;
+        }
+        removeFileIfPresent(markerPath);
+      }
+    }
+    return recovery;
+  }
+
+  #prepareEntry(input: RecordTaskResultInput): PreparedTaskResultEntry {
     if (!isTaskResultKind(input.kind)) {
       throw new TaskResultContentError("invalid-kind", "Task result kind is invalid.");
     }
@@ -143,14 +308,17 @@ export class TaskResultService {
     if (input.mimeType !== undefined && codePointLength(input.mimeType) > 255) {
       throw new TaskResultContentError("mime-type-too-large", "Task result MIME type exceeds 255 characters.");
     }
+    if (input.expiresAt !== undefined && !Number.isFinite(Date.parse(input.expiresAt))) {
+      throw new TaskResultContentError("invalid-expiry", "Task result expiresAt must be an ISO-compatible timestamp.");
+    }
 
     const taskId = nonEmpty(input.taskId, "Task ID");
+    const attemptId = input.attemptId === undefined ? undefined : nonEmpty(input.attemptId, "Attempt ID");
+    const attempt = attemptId === undefined ? null : this.#store.getAttempt(attemptId);
+    const effectiveStepId = input.stepId ?? attempt?.stepId;
     const task = this.#store.getTask(taskId);
     if (task === null) throw new TaskResultAccessError();
-    const attempt = input.attemptId === undefined
-      ? null
-      : this.#store.getAttempt(nonEmpty(input.attemptId, "Attempt ID"));
-    if (input.attemptId !== undefined && (attempt === null || attempt.taskId !== taskId)) {
+    if (attemptId !== undefined && (attempt === null || attempt.taskId !== taskId)) {
       throw new TaskResultContentError("attempt-task-mismatch", "Result Attempt does not belong to its Task.");
     }
     if (input.expectedLease !== undefined) {
@@ -159,10 +327,7 @@ export class TaskResultService {
       }
       assertCurrentResultLease(attempt.lease, input.expectedLease, this.#now().getTime());
     }
-    const effectiveStepId = input.stepId ?? attempt?.stepId;
-    const step = effectiveStepId === undefined
-      ? null
-      : this.#store.getStep(nonEmpty(effectiveStepId, "Step ID"));
+    const step = effectiveStepId === undefined ? null : this.#store.getStep(nonEmpty(effectiveStepId, "Step ID"));
     if (effectiveStepId !== undefined && (step === null || step.taskId !== taskId)) {
       throw new TaskResultContentError("step-task-mismatch", "Result Step does not belong to its Task.");
     }
@@ -170,103 +335,123 @@ export class TaskResultService {
       throw new TaskResultContentError("attempt-step-mismatch", "Result Attempt does not belong to its Step.");
     }
     if (step !== null) assertResultMatchesStepPolicy(step.resultPolicy.kind, input.kind);
-    if (input.expiresAt !== undefined && !Number.isFinite(Date.parse(input.expiresAt))) {
-      throw new TaskResultContentError("invalid-expiry", "Task result expiresAt must be an ISO-compatible timestamp.");
-    }
-
     const id = nonEmpty(input.id ?? this.#id(), "result ID");
     const handle = `task-result:${nonEmpty(this.#handleId(), "result handle ID")}`;
     const now = this.#now().toISOString();
-    const contentHash = hashContent(bytes);
     const result: TaskResult = {
       id,
       profileId: this.#profileId,
       taskId,
-      ...(effectiveStepId === undefined ? {} : { stepId: effectiveStepId }),
-      ...(input.attemptId === undefined ? {} : { attemptId: nonEmpty(input.attemptId, "Attempt ID") }),
+      ...(effectiveStepId === undefined ? {} : { stepId: nonEmpty(effectiveStepId, "Step ID") }),
+      ...(attemptId === undefined ? {} : { attemptId }),
       kind: input.kind,
       status: "available",
       handle,
       byteLength: bytes.byteLength,
-      contentHash,
+      contentHash: hashContent(bytes),
       mimeType: input.mimeType ?? defaultMimeType(input.kind),
       ...(input.summary === undefined ? {} : { summary: input.summary }),
       createdAt: now,
       ...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt })
     };
+    return {
+      result,
+      bytes,
+      eventId: this.#eventId(),
+      expectedLease: input.expectedLease,
+      contentPath: this.#contentPath(handle),
+      markerPath: this.#markerPath(result)
+    };
+  }
 
-    const contentPath = this.#writeContent(handle, bytes);
-    try {
-      this.#store.atomicWrite((store) => {
-        const persistedTask = store.getTask(result.taskId);
-        if (persistedTask === null) throw new TaskResultAccessError();
-
-        const persistedStep = result.stepId === undefined ? null : store.getStep(result.stepId);
-        if (result.stepId !== undefined && (persistedStep === null || persistedStep.taskId !== result.taskId)) {
-          throw new TaskResultContentError("step-task-mismatch", "Result Step does not belong to its Task.");
+  #validatePreparedEntries(store: TaskStore, entries: readonly PreparedTaskResultEntry[]): void {
+    const addedBytesByStep = new Map<string, number>();
+    for (const entry of entries) {
+      const result = entry.result;
+      const task = store.getTask(result.taskId);
+      if (task === null) throw new TaskResultAccessError();
+      const attempt = result.attemptId === undefined ? null : store.getAttempt(result.attemptId);
+      if (result.attemptId !== undefined && (attempt === null || attempt.taskId !== result.taskId)) {
+        throw new TaskResultContentError("attempt-task-mismatch", "Result Attempt does not belong to its Task.");
+      }
+      if (entry.expectedLease !== undefined) {
+        if (attempt === null) {
+          throw new TaskResultContentError("result-fence-missing-attempt", "A fenced Result requires an Attempt.");
         }
-        const persistedAttempt = result.attemptId === undefined ? null : store.getAttempt(result.attemptId);
-        if (result.attemptId !== undefined && (persistedAttempt === null || persistedAttempt.taskId !== result.taskId)) {
-          throw new TaskResultContentError("attempt-task-mismatch", "Result Attempt does not belong to its Task.");
-        }
-        if (input.expectedLease !== undefined) {
-          if (persistedAttempt === null) {
-            throw new TaskResultContentError("result-fence-missing-attempt", "A fenced Result requires an Attempt.");
-          }
-          assertCurrentResultLease(persistedAttempt.lease, input.expectedLease, this.#now().getTime());
-        }
-        if (persistedAttempt !== null && result.stepId !== undefined && persistedAttempt.stepId !== result.stepId) {
-          throw new TaskResultContentError("attempt-step-mismatch", "Result Attempt does not belong to its Step.");
-        }
-
-        if (result.stepId !== undefined) {
-          const effectiveStep = persistedStep;
-          if (effectiveStep === null || effectiveStep.taskId !== result.taskId) {
-            throw new TaskResultContentError("step-task-mismatch", "Result Step does not belong to its Task.");
-          }
-          assertResultMatchesStepPolicy(effectiveStep.resultPolicy.kind, result.kind);
-          const existingBytes = store.listResults(result.taskId)
-            .filter((candidate) => candidate.status === "available" && candidate.stepId === result.stepId)
-            .reduce((total, candidate) => total + candidate.byteLength, 0);
-          const resultLimit = Math.min(
-            TASK_GRAPH_LIMITS.maxResultBytesPerStep,
-            effectiveStep.resultPolicy.maxBytes
-          );
-          if (existingBytes + result.byteLength > resultLimit) {
-            throw new TaskResultContentError(
-              "step-result-budget-exceeded",
-              `Task Step result content exceeds its ${resultLimit}-byte limit.`
-            );
-          }
-        }
-
-        store.recordResult(result);
-        store.appendEvent({
-          id: this.#eventId(),
-          profileId: this.#profileId,
-          taskId: result.taskId,
-          ...(persistedAttempt === null
-            ? persistedStep === null ? {} : { planRevisionId: persistedStep.planRevisionId }
-            : { planRevisionId: persistedAttempt.planRevisionId }),
-          ...(result.stepId === undefined ? {} : { stepId: result.stepId }),
-          ...(result.attemptId === undefined ? {} : { attemptId: result.attemptId }),
-          kind: "result-recorded",
-          timestamp: now,
-          data: {
-            resultId: result.id,
-            kind: result.kind,
-            handle: result.handle,
-            byteLength: result.byteLength,
-            contentHash: result.contentHash
-          }
-        });
-      });
-    } catch (error) {
-      removeFileBestEffort(contentPath);
-      throw error;
+        assertCurrentResultLease(attempt.lease, entry.expectedLease, this.#now().getTime());
+      }
+      const step = result.stepId === undefined ? null : store.getStep(result.stepId);
+      if (result.stepId !== undefined && (step === null || step.taskId !== result.taskId)) {
+        throw new TaskResultContentError("step-task-mismatch", "Result Step does not belong to its Task.");
+      }
+      if (attempt !== null && step !== null && attempt.stepId !== step.id) {
+        throw new TaskResultContentError("attempt-step-mismatch", "Result Attempt does not belong to its Step.");
+      }
+      if (step === null) continue;
+      assertResultMatchesStepPolicy(step.resultPolicy.kind, result.kind);
+      addedBytesByStep.set(step.id, (addedBytesByStep.get(step.id) ?? 0) + result.byteLength);
     }
+    for (const [stepId, addedBytes] of addedBytesByStep) {
+      const step = store.getStep(stepId)!;
+      const existingBytes = store.listResults(step.taskId)
+        .filter((candidate) => candidate.status === "available" && candidate.stepId === stepId)
+        .reduce((total, candidate) => total + candidate.byteLength, 0);
+      const resultLimit = Math.min(TASK_GRAPH_LIMITS.maxResultBytesPerStep, step.resultPolicy.maxBytes);
+      if (existingBytes + addedBytes > resultLimit) {
+        throw new TaskResultContentError(
+          "step-result-budget-exceeded",
+          `Task Step result content exceeds its ${resultLimit}-byte limit.`
+        );
+      }
+    }
+  }
 
-    return result;
+  #preparedState(batch: PreparedTaskResultBatch): PreparedTaskResultState {
+    const state = this.#prepared.get(batch.id);
+    if (state === undefined || state.batch !== batch) {
+      throw new TaskResultContentError("prepared-result-unavailable", "Prepared Task result batch is unavailable.");
+    }
+    return state;
+  }
+
+  #writePreparedContent(entry: PreparedTaskResultEntry): void {
+    const parent = dirname(entry.contentPath);
+    ensurePrivateDirectory(this.#contentRoot, true);
+    ensurePrivateDirectory(parent);
+    chmodSync(this.#contentRoot, 0o700);
+    chmodSync(parent, 0o700);
+    if (existsSync(entry.contentPath) || existsSync(entry.markerPath)) {
+      throw new TaskResultContentError("content-collision", "Task result content handle already exists.");
+    }
+    const tempPath = join(parent, `.${randomUUID()}.tmp`);
+    try {
+      writeFileSync(entry.markerPath, entry.result.id, { flag: "wx", mode: 0o600 });
+      writeFileSync(tempPath, entry.bytes, { flag: "wx", mode: 0o600 });
+      renameSync(tempPath, entry.contentPath);
+      chmodSync(entry.contentPath, 0o600);
+    } catch (error) {
+      removeFileBestEffort(tempPath);
+      this.#removePreparedEntry(entry, false);
+      throw new TaskResultContentError("content-write-failed", "Failed to prepare Task result content.", { cause: error });
+    }
+  }
+
+  #removePreparedEntry(entry: PreparedTaskResultEntry, preserveCommitted: boolean): void {
+    const persisted = preserveCommitted ? this.#store.getResult(entry.result.id) : null;
+    if (persisted === null || persisted.handle !== entry.result.handle) {
+      try {
+        removeFileIfPresent(entry.contentPath);
+      } catch {
+        // Keep the marker so startup recovery can retry without losing the ownership record.
+        return;
+      }
+    }
+    removeFileBestEffort(entry.markerPath);
+  }
+
+  #markerPath(result: TaskResult): string {
+    const digest = contentDigest(result.handle);
+    return join(dirname(this.#contentPath(result.handle)), `${digest}.pending`);
   }
 
   async readPage(input: ReadTaskResultPageInput): Promise<TaskResultPage> {
@@ -336,29 +521,6 @@ export class TaskResultService {
     return pruned;
   }
 
-  #writeContent(handle: string, bytes: Uint8Array): string {
-    const path = this.#contentPath(handle);
-    const parent = dirname(path);
-    ensurePrivateDirectory(this.#contentRoot, true);
-    ensurePrivateDirectory(parent);
-    chmodSync(this.#contentRoot, 0o700);
-    chmodSync(parent, 0o700);
-    if (existsSync(path)) {
-      throw new TaskResultContentError("content-collision", "Task result content handle already exists.");
-    }
-    const tempPath = join(parent, `.${randomUUID()}.tmp`);
-    try {
-      writeFileSync(tempPath, bytes, { flag: "wx", mode: 0o600 });
-      renameSync(tempPath, path);
-      chmodSync(path, 0o600);
-      return path;
-    } catch (error) {
-      removeFileBestEffort(tempPath);
-      removeFileBestEffort(path);
-      throw new TaskResultContentError("content-write-failed", "Failed to persist Task result content.", { cause: error });
-    }
-  }
-
   #readVerifiedContent(result: TaskResult): Uint8Array {
     let bytes: Buffer;
     let descriptor: number | undefined;
@@ -396,7 +558,7 @@ export class TaskResultService {
     if (!/^task-result:[A-Za-z0-9._-]+$/u.test(handle)) {
       throw new TaskResultContentError("invalid-handle", "Stored Task result handle is invalid.");
     }
-    const digest = createHash("sha256").update(handle, "utf8").digest("hex");
+    const digest = contentDigest(handle);
     return join(this.#contentRoot, digest.slice(0, 2), `${digest}.bin`);
   }
 
@@ -514,6 +676,27 @@ function isTextReadable(result: TaskResult): boolean {
 
 function hashContent(content: Uint8Array): string {
   return `sha256:${createHash("sha256").update(content).digest("hex")}`;
+}
+
+function contentDigest(handle: string): string {
+  return createHash("sha256").update(handle, "utf8").digest("hex");
+}
+
+function readPreparedResultId(path: string): string | undefined {
+  let descriptor: number | undefined;
+  try {
+    const pathStat = lstatSync(path);
+    if (pathStat.isSymbolicLink() || !pathStat.isFile() || pathStat.size > 4_096) return undefined;
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const stat = fstatSync(descriptor);
+    if (!stat.isFile() || stat.size > 4_096) return undefined;
+    const value = readFileSync(descriptor, "utf8");
+    return value.length === 0 || value.includes("\u0000") ? undefined : value;
+  } catch {
+    return undefined;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
 }
 
 function nonEmpty(value: string, label: string): string {

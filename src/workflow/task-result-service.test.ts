@@ -228,6 +228,119 @@ describe("TaskResultService", () => {
     expect(contentFileExists("task-result:handle-2")).toBe(false);
   });
 
+  it("publishes a prepared batch atomically when a later Result insert fails", () => {
+    const duplicateEventService = new TaskResultService({
+      store,
+      profileId: "alpha",
+      contentRoot,
+      id: () => resultIds.shift()!,
+      handleId: () => handles.shift()!,
+      eventId: () => "duplicate-batch-event",
+      now: () => new Date(NOW)
+    });
+    const batch = duplicateEventService.prepare([
+      { taskId: "task-alpha", kind: "summary", content: "first" },
+      { taskId: "task-alpha", kind: "summary", content: "second" }
+    ]);
+
+    expect(() => store.atomicWrite((transaction) => duplicateEventService.publishPrepared(batch, transaction)))
+      .toThrow(/unique/iu);
+    duplicateEventService.discardPrepared(batch);
+
+    expect(store.listResults("task-alpha")).toEqual([]);
+    expect(store.listEvents("task-alpha", { kinds: ["result-recorded"] })).toEqual([]);
+    expect(contentFileExists("task-result:handle-1")).toBe(false);
+    expect(contentFileExists("task-result:handle-2")).toBe(false);
+  });
+
+  it("rejects a prepared batch when its Attempt fence is cancelled before publication", () => {
+    const task = store.getTask("task-alpha")!;
+    const step = store.getStep("step-alpha")!;
+    store.updateTask({ ...task, status: "running", startedAt: NOW, updatedAt: NOW });
+    store.updateStep({ ...step, status: "ready", updatedAt: NOW });
+    store.createAttempt({
+      id: "attempt-alpha",
+      profileId: "alpha",
+      taskId: task.id,
+      planRevisionId: step.planRevisionId,
+      stepId: step.id,
+      attemptNumber: 1,
+      status: "queued",
+      dispatchKey: "dispatch-alpha",
+      usage: {
+        providerCalls: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 0,
+        totalTokens: 0,
+        estimatedCostUsd: 0,
+        usageComplete: true,
+        pricingComplete: true,
+        incompleteReasons: []
+      },
+      resultIds: [],
+      createdAt: NOW,
+      updatedAt: NOW
+    });
+    const lease = store.acquireAttemptLease({
+      attemptId: "attempt-alpha",
+      ownerId: "scheduler-alpha",
+      acquiredAt: NOW,
+      expiresAt: "2030-01-01T00:01:00.000Z"
+    })!;
+    store.updateAttempt({ ...store.getAttempt("attempt-alpha")!, status: "running", startedAt: NOW, updatedAt: NOW });
+    store.updateStep({ ...store.getStep("step-alpha")!, status: "running", updatedAt: NOW });
+    const batch = service.prepare([{
+      taskId: task.id,
+      stepId: step.id,
+      attemptId: "attempt-alpha",
+      kind: "text",
+      content: "prepared",
+      expectedLease: { ownerId: lease.ownerId, fencingToken: lease.fencingToken }
+    }]);
+
+    store.requestAttemptCancellation("attempt-alpha", "2030-01-01T00:00:01.000Z");
+    expect(() => store.atomicWrite((transaction) => service.publishPrepared(batch, transaction)))
+      .toThrowError(expect.objectContaining({ code: "result-fence-lost" }));
+    service.discardPrepared(batch);
+
+    expect(store.listResults(task.id)).toEqual([]);
+    expect(contentFileExists("task-result:handle-1")).toBe(false);
+  });
+
+  it("removes abandoned prepared bodies when a restarted service recovers", () => {
+    const batch = service.prepare([{
+      taskId: "task-alpha",
+      kind: "summary",
+      content: "crash before settlement"
+    }]);
+    expect(contentFileExists(batch.results[0]!.handle)).toBe(true);
+    expect(store.listResults("task-alpha")).toEqual([]);
+
+    const restarted = createService();
+    expect(restarted.recoverPrepared()).toEqual({ removed: 1, finalized: 0, unresolved: 0 });
+    expect(contentFileExists(batch.results[0]!.handle)).toBe(false);
+    expect(store.listResults("task-alpha")).toEqual([]);
+  });
+
+  it("preserves committed bodies when restart recovery finds a stale preparation marker", async () => {
+    const batch = service.prepare([{
+      taskId: "task-alpha",
+      kind: "summary",
+      content: "committed before marker cleanup"
+    }]);
+    store.atomicWrite((transaction) => service.publishPrepared(batch, transaction));
+
+    const restarted = createService();
+    expect(restarted.recoverPrepared()).toEqual({ removed: 0, finalized: 1, unresolved: 0 });
+    expect(contentFileExists(batch.results[0]!.handle)).toBe(true);
+    expect((await restarted.readPage({
+      taskId: "task-alpha",
+      resultId: batch.results[0]!.id,
+      sessionId: "creator-alpha"
+    })).content).toBe("committed before marker cleanup");
+  });
+
   it("detects content tampering before returning a page", async () => {
     const result = service.record({ taskId: "task-alpha", kind: "text", content: "trusted" });
     writeFileSync(contentPath(result.handle), "tampered", "utf8");

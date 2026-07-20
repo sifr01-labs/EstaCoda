@@ -46,6 +46,13 @@ export class SupervisorTaskBackgroundHost {
     this.#store = options.store;
     this.#createExecutorRuntime = options.createExecutorRuntime;
     this.#logWarning = options.logWarning ?? (() => undefined);
+    const resultRecovery = options.resultService.recoverPrepared();
+    if (resultRecovery.removed > 0) {
+      this.#logWarning(`Removed ${resultRecovery.removed} abandoned prepared Task result bodies.`);
+    }
+    if (resultRecovery.unresolved > 0) {
+      this.#logWarning(`Could not safely reconcile ${resultRecovery.unresolved} prepared Task result markers.`);
+    }
     const scheduler = new TaskScheduler({
       store: options.store,
       resultService: options.resultService,

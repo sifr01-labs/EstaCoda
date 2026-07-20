@@ -239,6 +239,89 @@ describe("TaskScheduler", () => {
     expect(store.listResults("task-alpha")).toHaveLength(0);
   });
 
+  it("retries a failed atomic publication without exposing stale or duplicate Results", async () => {
+    store.createTaskGraph(makeGraph([
+      makeStep("publish", 0),
+      makeStep("consume", 1, { dependsOn: ["step-publish"] })
+    ]));
+    const resultEventIds = [
+      "duplicate-result-event",
+      "duplicate-result-event",
+      "retry-result-event",
+      "consumer-result-event"
+    ];
+    resultService = new TaskResultService({
+      store,
+      profileId: "alpha",
+      contentRoot: join(tempDir, "profiles", "alpha", "tasks", "results"),
+      sessionDb,
+      now,
+      id: () => nextId("result"),
+      handleId: () => nextId("handle"),
+      eventId: () => resultEventIds.shift()!
+    });
+    let downstreamResults: string[] | undefined;
+    const executor = new FakeTaskStepExecutor(({ step }, executionNumber) => {
+      if (step.key === "consume") {
+        downstreamResults = store.listResults("task-alpha")
+          .filter((result) => result.stepId === "step-publish")
+          .map((result) => result.id);
+        return { outcome: "succeeded", results: [{ kind: "text", content: "consumed result" }] };
+      }
+      return executionNumber === 1 ? {
+          outcome: "succeeded",
+          results: [
+            { kind: "text", content: "first prepared result" },
+            { kind: "text", content: "later prepared result" }
+          ]
+        }
+        : { outcome: "succeeded", results: [{ kind: "text", content: "retry result" }] };
+    });
+    const scheduler = makeScheduler(executor);
+
+    expect(await scheduler.runOnce()).toMatchObject({ dispatched: 1, completed: 0, failed: 1 });
+    expect(store.listResults("task-alpha")).toEqual([]);
+    expect(store.listEvents("task-alpha", { kinds: ["result-recorded"] })).toEqual([]);
+    expect(store.listAttempts("task-alpha")[0]).toMatchObject({
+      status: "failed",
+      failure: { class: "result-persistence-failed", retryable: true }
+    });
+    expect(store.getStep("step-publish")?.status).toBe("ready");
+
+    expect(await scheduler.runOnce()).toMatchObject({ dispatched: 1, completed: 1, failed: 0 });
+    expect(store.getTask("task-alpha")?.status).toBe("running");
+    const published = store.listResults("task-alpha");
+    expect(published).toEqual([
+      expect.objectContaining({ attemptId: store.listAttempts("task-alpha")[1]!.id, byteLength: 12 })
+    ]);
+
+    expect(await scheduler.runOnce()).toMatchObject({ dispatched: 1, completed: 1, failed: 0 });
+    expect(downstreamResults).toEqual([published[0]!.id]);
+    expect(store.getTask("task-alpha")?.status).toBe("completed");
+    expect(store.listResults("task-alpha")).toHaveLength(2);
+    expect(store.listEvents("task-alpha", { kinds: ["result-recorded"] })).toHaveLength(2);
+  });
+
+  it("rolls prepared Results back when a later settlement write is invalid", async () => {
+    store.createTaskGraph(makeGraph([makeStep("atomic", 0)]));
+    const scheduler = makeScheduler(new FakeTaskStepExecutor(({ attempt }) => ({
+      outcome: "succeeded",
+      results: [{ kind: "text", content: "must roll back" }],
+      usage: usage(1, 10, 0.1),
+      usageEntries: [{ ...usageEntry(attempt, "wrong-owner", 10, 0.1), attemptId: "another-attempt" }]
+    })));
+
+    expect(await scheduler.runOnce()).toMatchObject({ dispatched: 1, completed: 0, failed: 1 });
+    expect(store.listResults("task-alpha")).toEqual([]);
+    expect(store.listUsageEntries("task-alpha")).toEqual([]);
+    expect(store.listEvents("task-alpha", { kinds: ["result-recorded", "attempt-completed"] })).toEqual([]);
+    expect(store.listAttempts("task-alpha")[0]).toMatchObject({
+      status: "failed",
+      failure: { class: "invalid-settlement" }
+    });
+    expect(store.getTask("task-alpha")?.status).toBe("failed");
+  });
+
   it("persists operator-wait Step and Task transitions in the event journal", async () => {
     store.createTaskGraph(makeGraph([makeStep("review", 0, {
       retryPolicy: { ...makeStep("review-policy", 0).retryPolicy, maxAttempts: 1 },

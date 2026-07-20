@@ -17,7 +17,11 @@ import {
   isTerminalTaskStatus,
   isTerminalTaskStepStatus
 } from "../contracts/task.js";
-import { TaskResultContentError, type TaskResultService } from "./task-result-service.js";
+import {
+  TaskResultContentError,
+  type PreparedTaskResultBatch,
+  type TaskResultService
+} from "./task-result-service.js";
 import type { TaskStore } from "./task-store.js";
 import type { TaskApprovalService } from "./task-approval-service.js";
 import { cancelTaskInStore } from "./task-operator-service.js";
@@ -97,6 +101,13 @@ class TaskSchedulerCancellationError extends Error {
   constructor() {
     super("Task Attempt cancellation was requested.");
     this.name = "TaskSchedulerCancellationError";
+  }
+}
+
+class TaskSchedulerResultPublicationError extends Error {
+  constructor(options?: ErrorOptions) {
+    super("Prepared Task results could not be published.", options);
+    this.name = "TaskSchedulerResultPublicationError";
   }
 }
 
@@ -831,10 +842,10 @@ export class TaskScheduler {
       acceptanceFailure = failure("budget-exceeded", "Attempt usage exceeded its Task or Step budget.", false, false);
     }
 
+    let preparedResults: PreparedTaskResultBatch | undefined;
     if (acceptanceFailure === undefined) {
       try {
-        for (const result of results) {
-          this.#resultService.record({
+        preparedResults = this.#resultService.prepare(results.map((result) => ({
             taskId,
             stepId,
             attemptId,
@@ -844,8 +855,7 @@ export class TaskScheduler {
             summary: result.summary,
             expiresAt: result.expiresAt,
             expectedLease: { ownerId: lease.ownerId, fencingToken: lease.fencingToken }
-          });
-        }
+          })));
       } catch (error) {
         if (error instanceof TaskResultContentError && error.code === "result-fence-lost") {
           throw new TaskSchedulerLeaseLostError();
@@ -859,54 +869,94 @@ export class TaskScheduler {
       }
     }
     if (acceptanceFailure !== undefined) {
-      this.#settleFailure(taskId, attemptId, lease, acceptanceFailure, usage);
+      this.#settleFailure(taskId, attemptId, lease, acceptanceFailure, usage, settlement.usageEntries);
       return "failed";
     }
+    if (preparedResults === undefined) throw new Error("Task result preparation did not complete.");
 
     const now = this.#now().toISOString();
-    this.#store.atomicWrite((store) => {
-      const context = this.#assertCurrentLease(store, taskId, attemptId, lease, false);
-      const currentStep = store.getStep(stepId);
-      if (currentStep === null || currentStep.status !== "running") throw new TaskSchedulerLeaseLostError();
-      if (settlement.workerSessionId !== undefined && context.attempt.workerSessionId !== undefined &&
-          settlement.workerSessionId !== context.attempt.workerSessionId) {
-        throw new Error("Task Attempt settlement cannot replace its checkpointed worker session.");
+    try {
+      this.#store.atomicWrite((store) => {
+        const context = this.#assertCurrentLease(store, taskId, attemptId, lease, false);
+        const currentStep = store.getStep(stepId);
+        if (currentStep === null || currentStep.status !== "running") throw new TaskSchedulerLeaseLostError();
+        if (settlement.workerSessionId !== undefined && context.attempt.workerSessionId !== undefined &&
+            settlement.workerSessionId !== context.attempt.workerSessionId) {
+          throw new Error("Task Attempt settlement cannot replace its checkpointed worker session.");
+        }
+        if (settlement.trajectoryId !== undefined && context.attempt.trajectoryId !== undefined &&
+            settlement.trajectoryId !== context.attempt.trajectoryId) {
+          throw new Error("Task Attempt settlement cannot replace its checkpointed trajectory.");
+        }
+        let publishedResultCount = 0;
+        try {
+          publishedResultCount = this.#resultService.publishPrepared(preparedResults, store).length;
+        } catch (error) {
+          if (error instanceof TaskResultContentError && error.code === "result-fence-lost") {
+            throw new TaskSchedulerLeaseLostError();
+          }
+          throw new TaskSchedulerResultPublicationError({ cause: error });
+        }
+        const finalUsage = this.#recordUsageEntries(store, context.attempt, settlement.usageEntries, usage);
+        const completed: TaskAttempt = {
+          ...context.attempt,
+          status: "completed",
+          usage: finalUsage,
+          workerSessionId: settlement.workerSessionId ?? context.attempt.workerSessionId,
+          trajectoryId: settlement.trajectoryId ?? context.attempt.trajectoryId,
+          updatedAt: now,
+          completedAt: now
+        };
+        store.updateAttempt(completed);
+        store.updateStep({ ...currentStep, status: "completed", updatedAt: now });
+        const steps = store.listSteps(context.task.id, currentStep.planRevisionId);
+        const allSettled = steps.length > 0 && steps.every((candidate) => isTerminalTaskStepStatus(candidate.status));
+        if (allSettled) {
+          const status: Task["status"] = steps.every((candidate) => candidate.status === "completed")
+            ? "completed"
+            : "partial";
+          store.updateTask({ ...context.task, status, updatedAt: now, completedAt: now });
+          store.appendEvent(this.#event(context.task, "task-state-changed", now, {
+            data: { from: context.task.status, to: status, reasonCode: "all-steps-settled" }
+          }));
+        } else {
+          store.updateTask({ ...context.task, updatedAt: now });
+        }
+        if (!store.releaseAttemptLease(fenceInput(lease))) throw new TaskSchedulerLeaseLostError();
+        store.appendEvent(this.#event(context.task, "usage-recorded", now, {
+          attemptId,
+          stepId,
+          planRevisionId: completed.planRevisionId,
+          data: usageEventData(finalUsage)
+        }));
+        store.appendEvent(this.#event(context.task, "attempt-completed", now, {
+          attemptId,
+          stepId,
+          planRevisionId: completed.planRevisionId,
+          data: { resultCount: publishedResultCount }
+        }));
+        store.appendEvent(this.#event(context.task, "step-state-changed", now, {
+          stepId,
+          planRevisionId: completed.planRevisionId,
+          data: { from: "running", to: "completed", reasonCode: "acceptance-passed" }
+        }));
+      });
+      this.#resultService.finalizePrepared(preparedResults);
+    } catch (error) {
+      this.#resultService.discardPrepared(preparedResults);
+      if (error instanceof TaskSchedulerResultPublicationError) {
+        this.#settleFailure(
+          taskId,
+          attemptId,
+          lease,
+          failure("result-persistence-failed", "Attempt results could not be durably persisted.", true, false),
+          usage,
+          settlement.usageEntries
+        );
+        return "failed";
       }
-      if (settlement.trajectoryId !== undefined && context.attempt.trajectoryId !== undefined &&
-          settlement.trajectoryId !== context.attempt.trajectoryId) {
-        throw new Error("Task Attempt settlement cannot replace its checkpointed trajectory.");
-      }
-      const finalUsage = this.#recordUsageEntries(store, context.attempt, settlement.usageEntries, usage);
-      const completed: TaskAttempt = {
-        ...context.attempt,
-        status: "completed",
-        usage: finalUsage,
-        workerSessionId: settlement.workerSessionId ?? context.attempt.workerSessionId,
-        trajectoryId: settlement.trajectoryId ?? context.attempt.trajectoryId,
-        updatedAt: now,
-        completedAt: now
-      };
-      store.updateAttempt(completed);
-      store.updateStep({ ...currentStep, status: "completed", updatedAt: now });
-      if (!store.releaseAttemptLease(fenceInput(lease))) throw new TaskSchedulerLeaseLostError();
-      store.appendEvent(this.#event(context.task, "usage-recorded", now, {
-        attemptId,
-        stepId,
-        planRevisionId: completed.planRevisionId,
-        data: usageEventData(finalUsage)
-      }));
-      store.appendEvent(this.#event(context.task, "attempt-completed", now, {
-        attemptId,
-        stepId,
-        planRevisionId: completed.planRevisionId,
-        data: { resultCount: store.listResults(taskId, attemptId).length }
-      }));
-      store.appendEvent(this.#event(context.task, "step-state-changed", now, {
-        stepId,
-        planRevisionId: completed.planRevisionId,
-        data: { from: "running", to: "completed", reasonCode: "acceptance-passed" }
-      }));
-    });
+      throw error;
+    }
     return "completed";
   }
 
