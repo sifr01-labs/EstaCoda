@@ -112,6 +112,9 @@ export class DurableDelegationService {
           }
         })
       },
+      childTaskPolicy: item.role === "orchestrator" && stepAuthorities[index]!.mayCreateChildTasks
+        ? "fire_and_forget"
+        : "forbid",
       authorityPolicy: stepAuthorities[index]!,
       budget: budgets.step,
       retryPolicy: {
@@ -142,6 +145,7 @@ export class DurableDelegationService {
       budgetPolicy: budgets.task,
       steps,
       planReason: "Created by delegate_task as durable background work.",
+      ...(parent === undefined ? { originTurnId: request.toolCallId } : {}),
       ...(completionDestination === undefined ? {} : {
         completionDelivery: {
           deliveryKey: TASK_ORIGIN_COMPLETION_DELIVERY_KEY,
@@ -171,6 +175,9 @@ export class DurableDelegationService {
       step.taskId !== task.id || attempt.taskId !== task.id || attempt.stepId !== step.id ||
       attempt.planRevisionId !== execution.planRevisionId) {
       throw new Error("The active parent Task Attempt is no longer valid.");
+    }
+    if (step.childTaskPolicy !== "fire_and_forget") {
+      throw new Error("The active parent Step forbids runtime child Tasks.");
     }
     return { taskId: task.id, attemptId: attempt.id, authority: step.authorityPolicy, budget: step.budget };
   }

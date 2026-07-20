@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 
-export const TASK_SCHEMA_VERSION = 15;
+export const TASK_SCHEMA_VERSION = 16;
 
 const OBSOLETE_EXECUTION_TABLES = [
   "workflow_event_summaries",
@@ -609,4 +609,89 @@ export function migrateTaskVerticalSliceSchemaV15(db: SQLiteDatabase): void {
     create index idx_task_events_attempt
       on task_events(profile_id, attempt_id, timestamp);
   `);
+}
+
+/** Adds explicit runtime-child policy plus immutable Task-tree origin attribution. */
+export function migrateTaskChildGovernanceSchemaV16(db: SQLiteDatabase): void {
+  const taskColumns = db.query<{ name: string }>("pragma table_info(tasks)").all();
+  if (!taskColumns.some((column) => column.name === "root_task_id")) {
+    db.exec("alter table tasks add column root_task_id text");
+  }
+  if (!taskColumns.some((column) => column.name === "origin_session_id")) {
+    db.exec("alter table tasks add column origin_session_id text");
+  }
+  if (!taskColumns.some((column) => column.name === "origin_turn_id")) {
+    db.exec("alter table tasks add column origin_turn_id text");
+  }
+  db.exec(`
+    with recursive task_lineage(id, root_id, origin_session_id) as (
+      select id, id, creator_session_id
+      from tasks
+      where parent_task_id is null
+      union all
+      select child.id, task_lineage.root_id, task_lineage.origin_session_id
+      from tasks child
+      join task_lineage on child.parent_task_id = task_lineage.id
+    )
+    update tasks
+    set root_task_id = (
+          select root_id from task_lineage where task_lineage.id = tasks.id
+        ),
+        origin_session_id = (
+          select origin_session_id from task_lineage where task_lineage.id = tasks.id
+        )
+    where root_task_id is null or origin_session_id is null;
+    create index if not exists idx_tasks_root
+      on tasks(profile_id, root_task_id, created_at);
+  `);
+  const incompleteLineage = db.query<{ count: number }>(
+    "select count(*) as count from tasks where root_task_id is null or origin_session_id is null"
+  ).get()?.count ?? 0;
+  if (incompleteLineage > 0) {
+    throw new Error("Task child-governance migration could not derive complete Task lineage.");
+  }
+  db.exec(`
+    create trigger if not exists trg_tasks_child_lineage_insert
+    before insert on tasks
+    begin
+      select case
+        when new.root_task_id is null or new.origin_session_id is null
+          then raise(abort, 'Task lineage attribution is required')
+        when not exists (
+          select 1 from sessions origin
+          where origin.profile_id = new.profile_id and origin.id = new.origin_session_id
+        ) then raise(abort, 'Task origin session is not profile-owned')
+        when new.parent_task_id is null and (
+          new.creator_session_id is null or new.parent_attempt_id is not null or new.root_task_id <> new.id or
+          new.origin_session_id <> new.creator_session_id
+        ) then raise(abort, 'Root Task lineage attribution is invalid')
+        when new.parent_task_id is not null and new.parent_attempt_id is null
+          then raise(abort, 'Child Task parent Attempt is required')
+        when new.parent_task_id is not null and not exists (
+          select 1 from tasks parent
+          where parent.profile_id = new.profile_id and parent.id = new.parent_task_id
+            and parent.root_task_id = new.root_task_id
+            and parent.origin_session_id = new.origin_session_id
+            and parent.origin_turn_id is new.origin_turn_id
+        ) then raise(abort, 'Child Task lineage attribution is invalid')
+      end;
+    end;
+
+    create trigger if not exists trg_tasks_child_lineage_update
+    before update of root_task_id, origin_session_id, origin_turn_id, parent_task_id, parent_attempt_id on tasks
+    when new.root_task_id is not old.root_task_id
+      or new.origin_session_id is not old.origin_session_id
+      or new.origin_turn_id is not old.origin_turn_id
+      or new.parent_task_id is not old.parent_task_id
+      or new.parent_attempt_id is not old.parent_attempt_id
+    begin
+      select raise(abort, 'Task lineage attribution is immutable');
+    end;
+  `);
+
+  const stepColumns = db.query<{ name: string }>("pragma table_info(task_steps)").all();
+  if (!stepColumns.some((column) => column.name === "child_task_policy")) {
+    db.exec(`alter table task_steps add column child_task_policy text not null default 'forbid'
+      check(child_task_policy in ('forbid', 'fire_and_forget'))`);
+  }
 }

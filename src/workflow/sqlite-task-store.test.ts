@@ -20,6 +20,7 @@ import { SQLiteTaskStore, TaskStoreProfileError } from "./sqlite-task-store.js";
 import {
   migrateTaskAgentExecutorSchemaV12,
   migrateTaskBackgroundHostSchemaV13,
+  migrateTaskChildGovernanceSchemaV16,
   migrateTaskSchedulerSchemaV11,
   migrateTaskVerticalSliceSchemaV15,
   TASK_SCHEMA_VERSION
@@ -83,7 +84,12 @@ describe("SQLiteTaskStore", () => {
   });
 
   it("rolls back every write when an atomic callback fails", () => {
-    const task = { ...makeGraph("alpha").task, id: "task-rollback", activePlanRevisionId: undefined };
+    const task = {
+      ...makeGraph("alpha").task,
+      id: "task-rollback",
+      rootTaskId: "task-rollback",
+      activePlanRevisionId: undefined
+    };
 
     expect(() => store.atomicWrite((tx) => {
       tx.createTask(task);
@@ -105,10 +111,17 @@ describe("SQLiteTaskStore", () => {
     expect(() => store.createTask({
       ...alphaGraph.task,
       id: "task-wrong-session",
+      rootTaskId: "task-wrong-session",
       activePlanRevisionId: undefined,
-      creatorSessionId: "session-beta"
+      creatorSessionId: "session-beta",
+      originSessionId: "session-beta"
     })).toThrow(TaskStoreProfileError);
-    expect(() => store.createTask({ ...betaGraph.task, id: "task-forged", activePlanRevisionId: undefined }))
+    expect(() => store.createTask({
+      ...betaGraph.task,
+      id: "task-forged",
+      rootTaskId: "task-forged",
+      activePlanRevisionId: undefined
+    }))
       .toThrow(TaskStoreProfileError);
   });
 
@@ -118,6 +131,7 @@ describe("SQLiteTaskStore", () => {
     expect(() => store.createTask({
       ...graph.task,
       id: "task-duplicate-creation",
+      rootTaskId: "task-duplicate-creation",
       activePlanRevisionId: undefined
     })).toThrow(/unique/i);
 
@@ -682,6 +696,66 @@ describe("Task vertical slice schema v15 migration", () => {
   });
 });
 
+describe("Task child governance schema v16 migration", () => {
+  it("backfills recursive roots and installs fail-closed Step policy idempotently", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-task-child-governance-migration-"));
+    const database = openDefaultSQLiteDatabase({ path: join(tempDir, "child-governance.sqlite") });
+    try {
+      database.exec(`
+        create table sessions(id text primary key, profile_id text not null);
+        create table tasks(
+          id text primary key,
+          profile_id text not null,
+          creator_session_id text,
+          parent_task_id text,
+          parent_attempt_id text,
+          created_at text not null
+        );
+        create table task_steps(id text primary key);
+        insert into sessions values ('origin-session', 'alpha');
+        insert into sessions values ('worker-1', 'alpha');
+        insert into sessions values ('worker-2', 'alpha');
+        insert into sessions values ('worker-3', 'alpha');
+        insert into tasks values ('root', 'alpha', 'origin-session', null, null, '${NOW}');
+        insert into tasks values ('child', 'alpha', 'worker-1', 'root', 'attempt-root', '${NOW}');
+        insert into tasks values ('grandchild', 'alpha', 'worker-2', 'child', 'attempt-child', '${NOW}');
+        insert into task_steps values ('step-1');
+      `);
+
+      migrateTaskChildGovernanceSchemaV16(database);
+      migrateTaskChildGovernanceSchemaV16(database);
+
+      expect(database.query<{
+        id: string;
+        root_task_id: string;
+        origin_session_id: string;
+      }>("select id, root_task_id, origin_session_id from tasks order by id").all()).toEqual([
+        { id: "child", root_task_id: "root", origin_session_id: "origin-session" },
+        { id: "grandchild", root_task_id: "root", origin_session_id: "origin-session" },
+        { id: "root", root_task_id: "root", origin_session_id: "origin-session" }
+      ]);
+      expect(database.query<{ child_task_policy: string }>(
+        "select child_task_policy from task_steps where id = 'step-1'"
+      ).get()).toEqual({ child_task_policy: "forbid" });
+      expect(() => database.query(
+        `insert into tasks (
+          id, profile_id, creator_session_id, parent_task_id, parent_attempt_id, created_at,
+          root_task_id, origin_session_id, origin_turn_id
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        "spoofed-child", "alpha", "worker-3", "child", "attempt-child", NOW,
+        "child", "worker-3", "spoofed-turn"
+      )).toThrow(/lineage/i);
+      expect(() => database.query(
+        "update tasks set origin_session_id = ? where id = ?"
+      ).run("worker-1", "child")).toThrow(/immutable/i);
+    } finally {
+      database.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
 const NOW = "2030-01-01T00:00:00.000Z";
 
 function makeGraph(profileId: "alpha" | "beta") {
@@ -693,6 +767,8 @@ function makeGraph(profileId: "alpha" | "beta") {
     id: taskId,
     profileId,
     creatorSessionId,
+    rootTaskId: taskId,
+    originSessionId: creatorSessionId,
     source: "cli",
     creationKey: `create-${suffix}`,
     objective: "Research and summarize the requested topic.",
@@ -759,6 +835,7 @@ function makeStep(input: {
     objective: `Complete ${input.key}.`,
     dependsOn: input.dependsOn ?? [],
     executor: { kind: "agent", role: "worker" },
+    childTaskPolicy: "forbid",
     authorityPolicy: stepAuthority(),
     budget: {
       maxProviderCalls: 5,

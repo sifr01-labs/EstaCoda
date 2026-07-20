@@ -1890,7 +1890,8 @@ function promptTaskCard(): TaskCardState {
     status: "completed",
     progress: { completed: 1, skipped: 0, total: 1 },
     planRevision: { revision: 1, status: "active" },
-    steps: [{ stepId: "step-1", title: "Finish work", status: "completed", dependsOn: [] }],
+    steps: [{ stepId: "step-1", title: "Finish work", status: "completed", dependsOn: [], childTaskPolicy: "forbid" }],
+    childTasks: [],
     recentActivity: [{ kind: "attempt-completed", label: "Attempt completed", timestamp: "2026-07-20T10:00:00.000Z" }],
     elapsedMs: 1_000,
     usage: {

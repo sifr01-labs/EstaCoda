@@ -298,6 +298,8 @@ function makeGraph(): { task: Task; revision: TaskPlanRevision; steps: TaskStep[
     id: "task-alpha",
     profileId: "alpha",
     creatorSessionId: "creator-alpha",
+    rootTaskId: "task-alpha",
+    originSessionId: "creator-alpha",
     source: "cli",
     creationKey: "create-alpha",
     objective: "Research and return the complete durable result.",
@@ -340,6 +342,7 @@ function makeGraph(): { task: Task; revision: TaskPlanRevision; steps: TaskStep[
     objective: "Inspect the workspace and return the full answer.",
     dependsOn: [],
     executor: { kind: "agent", role: "worker", model: { provider: "openai", id: "child-model" } },
+    childTaskPolicy: "forbid",
     authorityPolicy: policy,
     budget: { maxProviderCalls: 5, maxTotalTokens: 50_000, maxEstimatedCostUsd: 5, maxWallClockMs: 120_000 },
     retryPolicy: {

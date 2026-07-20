@@ -352,7 +352,10 @@ tool input/output, result bodies, workspace paths, credentials, lease-owner
 identities, or unbounded child text.
 
 Worker progress persists only categorical, bounded transition labels (for
-example provider wait/fallback and tool category). Child provider-token text is
+example provider wait/fallback and tool category). Child Tasks appear only as
+bounded handles, statuses, and parent-Attempt attribution. The originating
+session receives an observer link at child creation; raw child prompts,
+transcripts, and provider-token text remain excluded. Provider fallback text is
 not buffered into Task cards or inspection. Consequently, abandoned text from
 a failed provider route cannot remain visible as accepted worker output; the
 Task result becomes readable only through the verified result surface after

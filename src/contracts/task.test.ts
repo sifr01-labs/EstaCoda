@@ -321,6 +321,21 @@ describe("validateTaskPlan", () => {
       "step-executor-invalid"
     ]));
   });
+
+  it("allows fire-and-forget children only for explicitly authorized orchestrator Steps", () => {
+    const worker = validPlan();
+    worker.steps = [{ ...worker.steps[0]!, childTaskPolicy: "fire_and_forget" }];
+    expect(issueCodes(validateTaskPlan(worker))).toContain("step-child-policy-invalid");
+
+    const orchestrator = validPlan();
+    orchestrator.steps = [{
+      ...orchestrator.steps[0]!,
+      executor: { kind: "agent", role: "orchestrator" },
+      childTaskPolicy: "fire_and_forget",
+      authorityPolicy: taskAuthority()
+    }];
+    expect(validateTaskPlan(orchestrator).ok).toBe(true);
+  });
 });
 
 function validPlan(): TaskPlanValidationInput {
@@ -373,6 +388,7 @@ function step(id: string, position: number, dependsOn: readonly string[] = []): 
     objective: `Complete the objective for ${id}.`,
     dependsOn,
     executor: { kind: "agent", role: "worker" },
+    childTaskPolicy: "forbid",
     authorityPolicy: stepAuthority(),
     budget: {
       maxProviderCalls: 5,

@@ -23,7 +23,7 @@ This document describes the persistence, result, scheduler, agent-execution, bac
 ## Source of truth
 
 - `src/contracts/task.ts` defines the durable records, legal state transitions, authority and budget policies, and deterministic graph validation.
-- `src/workflow/task-schema.ts` owns SQLite schema version 15.
+- `src/workflow/task-schema.ts` owns SQLite schema version 16.
 - `src/workflow/task-store.ts` defines the profile-bound storage contract.
 - `src/workflow/sqlite-task-store.ts` implements transactional SQLite persistence.
 - `src/workflow/task-result-service.ts` stores bounded result bodies under the selected profile and verifies them before reads.
@@ -55,7 +55,7 @@ Opaque Task and session identifiers are routing keys, not authorization boundari
 
 ## Transaction and graph invariants
 
-- A Task, its first PlanRevision, Steps, dependencies, and creator-session link can be inserted in one `begin immediate` transaction.
+- A Task, its first PlanRevision, Steps, dependencies, creator-session link, and any inherited origin-observer link can be inserted in one `begin immediate` transaction.
 - Creation events are journaled in that same transaction, with deterministic ordering and no raw objective or result content.
 - Failed graph writes roll back completely.
 - Plan definitions are immutable after insertion. Replanning creates a new PlanRevision.
@@ -89,7 +89,9 @@ An approval ask is a normal non-terminal settlement. The scheduler records a pro
 
 `AgentStepExecutor` adapts the existing child-agent factory and runner to the durable Attempt contract; it does not create a parallel delegation lifecycle. Before constructing a child, it verifies the Task, Step, Attempt, profile, exact workspace binding, creator session, and current workspace trust. The scheduler resolver receives both Task and Step so a future host can expose the executor only for workspace-eligible work without embedding delegation or runtime policy in the scheduler.
 
-Task and Step authority are intersected with the parent session's visible tools. Blocked tools, forbidden risk classes, and non-shared toolsets are removed. `delegate_task` is removed from worker Steps and retained only for orchestrator Steps with explicit child-creation authority and remaining depth. Authorized write and side-effect tools remain available, but Task authority can only narrow the active runtime security policy: a runtime denial remains a denial, `forbid` denies, and `require_approval` creates a durable ask. An approval is bound to the creator session, Attempt, tool, risk class, and SHA-256 target fingerprint; it cannot become a general grant or override the hardline floor.
+Task and Step authority are intersected with the parent session's visible tools. Blocked tools, forbidden risk classes, and non-shared toolsets are removed. Every Step also has an immutable child policy: `forbid` or `fire_and_forget`. Worker Steps are always `forbid`; only a reviewed orchestrator Step with child-creation authority and remaining depth may be `fire_and_forget`. A runtime-created child can therefore never become an undeclared dependency of the active PlanRevision, and parent settlement does not wait for explicitly detached children. Required fan-out and synthesis must be declared in the initial fixed graph until governed PlanRevision changes exist. Authorized write and side-effect tools remain available, but Task authority can only narrow the active runtime security policy: a runtime denial remains a denial, `forbid` denies, and `require_approval` creates a durable ask. An approval is bound to the creator session, Attempt, tool, risk class, and SHA-256 target fingerprint; it cannot become a general grant or override the hardline floor.
+
+Every Task persists its root Task, parent Task and Attempt when present, origin session, and stable origin-turn/call attribution when available. Descendants inherit this lineage unchanged. Child creation atomically links the original session as an observer, so the originating user can inspect child handles and statuses even though the worker session remains the child's creator and approval root.
 
 The child session is marked `task-step-worker` and carries Task, PlanRevision, Step, and Attempt ownership metadata. Its session is checkpointed under the current fencing token before provider work begins. Once the child trajectory is durably present, that trajectory is checkpointed under the same fence. These checkpoints renew the lease, create the worker `TaskSessionLink`, append a bounded `attempt-progressed` event, and cannot be replaced by a later checkpoint or settlement.
 
@@ -119,7 +121,7 @@ External delivery is deliberately at-most-once after ambiguity. A crash or trans
 
 ## Migration behavior
 
-Opening a writable `SQLiteSessionDB` migrates it to schema version 15 under the existing migration lock and transaction. Version 10 performs the Task persistence cutover; version 11 adds the durable Attempt cancellation marker without replacing existing leases; version 12 extends the Task event journal with fenced Attempt progress checkpoints; version 13 adds the profile-owned completion-delivery outbox; version 14 adds monotonic lease generations, durable Task approval links, and canonical provider-call usage entries; version 15 adds profile-owned steering context and its bounded audit event. The migrations preserve unrelated session, message, trajectory, approval, cron, finalization, and memory-curation data. A best-effort pre-migration backup is created by the session database migration runner.
+Opening a writable `SQLiteSessionDB` migrates it to schema version 16 under the existing migration lock and transaction. Version 10 performs the Task persistence cutover; version 11 adds the durable Attempt cancellation marker without replacing existing leases; version 12 extends the Task event journal with fenced Attempt progress checkpoints; version 13 adds the profile-owned completion-delivery outbox; version 14 adds monotonic lease generations, durable Task approval links, and canonical provider-call usage entries; version 15 adds profile-owned steering context and its bounded audit event; version 16 adds immutable Task-tree origin attribution and explicit Step child policy. The migrations preserve unrelated session, message, trajectory, approval, cron, finalization, and memory-curation data. A best-effort pre-migration backup is created by the session database migration runner.
 
 The cutover migration is intentionally destructive only for obsolete execution tables. There is no dual-read, dual-write, compatibility alias, or alternate store.
 

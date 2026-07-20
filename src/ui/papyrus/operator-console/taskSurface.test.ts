@@ -27,7 +27,9 @@ describe("durable Task surfaces", () => {
   });
 
   it("renders the full safe inspection projection without raw bodies or internal worker handles", () => {
-    const card = makeCard();
+    const card = makeCard({
+      childTasks: [{ taskId: "T-child-1", status: "running", parentAttemptId: "attempt-parent-1" }]
+    });
     const lines = renderTaskInspectionSurface({
       cards: [card],
       selectedTaskId: card.taskId,
@@ -40,6 +42,9 @@ describe("durable Task surfaces", () => {
     expect(text).toContain("Plan revision");
     expect(text).toContain("Dependencies");
     expect(text).toContain("Active Attempt");
+    expect(text).toContain("Child Tasks");
+    expect(text).toContain("T-child-1");
+    expect(text).toContain("running");
     expect(text).toContain("Usage and cost");
     expect(text).toContain("result://safe-1");
     expect(text).not.toContain("raw tool input");
@@ -114,6 +119,7 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
         title: "Research Company A",
         status: "running",
         dependsOn: [],
+        childTaskPolicy: "forbid",
         activeAttempt: {
           attemptNumber: 1,
           status: "running",
@@ -122,9 +128,10 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
           currentToolCategory: "browser",
         },
       },
-      { stepId: "step-b", title: "Define comparison criteria", status: "completed", dependsOn: [] },
-      { stepId: "step-c", title: "Compare findings", status: "pending", dependsOn: ["step-a", "step-b"] },
+      { stepId: "step-b", title: "Define comparison criteria", status: "completed", dependsOn: [], childTaskPolicy: "forbid" },
+      { stepId: "step-c", title: "Compare findings", status: "pending", dependsOn: ["step-a", "step-b"], childTaskPolicy: "forbid" },
     ],
+    childTasks: [],
     recentActivity: [
       { kind: "attempt-started", label: "Attempt started · Research Company A", timestamp: "2026-07-20T10:00:00.000Z" },
     ],

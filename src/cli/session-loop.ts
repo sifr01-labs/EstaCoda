@@ -2857,6 +2857,7 @@ function taskProjectionToCard(task: TaskStatusProjection): TaskCardState {
       title: step.title,
       status: step.status,
       dependsOn: [...step.dependsOn],
+      childTaskPolicy: step.childTaskPolicy,
       ...(step.activeAttempt === undefined ? {} : {
         activeAttempt: {
           attemptNumber: step.activeAttempt.attemptNumber,
@@ -2867,6 +2868,7 @@ function taskProjectionToCard(task: TaskStatusProjection): TaskCardState {
         },
       }),
     })),
+    childTasks: task.childTasks.map((child) => ({ ...child })),
     recentActivity: task.recentActivity.map((activity) => ({ ...activity })),
     ...(task.currentToolCategory === undefined ? {} : { currentToolCategory: task.currentToolCategory }),
     elapsedMs: task.elapsedMs,

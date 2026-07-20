@@ -22,6 +22,7 @@ type TaskCopy = {
   status: string;
   planRevision: string;
   dependencies: string;
+  childTasks: string;
   activeAttempt: string;
   elapsed: string;
   recentActivity: string;
@@ -42,6 +43,7 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     status: "Status",
     planRevision: "Plan revision",
     dependencies: "Dependencies",
+    childTasks: "Child Tasks",
     activeAttempt: "Active Attempt",
     elapsed: "Elapsed",
     recentActivity: "Recent safe activity",
@@ -60,6 +62,7 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     status: "الحالة",
     planRevision: "مراجعة الخطة",
     dependencies: "الاعتماديات",
+    childTasks: "المهام الفرعية",
     activeAttempt: "المحاولة النشطة",
     elapsed: "المدة",
     recentActivity: "النشاط الآمن الأخير",
@@ -151,6 +154,12 @@ export function taskInspectionContentLines(
     : `${card.planRevision.revision} · ${card.planRevision.status}`]);
   addSection(lines, copy.elapsed, [formatDuration(card.elapsedMs)]);
   addSection(lines, copy.dependencies, dependencyLines(card, copy.none));
+  addSection(lines, copy.childTasks, card.childTasks.length === 0
+    ? [copy.none]
+    : card.childTasks.map((child) =>
+        `${isolate(child.taskId)} · ${formatStatus(child.status)}` +
+        `${child.parentAttemptId === undefined ? "" : ` · Attempt ${isolate(child.parentAttemptId)}`}`
+      ));
   addSection(lines, copy.activeAttempt, activeAttemptLines(card, copy.none));
   addSection(lines, copy.toolCategory, [card.currentToolCategory === undefined ? copy.none : isolate(card.currentToolCategory)]);
   addSection(lines, copy.usageCost, [

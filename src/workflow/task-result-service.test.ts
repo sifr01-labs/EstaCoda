@@ -430,6 +430,8 @@ function makeGraph(): { task: Task; revision: TaskPlanRevision; steps: TaskStep[
     id: "task-alpha",
     profileId: "alpha",
     creatorSessionId: "creator-alpha",
+    rootTaskId: "task-alpha",
+    originSessionId: "creator-alpha",
     source: "cli",
     creationKey: "create-alpha",
     objective: "Produce a durable result.",
@@ -472,6 +474,7 @@ function makeGraph(): { task: Task; revision: TaskPlanRevision; steps: TaskStep[
     objective: "Produce the requested result.",
     dependsOn: [],
     executor: { kind: "agent", role: "worker" },
+    childTaskPolicy: "forbid",
     authorityPolicy: authorityPolicy(),
     budget: {
       maxProviderCalls: 5,

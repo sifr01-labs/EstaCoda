@@ -151,8 +151,30 @@ export class SQLiteTaskStore implements TaskStore {
   createTask(task: Task): void {
     this.#assertTransactionActive();
     this.#assertProfile(task.profileId, "Task", task.id);
+    requireBoundedText(task.rootTaskId, "Task root ID", 256);
+    requireBoundedText(task.originSessionId, "Task origin session ID", 256);
+    if (task.originTurnId !== undefined) requireBoundedText(task.originTurnId, "Task origin turn ID", 256);
     if (task.creatorSessionId !== undefined) this.#assertSessionOwned(task.creatorSessionId);
-    if (task.parentTaskId !== undefined) this.#assertTaskOwned(task.parentTaskId);
+    this.#assertSessionOwned(task.originSessionId);
+    if (task.parentTaskId === undefined) {
+      if (task.rootTaskId !== task.id || task.originSessionId !== task.creatorSessionId) {
+        throw new TaskStoreIntegrityError("A root Task must own its root and origin session attribution.");
+      }
+    } else if (task.rootTaskId === task.id) {
+      throw new TaskStoreIntegrityError("A child Task cannot identify itself as the Task-tree root.");
+    }
+    if (task.rootTaskId !== task.id) this.#assertTaskOwned(task.rootTaskId);
+    if (task.parentTaskId !== undefined) {
+      if (task.parentAttemptId === undefined) {
+        throw new TaskStoreIntegrityError("A child Task requires a parent Attempt.");
+      }
+      this.#assertTaskOwned(task.parentTaskId);
+      const parent = this.getTask(task.parentTaskId)!;
+      if (task.rootTaskId !== parent.rootTaskId || task.originSessionId !== parent.originSessionId ||
+        task.originTurnId !== parent.originTurnId) {
+        throw new TaskStoreIntegrityError("A child Task must inherit its parent Task lineage attribution.");
+      }
+    }
     if (task.parentAttemptId !== undefined) {
       if (task.parentTaskId === undefined) {
         throw new TaskStoreIntegrityError("A parent Attempt requires a parent Task.");
@@ -162,12 +184,13 @@ export class SQLiteTaskStore implements TaskStore {
 
     this.#db.query(
       `insert into tasks (
-        id, profile_id, creator_session_id, parent_task_id, parent_attempt_id,
+        id, profile_id, creator_session_id, root_task_id, origin_session_id, origin_turn_id,
+        parent_task_id, parent_attempt_id,
         source, creation_key, objective, status, workspace_path, workspace_identity_hash,
         authority_policy_json, budget_policy_json, active_plan_revision_id,
         wait_reason_json, failure_json, created_by_json,
         created_at, updated_at, started_at, completed_at, cancelled_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(...taskValues(task));
   }
 
@@ -180,6 +203,9 @@ export class SQLiteTaskStore implements TaskStore {
     if (isTerminalTaskStatus(existing.status)) assertUnchanged("Terminal Task", existing, task);
     assertUnchanged("Task creation fields", {
       creatorSessionId: existing.creatorSessionId,
+      rootTaskId: existing.rootTaskId,
+      originSessionId: existing.originSessionId,
+      originTurnId: existing.originTurnId,
       parentTaskId: existing.parentTaskId,
       parentAttemptId: existing.parentAttemptId,
       source: existing.source,
@@ -190,6 +216,9 @@ export class SQLiteTaskStore implements TaskStore {
       createdAt: existing.createdAt
     }, {
       creatorSessionId: task.creatorSessionId,
+      rootTaskId: task.rootTaskId,
+      originSessionId: task.originSessionId,
+      originTurnId: task.originTurnId,
       parentTaskId: task.parentTaskId,
       parentAttemptId: task.parentAttemptId,
       source: task.source,
@@ -204,7 +233,8 @@ export class SQLiteTaskStore implements TaskStore {
 
     const result = this.#db.query(
       `update tasks set
-        creator_session_id = ?, parent_task_id = ?, parent_attempt_id = ?, source = ?,
+        creator_session_id = ?, root_task_id = ?, origin_session_id = ?, origin_turn_id = ?,
+        parent_task_id = ?, parent_attempt_id = ?, source = ?,
         creation_key = ?, objective = ?, status = ?, workspace_path = ?, workspace_identity_hash = ?,
         authority_policy_json = ?, budget_policy_json = ?, active_plan_revision_id = ?,
         wait_reason_json = ?, failure_json = ?, created_by_json = ?, created_at = ?,
@@ -239,6 +269,15 @@ export class SQLiteTaskStore implements TaskStore {
     sql += " order by updated_at desc, id limit ?";
     params.push(limit);
     return this.#db.query<TaskRow>(sql).all(...params).map(rowToTask);
+  }
+
+  listChildTasks(parentTaskId: string): Task[] {
+    this.#assertTaskOwned(parentTaskId);
+    return this.#db.query<TaskRow>(
+      `select * from tasks
+       where profile_id = ? and parent_task_id = ?
+       order by created_at, id`
+    ).all(this.#profileId, parentTaskId).map(rowToTask);
   }
 
   #insertPlanRevisionRecord(revision: TaskPlanRevision): void {
@@ -1041,9 +1080,9 @@ export class SQLiteTaskStore implements TaskStore {
     this.#db.query(
       `insert into task_steps (
         id, profile_id, task_id, plan_revision_id, step_key, position, status, title,
-        objective, executor_json, authority_policy_json, budget_json, retry_policy_json,
+        objective, executor_json, child_task_policy, authority_policy_json, budget_json, retry_policy_json,
         failure_policy_json, idempotency, result_policy_json, created_at, updated_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       step.id,
       this.#profileId,
@@ -1055,6 +1094,7 @@ export class SQLiteTaskStore implements TaskStore {
       step.title,
       step.objective,
       stringify(step.executor),
+      step.childTaskPolicy,
       stringify(step.authorityPolicy),
       stringify(step.budget),
       stringify(step.retryPolicy),
@@ -1235,6 +1275,7 @@ function immutableStepFields(step: TaskStep): unknown {
     objective: step.objective,
     dependsOn: step.dependsOn,
     executor: step.executor,
+    childTaskPolicy: step.childTaskPolicy,
     authorityPolicy: step.authorityPolicy,
     budget: step.budget,
     retryPolicy: step.retryPolicy,
@@ -1256,6 +1297,9 @@ function taskValues(task: Task): SQLiteValue[] {
     task.id,
     task.profileId,
     task.creatorSessionId ?? null,
+    task.rootTaskId,
+    task.originSessionId,
+    task.originTurnId ?? null,
     task.parentTaskId ?? null,
     task.parentAttemptId ?? null,
     task.source,
@@ -1390,6 +1434,9 @@ function rowToTask(row: TaskRow): Task {
     id: row.id,
     profileId: row.profile_id,
     ...(row.creator_session_id === null ? {} : { creatorSessionId: row.creator_session_id }),
+    rootTaskId: requirePersistedLineage(row.root_task_id, "Task.rootTaskId"),
+    originSessionId: requirePersistedLineage(row.origin_session_id, "Task.originSessionId"),
+    ...(row.origin_turn_id === null ? {} : { originTurnId: row.origin_turn_id }),
     ...(row.parent_task_id === null ? {} : { parentTaskId: row.parent_task_id }),
     ...(row.parent_attempt_id === null ? {} : { parentAttemptId: row.parent_attempt_id }),
     source: row.source as Task["source"],
@@ -1440,6 +1487,7 @@ function rowToStep(row: StepRow, dependsOn: readonly string[]): TaskStep {
     objective: row.objective,
     dependsOn,
     executor: parseJson(row.executor_json, "TaskStep.executor"),
+    childTaskPolicy: row.child_task_policy as TaskStep["childTaskPolicy"],
     authorityPolicy: parseJson(row.authority_policy_json, "TaskStep.authorityPolicy"),
     budget: parseJson(row.budget_json, "TaskStep.budget"),
     retryPolicy: parseJson(row.retry_policy_json, "TaskStep.retryPolicy"),
@@ -1662,6 +1710,11 @@ function requireBoundedText(value: string, label: string, maxChars: number): str
   return normalized;
 }
 
+function requirePersistedLineage(value: string | null, label: string): string {
+  if (value === null) throw new TaskStoreIntegrityError(`Stored ${label} is missing.`);
+  return requireBoundedText(value, label, 256);
+}
+
 function requireBoundedContent(value: string, label: string, maxChars: number): string {
   const normalized = value.trim();
   if (normalized.length === 0 || normalized.length > maxChars || /\u0000/u.test(normalized)) {
@@ -1743,6 +1796,9 @@ type TaskRow = {
   id: string;
   profile_id: string;
   creator_session_id: string | null;
+  root_task_id: string | null;
+  origin_session_id: string | null;
+  origin_turn_id: string | null;
   parent_task_id: string | null;
   parent_attempt_id: string | null;
   source: string;
@@ -1789,6 +1845,7 @@ type StepRow = {
   title: string;
   objective: string;
   executor_json: string;
+  child_task_policy: string;
   authority_policy_json: string;
   budget_json: string;
   retry_policy_json: string;

@@ -345,6 +345,7 @@ function filterTaskStepTools(tools: readonly ToolDefinition[], task: Task, step:
   return tools.filter((tool) =>
     (tool.name !== "delegate_task" || (
       step.executor.role === "orchestrator" &&
+      step.childTaskPolicy === "fire_and_forget" &&
       task.authorityPolicy.mayCreateChildTasks &&
       step.authorityPolicy.mayCreateChildTasks &&
       step.authorityPolicy.maxChildDepth > 0

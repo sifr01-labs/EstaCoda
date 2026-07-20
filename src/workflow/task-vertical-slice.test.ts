@@ -322,6 +322,7 @@ function step(
     objective: `Complete ${key} within the declared Task authority.`,
     dependsOn,
     executor: { kind: "agent" as const, role: key.startsWith("research-") ? "worker" as const : "orchestrator" as const },
+    childTaskPolicy: "forbid" as const,
     authorityPolicy,
     budget: { maxProviderCalls: 5, maxTotalTokens: 25_000, maxEstimatedCostUsd: 3, maxWallClockMs: 300_000 },
     retryPolicy: {

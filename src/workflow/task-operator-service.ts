@@ -35,6 +35,7 @@ const MAX_LISTED_TASKS = 100;
 const MAX_PROJECTED_RESULTS = 20;
 const MAX_PROJECTED_STEPS = 100;
 const MAX_RECENT_ACTIVITY = 12;
+const MAX_PROJECTED_CHILD_TASKS = 32;
 
 export type TaskProgress = Record<TaskStep["status"], number> & { total: number };
 
@@ -44,6 +45,11 @@ export type TaskStatusProjection = {
   status: TaskStatus;
   source: Task["source"];
   parentTaskId?: string;
+  childTasks: readonly {
+    taskId: string;
+    status: TaskStatus;
+    parentAttemptId?: string;
+  }[];
   progress: TaskProgress;
   activeAttempts: number;
   planRevision?: {
@@ -77,6 +83,7 @@ export type TaskStepProjection = {
   title: string;
   status: TaskStep["status"];
   dependsOn: readonly string[];
+  childTaskPolicy: TaskStep["childTaskPolicy"];
   activeAttempt?: TaskAttemptProjection;
 };
 
@@ -127,6 +134,7 @@ export class TaskOperatorService {
         objective,
         dependsOn: [],
         executor: { kind: "agent", role: "worker" },
+        childTaskPolicy: "forbid",
         authorityPolicy: authority,
         budget: {
           maxProviderCalls: 45,
@@ -286,6 +294,11 @@ export class TaskOperatorService {
       status: task.status,
       source: task.source,
       ...(task.parentTaskId === undefined ? {} : { parentTaskId: task.parentTaskId }),
+      childTasks: this.#store.listChildTasks(task.id).slice(0, MAX_PROJECTED_CHILD_TASKS).map((child) => ({
+        taskId: child.id,
+        status: child.status,
+        ...(child.parentAttemptId === undefined ? {} : { parentAttemptId: child.parentAttemptId })
+      })),
       progress,
       activeAttempts: attempts.filter((attempt) => ACTIVE_ATTEMPT_STATUSES.includes(attempt.status)).length,
       ...(planRevision === null || planRevision === undefined ? {} : {
@@ -299,6 +312,7 @@ export class TaskOperatorService {
         title: safeText(step.title, 160),
         status: step.status,
         dependsOn: step.dependsOn.slice(0, TASK_GRAPH_LIMITS.maxDependenciesPerStep),
+        childTaskPolicy: step.childTaskPolicy,
         ...projectActiveAttempt(attemptsByStep.get(step.id), activityByAttempt, projectionNow)
       })),
       recentActivity,

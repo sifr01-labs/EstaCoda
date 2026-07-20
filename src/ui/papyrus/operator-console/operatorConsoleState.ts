@@ -112,6 +112,7 @@ export type TaskCardStepState = {
   readonly title: string;
   readonly status: "pending" | "ready" | "running" | "waiting_for_input" | "waiting_for_approval" | "completed" | "failed" | "skipped" | "cancelled";
   readonly dependsOn: readonly string[];
+  readonly childTaskPolicy: "forbid" | "fire_and_forget";
   readonly activeAttempt?: {
     readonly attemptNumber: number;
     readonly status: "queued" | "leased" | "running" | "waiting_for_input" | "waiting_for_approval" | "completed" | "failed" | "cancelled" | "interrupted" | "expired";
@@ -139,6 +140,11 @@ export type TaskCardState = {
   };
   readonly planRevision?: { readonly revision: number; readonly status: string };
   readonly steps: readonly TaskCardStepState[];
+  readonly childTasks: readonly {
+    readonly taskId: string;
+    readonly status: TaskCardState["status"];
+    readonly parentAttemptId?: string;
+  }[];
   readonly recentActivity: readonly TaskCardActivityState[];
   readonly currentToolCategory?: string;
   readonly elapsedMs: number;

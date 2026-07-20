@@ -9,6 +9,7 @@ import type { ToolDefinition, ToolRiskClass, ToolsetName } from "../contracts/to
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { FixedTaskCreationConflictError, FixedTaskService } from "../workflow/fixed-task-service.js";
 import { SQLiteTaskStore } from "../workflow/sqlite-task-store.js";
+import { TaskOperatorService } from "../workflow/task-operator-service.js";
 import { DurableDelegationService } from "./durable-delegation-service.js";
 
 describe("DurableDelegationService", () => {
@@ -46,9 +47,15 @@ describe("DurableDelegationService", () => {
 
     expect(replay).toMatchObject({ taskId: first.taskId, idempotentReplay: true });
     expect(task).toMatchObject({ status: "queued", source: "delegation" });
+    expect(task).toMatchObject({
+      rootTaskId: task.id,
+      originSessionId: "parent",
+      originTurnId: "call-1"
+    });
     expect(task.parentTaskId).toBeUndefined();
     expect(task.budgetPolicy.maxConcurrentAttempts).toBe(2);
     expect(steps.map((step) => step.executor.role)).toEqual(["worker", "orchestrator"]);
+    expect(steps.map((step) => step.childTaskPolicy)).toEqual(["forbid", "fire_and_forget"]);
     expect(steps[1]?.authorityPolicy.maxChildDepth).toBe(1);
     expect(store.listSessionLinks(task.id)).toEqual([
       expect.objectContaining({ taskId: task.id, sessionId: "parent", relationship: "creator" })
@@ -86,11 +93,15 @@ describe("DurableDelegationService", () => {
       tasks: [{ task: "Nested review", role: "orchestrator" }]
     });
     const child = store.getTask(handle.taskId)!;
+    const parentTask = store.getTask(parent.taskId)!;
 
     expect(handle).toMatchObject({ childTask: true, parentTaskId: parent.taskId });
     expect(child).toMatchObject({
       parentTaskId: parent.taskId,
       parentAttemptId: parent.attemptId,
+      rootTaskId: parentTask.rootTaskId,
+      originSessionId: "parent",
+      originTurnId: "parent-turn",
       createdBy: {
         kind: "agent",
         sessionId: "worker",
@@ -100,19 +111,67 @@ describe("DurableDelegationService", () => {
     });
     expect(child.authorityPolicy.maxChildDepth).toBe(1);
     expect(child.budgetPolicy.maxProviderCalls).toBeLessThanOrEqual(parent.stepBudget.maxProviderCalls);
+    expect(store.listSessionLinks(child.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sessionId: "worker", relationship: "creator" }),
+      expect.objectContaining({ sessionId: "parent", relationship: "observer" })
+    ]));
+    expect(store.listChildTasks(parent.taskId).map((task) => task.id)).toEqual([child.id]);
+    expect(new TaskOperatorService({ store }).status(child.id, "parent").taskId).toBe(child.id);
+    expect(new TaskOperatorService({ store }).status(parent.taskId, "parent").childTasks).toEqual([
+      expect.objectContaining({ taskId: child.id, status: "queued", parentAttemptId: parent.attemptId })
+    ]);
 
+    const runningParent = { ...parentTask, status: "running" as const, startedAt: "2026-01-01T00:00:30.000Z", updatedAt: "2026-01-01T00:00:30.000Z" };
+    store.updateTask(runningParent);
+    const parentStep = store.getStep(parent.stepId)!;
+    const readyStep = { ...parentStep, status: "ready" as const, updatedAt: "2026-01-01T00:00:30.000Z" };
+    store.updateStep(readyStep);
+    const runningStep = { ...readyStep, status: "running" as const, updatedAt: "2026-01-01T00:00:30.000Z" };
+    store.updateStep(runningStep);
     const settledParentAttempt = store.getAttempt(parent.attemptId)!;
     store.updateAttempt({
       ...settledParentAttempt,
-      status: "cancelled",
+      status: "completed",
       updatedAt: "2026-01-01T00:01:00.000Z",
       completedAt: "2026-01-01T00:01:00.000Z"
     });
+    store.updateStep({ ...runningStep, status: "completed", updatedAt: "2026-01-01T00:01:00.000Z" });
+    store.updateTask({
+      ...runningParent,
+      status: "completed",
+      updatedAt: "2026-01-01T00:01:00.000Z",
+      completedAt: "2026-01-01T00:01:00.000Z"
+    });
+    expect(store.getTask(child.id)?.status).toBe("queued");
     expect(service.create({
       toolCallId: "nested-call",
       trustedWorkspace: true,
       tasks: [{ task: "Nested review", role: "orchestrator" }]
     })).toMatchObject({ taskId: handle.taskId, idempotentReplay: true });
+  });
+
+  it("rejects runtime children when the active parent Step policy forbids them", () => {
+    const parent = createParentAttempt(store, "forbid");
+    const service = new DurableDelegationService({
+      store,
+      creatorSessionId: () => "worker",
+      workspace: workspace(),
+      config: { ...DEFAULT_DELEGATION_CONFIG, maxSpawnDepth: 3 },
+      visibleTools,
+      activeTaskExecution: {
+        taskId: parent.taskId,
+        planRevisionId: parent.planRevisionId,
+        stepId: parent.stepId,
+        attemptId: parent.attemptId
+      }
+    });
+
+    expect(() => service.create({
+      toolCallId: "forbidden-child",
+      trustedWorkspace: true,
+      tasks: [{ task: "Must not start" }]
+    })).toThrow("forbids runtime child Tasks");
+    expect(store.listChildTasks(parent.taskId)).toEqual([]);
   });
 
   it("fails closed for untrusted workspaces and overlong objectives", () => {
@@ -140,7 +199,7 @@ function rootService(store: SQLiteTaskStore) {
   });
 }
 
-function createParentAttempt(store: SQLiteTaskStore) {
+function createParentAttempt(store: SQLiteTaskStore, childTaskPolicy: "forbid" | "fire_and_forget" = "fire_and_forget") {
   const authority = authorityPolicy(2);
   const stepBudget = {
     maxProviderCalls: 40,
@@ -151,6 +210,7 @@ function createParentAttempt(store: SQLiteTaskStore) {
   const graph = new FixedTaskService({ store }).create({
     creatorSessionId: "parent",
     source: "runtime",
+    originTurnId: "parent-turn",
     objective: "Parent Task",
     workspace: workspace(),
     authorityPolicy: authority,
@@ -161,6 +221,7 @@ function createParentAttempt(store: SQLiteTaskStore) {
       objective: "Parent work",
       dependsOn: [],
       executor: { kind: "agent", role: "orchestrator" },
+      childTaskPolicy,
       authorityPolicy: authority,
       budget: stepBudget,
       retryPolicy: {

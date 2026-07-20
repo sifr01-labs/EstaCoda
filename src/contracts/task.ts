@@ -158,6 +158,9 @@ export type TaskFailurePolicy = {
 
 export type TaskIdempotency = "idempotent" | "retry_safe" | "non_idempotent" | "unknown";
 
+/** Runtime-created child Tasks may never become implicit dependencies of their parent plan. */
+export type TaskChildPolicy = "forbid" | "fire_and_forget";
+
 export type TaskAgentExecutor = {
   kind: "agent";
   role: "worker" | "orchestrator";
@@ -191,6 +194,12 @@ export type Task = {
   id: TaskId;
   profileId: string;
   creatorSessionId?: string;
+  /** Immutable root of this Task tree. Root Tasks identify themselves. */
+  rootTaskId: TaskId;
+  /** Original user/operator session authorized to observe every descendant. */
+  originSessionId: string;
+  /** Stable originating turn/call attribution when the creation surface provides one. */
+  originTurnId?: string;
   parentTaskId?: TaskId;
   parentAttemptId?: TaskAttemptId;
   source: TaskSource;
@@ -239,6 +248,7 @@ export type TaskStep = {
   objective: string;
   dependsOn: readonly TaskStepId[];
   executor: TaskAgentExecutor;
+  childTaskPolicy: TaskChildPolicy;
   authorityPolicy: TaskAuthorityPolicy;
   budget: TaskStepBudget;
   retryPolicy: TaskRetryPolicy;
@@ -612,6 +622,7 @@ export type TaskPlanValidationIssueCode =
   | "step-objective-empty"
   | "step-objective-too-long"
   | "step-executor-invalid"
+  | "step-child-policy-invalid"
   | "step-too-many-dependencies"
   | "step-dependency-duplicate"
   | "step-dependency-self"
@@ -756,6 +767,20 @@ export function validateTaskPlan(
       ))
     ) {
       issues.push(issue("step-executor-invalid", "Step executor is unsupported or contains an invalid model selection.", step.id));
+    }
+
+    if (step.childTaskPolicy !== "forbid" && step.childTaskPolicy !== "fire_and_forget") {
+      issues.push(issue("step-child-policy-invalid", "Step child Task policy is unsupported.", step.id));
+    } else if (step.childTaskPolicy === "fire_and_forget" && (
+      step.executor.role !== "orchestrator" ||
+      !step.authorityPolicy.mayCreateChildTasks ||
+      step.authorityPolicy.maxChildDepth <= 0
+    )) {
+      issues.push(issue(
+        "step-child-policy-invalid",
+        "Only an authorized orchestrator Step may create fire-and-forget child Tasks.",
+        step.id
+      ));
     }
 
     dependencyCount += step.dependsOn.length;

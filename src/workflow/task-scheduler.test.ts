@@ -683,6 +683,8 @@ function makeGraph(
     id: "task-alpha",
     profileId: "alpha",
     creatorSessionId: "creator-alpha",
+    rootTaskId: "task-alpha",
+    originSessionId: "creator-alpha",
     source: "cli",
     creationKey: "create-alpha",
     objective: "Execute a deterministic durable Task.",
@@ -734,6 +736,7 @@ function makeStep(
     objective: `Complete ${key}.`,
     dependsOn: [],
     executor: { kind: "agent", role: "worker" },
+    childTaskPolicy: "forbid",
     authorityPolicy: authorityPolicy(),
     budget: {
       maxProviderCalls: 5,

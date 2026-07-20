@@ -29,6 +29,7 @@ export type FixedTaskStepInput = Pick<
   | "title"
   | "objective"
   | "executor"
+  | "childTaskPolicy"
   | "authorityPolicy"
   | "budget"
   | "retryPolicy"
@@ -45,6 +46,8 @@ export type CreateFixedTaskInput = {
   creatorSessionId: string;
   source: TaskSource;
   creationKey?: string;
+  /** Stable origin attribution for a root Task; descendants inherit it unchanged. */
+  originTurnId?: string;
   objective: string;
   workspace: TaskWorkspaceBinding;
   authorityPolicy: TaskAuthorityPolicy;
@@ -105,6 +108,10 @@ export class FixedTaskService {
 
     const timestamp = this.#now().toISOString();
     const taskId = boundedToken(this.#id("task"), "Task ID", 256);
+    const parentTask = parent === undefined ? undefined : this.#store.getTask(parent.taskId) ?? undefined;
+    const rootTaskId = parentTask?.rootTaskId ?? taskId;
+    const originSessionId = parentTask?.originSessionId ?? normalized.creatorSessionId;
+    const originTurnId = parentTask?.originTurnId ?? normalized.originTurnId;
     const revisionId = boundedToken(this.#id("revision"), "PlanRevision ID", 256);
     const createdBy = normalized.createdBy ?? { kind: "user" as const, sessionId: normalized.creatorSessionId };
     const stepIds = new Map(normalized.steps.map((step) => [
@@ -115,6 +122,9 @@ export class FixedTaskService {
       id: taskId,
       profileId: this.#store.profileId,
       creatorSessionId: normalized.creatorSessionId,
+      rootTaskId,
+      originSessionId,
+      ...(originTurnId === undefined ? {} : { originTurnId }),
       ...(parent === undefined ? {} : {
         parentTaskId: parent.taskId,
         parentAttemptId: parent.attemptId
@@ -177,8 +187,17 @@ export class FixedTaskService {
     const initialEvents = this.#creationEvents(graph, timestamp);
     try {
       this.#store.atomicWrite((store) => {
-        if (normalized.parent !== undefined) this.#validateParent(normalized, store);
+        if (normalized.parent !== undefined) this.#validateParent(normalized, task, store);
         store.createTaskGraph({ task, revision, steps, initialEvents });
+        if (task.parentTaskId !== undefined && task.originSessionId !== task.creatorSessionId) {
+          store.linkSession({
+            taskId: task.id,
+            profileId: task.profileId,
+            sessionId: task.originSessionId,
+            relationship: "observer",
+            createdAt: timestamp
+          });
+        }
         if (completionDelivery !== undefined) store.createDeliveryBinding(completionDelivery);
       });
       return graph;
@@ -190,7 +209,7 @@ export class FixedTaskService {
     }
   }
 
-  #validateParent(input: NormalizedCreateFixedTaskInput, store: TaskStore) {
+  #validateParent(input: NormalizedCreateFixedTaskInput, child: Task, store: TaskStore) {
     const parent = input.parent!;
     const task = store.getTask(parent.taskId);
     const attempt = store.getAttempt(parent.attemptId);
@@ -208,6 +227,13 @@ export class FixedTaskService {
       task.activePlanRevisionId !== attempt.planRevisionId ||
       input.createdBy?.sessionId !== attempt.workerSessionId) {
       throw new Error("A child Task must be created by its active parent Task Attempt worker.");
+    }
+    if (step.childTaskPolicy !== "fire_and_forget") {
+      throw new Error("The active parent Step forbids runtime child Tasks.");
+    }
+    if (child.rootTaskId !== task.rootTaskId || child.originSessionId !== task.originSessionId ||
+      child.originTurnId !== task.originTurnId) {
+      throw new Error("A child Task must inherit its parent Task lineage attribution.");
     }
     if (!isChildTaskAuthorityAllowed(input.authorityPolicy, step.authorityPolicy)) {
       throw new Error("Child Task authority exceeds the active parent Step authority.");
@@ -268,6 +294,13 @@ export class FixedTaskService {
       steps,
       ...(completionDelivery === undefined ? {} : { completionDelivery })
     };
+    if (input.parent !== undefined) {
+      const parent = this.#store.getTask(input.parent.taskId);
+      if (parent === null || task.rootTaskId !== parent.rootTaskId ||
+        task.originSessionId !== parent.originSessionId || task.originTurnId !== parent.originTurnId) {
+        throw new FixedTaskCreationConflictError();
+      }
+    }
     if (!matchesInput(graph, input)) throw new FixedTaskCreationConflictError();
     return graph;
   }
@@ -314,9 +347,10 @@ export class FixedTaskService {
 
 type NormalizedCreateFixedTaskInput = Omit<
   CreateFixedTaskInput,
-  "creationKey" | "objective" | "steps" | "planReason" | "completionDelivery"
+  "creationKey" | "originTurnId" | "objective" | "steps" | "planReason" | "completionDelivery"
 > & {
   creationKey?: string;
+  originTurnId?: string;
   objective: string;
   steps: readonly FixedTaskStepInput[];
   planReason: string;
@@ -341,6 +375,9 @@ function normalizeCreateInput(input: CreateFixedTaskInput): NormalizedCreateFixe
     };
   });
   const creatorSessionId = boundedToken(input.creatorSessionId, "creator session ID", 256);
+  const originTurnId = input.originTurnId === undefined
+    ? undefined
+    : boundedToken(input.originTurnId, "origin turn ID", 256);
   const completionDelivery = normalizeCompletionDelivery(input.completionDelivery);
   let parent: CreateFixedTaskInput["parent"];
   if (input.parent === undefined) {
@@ -352,6 +389,9 @@ function normalizeCreateInput(input: CreateFixedTaskInput): NormalizedCreateFixe
       throw new Error("A root fixed Task actor must be its creator session.");
     }
   } else {
+    if (originTurnId !== undefined) {
+      throw new Error("A child fixed Task inherits origin turn attribution from its parent.");
+    }
     parent = {
       taskId: boundedToken(input.parent.taskId, "parent Task ID", 256),
       attemptId: boundedToken(input.parent.attemptId, "parent Attempt ID", 256)
@@ -367,6 +407,7 @@ function normalizeCreateInput(input: CreateFixedTaskInput): NormalizedCreateFixe
     ...input,
     ...(parent === undefined ? {} : { parent }),
     creatorSessionId,
+    ...(originTurnId === undefined ? {} : { originTurnId }),
     ...(completionDelivery === undefined ? {} : { completionDelivery }),
     ...(input.creationKey === undefined
       ? {}
@@ -385,6 +426,7 @@ function matchesInput(graph: FixedTaskGraph, input: NormalizedCreateFixedTaskInp
     objective: step.objective,
     dependsOn: step.dependsOn.map((id) => keyById.get(id) ?? `missing:${id}`),
     executor: step.executor,
+    childTaskPolicy: step.childTaskPolicy,
     authorityPolicy: step.authorityPolicy,
     budget: step.budget,
     retryPolicy: step.retryPolicy,
@@ -400,6 +442,11 @@ function matchesInput(graph: FixedTaskGraph, input: NormalizedCreateFixedTaskInp
   );
   return deliveryMatches &&
     graph.task.creatorSessionId === input.creatorSessionId &&
+    (input.parent !== undefined || (
+      graph.task.rootTaskId === graph.task.id &&
+      graph.task.originSessionId === input.creatorSessionId &&
+      graph.task.originTurnId === input.originTurnId
+    )) &&
     graph.task.parentTaskId === input.parent?.taskId &&
     graph.task.parentAttemptId === input.parent?.attemptId &&
     graph.task.source === input.source &&

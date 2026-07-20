@@ -90,6 +90,7 @@ export interface TaskStore {
   getTask(id: string): Task | null;
   getTaskByCreationKey(creationKey: string): Task | null;
   listTasks(options?: ListTasksOptions): Task[];
+  listChildTasks(parentTaskId: string): Task[];
 
   createPlanRevisionGraph(revision: TaskPlanRevision, steps: readonly TaskStep[]): void;
   updatePlanRevision(revision: TaskPlanRevision): void;
