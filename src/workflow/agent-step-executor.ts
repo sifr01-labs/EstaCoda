@@ -16,7 +16,6 @@ import {
 import type { TaskStore } from "./task-store.js";
 import { TaskApprovalService } from "./task-approval-service.js";
 import {
-  taskUsageEntriesFromSessionEvents,
   taskUsageFromAgentResponse,
   taskUsageFromEntries
 } from "./task-agent-usage.js";
@@ -166,6 +165,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
         ),
         taskExecution: {
           taskId: input.task.id,
+          rootTaskId: input.task.rootTaskId,
           planRevisionId: input.step.planRevisionId,
           stepId: input.step.id,
           attemptId: input.attempt.id
@@ -261,14 +261,8 @@ export class AgentStepExecutor implements TaskStepExecutor {
       if (trajectoryId !== undefined) input.checkpoint({ trajectoryId });
       const common = { ...worker, ...(trajectoryId === undefined ? {} : { trajectoryId }) };
       const events = await this.#sessionDb.listEvents(child.childSessionId);
-      const usageEntries = taskUsageEntriesFromSessionEvents(events, child.builtSession.providerRoutes, {
-        profileId: input.attempt.profileId,
-        taskId: input.attempt.taskId,
-        planRevisionId: input.attempt.planRevisionId,
-        stepId: input.attempt.stepId,
-        id: input.attempt.id,
-        workerSessionId: child.childSessionId,
-        occurredAt: this.#now().toISOString()
+      const usageEntries = await this.#sessionDb.listProviderUsageEntries(input.task.profileId, {
+        attemptId: input.attempt.id
       });
       const usage = usageEntries.length === 0
         ? taskUsageFromAgentResponse(response.providerExecution, child.builtSession.providerRoutes)

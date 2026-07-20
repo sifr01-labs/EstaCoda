@@ -40,6 +40,10 @@ import type { ConversationContinuationState } from "./conversation-continuation-
 import { normalizeProviderMessagesStrict } from "../providers/provider-message-normalizer.js";
 import type { PromptBudgetReport, PromptSemanticCompressionReport } from "../contracts/prompt.js";
 import type { ProviderAttempt, ProviderExecutionResult, ProviderExecutor, ProviderRuntimeEvent } from "../providers/provider-executor.js";
+import {
+  providerUsageEntriesFromExecution,
+  type ProviderUsageTaskAttribution
+} from "../providers/provider-usage-ledger.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { stableToolCallId } from "../tools/tool-call-planner.js";
@@ -94,6 +98,7 @@ export type ProviderTurnLoopOptions = {
   budgets: ProviderTurnLoopBudgets;
   providerRequestDefaults?: ProviderTurnLoopRequestDefaults;
   initialContextWindowUsage?: SessionContextWindowUsage;
+  taskExecution?: ProviderUsageTaskAttribution;
 };
 
 export class ProviderTurnLoop {
@@ -115,6 +120,9 @@ export class ProviderTurnLoop {
   readonly #agentProfile: ProviderTurnLoopOptions["agentProfile"];
   readonly #budgets: ProviderTurnLoopBudgets;
   readonly #providerRequestDefaults: ProviderTurnLoopRequestDefaults;
+  readonly #profileId: string;
+  readonly #taskExecution: ProviderUsageTaskAttribution | undefined;
+  #providerRequestSequence = 0;
   #lastPromptTokens = 0;
   #lastActualPromptTokens: number | undefined;
 
@@ -137,6 +145,8 @@ export class ProviderTurnLoop {
     this.#agentProfile = options.agentProfile;
     this.#budgets = options.budgets;
     this.#providerRequestDefaults = options.providerRequestDefaults ?? {};
+    this.#profileId = options.profileId;
+    this.#taskExecution = options.taskExecution;
     this.#lastActualPromptTokens = options.initialContextWindowUsage?.usedTokens;
   }
 
@@ -147,6 +157,7 @@ export class ProviderTurnLoop {
   }
 
   async run(input: {
+    visibleTurnId?: string;
     userText: string;
     routedText: string;
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
@@ -177,6 +188,7 @@ export class ProviderTurnLoop {
     toolExecutions: ToolExecutionRecord[];
     iterations: number;
   }> {
+    this.#providerRequestSequence = 0;
     this.#toolPlanRunner.resetPerTurnBudgets?.();
     const providerToolExecutions: ToolExecutionRecord[] = [];
     let effectiveProviderExecution: ProviderExecutionResult | undefined;
@@ -524,6 +536,7 @@ export class ProviderTurnLoop {
   }
 
   async #completeWithProvider(input: {
+    visibleTurnId?: string;
     userText: string;
     routedText: string;
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
@@ -611,6 +624,7 @@ export class ProviderTurnLoop {
       onDelta: input.onDelta,
       onSegmentBreak: input.onSegmentBreak
     });
+    if (input.visibleTurnId !== undefined) await this.#recordProviderUsage(execution, input.visibleTurnId);
     if (execution.response?.usage?.inputTokens !== undefined) {
       await this.#recordContextWindowUsage(execution, prompt.budget, input.onEvent);
     }
@@ -642,6 +656,7 @@ export class ProviderTurnLoop {
   }
 
   async #continueProviderAfterTools(input: {
+    visibleTurnId?: string;
     userText: string;
     routedText: string;
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
@@ -743,6 +758,7 @@ export class ProviderTurnLoop {
       onDelta: input.onDelta,
       onSegmentBreak: input.onSegmentBreak
     });
+    if (input.visibleTurnId !== undefined) await this.#recordProviderUsage(execution, input.visibleTurnId);
     if (execution.response?.usage?.inputTokens !== undefined) {
       await this.#recordContextWindowUsage(execution, prompt.budget, input.onEvent);
     }
@@ -1109,6 +1125,23 @@ export class ProviderTurnLoop {
 
   #currentSessionId(): string {
     return this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
+  }
+
+  async #recordProviderUsage(execution: ProviderExecutionResult, visibleTurnId: string): Promise<void> {
+    const sessionId = this.#currentSessionId();
+    const entries = providerUsageEntriesFromExecution({
+      execution,
+      profileId: this.#profileId,
+      sessionId,
+      visibleTurnId,
+      requestSequence: this.#providerRequestSequence++,
+      routes: [
+        ...(this.#primaryModelRoute === undefined ? [] : [this.#primaryModelRoute]),
+        ...this.#modelFallbackRoutes
+      ],
+      ...(this.#taskExecution === undefined ? {} : { task: this.#taskExecution })
+    });
+    if (entries.length > 0) await this.#sessionDb.recordProviderUsageEntries(entries);
   }
 
   async #recordNativeHistoryDiagnostics(prompt: ProviderPromptAssembly, routeRole: string): Promise<void> {
@@ -1486,6 +1519,7 @@ function providerAttemptEventPayload(attempt: ProviderAttempt): {
   provider: string;
   model: string;
   dispatched: boolean;
+  dispatchedAt?: string;
   credentialId?: string;
   ok: boolean;
   errorClass?: string;
@@ -1501,6 +1535,7 @@ function providerAttemptEventPayload(attempt: ProviderAttempt): {
     dispatched: attempt.dispatched ?? (
       attempt.errorClass !== "unsupported" && attempt.errorClass !== "missing-route" && attempt.errorClass !== "auth"
     ),
+    ...(attempt.dispatchedAt === undefined ? {} : { dispatchedAt: attempt.dispatchedAt }),
     ok: attempt.ok,
     ...(attempt.credentialId === undefined ? {} : { credentialId: attempt.credentialId }),
     ...(attempt.errorClass === undefined ? {} : { errorClass: attempt.errorClass }),

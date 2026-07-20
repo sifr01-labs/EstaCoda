@@ -69,6 +69,7 @@ export type CreateChildAgentLoopInput = {
   parentVisibleTools: readonly ToolDefinition[];
   taskExecution?: {
     taskId: string;
+    rootTaskId: string;
     planRevisionId: string;
     stepId: string;
     attemptId: string;
@@ -235,6 +236,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
       skillLearningManager: undefined,
       agentEvolutionPolicy: undefined as AgentEvolutionPolicy | undefined,
       providerRoutes: modelOverride.routes,
+      taskExecution: input.taskExecution,
       toolRegistryFilter: ({ registry, availableTools }) => {
         const result = input.taskExecution === undefined
           ? resolveChildToolAccess({

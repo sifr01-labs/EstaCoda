@@ -11,9 +11,9 @@ import type {
   TaskPlanRevision,
   TaskResult,
   TaskSessionLink,
-  TaskStep,
-  TaskUsageEntry
+  TaskStep
 } from "../contracts/task.js";
+import type { ProviderUsageEntry, ProviderUsageQuery } from "../contracts/provider-usage.js";
 import {
   TASK_GRAPH_LIMITS,
   assertTaskAttemptTransition,
@@ -28,6 +28,7 @@ import {
   validateTaskPlan
 } from "../contracts/task.js";
 import type { SQLiteDatabase, SQLiteValue } from "../storage/sqlite.js";
+import { insertProviderUsageEntry, selectProviderUsageEntries } from "./sqlite-provider-usage.js";
 import type {
   AcquireTaskAttemptLeaseInput,
   CreateTaskGraphInput,
@@ -655,46 +656,16 @@ export class SQLiteTaskStore implements TaskStore {
     });
   }
 
-  recordUsageEntry(entry: TaskUsageEntry): void {
+  recordProviderUsageEntry(entry: ProviderUsageEntry): void {
     this.#assertTransactionActive();
-    this.#assertProfile(entry.profileId, "TaskUsageEntry", entry.id);
-    this.#assertAttemptOwned(entry.attemptId, entry.taskId);
-    assertUsageEntry(entry);
-    this.#db.query(
-      `insert into task_usage_entries (
-        id, profile_id, task_id, plan_revision_id, step_id, attempt_id, request_key,
-        turn_id, provider_attempt_index, provider, model, route_role, route_index,
-        dispatched, input_tokens, output_tokens, reasoning_tokens, total_tokens,
-        estimated_cost_usd, usage_complete, pricing_complete, incomplete_reasons_json,
-        occurred_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      on conflict(profile_id, request_key) do nothing`
-    ).run(
-      entry.id, this.#profileId, entry.taskId, entry.planRevisionId, entry.stepId,
-      entry.attemptId, entry.requestKey, entry.turnId, entry.providerAttemptIndex,
-      entry.provider, entry.model, entry.routeRole, entry.routeIndex,
-      entry.dispatched ? 1 : 0, entry.inputTokens, entry.outputTokens,
-      entry.reasoningTokens, entry.totalTokens, entry.estimatedCostUsd,
-      entry.usageComplete ? 1 : 0, entry.pricingComplete ? 1 : 0,
-      stringify(entry.incompleteReasons), entry.occurredAt
-    );
-    const persisted = this.#db.query<UsageEntryRow>(
-      "select * from task_usage_entries where profile_id = ? and request_key = ?"
-    ).get(this.#profileId, entry.requestKey);
-    if (persisted === null || stringify(usageEntryValue(rowToUsageEntry(persisted))) !== stringify(usageEntryValue(entry))) {
-      throw new TaskStoreIntegrityError(`Task usage request key ${entry.requestKey} conflicts with another entry.`);
-    }
+    this.#assertProfile(entry.profileId, "ProviderUsageEntry", entry.id);
+    if (entry.attemptId !== undefined && entry.taskId !== undefined) this.#assertAttemptOwned(entry.attemptId, entry.taskId);
+    insertProviderUsageEntry(this.#db, entry);
   }
 
-  listUsageEntries(taskId: string, attemptId?: string): TaskUsageEntry[] {
-    if (this.getTask(taskId) === null) return [];
-    const sql = "select * from task_usage_entries where profile_id = ? and task_id = ?" +
-      (attemptId === undefined ? "" : " and attempt_id = ?") +
-      " order by occurred_at, turn_id, provider_attempt_index, id";
-    const rows = attemptId === undefined
-      ? this.#db.query<UsageEntryRow>(sql).all(this.#profileId, taskId)
-      : this.#db.query<UsageEntryRow>(sql).all(this.#profileId, taskId, attemptId);
-    return rows.map(rowToUsageEntry);
+  listProviderUsageEntries(query: ProviderUsageQuery = {}): ProviderUsageEntry[] {
+    if (query.taskId !== undefined && this.getTask(query.taskId) === null) return [];
+    return selectProviderUsageEntries(this.#db, this.#profileId, query);
   }
 
   recordResult(result: TaskResult): void {
@@ -1476,34 +1447,6 @@ function approvalLinkValues(link: TaskApprovalLink): SQLiteValue[] {
   ];
 }
 
-function usageEntryValue(entry: TaskUsageEntry): unknown {
-  return {
-    id: entry.id,
-    profileId: entry.profileId,
-    taskId: entry.taskId,
-    planRevisionId: entry.planRevisionId,
-    stepId: entry.stepId,
-    attemptId: entry.attemptId,
-    requestKey: entry.requestKey,
-    turnId: entry.turnId,
-    providerAttemptIndex: entry.providerAttemptIndex,
-    provider: entry.provider,
-    model: entry.model,
-    routeRole: entry.routeRole,
-    routeIndex: entry.routeIndex,
-    dispatched: entry.dispatched,
-    inputTokens: entry.inputTokens,
-    outputTokens: entry.outputTokens,
-    reasoningTokens: entry.reasoningTokens,
-    totalTokens: entry.totalTokens,
-    estimatedCostUsd: entry.estimatedCostUsd,
-    usageComplete: entry.usageComplete,
-    pricingComplete: entry.pricingComplete,
-    incompleteReasons: [...entry.incompleteReasons],
-    occurredAt: entry.occurredAt
-  };
-}
-
 function deliveryBindingValues(binding: TaskDeliveryBinding): SQLiteValue[] {
   return [
     binding.id,
@@ -1642,34 +1585,6 @@ function rowToLease(row: LeaseRow): TaskAttemptLease {
     ...(row.cancellation_requested_at === null
       ? {}
       : { cancellationRequestedAt: row.cancellation_requested_at })
-  };
-}
-
-function rowToUsageEntry(row: UsageEntryRow): TaskUsageEntry {
-  return {
-    id: row.id,
-    profileId: row.profile_id,
-    taskId: row.task_id,
-    planRevisionId: row.plan_revision_id,
-    stepId: row.step_id,
-    attemptId: row.attempt_id,
-    requestKey: row.request_key,
-    turnId: row.turn_id,
-    providerAttemptIndex: row.provider_attempt_index,
-    provider: row.provider,
-    model: row.model,
-    routeRole: row.route_role as TaskUsageEntry["routeRole"],
-    routeIndex: row.route_index,
-    dispatched: row.dispatched === 1,
-    inputTokens: row.input_tokens,
-    outputTokens: row.output_tokens,
-    reasoningTokens: row.reasoning_tokens,
-    totalTokens: row.total_tokens,
-    estimatedCostUsd: row.estimated_cost_usd,
-    usageComplete: row.usage_complete === 1,
-    pricingComplete: row.pricing_complete === 1,
-    incompleteReasons: parseJson(row.incomplete_reasons_json, "TaskUsageEntry.incompleteReasons"),
-    occurredAt: row.occurred_at
   };
 }
 
@@ -1850,30 +1765,6 @@ function assertLeaseWindow(start: string, end: string, label: string): void {
   }
 }
 
-function assertUsageEntry(entry: TaskUsageEntry): void {
-  requireBoundedText(entry.id, "Task usage entry ID", 256);
-  requireBoundedText(entry.requestKey, "Task usage request key", 512);
-  requireBoundedText(entry.turnId, "Task usage turn ID", 512);
-  requireBoundedText(entry.provider, "Task usage provider", 128);
-  requireBoundedText(entry.model, "Task usage model", 256);
-  const integers = [
-    entry.providerAttemptIndex,
-    entry.routeIndex,
-    entry.inputTokens,
-    entry.outputTokens,
-    entry.reasoningTokens,
-    entry.totalTokens
-  ];
-  if (integers.some((value) => !Number.isSafeInteger(value) || value < 0) ||
-      !Number.isFinite(entry.estimatedCostUsd) || entry.estimatedCostUsd < 0 ||
-      entry.totalTokens < entry.inputTokens + entry.outputTokens ||
-      !Array.isArray(entry.incompleteReasons) || entry.incompleteReasons.length > 32 ||
-      entry.incompleteReasons.some((reason) => typeof reason !== "string" || reason.length > 160)) {
-    throw new TaskStoreIntegrityError("Task usage entry contains invalid metering values.");
-  }
-  assertTimestamp(entry.occurredAt, "Task usage occurrence");
-}
-
 function assertBudgetPolicy(budget: TaskBudgetPolicy, label: string): void {
   if (!Number.isSafeInteger(budget.maxConcurrentAttempts) || budget.maxConcurrentAttempts < 1 ||
       !Number.isSafeInteger(budget.maxProviderCalls) || budget.maxProviderCalls < 0 ||
@@ -2043,32 +1934,6 @@ type LeaseRow = {
   heartbeat_at: string;
   expires_at: string;
   cancellation_requested_at: string | null;
-};
-
-type UsageEntryRow = {
-  id: string;
-  profile_id: string;
-  task_id: string;
-  plan_revision_id: string;
-  step_id: string;
-  attempt_id: string;
-  request_key: string;
-  turn_id: string;
-  provider_attempt_index: number;
-  provider: string;
-  model: string;
-  route_role: string;
-  route_index: number;
-  dispatched: number;
-  input_tokens: number;
-  output_tokens: number;
-  reasoning_tokens: number;
-  total_tokens: number;
-  estimated_cost_usd: number;
-  usage_complete: number;
-  pricing_complete: number;
-  incomplete_reasons_json: string;
-  occurred_at: string;
 };
 
 type BudgetReservationRow = {

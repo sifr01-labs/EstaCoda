@@ -332,9 +332,11 @@ async function runBasicProviderTurn(
     onDelta?: (text: string) => void;
     onSegmentBreak?: (reason?: string) => void | Promise<void>;
     attachments?: ChannelAttachment[];
+    visibleTurnId?: string;
   } = {}
 ): Promise<Awaited<ReturnType<ProviderTurnLoop["run"]>>> {
   return await loop.run({
+    visibleTurnId: callbacks.visibleTurnId,
     userText: "current user request",
     routedText: "current user request",
     selectedSkill: undefined,
@@ -820,6 +822,8 @@ function forwardingSessionDb(db: InMemorySessionDB, overrides: Partial<SessionDB
     replaceMessages: overrides.replaceMessages ?? db.replaceMessages.bind(db),
     rewriteTranscript: overrides.rewriteTranscript ?? db.rewriteTranscript.bind(db),
     appendEvent: overrides.appendEvent ?? db.appendEvent.bind(db),
+    recordProviderUsageEntries: overrides.recordProviderUsageEntries ?? db.recordProviderUsageEntries.bind(db),
+    listProviderUsageEntries: overrides.listProviderUsageEntries ?? db.listProviderUsageEntries.bind(db),
     listMessages: overrides.listMessages ?? db.listMessages.bind(db),
     listEvents: overrides.listEvents ?? db.listEvents.bind(db),
     search: overrides.search ?? db.search.bind(db),
@@ -992,6 +996,49 @@ describe("ProviderTurnLoop streaming callbacks", () => {
 });
 
 describe("ProviderTurnLoop provider availability", () => {
+  it("records ordinary provider requests against the persisted visible user turn", async () => {
+    const harness = await createCompressionHarness();
+    await appendHistory(harness.sessionDb, harness.sessionId, "history");
+    harness.completeSpy.mockResolvedValueOnce({
+      ok: false,
+      fallbackUsed: true,
+      attempts: [
+        {
+          provider: "test-provider",
+          model: "test-model",
+          dispatched: true,
+          dispatchedAt: "2030-01-01T00:00:00.000Z",
+          ok: false,
+          errorClass: "timeout",
+          content: "",
+          usage: { inputTokens: 25, outputTokens: 0, totalTokens: 25 }
+        },
+        {
+          provider: "fallback-provider",
+          model: "fallback-model",
+          dispatched: false,
+          ok: false,
+          errorClass: "auth",
+          content: ""
+        }
+      ],
+      toolCalls: []
+    });
+
+    await runBasicProviderTurn(harness.loop(), { visibleTurnId: `${harness.sessionId}-latest` });
+
+    const entries = await harness.sessionDb.listProviderUsageEntries("default", {
+      visibleTurnId: `${harness.sessionId}-latest`
+    });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      sessionId: harness.sessionId,
+      provider: "test-provider",
+      providerAttemptIndex: 0,
+      usageComplete: true
+    });
+  });
+
   it("can run provider when executor and configured model are present", async () => {
     const loop = await createProviderTurnLoopForTest();
 

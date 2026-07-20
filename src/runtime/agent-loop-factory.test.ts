@@ -99,6 +99,7 @@ describe("DefaultChildAgentLoopFactory", () => {
       parentVisibleTools: readOnlyParentTools(),
       taskExecution: {
         taskId: "task-1",
+        rootTaskId: "task-1",
         planRevisionId: "revision-1",
         stepId: "step-1",
         attemptId: "attempt-1"

@@ -1,14 +1,76 @@
 import { describe, expect, it } from "vitest";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
-import type { SessionEvent } from "../contracts/session.js";
 import type { AgentLoopRouteInput } from "../runtime/agent-loop-builder.js";
+import { providerUsageEntriesFromExecution } from "../providers/provider-usage-ledger.js";
 import {
-  taskUsageEntriesFromSessionEvents,
   taskUsageFromAgentResponse,
   taskUsageFromEntries
 } from "./task-agent-usage.js";
 
 describe("taskUsageFromAgentResponse", () => {
+  it("excludes preflight failures and retains failed requests that reached a provider", () => {
+    const execution: ProviderExecutionResult = {
+      ok: false,
+      fallbackUsed: true,
+      attempts: [
+        { provider: "openai", model: "primary", dispatched: false, ok: false, errorClass: "auth", content: "" },
+        {
+          provider: "deepseek",
+          model: "fallback",
+          dispatched: true,
+          ok: false,
+          errorClass: "timeout",
+          content: ""
+        }
+      ],
+      toolCalls: []
+    };
+
+    expect(taskUsageFromAgentResponse(execution, routes())).toMatchObject({
+      providerCalls: 1,
+      usageComplete: false,
+      pricingComplete: false
+    });
+  });
+
+  it("prices uncached input, cache reads, and cache writes on the exact route", () => {
+    const cacheRoutes = routes();
+    cacheRoutes.primaryModelRoute!.profile.cost = {
+      inputPerMillionTokens: 2,
+      outputPerMillionTokens: 4,
+      reasoningPerMillionTokens: 0,
+      cacheReadPerMillionTokens: 0.5,
+      cacheWritePerMillionTokens: 1
+    };
+    const execution: ProviderExecutionResult = {
+      ok: true,
+      fallbackUsed: false,
+      attempts: [{
+        provider: "openai",
+        model: "primary",
+        dispatched: true,
+        ok: true,
+        content: "done",
+        usage: {
+          inputTokens: 1_000,
+          outputTokens: 100,
+          totalTokens: 1_100,
+          cacheReadTokens: 400,
+          cacheWriteTokens: 100
+        }
+      }],
+      toolCalls: []
+    };
+
+    expect(taskUsageFromAgentResponse(execution, cacheRoutes)).toMatchObject({
+      cacheReadTokens: 400,
+      cacheWriteTokens: 100,
+      usageComplete: true,
+      pricingComplete: true
+    });
+    expect(taskUsageFromAgentResponse(execution, cacheRoutes).estimatedCostUsd).toBeCloseTo(0.0017, 12);
+  });
+
   it("counts every provider Attempt and applies each route's pricing", () => {
     const execution: ProviderExecutionResult = {
       ok: true,
@@ -18,6 +80,7 @@ describe("taskUsageFromAgentResponse", () => {
         {
           provider: "openai",
           model: "primary",
+          dispatched: true,
           ok: false,
           content: "",
           usage: { inputTokens: 1_000, outputTokens: 100, totalTokens: 1_100, reasoningTokens: 40 }
@@ -25,6 +88,7 @@ describe("taskUsageFromAgentResponse", () => {
         {
           provider: "deepseek",
           model: "fallback",
+          dispatched: true,
           ok: true,
           content: "done",
           usage: { inputTokens: 2_000, outputTokens: 300, totalTokens: 2_300, reasoningTokens: 50 }
@@ -38,6 +102,8 @@ describe("taskUsageFromAgentResponse", () => {
       inputTokens: 3_000,
       outputTokens: 400,
       reasoningTokens: 90,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
       totalTokens: 3_400,
       estimatedCostUsd: 0.005,
       usageComplete: true,
@@ -51,10 +117,11 @@ describe("taskUsageFromAgentResponse", () => {
       ok: false,
       fallbackUsed: false,
       attempts: [
-        { provider: "openai", model: "primary", ok: false, content: "" },
+        { provider: "openai", model: "primary", dispatched: true, ok: false, content: "" },
         {
           provider: "unknown",
           model: "unpriced",
+          dispatched: true,
           ok: false,
           content: "",
           usage: { inputTokens: 25, outputTokens: 5, totalTokens: 30 }
@@ -74,6 +141,8 @@ describe("taskUsageFromAgentResponse", () => {
     });
     expect(taskUsageFromAgentResponse(execution, routes()).incompleteReasons).toEqual([
       "provider-attempt-1-usage-missing",
+      "provider-attempt-1-token-breakdown-incomplete",
+      "provider-attempt-1-total-tokens-missing",
       "provider-attempt-2-input-pricing-missing",
       "provider-attempt-2-output-pricing-missing"
     ]);
@@ -87,6 +156,7 @@ describe("taskUsageFromAgentResponse", () => {
       attempts: [{
         provider: "openai",
         model: "primary",
+        dispatched: true,
         ok: true,
         content: "done",
         usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120, reasoningTokens: 15 }
@@ -96,55 +166,82 @@ describe("taskUsageFromAgentResponse", () => {
 
     expect(taskUsageFromAgentResponse(execution, routes())).toMatchObject({
       totalTokens: 120,
-      reasoningTokens: 15,
-      estimatedCostUsd: 0.00028
+      reasoningTokens: 15
     });
+    expect(taskUsageFromAgentResponse(execution, routes()).estimatedCostUsd).toBeCloseTo(0.00028, 12);
   });
 });
 
 describe("task usage ledger", () => {
   it("meters completion and continuation provider calls with stable request identities", () => {
-    const events: SessionEvent[] = [
-      {
-        kind: "provider-completion",
-        iteration: 1,
+    const first = providerUsageEntriesFromExecution({
+      execution: {
         ok: true,
         fallbackUsed: false,
         attempts: [{
           provider: "openai",
           model: "primary",
+          dispatched: true,
+          dispatchedAt: "2030-01-01T00:00:00.000Z",
           ok: true,
+          content: "done",
           usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 }
-        }]
+        }],
+        toolCalls: []
       },
-      {
-        kind: "provider-continuation",
-        iteration: 1,
+      profileId: "alpha",
+      sessionId: "worker-alpha",
+      visibleTurnId: "message-alpha",
+      requestSequence: 0,
+      routes: [routes().primaryModelRoute!, ...routes().modelFallbackRoutes!],
+      task: {
+        taskId: "task-alpha",
+        rootTaskId: "task-alpha",
+        planRevisionId: "revision-alpha",
+        stepId: "step-alpha",
+        attemptId: "attempt-alpha"
+      }
+    });
+    const second = providerUsageEntriesFromExecution({
+      execution: {
         ok: true,
-        toolPlans: [],
+        fallbackUsed: true,
         attempts: [{
           provider: "deepseek",
           model: "fallback",
+          dispatched: true,
+          dispatchedAt: "2030-01-01T00:00:01.000Z",
           ok: true,
+          content: "done",
           usage: { inputTokens: 50, outputTokens: 10, totalTokens: 60 }
-        }]
-      }
-    ];
-    const entries = taskUsageEntriesFromSessionEvents(events, routes(), {
+        }],
+        toolCalls: []
+      },
       profileId: "alpha",
+      sessionId: "worker-alpha",
+      visibleTurnId: "message-alpha",
+      requestSequence: 1,
+      routes: [routes().primaryModelRoute!, ...routes().modelFallbackRoutes!],
+      task: {
       taskId: "task-alpha",
+      rootTaskId: "task-alpha",
       planRevisionId: "revision-alpha",
       stepId: "step-alpha",
-      id: "attempt-alpha",
-      workerSessionId: "worker-alpha",
-      occurredAt: "2030-01-01T00:00:00.000Z"
+        attemptId: "attempt-alpha"
+      }
     });
+    const entries = [...first, ...second];
 
     expect(entries).toHaveLength(2);
-    expect(entries.map((entry) => [entry.routeRole, entry.routeIndex, entry.requestKey])).toEqual([
-      ["primary", 0, "worker-alpha:000000:provider-completion:1:0"],
-      ["fallback", 1, "worker-alpha:000001:provider-continuation:1:0"]
+    expect(entries.map((entry) => [entry.routeRole, entry.routeIndex])).toEqual([
+      ["primary", 0],
+      ["fallback", 1]
     ]);
+    expect(entries.map((entry) => entry.requestKey)).toEqual([
+      expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
+      expect.stringMatching(/^sha256:[a-f0-9]{64}$/u)
+    ]);
+    expect(entries[0]!.requestKey).not.toBe(entries[1]!.requestKey);
     const totals = taskUsageFromEntries(entries);
     expect(totals).toMatchObject({
       providerCalls: 2,
@@ -153,6 +250,43 @@ describe("task usage ledger", () => {
       pricingComplete: true
     });
     expect(totals.estimatedCostUsd).toBeCloseTo(0.00035, 12);
+  });
+
+  it("uses dispatch-time route identity when duplicate provider/model routes have different pricing", () => {
+    const primary = routes().primaryModelRoute!;
+    const duplicateFallback = {
+      ...primary,
+      profile: {
+        ...primary.profile,
+        cost: { inputPerMillionTokens: 10, outputPerMillionTokens: 20 }
+      }
+    };
+    const [entry] = providerUsageEntriesFromExecution({
+      execution: {
+        ok: true,
+        fallbackUsed: true,
+        attempts: [{
+          provider: primary.provider,
+          model: primary.id,
+          routeIndex: 1,
+          routeRole: "fallback",
+          dispatched: true,
+          dispatchedAt: "2030-01-01T00:00:00.000Z",
+          ok: true,
+          content: "done",
+          usage: { inputTokens: 1_000, outputTokens: 100, totalTokens: 1_100 }
+        }],
+        toolCalls: []
+      },
+      profileId: "alpha",
+      sessionId: "worker-alpha",
+      visibleTurnId: "message-alpha",
+      requestSequence: 0,
+      routes: [primary, duplicateFallback]
+    });
+
+    expect(entry).toMatchObject({ routeRole: "fallback", routeIndex: 1 });
+    expect(entry!.estimatedCostUsd).toBeCloseTo(0.012, 12);
   });
 });
 
@@ -167,7 +301,7 @@ function routes(): AgentLoopRouteInput {
       supportsTools: true,
       supportsVision: false,
       supportsStructuredOutput: true,
-      cost: { inputPerMillionTokens: 2, outputPerMillionTokens: 4 }
+      cost: { inputPerMillionTokens: 2, outputPerMillionTokens: 4, reasoningPerMillionTokens: 0 }
     }
   } as const;
   const fallback = {
@@ -180,7 +314,7 @@ function routes(): AgentLoopRouteInput {
       supportsTools: true,
       supportsVision: false,
       supportsStructuredOutput: true,
-      cost: { inputPerMillionTokens: 1, outputPerMillionTokens: 2 }
+      cost: { inputPerMillionTokens: 1, outputPerMillionTokens: 2, reasoningPerMillionTokens: 0 }
     }
   } as const;
   return {

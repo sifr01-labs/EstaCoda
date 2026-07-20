@@ -442,6 +442,8 @@ function response(overrides: Partial<AgentLoopResponse> = {}): AgentLoopResponse
         {
           provider: "openai",
           model: "fallback-model",
+          dispatched: true,
+          dispatchedAt: NOW,
           ok: false,
           content: "",
           usage: { inputTokens: 500, outputTokens: 100, reasoningTokens: 25, totalTokens: 600 }
@@ -449,6 +451,8 @@ function response(overrides: Partial<AgentLoopResponse> = {}): AgentLoopResponse
         {
           provider: "openai",
           model: "child-model",
+          dispatched: true,
+          dispatchedAt: NOW,
           ok: true,
           content: FULL_RESULT,
           usage: { inputTokens: 1_000, outputTokens: 200, reasoningTokens: 50, totalTokens: 1_200 }
@@ -461,8 +465,16 @@ function response(overrides: Partial<AgentLoopResponse> = {}): AgentLoopResponse
 }
 
 function routes(): AgentLoopRouteInput {
-  const primary = route("child-model", { inputPerMillionTokens: 2, outputPerMillionTokens: 4 });
-  const fallback = route("fallback-model", { inputPerMillionTokens: 1, outputPerMillionTokens: 2 });
+  const primary = route("child-model", {
+    inputPerMillionTokens: 2,
+    outputPerMillionTokens: 4,
+    reasoningPerMillionTokens: 0
+  });
+  const fallback = route("fallback-model", {
+    inputPerMillionTokens: 1,
+    outputPerMillionTokens: 2,
+    reasoningPerMillionTokens: 0
+  });
   return {
     model: primary.profile,
     mainRoute: primary,

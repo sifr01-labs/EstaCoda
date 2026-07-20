@@ -1032,6 +1032,10 @@ function normalizeOpenAICompatibleUsage(usage: {
   prompt_tokens?: number;
   completion_tokens?: number;
   total_tokens?: number;
+  prompt_tokens_details?: {
+    cached_tokens?: number;
+    cache_write_tokens?: number;
+  };
   completion_tokens_details?: {
     reasoning_tokens?: number;
   };
@@ -1044,6 +1048,12 @@ function normalizeOpenAICompatibleUsage(usage: {
     ...(usage.prompt_tokens === undefined ? {} : { inputTokens: usage.prompt_tokens }),
     ...(usage.completion_tokens === undefined ? {} : { outputTokens: usage.completion_tokens }),
     ...(usage.total_tokens === undefined ? {} : { totalTokens: usage.total_tokens }),
+    ...(usage.prompt_tokens_details?.cached_tokens === undefined
+      ? {}
+      : { cacheReadTokens: usage.prompt_tokens_details.cached_tokens }),
+    ...(usage.prompt_tokens_details?.cache_write_tokens === undefined
+      ? {}
+      : { cacheWriteTokens: usage.prompt_tokens_details.cache_write_tokens }),
     ...(usage.completion_tokens_details?.reasoning_tokens === undefined
       ? {}
       : { reasoningTokens: usage.completion_tokens_details.reasoning_tokens })

@@ -1,4 +1,5 @@
-import type { Task, TaskAttempt, TaskStep, TaskUsageEntry } from "../contracts/task.js";
+import type { Task, TaskAttempt, TaskStep } from "../contracts/task.js";
+import type { ProviderUsageEntry } from "../contracts/provider-usage.js";
 import type { TaskStore } from "./task-store.js";
 
 const MAX_TASK_TREE_RECORDS = 1_000;
@@ -31,8 +32,8 @@ export function listTaskTreeAttempts(store: TaskStore, taskId: string): readonly
   return listTaskTree(store, taskId).flatMap((task) => store.listAttempts(task.id));
 }
 
-export function listTaskTreeUsageEntries(store: TaskStore, taskId: string): readonly TaskUsageEntry[] {
-  return listTaskTree(store, taskId).flatMap((task) => store.listUsageEntries(task.id));
+export function listTaskTreeUsageEntries(store: TaskStore, taskId: string): readonly ProviderUsageEntry[] {
+  return listTaskTree(store, taskId).flatMap((task) => store.listProviderUsageEntries({ taskId: task.id }));
 }
 
 /** Includes the parent Step's Attempts and every descendant tree created by those Attempts. */

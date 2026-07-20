@@ -8,9 +8,9 @@ import type {
   TaskEventKind,
   TaskFailure,
   TaskStep,
-  TaskUsageEntry,
   TaskUsageTotals
 } from "../contracts/task.js";
+import type { ProviderUsageEntry } from "../contracts/provider-usage.js";
 import {
   TASK_GRAPH_LIMITS,
   isTerminalTaskAttemptStatus,
@@ -1070,7 +1070,7 @@ export class TaskScheduler {
     lease: TaskAttemptLease,
     failureRecord: TaskFailure,
     usage: TaskUsageTotals,
-    usageEntries?: readonly TaskUsageEntry[]
+    usageEntries?: readonly ProviderUsageEntry[]
   ): void {
     const now = this.#now().toISOString();
     let abortTask = false;
@@ -1111,17 +1111,17 @@ export class TaskScheduler {
   #recordUsageEntries(
     store: TaskStore,
     attempt: TaskAttempt,
-    entries: readonly TaskUsageEntry[] | undefined,
+    entries: readonly ProviderUsageEntry[] | undefined,
     fallback: TaskUsageTotals
   ): TaskUsageTotals {
     for (const entry of entries ?? []) {
       if (entry.attemptId !== attempt.id || entry.taskId !== attempt.taskId ||
           entry.stepId !== attempt.stepId || entry.planRevisionId !== attempt.planRevisionId) {
-        throw new Error("Task usage entry does not belong to the settling Attempt.");
+        throw new Error("Provider usage entry does not belong to the settling Attempt.");
       }
-      store.recordUsageEntry(entry);
+      store.recordProviderUsageEntry(entry);
     }
-    const persisted = store.listUsageEntries(attempt.taskId, attempt.id);
+    const persisted = store.listProviderUsageEntries({ attemptId: attempt.id });
     return persisted.length === 0 ? fallback : usageTotalsFromEntries(persisted);
   }
 
@@ -1548,6 +1548,8 @@ function normalizeUsage(value: TaskUsageTotals | undefined): TaskUsageTotals {
     value.inputTokens,
     value.outputTokens,
     value.reasoningTokens,
+    value.cacheReadTokens ?? 0,
+    value.cacheWriteTokens ?? 0,
     value.totalTokens
   ];
   if (integerFields.some((entry) => !Number.isSafeInteger(entry) || entry < 0) ||
@@ -1556,26 +1558,32 @@ function normalizeUsage(value: TaskUsageTotals | undefined): TaskUsageTotals {
       value.incompleteReasons.some((reason) => typeof reason !== "string" || reason.length > 160)) {
     throw new Error("Executor returned invalid Task usage totals.");
   }
-  return { ...value, incompleteReasons: [...value.incompleteReasons] };
+  return {
+    ...value,
+    cacheReadTokens: value.cacheReadTokens ?? 0,
+    cacheWriteTokens: value.cacheWriteTokens ?? 0,
+    incompleteReasons: [...value.incompleteReasons]
+  };
 }
 
 function sumUsage(values: readonly TaskUsageTotals[]): TaskUsageTotals {
   return values.reduce(addUsage, emptyUsage());
 }
 
-function usageTotalsFromEntries(entries: readonly TaskUsageEntry[]): TaskUsageTotals {
-  const dispatched = entries.filter((entry) => entry.dispatched);
-  const reasons = [...new Set(dispatched.flatMap((entry) => entry.incompleteReasons))].slice(0, 32);
-  if (dispatched.length === 0) reasons.push("provider-usage-unavailable");
+function usageTotalsFromEntries(entries: readonly ProviderUsageEntry[]): TaskUsageTotals {
+  const reasons = [...new Set(entries.flatMap((entry) => entry.incompleteReasons))].slice(0, 32);
+  if (entries.length === 0) reasons.push("provider-usage-unavailable");
   return {
-    providerCalls: dispatched.length,
-    inputTokens: dispatched.reduce((sum, entry) => sum + entry.inputTokens, 0),
-    outputTokens: dispatched.reduce((sum, entry) => sum + entry.outputTokens, 0),
-    reasoningTokens: dispatched.reduce((sum, entry) => sum + entry.reasoningTokens, 0),
-    totalTokens: dispatched.reduce((sum, entry) => sum + entry.totalTokens, 0),
-    estimatedCostUsd: dispatched.reduce((sum, entry) => sum + entry.estimatedCostUsd, 0),
-    usageComplete: dispatched.length > 0 && dispatched.every((entry) => entry.usageComplete),
-    pricingComplete: dispatched.length > 0 && dispatched.every((entry) => entry.pricingComplete),
+    providerCalls: entries.length,
+    inputTokens: entries.reduce((sum, entry) => sum + entry.inputTokens, 0),
+    outputTokens: entries.reduce((sum, entry) => sum + entry.outputTokens, 0),
+    reasoningTokens: entries.reduce((sum, entry) => sum + entry.reasoningTokens, 0),
+    cacheReadTokens: entries.reduce((sum, entry) => sum + entry.cacheReadTokens, 0),
+    cacheWriteTokens: entries.reduce((sum, entry) => sum + entry.cacheWriteTokens, 0),
+    totalTokens: entries.reduce((sum, entry) => sum + entry.totalTokens, 0),
+    estimatedCostUsd: entries.reduce((sum, entry) => sum + entry.estimatedCostUsd, 0),
+    usageComplete: entries.length > 0 && entries.every((entry) => entry.usageComplete),
+    pricingComplete: entries.length > 0 && entries.every((entry) => entry.pricingComplete),
     incompleteReasons: reasons
   };
 }
@@ -1590,6 +1598,8 @@ function addUsage(left: TaskUsageTotals, right: TaskUsageTotals): TaskUsageTotal
     inputTokens: left.inputTokens + right.inputTokens,
     outputTokens: left.outputTokens + right.outputTokens,
     reasoningTokens: left.reasoningTokens + right.reasoningTokens,
+    cacheReadTokens: (left.cacheReadTokens ?? 0) + (right.cacheReadTokens ?? 0),
+    cacheWriteTokens: (left.cacheWriteTokens ?? 0) + (right.cacheWriteTokens ?? 0),
     totalTokens: left.totalTokens + right.totalTokens,
     estimatedCostUsd: left.estimatedCostUsd + right.estimatedCostUsd,
     usageComplete: left.usageComplete && right.usageComplete,

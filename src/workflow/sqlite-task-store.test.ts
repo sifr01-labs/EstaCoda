@@ -21,6 +21,7 @@ import {
   migrateTaskAgentExecutorSchemaV12,
   migrateTaskBackgroundHostSchemaV13,
   migrateTaskChildGovernanceSchemaV16,
+  migrateProviderUsageLedgerSchemaV18,
   migrateTaskTreeBudgetSchemaV17,
   migrateTaskSchedulerSchemaV11,
   migrateTaskVerticalSliceSchemaV15,
@@ -609,6 +610,9 @@ describe("Task background host schema v13 migration", () => {
       database.exec(`
         pragma foreign_keys = on;
         create table sessions(id text primary key, profile_id text not null, unique(profile_id, id));
+        create table messages(
+          id text primary key, session_id text not null, role text not null, content text not null
+        );
         create table tasks(id text primary key, profile_id text not null, unique(profile_id, id));
       `);
       migrateTaskBackgroundHostSchemaV13(database);
@@ -834,6 +838,72 @@ describe("Task tree budget schema v17 migration", () => {
   });
 });
 
+describe("Provider usage ledger schema v18 migration", () => {
+  it("moves only dispatched Task requests into the canonical ledger and removes the old table", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-provider-usage-migration-"));
+    const database = openDefaultSQLiteDatabase({ path: join(tempDir, "provider-usage.sqlite") });
+    try {
+      database.exec(`
+        create table sessions(id text primary key, profile_id text not null, unique(profile_id, id));
+        create table messages(
+          id text primary key, session_id text not null, role text not null, content text not null
+        );
+        create table tasks(
+          id text primary key, profile_id text not null, creator_session_id text,
+          root_task_id text not null, unique(profile_id, id)
+        );
+        create table task_attempts(
+          id text primary key, profile_id text not null, task_id text not null,
+          plan_revision_id text not null, step_id text not null, worker_session_id text,
+          unique(profile_id, task_id, plan_revision_id, step_id, id),
+          unique(profile_id, task_id, id)
+        );
+        create table task_usage_entries(
+          id text primary key, profile_id text not null, task_id text not null,
+          plan_revision_id text not null, step_id text not null, attempt_id text not null,
+          request_key text not null, turn_id text not null, provider_attempt_index integer not null,
+          provider text not null, model text not null, route_role text not null, route_index integer not null,
+          dispatched integer not null, input_tokens integer not null, output_tokens integer not null,
+          reasoning_tokens integer not null, total_tokens integer not null, estimated_cost_usd real not null,
+          usage_complete integer not null, pricing_complete integer not null,
+          incomplete_reasons_json text not null, occurred_at text not null
+        );
+        insert into sessions values ('origin', 'alpha');
+        insert into sessions values ('worker', 'alpha');
+        insert into messages values ('worker-turn', 'worker', 'user', 'Run the Task');
+        insert into tasks values ('task', 'alpha', 'origin', 'task');
+        insert into task_attempts values ('attempt', 'alpha', 'task', 'revision', 'step', 'worker');
+        insert into task_usage_entries values (
+          'usage-dispatched', 'alpha', 'task', 'revision', 'step', 'attempt', 'request-dispatched',
+          'turn', 0, 'openai', 'model', 'primary', 0, 1, 10, 2, 0, 12, 0.01, 1, 1, '[]', '${NOW}'
+        );
+        insert into task_usage_entries values (
+          'usage-preflight', 'alpha', 'task', 'revision', 'step', 'attempt', 'request-preflight',
+          'turn', 1, 'openai', 'model', 'fallback', 1, 0, 0, 0, 0, 0, 0, 0, 0, '["preflight"]', '${NOW}'
+        );
+      `);
+
+      migrateProviderUsageLedgerSchemaV18(database);
+      migrateProviderUsageLedgerSchemaV18(database);
+
+      expect(database.query<{ id: string; session_id: string; root_task_id: string; cache_read_tokens: number }>(
+        "select id, session_id, root_task_id, cache_read_tokens from provider_usage_entries"
+      ).all()).toEqual([{
+        id: "usage-dispatched",
+        session_id: "worker",
+        root_task_id: "task",
+        cache_read_tokens: 0
+      }]);
+      expect(database.query<{ name: string }>(
+        "select name from sqlite_master where type = 'table' and name = 'task_usage_entries'"
+      ).get()).toBeNull();
+    } finally {
+      database.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
 const NOW = "2030-01-01T00:00:00.000Z";
 
 function makeGraph(profileId: "alpha" | "beta") {
@@ -1041,7 +1111,7 @@ const TASK_TABLES = [
   "task_events",
   "task_session_links",
   "task_guidance",
-  "task_usage_entries",
+  "provider_usage_entries",
   "task_approval_links",
   "task_delivery_bindings",
   "task_budget_reservations"

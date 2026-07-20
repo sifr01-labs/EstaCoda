@@ -33,6 +33,7 @@ import type { ProviderRegistry } from "../providers/provider-registry.js";
 import type { SessionCompressionService } from "../prompt/session-compression-service.js";
 import type { SessionCompressionConfig } from "../config/runtime-config.js";
 import type { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
+import type { ProviderUsageTaskAttribution } from "../providers/provider-usage-ledger.js";
 import { loadSessionContextWindowUsage } from "../session/session-context-window-usage.js";
 import type { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import type { ChangeManifestStore } from "../skills/change-manifest-store.js";
@@ -226,6 +227,7 @@ export type AgentLoopSessionInput = {
   projectContext?: ProjectContextSnapshot;
   providerRoutes?: AgentLoopSessionRouteOverride;
   toolRegistryFilter?: AgentLoopToolRegistryFilter;
+  taskExecution?: ProviderUsageTaskAttribution;
 };
 
 export type BuiltAgentLoopSession = {
@@ -522,7 +524,8 @@ export class AgentLoopBuilder {
         ...substrate.executionControls?.providerBudgets
       },
       providerRequestDefaults: substrate.executionControls?.providerRequestDefaults,
-      initialContextWindowUsage
+      initialContextWindowUsage,
+      taskExecution: input.taskExecution
     });
     const skillPlaybookRunner = (this.#factories.skillPlaybookRunner ?? ((options) => new SkillPlaybookRunner(options)))({
       toolExecutor,

@@ -26,8 +26,12 @@ import { refreshOAuthToken } from "./oauth/oauth-refresh.js";
 export type ProviderAttempt = {
   provider: string;
   model: string;
+  /** Exact position and semantic role in the resolved route chain. */
+  routeIndex?: number;
+  routeRole?: ProviderRouteRole;
   /** True only after invoking a provider adapter. Preflight route failures are not calls. */
   dispatched?: boolean;
+  dispatchedAt?: string;
   credentialId?: string;
   ok: boolean;
   errorClass?: string;
@@ -325,6 +329,7 @@ export class ProviderExecutor {
 
       while (routeAttemptCount < maxRouteAttempts) {
         routeAttemptCount++;
+        const dispatchedAt = new Date().toISOString();
 
         await options.onEvent?.({
           kind: "provider-attempt-start",
@@ -370,7 +375,10 @@ export class ProviderExecutor {
         attempts.push({
           provider: route.provider,
           model: route.id,
+          routeIndex: index,
+          routeRole: routeRoleForIndex(index),
           dispatched: true,
+          dispatchedAt,
           credentialId: credential?.id,
           ok: callResponse.ok,
           errorClass: callResponse.errorClass,

@@ -16,6 +16,7 @@ import type {
   CompiledSkillPlaybook
 } from "./skill.js";
 import type { FailureRecord } from "./failure.js";
+import type { ProviderUsageEntry, ProviderUsageQuery } from "./provider-usage.js";
 import type { DelegateRole } from "./delegation.js";
 import type {
   ModelProfile,
@@ -328,6 +329,7 @@ export type SessionEvent =
         provider: string;
         model: string;
         dispatched?: boolean;
+        dispatchedAt?: string;
         credentialId?: string;
         ok: boolean;
         errorClass?: ProviderErrorClass | string;
@@ -351,6 +353,7 @@ export type SessionEvent =
         provider: string;
         model: string;
         dispatched?: boolean;
+        dispatchedAt?: string;
         credentialId?: string;
         ok: boolean;
         errorClass?: ProviderErrorClass | string;
@@ -656,6 +659,8 @@ export type SessionDB = {
   replaceMessages(input: RewriteSessionTranscriptInput): Promise<SessionMessage[]>;
   rewriteTranscript(input: RewriteSessionTranscriptInput): Promise<SessionMessage[]>;
   appendEvent(sessionId: string, event: SessionEvent): Promise<void>;
+  recordProviderUsageEntries(entries: readonly ProviderUsageEntry[]): Promise<void>;
+  listProviderUsageEntries(profileId: string, query?: ProviderUsageQuery): Promise<ProviderUsageEntry[]>;
   listMessages(sessionId: string): Promise<SessionMessage[]>;
   listEvents(sessionId: string): Promise<SessionEvent[]>;
   search(query: string, options?: SessionSearchOptions): Promise<SessionSearchResult[]>;

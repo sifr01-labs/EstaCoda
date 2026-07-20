@@ -25,6 +25,12 @@ describe("DurableDelegationService", () => {
     sessionDb = new SQLiteSessionDB({ path: join(root, "sessions.sqlite") });
     await sessionDb.createSession({ id: "parent", profileId: "alpha" });
     await sessionDb.createSession({ id: "worker", profileId: "alpha", parentSessionId: "parent" });
+    await sessionDb.appendMessage({
+      id: "visible-turn-alpha",
+      sessionId: "parent",
+      role: "user",
+      content: "Delegate the Task"
+    });
     store = new SQLiteTaskStore({ db: sessionDb.db, profileId: "alpha" });
   });
 
@@ -387,7 +393,8 @@ describe("DurableDelegationService", () => {
       completedAt: "2026-01-01T00:00:10.000Z",
       updatedAt: "2026-01-01T00:00:10.000Z"
     });
-    store.recordUsageEntry(usageEntry(parentAttempt, "parent-usage", 30_000, 1));
+    store.recordProviderUsageEntry(usageEntry(parentAttempt, parentTask.rootTaskId, "parent-usage", 30_000, 1));
+    expect(store.listProviderUsageEntries({ rootTaskId: parentTask.rootTaskId })).toHaveLength(1);
     store.updateStep({ ...parentStep, status: "completed", updatedAt: "2026-01-01T00:00:10.000Z" });
     store.updateTask({
       ...parentTask,
@@ -400,7 +407,7 @@ describe("DurableDelegationService", () => {
     const executor = new FakeTaskStepExecutor(({ attempt }) => ({
       outcome: "succeeded",
       usage: usage(1, 80_000, 1),
-      usageEntries: [usageEntry(attempt, "child-usage", 80_000, 1)],
+      usageEntries: [usageEntry(attempt, store.getTask(child.taskId)!.rootTaskId, "child-usage", 80_000, 1)],
       results: [{ kind: "text", content: "Child result" }]
     }));
     const childScheduler = scheduler(
@@ -412,6 +419,7 @@ describe("DurableDelegationService", () => {
       () => new Date("2026-01-01T00:00:20.000Z")
     );
     expect(await childScheduler.runOnce()).toMatchObject({ dispatched: 1, failed: 1, completed: 0 });
+    expect(store.listProviderUsageEntries({ rootTaskId: parentTask.rootTaskId })).toHaveLength(2);
     expect(store.getTask(child.taskId)?.status).toBe("failed");
     expect(store.listAttempts(child.taskId)[0]).toMatchObject({
       status: "failed",
@@ -755,6 +763,7 @@ function usage(providerCalls: number, totalTokens: number, estimatedCostUsd: num
 
 function usageEntry(
   attempt: TaskAttempt,
+  rootTaskId: string,
   requestKey: string,
   totalTokens: number,
   estimatedCostUsd: number
@@ -762,26 +771,29 @@ function usageEntry(
   return {
     id: `usage-${requestKey}`,
     profileId: attempt.profileId,
+    sessionId: "parent",
+    visibleTurnId: "visible-turn-alpha",
     taskId: attempt.taskId,
+    rootTaskId,
     planRevisionId: attempt.planRevisionId,
     stepId: attempt.stepId,
     attemptId: attempt.id,
     requestKey,
-    turnId: requestKey,
     providerAttemptIndex: 0,
     provider: "test",
     model: "test-model",
     routeRole: "primary" as const,
     routeIndex: 0,
-    dispatched: true,
     inputTokens: totalTokens,
     outputTokens: 0,
     reasoningTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
     totalTokens,
     estimatedCostUsd,
     usageComplete: true,
     pricingComplete: true,
     incompleteReasons: [],
-    occurredAt: "2026-01-01T00:00:10.000Z"
+    dispatchedAt: "2026-01-01T00:00:10.000Z"
   };
 }

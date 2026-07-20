@@ -15,6 +15,7 @@ import type {
 import type { ChannelKind } from "../contracts/channel.js";
 import type { Trajectory, CompressedTrajectory } from "../contracts/trajectory.js";
 import type { FailureRecord } from "../contracts/failure.js";
+import type { ProviderUsageEntry, ProviderUsageQuery } from "../contracts/provider-usage.js";
 import type { TrajectoryStore } from "../contracts/trajectory-store.js";
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
@@ -23,12 +24,14 @@ import {
   migrateTaskAgentExecutorSchemaV12,
   migrateTaskBackgroundHostSchemaV13,
   migrateTaskChildGovernanceSchemaV16,
+  migrateProviderUsageLedgerSchemaV18,
   migrateTaskTreeBudgetSchemaV17,
   migrateTaskCorrectiveFoundationSchemaV14,
   migrateTaskVerticalSliceSchemaV15,
   migrateTaskSchedulerSchemaV11,
   migrateTaskSchemaV10
 } from "../workflow/task-schema.js";
+import { insertProviderUsageEntry, selectProviderUsageEntries } from "../workflow/sqlite-provider-usage.js";
 
 type SessionRow = {
   id: string;
@@ -386,6 +389,21 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     this.#touch(sessionId);
   }
 
+  async recordProviderUsageEntries(entries: readonly ProviderUsageEntry[]): Promise<void> {
+    this.#withWriteTransaction(() => {
+      for (const entry of entries) {
+        insertProviderUsageEntry(this.#db, entry);
+      }
+    });
+  }
+
+  async listProviderUsageEntries(
+    profileId: string,
+    query: ProviderUsageQuery = {}
+  ): Promise<ProviderUsageEntry[]> {
+    return selectProviderUsageEntries(this.#db, profileId, query);
+  }
+
   async listMessages(sessionId: string): Promise<SessionMessage[]> {
     return this.#db
       .query<MessageRow>("select * from messages where session_id = ? order by created_at asc, rowid asc")
@@ -714,6 +732,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     this.#runMigrationStep(15, "v0.10-schema-v15-task-vertical-slice", () => migrateTaskVerticalSliceSchemaV15(this.#db));
     this.#runMigrationStep(16, "v0.10-schema-v16-task-child-governance", () => migrateTaskChildGovernanceSchemaV16(this.#db));
     this.#runMigrationStep(17, "v0.10-schema-v17-task-tree-budgets", () => migrateTaskTreeBudgetSchemaV17(this.#db));
+    this.#runMigrationStep(18, "v0.10-schema-v18-provider-usage-ledger", () => migrateProviderUsageLedgerSchemaV18(this.#db));
   }
 
   #withMigrationLock(migrate: () => void): void {

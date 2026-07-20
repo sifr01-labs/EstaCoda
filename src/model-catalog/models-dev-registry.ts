@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveHomeDir } from "../config/home-dir.js";
 import type { ModelProfile, ProviderId } from "../contracts/provider.js";
+import { estimateTokenUsageCost } from "../providers/provider-usage-estimator.js";
 
 export type ModelModality = "text" | "image" | "pdf" | "audio" | "video";
 export type ModelStatus = "" | "alpha" | "beta" | "deprecated";
@@ -230,7 +231,10 @@ export function modelInfoToProfile(model: ModelInfo): ModelProfile {
     freeOrOpenWeights: model.openWeights,
     cost: {
       inputPerMillionTokens: model.costInput,
-      outputPerMillionTokens: model.costOutput
+      outputPerMillionTokens: model.costOutput,
+      reasoningPerMillionTokens: model.costReasoning,
+      cacheReadPerMillionTokens: model.costCacheRead,
+      cacheWritePerMillionTokens: model.costCacheWrite
     }
   };
 }
@@ -244,14 +248,15 @@ export function estimateCost(model: ModelInfo, usage: {
   inputAudioTokens?: number;
   outputAudioTokens?: number;
 }): CostEstimate {
-  const inputUsd = costFor(usage.inputTokens, model.costInput);
-  const outputUsd = costFor(usage.outputTokens, model.costOutput);
-  const reasoningUsd = costFor(usage.reasoningTokens, model.costReasoning);
-  const cacheReadUsd = costFor(usage.cacheReadTokens, model.costCacheRead);
-  const cacheWriteUsd = costFor(usage.cacheWriteTokens, model.costCacheWrite);
-  const inputAudioUsd = costFor(usage.inputAudioTokens, model.costInputAudio);
-  const outputAudioUsd = costFor(usage.outputAudioTokens, model.costOutputAudio);
-  const amountUsd = inputUsd + outputUsd + reasoningUsd + cacheReadUsd + cacheWriteUsd + inputAudioUsd + outputAudioUsd;
+  const estimate = estimateTokenUsageCost(usage, {
+    input: model.costInput,
+    output: model.costOutput,
+    reasoning: model.costReasoning,
+    cacheRead: model.costCacheRead,
+    cacheWrite: model.costCacheWrite,
+    inputAudio: model.costInputAudio,
+    outputAudio: model.costOutputAudio
+  });
   const hasKnownPricing = [
     model.costInput,
     model.costOutput,
@@ -263,17 +268,9 @@ export function estimateCost(model: ModelInfo, usage: {
   ].some((value) => typeof value === "number");
 
   return {
-    amountUsd,
+    amountUsd: estimate.amountUsd,
     status: hasKnownPricing ? "estimated" : "unknown_pricing",
-    breakdown: {
-      inputUsd,
-      outputUsd,
-      reasoningUsd,
-      cacheReadUsd,
-      cacheWriteUsd,
-      inputAudioUsd,
-      outputAudioUsd
-    }
+    breakdown: estimate.breakdown
   };
 }
 
@@ -656,10 +653,6 @@ function inferFamily(modelId: string): string {
   if (normalized.includes("mistral")) return "mistral";
   if (normalized.includes("hermes")) return "hermes";
   return "";
-}
-
-function costFor(tokens: number | undefined, costPerMillion: number | undefined): number {
-  return tokens === undefined || costPerMillion === undefined ? 0 : (tokens / 1_000_000) * costPerMillion;
 }
 
 function stringValue(value: unknown): string | undefined {

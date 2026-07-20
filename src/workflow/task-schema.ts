@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 
-export const TASK_SCHEMA_VERSION = 17;
+export const TASK_SCHEMA_VERSION = 18;
 
 const OBSOLETE_EXECUTION_TABLES = [
   "workflow_event_summaries",
@@ -782,4 +782,99 @@ export function migrateTaskTreeBudgetSchemaV17(db: SQLiteDatabase): void {
       ) then raise(abort, 'Child Task budget reservation is required') end;
     end;
   `);
+}
+
+/** Replaces Task-only metering with the canonical provider-request ledger. */
+export function migrateProviderUsageLedgerSchemaV18(db: SQLiteDatabase): void {
+  db.exec(`
+    create table if not exists provider_usage_entries (
+      id text primary key,
+      profile_id text not null check(length(profile_id) between 1 and 128),
+      session_id text not null check(length(session_id) between 1 and 256),
+      visible_turn_id text not null check(length(visible_turn_id) between 1 and 512),
+      request_key text not null check(length(request_key) between 1 and 512),
+      provider text not null check(length(provider) between 1 and 128),
+      model text not null check(length(model) between 1 and 256),
+      route_role text not null check(route_role in ('primary', 'fallback', 'alias', 'override', 'unknown')),
+      route_index integer not null check(route_index >= 0),
+      provider_attempt_index integer not null check(provider_attempt_index >= 0),
+      input_tokens integer not null check(input_tokens >= 0),
+      output_tokens integer not null check(output_tokens >= 0),
+      reasoning_tokens integer not null check(reasoning_tokens >= 0),
+      cache_read_tokens integer not null check(cache_read_tokens >= 0),
+      cache_write_tokens integer not null check(cache_write_tokens >= 0),
+      total_tokens integer not null check(total_tokens >= 0),
+      estimated_cost_usd real not null check(estimated_cost_usd >= 0),
+      usage_complete integer not null check(usage_complete in (0, 1)),
+      pricing_complete integer not null check(pricing_complete in (0, 1)),
+      incomplete_reasons_json text not null check(json_valid(incomplete_reasons_json)),
+      task_id text,
+      root_task_id text,
+      plan_revision_id text,
+      step_id text,
+      attempt_id text,
+      dispatched_at text not null,
+      unique(profile_id, id),
+      unique(profile_id, request_key),
+      check(
+        (task_id is null and root_task_id is null and plan_revision_id is null and step_id is null and attempt_id is null)
+        or
+        (task_id is not null and root_task_id is not null and plan_revision_id is not null and step_id is not null and attempt_id is not null)
+      ),
+      foreign key(profile_id, session_id)
+        references sessions(profile_id, id) on delete cascade,
+      foreign key(profile_id, task_id, plan_revision_id, step_id, attempt_id)
+        references task_attempts(profile_id, task_id, plan_revision_id, step_id, id) on delete cascade,
+      foreign key(profile_id, root_task_id)
+        references tasks(profile_id, id) on delete cascade
+    );
+    create index if not exists idx_provider_usage_session
+      on provider_usage_entries(profile_id, session_id, dispatched_at, provider_attempt_index);
+    create index if not exists idx_provider_usage_turn
+      on provider_usage_entries(profile_id, visible_turn_id, dispatched_at, provider_attempt_index);
+    create index if not exists idx_provider_usage_attempt
+      on provider_usage_entries(profile_id, attempt_id, dispatched_at, provider_attempt_index);
+    create index if not exists idx_provider_usage_task
+      on provider_usage_entries(profile_id, task_id, dispatched_at);
+    create index if not exists idx_provider_usage_root_task
+      on provider_usage_entries(profile_id, root_task_id, dispatched_at);
+  `);
+
+  const legacy = db.query<{ name: string }>(
+    "select name from sqlite_master where type = 'table' and name = 'task_usage_entries'"
+  ).get();
+  if (legacy !== null) {
+    db.exec(`
+      insert or ignore into provider_usage_entries (
+        id, profile_id, session_id, visible_turn_id, request_key, provider, model,
+        route_role, route_index, provider_attempt_index, input_tokens, output_tokens,
+        reasoning_tokens, cache_read_tokens, cache_write_tokens, total_tokens,
+        estimated_cost_usd, usage_complete, pricing_complete, incomplete_reasons_json,
+        task_id, root_task_id, plan_revision_id, step_id, attempt_id, dispatched_at
+      )
+      select
+        usage.id, usage.profile_id, attempt.worker_session_id,
+        (select message.id from messages message
+          where message.session_id = attempt.worker_session_id and message.role = 'user'
+          order by message.rowid asc limit 1),
+        usage.request_key, usage.provider, usage.model, usage.route_role,
+        usage.route_index, usage.provider_attempt_index, usage.input_tokens, usage.output_tokens,
+        usage.reasoning_tokens, 0, 0, usage.total_tokens, usage.estimated_cost_usd,
+        usage.usage_complete, usage.pricing_complete, usage.incomplete_reasons_json,
+        usage.task_id, task.root_task_id, usage.plan_revision_id, usage.step_id,
+        usage.attempt_id, usage.occurred_at
+      from task_usage_entries usage
+      join task_attempts attempt
+        on attempt.profile_id = usage.profile_id and attempt.id = usage.attempt_id
+      join tasks task
+        on task.profile_id = usage.profile_id and task.id = usage.task_id
+      where usage.dispatched = 1
+        and attempt.worker_session_id is not null
+        and exists (
+          select 1 from messages message
+          where message.session_id = attempt.worker_session_id and message.role = 'user'
+        );
+      drop table task_usage_entries;
+    `);
+  }
 }

@@ -122,8 +122,12 @@ Provider usage metadata is normalized as:
 | `outputTokens` | Provider-reported completion/output tokens |
 | `totalTokens` | Provider-reported total tokens |
 | `reasoningTokens` | Provider-reported reasoning token telemetry |
+| `cacheReadTokens` | Provider-reported input tokens served from a prompt cache |
+| `cacheWriteTokens` | Provider-reported input tokens written to a prompt cache |
 
 `reasoningTokens` is safe usage telemetry only. It does not mean raw reasoning was available, extracted, stored, displayed, summarized, or sent back to a provider. Raw reasoning, when an adapter can extract it for turn-local handling, is kept out of attempts, runtime events, session messages, summaries, memory, skill learning, and normal exports. Safe `reasoningMetadata` may record only presence, character count, and format.
+
+Every dispatched main-turn request is recorded in the profile-owned canonical provider-request ledger. Ordinary turns and durable Task workers use the same writer. Pricing uses the exact resolved route and separates uncached input, output, reasoning, cache-read, and cache-write rates; unknown components remain explicitly incomplete instead of being treated as zero. Preflight route and credential failures that never call an adapter are not ledger requests.
 
 Operators can inspect provider final-state behavior through runtime `provider-result` events and session `provider-completion` / `provider-continuation` events. These events include finish reason, incomplete reason, usage, safe reasoning metadata, fallback status, and safe `runtimeMetadata` for truncation or continuation. They do not include raw provider payloads, raw reasoning, or discarded truncated tool arguments.
 

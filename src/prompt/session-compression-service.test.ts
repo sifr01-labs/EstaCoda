@@ -1028,6 +1028,8 @@ function forwardingSessionDb(db: InMemorySessionDB, overrides: Partial<SessionDB
     replaceMessages: overrides.replaceMessages ?? db.replaceMessages.bind(db),
     rewriteTranscript: overrides.rewriteTranscript ?? db.rewriteTranscript.bind(db),
     appendEvent: overrides.appendEvent ?? db.appendEvent.bind(db),
+    recordProviderUsageEntries: overrides.recordProviderUsageEntries ?? db.recordProviderUsageEntries.bind(db),
+    listProviderUsageEntries: overrides.listProviderUsageEntries ?? db.listProviderUsageEntries.bind(db),
     listMessages: overrides.listMessages ?? db.listMessages.bind(db),
     listEvents: overrides.listEvents ?? db.listEvents.bind(db),
     search: overrides.search ?? db.search.bind(db),

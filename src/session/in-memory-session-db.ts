@@ -11,7 +11,9 @@ import type {
   SessionSearchResult
 } from "../contracts/session.js";
 import type { FailureRecord } from "../contracts/failure.js";
+import type { ProviderUsageEntry, ProviderUsageQuery } from "../contracts/provider-usage.js";
 import { tokenizeSearchTerms } from "../search/fts-query.js";
+import { providerUsageMatches } from "../providers/provider-usage-ledger.js";
 
 const SESSION_MODEL_OVERRIDE_METADATA_KEY = "sessionModelOverride";
 
@@ -19,6 +21,7 @@ export class InMemorySessionDB implements SessionDB {
   readonly #sessions = new Map<string, SessionRecord>();
   readonly #messages = new Map<string, SessionMessage[]>();
   readonly #events = new Map<string, SessionEvent[]>();
+  readonly #providerUsage = new Map<string, ProviderUsageEntry>();
   readonly #now: () => Date;
   readonly #id: () => string;
 
@@ -187,6 +190,33 @@ export class InMemorySessionDB implements SessionDB {
 
     this.#events.get(sessionId)?.push(structuredClone(event));
     this.#touch(sessionId);
+  }
+
+  async recordProviderUsageEntries(entries: readonly ProviderUsageEntry[]): Promise<void> {
+    for (const entry of entries) {
+      const session = this.#sessions.get(entry.sessionId);
+      const turn = [...this.#messages.entries()].find(([sessionId, messages]) =>
+        this.#sessions.get(sessionId)?.profileId === entry.profileId &&
+        messages.some((message) => message.id === entry.visibleTurnId && message.role === "user")
+      );
+      if (session === undefined || session.profileId !== entry.profileId || turn === undefined) {
+        throw new Error("Provider usage attribution does not belong to its profile Session and visible turn.");
+      }
+      const key = `${entry.profileId}\0${entry.requestKey}`;
+      const existing = this.#providerUsage.get(key);
+      if (existing !== undefined && JSON.stringify(existing) !== JSON.stringify(entry)) {
+        throw new Error(`Provider usage request key ${entry.requestKey} conflicts with another entry.`);
+      }
+      this.#providerUsage.set(key, structuredClone(entry));
+    }
+  }
+
+  async listProviderUsageEntries(profileId: string, query: ProviderUsageQuery = {}): Promise<ProviderUsageEntry[]> {
+    return [...this.#providerUsage.values()]
+      .filter((entry) => entry.profileId === profileId && providerUsageMatches(entry, query))
+      .sort((left, right) => left.dispatchedAt.localeCompare(right.dispatchedAt) ||
+        left.providerAttemptIndex - right.providerAttemptIndex || left.id.localeCompare(right.id))
+      .map((entry) => structuredClone(entry));
   }
 
   async listMessages(sessionId: string): Promise<SessionMessage[]> {

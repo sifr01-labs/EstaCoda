@@ -14,9 +14,9 @@ import type {
   TaskResult,
   TaskSessionLink,
   TaskStatus,
-  TaskStep,
-  TaskUsageEntry
+  TaskStep
 } from "../contracts/task.js";
+import type { ProviderUsageEntry, ProviderUsageQuery } from "../contracts/provider-usage.js";
 
 export type CreateTaskGraphInput = {
   task: Task;
@@ -113,8 +113,8 @@ export interface TaskStore {
   requestAttemptCancellation(attemptId: string, requestedAt: string): TaskAttemptLease | null;
   releaseAttemptLease(input: ReleaseTaskAttemptLeaseInput): boolean;
 
-  recordUsageEntry(entry: TaskUsageEntry): void;
-  listUsageEntries(taskId: string, attemptId?: string): TaskUsageEntry[];
+  recordProviderUsageEntry(entry: ProviderUsageEntry): void;
+  listProviderUsageEntries(query?: ProviderUsageQuery): ProviderUsageEntry[];
 
   recordResult(result: TaskResult): void;
   updateResult(result: TaskResult): void;

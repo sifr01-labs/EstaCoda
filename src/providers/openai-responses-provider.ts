@@ -1297,6 +1297,10 @@ function normalizeResponsesUsage(usage: {
   output_tokens?: number;
   total_tokens?: number;
   reasoning_tokens?: number;
+  input_tokens_details?: {
+    cached_tokens?: number;
+    cache_write_tokens?: number;
+  };
   output_tokens_details?: {
     reasoning_tokens?: number;
   };
@@ -1311,6 +1315,12 @@ function normalizeResponsesUsage(usage: {
     ...(usage.input_tokens === undefined ? {} : { inputTokens: usage.input_tokens }),
     ...(usage.output_tokens === undefined ? {} : { outputTokens: usage.output_tokens }),
     ...(usage.total_tokens === undefined ? {} : { totalTokens: usage.total_tokens }),
+    ...(usage.input_tokens_details?.cached_tokens === undefined
+      ? {}
+      : { cacheReadTokens: usage.input_tokens_details.cached_tokens }),
+    ...(usage.input_tokens_details?.cache_write_tokens === undefined
+      ? {}
+      : { cacheWriteTokens: usage.input_tokens_details.cache_write_tokens }),
     ...(reasoningTokens === undefined ? {} : { reasoningTokens })
   };
 }

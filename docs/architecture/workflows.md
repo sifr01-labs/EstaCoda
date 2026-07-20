@@ -14,8 +14,11 @@ Task
         └── Attempt
             ├── Lease
             ├── Approval link
-            ├── Provider-call usage entries
             └── Result
+
+Provider request ledger
+├── visible turn → session
+└── optional Attempt → Step → Task → root Task
 ```
 
 This document describes the persistence, result, scheduler, agent-execution, background-host, delegation, and operator-control foundation currently present in the codebase. The profile gateway supervisor runs a durable Task tick beside cron and channel work, recovers abandoned Attempts after restart, and delivers terminal results through a fail-closed completion outbox. Trusted users can create Tasks through `estacoda task`, `/task`, and `delegate_task`.
@@ -23,14 +26,16 @@ This document describes the persistence, result, scheduler, agent-execution, bac
 ## Source of truth
 
 - `src/contracts/task.ts` defines the durable records, legal state transitions, authority and budget policies, and deterministic graph validation.
-- `src/workflow/task-schema.ts` owns SQLite schema version 16.
+- `src/workflow/task-schema.ts` owns SQLite schema version 18.
 - `src/workflow/task-store.ts` defines the profile-bound storage contract.
 - `src/workflow/sqlite-task-store.ts` implements transactional SQLite persistence.
 - `src/workflow/task-result-service.ts` stores bounded result bodies under the selected profile and verifies them before reads.
 - `src/workflow/fixed-task-service.ts` creates immutable initial graphs idempotently and records authorized Task steering.
 - `src/workflow/task-step-executor.ts` defines the narrow Attempt execution and settlement contract.
 - `src/workflow/agent-step-executor.ts` runs one agent Attempt in an isolated child session under narrowed authority.
-- `src/workflow/task-agent-usage.ts` accounts for every provider attempt, fallback, retry, token total, and known route price.
+- `src/providers/provider-usage-ledger.ts` builds and projects the canonical provider-request records used by ordinary turns and Task workers.
+- `src/providers/provider-usage-estimator.ts` applies full-precision, cache-aware pricing from the exact resolved route.
+- `src/workflow/task-agent-usage.ts` adapts canonical projections to Task budget totals and provides a bounded fallback for injected executors.
 - `src/workflow/task-approval-service.ts` narrows runtime policy with Task authority and bridges asks to the durable gateway approval queue.
 - `src/workflow/task-scheduler.ts` owns deterministic readiness, dispatch, fencing, retry, cancellation, acceptance, and restart reconciliation.
 - `src/workflow/task-background-host.ts` prevents overlapping scheduler/delivery ticks and performs one-time startup recovery.
@@ -71,7 +76,7 @@ Opaque Task and session identifiers are routing keys, not authorization boundari
 
 SQLite stores Result identity, ownership, opaque handle, byte length, MIME type, and SHA-256 digest. Raw result bodies are never stored in SQLite events or ordinary diagnostics. Content is written under `~/.estacoda/profiles/<id>/tasks/results/` with private directory and file permissions; filenames are hashes of opaque handles and never appear in tool output.
 
-Result creation first writes and verifies private prepared bodies without publishing metadata or handles. Successful Attempt settlement then inserts the complete Result batch, usage entries, Attempt state, Step state, and the corresponding Task update in one fenced SQLite transaction. A failed transaction removes every prepared body, so downstream Steps cannot observe a partial batch. Private preparation markers let supervisor startup remove bodies abandoned before commit while preserving bodies whose metadata committed before marker cleanup. Reads verify the stored byte length and digest, reject symlinks and non-regular files, and fail closed when content is missing or modified.
+Result creation first writes and verifies private prepared bodies without publishing metadata or handles. Provider requests are already present in the canonical ledger when Attempt settlement begins. Successful settlement verifies that attribution, inserts the complete Result batch, and writes Attempt, Step, and Task state in one fenced SQLite transaction. A failed transaction removes every prepared body, so downstream Steps cannot observe a partial batch. Private preparation markers let supervisor startup remove bodies abandoned before commit while preserving bodies whose metadata committed before marker cleanup. Reads verify the stored byte length and digest, reject symlinks and non-regular files, and fail closed when content is missing or modified.
 
 `task.result.read` requires both the Task and Result IDs. The active session must have a profile-owned `TaskSessionLink` to that Task. Access survives transcript-preserving compaction only when every lineage hop has the same profile, a matching `parentSessionId` and `compactedFromSessionId`, and a parent ended for compression; ordinary parent/child session relationships grant nothing. Missing, cross-profile, and unauthorized records share the same error. Text and JSON are returned in bounded Unicode-character pages; binary artifacts remain durable but are not transported through a text tool. Pruned and expired Results are unavailable.
 
@@ -103,7 +108,7 @@ The child runner sends progress through the normal runtime event sink while its 
 
 Successful text and JSON results are captured in full. Artifact bodies are accepted only through an injected, bounded resolver and must match the artifact's declared byte count before the scheduler writes them to the result plane. Dependency context contains bounded result metadata and opaque handles, never raw bodies or filesystem paths; the child reads authorized content through `task.result.read`. Authorized steering is stored outside the conversation transcript and injected as bounded context at safe Attempt boundaries, so transcript compaction or terminal closure cannot discard it. Guidance is user context, not policy: it cannot override Task authority, repository instructions, or runtime security.
 
-Usage is a canonical append-only ledger keyed by the worker session, provider turn, and provider-attempt index. It includes initial completions, continuation turns, fallbacks, and provider retries, while distinguishing preflight route failures from calls that actually reached an adapter. Settlement totals are re-derived from persisted entries, so scheduler replay and approval resume cannot overwrite or double-count earlier usage. Full-precision cost stays in storage; missing token or price data remains explicit incompleteness.
+Usage is one profile-owned, append-only provider-request ledger for ordinary turns and Task workers. Every row uses the persisted user-message ID as its visible turn, a deterministic request key, the exact resolved provider/model route, route role and attempt index, dispatch time, input/output/reasoning/cache-read/cache-write tokens, full-precision known estimated cost, and explicit usage/pricing completeness. Optional root Task, Task, PlanRevision, Step, and Attempt fields provide durable worker attribution. Initial calls, continuations, fallbacks, retries, and failed requests that reached an adapter are included; preflight failures that never dispatched are excluded. Deterministic keys make runtime replay and approval resume idempotent. The same rows project to Attempt, Step, Task subtree, visible turn, or session—there is no separate delegation-cost or session-cost ledger.
 
 ## Background host and restart recovery
 
@@ -125,7 +130,7 @@ External delivery is deliberately at-most-once after ambiguity. A crash or trans
 
 ## Migration behavior
 
-Opening a writable `SQLiteSessionDB` migrates it to schema version 17 under the existing migration lock and transaction. Version 10 performs the Task persistence cutover; version 11 adds the durable Attempt cancellation marker without replacing existing leases; version 12 extends the Task event journal with fenced Attempt progress checkpoints; version 13 adds the profile-owned completion-delivery outbox; version 14 adds monotonic lease generations, durable Task approval links, and canonical provider-call usage entries; version 15 adds profile-owned steering context and its bounded audit event; version 16 adds immutable Task-tree origin attribution and explicit Step child policy; version 17 adds immutable child-budget reservations and requires them for child insertion. The migrations preserve unrelated session, message, trajectory, approval, cron, finalization, and memory-curation data. A best-effort pre-migration backup is created by the session database migration runner.
+Opening a writable `SQLiteSessionDB` migrates it to schema version 18 under the existing migration lock and transaction. Version 10 performs the Task persistence cutover; version 11 adds the durable Attempt cancellation marker without replacing existing leases; version 12 extends the Task event journal with fenced Attempt progress checkpoints; version 13 adds the profile-owned completion-delivery outbox; version 14 adds monotonic lease generations, durable Task approval links, and the former Task-only usage table; version 15 adds profile-owned steering context and its bounded audit event; version 16 adds immutable Task-tree origin attribution and explicit Step child policy; version 17 adds immutable child-budget reservations and requires them for child insertion; version 18 migrates dispatched historical rows, drops the Task-only table, and installs the canonical provider-request ledger. The migrations preserve unrelated session, message, trajectory, approval, cron, finalization, and memory-curation data. A best-effort pre-migration backup is created by the session database migration runner.
 
 The cutover migration is intentionally destructive only for obsolete execution tables. There is no dual-read, dual-write, compatibility alias, or alternate store.
 

@@ -329,7 +329,7 @@ export class AgentLoop {
     });
     const attachments = route.attachments;
 
-    await this.#sessionDb.appendMessage({
+    const visibleTurn = await this.#sessionDb.appendMessage({
       sessionId: this.#currentSessionId(),
       role: "user",
       content: effectiveText,
@@ -667,6 +667,7 @@ export class AgentLoop {
       stage: "preflight"
     });
     const providerLoop = await this.#providerTurnLoop.run({
+      visibleTurnId: visibleTurn.id,
       userText: effectiveText,
       routedText,
       selectedSkill,

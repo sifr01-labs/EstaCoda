@@ -40,6 +40,12 @@ describe("TaskScheduler", () => {
     ids = 0;
     sessionDb = new SQLiteSessionDB({ path: join(tempDir, "sessions.sqlite"), now });
     await sessionDb.createSession({ id: "creator-alpha", profileId: "alpha" });
+    await sessionDb.appendMessage({
+      id: "visible-turn-alpha",
+      sessionId: "creator-alpha",
+      role: "user",
+      content: "Run the Task"
+    });
     store = new SQLiteTaskStore({ db: sessionDb.db, profileId: "alpha" });
     resultService = new TaskResultService({
       store,
@@ -313,7 +319,7 @@ describe("TaskScheduler", () => {
 
     expect(await scheduler.runOnce()).toMatchObject({ dispatched: 1, completed: 0, failed: 1 });
     expect(store.listResults("task-alpha")).toEqual([]);
-    expect(store.listUsageEntries("task-alpha")).toEqual([]);
+    expect(store.listProviderUsageEntries({ taskId: "task-alpha" })).toEqual([]);
     expect(store.listEvents("task-alpha", { kinds: ["result-recorded", "attempt-completed"] })).toEqual([]);
     expect(store.listAttempts("task-alpha")[0]).toMatchObject({
       status: "failed",
@@ -638,7 +644,7 @@ describe("TaskScheduler", () => {
       usage: { providerCalls: 2, totalTokens: 30 }
     });
     expect(store.getAttempt(attemptId)!.usage.estimatedCostUsd).toBeCloseTo(0.3, 12);
-    expect(store.listUsageEntries("task-alpha", attemptId).map((entry) => entry.requestKey)).toEqual([
+    expect(store.listProviderUsageEntries({ taskId: "task-alpha", attemptId }).map((entry) => entry.requestKey)).toEqual([
       "request-one",
       "request-two"
     ]);
@@ -829,27 +835,30 @@ function usageEntry(attempt: TaskAttempt, requestKey: string, totalTokens: numbe
   return {
     id: `usage-${requestKey}`,
     profileId: attempt.profileId,
+    sessionId: "creator-alpha",
+    visibleTurnId: "visible-turn-alpha",
     taskId: attempt.taskId,
+    rootTaskId: attempt.taskId,
     planRevisionId: attempt.planRevisionId,
     stepId: attempt.stepId,
     attemptId: attempt.id,
     requestKey,
-    turnId: requestKey,
     providerAttemptIndex: 0,
     provider: "test",
     model: "test-model",
     routeRole: "primary" as const,
     routeIndex: 0,
-    dispatched: true,
     inputTokens: totalTokens,
     outputTokens: 0,
     reasoningTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
     totalTokens,
     estimatedCostUsd,
     usageComplete: true,
     pricingComplete: true,
     incompleteReasons: [],
-    occurredAt: NOW
+    dispatchedAt: NOW
   };
 }
 

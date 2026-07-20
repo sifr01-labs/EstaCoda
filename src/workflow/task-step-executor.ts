@@ -5,9 +5,9 @@ import type {
   TaskFailure,
   TaskResultKind,
   TaskStep,
-  TaskUsageEntry,
   TaskUsageTotals
 } from "../contracts/task.js";
+import type { ProviderUsageEntry } from "../contracts/provider-usage.js";
 import type { TaskApprovalRequest } from "./task-approval-service.js";
 
 export type TaskExecutorResultContent = {
@@ -23,7 +23,7 @@ export type TaskExecutorSettlement =
       outcome: "succeeded";
       results?: readonly TaskExecutorResultContent[];
       usage?: TaskUsageTotals;
-      usageEntries?: readonly TaskUsageEntry[];
+      usageEntries?: readonly ProviderUsageEntry[];
       workerSessionId?: string;
       trajectoryId?: string;
     }
@@ -31,7 +31,7 @@ export type TaskExecutorSettlement =
       outcome: "failed";
       failure: TaskFailure;
       usage?: TaskUsageTotals;
-      usageEntries?: readonly TaskUsageEntry[];
+      usageEntries?: readonly ProviderUsageEntry[];
       workerSessionId?: string;
       trajectoryId?: string;
     }
@@ -39,14 +39,14 @@ export type TaskExecutorSettlement =
       outcome: "waiting_for_approval";
       approval: TaskApprovalRequest;
       usage?: TaskUsageTotals;
-      usageEntries?: readonly TaskUsageEntry[];
+      usageEntries?: readonly ProviderUsageEntry[];
       workerSessionId?: string;
       trajectoryId?: string;
     }
   | {
       outcome: "cancelled";
       usage?: TaskUsageTotals;
-      usageEntries?: readonly TaskUsageEntry[];
+      usageEntries?: readonly ProviderUsageEntry[];
       workerSessionId?: string;
       trajectoryId?: string;
     };

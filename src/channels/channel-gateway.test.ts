@@ -1288,6 +1288,8 @@ function createMinimalRuntime(): Runtime {
       replaceMessages: async () => [],
       rewriteTranscript: async () => [],
       appendEvent: async () => {},
+      recordProviderUsageEntries: async () => {},
+      listProviderUsageEntries: async () => [],
       listMessages: async () => [],
       listEvents: async () => [],
       search: async () => []

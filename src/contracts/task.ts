@@ -1,4 +1,5 @@
 import type { ProviderId } from "./provider.js";
+import type { ProviderUsageTotals } from "./provider-usage.js";
 import type { ToolRiskClass, ToolsetName } from "./tool.js";
 
 // Durable Task identities are opaque storage keys. They are never authorization boundaries.
@@ -10,7 +11,6 @@ export type TaskEventId = string;
 export type TaskResultId = string;
 export type TaskDeliveryId = string;
 export type TaskApprovalId = string;
-export type TaskUsageEntryId = string;
 export type TaskGuidanceId = string;
 
 export type TaskGraphLimits = {
@@ -285,43 +285,9 @@ export type TaskAttemptLease = {
   cancellationRequestedAt?: string;
 };
 
-export type TaskUsageTotals = {
-  providerCalls: number;
-  inputTokens: number;
-  outputTokens: number;
-  reasoningTokens: number;
-  totalTokens: number;
-  estimatedCostUsd: number;
-  usageComplete: boolean;
-  pricingComplete: boolean;
-  incompleteReasons: readonly string[];
-};
-
-export type TaskUsageEntry = {
-  id: TaskUsageEntryId;
-  profileId: string;
-  taskId: TaskId;
-  planRevisionId: TaskPlanRevisionId;
-  stepId: TaskStepId;
-  attemptId: TaskAttemptId;
-  /** Stable provider-request identity; retries and scheduler replays cannot double count it. */
-  requestKey: string;
-  turnId: string;
-  providerAttemptIndex: number;
-  provider: string;
-  model: string;
-  routeRole: "primary" | "fallback";
-  routeIndex: number;
-  dispatched: boolean;
-  inputTokens: number;
-  outputTokens: number;
-  reasoningTokens: number;
-  totalTokens: number;
-  estimatedCostUsd: number;
-  usageComplete: boolean;
-  pricingComplete: boolean;
-  incompleteReasons: readonly string[];
-  occurredAt: string;
+export type TaskUsageTotals = Omit<ProviderUsageTotals, "cacheReadTokens" | "cacheWriteTokens"> & {
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
 };
 
 export type TaskAttempt = {
