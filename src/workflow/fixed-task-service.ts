@@ -1,0 +1,314 @@
+import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+import type {
+  Task,
+  TaskActor,
+  TaskAuthorityPolicy,
+  TaskBudgetPolicy,
+  TaskEvent,
+  TaskGuidance,
+  TaskPlanRevision,
+  TaskSource,
+  TaskStep,
+  TaskWorkspaceBinding
+} from "../contracts/task.js";
+import { isTerminalTaskStatus } from "../contracts/task.js";
+import type { TaskStore } from "./task-store.js";
+
+const MAX_GUIDANCE_RECORDS = 64;
+
+export type FixedTaskStepInput = Pick<
+  TaskStep,
+  | "key"
+  | "title"
+  | "objective"
+  | "executor"
+  | "authorityPolicy"
+  | "budget"
+  | "retryPolicy"
+  | "failurePolicy"
+  | "idempotency"
+  | "resultPolicy"
+> & {
+  /** Stable Step keys, resolved to immutable Step IDs during creation. */
+  dependsOn: readonly string[];
+};
+
+export type CreateFixedTaskInput = {
+  creatorSessionId: string;
+  source: TaskSource;
+  creationKey?: string;
+  objective: string;
+  workspace: TaskWorkspaceBinding;
+  authorityPolicy: TaskAuthorityPolicy;
+  budgetPolicy: TaskBudgetPolicy;
+  steps: readonly FixedTaskStepInput[];
+  planReason?: string;
+  createdBy?: TaskActor;
+};
+
+export type FixedTaskGraph = {
+  task: Task;
+  revision: TaskPlanRevision;
+  steps: readonly TaskStep[];
+};
+
+type FixedTaskIdKind = "task" | "revision" | "step" | "event" | "guidance";
+
+export class FixedTaskCreationConflictError extends Error {
+  constructor() {
+    super("The Task creation key is already bound to a different fixed Task definition.");
+    this.name = "FixedTaskCreationConflictError";
+  }
+}
+
+/** Creates immutable, profile-owned fixed Task graphs and durable steering context. */
+export class FixedTaskService {
+  readonly #store: TaskStore;
+  readonly #now: () => Date;
+  readonly #id: (kind: FixedTaskIdKind) => string;
+
+  constructor(options: {
+    store: TaskStore;
+    now?: () => Date;
+    id?: (kind: FixedTaskIdKind) => string;
+  }) {
+    this.#store = options.store;
+    this.#now = options.now ?? (() => new Date());
+    this.#id = options.id ?? ((kind) => `${kind}_${randomUUID()}`);
+  }
+
+  create(input: CreateFixedTaskInput): FixedTaskGraph {
+    const normalized = normalizeCreateInput(input);
+    const existing = normalized.creationKey === undefined
+      ? null
+      : this.#store.getTaskByCreationKey(normalized.creationKey);
+    if (existing !== null) return this.#existingGraph(existing, normalized);
+
+    const timestamp = this.#now().toISOString();
+    const taskId = boundedToken(this.#id("task"), "Task ID", 256);
+    const revisionId = boundedToken(this.#id("revision"), "PlanRevision ID", 256);
+    const createdBy = normalized.createdBy ?? { kind: "user" as const, sessionId: normalized.creatorSessionId };
+    const stepIds = new Map(normalized.steps.map((step) => [
+      step.key,
+      boundedToken(this.#id("step"), "Step ID", 256)
+    ]));
+    const task: Task = {
+      id: taskId,
+      profileId: this.#store.profileId,
+      creatorSessionId: normalized.creatorSessionId,
+      source: normalized.source,
+      ...(normalized.creationKey === undefined ? {} : { creationKey: normalized.creationKey }),
+      objective: normalized.objective,
+      status: "queued",
+      workspace: normalized.workspace,
+      authorityPolicy: normalized.authorityPolicy,
+      budgetPolicy: normalized.budgetPolicy,
+      activePlanRevisionId: revisionId,
+      createdBy,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+    const revision: TaskPlanRevision = {
+      id: revisionId,
+      profileId: this.#store.profileId,
+      taskId,
+      revision: 1,
+      status: "active",
+      reason: normalized.planReason,
+      createdBy,
+      createdAt: timestamp,
+      validatedAt: timestamp,
+      activatedAt: timestamp
+    };
+    const steps: TaskStep[] = normalized.steps.map((step, position) => ({
+      ...step,
+      id: stepIds.get(step.key)!,
+      profileId: this.#store.profileId,
+      taskId,
+      planRevisionId: revisionId,
+      position,
+      status: "pending",
+      dependsOn: step.dependsOn.map((key) => stepIds.get(key) ?? `missing:${key}`),
+      createdAt: timestamp,
+      updatedAt: timestamp
+    }));
+    const graph = { task, revision, steps };
+    const initialEvents = this.#creationEvents(graph, timestamp);
+    try {
+      this.#store.createTaskGraph({ ...graph, initialEvents });
+      return graph;
+    } catch (error) {
+      if (normalized.creationKey === undefined) throw error;
+      const raced = this.#store.getTaskByCreationKey(normalized.creationKey);
+      if (raced === null) throw error;
+      return this.#existingGraph(raced, normalized);
+    }
+  }
+
+  steer(input: { taskId: string; authorizedSessionId: string; guidance: string }): TaskGuidance {
+    const taskId = boundedToken(input.taskId, "Task ID", 256);
+    const sessionId = boundedToken(input.authorizedSessionId, "authorized session ID", 256);
+    const guidanceText = boundedText(input.guidance, "Task guidance", 4_000);
+    const timestamp = this.#now().toISOString();
+    return this.#store.atomicWrite((store) => {
+      const task = store.getTask(taskId);
+      if (task === null) throw new Error(`Task ${taskId} was not found.`);
+      if (isTerminalTaskStatus(task.status)) throw new Error(`Task ${taskId} is already settled.`);
+      if (store.listGuidance(taskId).length >= MAX_GUIDANCE_RECORDS) {
+        throw new Error(`Task ${taskId} has reached its durable guidance limit.`);
+      }
+      const guidance: TaskGuidance = {
+        id: boundedToken(this.#id("guidance"), "Task Guidance ID", 256),
+        profileId: store.profileId,
+        taskId,
+        authorizedSessionId: sessionId,
+        guidance: guidanceText,
+        createdAt: timestamp
+      };
+      store.createGuidance(guidance);
+      store.appendEvent({
+        id: boundedToken(this.#id("event"), "Task Event ID", 256),
+        profileId: store.profileId,
+        taskId,
+        kind: "task-steered",
+        timestamp,
+        data: { guidanceId: guidance.id, characterCount: guidance.guidance.length }
+      });
+      return guidance;
+    });
+  }
+
+  #existingGraph(task: Task, input: NormalizedCreateFixedTaskInput): FixedTaskGraph {
+    const revision = task.activePlanRevisionId === undefined
+      ? null
+      : this.#store.getPlanRevision(task.activePlanRevisionId);
+    if (revision === null) throw new FixedTaskCreationConflictError();
+    const steps = this.#store.listSteps(task.id, revision.id);
+    if (!matchesInput({ task, revision, steps }, input)) throw new FixedTaskCreationConflictError();
+    return { task, revision, steps };
+  }
+
+  #creationEvents(graph: FixedTaskGraph, timestamp: string): TaskEvent[] {
+    const common = {
+      profileId: this.#store.profileId,
+      taskId: graph.task.id,
+      planRevisionId: graph.revision.id
+    };
+    const eventId = (order: number) => `${order}-${boundedToken(this.#id("event"), "Task Event ID", 252)}`;
+    return [
+      {
+        ...common,
+        id: eventId(0),
+        kind: "task-created",
+        timestamp,
+        data: { source: graph.task.source, stepCount: graph.steps.length }
+      },
+      {
+        ...common,
+        id: eventId(1),
+        kind: "plan-revision-created",
+        timestamp,
+        data: { revision: 1, stepCount: graph.steps.length }
+      },
+      {
+        ...common,
+        id: eventId(2),
+        kind: "plan-revision-validated",
+        timestamp,
+        data: { revision: 1 }
+      },
+      {
+        ...common,
+        id: eventId(3),
+        kind: "plan-revision-activated",
+        timestamp,
+        data: { revision: 1 }
+      }
+    ];
+  }
+}
+
+type NormalizedCreateFixedTaskInput = Omit<CreateFixedTaskInput, "creationKey" | "objective" | "steps" | "planReason"> & {
+  creationKey?: string;
+  objective: string;
+  steps: readonly FixedTaskStepInput[];
+  planReason: string;
+};
+
+function normalizeCreateInput(input: CreateFixedTaskInput): NormalizedCreateFixedTaskInput {
+  const seen = new Set<string>();
+  const steps = input.steps.map((step) => {
+    const key = boundedToken(step.key, "Step key", 128);
+    if (seen.has(key)) throw new Error(`Task Step key is duplicated: ${key}.`);
+    seen.add(key);
+    return {
+      ...step,
+      key,
+      title: boundedText(step.title, "Step title", 500),
+      objective: boundedText(step.objective, "Step objective", 8_000),
+      dependsOn: step.dependsOn.map((dependency) => boundedToken(dependency, "Step dependency key", 128))
+    };
+  });
+  const creatorSessionId = boundedToken(input.creatorSessionId, "creator session ID", 256);
+  if (input.createdBy !== undefined && (
+    (input.createdBy.kind !== "system" && input.createdBy.sessionId !== creatorSessionId) ||
+    input.createdBy.taskId !== undefined || input.createdBy.attemptId !== undefined
+  )) {
+    throw new Error("A root fixed Task actor must be the creator session or the system actor.");
+  }
+  return {
+    ...input,
+    creatorSessionId,
+    ...(input.creationKey === undefined
+      ? {}
+      : { creationKey: boundedToken(input.creationKey, "Task creation key", 256) }),
+    objective: boundedText(input.objective, "Task objective", 8_000),
+    planReason: boundedText(input.planReason ?? "Initial fixed Task plan.", "Plan reason", 1_000),
+    steps
+  };
+}
+
+function matchesInput(graph: FixedTaskGraph, input: NormalizedCreateFixedTaskInput): boolean {
+  const keyById = new Map(graph.steps.map((step) => [step.id, step.key]));
+  const actualSteps: FixedTaskStepInput[] = graph.steps.map((step) => ({
+    key: step.key,
+    title: step.title,
+    objective: step.objective,
+    dependsOn: step.dependsOn.map((id) => keyById.get(id) ?? `missing:${id}`),
+    executor: step.executor,
+    authorityPolicy: step.authorityPolicy,
+    budget: step.budget,
+    retryPolicy: step.retryPolicy,
+    failurePolicy: step.failurePolicy,
+    idempotency: step.idempotency,
+    resultPolicy: step.resultPolicy
+  }));
+  const expectedActor = input.createdBy ?? { kind: "user", sessionId: input.creatorSessionId };
+  return graph.task.creatorSessionId === input.creatorSessionId &&
+    graph.task.source === input.source &&
+    graph.task.creationKey === input.creationKey &&
+    graph.task.objective === input.objective &&
+    graph.revision.reason === input.planReason &&
+    isDeepStrictEqual(graph.task.createdBy, expectedActor) &&
+    isDeepStrictEqual(graph.task.workspace, input.workspace) &&
+    isDeepStrictEqual(graph.task.authorityPolicy, input.authorityPolicy) &&
+    isDeepStrictEqual(graph.task.budgetPolicy, input.budgetPolicy) &&
+    isDeepStrictEqual(actualSteps, input.steps);
+}
+
+function boundedToken(value: string, label: string, maxChars: number): string {
+  const normalized = value.trim();
+  if (normalized.length === 0 || normalized.length > maxChars || /[\u0000-\u001F\u007F]/u.test(normalized)) {
+    throw new Error(`${label} is invalid or exceeds ${maxChars} characters.`);
+  }
+  return normalized;
+}
+
+function boundedText(value: string, label: string, maxChars: number): string {
+  const normalized = value.trim();
+  if (normalized.length === 0 || normalized.length > maxChars || /\u0000/u.test(normalized)) {
+    throw new Error(`${label} is invalid or exceeds ${maxChars} characters.`);
+  }
+  return normalized;
+}

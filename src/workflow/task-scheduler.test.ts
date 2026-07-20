@@ -223,6 +223,22 @@ describe("WorkflowScheduler", () => {
     expect(store.listResults("task-alpha")).toEqual([]);
   });
 
+  it("fails deterministic acceptance when a required durable result is empty", async () => {
+    store.createTaskGraph(makeGraph([makeStep("required", 0)]));
+    const scheduler = makeScheduler(new FakeTaskStepExecutor(() => ({
+      outcome: "succeeded",
+      results: [{ kind: "text", content: "" }]
+    })));
+
+    await scheduler.runOnce();
+
+    expect(store.getTask("task-alpha")).toMatchObject({
+      status: "failed",
+      failure: { class: "empty-result" }
+    });
+    expect(store.listResults("task-alpha")).toHaveLength(0);
+  });
+
   it("persists operator-wait Step and Task transitions in the event journal", async () => {
     store.createTaskGraph(makeGraph([makeStep("review", 0, {
       retryPolicy: { ...makeStep("review-policy", 0).retryPolicy, maxAttempts: 1 },

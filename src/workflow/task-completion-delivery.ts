@@ -74,6 +74,23 @@ export class TaskCompletionDeliveryService {
   }
 
   /**
+   * Explicitly retries a confirmed failed delivery. Ambiguous post-crash outcomes
+   * stay failed so an operator cannot accidentally duplicate an external message.
+   */
+  retry(bindingId: string, authorizedSessionId: string): TaskDeliveryBinding {
+    const id = boundedToken(bindingId, "delivery ID", 256);
+    const sessionId = boundedToken(authorizedSessionId, "authorized session ID", 256);
+    const binding = this.#store.getDeliveryBinding(id);
+    if (binding === null || binding.authorizedSessionId !== sessionId) {
+      throw new Error("Task completion delivery was not found or is not authorized for this session.");
+    }
+    return this.#store.retryDeliveryBinding(
+      id,
+      this.#now().toISOString()
+    );
+  }
+
+  /**
    * A process may have sent an external message before crashing. Those outcomes are
    * deliberately marked ambiguous and are never retried automatically.
    */
@@ -104,21 +121,37 @@ export class TaskCompletionDeliveryService {
       const claimed = this.#store.claimDeliveryBinding(candidate.id, this.#now().toISOString());
       if (claimed === null) continue;
       result.claimed++;
+      let text: string;
       try {
         const task = this.#store.getTask(claimed.taskId);
         if (task === null) throw new Error("task-unavailable");
-        const text = await this.#renderCompletion(task, claimed);
-        const delivery = await this.#router.deliverText([toDeliveryTarget(claimed.destination)], text);
-        if (delivery.size !== 1 || [...delivery.values()].some((entry) => !entry.success)) {
-          throw new Error("delivery-rejected");
-        }
+        text = await this.#renderCompletion(task, claimed);
+      } catch {
         this.#store.settleDeliveryBinding({
           id: claimed.id,
-          status: "delivered",
-          settledAt: this.#now().toISOString()
+          status: "failed",
+          settledAt: this.#now().toISOString(),
+          failureClass: "delivery-preparation-failed",
+          failureMessage: "Task completion delivery could not be prepared."
         });
-        result.delivered++;
+        result.failed++;
+        continue;
+      }
+      let delivery: Map<string, { success: boolean; error?: string }>;
+      try {
+        delivery = await this.#router.deliverText([toDeliveryTarget(claimed.destination)], text);
       } catch {
+        this.#store.settleDeliveryBinding({
+          id: claimed.id,
+          status: "failed",
+          settledAt: this.#now().toISOString(),
+          failureClass: "delivery-outcome-unknown",
+          failureMessage: "Task completion delivery ended without a confirmed external outcome."
+        });
+        result.failed++;
+        continue;
+      }
+      if (delivery.size !== 1 || [...delivery.values()].some((entry) => !entry.success)) {
         this.#store.settleDeliveryBinding({
           id: claimed.id,
           status: "failed",
@@ -127,7 +160,14 @@ export class TaskCompletionDeliveryService {
           failureMessage: "Task completion delivery failed."
         });
         result.failed++;
+        continue;
       }
+      this.#store.settleDeliveryBinding({
+        id: claimed.id,
+        status: "delivered",
+        settledAt: this.#now().toISOString()
+      });
+      result.delivered++;
     }
     return result;
   }

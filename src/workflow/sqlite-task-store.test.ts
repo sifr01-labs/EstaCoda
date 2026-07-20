@@ -21,6 +21,7 @@ import {
   migrateTaskAgentExecutorSchemaV12,
   migrateTaskBackgroundHostSchemaV13,
   migrateTaskSchedulerSchemaV11,
+  migrateTaskVerticalSliceSchemaV15,
   TASK_SCHEMA_VERSION
 } from "./task-schema.js";
 
@@ -597,6 +598,79 @@ describe("Task background host schema v13 migration", () => {
   });
 });
 
+describe("Task vertical slice schema v15 migration", () => {
+  it("preserves events and adds durable steering idempotently", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-task-vertical-migration-"));
+    const database = openDefaultSQLiteDatabase({ path: join(tempDir, "vertical.sqlite") });
+    try {
+      database.exec(`
+        pragma foreign_keys = on;
+        create table sessions(id text primary key, profile_id text not null, unique(profile_id, id));
+        create table tasks(id text primary key, profile_id text not null, unique(profile_id, id));
+        create table task_plan_revisions(
+          id text primary key, profile_id text not null, task_id text not null,
+          unique(profile_id, task_id, id)
+        );
+        create table task_steps(
+          id text primary key, profile_id text not null, task_id text not null,
+          unique(profile_id, task_id, id)
+        );
+        create table task_attempts(
+          id text primary key, profile_id text not null, task_id text not null,
+          unique(profile_id, task_id, id)
+        );
+        create table task_events (
+          id text primary key,
+          profile_id text not null,
+          task_id text not null,
+          plan_revision_id text,
+          step_id text,
+          attempt_id text,
+          kind text not null check(kind in ('task-created', 'attempt-progressed')),
+          timestamp text not null,
+          data_json text not null check(json_valid(data_json)),
+          unique(profile_id, id),
+          foreign key(profile_id, task_id) references tasks(profile_id, id),
+          foreign key(profile_id, task_id, plan_revision_id)
+            references task_plan_revisions(profile_id, task_id, id),
+          foreign key(profile_id, task_id, step_id)
+            references task_steps(profile_id, task_id, id),
+          foreign key(profile_id, task_id, attempt_id)
+            references task_attempts(profile_id, task_id, id)
+        );
+        create index idx_task_events_task on task_events(profile_id, task_id, timestamp, id);
+        create index idx_task_events_attempt on task_events(profile_id, attempt_id, timestamp);
+        insert into sessions values ('session-1', 'alpha');
+        insert into tasks values ('task-1', 'alpha');
+        insert into task_events values (
+          'event-1', 'alpha', 'task-1', null, null, null,
+          'task-created', '${NOW}', '{"preserved":true}'
+        );
+      `);
+
+      migrateTaskVerticalSliceSchemaV15(database);
+      migrateTaskVerticalSliceSchemaV15(database);
+      database.query(
+        `insert into task_guidance values (?, ?, ?, ?, ?, ?)`
+      ).run("guidance-1", "alpha", "task-1", "session-1", "Use primary sources.", NOW);
+      database.query(
+        `insert into task_events values (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run("event-2", "alpha", "task-1", null, null, null, "task-steered", NOW, "{}");
+
+      expect(database.query<{ id: string; kind: string }>(
+        "select id, kind from task_events order by id"
+      ).all()).toEqual([
+        { id: "event-1", kind: "task-created" },
+        { id: "event-2", kind: "task-steered" }
+      ]);
+      expect(database.query("pragma foreign_key_check").all()).toEqual([]);
+    } finally {
+      database.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
 const NOW = "2030-01-01T00:00:00.000Z";
 
 function makeGraph(profileId: "alpha" | "beta") {
@@ -800,6 +874,7 @@ const TASK_TABLES = [
   "task_results",
   "task_events",
   "task_session_links",
+  "task_guidance",
   "task_usage_entries",
   "task_approval_links",
   "task_delivery_bindings"

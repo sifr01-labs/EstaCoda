@@ -143,7 +143,28 @@ describe("TaskCompletionDeliveryService", () => {
       status: "failed",
       failureClass: "delivery-outcome-unknown"
     });
+    expect(() => service.retry(binding.id, "creator-alpha")).toThrow(/ambiguous external outcome/u);
     expect(deliverText).not.toHaveBeenCalled();
+  });
+
+  it("does not retry a transport exception with an unknown external outcome", async () => {
+    completeTask();
+    const service = createService(vi.fn(async () => {
+      throw new Error("transport disconnected after send");
+    }));
+    const binding = service.bind({
+      taskId: "task-alpha",
+      authorizedSessionId: "creator-alpha",
+      deliveryKey: "uncertain",
+      destination: { platform: "telegram", chatId: "chat-1" }
+    });
+
+    await expect(service.runOnce()).resolves.toMatchObject({ claimed: 1, failed: 1 });
+    expect(store.getDeliveryBinding(binding.id)).toMatchObject({
+      status: "failed",
+      failureClass: "delivery-outcome-unknown"
+    });
+    expect(() => service.retry(binding.id, "creator-alpha")).toThrow(/ambiguous external outcome/u);
   });
 
   it("requires a linked profile-owned session and a concrete channel destination", () => {

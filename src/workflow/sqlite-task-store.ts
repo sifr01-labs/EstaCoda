@@ -5,6 +5,7 @@ import type {
   TaskAttemptLease,
   TaskDeliveryBinding,
   TaskEvent,
+  TaskGuidance,
   TaskPlanRevision,
   TaskResult,
   TaskSessionLink,
@@ -91,6 +92,13 @@ export class SQLiteTaskStore implements TaskStore {
     if ((input.task.activePlanRevisionId === input.revision.id) !== (input.revision.status === "active")) {
       throw new TaskStoreIntegrityError("Task.activePlanRevisionId and the active PlanRevision status must agree.");
     }
+    if ((input.initialEvents ?? []).some((event) =>
+      event.profileId !== input.task.profileId || event.taskId !== input.task.id ||
+      (event.planRevisionId !== undefined && event.planRevisionId !== input.revision.id) ||
+      (event.stepId !== undefined && !input.steps.some((step) => step.id === event.stepId))
+    )) {
+      throw new TaskStoreIntegrityError("Initial Task events must belong to the supplied Task graph.");
+    }
 
     this.atomicWrite((store) => {
       store.createTask(input.task);
@@ -110,6 +118,7 @@ export class SQLiteTaskStore implements TaskStore {
           createdAt: input.task.createdAt
         });
       }
+      for (const event of input.initialEvents ?? []) store.appendEvent(event);
     });
   }
 
@@ -207,6 +216,14 @@ export class SQLiteTaskStore implements TaskStore {
 
   getTask(id: string): Task | null {
     const row = this.#db.query<TaskRow>("select * from tasks where id = ? and profile_id = ?").get(id, this.#profileId);
+    return row === null ? null : rowToTask(row);
+  }
+
+  getTaskByCreationKey(creationKey: string): Task | null {
+    const key = requireBoundedText(creationKey, "Task creation key", 256);
+    const row = this.#db.query<TaskRow>(
+      "select * from tasks where creation_key = ? and profile_id = ?"
+    ).get(key, this.#profileId);
     return row === null ? null : rowToTask(row);
   }
 
@@ -724,6 +741,44 @@ export class SQLiteTaskStore implements TaskStore {
     ).all(this.#profileId, taskId).map(rowToSessionLink);
   }
 
+  createGuidance(guidance: TaskGuidance): void {
+    this.#assertTransactionActive();
+    this.#assertProfile(guidance.profileId, "TaskGuidance", guidance.id);
+    this.#assertTaskOwned(guidance.taskId);
+    this.#assertSessionOwned(guidance.authorizedSessionId);
+    requireBoundedText(guidance.id, "Task Guidance ID", 256);
+    const text = requireBoundedContent(guidance.guidance, "Task guidance", 4_000);
+    assertTimestamp(guidance.createdAt, "Task guidance creation");
+    const linked = this.listSessionLinks(guidance.taskId)
+      .some((link) => link.sessionId === guidance.authorizedSessionId && link.relationship !== "worker");
+    if (!linked) {
+      throw new TaskStoreProfileError(
+        this.#profileId,
+        `Session ${guidance.authorizedSessionId} is not authorized for Task ${guidance.taskId}.`
+      );
+    }
+    this.#db.query(
+      `insert into task_guidance (
+        id, profile_id, task_id, authorized_session_id, guidance, created_at
+      ) values (?, ?, ?, ?, ?, ?)`
+    ).run(
+      guidance.id,
+      this.#profileId,
+      guidance.taskId,
+      guidance.authorizedSessionId,
+      text,
+      guidance.createdAt
+    );
+  }
+
+  listGuidance(taskId: string): TaskGuidance[] {
+    if (this.getTask(taskId) === null) return [];
+    return this.#db.query<GuidanceRow>(
+      `select id, profile_id, task_id, authorized_session_id, guidance, created_at
+       from task_guidance where profile_id = ? and task_id = ? order by created_at, id`
+    ).all(this.#profileId, taskId).map(rowToGuidance);
+  }
+
   createApprovalLink(link: TaskApprovalLink): void {
     this.#assertTransactionActive();
     this.#assertProfile(link.profileId, "TaskApprovalLink", link.id);
@@ -829,7 +884,7 @@ export class SQLiteTaskStore implements TaskStore {
       throw new TaskStoreIntegrityError("Task Delivery destination is invalid or exceeds its persistence limit.");
     }
     const linked = this.listSessionLinks(binding.taskId)
-      .some((link) => link.sessionId === binding.authorizedSessionId);
+      .some((link) => link.sessionId === binding.authorizedSessionId && link.relationship !== "worker");
     if (!linked) {
       throw new TaskStoreProfileError(
         this.#profileId,
@@ -920,6 +975,31 @@ export class SQLiteTaskStore implements TaskStore {
       );
       this.#assertChanged(updated.changes, "TaskDeliveryBinding", input.id);
       return this.getDeliveryBinding(input.id)!;
+    });
+  }
+
+  retryDeliveryBinding(id: string, retriedAt: string): TaskDeliveryBinding {
+    assertTimestamp(retriedAt, "Task Delivery retry");
+    return this.atomicWrite(() => {
+      const binding = this.getDeliveryBinding(id);
+      if (binding === null || binding.status !== "failed") {
+        throw new TaskStoreIntegrityError(`Task Delivery ${id} is not in failed state.`);
+      }
+      if (binding.failureClass === "delivery-outcome-unknown") {
+        throw new TaskStoreIntegrityError("A Task Delivery with an ambiguous external outcome cannot be retried.");
+      }
+      if (binding.failureClass !== "delivery-failed" && binding.failureClass !== "delivery-preparation-failed") {
+        throw new TaskStoreIntegrityError("This Task Delivery failure class is not safely retryable.");
+      }
+      const updated = this.#db.query(
+        `update task_delivery_bindings set
+          status = 'pending', failure_class = null, failure_message = null,
+          updated_at = ?, started_at = null, delivered_at = null, failed_at = null
+         where id = ? and profile_id = ? and status = 'failed'
+           and failure_class in ('delivery-failed', 'delivery-preparation-failed')`
+      ).run(retriedAt, id, this.#profileId);
+      this.#assertChanged(updated.changes, "TaskDeliveryBinding", id);
+      return this.getDeliveryBinding(id)!;
     });
   }
 
@@ -1518,6 +1598,17 @@ function rowToSessionLink(row: SessionLinkRow): TaskSessionLink {
   };
 }
 
+function rowToGuidance(row: GuidanceRow): TaskGuidance {
+  return {
+    id: row.id,
+    profileId: row.profile_id,
+    taskId: row.task_id,
+    authorizedSessionId: row.authorized_session_id,
+    guidance: row.guidance,
+    createdAt: row.created_at
+  };
+}
+
 function rowToDeliveryBinding(row: DeliveryBindingRow): TaskDeliveryBinding {
   return {
     id: row.id,
@@ -1564,6 +1655,14 @@ function requireNonEmpty(value: string, label: string): string {
 function requireBoundedText(value: string, label: string, maxChars: number): string {
   const normalized = requireNonEmpty(value, label);
   if (normalized.length > maxChars || /[\u0000-\u001F\u007F]/u.test(normalized)) {
+    throw new TaskStoreIntegrityError(`${label} is invalid or exceeds ${maxChars} characters.`);
+  }
+  return normalized;
+}
+
+function requireBoundedContent(value: string, label: string, maxChars: number): string {
+  const normalized = value.trim();
+  if (normalized.length === 0 || normalized.length > maxChars || /\u0000/u.test(normalized)) {
     throw new TaskStoreIntegrityError(`${label} is invalid or exceeds ${maxChars} characters.`);
   }
   return normalized;
@@ -1823,6 +1922,15 @@ type SessionLinkRow = {
   relationship: string;
   step_id: string | null;
   attempt_id: string | null;
+  created_at: string;
+};
+
+type GuidanceRow = {
+  id: string;
+  profile_id: string;
+  task_id: string;
+  authorized_session_id: string;
+  guidance: string;
   created_at: string;
 };
 

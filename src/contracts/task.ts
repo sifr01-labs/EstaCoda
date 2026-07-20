@@ -11,6 +11,7 @@ export type TaskResultId = string;
 export type TaskDeliveryId = string;
 export type TaskApprovalId = string;
 export type TaskUsageEntryId = string;
+export type TaskGuidanceId = string;
 
 export type TaskGraphLimits = {
   readonly maxSteps: number;
@@ -354,6 +355,16 @@ export type TaskSessionLink = {
   createdAt: string;
 };
 
+/** Durable operator guidance consumed as bounded Task context at safe Attempt boundaries. */
+export type TaskGuidance = {
+  id: TaskGuidanceId;
+  profileId: string;
+  taskId: TaskId;
+  authorizedSessionId: string;
+  guidance: string;
+  createdAt: string;
+};
+
 export type TaskApprovalStatus = "requesting" | "pending" | "approved" | "denied" | "expired" | "consumed";
 
 export type TaskApprovalLink = {
@@ -445,6 +456,7 @@ export type TaskEventKind =
   | "attempt-expired"
   | "approval-requested"
   | "approval-resolved"
+  | "task-steered"
   | "usage-recorded"
   | "result-recorded";
 

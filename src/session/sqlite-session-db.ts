@@ -23,6 +23,7 @@ import {
   migrateTaskAgentExecutorSchemaV12,
   migrateTaskBackgroundHostSchemaV13,
   migrateTaskCorrectiveFoundationSchemaV14,
+  migrateTaskVerticalSliceSchemaV15,
   migrateTaskSchedulerSchemaV11,
   migrateTaskSchemaV10
 } from "../workflow/task-schema.js";
@@ -708,6 +709,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     this.#runMigrationStep(12, "v0.10-schema-v12-task-agent-executor", () => migrateTaskAgentExecutorSchemaV12(this.#db));
     this.#runMigrationStep(13, "v0.10-schema-v13-task-background-host", () => migrateTaskBackgroundHostSchemaV13(this.#db));
     this.#runMigrationStep(14, "v0.10-schema-v14-task-corrective-foundation", () => migrateTaskCorrectiveFoundationSchemaV14(this.#db));
+    this.#runMigrationStep(15, "v0.10-schema-v15-task-vertical-slice", () => migrateTaskVerticalSliceSchemaV15(this.#db));
   }
 
   #withMigrationLock(migrate: () => void): void {

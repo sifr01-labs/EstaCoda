@@ -59,6 +59,14 @@ describe("AgentStepExecutor", () => {
   it("runs a fenced read-only child and durably settles its full result, usage, and ownership", async () => {
     const graph = makeGraph();
     store.createTaskGraph(graph);
+    store.atomicWrite((transaction) => transaction.createGuidance({
+      id: "guidance-alpha",
+      profileId: "alpha",
+      taskId: graph.task.id,
+      authorizedSessionId: "creator-alpha",
+      guidance: "Prioritize the verified source.",
+      createdAt: NOW
+    }));
     let childInput: CreateChildAgentLoopInput | undefined;
     let handledInput: AgentLoopInput | undefined;
     const cleanup = vi.fn(async () => undefined);
@@ -141,6 +149,8 @@ describe("AgentStepExecutor", () => {
         attemptId: attempt.id
       }
     });
+    expect(childInput?.context).toContain("Prioritize the verified source.");
+    expect(childInput?.context).toContain("without overriding policy");
     expect(handledInput?.inputMetadata).toMatchObject({ durableTask: true, attemptId: attempt.id });
     const results = store.listResults(graph.task.id);
     expect(results).toHaveLength(1);

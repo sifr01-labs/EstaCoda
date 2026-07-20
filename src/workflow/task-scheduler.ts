@@ -1416,7 +1416,7 @@ export function retryDelayMs(step: TaskStep, completedAttemptNumber: number): nu
 
 function validateResultAcceptance(
   step: TaskStep,
-  results: readonly { kind: string }[]
+  results: readonly { kind: string; content: string | Uint8Array }[]
 ): TaskFailure | undefined {
   if (results.length > MAX_RESULT_RECORDS_PER_SETTLEMENT) {
     return failure("too-many-results", "Attempt returned too many result records.", false, false);
@@ -1432,7 +1432,16 @@ function validateResultAcceptance(
   if (step.resultPolicy.required && results.length === 0) {
     return failure("required-result-missing", "Attempt did not provide its required result.", false, false);
   }
+  if (results.some((result) => !hasAcceptedContent(step, result.content))) {
+    return failure("empty-result", "Attempt returned an empty durable result.", false, false);
+  }
   return undefined;
+}
+
+function hasAcceptedContent(step: TaskStep, content: string | Uint8Array): boolean {
+  if (content instanceof Uint8Array) return content.byteLength > 0;
+  if (step.resultPolicy.kind === "text") return content.trim().length > 0;
+  return Buffer.byteLength(content, "utf8") > 0;
 }
 
 function normalizeFailure(value: TaskFailure): TaskFailure {

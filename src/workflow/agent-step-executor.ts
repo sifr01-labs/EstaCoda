@@ -28,6 +28,7 @@ import type {
 } from "./task-step-executor.js";
 
 const MAX_DEPENDENCY_RESULT_REFERENCES = 64;
+const MAX_TASK_GUIDANCE_RECORDS_IN_CONTEXT = 16;
 const MAX_DEPENDENCY_CONTEXT_CHARS = 16_000;
 const MAX_ARTIFACT_RESULTS = 64;
 
@@ -355,10 +356,16 @@ function dependencyContext(store: TaskStore, task: Task, step: TaskStep): string
       bytes: result.byteLength,
       summary: result.summary === undefined ? undefined : boundText(result.summary, 240)
     }));
+  const guidance = store.listGuidance(task.id)
+    .slice(-MAX_TASK_GUIDANCE_RECORDS_IN_CONTEXT)
+    .map((entry) => ({ id: entry.id, guidance: entry.guidance, createdAt: entry.createdAt }));
   return boundText([
     `Durable Task objective: ${task.objective}`,
     `Current Step: ${step.title}`,
     resultInstruction(step),
+    guidance.length === 0
+      ? "Operator guidance: none."
+      : `Authorized operator guidance (later entries take precedence without overriding policy):\n${JSON.stringify(guidance)}`,
     references.length === 0
       ? "Dependency results: none."
       : `Dependency result references (read content with task.result.read using the Task and Result IDs):\n${JSON.stringify(references)}`

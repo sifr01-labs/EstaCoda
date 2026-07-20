@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 
-export const TASK_SCHEMA_VERSION = 14;
+export const TASK_SCHEMA_VERSION = 15;
 
 const WORKFLOW_TABLES = [
   "workflow_event_summaries",
@@ -540,5 +540,77 @@ export function migrateTaskCorrectiveFoundationSchemaV14(db: SQLiteDatabase): vo
       on task_approval_links(profile_id, attempt_id, status);
     create index if not exists idx_task_approval_target
       on task_approval_links(profile_id, attempt_id, target_fingerprint, status);
+  `);
+}
+
+/** Adds durable steering context and its bounded audit event for fixed Task graphs. */
+export function migrateTaskVerticalSliceSchemaV15(db: SQLiteDatabase): void {
+  db.exec(`
+    create table if not exists task_guidance (
+      id text primary key check(length(id) between 1 and 256),
+      profile_id text not null,
+      task_id text not null,
+      authorized_session_id text not null check(length(authorized_session_id) between 1 and 256),
+      guidance text not null check(length(guidance) between 1 and 4000),
+      created_at text not null,
+      unique(profile_id, id),
+      foreign key(profile_id, task_id)
+        references tasks(profile_id, id) on delete cascade,
+      foreign key(profile_id, authorized_session_id)
+        references sessions(profile_id, id) on delete restrict
+    );
+    create index if not exists idx_task_guidance_task
+      on task_guidance(profile_id, task_id, created_at, id);
+  `);
+
+  const definition = db.query<{ sql: string | null }>(
+    "select sql from sqlite_master where type = 'table' and name = 'task_events'"
+  ).get()?.sql;
+  if (definition?.includes("task-steered")) return;
+
+  db.exec(`
+    alter table task_events rename to task_events_v14;
+
+    create table task_events (
+      id text primary key,
+      profile_id text not null,
+      task_id text not null,
+      plan_revision_id text,
+      step_id text,
+      attempt_id text,
+      kind text not null check(kind in (
+        'task-created', 'task-state-changed', 'plan-revision-created',
+        'plan-revision-validated', 'plan-revision-activated', 'plan-revision-rejected',
+        'plan-revision-superseded', 'step-state-changed', 'attempt-created',
+        'attempt-leased', 'attempt-started', 'attempt-progressed', 'attempt-waiting',
+        'attempt-completed', 'attempt-failed', 'attempt-cancelled', 'attempt-interrupted',
+        'attempt-expired', 'approval-requested', 'approval-resolved', 'task-steered',
+        'usage-recorded', 'result-recorded'
+      )),
+      timestamp text not null,
+      data_json text not null check(json_valid(data_json)),
+      unique(profile_id, id),
+      foreign key(profile_id, task_id)
+        references tasks(profile_id, id) on delete cascade,
+      foreign key(profile_id, task_id, plan_revision_id)
+        references task_plan_revisions(profile_id, task_id, id) on delete cascade,
+      foreign key(profile_id, task_id, step_id)
+        references task_steps(profile_id, task_id, id) on delete cascade,
+      foreign key(profile_id, task_id, attempt_id)
+        references task_attempts(profile_id, task_id, id) on delete cascade
+    );
+
+    insert into task_events (
+      id, profile_id, task_id, plan_revision_id, step_id, attempt_id, kind, timestamp, data_json
+    ) select
+      id, profile_id, task_id, plan_revision_id, step_id, attempt_id, kind, timestamp, data_json
+    from task_events_v14;
+
+    drop table task_events_v14;
+
+    create index idx_task_events_task
+      on task_events(profile_id, task_id, timestamp, id);
+    create index idx_task_events_attempt
+      on task_events(profile_id, attempt_id, timestamp);
   `);
 }

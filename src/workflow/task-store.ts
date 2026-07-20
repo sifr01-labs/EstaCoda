@@ -8,6 +8,7 @@ import type {
   TaskDeliveryStatus,
   TaskEvent,
   TaskEventKind,
+  TaskGuidance,
   TaskPlanRevision,
   TaskResult,
   TaskSessionLink,
@@ -20,6 +21,8 @@ export type CreateTaskGraphInput = {
   task: Task;
   revision: TaskPlanRevision;
   steps: readonly TaskStep[];
+  /** Creation journal records persisted atomically with the graph. */
+  initialEvents?: readonly TaskEvent[];
 };
 
 export type ListTasksOptions = {
@@ -84,6 +87,7 @@ export interface TaskStore {
   createTask(task: Task): void;
   updateTask(task: Task): void;
   getTask(id: string): Task | null;
+  getTaskByCreationKey(creationKey: string): Task | null;
   listTasks(options?: ListTasksOptions): Task[];
 
   createPlanRevisionGraph(revision: TaskPlanRevision, steps: readonly TaskStep[]): void;
@@ -118,6 +122,9 @@ export interface TaskStore {
   linkSession(link: TaskSessionLink): void;
   listSessionLinks(taskId: string): TaskSessionLink[];
 
+  createGuidance(guidance: TaskGuidance): void;
+  listGuidance(taskId: string): TaskGuidance[];
+
   createApprovalLink(link: TaskApprovalLink): void;
   updateApprovalLink(link: TaskApprovalLink): void;
   getApprovalLink(id: string): TaskApprovalLink | null;
@@ -128,6 +135,7 @@ export interface TaskStore {
   listDeliveryBindings(options?: ListTaskDeliveryBindingsOptions): TaskDeliveryBinding[];
   claimDeliveryBinding(id: string, startedAt: string): TaskDeliveryBinding | null;
   settleDeliveryBinding(input: SettleTaskDeliveryInput): TaskDeliveryBinding;
+  retryDeliveryBinding(id: string, retriedAt: string): TaskDeliveryBinding;
 
   atomicWrite<T>(work: (store: TaskStore) => T): T;
 }

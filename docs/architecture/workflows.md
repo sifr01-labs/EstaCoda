@@ -18,15 +18,16 @@ Task
             └── Result
 ```
 
-This document describes the persistence, result, scheduler, agent-execution, and background-host foundation currently present in the codebase. The profile gateway supervisor now runs a durable Task tick beside cron and channel work, recovers abandoned Attempts after restart, and delivers terminal results through a fail-closed completion outbox. No ordinary user path creates Tasks yet: Task creation, operator commands, and user-facing delegation semantics remain outside this build. The retired Workflow commands fail explicitly instead of falling back to an in-memory or partially initialized implementation.
+This document describes the persistence, result, scheduler, agent-execution, and background-host foundation currently present in the codebase. The profile gateway supervisor now runs a durable Task tick beside cron and channel work, recovers abandoned Attempts after restart, and delivers terminal results through a fail-closed completion outbox. The internal fixed-graph service can atomically create idempotent Tasks and persist authorized steering, but no ordinary user path invokes it yet: operator commands and user-facing delegation semantics remain outside this build. The retired Workflow commands fail explicitly instead of falling back to an in-memory or partially initialized implementation.
 
 ## Source of truth
 
 - `src/contracts/task.ts` defines the durable records, legal state transitions, authority and budget policies, and deterministic graph validation.
-- `src/workflow/task-schema.ts` owns SQLite schema version 14.
+- `src/workflow/task-schema.ts` owns SQLite schema version 15.
 - `src/workflow/task-store.ts` defines the profile-bound storage contract.
 - `src/workflow/sqlite-task-store.ts` implements transactional SQLite persistence.
 - `src/workflow/task-result-service.ts` stores bounded result bodies under the selected profile and verifies them before reads.
+- `src/workflow/fixed-task-service.ts` creates immutable initial graphs idempotently and records authorized Task steering.
 - `src/workflow/task-step-executor.ts` defines the narrow Attempt execution and settlement contract.
 - `src/workflow/agent-step-executor.ts` runs one agent Attempt in an isolated child session under narrowed authority.
 - `src/workflow/task-agent-usage.ts` accounts for every provider attempt, fallback, retry, token total, and known route price.
@@ -51,6 +52,7 @@ Opaque Task and session identifiers are routing keys, not authorization boundari
 ## Transaction and graph invariants
 
 - A Task, its first PlanRevision, Steps, dependencies, and creator-session link can be inserted in one `begin immediate` transaction.
+- Creation events are journaled in that same transaction, with deterministic ordering and no raw objective or result content.
 - Failed graph writes roll back completely.
 - Plan definitions are immutable after insertion. Replanning creates a new PlanRevision.
 - Task creation keys and Attempt dispatch keys have separate profile-scoped uniqueness constraints.
@@ -89,7 +91,7 @@ The child session is marked `task-step-worker` and carries Task, PlanRevision, S
 
 The child runner sends progress through the normal runtime event sink while its heartbeat renews the Attempt lease. It suppresses legacy `delegation-heartbeat` persistence for Task execution because the Task journal is the sole lifecycle authority. Durable cancellation aborts the child; timeouts and provider, approval, security, tool, JSON, and artifact-capture failures return bounded classifications to the scheduler.
 
-Successful text and JSON results are captured in full. Artifact bodies are accepted only through an injected, bounded resolver and must match the artifact's declared byte count before the scheduler writes them to the result plane. Dependency context contains bounded result metadata and opaque handles, never raw bodies or filesystem paths; the child reads authorized content through `task.result.read`.
+Successful text and JSON results are captured in full. Artifact bodies are accepted only through an injected, bounded resolver and must match the artifact's declared byte count before the scheduler writes them to the result plane. Dependency context contains bounded result metadata and opaque handles, never raw bodies or filesystem paths; the child reads authorized content through `task.result.read`. Authorized steering is stored outside the conversation transcript and injected as bounded context at safe Attempt boundaries, so transcript compaction or terminal closure cannot discard it. Guidance is user context, not policy: it cannot override Task authority, repository instructions, or runtime security.
 
 Usage is a canonical append-only ledger keyed by the worker session, provider turn, and provider-attempt index. It includes initial completions, continuation turns, fallbacks, and provider retries, while distinguishing preflight route failures from calls that actually reached an adapter. Settlement totals are re-derived from persisted entries, so scheduler replay and approval resume cannot overwrite or double-count earlier usage. Full-precision cost stays in storage; missing token or price data remains explicit incompleteness.
 
@@ -109,14 +111,14 @@ Completion delivery is a profile-owned SQLite outbox linked to both a Task and a
 
 Delivery renders bounded Task status and durable Results. Text/JSON bodies are read through `TaskResultService` using the authorized session; artifacts are represented by opaque handles and summaries, never local paths. Transport errors are reduced to bounded static failure metadata so provider, adapter, or user content is not copied into the outbox.
 
-External delivery is deliberately at-most-once after ambiguity. A crash may occur after an adapter accepts a message but before the process records success. Any binding found in `delivering` state on restart is therefore marked `delivery-outcome-unknown` and is not retried automatically. This avoids duplicate external messages; a later operator surface may expose explicit, reviewable redelivery.
+External delivery is deliberately at-most-once after ambiguity. A crash or transport exception may occur after an adapter accepts a message but before the process records success. Those bindings are marked `delivery-outcome-unknown` and cannot be retried through the delivery service. Confirmed transport rejection and pre-send rendering failure remain failed until an explicit retry call resets the binding; nothing retries automatically. This preserves a reviewable retry path without turning uncertain delivery into duplicate external messages.
 
 ## Migration behavior
 
-Opening a writable `SQLiteSessionDB` migrates it to schema version 14 under the existing migration lock and transaction. Version 10 performs the Task persistence cutover; version 11 adds the durable Attempt cancellation marker without replacing existing leases; version 12 extends the Task event journal with fenced Attempt progress checkpoints; version 13 adds the profile-owned completion-delivery outbox; version 14 adds monotonic lease generations, durable Task approval links, and canonical provider-call usage entries. The migrations preserve unrelated session, message, trajectory, approval, cron, finalization, and memory-curation data. A best-effort pre-migration backup is created by the session database migration runner.
+Opening a writable `SQLiteSessionDB` migrates it to schema version 15 under the existing migration lock and transaction. Version 10 performs the Task persistence cutover; version 11 adds the durable Attempt cancellation marker without replacing existing leases; version 12 extends the Task event journal with fenced Attempt progress checkpoints; version 13 adds the profile-owned completion-delivery outbox; version 14 adds monotonic lease generations, durable Task approval links, and canonical provider-call usage entries; version 15 adds profile-owned steering context and its bounded audit event. The migrations preserve unrelated session, message, trajectory, approval, cron, finalization, and memory-curation data. A best-effort pre-migration backup is created by the session database migration runner.
 
 The migration is intentionally destructive only for the retired Workflow tables. There is no dual-read, dual-write, compatibility alias, or hidden legacy store.
 
 ## Current boundary
 
-The execution host is live, but the product creation surface is not. Existing durable Tasks can be recovered, dispatched by an eligible workspace host, inspected through status, and delivered through a pre-authorized binding. No CLI command, channel command, or model-visible tool creates a Task or a delivery binding in this build. Task creation, operator controls, and the replacement `delegate_task` experience must land before ordinary users can start durable execution.
+The execution host and internal fixed-graph creation path are live, but the product creation surface is not. Durable Tasks can be created idempotently by trusted runtime code, steered by a linked creator or observer session, recovered, dispatched by an eligible workspace host, and delivered through a creator- or observer-authorized binding. Worker sessions cannot authorize steering or delivery. No CLI command, channel command, or model-visible tool creates a Task or delivery binding in this build. Operator controls and the replacement `delegate_task` experience must land before ordinary users can start durable execution.
