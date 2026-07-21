@@ -34,7 +34,7 @@ export function insertProviderUsageEntry(db: SQLiteDatabase, entry: ProviderUsag
   }
 }
 
-function providerUsageLineageIsValid(
+export function providerUsageLineageIsValid(
   db: SQLiteDatabase,
   entry: Pick<ProviderUsageEntry, "profileId" | "sessionId" | "sessionBudgetScopeId" | "visibleTurnId" | "sourceKind">
 ): boolean {

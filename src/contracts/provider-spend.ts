@@ -42,6 +42,65 @@ export type ProviderSpendState =
   | "released"
   | "uncertain";
 
+export type ProviderSpendScopeKind = "session" | "root_task";
+
+export type ProviderSpendingScope = {
+  profileId: string;
+  kind: ProviderSpendScopeKind;
+  ownerId: string;
+  maxEstimatedCostUsd: number;
+  warningThresholdPercent: number;
+  spentCostUsd: number;
+  reservedCostUsd: number;
+  state: "available" | "warning" | "exhausted";
+  ownerCreatedAt: string;
+  createdAt: string;
+  warningReachedAt?: string;
+  exhaustedAt?: string;
+};
+
+export type ProviderSpendAllocation = {
+  profileId: string;
+  requestKey: string;
+  scopeKind: ProviderSpendScopeKind;
+  scopeOwnerId: string;
+  reservedCostUsd: number;
+  createdAt: string;
+};
+
+export type ProviderSpendAttempt = {
+  id: string;
+  request: ProviderSpendRequest;
+  state: ProviderSpendState;
+  reservedCostUsd: number;
+  actualEstimatedCostUsd?: number;
+  usageEntryId?: string;
+  createdAt: string;
+  reservedAt: string;
+  dispatchingAt?: string;
+  settledAt?: string;
+  releasedAt?: string;
+  uncertainAt?: string;
+  uncertaintyReason?: string;
+  allocations: readonly ProviderSpendAllocation[];
+};
+
+export type ProviderSpendDenialReason =
+  | "SESSION_LIMIT_EXHAUSTED"
+  | "TASK_LIMIT_EXHAUSTED"
+  | "SESSION_CAPACITY_RESERVED"
+  | "TASK_CAPACITY_RESERVED";
+
+export type ProviderSpendReservationResult =
+  | { ok: true; attempt: ProviderSpendAttempt }
+  | {
+    ok: false;
+    reason: ProviderSpendDenialReason;
+    scope: ProviderSpendingScope;
+    requestedCostUsd: number;
+    availableCostUsd: number;
+  };
+
 const ROUTE_ROLES = new Set<ProviderRouteRole>(["primary", "fallback", "alias", "override", "unknown"]);
 const SOURCE_KINDS = new Set<ProviderSpendRequest["sourceKind"]>(["main", "task", "auxiliary"]);
 

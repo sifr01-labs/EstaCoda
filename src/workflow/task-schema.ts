@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 
-export const TASK_SCHEMA_VERSION = 22;
+export const TASK_SCHEMA_VERSION = 23;
 
 const OBSOLETE_EXECUTION_TABLES = [
   "workflow_event_summaries",
@@ -1187,6 +1187,153 @@ export function migrateExecutionLimitsAndSpendingPolicySchemaV22(db: SQLiteDatab
           and reservation.max_total_tokens = json_extract(new.execution_limits_json, '$.maxTotalTokens')
           and reservation.max_wall_clock_ms = json_extract(new.execution_limits_json, '$.maxWallClockMs')
       ) then raise(abort, 'Child Task execution reservation is required') end;
+    end;
+  `);
+}
+
+/** Adds transactional monetary reservations at the canonical provider-request boundary. */
+export function migrateProviderSpendReservationSchemaV23(db: SQLiteDatabase): void {
+  db.exec(`
+    create table provider_spending_scopes (
+      profile_id text not null check(length(profile_id) between 1 and 128),
+      kind text not null check(kind in ('session', 'root_task')),
+      owner_id text not null check(length(owner_id) between 1 and 256),
+      max_estimated_cost_usd real not null check(max_estimated_cost_usd >= 0),
+      warning_threshold_percent real not null check(
+        warning_threshold_percent >= 0 and warning_threshold_percent <= 100
+      ),
+      spent_cost_usd real not null default 0 check(spent_cost_usd >= 0),
+      reserved_cost_usd real not null default 0 check(reserved_cost_usd >= 0),
+      state text not null check(state in ('available', 'warning', 'exhausted')),
+      owner_created_at text not null,
+      created_at text not null,
+      warning_reached_at text,
+      exhausted_at text,
+      primary key(profile_id, kind, owner_id)
+    );
+
+    create table provider_spend_attempts (
+      id text primary key,
+      profile_id text not null check(length(profile_id) between 1 and 128),
+      request_key text not null check(length(request_key) between 1 and 512),
+      attribution_json text not null check(json_valid(attribution_json)),
+      provider text not null check(length(provider) between 1 and 128),
+      model text not null check(length(model) between 1 and 256),
+      pricing_snapshot_json text not null check(json_valid(pricing_snapshot_json)),
+      pricing_fingerprint text not null check(length(pricing_fingerprint) between 1 and 256),
+      maximum_estimated_exposure_usd real not null check(maximum_estimated_exposure_usd >= 0),
+      state text not null check(state in ('reserved', 'dispatching', 'settled', 'released', 'uncertain')),
+      reserved_cost_usd real not null check(reserved_cost_usd >= 0),
+      actual_estimated_cost_usd real check(actual_estimated_cost_usd is null or actual_estimated_cost_usd >= 0),
+      usage_entry_id text,
+      created_at text not null,
+      reserved_at text not null,
+      dispatching_at text,
+      settled_at text,
+      released_at text,
+      uncertain_at text,
+      uncertainty_reason text check(uncertainty_reason is null or length(uncertainty_reason) between 1 and 256),
+      unique(profile_id, id),
+      unique(profile_id, request_key),
+      foreign key(profile_id, usage_entry_id)
+        references provider_usage_entries(profile_id, id) on delete restrict,
+      check((state = 'reserved') =
+        (dispatching_at is null and settled_at is null and released_at is null and uncertain_at is null
+          and actual_estimated_cost_usd is null and usage_entry_id is null and uncertainty_reason is null)),
+      check((state = 'dispatching') =
+        (dispatching_at is not null and settled_at is null and released_at is null and uncertain_at is null
+          and actual_estimated_cost_usd is null and usage_entry_id is null and uncertainty_reason is null)),
+      check((state = 'settled') =
+        (dispatching_at is not null and settled_at is not null and released_at is null and uncertain_at is null
+          and actual_estimated_cost_usd is not null and usage_entry_id is not null and uncertainty_reason is null)),
+      check((state = 'released') =
+        (dispatching_at is null and settled_at is null and released_at is not null and uncertain_at is null
+          and actual_estimated_cost_usd is null and usage_entry_id is null and uncertainty_reason is null)),
+      check((state = 'uncertain') =
+        (dispatching_at is not null and settled_at is null and released_at is null and uncertain_at is not null
+          and actual_estimated_cost_usd is null and usage_entry_id is null and uncertainty_reason is not null))
+    );
+
+    create table provider_spend_scope_allocations (
+      profile_id text not null,
+      request_key text not null,
+      scope_kind text not null check(scope_kind in ('session', 'root_task')),
+      scope_owner_id text not null,
+      reserved_cost_usd real not null check(reserved_cost_usd >= 0),
+      created_at text not null,
+      primary key(profile_id, request_key, scope_kind, scope_owner_id),
+      foreign key(profile_id, request_key)
+        references provider_spend_attempts(profile_id, request_key) on delete restrict,
+      foreign key(profile_id, scope_kind, scope_owner_id)
+        references provider_spending_scopes(profile_id, kind, owner_id) on delete restrict
+    );
+
+    create index idx_provider_spend_attempts_state
+      on provider_spend_attempts(profile_id, state, reserved_at);
+    create index idx_provider_spend_allocations_scope
+      on provider_spend_scope_allocations(profile_id, scope_kind, scope_owner_id, request_key);
+
+    create trigger trg_provider_spending_scope_identity_immutable
+    before update of profile_id, kind, owner_id, max_estimated_cost_usd,
+      warning_threshold_percent, owner_created_at, created_at on provider_spending_scopes
+    begin
+      select raise(abort, 'Provider spending scope identity and policy are immutable');
+    end;
+
+    create trigger trg_provider_spending_scope_no_delete
+    before delete on provider_spending_scopes
+    begin
+      select raise(abort, 'Provider spending scopes are durable');
+    end;
+
+    create trigger trg_provider_spend_attempt_identity_immutable
+    before update of id, profile_id, request_key, attribution_json, provider, model,
+      pricing_snapshot_json, pricing_fingerprint, maximum_estimated_exposure_usd,
+      reserved_cost_usd, created_at, reserved_at on provider_spend_attempts
+    begin
+      select raise(abort, 'Provider spend Attempt identity is immutable');
+    end;
+
+    create trigger trg_provider_spend_attempt_transition_valid
+    before update of state, actual_estimated_cost_usd, usage_entry_id,
+      dispatching_at, settled_at, released_at, uncertain_at, uncertainty_reason
+    on provider_spend_attempts
+    when not (
+      (old.state = 'reserved' and new.state in ('dispatching', 'released'))
+      or (old.state = 'dispatching' and new.state in ('settled', 'uncertain'))
+    )
+    begin
+      select raise(abort, 'Provider spend Attempt transition is invalid');
+    end;
+
+    create trigger trg_provider_spend_attempt_no_delete
+    before delete on provider_spend_attempts
+    begin
+      select raise(abort, 'Provider spend Attempts are durable');
+    end;
+
+    create trigger trg_provider_spend_allocation_immutable
+    before update on provider_spend_scope_allocations
+    begin
+      select raise(abort, 'Provider spend scope allocations are immutable');
+    end;
+
+    create trigger trg_provider_spend_allocation_no_delete
+    before delete on provider_spend_scope_allocations
+    begin
+      select raise(abort, 'Provider spend scope allocations are durable');
+    end;
+
+    create trigger trg_provider_usage_entry_immutable
+    before update on provider_usage_entries
+    begin
+      select raise(abort, 'Provider usage facts are immutable');
+    end;
+
+    create trigger trg_provider_usage_entry_no_delete
+    before delete on provider_usage_entries
+    begin
+      select raise(abort, 'Provider usage facts are durable');
     end;
   `);
 }

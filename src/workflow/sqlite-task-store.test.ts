@@ -1348,6 +1348,9 @@ const TASK_TABLES = [
   "task_session_links",
   "task_guidance",
   "provider_usage_entries",
+  "provider_spending_scopes",
+  "provider_spend_attempts",
+  "provider_spend_scope_allocations",
   "task_approval_links",
   "task_delivery_bindings",
   "task_execution_reservations"
