@@ -15,6 +15,7 @@ import type {
 } from "../ui/papyrus/operator-console/operatorConsoleLayout.js";
 import type {
   AttachmentCardState,
+  ApprovalCardState,
   PromptSurfaceState,
   SlashMenuState,
   SteerState,
@@ -61,6 +62,9 @@ export type RawPromptOperatorConsoleOptions = Omit<OperatorConsoleRawPromptSnaps
   readonly onAttachmentPreview?: (attachment: AttachmentCardState) => void;
   readonly getStatus?: () => OperatorConsoleRawPromptSnapshot["status"];
   readonly getTasks?: () => readonly TaskCardState[];
+  readonly getApprovals?: () => readonly ApprovalCardState[];
+  readonly onApprovalIntent?: (intent: import("../ui/papyrus/operator-console/approvalSurface.js").ApprovalIntent) =>
+    void | Promise<void>;
   readonly tasks?: TaskSurfaceState;
   readonly focus?: FocusState;
   readonly slash?: SlashMenuState;
@@ -138,6 +142,7 @@ export class RawPromptRenderLoop {
         turnActivity: snapshot.operatorConsole.turnActivity,
         terminal: snapshot.operatorConsole.terminal,
         attachments: snapshot.operatorConsole.attachments,
+        approvals: snapshot.operatorConsole.approvals,
         tasks: snapshot.operatorConsole.tasks,
         slash: snapshot.operatorConsole.slash,
         activeWork: snapshot.operatorConsole.activeWork,

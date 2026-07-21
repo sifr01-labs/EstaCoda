@@ -382,6 +382,133 @@ describe("ForegroundTaskHost", () => {
     await background.dispose();
   });
 
+  it("authorizes interactive approval to the exact creator session and resumes immediately", async () => {
+    store.createTaskGraph(makeGraph("task-interactive-approval", [step("task-interactive-approval", "approval", 0)]));
+    const queue = new GatewayApprovalQueue({
+      db: sessionDb.db,
+      controller: new WorkspaceApprovalController(),
+      now
+    });
+    const approvalService = new TaskApprovalService({
+      store,
+      queue,
+      now,
+      id: () => nextId("interactive-approval")
+    });
+    let executions = 0;
+    const executor = new FakeTaskStepExecutor(() => {
+      executions++;
+      return executions === 1
+        ? {
+            outcome: "waiting_for_approval",
+            approval: {
+              toolName: "file.write",
+              riskClass: "workspace-write",
+              targetFingerprint: `sha256:${"b".repeat(64)}`,
+              targetPreview: "write the reviewed artifact"
+            }
+          }
+        : { outcome: "succeeded", results: [{ kind: "text", content: "approved interactively" }] };
+    });
+    const host = new ForegroundTaskHost({
+      store,
+      resultService,
+      executor,
+      approvalService,
+      ownerId: "foreground-interactive-approval",
+      workspaceIdentityHash: "workspace-hash",
+      leaseMs: 600_000,
+      heartbeatIntervalMs: 300_000,
+      now
+    });
+
+    await host.startTask("task-interactive-approval");
+    await vi.waitFor(() => expect(store.getTask("task-interactive-approval")?.status).toBe("waiting_for_approval"));
+    await host.runOnce();
+    const approval = host.listPendingApprovals("creator-alpha")[0]!;
+
+    expect(approval).toMatchObject({
+      taskId: "task-interactive-approval",
+      authorizedSessionId: "creator-alpha",
+      toolName: "file.write",
+      targetPreview: "write the reviewed artifact"
+    });
+    expect(host.listPendingApprovals("different-session")).toEqual([]);
+    await expect(host.resolvePendingApproval({
+      approvalId: approval.approvalId,
+      authorizedSessionId: "different-session",
+      decision: "approved"
+    })).rejects.toThrow("Pending Task approval not found for this session.");
+    expect(await queue.listPending({ profileId: "alpha", sessionId: "creator-alpha" })).toHaveLength(1);
+
+    await expect(host.resolvePendingApproval({
+      approvalId: approval.approvalId,
+      authorizedSessionId: "creator-alpha",
+      decision: "approved"
+    })).resolves.toMatchObject({
+      approvalId: approval.approvalId,
+      taskId: "task-interactive-approval",
+      decision: "approved"
+    });
+    await vi.waitFor(() => expect(store.getTask("task-interactive-approval")?.status).toBe("completed"));
+    expect(executions).toBe(2);
+    expect(store.getApprovalLink(store.listApprovalLinks({ taskId: "task-interactive-approval" })[0]!.id)?.status)
+      .toBe("approved");
+    await host.shutdown();
+  });
+
+  it("settles an interactively rejected foreground approval without replaying the Attempt", async () => {
+    store.createTaskGraph(makeGraph("task-interactive-rejection", [step("task-interactive-rejection", "approval", 0)]));
+    const queue = new GatewayApprovalQueue({
+      db: sessionDb.db,
+      controller: new WorkspaceApprovalController(),
+      now
+    });
+    const approvalService = new TaskApprovalService({
+      store,
+      queue,
+      now,
+      id: () => nextId("interactive-rejection")
+    });
+    const executor = new FakeTaskStepExecutor(() => ({
+      outcome: "waiting_for_approval",
+      approval: {
+        toolName: "terminal.exec",
+        riskClass: "destructive-local",
+        targetFingerprint: `sha256:${"c".repeat(64)}`,
+        targetPreview: "run the reviewed command"
+      }
+    }));
+    const host = new ForegroundTaskHost({
+      store,
+      resultService,
+      executor,
+      approvalService,
+      ownerId: "foreground-interactive-rejection",
+      workspaceIdentityHash: "workspace-hash",
+      leaseMs: 600_000,
+      heartbeatIntervalMs: 300_000,
+      now
+    });
+
+    await host.startTask("task-interactive-rejection");
+    await vi.waitFor(() => expect(store.getTask("task-interactive-rejection")?.status).toBe("waiting_for_approval"));
+    await host.runOnce();
+    const approval = host.listPendingApprovals("creator-alpha")[0]!;
+    await host.resolvePendingApproval({
+      approvalId: approval.approvalId,
+      authorizedSessionId: "creator-alpha",
+      decision: "denied"
+    });
+
+    expect(store.getTask("task-interactive-rejection")).toMatchObject({
+      status: "failed",
+      failure: { class: "approval-denied", retryable: false }
+    });
+    expect(executor.executions).toHaveLength(1);
+    await host.shutdown();
+  });
+
   function makeHost(executor: FakeTaskStepExecutor, ownerId: string): ForegroundTaskHost {
     return new ForegroundTaskHost({
       store,

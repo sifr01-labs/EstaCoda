@@ -11,6 +11,12 @@ type ApprovalQueue = {
     options?: PendingApprovalCreationOptions
   ): Promise<PendingApproval>;
   getApproval(id: string, scope: { profileId: string; sessionId?: string }): Promise<PendingApproval | undefined>;
+  resolveApproval(
+    id: string,
+    decision: "approved" | "denied",
+    resolvedBy: string,
+    scope: { profileId: string; sessionId?: string }
+  ): Promise<void>;
 };
 
 export type TaskApprovalRequest = {
@@ -18,6 +24,25 @@ export type TaskApprovalRequest = {
   riskClass: TaskApprovalLink["riskClass"];
   targetFingerprint: string;
   targetPreview: string;
+};
+
+export type PendingTaskApproval = {
+  approvalId: string;
+  taskId: string;
+  stepId: string;
+  attemptId: string;
+  authorizedSessionId: string;
+  toolName: string;
+  riskClass: TaskApprovalLink["riskClass"];
+  targetPreview: string;
+  requestedAt: string;
+  expiresAt: string;
+};
+
+export type TaskApprovalResolution = {
+  approvalId: string;
+  taskId: string;
+  decision: "approved" | "denied";
 };
 
 export type TaskApprovalServiceOptions = {
@@ -94,6 +119,47 @@ export class TaskApprovalService {
   clearAttempt(attemptId: string): void {
     this.#requests.delete(attemptId);
     this.#approvedRequests.delete(attemptId);
+  }
+
+  /** Returns only queue-backed approvals authorized to the exact interactive session. */
+  listPendingForSession(authorizedSessionId: string): readonly PendingTaskApproval[] {
+    const sessionId = requireIdentifier(authorizedSessionId, "Task approval session ID");
+    if (this.#queue === undefined) return [];
+    return this.#store.listApprovalLinks({ statuses: ["pending"], limit: 1_000 })
+      .filter((link) => link.authorizedSessionId === sessionId && link.pendingApprovalId !== undefined)
+      .map((link) => ({
+        approvalId: link.pendingApprovalId!,
+        taskId: link.taskId,
+        stepId: link.stepId,
+        attemptId: link.attemptId,
+        authorizedSessionId: link.authorizedSessionId,
+        toolName: link.toolName,
+        riskClass: link.riskClass,
+        targetPreview: link.targetPreview,
+        requestedAt: link.requestedAt,
+        expiresAt: link.expiresAt
+      }));
+  }
+
+  /** Resolves one exact session-owned queue row; Task state is reconciled by the owning host. */
+  async resolvePendingForSession(input: {
+    approvalId: string;
+    authorizedSessionId: string;
+    decision: "approved" | "denied";
+  }): Promise<TaskApprovalResolution> {
+    const queue = this.#queue;
+    if (queue === undefined) throw new Error("Durable Task approval queue is unavailable.");
+    const approvalId = requireIdentifier(input.approvalId, "Task approval ID");
+    const sessionId = requireIdentifier(input.authorizedSessionId, "Task approval session ID");
+    const link = this.#store.listApprovalLinks({ statuses: ["pending"], limit: 1_000 })
+      .find((candidate) => candidate.pendingApprovalId === approvalId && candidate.authorizedSessionId === sessionId);
+    if (link === undefined) throw new Error("Pending Task approval not found for this session.");
+    await queue.resolveApproval(approvalId, input.decision, "cli-operator", {
+      profileId: this.#store.profileId,
+      sessionId
+    });
+    await this.reconcile({ eligibleTaskIds: new Set([link.taskId]) });
+    return { approvalId, taskId: link.taskId, decision: input.decision };
   }
 
   createLink(input: {
@@ -257,4 +323,12 @@ function bounded(value: string, maxChars: number): string {
 function positiveInteger(value: number, label: string): number {
   if (!Number.isSafeInteger(value) || value < 1) throw new Error(`${label} must be a positive integer.`);
   return value;
+}
+
+function requireIdentifier(value: string, label: string): string {
+  const normalized = value.trim();
+  if (normalized.length === 0 || normalized.length > 256 || /[\u0000-\u001F\u007F]/u.test(normalized)) {
+    throw new Error(`${label} must be a bounded non-empty identifier.`);
+  }
+  return normalized;
 }

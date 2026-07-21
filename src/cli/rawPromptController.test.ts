@@ -20,7 +20,7 @@ import type {
   TypeaheadProviderRouter,
   TypeaheadProviderSelection,
 } from "../ui/papyrus/input/typeaheadProviderRouter.js";
-import type { AttachmentCardState, TaskCardState } from "../ui/papyrus/operator-console/index.js";
+import type { ApprovalCardState, AttachmentCardState, TaskCardState } from "../ui/papyrus/operator-console/index.js";
 
 const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
@@ -268,6 +268,66 @@ describe("raw prompt controller", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("requires explicit approval focus before normal Enter can resolve a Task approval", async () => {
+    const onApprovalIntent = vi.fn();
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        getApprovals: () => [promptApprovalCard()],
+        onApprovalIntent
+      }
+    });
+
+    expect(read.output.writes.join("")).toContain("Approval required");
+    read.input.send("\r");
+
+    await expect(read.pending).resolves.toEqual({ type: "submit", text: "" });
+    expect(onApprovalIntent).not.toHaveBeenCalled();
+  });
+
+  it("routes explicit approve-once and rejection controls without submitting the prompt", async () => {
+    let approvals: readonly ApprovalCardState[] = [promptApprovalCard()];
+    const onApprovalIntent = vi.fn(async () => {
+      approvals = [];
+    });
+    const approved = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        getApprovals: () => approvals,
+        onApprovalIntent
+      }
+    });
+
+    approved.input.send("\t");
+    approved.input.send("\r");
+    await flushPromises();
+    expect(approved.isResolved()).toBe(false);
+    expect(onApprovalIntent).toHaveBeenCalledWith({ type: "approve", approvalId: "approval-raw-1" });
+    approved.input.send("continue\r");
+    await expect(approved.pending).resolves.toEqual({ type: "submit", text: "continue" });
+
+    approvals = [promptApprovalCard()];
+    onApprovalIntent.mockClear();
+    const rejected = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        getApprovals: () => approvals,
+        onApprovalIntent
+      }
+    });
+    rejected.input.send("\t");
+    rejected.input.send("\x1b[C");
+    rejected.input.send("\r");
+    await flushPromises();
+    expect(rejected.isResolved()).toBe(false);
+    expect(onApprovalIntent).toHaveBeenCalledWith({ type: "reject", approvalId: "approval-raw-1" });
+    rejected.input.send("done\r");
+    await expect(rejected.pending).resolves.toEqual({ type: "submit", text: "done" });
   });
 
   it("captures input that becomes readable immediately on resume", async () => {
@@ -1904,6 +1964,17 @@ function promptTaskCard(): TaskCardState {
     results: [],
     createdAt: "2026-07-20T09:59:59.000Z",
     updatedAt: "2026-07-20T10:00:00.000Z",
+  };
+}
+
+function promptApprovalCard(): ApprovalCardState {
+  return {
+    id: "approval-raw-1",
+    status: "pending",
+    action: "Write file",
+    target: "write the reviewed artifact",
+    risk: "workspace-write",
+    summary: "Task task-raw-1 · approve once only"
   };
 }
 

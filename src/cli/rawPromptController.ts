@@ -30,16 +30,19 @@ import {
   type PapyrusVimKeymapState,
 } from "../ui/papyrus/input/vim/vimKeymap.js";
 import {
+  createApprovalFocusTarget,
   createInitialFocusState,
   createInitialOperatorConsoleState,
   createPastedTextAttachment,
   formatSubmittedPromptWithAttachmentContent,
   formatSubmittedPromptWithAttachmentPreview,
   removeAttachmentAndRepairFocus,
+  routeApprovalKey,
   routeAttachmentKey,
   resolveOperatorConsoleInputSurface,
   routeTaskSurfaceKey,
   type AttachmentCardState,
+  type ApprovalCardState,
   type FocusState,
   type SlashMenuState,
   type TaskSurfaceState,
@@ -134,6 +137,9 @@ export class RawPromptController {
     let attachmentSequence = 0;
     let attachments: readonly AttachmentCardState[] = [];
     let attachmentFocus: FocusState = createInitialFocusState();
+    let approvals: readonly ApprovalCardState[] = [];
+    const resolvingApprovalIds = new Set<string>();
+    const approvalErrors = new Set<string>();
     let taskSurface: TaskSurfaceState = { cards: [], scrollOffset: 0 };
     let vimKeymapState: PapyrusVimKeymapState | undefined =
       this.#keymap?.mode === "vim" ? createPapyrusVimKeymapState() : undefined;
@@ -145,6 +151,27 @@ export class RawPromptController {
       statusTicker = undefined;
     };
     const render = () => {
+      const refreshedApprovals = this.#operatorConsole?.getApprovals?.() ?? approvals;
+      const refreshedIds = new Set(refreshedApprovals.map((approval) => approval.id));
+      for (const approvalId of resolvingApprovalIds) {
+        if (!refreshedIds.has(approvalId)) resolvingApprovalIds.delete(approvalId);
+      }
+      const focusedApproval = attachmentFocus.target.kind === "approval" ? attachmentFocus.target : undefined;
+      approvals = refreshedApprovals
+        .filter((approval) => !resolvingApprovalIds.has(approval.id))
+        .map((approval) => ({
+          ...approval,
+          ...(approvalErrors.has(approval.id)
+            ? { summary: "Approval could not be resolved. Try again." }
+            : {}),
+          ...(focusedApproval?.approvalId === approval.id
+            ? { focusedControl: focusedApproval.control }
+            : { focusedControl: undefined })
+        }));
+      if (focusedApproval !== undefined &&
+          !approvals.some((approval) => approval.id === focusedApproval.approvalId)) {
+        attachmentFocus = createInitialFocusState();
+      }
       const cards = this.#operatorConsole?.getTasks?.() ?? this.#operatorConsole?.tasks?.cards ?? taskSurface.cards;
       const selectedTaskId = cards.some((card) => card.taskId === taskSurface.selectedTaskId)
         ? taskSurface.selectedTaskId
@@ -176,6 +203,7 @@ export class RawPromptController {
               isTty: this.#operatorConsole.terminal?.isTty ?? this.#output.isTTY ?? true,
             },
             attachments,
+            approvals,
             tasks: taskSurface,
             slash: slashMenu,
             placeholder: options?.placeholder,
@@ -197,7 +225,8 @@ export class RawPromptController {
       throw error;
     }
     if (this.#operatorConsole?.enabled === true &&
-        (this.#operatorConsole.getStatus !== undefined || this.#operatorConsole.getTasks !== undefined)) {
+        (this.#operatorConsole.getStatus !== undefined || this.#operatorConsole.getTasks !== undefined ||
+          this.#operatorConsole.getApprovals !== undefined)) {
       statusTicker = setInterval(render, 1000);
     }
 
@@ -426,6 +455,56 @@ export class RawPromptController {
         return true;
       };
 
+      const handleApprovalFocusEntry = (event: ParsedKeypress) => {
+        if (this.#operatorConsole?.enabled !== true || approvals.length === 0 || state.text.length > 0 ||
+            attachmentFocus.target.kind !== "prompt" || event.type !== "key" || event.key !== "tab" ||
+            isTypeaheadActive()) {
+          return false;
+        }
+        const approval = approvals.find((candidate) => candidate.status === "pending");
+        if (approval === undefined) return false;
+        approvalErrors.delete(approval.id);
+        attachmentFocus = createInitialFocusState(createApprovalFocusTarget(approval.id, "approve"));
+        render();
+        return true;
+      };
+
+      const handleApprovalKeypress = (event: ParsedKeypress) => {
+        if (this.#operatorConsole?.enabled !== true || attachmentFocus.target.kind !== "approval") return false;
+        const routed = routeApprovalKey(createInitialOperatorConsoleState({
+          approvals,
+          focus: attachmentFocus,
+        }), event);
+        approvals = routed.state.approvals;
+        attachmentFocus = routed.state.focus;
+        const intent = routed.intent;
+        if (intent.type === "none" || intent.type === "inspect") {
+          render();
+          return true;
+        }
+        const resolveApproval = this.#operatorConsole.onApprovalIntent;
+        if (resolveApproval === undefined) {
+          approvalErrors.add(intent.approvalId);
+          render();
+          return true;
+        }
+        resolvingApprovalIds.add(intent.approvalId);
+        approvalErrors.delete(intent.approvalId);
+        attachmentFocus = createInitialFocusState();
+        render();
+        void Promise.resolve(resolveApproval(intent)).then(
+          () => {
+            if (!settled) render();
+          },
+          () => {
+            resolvingApprovalIds.delete(intent.approvalId);
+            approvalErrors.add(intent.approvalId);
+            if (!settled) render();
+          }
+        );
+        return true;
+      };
+
       const handleTaskKeypress = (event: ParsedKeypress, modalOnly = false) => {
         if (this.#operatorConsole?.enabled !== true || taskSurface.cards.length === 0) return false;
         const inspectionOpen = taskSurface.inspectedTaskId !== undefined;
@@ -469,13 +548,15 @@ export class RawPromptController {
             continue;
           }
           if (handleEmptyPromptAttachmentClear(event)) continue;
+          if (handleApprovalFocusEntry(event)) continue;
           const inputSurface = resolveOperatorConsoleInputSurface({
             taskInspection: false,
-            approval: false,
+            approval: attachmentFocus.target.kind === "approval",
             typeahead: isTypeaheadActive(),
             attachment: attachmentFocus.target.kind === "attachment" ||
               (attachments.length > 0 && event.type === "key" && event.key === "tab"),
           });
+          if (inputSurface === "approval" && handleApprovalKeypress(event)) continue;
           if (inputSurface === "typeahead" && handleTypeaheadKeypress(event)) continue;
           if (inputSurface === "attachment" && handleAttachmentKeypress(event)) continue;
           if (handleTaskKeypress(event)) continue;

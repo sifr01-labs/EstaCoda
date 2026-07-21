@@ -3,6 +3,7 @@ import type { FocusState } from "./focusModel.js";
 import {
   createInitialOperatorConsoleState,
   type AttachmentCardState,
+  type ApprovalCardState,
   type OperatorConsoleMode,
   type OperatorConsoleState,
   type PromptSurfaceState,
@@ -38,6 +39,7 @@ export type OperatorConsoleRawPromptSnapshot = {
   readonly terminal?: Partial<TerminalMetrics>;
   readonly transcript?: readonly TranscriptBlock[];
   readonly attachments?: readonly AttachmentCardState[];
+  readonly approvals?: readonly ApprovalCardState[];
   readonly tasks?: TaskSurfaceState;
   readonly turnActivity?: TurnActivityState;
   readonly slash?: SlashMenuState;
@@ -86,6 +88,7 @@ export function buildOperatorConsoleStateFromRawPrompt(
     transcript: snapshot.transcript ?? [],
     turnActivity: snapshot.turnActivity,
     attachments: snapshot.attachments ?? [],
+    approvals: snapshot.approvals ?? [],
     tasks: snapshot.tasks,
     activeWork: snapshot.activeWork,
     streaming: snapshot.streaming,
@@ -131,6 +134,7 @@ export function buildOperatorConsoleRawPromptFrameWithRuntimeHost(
   host.setTranscript(snapshot.transcript ?? []);
   host.setTurnActivity(snapshot.turnActivity);
   host.setAttachments(snapshot.attachments ?? []);
+  host.setApprovals(snapshot.approvals ?? []);
   host.setTasks(snapshot.tasks ?? createInitialOperatorConsoleState().tasks);
   host.setSlash(snapshot.slash);
   host.setActiveWork(snapshot.activeWork ?? createInitialOperatorConsoleState().activeWork);

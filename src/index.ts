@@ -373,6 +373,12 @@ async function main(): Promise<void> {
         locale: launchLocale ?? (config.ui.language === "ar" ? "ar" : "en"),
         showResponseProgress: config.ui.showResponseProgress,
         operatorConsole: { enabled: true },
+        taskApprovals: {
+          listPending: (authorizedSessionId) => host.listPendingApprovals(authorizedSessionId),
+          resolve: async (input) => {
+            await host.resolvePendingApproval(input);
+          }
+        },
         refreshRuntime: async (options) => {
           const nextRuntime = await buildRuntime({
             sessionId: options?.preserveSession === true ? runtime.sessionId : createSessionId(),

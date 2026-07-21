@@ -1,7 +1,11 @@
 import type { Task, TaskHostLease } from "../contracts/task.js";
 import { isTerminalTaskStatus } from "../contracts/task.js";
 import type { TaskStepExecutor } from "./task-step-executor.js";
-import { TaskApprovalService } from "./task-approval-service.js";
+import {
+  TaskApprovalService,
+  type PendingTaskApproval,
+  type TaskApprovalResolution
+} from "./task-approval-service.js";
 import type { TaskResultService } from "./task-result-service.js";
 import {
   TaskScheduler,
@@ -47,6 +51,7 @@ export type ForegroundTaskStartResult = {
 export class ForegroundTaskHost {
   readonly #store: TaskStore;
   readonly #scheduler: TaskScheduler;
+  readonly #approvalService: TaskApprovalService;
   readonly #ownerId: string;
   readonly #workspaceIdentityHash: string;
   readonly #leaseMs: number;
@@ -108,11 +113,12 @@ export class ForegroundTaskHost {
       throw new Error("Foreground Task host requires an executor or executor runtime factory.");
     }
 
+    this.#approvalService = options.approvalService ?? new TaskApprovalService({ store: options.store, now: this.#now });
     this.#scheduler = new TaskScheduler({
       store: options.store,
       resultService: options.resultService,
       ownerId: options.ownerId,
-      approvalService: options.approvalService ?? new TaskApprovalService({ store: options.store, now: this.#now }),
+      approvalService: this.#approvalService,
       now: this.#now,
       resolveExecutor: (task, step) => {
         const executor = this.#executor;
@@ -182,6 +188,21 @@ export class ForegroundTaskHost {
 
   hasPendingWork(): boolean {
     return this.#scheduler.hasPendingWork() || this.#owned.size > 0;
+  }
+
+  listPendingApprovals(authorizedSessionId: string): readonly PendingTaskApproval[] {
+    return this.#approvalService.listPendingForSession(authorizedSessionId);
+  }
+
+  async resolvePendingApproval(input: {
+    approvalId: string;
+    authorizedSessionId: string;
+    decision: "approved" | "denied";
+  }): Promise<TaskApprovalResolution> {
+    if (this.#stopping) throw new Error("Foreground Task host is stopping.");
+    const resolution = await this.#approvalService.resolvePendingForSession(input);
+    await this.runOnce();
+    return resolution;
   }
 
   /** Stops admission and transfers unfinished durable work to an eligible background host. */

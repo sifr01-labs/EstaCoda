@@ -181,6 +181,31 @@ describe("Papyrus operator console raw prompt host", () => {
     expect(status).not.toMatch(/\b(attachment|pasted text|OPENAI_API_KEY|secret)\b/iu);
   });
 
+  it("maps pending approvals into the raw prompt Operator Console frame", () => {
+    const approval = {
+      id: "approval-1",
+      status: "pending" as const,
+      action: "Write file",
+      target: "write the reviewed artifact",
+      risk: "workspace-write",
+      summary: "Task task-1 · approve once only",
+      focusedControl: "approve" as const
+    };
+    const frame = buildOperatorConsoleRawPromptFrame({
+      prompt: "> ",
+      state: createLineEditorState(""),
+      terminal: { width: 80, height: 18, isTty: true },
+      approvals: [approval]
+    });
+    const text = frame.rows.join("\n");
+
+    expect(frame.state.approvals).toEqual([approval]);
+    expect(text).toContain("Approval required");
+    expect(text).toContain("Action: Write file");
+    expect(text).toContain("Target: write the reviewed artifact");
+    expect(text).toContain("❯ Approve once");
+  });
+
   it("maps raw prompt streaming state into the Operator Console frame", () => {
     const frame = buildOperatorConsoleRawPromptFrame({
       prompt: "> ",

@@ -122,7 +122,12 @@ import { selectProviderModelRoute } from "../setup/provider-model-route-prompt.j
 import { isMemoryCurationModeMutation, runMemoryOperatorCommand } from "../memory/memory-operator-commands.js";
 import type { SessionFinalizationReason } from "../session/session-finalization-queue.js";
 import type { TaskStatusProjection } from "../workflow/task-operator-service.js";
-import type { TaskCardState } from "../ui/papyrus/operator-console/operatorConsoleState.js";
+import type { PendingTaskApproval } from "../workflow/task-approval-service.js";
+import type { ApprovalIntent } from "../ui/papyrus/operator-console/approvalSurface.js";
+import type {
+  ApprovalCardState,
+  TaskCardState
+} from "../ui/papyrus/operator-console/operatorConsoleState.js";
 import type { SessionCostSummary, TurnUsageSummary, UsageCostSummary } from "../contracts/usage-cost.js";
 import { mergeUsageCostSummaries, unavailableUsageCostSummary } from "../providers/provider-usage-projection.js";
 import { formatUsageCost } from "../ui/usage-cost-format.js";
@@ -149,6 +154,14 @@ export type SessionLoopOptions = {
   operatorConsole?: {
     readonly enabled?: boolean;
     readonly runtimeHost?: OperatorConsoleRuntimeHost;
+  };
+  taskApprovals?: {
+    listPending(authorizedSessionId: string): readonly PendingTaskApproval[];
+    resolve(input: {
+      approvalId: string;
+      authorizedSessionId: string;
+      decision: "approved" | "denied";
+    }): Promise<void>;
   };
   cliVoice?: {
     recorder?: CliVoiceRecorder;
@@ -403,6 +416,24 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     cachedTaskCards = operatorConsoleTaskCards(runtime);
     return cachedTaskCards;
   };
+  const getOperatorConsoleApprovals = (): readonly ApprovalCardState[] => {
+    try {
+      return (options.taskApprovals?.listPending(runtime.sessionId) ?? [])
+        .map((approval) => taskApprovalToCard(approval, renderer.locale === "ar" ? "ar" : "en"));
+    } catch {
+      return [];
+    }
+  };
+  const onOperatorConsoleApprovalIntent = async (intent: ApprovalIntent): Promise<void> => {
+    if (intent.type !== "approve" && intent.type !== "reject") return;
+    const taskApprovals = options.taskApprovals;
+    if (taskApprovals === undefined) throw new Error("Interactive Task approvals are unavailable.");
+    await taskApprovals.resolve({
+      approvalId: intent.approvalId,
+      authorizedSessionId: runtime.sessionId,
+      decision: intent.type === "approve" ? "approved" : "denied"
+    });
+  };
   const prompt = options.prompt ?? createInteractivePrompt({
     input: cliInput,
     output: output as NodeJS.WriteStream,
@@ -422,6 +453,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           },
           getStatus: getOperatorConsoleStatus,
           getTasks: getOperatorConsoleTasks,
+          getApprovals: getOperatorConsoleApprovals,
+          onApprovalIntent: onOperatorConsoleApprovalIntent,
           style: operatorConsoleStyle,
         },
       }),
@@ -2961,6 +2994,23 @@ function operatorConsoleTaskCards(runtime: Runtime): readonly TaskCardState[] {
   } catch {
     return [];
   }
+}
+
+function taskApprovalToCard(
+  approval: PendingTaskApproval,
+  locale: import("../ui/tool-display.js").ToolDisplayLocale
+): ApprovalCardState {
+  const summary = locale === "ar"
+    ? isolateRtl(`المهمة ${isolateLtr(approval.taskId)} · موافقة لمرة واحدة فقط`)
+    : `Task ${approval.taskId} · approve once only`;
+  return {
+    id: approval.approvalId,
+    status: "pending",
+    action: toolDisplayLabel(approval.toolName, locale),
+    target: approval.targetPreview,
+    risk: approval.riskClass,
+    summary
+  };
 }
 
 function taskProjectionToCard(task: TaskStatusProjection): TaskCardState {
