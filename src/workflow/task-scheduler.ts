@@ -318,7 +318,7 @@ export class TaskScheduler {
 
   /**
    * Stops admission, gives active work a bounded settlement window, then
-   * requeues unfinished Attempts under the current fence for another host.
+   * transfers restart-safe work and pauses uncertain work for operator review.
    */
   async handoff(options: TaskSchedulerHandoffOptions = {}): Promise<TaskSchedulerHandoffResult> {
     this.stopDispatching();
@@ -914,29 +914,58 @@ export class TaskScheduler {
             (attempt.status !== "leased" && attempt.status !== "running")) continue;
         const step = store.getStep(attempt.stepId);
         if (step === null || (step.status !== "ready" && step.status !== "running")) continue;
-        store.updateAttempt({
-          ...attempt,
-          status: "queued",
-          failure: undefined,
-          completedAt: undefined,
-          updatedAt: now
-        });
         const task = store.getTask(attempt.taskId);
         if (task === null) continue;
-        if (step.status !== "ready") {
-          store.updateStep({ ...step, status: "ready", updatedAt: now });
-          store.appendEvent(this.#event(task, "step-state-changed", now, {
-            stepId: step.id,
-            planRevisionId: step.planRevisionId,
-            data: { from: step.status, to: "ready", reasonCode: "foreground-host-handoff" }
-          }));
+        const restartSafe = attempt.status === "leased" || isAutomaticRestartSafe(step);
+        if (restartSafe) {
+          store.updateAttempt({
+            ...attempt,
+            status: "queued",
+            failure: undefined,
+            completedAt: undefined,
+            updatedAt: now
+          });
+          if (step.status !== "ready") {
+            store.updateStep({ ...step, status: "ready", updatedAt: now });
+            store.appendEvent(this.#event(task, "step-state-changed", now, {
+              stepId: step.id,
+              planRevisionId: step.planRevisionId,
+              data: { from: step.status, to: "ready", reasonCode: "foreground-host-handoff" }
+            }));
+          }
+        } else {
+          const interruption = failure(
+            "host-handoff-uncertain",
+            "Foreground execution ended after this Attempt started; operator review is required before retry.",
+            false,
+            true
+          );
+          store.updateAttempt({
+            ...attempt,
+            status: "interrupted",
+            failure: interruption,
+            updatedAt: now,
+            completedAt: now
+          });
+          this.#pauseForOperatorReview(
+            store,
+            task,
+            step,
+            now,
+            "foreground-host-handoff-review-required",
+            "Interrupted Task work may have produced side effects; review it before retrying."
+          );
         }
         if (!store.releaseAttemptLease(fenceInput(lease))) throw new TaskSchedulerLeaseLostError();
         store.appendEvent(this.#event(task, "attempt-interrupted", now, {
           attemptId: attempt.id,
           stepId: attempt.stepId,
           planRevisionId: attempt.planRevisionId,
-          data: { reasonCode: "foreground-host-handoff", recoverable: true }
+          data: {
+            reasonCode: restartSafe ? "foreground-host-handoff" : "foreground-host-handoff-review-required",
+            recoverable: restartSafe,
+            uncertainSideEffects: !restartSafe
+          }
         }));
         interrupted++;
       }
@@ -1332,6 +1361,18 @@ export class TaskScheduler {
       return false;
     }
 
+    if (attempt.failure?.uncertainSideEffects === true && !isAutomaticRestartSafe(step)) {
+      this.#pauseForOperatorReview(
+        store,
+        task,
+        step,
+        now,
+        "uncertain-side-effects",
+        "A Task Step may have produced side effects; review it before retrying."
+      );
+      return false;
+    }
+
     const policy = step.failurePolicy.onAttemptsExhausted;
     if (policy === "skip_if_optional" && step.failurePolicy.optional) {
       store.updateStep({ ...step, status: "skipped", updatedAt: now });
@@ -1343,23 +1384,14 @@ export class TaskScheduler {
       return false;
     }
     if (policy === "wait_for_operator") {
-      store.updateStep({ ...step, status: "waiting_for_input", updatedAt: now });
-      store.appendEvent(this.#event(task, "step-state-changed", now, {
-        stepId: step.id,
-        planRevisionId: step.planRevisionId,
-        data: { from: "running", to: "waiting_for_input", reasonCode: "operator-review-required" }
-      }));
-      if (task.status === "running") {
-        store.updateTask({
-          ...task,
-          status: "waiting_for_input",
-          updatedAt: now,
-          waitReason: { kind: "operator", summary: "A Task Step requires operator review.", requestedAt: now }
-        });
-        store.appendEvent(this.#event(task, "task-state-changed", now, {
-          data: { from: "running", to: "waiting_for_input", reasonCode: "operator-review-required" }
-        }));
-      }
+      this.#pauseForOperatorReview(
+        store,
+        task,
+        step,
+        now,
+        "operator-review-required",
+        "A Task Step requires operator review."
+      );
       return false;
     }
 
@@ -1405,6 +1437,34 @@ export class TaskScheduler {
       }
     }
     return true;
+  }
+
+  #pauseForOperatorReview(
+    store: TaskStore,
+    task: Task,
+    step: TaskStep,
+    now: string,
+    reasonCode: string,
+    summary: string
+  ): void {
+    if (step.status !== "running") return;
+    store.updateStep({ ...step, status: "waiting_for_input", updatedAt: now });
+    store.appendEvent(this.#event(task, "step-state-changed", now, {
+      stepId: step.id,
+      planRevisionId: step.planRevisionId,
+      data: { from: "running", to: "waiting_for_input", reasonCode }
+    }));
+    const currentTask = store.getTask(task.id);
+    if (currentTask?.status !== "running") return;
+    store.updateTask({
+      ...currentTask,
+      status: "waiting_for_input",
+      updatedAt: now,
+      waitReason: { kind: "operator", summary, requestedAt: now }
+    });
+    store.appendEvent(this.#event(currentTask, "task-state-changed", now, {
+      data: { from: "running", to: "waiting_for_input", reasonCode }
+    }));
   }
 
   #assertCurrentLease(
@@ -1674,10 +1734,14 @@ export function classifyTaskRetry(step: TaskStep, attempt: TaskAttempt): TaskRet
   if (step.retryPolicy.requireIdempotent && step.idempotency !== "idempotent" && step.idempotency !== "retry_safe") {
     return { retry: false, delayMs: 0, reason: "idempotency-required" };
   }
-  if (failureRecord.uncertainSideEffects && step.idempotency !== "idempotent") {
+  if (failureRecord.uncertainSideEffects && !isAutomaticRestartSafe(step)) {
     return { retry: false, delayMs: 0, reason: "uncertain-side-effects" };
   }
   return { retry: true, delayMs: retryDelayMs(step, attempt.attemptNumber), reason: "retry-policy-allowed" };
+}
+
+function isAutomaticRestartSafe(step: TaskStep): boolean {
+  return step.idempotency === "idempotent" || step.idempotency === "retry_safe";
 }
 
 export function retryDelayMs(step: TaskStep, completedAttemptNumber: number): number {

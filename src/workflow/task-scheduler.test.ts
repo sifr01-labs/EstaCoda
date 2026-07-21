@@ -19,6 +19,7 @@ import { FakeTaskStepExecutor } from "./fake-task-step-executor.js";
 import { SQLiteTaskStore } from "./sqlite-task-store.js";
 import { TaskResultService } from "./task-result-service.js";
 import { TaskApprovalService } from "./task-approval-service.js";
+import { TaskOperatorService } from "./task-operator-service.js";
 import {
   TaskScheduler,
   classifyTaskRetry,
@@ -231,6 +232,68 @@ describe("TaskScheduler", () => {
     expect(store.listEvents("task-alpha", { kinds: ["attempt-interrupted"] })).toHaveLength(1);
   });
 
+  it.each(["unknown", "non_idempotent"] as const)(
+    "pauses started %s work for operator review during host handoff",
+    async (idempotency) => {
+      store.createTaskGraph(makeGraph([makeStep("unsafe-handoff", 0, {
+        idempotency,
+        retryPolicy: {
+          maxAttempts: 2,
+          initialBackoffMs: 0,
+          backoffMultiplier: 1,
+          maxBackoffMs: 0,
+          retryableFailureClasses: ["lease-expired", "lease-missing"],
+          nonRetryableFailureClasses: [],
+          requireIdempotent: false
+        }
+      })]));
+      let finishOld: (() => void) | undefined;
+      const oldGate = new Promise<void>((resolve) => { finishOld = resolve; });
+      const foregroundExecutor = new FakeTaskStepExecutor(async () => {
+        await oldGate;
+        return { outcome: "succeeded", results: [{ kind: "text", content: "stale foreground result" }] };
+      });
+      const foreground = makeScheduler(foregroundExecutor, undefined, undefined, "foreground-owner");
+      const dispatch = await foreground.dispatchOnce({ eligibleTaskIds: ["task-alpha"] });
+      const attemptId = store.listAttempts("task-alpha")[0]!.id;
+
+      await expect(foreground.handoff({
+        eligibleTaskIds: ["task-alpha"],
+        settleGraceMs: 0,
+        abortGraceMs: 0
+      })).resolves.toMatchObject({ settled: false, interrupted: 1, stillStopping: 1 });
+      expect(store.getTask("task-alpha")).toMatchObject({
+        status: "waiting_for_input",
+        waitReason: { kind: "operator" }
+      });
+      expect(store.getStep("step-unsafe-handoff")?.status).toBe("waiting_for_input");
+      expect(store.getAttempt(attemptId)).toMatchObject({
+        status: "interrupted",
+        failure: { class: "host-handoff-uncertain", uncertainSideEffects: true }
+      });
+      expect(store.getAttempt(attemptId)?.lease).toBeUndefined();
+
+      const backgroundExecutor = new FakeTaskStepExecutor(() => ({
+        outcome: "succeeded",
+        results: [{ kind: "text", content: "reviewed background result" }]
+      }));
+      const background = makeScheduler(backgroundExecutor, undefined, undefined, "background-owner");
+      expect((await background.runOnce({ eligibleTaskIds: ["task-alpha"] })).dispatched).toBe(0);
+
+      new TaskOperatorService({ store, now }).retry("task-alpha", undefined, "creator-alpha");
+      await expect(background.runOnce({ eligibleTaskIds: ["task-alpha"] })).resolves.toMatchObject({
+        dispatched: 1,
+        completed: 1
+      });
+      expect(store.listAttempts("task-alpha").map((attempt) => attempt.status)).toEqual(["interrupted", "completed"]);
+
+      finishOld!();
+      await dispatch.completion;
+      expect(store.getTask("task-alpha")?.status).toBe("completed");
+      expect(store.listResults("task-alpha").map((result) => result.summary ?? result.kind)).toEqual(["text"]);
+    }
+  );
+
   it("enforces profile and Task concurrency without duplicate dispatch", async () => {
     store.createTaskGraph(makeGraph([
       makeStep("one", 0),
@@ -326,7 +389,7 @@ describe("TaskScheduler", () => {
     expect(store.getTask("task-alpha")?.status).toBe("completed");
   });
 
-  it("does not retry uncertain non-idempotent work", async () => {
+  it("pauses uncertain non-idempotent work for operator review", async () => {
     const step = makeStep("unsafe", 0, {
       idempotency: "non_idempotent",
       retryPolicy: {
@@ -347,8 +410,11 @@ describe("TaskScheduler", () => {
 
     expect(await makeScheduler(executor).runOnce()).toMatchObject({ dispatched: 1, failed: 1 });
     expect(store.listAttempts("task-alpha")).toHaveLength(1);
-    expect(store.getStep(step.id)?.status).toBe("failed");
-    expect(store.getTask("task-alpha")?.status).toBe("failed");
+    expect(store.getStep(step.id)?.status).toBe("waiting_for_input");
+    expect(store.getTask("task-alpha")).toMatchObject({
+      status: "waiting_for_input",
+      waitReason: { kind: "operator" }
+    });
     expect(classifyTaskRetry(step, store.listAttempts("task-alpha")[0]!)).toMatchObject({
       retry: false,
       reason: "uncertain-side-effects"
@@ -588,8 +654,8 @@ describe("TaskScheduler", () => {
     ]);
   });
 
-  it("reconciles an expired running Attempt after restart and retries only through policy", async () => {
-    const graph = makeGraph([makeStep("recover", 0)]);
+  it("reconciles an expired retry-safe Attempt after restart and retries only through policy", async () => {
+    const graph = makeGraph([makeStep("recover", 0, { idempotency: "retry_safe" })]);
     graph.task.status = "running";
     graph.task.startedAt = NOW;
     graph.steps[0]!.status = "running";
@@ -605,6 +671,56 @@ describe("TaskScheduler", () => {
     expect(store.getTask("task-alpha")?.status).toBe("completed");
     expect(store.listEvents("task-alpha", { kinds: ["attempt-expired"] })).toHaveLength(1);
   });
+
+  it.each(["unknown", "non_idempotent"] as const)(
+    "pauses an expired started %s Attempt until an operator retries it",
+    async (idempotency) => {
+      const graph = makeGraph([makeStep("unsafe-recover", 0, {
+        idempotency,
+        retryPolicy: {
+          maxAttempts: 2,
+          initialBackoffMs: 0,
+          backoffMultiplier: 1,
+          maxBackoffMs: 0,
+          retryableFailureClasses: ["lease-expired", "lease-missing"],
+          nonRetryableFailureClasses: [],
+          requireIdempotent: false
+        }
+      })]);
+      graph.task.status = "running";
+      graph.task.startedAt = NOW;
+      graph.steps[0]!.status = "running";
+      store.createTaskGraph(graph);
+      store.createAttempt(makeRunningAttempt(
+        graph.steps[0]!,
+        "attempt-before-restart",
+        "2029-12-31T23:59:00.000Z"
+      ));
+      const leased = store.getAttempt("attempt-before-restart")!;
+      store.updateAttempt({ ...leased, status: "running", startedAt: leased.startedAt ?? leased.updatedAt });
+      const executor = new FakeTaskStepExecutor(() => ({
+        outcome: "succeeded",
+        results: [{ kind: "text", content: "operator-approved recovery" }]
+      }));
+      const scheduler = makeScheduler(executor);
+
+      expect(await scheduler.runOnce()).toMatchObject({ reconciled: 1, dispatched: 0 });
+      expect(store.listAttempts("task-alpha")[0]).toMatchObject({
+        status: "expired",
+        failure: { class: "lease-expired", uncertainSideEffects: true }
+      });
+      expect(store.getStep("step-unsafe-recover")?.status).toBe("waiting_for_input");
+      expect(store.getTask("task-alpha")).toMatchObject({
+        status: "waiting_for_input",
+        waitReason: { kind: "operator" }
+      });
+
+      new TaskOperatorService({ store, now }).retry("task-alpha", undefined, "creator-alpha");
+      expect(await scheduler.runOnce()).toMatchObject({ dispatched: 1, completed: 1 });
+      expect(store.listAttempts("task-alpha").map((attempt) => attempt.status)).toEqual(["expired", "completed"]);
+      expect(store.getTask("task-alpha")?.status).toBe("completed");
+    }
+  );
 
   it("reuses a queued crash-boundary Attempt instead of creating a duplicate dispatch", async () => {
     const graph = makeGraph([makeStep("queued", 0)]);

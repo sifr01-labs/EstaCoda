@@ -5,6 +5,8 @@ import type {
   TaskAuthorityPolicy,
   TaskBudgetPolicy,
   TaskDeliveryDestination,
+  TaskIdempotency,
+  TaskRetryPolicy,
   TaskStepBudget,
   TaskWorkspaceBinding
 } from "../contracts/task.js";
@@ -117,42 +119,41 @@ export class DurableDelegationService {
       this.#config.childTimeoutSeconds,
       parent?.budget
     );
-    const workerSteps = request.tasks.map((item, index): FixedTaskStepInput => ({
-      key: `delegated-${index + 1}`,
-      title: request.tasks.length === 1 ? "Delegated work" : `Delegated work ${index + 1}`,
-      objective: delegatedObjective(item),
-      dependsOn: [],
-      executor: {
-        kind: "agent",
-        role: item.role === "orchestrator" ? "orchestrator" : "worker",
-        ...(item.modelOverride === undefined ? {} : {
-          model: {
-            ...(item.modelOverride.provider === undefined ? {} : { provider: item.modelOverride.provider }),
-            id: item.modelOverride.model
-          }
-        })
-      },
-      childTaskPolicy: item.role === "orchestrator" && stepAuthorities[index]!.mayCreateChildTasks
-        ? "fire_and_forget"
-        : "forbid",
-      authorityPolicy: stepAuthorities[index]!,
-      budget: budgets.step,
-      retryPolicy: {
-        maxAttempts: 1,
-        initialBackoffMs: 0,
-        backoffMultiplier: 1,
-        maxBackoffMs: 0,
-        retryableFailureClasses: [],
-        nonRetryableFailureClasses: [],
-        requireIdempotent: true
-      },
-      failurePolicy: {
-        onAttemptsExhausted: request.tasks.length === 1 && request.synthesis === undefined ? "fail_task" : "mark_partial",
-        optional: false
-      },
-      idempotency: "unknown",
-      resultPolicy: { kind: "text", required: true, maxBytes: STEP_RESULT_BYTES }
-    }));
+    const workerSteps = request.tasks.map((item, index): FixedTaskStepInput => {
+      const authority = stepAuthorities[index]!;
+      const idempotency = delegatedStepIdempotency(authority);
+      return {
+        key: `delegated-${index + 1}`,
+        title: request.tasks.length === 1 ? "Delegated work" : `Delegated work ${index + 1}`,
+        objective: delegatedObjective(item),
+        dependsOn: [],
+        executor: {
+          kind: "agent",
+          role: item.role === "orchestrator" ? "orchestrator" : "worker",
+          ...(item.modelOverride === undefined ? {} : {
+            model: {
+              ...(item.modelOverride.provider === undefined ? {} : { provider: item.modelOverride.provider }),
+              id: item.modelOverride.model
+            }
+          })
+        },
+        childTaskPolicy: item.role === "orchestrator" && authority.mayCreateChildTasks
+          ? "fire_and_forget"
+          : "forbid",
+        authorityPolicy: authority,
+        budget: budgets.step,
+        retryPolicy: delegatedRetryPolicy(idempotency),
+        failurePolicy: {
+          onAttemptsExhausted: request.tasks.length === 1 && request.synthesis === undefined ? "fail_task" : "mark_partial",
+          optional: false
+        },
+        idempotency,
+        resultPolicy: { kind: "text", required: true, maxBytes: STEP_RESULT_BYTES }
+      };
+    });
+    const synthesisIdempotency = synthesisAuthority === undefined
+      ? undefined
+      : delegatedStepIdempotency(synthesisAuthority);
     const steps: FixedTaskStepInput[] = request.synthesis === undefined ? workerSteps : [
       ...workerSteps,
       {
@@ -175,17 +176,9 @@ export class DurableDelegationService {
         childTaskPolicy: "forbid",
         authorityPolicy: synthesisAuthority!,
         budget: budgets.step,
-        retryPolicy: {
-          maxAttempts: 1,
-          initialBackoffMs: 0,
-          backoffMultiplier: 1,
-          maxBackoffMs: 0,
-          retryableFailureClasses: [],
-          nonRetryableFailureClasses: [],
-          requireIdempotent: true
-        },
+        retryPolicy: delegatedRetryPolicy(synthesisIdempotency!),
         failurePolicy: { onAttemptsExhausted: "fail_task", optional: false },
-        idempotency: "unknown",
+        idempotency: synthesisIdempotency!,
         resultPolicy: { kind: "text", required: true, maxBytes: STEP_RESULT_BYTES }
       }
     ];
@@ -292,6 +285,29 @@ export class DurableDelegationService {
     }
     return authority;
   }
+}
+
+function delegatedStepIdempotency(authority: TaskAuthorityPolicy): TaskIdempotency {
+  const allowedRiskClasses = TASK_TOOL_RISK_CLASSES.filter(
+    (riskClass) => authority.riskClassPolicy[riskClass] !== "forbid"
+  );
+  return authority.mayCreateChildTasks === false && allowedRiskClasses.every(
+    (riskClass) => riskClass === "read-only-local" || riskClass === "read-only-network"
+  )
+    ? "retry_safe"
+    : "unknown";
+}
+
+function delegatedRetryPolicy(idempotency: TaskIdempotency): TaskRetryPolicy {
+  return {
+    maxAttempts: TASK_GRAPH_LIMITS.maxAttemptsPerStep,
+    initialBackoffMs: 0,
+    backoffMultiplier: 1,
+    maxBackoffMs: 0,
+    retryableFailureClasses: ["lease-expired", "lease-missing"],
+    nonRetryableFailureClasses: [],
+    requireIdempotent: idempotency === "idempotent" || idempotency === "retry_safe"
+  };
 }
 
 function delegationBudgets(

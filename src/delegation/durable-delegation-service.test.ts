@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import type { TaskAttempt, TaskAuthorityPolicy, TaskUsageTotals } from "../contracts/task.js";
-import { TASK_TOOL_RISK_CLASSES } from "../contracts/task.js";
+import { TASK_GRAPH_LIMITS, TASK_TOOL_RISK_CLASSES } from "../contracts/task.js";
 import type { ToolDefinition, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { FixedTaskCreationConflictError, FixedTaskService } from "../workflow/fixed-task-service.js";
@@ -65,6 +65,19 @@ describe("DurableDelegationService", () => {
     expect(task.budgetPolicy.maxConcurrentAttempts).toBe(2);
     expect(steps.map((step) => step.executor.role)).toEqual(["worker", "orchestrator"]);
     expect(steps.map((step) => step.childTaskPolicy)).toEqual(["forbid", "fire_and_forget"]);
+    expect(steps.map((step) => step.idempotency)).toEqual(["retry_safe", "unknown"]);
+    expect(steps.map((step) => step.retryPolicy)).toEqual([
+      expect.objectContaining({
+        maxAttempts: TASK_GRAPH_LIMITS.maxAttemptsPerStep,
+        retryableFailureClasses: ["lease-expired", "lease-missing"],
+        requireIdempotent: true
+      }),
+      expect.objectContaining({
+        maxAttempts: TASK_GRAPH_LIMITS.maxAttemptsPerStep,
+        retryableFailureClasses: ["lease-expired", "lease-missing"],
+        requireIdempotent: false
+      })
+    ]);
     expect(steps[1]?.authorityPolicy.maxChildDepth).toBe(1);
     expect(store.listSessionLinks(task.id)).toEqual([
       expect.objectContaining({ taskId: task.id, sessionId: "parent", relationship: "creator" })
@@ -118,6 +131,13 @@ describe("DurableDelegationService", () => {
     expect(revisions[0]?.status).toBe("active");
     expect(new Set(synthesis.dependsOn)).toEqual(new Set(workers.map((step) => step.id)));
     expect(synthesis.childTaskPolicy).toBe("forbid");
+    expect(synthesis.idempotency).toBe("retry_safe");
+    expect(synthesis.retryPolicy).toMatchObject({
+      maxAttempts: TASK_GRAPH_LIMITS.maxAttemptsPerStep,
+      retryableFailureClasses: ["lease-expired", "lease-missing"],
+      requireIdempotent: true
+    });
+    expect(workers.every((step) => step.idempotency === "retry_safe")).toBe(true);
     expect(synthesis.authorityPolicy).toMatchObject({
       allowedToolsets: ["core"],
       allowedTools: ["task.result.read"],
