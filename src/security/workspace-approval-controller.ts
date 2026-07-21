@@ -45,6 +45,7 @@ export type SmartApprovalAssessorRuntimeConfig = {
   mainRoute?: ResolvedModelRoute;
   providerExecutor?: ProviderExecutor;
   scopeKey: string;
+  executionSessionId?: string;
   assessCommandRisk?: typeof assessCommandRisk;
 };
 
@@ -400,7 +401,8 @@ async function smartAssessmentFor(
     assessorRoute: smartApproval.assessorRoute,
     mainRoute: smartApproval.mainRoute,
     providerExecutor: smartApproval.providerExecutor,
-    scopeKey: smartApproval.scopeKey
+    scopeKey: smartApproval.scopeKey,
+    executionSessionId: smartApproval.executionSessionId
   });
 
   return smartDecisionToAssessment(decision, request);

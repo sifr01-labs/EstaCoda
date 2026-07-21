@@ -22,6 +22,8 @@ import {
 import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolver.js";
 import { executeAuxiliaryTask } from "../providers/auxiliary-executor.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
+import { createProviderUsageRecorder } from "../providers/provider-usage-ledger.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
 
 export async function profileCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [subcommand, ...rest] = args;
@@ -130,47 +132,58 @@ async function createProductionProfileContextGenerator(options: CliOptions): Pro
       throw new Error(`Profile context generation route is unavailable: ${route.diagnostics.join("; ") || "no profile_context route"}`);
     }
 
-    const result = await executeAuxiliaryTask({
-      route,
-      mainRoute: loaded.primaryModelRoute,
-      providerExecutor: new ProviderExecutor({
-        registry: loaded.providerRegistry,
-        homeDir: loaded.homeDir,
-        profileId: loaded.profileId
-      }),
-      scopeKey: input.profileId,
-      request: {
-        model: route.route.id,
-        messages: [
-          {
-            role: "system",
-            content: [
-              "You are EstaCoda's profile context generator.",
-              "Write a concise SOUL.md profile context for the new profile.",
-              "Do not include secrets, credentials, private keys, or raw environment values."
-            ].join("\n")
-          },
-          {
-            role: "user",
-            content: JSON.stringify({
-              profileId: input.profileId,
-              sourceProfileId: input.sourceProfileId,
-              profileContextFocus: input.profileContextFocus,
-              user: input.user,
-              memory: input.memory,
-              soul: input.soul
-            })
-          }
-        ],
-        temperature: 0.2,
-        maxTokens: 700
-      }
+    const sessionDb = await createSQLiteSessionDB({
+      path: resolveGlobalStateHome({ homeDir: options.homeDir }).sessionsSqlitePath
     });
+    try {
+      const result = await executeAuxiliaryTask({
+        route,
+        mainRoute: loaded.primaryModelRoute,
+        providerExecutor: new ProviderExecutor({
+          registry: loaded.providerRegistry,
+          homeDir: loaded.homeDir,
+          profileId: loaded.profileId,
+          usageRecorder: createProviderUsageRecorder({
+            profileId: loaded.profileId,
+            record: (entries) => sessionDb.recordProviderUsageEntries(entries)
+          })
+        }),
+        scopeKey: input.profileId,
+        request: {
+          model: route.route.id,
+          messages: [
+            {
+              role: "system",
+              content: [
+                "You are EstaCoda's profile context generator.",
+                "Write a concise SOUL.md profile context for the new profile.",
+                "Do not include secrets, credentials, private keys, or raw environment values."
+              ].join("\n")
+            },
+            {
+              role: "user",
+              content: JSON.stringify({
+                profileId: input.profileId,
+                sourceProfileId: input.sourceProfileId,
+                profileContextFocus: input.profileContextFocus,
+                user: input.user,
+                memory: input.memory,
+                soul: input.soul
+              })
+            }
+          ],
+          temperature: 0.2,
+          maxTokens: 700
+        }
+      });
 
-    if (!result.ok || result.response === undefined) {
-      throw new Error(`Profile context generation failed: ${result.status}`);
+      if (!result.ok || result.response === undefined) {
+        throw new Error(`Profile context generation failed: ${result.status}`);
+      }
+      return result.response.content;
+    } finally {
+      await sessionDb.close();
     }
-    return result.response.content;
   };
 }
 

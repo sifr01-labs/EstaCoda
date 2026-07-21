@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   AuxiliaryModelTask,
   ProviderErrorClass,
@@ -10,6 +11,7 @@ import type {
   ResolvedAuxiliaryRoute,
   ResolvedModelRoute
 } from "../contracts/provider.js";
+import type { ProviderUsageContext } from "../contracts/provider-usage.js";
 import type { ProviderExecutionResult, ProviderExecutor } from "./provider-executor.js";
 
 export type AuxiliaryExecutionAttempt = {
@@ -50,9 +52,11 @@ export type ExecuteAuxiliaryTaskInput = {
   preferences?: ProviderRoutePreferences;
   signal?: AbortSignal;
   scopeKey?: string;
+  usage?: Omit<ProviderUsageContext, "requestKey" | "sourceKind" | "auxiliaryKind" | "routeRole" | "routeIndex">;
 };
 
 export async function executeAuxiliaryTask(input: ExecuteAuxiliaryTaskInput): Promise<AuxiliaryExecutionResult> {
+  const usageKey = `auxiliary:${input.route.task}:${randomUUID()}`;
   const abort = createExecutionAbort({
     signal: input.signal,
     timeoutMs: input.route.timeoutMs
@@ -100,6 +104,7 @@ export async function executeAuxiliaryTask(input: ExecuteAuxiliaryTaskInput): Pr
         request: input.request,
         preferences: input.preferences,
         primaryRoute: input.route.route,
+        usage: auxiliaryUsage(input, usageKey, "primary", 0),
         abort
       });
 
@@ -138,6 +143,7 @@ export async function executeAuxiliaryTask(input: ExecuteAuxiliaryTaskInput): Pr
         request: input.request,
         preferences: input.preferences,
         primaryRoute: input.mainRoute,
+        usage: auxiliaryUsage(input, `${usageKey}:fallback`, "fallback", 1),
         abort
       });
 
@@ -347,6 +353,7 @@ async function executeRouteAttempt(input: {
   request: Omit<ProviderRequest, "model"> & { model?: string };
   preferences?: ProviderRoutePreferences;
   primaryRoute: ResolvedModelRoute;
+  usage: ProviderUsageContext;
   abort: ExecutionAbort;
 }): Promise<
   | { kind: "result"; result: ProviderExecutionResult }
@@ -372,7 +379,7 @@ async function executeRouteAttempt(input: {
     const execution = input.providerExecutor.complete(
       input.request,
       input.preferences ?? {},
-      { primaryRoute: input.primaryRoute, signal: input.abort.signal }
+      { primaryRoute: input.primaryRoute, signal: input.abort.signal, usage: input.usage }
     );
     const result = await input.abort.race(execution);
     return { kind: "result", result };
@@ -411,6 +418,22 @@ async function executeRouteAttempt(input: {
       })
     };
   }
+}
+
+function auxiliaryUsage(
+  input: ExecuteAuxiliaryTaskInput,
+  requestKey: string,
+  routeRole: "primary" | "fallback",
+  routeIndex: number
+): ProviderUsageContext {
+  return {
+    requestKey,
+    sourceKind: "auxiliary",
+    auxiliaryKind: input.route.task,
+    routeRole,
+    routeIndex,
+    ...(input.usage ?? {})
+  };
 }
 
 type ExecutionAbort = {

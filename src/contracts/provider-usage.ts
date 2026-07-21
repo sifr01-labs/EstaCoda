@@ -1,6 +1,25 @@
 import type { ProviderRouteRole } from "./provider.js";
+import type { ProviderPricingSnapshot } from "./provider-spend.js";
 
 export type ProviderUsageEntryId = string;
+
+/** Caller-owned attribution supplied before a logical provider execution begins. */
+export type ProviderUsageContext = {
+  requestKey: string;
+  sourceKind: "main" | "task" | "auxiliary";
+  auxiliaryKind?: string;
+  executionSessionId?: string;
+  sessionBudgetScopeId?: string;
+  visibleTurnId?: string;
+  taskId?: string;
+  rootTaskId?: string;
+  planRevisionId?: string;
+  stepId?: string;
+  attemptId?: string;
+  /** Overrides isolated auxiliary fallback execution back to its logical chain identity. */
+  routeRole?: ProviderRouteRole;
+  routeIndex?: number;
+};
 
 export type ProviderUsageTotals = {
   providerCalls: number;
@@ -20,9 +39,12 @@ export type ProviderUsageTotals = {
 export type ProviderUsageEntry = {
   id: ProviderUsageEntryId;
   profileId: string;
-  sessionId: string;
+  /** Session whose runtime executed the provider request. */
+  sessionId?: string;
+  /** Logical originating Session whose spending scope receives this fact. */
+  sessionBudgetScopeId?: string;
   /** The persisted user-message ID whose visible response caused this request. */
-  visibleTurnId: string;
+  visibleTurnId?: string;
   /** Stable request identity. Replays and settlement retries must not double count it. */
   requestKey: string;
   provider: string;
@@ -30,6 +52,10 @@ export type ProviderUsageEntry = {
   routeRole: ProviderRouteRole;
   routeIndex: number;
   providerAttemptIndex: number;
+  sourceKind: "main" | "task" | "auxiliary";
+  auxiliaryKind?: string;
+  pricing: ProviderPricingSnapshot;
+  pricingFingerprint: string;
   inputTokens: number;
   outputTokens: number;
   reasoningTokens: number;
@@ -51,6 +77,7 @@ export type ProviderUsageEntry = {
 
 export type ProviderUsageQuery = {
   sessionId?: string;
+  sessionBudgetScopeId?: string;
   visibleTurnId?: string;
   taskId?: string;
   rootTaskId?: string;

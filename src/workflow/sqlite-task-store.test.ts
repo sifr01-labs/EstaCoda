@@ -18,6 +18,7 @@ import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 import { SQLiteTaskStore, TaskStoreIntegrityError, TaskStoreProfileError } from "./sqlite-task-store.js";
 import {
+  migrateCanonicalProviderUsageSchemaV21,
   migrateTaskAgentExecutorSchemaV12,
   migrateTaskBackgroundHostSchemaV13,
   migrateTaskChildGovernanceSchemaV16,
@@ -1030,6 +1031,25 @@ describe("Provider usage ledger schema v18 migration", () => {
       expect(database.query<{ name: string }>(
         "select name from sqlite_master where type = 'table' and name = 'task_usage_entries'"
       ).get()).toBeNull();
+
+      migrateCanonicalProviderUsageSchemaV21(database);
+      expect(database.query<{
+        source_kind: string;
+        session_budget_scope_id: string;
+        pricing_fingerprint: string;
+        pricing_complete: number;
+        incomplete_reasons_json: string;
+      }>(
+        `select source_kind, session_budget_scope_id, pricing_fingerprint,
+                pricing_complete, incomplete_reasons_json
+         from provider_usage_entries`
+      ).get()).toEqual({
+        source_kind: "task",
+        session_budget_scope_id: "worker",
+        pricing_fingerprint: "legacy-pricing-unavailable",
+        pricing_complete: 0,
+        incomplete_reasons_json: '["pricing-snapshot-unavailable"]'
+      });
     } finally {
       database.close();
       rmSync(tempDir, { recursive: true, force: true });

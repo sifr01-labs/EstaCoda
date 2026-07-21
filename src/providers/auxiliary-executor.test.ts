@@ -121,10 +121,23 @@ describe("executeAuxiliaryTask", () => {
       mainRoute: fakeRoute({ id: "gpt-4o" }),
       providerExecutor: { complete },
       request,
+      usage: {
+        executionSessionId: "session-1",
+        sessionBudgetScopeId: "session-1",
+        visibleTurnId: "turn-1"
+      }
     });
 
     expect(complete).toHaveBeenCalledTimes(1);
     expect(complete.mock.calls[0]![2]!.primaryRoute).toEqual(route);
+    expect(complete.mock.calls[0]![2]!.usage).toMatchObject({
+      sourceKind: "auxiliary",
+      auxiliaryKind: "compression",
+      routeRole: "primary",
+      routeIndex: 0,
+      executionSessionId: "session-1",
+      visibleTurnId: "turn-1"
+    });
     expect(result.ok).toBe(true);
     expect(result.attempts).toEqual([
       { role: "primary", provider: "openai", model: "gpt-4.1-mini", ok: true, errorClass: undefined, content: "primary ok" }
@@ -219,6 +232,10 @@ describe("executeAuxiliaryTask", () => {
     expect(complete).toHaveBeenCalledTimes(2);
     expect(complete.mock.calls[0]![2]!.primaryRoute).toEqual(route);
     expect(complete.mock.calls[1]![2]!.primaryRoute).toEqual(mainRoute);
+    expect(complete.mock.calls.map((call) => call[2]!.usage)).toEqual([
+      expect.objectContaining({ routeRole: "primary", routeIndex: 0 }),
+      expect.objectContaining({ routeRole: "fallback", routeIndex: 1 })
+    ]);
     expect(result.ok).toBe(true);
     expect(result.fallbackUsed).toBe(true);
     expect(result.attempts.map((attempt) => attempt.role)).toEqual(["primary", "fallback"]);

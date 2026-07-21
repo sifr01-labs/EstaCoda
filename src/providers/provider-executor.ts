@@ -16,6 +16,7 @@ import type {
   ProviderStreamFinish,
   ProviderUsage
 } from "../contracts/provider.js";
+import type { ProviderUsageContext } from "../contracts/provider-usage.js";
 import { stripThinkBlocks } from "./provider-reasoning.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import { resolveRuntimeCredential } from "./runtime-credential-resolver.js";
@@ -125,23 +126,31 @@ export type ProviderExecutionOptions = {
   fallbackChain?: ResolvedModelRoute[];
   onEvent?: (event: ProviderRuntimeEvent) => void | Promise<void>;
   now?: () => number;
+  usage?: ProviderUsageContext;
 };
 
 export type ProviderExecutorOptions = {
   registry: ProviderRegistry;
   homeDir?: string;
   profileId?: string;
+  usageRecorder?: (input: {
+    execution: ProviderExecutionResult;
+    context: ProviderUsageContext;
+    routes: readonly ResolvedModelRoute[];
+  }) => Promise<void>;
 };
 
 export class ProviderExecutor {
   readonly #registry: ProviderRegistry;
   readonly #homeDir: string | undefined;
   readonly #profileId: string | undefined;
+  readonly #usageRecorder: ProviderExecutorOptions["usageRecorder"];
 
   constructor(options: ProviderExecutorOptions) {
     this.#registry = options.registry;
     this.#homeDir = options.homeDir;
     this.#profileId = options.profileId;
+    this.#usageRecorder = options.usageRecorder;
   }
 
   async complete(
@@ -168,8 +177,19 @@ export class ProviderExecutor {
         toolCalls: []
       };
     }
+    if (options.usage !== undefined && this.#usageRecorder === undefined) {
+      throw new Error("Attributed provider execution requires an immutable usage recorder before dispatch.");
+    }
 
-    return this.#executeRouteChain(request, preferences, options);
+    const execution = await this.#executeRouteChain(request, preferences, options);
+    if (options.usage !== undefined && this.#usageRecorder !== undefined) {
+      await this.#usageRecorder({
+        execution,
+        context: options.usage,
+        routes: [primaryRoute, ...(options.fallbackChain ?? [])]
+      });
+    }
+    return execution;
   }
 
   async #executeRouteChain(

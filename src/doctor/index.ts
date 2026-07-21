@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import type { CliCommandResult, CliOptions } from "../cli/cli.js";
-import { loadRuntimeConfig } from "../config/runtime-config.js";
+import { loadRuntimeConfig, type LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { resolveHomeDir } from "../config/home-dir.js";
 import { resolveStateHome } from "../config/state-home.js";
 import { resolveTokens } from "../theme/token-resolver.js";
@@ -10,6 +10,8 @@ import type { OperatorConsoleStyle } from "../ui/papyrus/operator-console/operat
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import { collectSetupEntryState, type SetupEntryState } from "../setup/setup-entry-state.js";
 import { repairSQLiteSchema } from "../storage/repair.js";
+import { createProviderUsageRecorder } from "../providers/provider-usage-ledger.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
 import {
   diagnoseProviderConfig,
   diagnoseProviderLive
@@ -254,7 +256,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
     ? setupState.setupVerification.providerDiagnostic
     : await diagnoseProviderConfig(config);
   const liveProviderDiagnostic = config !== undefined && hasFlag(args, "--live")
-    ? await diagnoseProviderLive(config)
+    ? await diagnoseLiveProviderWithUsage(config, stateHome.sessionsSqlitePath)
     : undefined;
   const providerChain = await diagnoseProviderChain(config, { oauthStatus });
   const liveToolDiagnostic = hasFlag(args, "--live-tools", "--live-tool")
@@ -1254,6 +1256,21 @@ async function trustStoreHealthy(path: string): Promise<boolean> {
       return true;
     }
     return false;
+  }
+}
+
+async function diagnoseLiveProviderWithUsage(
+  config: LoadedRuntimeConfig,
+  sessionsSqlitePath: string
+): Promise<ProviderLiveDiagnostic> {
+  const sessionDb = await createSQLiteSessionDB({ path: sessionsSqlitePath });
+  try {
+    return await diagnoseProviderLive(config, createProviderUsageRecorder({
+      profileId: config.profileId,
+      record: (entries) => sessionDb.recordProviderUsageEntries(entries)
+    }));
+  } finally {
+    await sessionDb.close();
   }
 }
 

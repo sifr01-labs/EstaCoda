@@ -19,7 +19,11 @@ export async function assertProviderSpendLineage(
     }
   }
   if (request.visibleTurnId === undefined) return;
-  for (const session of lineage) {
+  const visibleLineage = request.sessionBudgetScopeId === undefined
+    ? lineage
+    : await verifiedCompressionLineage(sessionDb, request.sessionBudgetScopeId, request.profileId);
+  if (visibleLineage === undefined) throw new Error("Provider spend visible-turn Session lineage is invalid.");
+  for (const session of visibleLineage) {
     const messages = await sessionDb.listMessages(session.id);
     if (messages.some((message) => message.id === request.visibleTurnId && message.role === "user")) return;
   }

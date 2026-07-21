@@ -11,6 +11,7 @@ export type VisionToolOptions = {
   visionAuxiliaryRoute?: ResolvedAuxiliaryRoute;
   mainRoute?: ResolvedModelRoute;
   providerExecutor?: ProviderExecutor;
+  currentSessionId?: () => string;
   maxImageBytes?: number;
   /** @deprecated Use visionAuxiliaryRoute. */
   resolvedVisionRoute?: ResolvedModelRoute;
@@ -47,7 +48,15 @@ export function createVisionTools(options: VisionToolOptions): readonly Register
       progressLabel: "analyzing image",
       maxResultSizeChars: 8_000,
       isAvailable: async () => resolveVisionAuxiliaryRoute(options).route !== undefined,
-      run: (input: { path?: string; prompt?: string }, context) => analyzeImageWithVision(options, input, context?.signal)
+      run: (input: { path?: string; prompt?: string }, context) => analyzeImageWithVision(
+        options,
+        input,
+        context?.signal,
+        {
+          executionSessionId: options.currentSessionId?.(),
+          visibleTurnId: context?.visibleTurnId
+        }
+      )
     }
   ];
 }
@@ -61,7 +70,8 @@ export const visionToolProvider: SessionToolProvider = {
       allowedRoots: [requireProviderDependency("vision", "channelMediaRoot", ctx.channelMediaRoot)],
       visionAuxiliaryRoute: ctx.visionRoute,
       mainRoute: ctx.mainRoute,
-      providerExecutor: requireProviderDependency("vision", "providerExecutor", ctx.providerExecutor)
+      providerExecutor: requireProviderDependency("vision", "providerExecutor", ctx.providerExecutor),
+      currentSessionId: () => ctx.currentSessionId()
     });
   }
 };
@@ -76,7 +86,8 @@ function requireProviderDependency<T>(provider: string, dependency: string, valu
 export async function analyzeImageWithVision(
   options: VisionToolOptions,
   input: { path?: string; prompt?: string },
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  usage: { executionSessionId?: string; visibleTurnId?: string } = {}
 ): Promise<ToolResult> {
   const workspaceRoot = resolve(options.workspaceRoot);
   const allowedRoots = dedupeRoots([workspaceRoot, ...(options.allowedRoots ?? [])]);
@@ -139,6 +150,13 @@ export async function analyzeImageWithVision(
     route: visionAuxiliaryRoute,
     mainRoute: options.mainRoute ?? visionAuxiliaryRoute.route,
     providerExecutor: options.providerExecutor,
+    usage: {
+      ...(usage.executionSessionId === undefined ? {} : {
+        executionSessionId: usage.executionSessionId,
+        sessionBudgetScopeId: usage.executionSessionId
+      }),
+      ...(usage.visibleTurnId === undefined ? {} : { visibleTurnId: usage.visibleTurnId })
+    },
     preferences: options.routePreferences,
     request: {
       model: visionAuxiliaryRoute.route.id,

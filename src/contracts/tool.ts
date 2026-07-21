@@ -53,6 +53,8 @@ export type ToolResult = {
 export type ToolExecutionContext = {
   /** Stable provider/native call identity for idempotent stateful tools. */
   toolCallId?: string;
+  /** Persisted visible user-message identity; never substitute the provider tool-call ID. */
+  visibleTurnId?: string;
   signal?: AbortSignal;
   environmentType?: EnvironmentType;
   onEvent?: RuntimeEventSink;

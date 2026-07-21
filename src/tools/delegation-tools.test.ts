@@ -75,12 +75,13 @@ describe("createDelegationTools", () => {
       allowedToolsets: ["files"],
       role: "leaf",
       modelOverride: { provider: " local ", model: " child-model " }
-    }, { toolCallId: "provider-call-1" });
+    }, { toolCallId: "provider-call-1", visibleTurnId: "visible-turn-1" });
 
     expect(result.ok).toBe(true);
     expect(result.content).toContain("Created durable Task task-1");
     expect(create).toHaveBeenCalledWith({
       toolCallId: "provider-call-1",
+      originTurnId: "visible-turn-1",
       trustedWorkspace: true,
       tasks: [{
         task: "Inspect the module",

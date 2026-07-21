@@ -55,6 +55,25 @@ describe("provider spend contracts", () => {
     }))).rejects.toThrow(/compression lineage/i);
   });
 
+  it("accepts a Task worker turn attributed to its originating Session budget scope", async () => {
+    const db = new InMemorySessionDB();
+    await db.createSession({ id: "origin", profileId: "alpha" });
+    await db.appendMessage({ id: "origin-turn", sessionId: "origin", role: "user", content: "Delegated work" });
+    await db.createSession({ id: "worker", profileId: "alpha", parentSessionId: "origin" });
+
+    await expect(assertProviderSpendLineage(db, request({
+      sourceKind: "task",
+      executionSessionId: "worker",
+      sessionBudgetScopeId: "origin",
+      visibleTurnId: "origin-turn",
+      taskId: "task-child",
+      rootTaskId: "task-root",
+      planRevisionId: "revision-child",
+      stepId: "step-child",
+      attemptId: "attempt-child"
+    }))).resolves.toBeUndefined();
+  });
+
   it("accepts a visible turn from verified compression ancestry", async () => {
     const db = new InMemorySessionDB();
     await db.createSession({ id: "parent", profileId: "alpha", endReason: "compression" });

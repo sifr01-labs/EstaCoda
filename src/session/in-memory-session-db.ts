@@ -195,14 +195,24 @@ export class InMemorySessionDB implements SessionDB {
 
   async recordProviderUsageEntries(entries: readonly ProviderUsageEntry[]): Promise<void> {
     for (const entry of entries) {
-      const lineage = await verifiedCompressionLineage(this, entry.sessionId, entry.profileId);
-      const visibleTurnOwned = lineage?.some((session) =>
-        this.#messages.get(session.id)?.some((message) =>
-          message.id === entry.visibleTurnId && message.role === "user"
-        ) === true
-      ) === true;
-      if (!visibleTurnOwned) {
-        throw new Error("Provider usage visible turn does not belong to its execution Session compression lineage.");
+      for (const sessionId of [entry.sessionId, entry.sessionBudgetScopeId]) {
+        if (sessionId !== undefined && this.#sessions.get(sessionId)?.profileId !== entry.profileId) {
+          throw new Error("Provider usage Session attribution is invalid.");
+        }
+      }
+      if (entry.visibleTurnId !== undefined) {
+        const lineageRoot = entry.sessionBudgetScopeId ?? entry.sessionId;
+        const lineage = lineageRoot === undefined
+          ? undefined
+          : await verifiedCompressionLineage(this, lineageRoot, entry.profileId);
+        const visibleTurnOwned = lineage?.some((session) =>
+          this.#messages.get(session.id)?.some((message) =>
+            message.id === entry.visibleTurnId && message.role === "user"
+          ) === true
+        ) === true;
+        if (!visibleTurnOwned) {
+          throw new Error("Provider usage visible turn does not belong to its attributed Session compression lineage.");
+        }
       }
       const key = `${entry.profileId}\0${entry.requestKey}`;
       const existing = this.#providerUsage.get(key);

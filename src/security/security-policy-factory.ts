@@ -296,7 +296,8 @@ async function assessWithAuxiliaryProvider(
       assessorRoute: route,
       mainRoute,
       providerExecutor: assessor.providerExecutor,
-      scopeKey: assessor.sessionId ?? "security-policy"
+      scopeKey: assessor.sessionId ?? "security-policy",
+      executionSessionId: assessor.sessionId
     });
 
     if (assessment.status !== "ok") {

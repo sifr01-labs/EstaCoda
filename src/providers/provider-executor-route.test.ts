@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import type {
   ModelProfile,
   ProviderAdapter,
@@ -117,6 +117,48 @@ describe("ProviderExecutor route-based execution", () => {
     expect(result.ok).toBe(true);
     expect(adapter.calls.length).toBe(1);
     expect(adapter.calls[0].options?.endpoint?.baseUrl).toBe("https://custom.example.com/v1");
+  });
+
+  it("settles an attributed execution through the configured immutable usage recorder", async () => {
+    const adapter = createMockAdapter({ id: "test-provider" });
+    registry.register(adapter);
+    const usageRecorder = vi.fn(async () => {});
+    executor = new ProviderExecutor({ registry, usageRecorder });
+    const route = createDefaultRoute({ provider: "test-provider" });
+
+    const result = await executor.complete({ messages: [] }, {}, {
+      primaryRoute: route,
+      usage: {
+        requestKey: "main:session-1:turn-1:0",
+        sourceKind: "main",
+        executionSessionId: "session-1",
+        visibleTurnId: "turn-1"
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(usageRecorder).toHaveBeenCalledOnce();
+    expect(usageRecorder).toHaveBeenCalledWith({
+      execution: result,
+      context: expect.objectContaining({ requestKey: "main:session-1:turn-1:0", sourceKind: "main" }),
+      routes: [route]
+    });
+  });
+
+  it("refuses attributed execution before dispatch when no immutable usage recorder exists", async () => {
+    const adapter = createMockAdapter({ id: "test-provider" });
+    registry.register(adapter);
+
+    await expect(executor.complete({ messages: [] }, {}, {
+      primaryRoute: createDefaultRoute({ provider: "test-provider" }),
+      usage: {
+        requestKey: "main:session-1:turn-1:0",
+        sourceKind: "main",
+        executionSessionId: "session-1",
+        visibleTurnId: "turn-1"
+      }
+    })).rejects.toThrow(/immutable usage recorder before dispatch/i);
+    expect(adapter.calls).toHaveLength(0);
   });
 
   it("passes route timeout options during completion", async () => {

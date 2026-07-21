@@ -17,6 +17,7 @@ import { CronStore } from "../cron/cron-store.js";
 import { CronExecutionStore } from "../cron/cron-execution-store.js";
 import { createFileCronJobLock } from "../cron/cron-lock.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
+import { createProviderUsageRecorder } from "../providers/provider-usage-ledger.js";
 import type { MemoryCurationCheckpointResult } from "../memory/memory-curation-service.js";
 import { curateSessionFinalizationJob } from "../memory/session-finalization-curator.js";
 import {
@@ -175,14 +176,7 @@ export function buildGatewayCronRuntimeOptions(input: GatewayCronRuntimeBaseInpu
     tts: latestConfig.tts,
     stt: latestConfig.stt,
     securityMode: latestConfig.security.approvalMode,
-    securityAssessor: {
-      ...latestConfig.security.assessor,
-      providerExecutor: new ProviderExecutor({
-        registry: latestConfig.providerRegistry,
-        homeDir: input.homeDir,
-        profileId: input.profileId
-      }),
-    },
+    securityAssessor: latestConfig.security.assessor,
     browser: latestConfig.browser,
     telegramReady: latestConfig.channels.telegram.ready,
     enableWebNetwork: latestConfig.web.enableNetwork,
@@ -230,14 +224,7 @@ export function buildGatewayCronRuntimeOptions(input: GatewayCronRuntimeBaseInpu
     tts: latestConfig.tts,
     stt: latestConfig.stt,
     securityMode: latestConfig.security.approvalMode,
-    securityAssessor: {
-      ...latestConfig.security.assessor,
-      providerExecutor: new ProviderExecutor({
-        registry: latestConfig.providerRegistry,
-        homeDir: input.homeDir,
-        profileId: input.profileId
-      }),
-    },
+    securityAssessor: latestConfig.security.assessor,
     browser: latestConfig.browser,
     telegramReady: latestConfig.channels.telegram.ready,
     enableWebNetwork: latestConfig.web.enableNetwork,
@@ -261,7 +248,8 @@ export function buildGatewayCronRuntimeOptions(input: GatewayCronRuntimeBaseInpu
 }
 
 async function buildGatewaySecurityAssessorConfig(
-  config: LoadedRuntimeConfig
+  config: LoadedRuntimeConfig,
+  sessionDb: SQLiteSessionDB
 ): Promise<SecurityAssessorRuntimeConfig> {
   const mainRoute: ResolvedModelRoute = config.primaryModelRoute ?? {
     provider: config.model.provider,
@@ -275,7 +263,11 @@ async function buildGatewaySecurityAssessorConfig(
       providerExecutor: new ProviderExecutor({
         registry: config.providerRegistry,
         homeDir: config.homeDir,
-        profileId: config.profileId
+        profileId: config.profileId,
+        usageRecorder: createProviderUsageRecorder({
+          profileId: config.profileId,
+          record: (entries) => sessionDb.recordProviderUsageEntries(entries)
+        })
       }),
     };
   }
@@ -298,7 +290,11 @@ async function buildGatewaySecurityAssessorConfig(
     providerExecutor: new ProviderExecutor({
       registry: config.providerRegistry,
       homeDir: config.homeDir,
-      profileId: config.profileId
+      profileId: config.profileId,
+      usageRecorder: createProviderUsageRecorder({
+        profileId: config.profileId,
+        record: (entries) => sessionDb.recordProviderUsageEntries(entries)
+      })
     }),
   };
 }
@@ -1014,7 +1010,11 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         providerExecutor: new ProviderExecutor({
           registry: config.providerRegistry,
           homeDir: config.homeDir,
-          profileId: config.profileId
+          profileId: config.profileId,
+          usageRecorder: createProviderUsageRecorder({
+            profileId,
+            record: (entries) => sessionDb.recordProviderUsageEntries(entries)
+          })
         })
       }),
       logWarning
@@ -1361,7 +1361,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       idleResetMinutes: telegram.sessionIdleResetMinutes,
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     };
-    const gatewaySecurityAssessor = await buildGatewaySecurityAssessorConfig(config);
+    const gatewaySecurityAssessor = await buildGatewaySecurityAssessorConfig(config, sessionDb);
     const voiceAudit = createVoiceTranscriptionAudit({ profilePaths, hookRegistry, logWarning });
     const gatewayLocalWhisperFor = async (stt: LoadedRuntimeConfig["stt"]) => {
       if (!isFasterWhisperConfig(stt)) {

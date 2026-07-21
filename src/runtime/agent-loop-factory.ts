@@ -73,6 +73,8 @@ export type CreateChildAgentLoopInput = {
     planRevisionId: string;
     stepId: string;
     attemptId: string;
+    originSessionId?: string;
+    originTurnId?: string;
   };
   securityPolicy?: SecurityPolicy;
   /** Existing open Task worker session resumed after a durable host handoff. */

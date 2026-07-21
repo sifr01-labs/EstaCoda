@@ -149,7 +149,9 @@ describe("AgentStepExecutor", () => {
         taskId: graph.task.id,
         planRevisionId: graph.revision.id,
         stepId: graph.steps[0]!.id,
-        attemptId: attempt.id
+        attemptId: attempt.id,
+        originSessionId: "creator-alpha",
+        originTurnId: "origin-turn-alpha"
       }
     });
     expect(childInput?.context).toContain("Prioritize the verified source.");
@@ -442,6 +444,7 @@ function makeGraph(): { task: Task; revision: TaskPlanRevision; steps: TaskStep[
     creatorSessionId: "creator-alpha",
     rootTaskId: "task-alpha",
     originSessionId: "creator-alpha",
+    originTurnId: "origin-turn-alpha",
     source: "cli",
     executionPreference: "auto",
     creationKey: "create-alpha",

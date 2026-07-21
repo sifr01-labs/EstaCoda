@@ -209,17 +209,19 @@ describe("task usage ledger", () => {
         toolCalls: []
       },
       profileId: "alpha",
-      sessionId: "worker-alpha",
-      visibleTurnId: "message-alpha",
-      requestSequence: 0,
-      routes: [routes().primaryModelRoute!, ...routes().modelFallbackRoutes!],
-      task: {
+      context: {
+        requestKey: "worker-alpha:message-alpha:0",
+        sourceKind: "task",
+        executionSessionId: "worker-alpha",
+        sessionBudgetScopeId: "origin-alpha",
+        visibleTurnId: "message-alpha",
         taskId: "task-alpha",
         rootTaskId: "task-alpha",
         planRevisionId: "revision-alpha",
         stepId: "step-alpha",
         attemptId: "attempt-alpha"
-      }
+      },
+      routes: [routes().primaryModelRoute!, ...routes().modelFallbackRoutes!],
     });
     const second = providerUsageEntriesFromExecution({
       execution: {
@@ -237,17 +239,19 @@ describe("task usage ledger", () => {
         toolCalls: []
       },
       profileId: "alpha",
-      sessionId: "worker-alpha",
-      visibleTurnId: "message-alpha",
-      requestSequence: 1,
-      routes: [routes().primaryModelRoute!, ...routes().modelFallbackRoutes!],
-      task: {
-      taskId: "task-alpha",
-      rootTaskId: "task-alpha",
-      planRevisionId: "revision-alpha",
-      stepId: "step-alpha",
+      context: {
+        requestKey: "worker-alpha:message-alpha:1",
+        sourceKind: "task",
+        executionSessionId: "worker-alpha",
+        sessionBudgetScopeId: "origin-alpha",
+        visibleTurnId: "message-alpha",
+        taskId: "task-alpha",
+        rootTaskId: "task-alpha",
+        planRevisionId: "revision-alpha",
+        stepId: "step-alpha",
         attemptId: "attempt-alpha"
-      }
+      },
+      routes: [routes().primaryModelRoute!, ...routes().modelFallbackRoutes!],
     });
     const entries = [...first, ...second];
 
@@ -256,6 +260,8 @@ describe("task usage ledger", () => {
       ["primary", 0],
       ["fallback", 1]
     ]);
+    expect(entries.every((entry) => entry.sourceKind === "task")).toBe(true);
+    expect(entries.every((entry) => entry.pricing.fingerprint === entry.pricingFingerprint)).toBe(true);
     expect(entries.map((entry) => entry.requestKey)).toEqual([
       expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
       expect.stringMatching(/^sha256:[a-f0-9]{64}$/u)
@@ -298,9 +304,12 @@ describe("task usage ledger", () => {
         toolCalls: []
       },
       profileId: "alpha",
-      sessionId: "worker-alpha",
-      visibleTurnId: "message-alpha",
-      requestSequence: 0,
+      context: {
+        requestKey: "worker-alpha:message-alpha:0",
+        sourceKind: "main",
+        executionSessionId: "worker-alpha",
+        visibleTurnId: "message-alpha"
+      },
       routes: [primary, duplicateFallback]
     });
 

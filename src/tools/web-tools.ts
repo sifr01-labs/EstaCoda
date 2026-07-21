@@ -11,7 +11,7 @@ import { deriveBrowserSessionKey } from "../browser/session-key.js";
 import { maybeSummarizeSnapshot, truncateSnapshotText } from "../browser/snapshot-summarizer.js";
 import { isAlwaysBlockedUrl, isSafeUrl, redactUrlForMetadata, scanUrlForSecrets, type ResolveHostnameFn } from "../browser/url-safety.js";
 import { checkWebsiteAccess, loadWebsiteBlocklist } from "../browser/website-policy.js";
-import { ProviderExecutor } from "../providers/provider-executor.js";
+import type { ProviderExecutor } from "../providers/provider-executor.js";
 import { analyzeImageWithVision } from "./vision-tools.js";
 import { createTimeoutSignal } from "../utils/timeout-signal.js";
 import {
@@ -46,7 +46,11 @@ export type WebToolOptions = {
   providerExecutor?: Pick<ProviderExecutor, "complete">;
   securityConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
   resolveHostname?: ResolveHostnameFn;
-  visionAnalyzer?: (input: { path: string; prompt?: string }, signal?: AbortSignal) => Promise<{
+  visionAnalyzer?: (
+    input: { path: string; prompt?: string },
+    signal?: AbortSignal,
+    usage?: { executionSessionId?: string; visibleTurnId?: string }
+  ) => Promise<{
     ok: boolean;
     content: string;
     metadata?: Record<string, unknown>;
@@ -258,7 +262,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       browserConfig: options.browserConfig,
       mainRoute: options.mainRoute,
       snapshotAuxiliaryRoute: options.snapshotAuxiliaryRoute,
-      providerExecutor: options.providerExecutor
+      providerExecutor: options.providerExecutor,
+      currentSessionId: options.currentSessionId
     }),
     createBrowserActionTool({
       name: "browser.click",
@@ -552,7 +557,10 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         const analysis = await options.visionAnalyzer({
           path: saved.path,
           prompt: input.prompt
-        }, context?.signal);
+        }, context?.signal, {
+          executionSessionId: options.currentSessionId?.(),
+          visibleTurnId: context?.visibleTurnId
+        });
         return {
           ...analysis,
           content: [
@@ -736,7 +744,6 @@ export const webToolProvider: SessionToolProvider = {
   name: "web",
   kind: "session",
   createTools(ctx) {
-    const providerRegistry = requireProviderDependency("web", "providerRegistry", ctx.providerRegistry);
     const channelMediaRoot = requireProviderDependency("web", "channelMediaRoot", ctx.channelMediaRoot);
     return createWebTools({
       fetch: ctx.webFetch,
@@ -752,17 +759,13 @@ export const webToolProvider: SessionToolProvider = {
       snapshotAuxiliaryRoute: ctx.compressionRoute,
       providerExecutor: ctx.providerExecutor,
       securityConfig: ctx.securityConfig,
-      visionAnalyzer: (input, signal) => analyzeImageWithVision({
+      visionAnalyzer: (input, signal, usage) => analyzeImageWithVision({
         workspaceRoot: ctx.workspaceRoot,
         allowedRoots: [channelMediaRoot],
         visionAuxiliaryRoute: ctx.visionRoute,
         mainRoute: ctx.mainRoute,
-        providerExecutor: new ProviderExecutor({
-          registry: providerRegistry,
-          homeDir: ctx.homeDir,
-          profileId: ctx.profileId
-        })
-      }, input, signal)
+        providerExecutor: ctx.providerExecutor
+      }, input, signal, usage)
     });
   }
 };
@@ -1053,6 +1056,7 @@ function createBrowserSnapshotTool(
     mainRoute?: ResolvedModelRoute;
     snapshotAuxiliaryRoute?: ResolvedAuxiliaryRoute;
     providerExecutor?: Pick<ProviderExecutor, "complete">;
+    currentSessionId?: () => string;
   } = {}
 ): RegisteredTool {
   return {
@@ -1088,7 +1092,9 @@ function createBrowserSnapshotTool(
       const summarizeResult = await maybeSummarizeSnapshot({
         renderedSnapshot,
         userTask: browserInput.text,
-        signal: context?.signal
+        signal: context?.signal,
+        executionSessionId: options.currentSessionId?.(),
+        visibleTurnId: context?.visibleTurnId
       }, {
         mode: options.browserConfig?.summarizeSnapshots ?? "auto",
         threshold: options.browserConfig?.snapshotSummarizeThreshold ?? 8_000,

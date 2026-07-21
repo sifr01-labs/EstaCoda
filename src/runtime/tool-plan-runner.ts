@@ -55,6 +55,7 @@ export class ToolPlanRunner {
     trustedWorkspace: boolean;
     remainingToolCalls: number;
     riskBaseline: ToolRiskClass;
+    visibleTurnId?: string;
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
   }): Promise<{
@@ -114,6 +115,7 @@ export class ToolPlanRunner {
           this.#executeProviderToolPlan({
             plan,
             trustedWorkspace: input.trustedWorkspace,
+            visibleTurnId: input.visibleTurnId,
             signal: input.signal,
             onEvent: input.onEvent
           })
@@ -127,6 +129,7 @@ export class ToolPlanRunner {
         const execution = await this.#executeProviderToolPlan({
           plan,
           trustedWorkspace: input.trustedWorkspace,
+          visibleTurnId: input.visibleTurnId,
           signal: input.signal,
           onEvent: input.onEvent
         });
@@ -145,6 +148,7 @@ export class ToolPlanRunner {
   async #executeProviderToolPlan(input: {
     plan: ToolCallPlan;
     trustedWorkspace: boolean;
+    visibleTurnId?: string;
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
   }): Promise<ToolExecutionRecord | undefined> {
@@ -164,6 +168,7 @@ export class ToolPlanRunner {
       trustedWorkspace: input.trustedWorkspace,
       sessionId: this.#currentSessionId(),
       toolCallId: plan.id,
+      visibleTurnId: input.visibleTurnId,
       toolCallName: plan.tool,
       providerNativeToolCall: plan.raw,
       signal: input.signal,

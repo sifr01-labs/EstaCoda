@@ -509,6 +509,8 @@ export class AgentLoop {
     const shadowLlmRerank = await this.#shadowLlmRerank({
       intent,
       userText: routedText,
+      executionSessionId: this.#currentSessionId(),
+      visibleTurnId: visibleTurn.id,
       ...(input.signal === undefined ? {} : { signal: input.signal })
     });
     await this.#runRecorder.recordRouteUsage({
@@ -1261,6 +1263,8 @@ export class AgentLoop {
   async #shadowLlmRerank(input: {
     intent: IntentRoute;
     userText: string;
+    executionSessionId?: string;
+    visibleTurnId?: string;
     signal?: AbortSignal;
   }): Promise<SkillRouteLlmRerankTelemetry | undefined> {
     if (this.#skillRouteShadowReranker === undefined) {

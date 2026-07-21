@@ -138,6 +138,7 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
         }];
         const handle = await options.service.createAndActivate({
           toolCallId: context.toolCallId,
+          ...(context.visibleTurnId === undefined ? {} : { originTurnId: context.visibleTurnId }),
           tasks,
           ...(parsed.synthesis === undefined ? {} : { synthesis: parsed.synthesis }),
           trustedWorkspace: await options.trustedWorkspace(),

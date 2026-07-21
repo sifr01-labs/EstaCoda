@@ -3,6 +3,7 @@ import { resolveProfileStateHome } from "../config/profile-home.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolver.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
+import { createProviderUsageRecorder } from "../providers/provider-usage-ledger.js";
 import type { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import type { SessionFinalizationJob } from "../session/session-finalization-queue.js";
 import { MemoryCurationStore, memoryCurationStorePath } from "./memory-curation-store.js";
@@ -84,6 +85,10 @@ export async function curateSessionFinalizationJob(input: {
       registry: input.config.providerRegistry,
       homeDir: input.homeDir,
       profileId: input.profileId,
+      usageRecorder: createProviderUsageRecorder({
+        profileId: input.profileId,
+        record: (entries) => input.sessionDb.recordProviderUsageEntries(entries)
+      })
     });
     const externalMemory = input.config.externalMemory;
     const externalMemoryProviders = createExternalMemoryProvidersFromConfig(externalMemory, {

@@ -439,7 +439,13 @@ export class MemoryFileCompactionService {
       mainRoute: this.#mainRoute!,
       providerExecutor: this.#providerExecutor!,
       request: memoryFileCompactionRequest(input.file, input.original, route.route!.id),
-      signal: input.signal
+      signal: input.signal,
+      ...(this.#sessionId === undefined ? {} : {
+        usage: {
+          executionSessionId: this.#sessionId,
+          sessionBudgetScopeId: this.#sessionId
+        }
+      })
     });
 
     const attempts = auxiliaryResult.attempts.map((attempt) =>

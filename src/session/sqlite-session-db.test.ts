@@ -62,6 +62,9 @@ describe("SQLiteSessionDB", () => {
         routeRole: "primary" as const,
         routeIndex: 0,
         providerAttemptIndex: 0,
+        sourceKind: "main" as const,
+        pricing: { currency: "USD" as const, fingerprint: "test-pricing" },
+        pricingFingerprint: "test-pricing",
         inputTokens: 100,
         outputTokens: 20,
         reasoningTokens: 5,
@@ -83,13 +86,13 @@ describe("SQLiteSessionDB", () => {
       await expect(db.listProviderUsageEntries("alpha", { sessionId: "other-session" })).resolves.toEqual([]);
       await expect(db.recordProviderUsageEntries([{ ...entry, totalTokens: 121 }])).rejects.toThrow(/conflicts/);
       await expect(db.recordProviderUsageEntries([{ ...entry, id: "usage-2", requestKey: "bad-turn", visibleTurnId: "missing" }]))
-        .rejects.toThrow(/visible turn/);
+        .rejects.toThrow(/visible-turn/);
       await expect(db.recordProviderUsageEntries([{
         ...entry,
         id: "usage-3",
         requestKey: "unrelated-turn",
         visibleTurnId: "other-turn"
-      }])).rejects.toThrow(/compression lineage/);
+      }])).rejects.toThrow(/lineage/);
     } finally {
       db.close();
     }
@@ -117,6 +120,9 @@ describe("SQLiteSessionDB", () => {
         routeRole: "primary" as const,
         routeIndex: 0,
         providerAttemptIndex: 0,
+        sourceKind: "main" as const,
+        pricing: { currency: "USD" as const, fingerprint: "test-pricing" },
+        pricingFingerprint: "test-pricing",
         inputTokens: 10,
         outputTokens: 2,
         reasoningTokens: 0,

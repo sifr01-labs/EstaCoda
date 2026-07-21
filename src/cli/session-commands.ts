@@ -9,6 +9,7 @@ import { renderSessionRecallResult, SessionRecallService } from "../session/sess
 import { renderSessionCompactionResult, type CompactResult } from "../prompt/session-compression-service.js";
 import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolver.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
+import { createProviderUsageRecorder } from "../providers/provider-usage-ledger.js";
 import {
   buildSessionsHelpViewModel,
   buildSessionsListViewModel,
@@ -110,7 +111,11 @@ export async function runSessionsCommand(
         providerExecutor: new ProviderExecutor({
           registry: runtimeConfig.providerRegistry,
           homeDir: runtimeConfig.homeDir,
-          profileId: runtimeConfig.profileId
+          profileId: runtimeConfig.profileId,
+          usageRecorder: createProviderUsageRecorder({
+            profileId,
+            record: (entries) => db.recordProviderUsageEntries(entries)
+          })
         })
       }).recall(query);
       return { ok: true, output: renderSessionRecallResult(result) };

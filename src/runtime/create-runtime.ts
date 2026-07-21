@@ -62,6 +62,7 @@ import {
 } from "../session/session-finalization-queue.js";
 import { SessionRecallService, type SessionRecallResult } from "../session/session-recall-service.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
+import { createProviderUsageRecorder } from "../providers/provider-usage-ledger.js";
 import { SessionCompressionService, type CompactResult } from "../prompt/session-compression-service.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
@@ -447,7 +448,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const providerExecutor = new ProviderExecutor({
     registry: providerRegistry,
     homeDir: globalPaths.homeDir,
-    profileId
+    profileId,
+    usageRecorder: createProviderUsageRecorder({
+      profileId,
+      record: (entries) => sessionDb.recordProviderUsageEntries(entries)
+    })
   });
   const processManager = new ProcessManager({ workspaceRoot });
   const pythonStateRoot = globalPaths.stateRoot;
@@ -747,8 +752,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           enabled: true,
           assessorRoute: effectiveSecurityAssessor.auxiliaryRoute ?? assessorRoute,
           mainRoute,
-          providerExecutor: effectiveSecurityAssessor.providerExecutor ?? providerExecutor,
-          scopeKey: profileId
+          providerExecutor,
+          scopeKey: profileId,
+          executionSessionId: sessionRuntimeContext.currentSessionId()
         } satisfies SmartApprovalAssessorRuntimeConfig
         : undefined;
 
@@ -829,6 +835,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         profileId,
         workspaceRoot,
         excludeSessionIds: () => [sessionRuntimeContext.currentSessionId()],
+        currentSessionId: () => sessionRuntimeContext.currentSessionId(),
         route: sessionSearchRoute,
         mainRoute,
         providerExecutor

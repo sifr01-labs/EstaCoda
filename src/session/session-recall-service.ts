@@ -47,6 +47,7 @@ export type SessionRecallServiceOptions = {
   maxContextChars?: number;
   maxSummaryChars?: number;
   excludeSessionIds?: string[] | (() => string[]);
+  currentSessionId?: () => string;
 };
 
 export type SessionRecallIntentDecision = {
@@ -73,6 +74,7 @@ export class SessionRecallService {
   readonly #maxContextChars: number;
   readonly #maxSummaryChars: number;
   readonly #excludeSessionIds: string[] | (() => string[]);
+  readonly #currentSessionId: (() => string) | undefined;
 
   constructor(options: SessionRecallServiceOptions) {
     this.#sessionDb = options.sessionDb;
@@ -87,6 +89,7 @@ export class SessionRecallService {
     this.#maxContextChars = options.maxContextChars ?? 6_000;
     this.#maxSummaryChars = options.maxSummaryChars ?? 1_200;
     this.#excludeSessionIds = options.excludeSessionIds ?? [];
+    this.#currentSessionId = options.currentSessionId;
   }
 
   async recall(query: string): Promise<SessionRecallResult> {
@@ -185,7 +188,13 @@ export class SessionRecallService {
       mainRoute: this.#mainRoute,
       providerExecutor: this.#providerExecutor,
       request: sessionRecallRequest(input),
-      scopeKey: this.#profileId
+      scopeKey: this.#profileId,
+      ...(this.#currentSessionId === undefined ? {} : {
+        usage: {
+          executionSessionId: this.#currentSessionId(),
+          sessionBudgetScopeId: this.#currentSessionId()
+        }
+      })
     });
 
     if (!auxiliaryResult.ok || auxiliaryResult.response === undefined) {

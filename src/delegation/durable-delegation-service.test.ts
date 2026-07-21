@@ -43,11 +43,13 @@ describe("DurableDelegationService", () => {
     const service = rootService(store);
     const first = service.create({
       toolCallId: "call-1",
+      originTurnId: "visible-turn-alpha",
       trustedWorkspace: true,
       tasks: [{ task: "Read A" }, { task: "Read B", role: "orchestrator" }]
     });
     const replay = service.create({
       toolCallId: "call-1",
+      originTurnId: "visible-turn-alpha",
       trustedWorkspace: true,
       tasks: [{ task: "Read A" }, { task: "Read B", role: "orchestrator" }]
     });
@@ -59,7 +61,7 @@ describe("DurableDelegationService", () => {
     expect(task).toMatchObject({
       rootTaskId: task.id,
       originSessionId: "parent",
-      originTurnId: "call-1"
+      originTurnId: "visible-turn-alpha"
     });
     expect(task.parentTaskId).toBeUndefined();
     expect(task.budgetPolicy.maxConcurrentAttempts).toBe(2);
@@ -892,6 +894,9 @@ function usageEntry(
     attemptId: attempt.id,
     requestKey,
     providerAttemptIndex: 0,
+    sourceKind: "task" as const,
+    pricing: { currency: "USD" as const, fingerprint: "test-pricing" },
+    pricingFingerprint: "test-pricing",
     provider: "test",
     model: "test-model",
     routeRole: "primary" as const,

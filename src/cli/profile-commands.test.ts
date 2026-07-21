@@ -3,7 +3,13 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { readActiveProfile, resolveProfileStateHome, writeActiveProfile } from "../config/profile-home.js";
+import {
+  readActiveProfile,
+  resolveGlobalStateHome,
+  resolveProfileStateHome,
+  writeActiveProfile
+} from "../config/profile-home.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { profileCommand } from "./profile-commands.js";
 import { ensureProfileSkeleton } from "./profile-state.js";
 import { parseGlobalCliOptions, runCliCommand, type CliOptions } from "./cli.js";
@@ -293,6 +299,21 @@ describe("profileCommand", () => {
     expect(requestBody?.model).toBe("context-model");
     expect(JSON.stringify(requestBody?.messages)).toContain("profileContextFocus");
     await expect(readFile(paths.soulMdPath, "utf8")).resolves.toBe("Generated profile soul\n");
+    const sessionDb = await createSQLiteSessionDB({
+      path: resolveGlobalStateHome({ homeDir: tempDir }).sessionsSqlitePath
+    });
+    try {
+      await expect(sessionDb.listProviderUsageEntries("default")).resolves.toEqual([
+        expect.objectContaining({
+          sourceKind: "auxiliary",
+          auxiliaryKind: "profile_context",
+          provider: "local",
+          model: "context-model"
+        })
+      ]);
+    } finally {
+      await sessionDb.close();
+    }
   });
 
   it("parses --profile as a global command option", () => {

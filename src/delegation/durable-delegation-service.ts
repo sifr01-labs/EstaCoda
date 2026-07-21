@@ -36,6 +36,7 @@ export type ActiveTaskExecution = {
 
 export type DurableDelegationRequest = {
   toolCallId: string;
+  originTurnId?: string;
   tasks: readonly DelegateTaskItem[];
   synthesis?: DelegateSynthesis;
   trustedWorkspace: boolean;
@@ -221,7 +222,7 @@ export class DurableDelegationService {
       steps,
       planReason: "Created by delegate_task as durable delegated work.",
       ...(initialHostLease === undefined ? {} : { initialHostLease }),
-      ...(parent === undefined ? { originTurnId: request.toolCallId } : {}),
+      ...(parent === undefined && request.originTurnId !== undefined ? { originTurnId: request.originTurnId } : {}),
       ...(completionDestination === undefined ? {} : {
         completionDelivery: {
           deliveryKey: TASK_ORIGIN_COMPLETION_DELIVERY_KEY,

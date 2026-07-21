@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LoadedRuntimeConfig } from "./runtime-config.js";
 import type { ModelProfile, ProviderAdapter, ProviderId, ResolvedModelRoute } from "../contracts/provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
+import type { ProviderExecutorOptions } from "../providers/provider-executor.js";
 import { createOpenAICompatibleProvider, type FetchLike } from "../providers/openai-compatible-provider.js";
 import { diagnoseProviderConfig, diagnoseProviderLive, formatProviderTruthStatus } from "./provider-diagnostics.js";
 import { normalizeMemoryConfig } from "./memory-config.js";
@@ -231,14 +232,20 @@ describe("provider diagnostics", () => {
       fetch
     }));
 
+    const usageRecorder = vi.fn<NonNullable<ProviderExecutorOptions["usageRecorder"]>>(async () => {});
     const diagnostic = await diagnoseProviderLive(loadedConfig({
       registry,
       primaryRoute: route({
         baseUrl: "https://api.openai.com/v1"
       })
-    }));
+    }), usageRecorder);
 
     expect(diagnostic.status).toBe("ready");
+    expect(usageRecorder).toHaveBeenCalledOnce();
+    expect(usageRecorder.mock.calls[0]?.[0].context).toMatchObject({
+      sourceKind: "auxiliary",
+      auxiliaryKind: "provider_diagnostic"
+    });
     expect(capturedBody?.max_completion_tokens).toBe(8);
     expect(capturedBody).not.toHaveProperty("max_tokens");
   });

@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import type { LoadedRuntimeConfig } from "./runtime-config.js";
 import type { ProviderExecutionSummary } from "../contracts/provider.js";
-import { ProviderExecutor } from "../providers/provider-executor.js";
+import { ProviderExecutor, type ProviderExecutorOptions } from "../providers/provider-executor.js";
 import { getProviderMetadata } from "../providers/provider-metadata.js";
 import { renderProviderExecutionSummary } from "../runtime/provider-execution-summary.js";
 
@@ -150,7 +151,10 @@ export function formatProviderTruthStatus(input: {
   ].join("\n");
 }
 
-export async function diagnoseProviderLive(config: LoadedRuntimeConfig): Promise<ProviderLiveDiagnostic> {
+export async function diagnoseProviderLive(
+  config: LoadedRuntimeConfig,
+  usageRecorder: NonNullable<ProviderExecutorOptions["usageRecorder"]>
+): Promise<ProviderLiveDiagnostic> {
   if (config.model.provider === "unconfigured" || config.model.id === "unconfigured") {
     return {
       status: "blocked",
@@ -162,7 +166,8 @@ export async function diagnoseProviderLive(config: LoadedRuntimeConfig): Promise
   const executor = new ProviderExecutor({
     registry: config.providerRegistry,
     homeDir: config.homeDir,
-    profileId: config.profileId
+    profileId: config.profileId,
+    usageRecorder
   });
   const execution = await executor.complete({
     provider: config.model.provider,
@@ -182,7 +187,12 @@ export async function diagnoseProviderLive(config: LoadedRuntimeConfig): Promise
   }, {
     providerOrder: [config.model.provider]
   }, {
-    primaryRoute: config.primaryModelRoute
+    primaryRoute: config.primaryModelRoute,
+    usage: {
+      requestKey: `diagnostic:provider-live:${randomUUID()}`,
+      sourceKind: "auxiliary",
+      auxiliaryKind: "provider_diagnostic"
+    }
   });
   const attemptSummary = execution.attempts.map((attempt) =>
     `${attempt.provider}/${attempt.model}:${attempt.ok ? "ok" : attempt.errorClass ?? "failed"}`

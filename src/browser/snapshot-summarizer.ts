@@ -19,6 +19,8 @@ export interface SnapshotSummarizeInput {
   renderedSnapshot: string;
   userTask?: string;
   signal?: AbortSignal;
+  executionSessionId?: string;
+  visibleTurnId?: string;
 }
 
 export interface SnapshotSummarizeResult {
@@ -94,6 +96,13 @@ export async function maybeSummarizeSnapshot(
       route,
       mainRoute: options.mainRoute ?? route.route,
       providerExecutor,
+      usage: {
+        ...(input.executionSessionId === undefined ? {} : {
+          executionSessionId: input.executionSessionId,
+          sessionBudgetScopeId: input.executionSessionId
+        }),
+        ...(input.visibleTurnId === undefined ? {} : { visibleTurnId: input.visibleTurnId })
+      },
       request: {
         model: route.route.id,
         messages: [

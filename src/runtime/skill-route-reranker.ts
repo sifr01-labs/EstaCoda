@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { IntentRoute, SkillRouteCandidate } from "../contracts/intent.js";
 import type { ProviderRequest, ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import type { SkillRouteLlmRerankTelemetry } from "../contracts/skill.js";
@@ -11,6 +12,8 @@ export type SkillRouteShadowReranker = {
   rerank(input: {
     intent: IntentRoute;
     userText: string;
+    executionSessionId?: string;
+    visibleTurnId?: string;
     signal?: AbortSignal;
   }): Promise<SkillRouteLlmRerankTelemetry | undefined>;
 };
@@ -33,6 +36,8 @@ export class LlmSkillRouteShadowReranker implements SkillRouteShadowReranker {
   async rerank(input: {
     intent: IntentRoute;
     userText: string;
+    executionSessionId?: string;
+    visibleTurnId?: string;
     signal?: AbortSignal;
   }): Promise<SkillRouteLlmRerankTelemetry | undefined> {
     const candidates = boundedRerankCandidates(input.intent);
@@ -60,7 +65,17 @@ export class LlmSkillRouteShadowReranker implements SkillRouteShadowReranker {
     });
     const execution = await this.#providerExecutor.complete(request, {}, {
       primaryRoute: route,
-      signal: input.signal
+      signal: input.signal,
+      usage: {
+        requestKey: `auxiliary:skill-rerank:${randomUUID()}`,
+        sourceKind: "auxiliary",
+        auxiliaryKind: "skill_rerank",
+        ...(input.executionSessionId === undefined ? {} : {
+          executionSessionId: input.executionSessionId,
+          sessionBudgetScopeId: input.executionSessionId
+        }),
+        ...(input.visibleTurnId === undefined ? {} : { visibleTurnId: input.visibleTurnId })
+      }
     });
 
     if (!execution.ok || execution.response?.ok !== true) {

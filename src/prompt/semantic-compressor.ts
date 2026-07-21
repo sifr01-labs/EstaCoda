@@ -184,6 +184,7 @@ export class SemanticCompressor {
       summaryBudget,
       providerMaxTokens,
       scopeKey,
+      sessionId: input.sessionId,
       signal: input.signal
     });
     const summaryText = normalizeSummaryPrefix(summary.summary);
@@ -312,6 +313,7 @@ export class SemanticCompressor {
     summaryBudget: number;
     providerMaxTokens: number;
     scopeKey: string;
+    sessionId: string;
     signal?: AbortSignal;
   }): Promise<{
     summary: string;
@@ -365,7 +367,11 @@ export class SemanticCompressor {
       providerExecutor: this.#providerExecutor,
       request,
       signal: input.signal,
-      scopeKey: input.scopeKey
+      scopeKey: input.scopeKey,
+      usage: {
+        executionSessionId: input.sessionId,
+        sessionBudgetScopeId: input.sessionId
+      }
     });
 
     if (!auxiliary.ok || auxiliary.response === undefined || auxiliary.response.content.trim().length === 0) {

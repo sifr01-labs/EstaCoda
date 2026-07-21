@@ -169,7 +169,9 @@ export class AgentStepExecutor implements TaskStepExecutor {
           rootTaskId: input.task.rootTaskId,
           planRevisionId: input.step.planRevisionId,
           stepId: input.step.id,
-          attemptId: input.attempt.id
+          attemptId: input.attempt.id,
+          originSessionId: input.task.originSessionId,
+          ...(input.task.originTurnId === undefined ? {} : { originTurnId: input.task.originTurnId })
         },
         ...(input.attempt.workerSessionId === undefined ? {} : { resumeSessionId: input.attempt.workerSessionId })
       });

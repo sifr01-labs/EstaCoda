@@ -375,6 +375,7 @@ export class ProviderTurnLoop {
         providerExecution: execution,
         toolPlans: input.toolPlans,
         trustedWorkspace: input.trustedWorkspace,
+        visibleTurnId: input.visibleTurnId,
         remainingToolCalls: Math.max(0, this.#budgets.maxProviderToolCalls - providerToolExecutions.length),
         riskBaseline: maxObservedRisk,
         signal: input.signal,
@@ -1136,17 +1137,32 @@ export class ProviderTurnLoop {
 
   async #recordProviderUsage(execution: ProviderExecutionResult, visibleTurnId: string): Promise<void> {
     const sessionId = this.#currentSessionId();
+    const task = this.#taskExecution;
     const entries = providerUsageEntriesFromExecution({
       execution,
       profileId: this.#profileId,
-      sessionId,
-      visibleTurnId,
-      requestSequence: this.#providerRequestSequence++,
+      context: {
+        requestKey: [sessionId, visibleTurnId, String(this.#providerRequestSequence++)].join("\0"),
+        sourceKind: task === undefined ? "main" : "task",
+        executionSessionId: sessionId,
+        sessionBudgetScopeId: task?.originSessionId ?? sessionId,
+        ...(task === undefined
+          ? { visibleTurnId }
+          : task.originTurnId === undefined
+          ? {}
+          : { visibleTurnId: task.originTurnId }),
+        ...(task === undefined ? {} : {
+          taskId: task.taskId,
+          rootTaskId: task.rootTaskId,
+          planRevisionId: task.planRevisionId,
+          stepId: task.stepId,
+          attemptId: task.attemptId
+        })
+      },
       routes: [
         ...(this.#primaryModelRoute === undefined ? [] : [this.#primaryModelRoute]),
         ...this.#modelFallbackRoutes
-      ],
-      ...(this.#taskExecution === undefined ? {} : { task: this.#taskExecution })
+      ]
     });
     if (entries.length > 0) await this.#sessionDb.recordProviderUsageEntries(entries);
   }
