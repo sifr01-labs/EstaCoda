@@ -21,6 +21,7 @@ import type {
 } from "../runtime/agent-loop-factory.js";
 import type { AgentLoopRouteInput } from "../runtime/agent-loop-builder.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
+import { createTaskResultTools } from "../tools/task-result-tools.js";
 import { AgentStepExecutor } from "./agent-step-executor.js";
 import { SQLiteTaskStore } from "./sqlite-task-store.js";
 import { TaskResultService } from "./task-result-service.js";
@@ -169,6 +170,85 @@ describe("AgentStepExecutor", () => {
       })
     );
     expect(cleanup).toHaveBeenCalledOnce();
+  });
+
+  it("gives dependent Steps directly executable Task result read inputs without exposing opaque handles", async () => {
+    const graph = makeDependencyGraph();
+    store.createTaskGraph(graph);
+    const dependencyResult = resultService.record({
+      id: "dependency-result",
+      taskId: graph.task.id,
+      stepId: graph.steps[0]!.id,
+      kind: "text",
+      content: "Verified dependency content.",
+      summary: "Verified dependency summary."
+    });
+    let childInput: CreateChildAgentLoopInput | undefined;
+    const childFactory: ChildAgentLoopFactory = {
+      createChild: vi.fn(async (input) => {
+        childInput = input;
+        await sessionDb.createSession({
+          id: "worker-synthesis",
+          profileId: input.profileId,
+          parentSessionId: input.parentSessionId,
+          metadata: { kind: "task-step-worker", ...(input.taskExecution ?? {}) }
+        });
+        return childRuntime(async () => response(), vi.fn(async () => undefined), {
+          sessionId: "worker-synthesis",
+          trajectoryId: "trajectory-synthesis"
+        });
+      })
+    };
+    const executor = new AgentStepExecutor({
+      childFactory,
+      sessionDb,
+      taskStore: store,
+      hostWorkspace: graph.task.workspace,
+      isWorkspaceTrusted: () => true,
+      parentVisibleTools: () => tools(),
+      approvalService: new TaskApprovalService({ store }),
+      securityPolicy: capabilityFirstDefaults
+    });
+
+    await expect(executor.execute({
+      task: graph.task,
+      step: graph.steps[1]!,
+      attempt: attempt(graph, graph.steps[1]!),
+      signal: new AbortController().signal,
+      heartbeat: vi.fn(),
+      checkpoint: vi.fn()
+    })).resolves.toMatchObject({ outcome: "succeeded" });
+
+    const marker = "Do not derive task_id from a result handle:\n";
+    const context = childInput?.context ?? "";
+    const markerIndex = context.indexOf(marker);
+    expect(markerIndex).toBeGreaterThanOrEqual(0);
+    const references = JSON.parse(context.slice(markerIndex + marker.length)) as Array<Record<string, unknown>>;
+    expect(references).toEqual([{
+      stepId: graph.steps[0]!.id,
+      readInput: {
+        task_id: graph.task.id,
+        result_id: dependencyResult.id
+      },
+      kind: "text",
+      bytes: Buffer.byteLength("Verified dependency content."),
+      summary: "Verified dependency summary."
+    }]);
+    expect(references[0]).not.toHaveProperty("handle");
+    expect(references[0]).not.toHaveProperty("resultId");
+
+    const [readTool] = createTaskResultTools({
+      service: resultService,
+      currentSessionId: () => "creator-alpha"
+    });
+    await expect(readTool!.run(references[0]!.readInput)).resolves.toMatchObject({
+      ok: true,
+      content: "Verified dependency content.",
+      metadata: {
+        taskId: graph.task.id,
+        resultId: dependencyResult.id
+      }
+    });
   });
 
   it("fails closed before child construction when live workspace trust is absent", async () => {
@@ -424,13 +504,45 @@ function makeGraph(): { task: Task; revision: TaskPlanRevision; steps: TaskStep[
   return { task, revision, steps: [step] };
 }
 
-function attempt(graph: ReturnType<typeof makeGraph>) {
+function makeDependencyGraph(): ReturnType<typeof makeGraph> {
+  const graph = makeGraph();
+  const authorityPolicy = {
+    ...graph.task.authorityPolicy,
+    allowedToolsets: [...graph.task.authorityPolicy.allowedToolsets, "core"],
+    allowedTools: ["task.result.read"]
+  } satisfies TaskAuthorityPolicy;
+  const dependency: TaskStep = {
+    ...graph.steps[0]!,
+    id: "step-dependency",
+    key: "dependency",
+    title: "Produce dependency result",
+    position: 0,
+    authorityPolicy
+  };
+  const synthesis: TaskStep = {
+    ...graph.steps[0]!,
+    id: "step-synthesis",
+    key: "synthesis",
+    title: "Synthesize dependency result",
+    objective: "Read the dependency and return the complete synthesis.",
+    position: 1,
+    dependsOn: [dependency.id],
+    authorityPolicy
+  };
+  return {
+    task: { ...graph.task, authorityPolicy },
+    revision: graph.revision,
+    steps: [dependency, synthesis]
+  };
+}
+
+function attempt(graph: ReturnType<typeof makeGraph>, step: TaskStep = graph.steps[0]!) {
   return {
     id: "attempt-alpha",
     profileId: "alpha",
     taskId: graph.task.id,
     planRevisionId: graph.revision.id,
-    stepId: graph.steps[0]!.id,
+    stepId: step.id,
     attemptNumber: 1,
     status: "running" as const,
     dispatchKey: "dispatch-alpha",

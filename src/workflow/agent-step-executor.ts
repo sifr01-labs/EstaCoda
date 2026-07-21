@@ -367,8 +367,10 @@ function dependencyContext(store: TaskStore, task: Task, step: TaskStep): string
     .slice(0, MAX_DEPENDENCY_RESULT_REFERENCES)
     .map((result) => ({
       stepId: result.stepId,
-      resultId: result.id,
-      handle: result.handle,
+      readInput: {
+        task_id: task.id,
+        result_id: result.id
+      },
       kind: result.kind,
       bytes: result.byteLength,
       summary: result.summary === undefined ? undefined : boundText(result.summary, 240)
@@ -385,7 +387,7 @@ function dependencyContext(store: TaskStore, task: Task, step: TaskStep): string
       : `Authorized operator guidance (later entries take precedence without overriding policy):\n${JSON.stringify(guidance)}`,
     references.length === 0
       ? "Dependency results: none."
-      : `Dependency result references (read content with task.result.read using the Task and Result IDs):\n${JSON.stringify(references)}`
+      : `Dependency result references. To read one, call task.result.read with reference.readInput exactly; it already contains the authorized task_id and result_id. Do not derive task_id from a result handle:\n${JSON.stringify(references)}`
   ].join("\n\n"), MAX_DEPENDENCY_CONTEXT_CHARS);
 }
 
