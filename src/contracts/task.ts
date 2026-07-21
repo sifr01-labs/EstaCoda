@@ -310,6 +310,16 @@ export type TaskHostLease = {
   expiresAt: string;
 };
 
+/** Exact host ownership proof that must be revalidated when Task work is dispatched. */
+export type TaskHostDispatchGrant = {
+  taskId: TaskId;
+  ownerId: string;
+  kind: TaskHostKind;
+  workspaceIdentityHash: string;
+  fencingToken: number;
+  expiresAt: string;
+};
+
 export type TaskUsageTotals = Omit<ProviderUsageTotals, "cacheReadTokens" | "cacheWriteTokens"> & {
   cacheReadTokens?: number;
   cacheWriteTokens?: number;

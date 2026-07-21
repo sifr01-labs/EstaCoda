@@ -7,6 +7,8 @@ import type {
   TaskEvent,
   TaskEventKind,
   TaskFailure,
+  TaskHostDispatchGrant,
+  TaskHostLease,
   TaskStep,
   TaskUsageTotals
 } from "../contracts/task.js";
@@ -91,11 +93,13 @@ export type TaskSchedulerRunResult = {
 };
 
 export type TaskSchedulerDispatchOptions = {
-  /** Exact Task IDs whose host ownership has already been established by the caller. */
-  eligibleTaskIds?: readonly string[];
+  /** Fenced host ownership proofs. Omission discovers this scheduler owner's current leases. */
+  dispatchGrants?: readonly TaskHostDispatchGrant[];
 };
 
-export type TaskSchedulerHandoffOptions = TaskSchedulerDispatchOptions & {
+export type TaskSchedulerHandoffOptions = {
+  /** Exact locally owned Task IDs whose in-flight Attempts should be handed off. */
+  eligibleTaskIds?: readonly string[];
   /** Opportunity for in-flight Attempts to settle normally before interruption. */
   settleGraceMs?: number;
   /** Opportunity for cooperative abort to finish before durable fencing proceeds. */
@@ -223,7 +227,11 @@ export class TaskScheduler {
 
   async #dispatchEligibleTasks(options: TaskSchedulerDispatchOptions): Promise<TaskSchedulerDispatchResult> {
     const result: MutableRunResult = emptyRunResult();
-    const eligibleTaskIds = normalizeEligibleTaskIds(options.eligibleTaskIds);
+    const suppliedGrants = options.dispatchGrants ?? this.#store.listTaskHostLeases({ ownerId: this.#ownerId })
+      .map(taskHostDispatchGrant);
+    const dispatchGrants = normalizeDispatchGrants(suppliedGrants);
+    const currentGrants = this.#currentDispatchGrants(dispatchGrants);
+    const eligibleTaskIds = new Set(currentGrants.keys());
     await this.#approvalService?.reconcile({ eligibleTaskIds });
     if (!this.#acceptingDispatch) return completedDispatch(result);
     this.#reconcileApprovals(result, eligibleTaskIds);
@@ -246,6 +254,8 @@ export class TaskScheduler {
     const touchedTaskIds = new Set<string>();
 
     for (const task of prepared) {
+      const dispatchGrant = currentGrants.get(task.id);
+      if (dispatchGrant === undefined) continue;
       touchedTaskIds.add(task.id);
       const revisionId = task.activePlanRevisionId;
       if (revisionId === undefined) continue;
@@ -271,9 +281,9 @@ export class TaskScheduler {
           break;
         }
 
-        const attempt = this.#claimAttempt(task, step);
+        const attempt = this.#claimAttempt(task, step, dispatchGrant);
         if (attempt === null || attempt.status !== "queued") continue;
-        const started = this.#leaseAndStart(task.id, step.id, attempt.id);
+        const started = this.#leaseAndStart(task.id, step.id, attempt.id, dispatchGrant);
         if (started === null) continue;
 
         result.dispatched++;
@@ -727,12 +737,20 @@ export class TaskScheduler {
     });
   }
 
-  #claimAttempt(task: Task, step: TaskStep): TaskAttempt | null {
-    const now = this.#now().toISOString();
+  #claimAttempt(task: Task, step: TaskStep, dispatchGrant: TaskHostDispatchGrant): TaskAttempt | null {
+    const currentTime = this.#now();
+    const now = currentTime.toISOString();
     return this.#store.atomicWrite((store) => {
       const currentTask = store.getTask(task.id);
       const currentStep = store.getStep(step.id);
-      if (currentTask?.status !== "running" || currentStep?.status !== "ready") return null;
+      if (currentTask?.status !== "running" || currentStep?.status !== "ready" ||
+          !isCurrentTaskHostDispatchGrant(
+            store,
+            currentTask,
+            dispatchGrant,
+            this.#ownerId,
+            currentTime.getTime()
+          )) return null;
       const attempts = store.listAttempts(task.id, step.id);
       const active = attempts.find((attempt) => !isTerminalTaskAttemptStatus(attempt.status));
       if (active !== undefined) return active;
@@ -763,14 +781,26 @@ export class TaskScheduler {
     });
   }
 
-  #leaseAndStart(taskId: string, stepId: string, attemptId: string): TaskAttempt | null {
+  #leaseAndStart(
+    taskId: string,
+    stepId: string,
+    attemptId: string,
+    dispatchGrant: TaskHostDispatchGrant
+  ): TaskAttempt | null {
     const now = this.#now();
     const timestamp = now.toISOString();
     return this.#store.atomicWrite((store) => {
       const task = store.getTask(taskId);
       const step = store.getStep(stepId);
       const attempt = store.getAttempt(attemptId);
-      if (task?.status !== "running" || step?.status !== "ready" || attempt?.status !== "queued") return null;
+      if (task?.status !== "running" || step?.status !== "ready" || attempt?.status !== "queued" ||
+          !isCurrentTaskHostDispatchGrant(
+            store,
+            task,
+            dispatchGrant,
+            this.#ownerId,
+            now.getTime()
+          )) return null;
       if (!this.#hasDurableCapacity(store, task, step) ||
           this.#budgetBlockReason(task, step, store, attempt.id) !== undefined) {
         return null;
@@ -807,6 +837,20 @@ export class TaskScheduler {
       }));
       return runningAttempt;
     });
+  }
+
+  #currentDispatchGrants(
+    dispatchGrants: ReadonlyMap<string, TaskHostDispatchGrant>
+  ): ReadonlyMap<string, TaskHostDispatchGrant> {
+    const nowMs = this.#now().getTime();
+    const current = new Map<string, TaskHostDispatchGrant>();
+    for (const [taskId, grant] of dispatchGrants) {
+      const task = this.#store.getTask(taskId);
+      if (task !== null && isCurrentTaskHostDispatchGrant(this.#store, task, grant, this.#ownerId, nowMs)) {
+        current.set(taskId, grant);
+      }
+    }
+    return current;
   }
 
   async #execute(
@@ -1927,6 +1971,73 @@ function snapshotRunResult(result: MutableRunResult): TaskSchedulerRunResult {
 function completedDispatch(result: MutableRunResult): TaskSchedulerDispatchResult {
   const snapshot = snapshotRunResult(result);
   return { ...snapshot, completion: Promise.resolve(snapshot) };
+}
+
+export function taskHostDispatchGrant(lease: TaskHostLease): TaskHostDispatchGrant {
+  return {
+    taskId: lease.taskId,
+    ownerId: lease.ownerId,
+    kind: lease.kind,
+    workspaceIdentityHash: lease.workspaceIdentityHash,
+    fencingToken: lease.fencingToken,
+    expiresAt: lease.expiresAt
+  };
+}
+
+function normalizeDispatchGrants(
+  grants: readonly TaskHostDispatchGrant[]
+): ReadonlyMap<string, TaskHostDispatchGrant> {
+  const normalized = new Map<string, TaskHostDispatchGrant>();
+  for (const grant of grants) {
+    const taskId = requireToken(grant.taskId, "dispatch grant Task ID");
+    if (normalized.has(taskId)) throw new Error(`Task dispatch grant is duplicated for ${taskId}.`);
+    const ownerId = requireToken(grant.ownerId, "dispatch grant owner ID");
+    const workspaceIdentityHash = requireToken(
+      grant.workspaceIdentityHash,
+      "dispatch grant workspace identity"
+    );
+    if (grant.kind !== "foreground" && grant.kind !== "background") {
+      throw new Error("Task dispatch grant host kind is invalid.");
+    }
+    if (!Number.isSafeInteger(grant.fencingToken) || grant.fencingToken <= 0) {
+      throw new Error("Task dispatch grant fencing token must be a positive integer.");
+    }
+    if (!Number.isFinite(Date.parse(grant.expiresAt))) {
+      throw new Error("Task dispatch grant expiration must be an ISO-compatible timestamp.");
+    }
+    normalized.set(taskId, {
+      taskId,
+      ownerId,
+      kind: grant.kind,
+      workspaceIdentityHash,
+      fencingToken: grant.fencingToken,
+      expiresAt: grant.expiresAt
+    });
+  }
+  return normalized;
+}
+
+function isCurrentTaskHostDispatchGrant(
+  store: TaskStore,
+  task: Task,
+  grant: TaskHostDispatchGrant,
+  schedulerOwnerId: string,
+  nowMs: number
+): boolean {
+  if (task.profileId !== store.profileId ||
+      grant.taskId !== task.id ||
+      grant.ownerId !== schedulerOwnerId ||
+      grant.workspaceIdentityHash !== task.workspace.identityHash ||
+      Date.parse(grant.expiresAt) <= nowMs) return false;
+  const lease = store.getTaskHostLease(task.id);
+  return lease !== null &&
+    lease.profileId === store.profileId &&
+    lease.taskId === task.id &&
+    lease.ownerId === grant.ownerId &&
+    lease.kind === grant.kind &&
+    lease.workspaceIdentityHash === grant.workspaceIdentityHash &&
+    lease.fencingToken === grant.fencingToken &&
+    Date.parse(lease.expiresAt) > nowMs;
 }
 
 function normalizeEligibleTaskIds(taskIds: readonly string[] | undefined): ReadonlySet<string> | undefined {

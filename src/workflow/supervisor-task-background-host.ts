@@ -7,7 +7,7 @@ import {
   type TaskBackgroundHostStatus
 } from "./task-background-host.js";
 import { TaskCompletionDeliveryService, type TaskCompletionDeliveryRouter } from "./task-completion-delivery.js";
-import { TaskScheduler } from "./task-scheduler.js";
+import { TaskScheduler, taskHostDispatchGrant } from "./task-scheduler.js";
 import type { TaskResultService } from "./task-result-service.js";
 import type { TaskStore } from "./task-store.js";
 import type { TaskApprovalService } from "./task-approval-service.js";
@@ -117,7 +117,7 @@ export class SupervisorTaskBackgroundHost {
           this.#renewOwnedTasks();
           await this.#claimAvailableTasks();
           await this.#ensureExecutorsForRunnableWork();
-          const result = await scheduler.runOnce({ eligibleTaskIds: this.#eligibleTaskIds() });
+          const result = await scheduler.runOnce({ dispatchGrants: this.#dispatchGrants() });
           this.#renewOwnedTasks();
           await this.#disposeUnusedWorkspaceRuntimes();
           return result;
@@ -212,8 +212,8 @@ export class SupervisorTaskBackgroundHost {
     if (state.creation === creation) state.creation = undefined;
   }
 
-  #eligibleTaskIds(limit = 1_000): string[] {
-    return [...this.#owned.keys()].slice(0, limit);
+  #dispatchGrants(limit = 1_000) {
+    return [...this.#owned.values()].slice(0, limit).map(taskHostDispatchGrant);
   }
 
   async #claimAvailableTasks(): Promise<void> {

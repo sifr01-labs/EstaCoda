@@ -193,6 +193,14 @@ describe("Task commands", () => {
       ownerId: "standalone-task-scheduler",
       resolveExecutor: (candidate, step) => executor.canExecute(candidate, step) ? executor : undefined
     });
+    store.acquireTaskHostLease({
+      taskId: task.id,
+      workspaceIdentityHash: task.workspace.identityHash,
+      ownerId: "standalone-task-scheduler",
+      kind: "foreground",
+      acquiredAt: task.createdAt,
+      expiresAt: new Date(Date.parse(task.createdAt) + 60_000).toISOString()
+    });
 
     await expect(scheduler.runOnce()).resolves.toMatchObject({ dispatched: 1, completed: 1, failed: 0 });
     expect(store.getTask(task.id)?.status).toBe("completed");

@@ -9,6 +9,7 @@ import {
 import type { TaskResultService } from "./task-result-service.js";
 import {
   TaskScheduler,
+  taskHostDispatchGrant,
   type TaskSchedulerDispatchResult,
   type TaskSchedulerRunResult
 } from "./task-scheduler.js";
@@ -154,7 +155,9 @@ export class ForegroundTaskHost {
       const claim = this.#claimTask(normalizedTaskId);
       if (claim.claimed === false) return claim;
       await this.#ensureExecutorRuntime();
-      const dispatch = await this.#scheduler.dispatchOnce({ eligibleTaskIds: [normalizedTaskId] });
+      const dispatch = await this.#scheduler.dispatchOnce({
+        dispatchGrants: claim.lease === undefined ? [] : [taskHostDispatchGrant(claim.lease)]
+      });
       this.#observeCompletion(dispatch);
       return {
         taskId: normalizedTaskId,
@@ -173,10 +176,10 @@ export class ForegroundTaskHost {
       if (this.#stopping) return emptyRunResult();
       this.#renewOwnedTasks();
       this.#claimAvailableTasks();
-      const eligibleTaskIds = [...this.#owned.keys()];
-      if (eligibleTaskIds.length === 0) return emptyRunResult();
+      const dispatchGrants = [...this.#owned.values()].map(taskHostDispatchGrant);
+      if (dispatchGrants.length === 0) return emptyRunResult();
       await this.#ensureExecutorRuntime();
-      const dispatch = await this.#scheduler.dispatchOnce({ eligibleTaskIds });
+      const dispatch = await this.#scheduler.dispatchOnce({ dispatchGrants });
       this.#observeCompletion(dispatch);
       return dispatchSnapshot(dispatch);
     });

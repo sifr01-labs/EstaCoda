@@ -7,6 +7,8 @@ import type {
   TaskAttempt,
   TaskAuthorityDisposition,
   TaskAuthorityPolicy,
+  TaskHostDispatchGrant,
+  TaskHostKind,
   TaskPlanRevision,
   TaskStep
 } from "../contracts/task.js";
@@ -23,6 +25,7 @@ import { TaskOperatorService } from "./task-operator-service.js";
 import {
   TaskScheduler,
   classifyTaskRetry,
+  taskHostDispatchGrant,
   taskDispatchKey,
   type TaskSchedulerLimits
 } from "./task-scheduler.js";
@@ -103,7 +106,9 @@ describe("TaskScheduler", () => {
     });
     const scheduler = makeScheduler(executor);
 
-    const dispatch = await scheduler.dispatchOnce({ eligibleTaskIds: ["task-alpha"] });
+    const dispatch = await scheduler.dispatchOnce({
+      dispatchGrants: dispatchGrantsFor("scheduler-alpha", ["task-alpha"])
+    });
 
     expect(dispatch).toMatchObject({ dispatched: 1, completed: 0, failed: 0 });
     expect(executor.executions).toHaveLength(1);
@@ -134,7 +139,9 @@ describe("TaskScheduler", () => {
     }));
     const scheduler = makeScheduler(executor);
 
-    const dispatch = await scheduler.dispatchOnce({ eligibleTaskIds: ["task-selected"] });
+    const dispatch = await scheduler.dispatchOnce({
+      dispatchGrants: dispatchGrantsFor("scheduler-alpha", ["task-selected"])
+    });
     await expect(dispatch.completion).resolves.toMatchObject({ dispatched: 1, completed: 1 });
 
     expect(executor.executions.map(({ task }) => task.id)).toEqual(["task-selected"]);
@@ -144,6 +151,103 @@ describe("TaskScheduler", () => {
     expect(store.getTask("task-alpha")?.status).toBe("running");
     expect(store.listEvents("task-alpha", { kinds: ["attempt-expired"] })).toHaveLength(0);
     expect(store.getTask("task-selected")?.status).toBe("completed");
+  });
+
+  it("denies expired and superseded host dispatch grants without creating Attempts", async () => {
+    store.createTaskGraph(makeGraph([makeStep("fenced", 0)]));
+    const executor = new FakeTaskStepExecutor(() => ({ outcome: "succeeded" }));
+    const scheduler = makeScheduler(executor, undefined, undefined, "host-owner");
+    const [currentGrant] = dispatchGrantsFor("host-owner", ["task-alpha"]);
+
+    expect((await scheduler.runOnce({
+      dispatchGrants: [{ ...currentGrant!, expiresAt: NOW }]
+    })).dispatched).toBe(0);
+    expect(store.listAttempts("task-alpha")).toHaveLength(0);
+
+    nowMs += 60_001;
+    expect((await scheduler.runOnce({
+      dispatchGrants: [{ ...currentGrant!, expiresAt: new Date(nowMs + 60_000).toISOString() }]
+    })).dispatched).toBe(0);
+    expect(store.listAttempts("task-alpha")).toHaveLength(0);
+
+    const [replacementGrant] = acquireDispatchGrants("host-owner", ["task-alpha"]);
+    expect(replacementGrant?.fencingToken).toBe(currentGrant!.fencingToken + 1);
+    expect((await scheduler.runOnce({ dispatchGrants: [currentGrant!] })).dispatched).toBe(0);
+    expect(store.listAttempts("task-alpha")).toHaveLength(0);
+  });
+
+  it("revalidates host fencing inside Attempt dispatch after an ownership race", async () => {
+    store.createTaskGraph(makeGraph([makeStep("fenced", 0)]));
+    const [staleGrant] = acquireDispatchGrants("host-owner", ["task-alpha"]);
+    const approvals = new TaskApprovalService({ store, now });
+    vi.spyOn(approvals, "reconcile").mockImplementation(async () => {
+      releaseHostLease("task-alpha", "host-owner");
+      acquireDispatchGrants("host-owner", ["task-alpha"]);
+    });
+    const executor = new FakeTaskStepExecutor(() => ({ outcome: "succeeded" }));
+    const scheduler = new TaskScheduler({
+      store,
+      resultService,
+      ownerId: "host-owner",
+      resolveExecutor: () => executor,
+      approvalService: approvals,
+      now
+    });
+
+    expect((await scheduler.runOnce({ dispatchGrants: [staleGrant!] })).dispatched).toBe(0);
+    expect(store.getTaskHostLease("task-alpha")?.fencingToken).toBe(staleGrant!.fencingToken + 1);
+    expect(store.listAttempts("task-alpha")).toHaveLength(0);
+    expect(executor.executions).toHaveLength(0);
+  });
+
+  it.each([
+    ["owner", (grant: TaskHostDispatchGrant) => ({ ...grant, ownerId: "wrong-owner" })],
+    ["kind", (grant: TaskHostDispatchGrant) => ({ ...grant, kind: "foreground" as const })],
+    ["workspace", (grant: TaskHostDispatchGrant) => ({ ...grant, workspaceIdentityHash: "wrong-workspace" })]
+  ])("denies a host dispatch grant with the wrong %s", async (_field, mutate) => {
+    store.createTaskGraph(makeGraph([makeStep("fenced", 0)]));
+    const executor = new FakeTaskStepExecutor(() => ({ outcome: "succeeded" }));
+    const scheduler = makeScheduler(executor, undefined, undefined, "host-owner");
+    const [grant] = dispatchGrantsFor("host-owner", ["task-alpha"]);
+
+    expect((await scheduler.runOnce({ dispatchGrants: [mutate(grant!)] })).dispatched).toBe(0);
+    expect(store.listAttempts("task-alpha")).toHaveLength(0);
+    expect(executor.executions).toHaveLength(0);
+  });
+
+  it("allows only one competing scheduler to dispatch with the same current host grant", async () => {
+    store.createTaskGraph(makeGraph([makeStep("contended", 0)]));
+    const [grant] = acquireDispatchGrants("shared-host", ["task-alpha"]);
+    let finish: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    const firstExecutor = new FakeTaskStepExecutor(async () => {
+      await gate;
+      return { outcome: "succeeded" };
+    });
+    const secondExecutor = new FakeTaskStepExecutor(() => ({ outcome: "succeeded" }));
+    const first = new TaskScheduler({
+      store,
+      resultService,
+      ownerId: "shared-host",
+      resolveExecutor: () => firstExecutor,
+      now
+    });
+    const second = new TaskScheduler({
+      store,
+      resultService,
+      ownerId: "shared-host",
+      resolveExecutor: () => secondExecutor,
+      now
+    });
+
+    const firstDispatch = await first.dispatchOnce({ dispatchGrants: [grant!] });
+    const secondDispatch = await second.dispatchOnce({ dispatchGrants: [grant!] });
+    expect(firstDispatch.dispatched + secondDispatch.dispatched).toBe(1);
+    expect(store.listAttempts("task-alpha")).toHaveLength(1);
+    expect(secondExecutor.executions).toHaveLength(0);
+
+    finish!();
+    await Promise.all([firstDispatch.completion, secondDispatch.completion]);
   });
 
   it("stops admitting new work and drains the final durable settlement on shutdown", async () => {
@@ -156,12 +260,16 @@ describe("TaskScheduler", () => {
       return { outcome: "succeeded", results: [{ kind: "text", content: task.id }] };
     });
     const scheduler = makeScheduler(executor);
-    const active = await scheduler.dispatchOnce({ eligibleTaskIds: ["task-alpha"] });
+    const active = await scheduler.dispatchOnce({
+      dispatchGrants: dispatchGrantsFor("scheduler-alpha", ["task-alpha"])
+    });
 
     let shutdownFinished = false;
     const shutdown = scheduler.shutdown().then(() => { shutdownFinished = true; });
     expect(scheduler.isAcceptingDispatch()).toBe(false);
-    expect((await scheduler.dispatchOnce({ eligibleTaskIds: ["task-waiting"] })).dispatched).toBe(0);
+    expect((await scheduler.dispatchOnce({
+      dispatchGrants: dispatchGrantsFor("scheduler-alpha", ["task-waiting"])
+    })).dispatched).toBe(0);
     await Promise.resolve();
     expect(shutdownFinished).toBe(false);
 
@@ -195,7 +303,9 @@ describe("TaskScheduler", () => {
       return { outcome: "succeeded", results: [{ kind: "text", content: "stale foreground result" }] };
     });
     const foreground = makeScheduler(foregroundExecutor, undefined, undefined, "foreground-owner");
-    const dispatch = await foreground.dispatchOnce({ eligibleTaskIds: ["task-alpha"] });
+    const dispatch = await foreground.dispatchOnce({
+      dispatchGrants: dispatchGrantsFor("foreground-owner", ["task-alpha"])
+    });
     const attemptId = store.listAttempts("task-alpha")[0]!.id;
 
     await expect(foreground.handoff({
@@ -218,7 +328,9 @@ describe("TaskScheduler", () => {
       results: [{ kind: "text", content: "background result" }]
     }));
     const background = makeScheduler(backgroundExecutor, undefined, undefined, "background-owner");
-    await expect(background.runOnce({ eligibleTaskIds: ["task-alpha"] })).resolves.toMatchObject({
+    releaseHostLease("task-alpha", "foreground-owner");
+    acquireDispatchGrants("background-owner", ["task-alpha"]);
+    await expect(background.runOnce()).resolves.toMatchObject({
       dispatched: 1,
       completed: 1
     });
@@ -254,7 +366,9 @@ describe("TaskScheduler", () => {
         return { outcome: "succeeded", results: [{ kind: "text", content: "stale foreground result" }] };
       });
       const foreground = makeScheduler(foregroundExecutor, undefined, undefined, "foreground-owner");
-      const dispatch = await foreground.dispatchOnce({ eligibleTaskIds: ["task-alpha"] });
+      const dispatch = await foreground.dispatchOnce({
+        dispatchGrants: dispatchGrantsFor("foreground-owner", ["task-alpha"])
+      });
       const attemptId = store.listAttempts("task-alpha")[0]!.id;
 
       await expect(foreground.handoff({
@@ -278,10 +392,14 @@ describe("TaskScheduler", () => {
         results: [{ kind: "text", content: "reviewed background result" }]
       }));
       const background = makeScheduler(backgroundExecutor, undefined, undefined, "background-owner");
-      expect((await background.runOnce({ eligibleTaskIds: ["task-alpha"] })).dispatched).toBe(0);
+      releaseHostLease("task-alpha", "foreground-owner");
+      acquireDispatchGrants("background-owner", ["task-alpha"]);
+      expect((await background.runOnce()).dispatched).toBe(0);
 
       new TaskOperatorService({ store, now }).retry("task-alpha", undefined, "creator-alpha");
-      await expect(background.runOnce({ eligibleTaskIds: ["task-alpha"] })).resolves.toMatchObject({
+      await expect(background.runOnce({
+        dispatchGrants: dispatchGrantsFor("background-owner", ["task-alpha"])
+      })).resolves.toMatchObject({
         dispatched: 1,
         completed: 1
       });
@@ -334,6 +452,8 @@ describe("TaskScheduler", () => {
 
     finishFirst!({ outcome: "succeeded", results: [{ kind: "text", content: "one" }] });
     await firstRun;
+    releaseHostLease("task-alpha", "scheduler-one");
+    acquireDispatchGrants("scheduler-two", ["task-alpha"]);
     expect((await secondScheduler.runOnce()).dispatched).toBe(1);
     expect(store.getTask("task-alpha")?.status).toBe("completed");
   });
@@ -755,6 +875,7 @@ describe("TaskScheduler", () => {
 
   it("waits for an eligible host and pauses before exceeding a zero provider-call budget", async () => {
     store.createTaskGraph(makeGraph([makeStep("host", 0)]));
+    acquireDispatchGrants("scheduler-alpha");
     const unavailable = new TaskScheduler({
       store,
       resultService,
@@ -788,6 +909,7 @@ describe("TaskScheduler", () => {
       outcome: "succeeded",
       results: [{ kind: "text", content: step.key }]
     }));
+    acquireDispatchGrants("scheduler-alpha");
     const scheduler = new TaskScheduler({
       store,
       resultService,
@@ -860,6 +982,7 @@ describe("TaskScheduler", () => {
           usage: usage(1, 20, 0.2),
           usageEntries: [usageEntry(attempt, "request-two", 20, 0.2)]
         });
+    acquireDispatchGrants("scheduler-alpha");
     const scheduler = new TaskScheduler({
       store,
       resultService,
@@ -914,12 +1037,54 @@ describe("TaskScheduler", () => {
     return `${prefix}-${++ids}`;
   }
 
+  function acquireDispatchGrants(
+    ownerId: string,
+    taskIds = store.listTasks().map((task) => task.id),
+    kind: TaskHostKind = "background"
+  ): TaskHostDispatchGrant[] {
+    return taskIds.flatMap((taskId) => {
+      const task = store.getTask(taskId);
+      if (task === null) return [];
+      const existing = store.getTaskHostLease(taskId);
+      if (existing !== null && existing.ownerId === ownerId && existing.kind === kind &&
+          Date.parse(existing.expiresAt) > nowMs) {
+        return [taskHostDispatchGrant(existing)];
+      }
+      const lease = store.acquireTaskHostLease({
+        taskId,
+        workspaceIdentityHash: task.workspace.identityHash,
+        ownerId,
+        kind,
+        acquiredAt: now().toISOString(),
+        expiresAt: new Date(nowMs + 60_000).toISOString()
+      });
+      return lease === null ? [] : [taskHostDispatchGrant(lease)];
+    });
+  }
+
+  function dispatchGrantsFor(ownerId: string, taskIds: readonly string[]): TaskHostDispatchGrant[] {
+    return acquireDispatchGrants(ownerId, [...taskIds]);
+  }
+
+  function releaseHostLease(taskId: string, ownerId: string): void {
+    const lease = store.getTaskHostLease(taskId);
+    if (lease === null || lease.ownerId !== ownerId) return;
+    store.releaseTaskHostLease({
+      taskId,
+      workspaceIdentityHash: lease.workspaceIdentityHash,
+      ownerId,
+      kind: lease.kind,
+      fencingToken: lease.fencingToken
+    });
+  }
+
   function makeScheduler(
     executor: FakeTaskStepExecutor,
     limits?: TaskSchedulerLimits,
     leaseMs?: number,
     ownerId = "scheduler-alpha"
   ): TaskScheduler {
+    acquireDispatchGrants(ownerId);
     return new TaskScheduler({
       store,
       resultService,

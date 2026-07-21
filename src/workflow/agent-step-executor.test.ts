@@ -105,6 +105,7 @@ describe("AgentStepExecutor", () => {
       approvalService: new TaskApprovalService({ store }),
       securityPolicy: capabilityFirstDefaults
     });
+    acquireHostLease(store, graph.task, "scheduler-alpha");
     const scheduler = new TaskScheduler({
       store,
       resultService,
@@ -401,6 +402,7 @@ describe("AgentStepExecutor", () => {
       id: () => nextId("attempt"),
       eventId: () => nextId("scheduler-event")
     });
+    acquireHostLease(store, graph.task, "scheduler-alpha");
 
     expect(await scheduler.runOnce()).toMatchObject({ completed: 1, failed: 0 });
     expect(resolveArtifactContent).toHaveBeenCalledWith(expect.objectContaining({
@@ -534,6 +536,17 @@ function makeDependencyGraph(): ReturnType<typeof makeGraph> {
     revision: graph.revision,
     steps: [dependency, synthesis]
   };
+}
+
+function acquireHostLease(store: SQLiteTaskStore, task: Task, ownerId: string): void {
+  store.acquireTaskHostLease({
+    taskId: task.id,
+    workspaceIdentityHash: task.workspace.identityHash,
+    ownerId,
+    kind: "background",
+    acquiredAt: NOW,
+    expiresAt: "2030-01-01T00:01:00.000Z"
+  });
 }
 
 function attempt(graph: ReturnType<typeof makeGraph>, step: TaskStep = graph.steps[0]!) {

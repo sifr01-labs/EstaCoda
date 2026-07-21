@@ -680,6 +680,8 @@ function scheduler(
   contentRoot: string,
   now?: () => Date
 ): TaskScheduler {
+  const clock = now ?? (() => new Date());
+  acquireTestHostLeases(taskStore, ownerId, clock);
   return new TaskScheduler({
     store: taskStore,
     resultService: new TaskResultService({
@@ -692,6 +694,30 @@ function scheduler(
     resolveExecutor: () => executor,
     ...(now === undefined ? {} : { now })
   });
+}
+
+function acquireTestHostLeases(store: SQLiteTaskStore, ownerId: string, now: () => Date): void {
+  for (const task of store.listTasks()) {
+    const existing = store.getTaskHostLease(task.id);
+    if (existing !== null && existing.ownerId !== ownerId) {
+      store.releaseTaskHostLease({
+        taskId: task.id,
+        workspaceIdentityHash: existing.workspaceIdentityHash,
+        ownerId: existing.ownerId,
+        kind: existing.kind,
+        fencingToken: existing.fencingToken
+      });
+    }
+    if (store.getTaskHostLease(task.id) !== null) continue;
+    store.acquireTaskHostLease({
+      taskId: task.id,
+      workspaceIdentityHash: task.workspace.identityHash,
+      ownerId,
+      kind: "background",
+      acquiredAt: now().toISOString(),
+      expiresAt: new Date(now().getTime() + 60_000).toISOString()
+    });
+  }
 }
 
 function createParentAttempt(

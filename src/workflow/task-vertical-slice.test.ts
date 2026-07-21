@@ -176,6 +176,7 @@ function createHost(
   ownerId: string,
   id: (kind: string) => string
 ): TaskBackgroundHost {
+  acquireTestHostLeases(store, ownerId);
   const scheduler = new TaskScheduler({
     store,
     resultService,
@@ -186,6 +187,30 @@ function createHost(
     eventId: () => id("scheduler-event")
   });
   return new TaskBackgroundHost({ scheduler, delivery, now });
+}
+
+function acquireTestHostLeases(store: SQLiteTaskStore, ownerId: string): void {
+  for (const task of store.listTasks()) {
+    const existing = store.getTaskHostLease(task.id);
+    if (existing !== null && existing.ownerId !== ownerId) {
+      store.releaseTaskHostLease({
+        taskId: task.id,
+        workspaceIdentityHash: existing.workspaceIdentityHash,
+        ownerId: existing.ownerId,
+        kind: existing.kind,
+        fencingToken: existing.fencingToken
+      });
+    }
+    if (store.getTaskHostLease(task.id) !== null) continue;
+    store.acquireTaskHostLease({
+      taskId: task.id,
+      workspaceIdentityHash: task.workspace.identityHash,
+      ownerId,
+      kind: "background",
+      acquiredAt: now().toISOString(),
+      expiresAt: new Date(now().getTime() + 60_000).toISOString()
+    });
+  }
 }
 
 function createResultService(
