@@ -5,12 +5,14 @@ import type {
   TaskAuthorityPolicy,
   TaskBudgetPolicy,
   TaskDeliveryDestination,
+  TaskExecutionPreference,
   TaskIdempotency,
   TaskRetryPolicy,
   TaskStepBudget,
   TaskWorkspaceBinding
 } from "../contracts/task.js";
 import {
+  isTerminalTaskStatus,
   TASK_GRAPH_LIMITS,
   TASK_ORIGIN_COMPLETION_DELIVERY_KEY,
   TASK_TOOL_RISK_CLASSES
@@ -38,11 +40,16 @@ export type DurableDelegationRequest = {
   synthesis?: DelegateSynthesis;
   trustedWorkspace: boolean;
   recoveredTasksFromJsonString?: boolean;
+  executionPreference?: TaskExecutionPreference;
 };
 
 export type DurableDelegationHandle = {
   taskId: string;
-  status: "queued";
+  status: import("../contracts/task.js").TaskStatus;
+  executionPreference: TaskExecutionPreference;
+  execution: "foreground" | "background" | "waiting";
+  backgroundContinuation: "available" | "unavailable" | "unknown";
+  executionWaitingReason?: string;
   stepCount: number;
   workerStepIds: readonly string[];
   synthesisStepId?: string;
@@ -63,6 +70,8 @@ export class DurableDelegationService {
   readonly #visibleTools: () => readonly ToolDefinition[];
   readonly #activeTaskExecution: ActiveTaskExecution | undefined;
   readonly #completionDestination: (() => TaskDeliveryDestination | undefined) | undefined;
+  readonly #executionPreference: (() => TaskExecutionPreference) | undefined;
+  readonly #backgroundContinuation: (() => DurableDelegationHandle["backgroundContinuation"]) | undefined;
   readonly #onTaskCreated: ((taskId: string) => Promise<void>) | undefined;
 
   constructor(options: {
@@ -73,6 +82,8 @@ export class DurableDelegationService {
     visibleTools: () => readonly ToolDefinition[];
     activeTaskExecution?: ActiveTaskExecution;
     completionDestination?: () => TaskDeliveryDestination | undefined;
+    executionPreference?: () => TaskExecutionPreference;
+    backgroundContinuation?: () => DurableDelegationHandle["backgroundContinuation"];
     onTaskCreated?: (taskId: string) => Promise<void>;
     fixedTasks?: FixedTaskService;
   }) {
@@ -84,13 +95,15 @@ export class DurableDelegationService {
     this.#visibleTools = options.visibleTools;
     this.#activeTaskExecution = options.activeTaskExecution;
     this.#completionDestination = options.completionDestination;
+    this.#executionPreference = options.executionPreference;
+    this.#backgroundContinuation = options.backgroundContinuation;
     this.#onTaskCreated = options.onTaskCreated;
   }
 
   async createAndActivate(request: DurableDelegationRequest): Promise<DurableDelegationHandle> {
     const handle = this.create(request);
-    await this.#onTaskCreated?.(handle.taskId);
-    return handle;
+    if (handle.executionPreference === "auto") await this.#onTaskCreated?.(handle.taskId);
+    return this.#refreshHandle(handle);
   }
 
   create(request: DurableDelegationRequest): DurableDelegationHandle {
@@ -101,9 +114,13 @@ export class DurableDelegationService {
     boundedToken(request.toolCallId, "provider tool call ID");
     const sessionId = boundedToken(this.#creatorSessionId(), "creator session ID");
     const completionDestination = this.#completionDestination?.();
+    const parent = this.#parentContext();
+    const executionPreference = request.executionPreference ?? this.#executionPreference?.() ?? parent?.executionPreference ?? "auto";
+    if (executionPreference !== "auto" && executionPreference !== "background") {
+      throw new Error("Delegation execution preference is invalid.");
+    }
     const creationKey = delegationCreationKey(this.#store.profileId, sessionId, request.toolCallId);
     const existing = this.#store.getTaskByCreationKey(creationKey);
-    const parent = this.#parentContext();
     const stepAuthorities = request.tasks.map((item) => this.#authorityFor(item, parent?.authority));
     const synthesisAuthority = request.synthesis === undefined
       ? undefined
@@ -185,6 +202,7 @@ export class DurableDelegationService {
     const graph = this.#fixedTasks.create({
       creatorSessionId: sessionId,
       source: "delegation",
+      executionPreference,
       creationKey,
       objective: request.synthesis !== undefined
         ? synthesisObjective(request.synthesis)
@@ -195,7 +213,7 @@ export class DurableDelegationService {
       authorityPolicy: taskAuthority,
       budgetPolicy: budgets.task,
       steps,
-      planReason: "Created by delegate_task as durable background work.",
+      planReason: "Created by delegate_task as durable delegated work.",
       ...(parent === undefined ? { originTurnId: request.toolCallId } : {}),
       ...(completionDestination === undefined ? {} : {
         completionDelivery: {
@@ -216,7 +234,36 @@ export class DurableDelegationService {
     return handle(graph, parent, request, existing !== null);
   }
 
-  #parentContext(): { taskId: string; attemptId: string; authority: TaskAuthorityPolicy; budget: TaskStepBudget } | undefined {
+  #refreshHandle(handle: DurableDelegationHandle): DurableDelegationHandle {
+    const task = this.#store.getTask(handle.taskId);
+    if (task === null) return handle;
+    const lease = this.#store.getTaskHostLease(task.id);
+    const execution = lease !== null && Date.parse(lease.expiresAt) > Date.now() ? lease.kind : "waiting";
+    const backgroundContinuation = this.#backgroundContinuation?.() ?? "unknown";
+    return {
+      ...handle,
+      status: task.status,
+      execution,
+      backgroundContinuation,
+      ...(execution === "waiting" && !isTerminalTaskStatus(task.status) ? {
+        executionWaitingReason: task.executionPreference === "background"
+          ? backgroundContinuation === "unavailable"
+            ? "Waiting for an active background host."
+            : "Waiting for the background host to claim this Task."
+          : backgroundContinuation === "unavailable"
+            ? "Waiting for an eligible host; no active background continuation is available."
+            : "Waiting for an eligible Task host."
+      } : {})
+    };
+  }
+
+  #parentContext(): {
+    taskId: string;
+    attemptId: string;
+    authority: TaskAuthorityPolicy;
+    budget: TaskStepBudget;
+    executionPreference: TaskExecutionPreference;
+  } | undefined {
     if (this.#activeTaskExecution === undefined) return undefined;
     const execution = this.#activeTaskExecution;
     const task = this.#store.getTask(execution.taskId);
@@ -230,7 +277,13 @@ export class DurableDelegationService {
     if (step.childTaskPolicy !== "fire_and_forget") {
       throw new Error("The active parent Step forbids runtime child Tasks.");
     }
-    return { taskId: task.id, attemptId: attempt.id, authority: step.authorityPolicy, budget: step.budget };
+    return {
+      taskId: task.id,
+      attemptId: attempt.id,
+      authority: step.authorityPolicy,
+      budget: step.budget,
+      executionPreference: task.executionPreference
+    };
   }
 
   #authorityFor(item: DelegateTaskItem, ceiling?: TaskAuthorityPolicy): TaskAuthorityPolicy {
@@ -395,7 +448,10 @@ function handle(
   const synthesisStep = graph.steps.find((step) => step.executor.role === "synthesis");
   return {
     taskId: graph.task.id,
-    status: "queued",
+    status: graph.task.status,
+    executionPreference: graph.task.executionPreference,
+    execution: "waiting",
+    backgroundContinuation: "unknown",
     stepCount: graph.steps.length,
     workerStepIds: graph.steps.filter((step) => step.executor.role !== "synthesis").map((step) => step.id),
     ...(synthesisStep === undefined

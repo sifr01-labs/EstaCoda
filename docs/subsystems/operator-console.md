@@ -332,7 +332,7 @@ Attachments:
 ### Phase E: Durable Task Creation
 
 `delegate_task` is a short Task-creation operation in the active turn. It
-persists a fixed graph and returns a queued Task handle; it does not keep the
+persists a fixed graph and returns a bounded Task handle; it does not keep the
 turn open while worker Steps execute. Running Attempts belong to the Task host
 and use Task/background-work surfaces rather than nested child cards owned by
 the creating tool row.
@@ -348,6 +348,10 @@ messages are not rewritten. Task cards use the same complete/lower-bound/
 unavailable cost language as turns and never present missing pricing as zero.
 
 Linked Tasks also render as retained Task cards in the interactive console.
+The card footer and inspection projection distinguish Task lifecycle from live
+foreground/background/waiting ownership, show the immutable preference and
+background-continuation readiness, and include only a bounded safe wait reason.
+Expired leases and Task status alone are never presented as active ownership.
 Cards remain available after completion, failure, partial settlement, or
 cancellation; they are not transient worker rows. `Tab` (when no higher-priority
 typeahead or attachment surface owns it) or `Ctrl+T` focuses the Task cards,

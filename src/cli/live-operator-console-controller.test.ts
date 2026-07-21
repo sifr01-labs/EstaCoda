@@ -168,6 +168,10 @@ describe("LiveOperatorConsoleController", () => {
         taskId: "T-live-1",
         objective: "Research competitor",
         status: "running",
+        executionPreference: "auto",
+        execution: "foreground",
+        foregroundOwnerActive: true,
+        backgroundContinuation: "available",
         progress: { completed: 0, skipped: 0, total: 1 },
         steps: [{
           stepId: "step-1",

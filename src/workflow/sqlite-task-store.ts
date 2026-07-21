@@ -195,11 +195,11 @@ export class SQLiteTaskStore implements TaskStore {
       `insert into tasks (
         id, profile_id, creator_session_id, root_task_id, origin_session_id, origin_turn_id,
         parent_task_id, parent_attempt_id,
-        source, creation_key, objective, status, workspace_path, workspace_identity_hash,
+        source, execution_preference, creation_key, objective, status, workspace_path, workspace_identity_hash,
         authority_policy_json, budget_policy_json, active_plan_revision_id,
         wait_reason_json, failure_json, created_by_json,
         created_at, updated_at, started_at, completed_at, cancelled_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(...taskValues(task));
   }
 
@@ -218,6 +218,7 @@ export class SQLiteTaskStore implements TaskStore {
       parentTaskId: existing.parentTaskId,
       parentAttemptId: existing.parentAttemptId,
       source: existing.source,
+      executionPreference: existing.executionPreference,
       creationKey: existing.creationKey,
       objective: existing.objective,
       workspace: existing.workspace,
@@ -231,6 +232,7 @@ export class SQLiteTaskStore implements TaskStore {
       parentTaskId: task.parentTaskId,
       parentAttemptId: task.parentAttemptId,
       source: task.source,
+      executionPreference: task.executionPreference,
       creationKey: task.creationKey,
       objective: task.objective,
       workspace: task.workspace,
@@ -243,7 +245,7 @@ export class SQLiteTaskStore implements TaskStore {
     const result = this.#db.query(
       `update tasks set
         creator_session_id = ?, root_task_id = ?, origin_session_id = ?, origin_turn_id = ?,
-        parent_task_id = ?, parent_attempt_id = ?, source = ?,
+        parent_task_id = ?, parent_attempt_id = ?, source = ?, execution_preference = ?,
         creation_key = ?, objective = ?, status = ?, workspace_path = ?, workspace_identity_hash = ?,
         authority_policy_json = ?, budget_policy_json = ?, active_plan_revision_id = ?,
         wait_reason_json = ?, failure_json = ?, created_by_json = ?, created_at = ?,
@@ -1545,6 +1547,7 @@ function taskValues(task: Task): SQLiteValue[] {
     task.parentTaskId ?? null,
     task.parentAttemptId ?? null,
     task.source,
+    task.executionPreference,
     task.creationKey ?? null,
     task.objective,
     task.status,
@@ -1654,6 +1657,7 @@ function rowToTask(row: TaskRow): Task {
     ...(row.parent_task_id === null ? {} : { parentTaskId: row.parent_task_id }),
     ...(row.parent_attempt_id === null ? {} : { parentAttemptId: row.parent_attempt_id }),
     source: row.source as Task["source"],
+    executionPreference: row.execution_preference as Task["executionPreference"],
     ...(row.creation_key === null ? {} : { creationKey: row.creation_key }),
     objective: row.objective,
     status: row.status as Task["status"],
@@ -2053,6 +2057,7 @@ type TaskRow = {
   parent_task_id: string | null;
   parent_attempt_id: string | null;
   source: string;
+  execution_preference: string;
   creation_key: string | null;
   objective: string;
   status: string;

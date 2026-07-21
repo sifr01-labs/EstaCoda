@@ -9,6 +9,7 @@ import type { SessionDB } from "./contracts/session.js";
 import { canRunInteractive } from "./ui/terminal-capabilities.js";
 import { createRuntime } from "./runtime/create-runtime.js";
 import { runSessionLoop, handleSlashCommand } from "./cli/session-loop.js";
+import { detectTaskBackgroundHost } from "./cli/task-commands.js";
 import { runOneShotPrompt } from "./cli/one-shot.js";
 import type { ModelSwitchContext } from "./providers/model-switch-resolver.js";
 import { resolveEffectiveSessionModelOverride } from "./providers/model-switch-resolver.js";
@@ -215,6 +216,7 @@ async function main(): Promise<void> {
     });
     const effectiveRoute = effectiveOverride?.ok === true ? effectiveOverride.route : latestConfig.primaryModelRoute;
     const effectiveModel = effectiveOverride?.ok === true ? effectiveOverride.route.profile : latestConfig.model;
+    const taskBackgroundHost = await detectTaskBackgroundHost({ homeDir, profileId });
 
     return createRuntime({
       tokens: resolveTokens("standard", "dark", "kemetBlue"),
@@ -262,6 +264,7 @@ async function main(): Promise<void> {
       securityAssessor: latestConfig.security.assessor,
       approvalController: cliApprovalController,
       workspaceTrusted: nowTrusted,
+      taskBackgroundContinuation: taskBackgroundHost === "active" ? "available" : "unavailable",
       onTaskCreated: activateForegroundTask
     });
   }

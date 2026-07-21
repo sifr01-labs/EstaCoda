@@ -202,6 +202,7 @@ export function buildGatewayCronRuntimeOptions(input: GatewayCronRuntimeBaseInpu
     disabledToolsets: [...CRON_FORCED_DISABLED_TOOLSETS],
     enabledToolsets: input.job?.enabledToolsets,
     workspaceTrusted: input.workspaceTrusted ?? false,
+    taskBackgroundContinuation: "available",
   };
   };
   return input.job === undefined ? {
@@ -255,6 +256,7 @@ export function buildGatewayCronRuntimeOptions(input: GatewayCronRuntimeBaseInpu
     disableCronTools: true,
     disabledToolsets: [...CRON_FORCED_DISABLED_TOOLSETS],
     workspaceTrusted: input.workspaceTrusted ?? true,
+    taskBackgroundContinuation: "available",
   } : build();
 }
 
@@ -866,6 +868,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         websiteBlocklist: latestConfig.security.websiteBlocklist
       },
       trustStorePath: tsp,
+      taskBackgroundContinuation: "available",
     });
   };
 

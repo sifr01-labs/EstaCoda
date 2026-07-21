@@ -27,6 +27,7 @@ import {
   migrateProviderUsageLedgerSchemaV18,
   migrateTaskTreeBudgetSchemaV17,
   migrateTaskCorrectiveFoundationSchemaV14,
+  migrateTaskExecutionPreferenceSchemaV20,
   migrateTaskHostOwnershipSchemaV19,
   migrateTaskVerticalSliceSchemaV15,
   migrateTaskSchedulerSchemaV11,
@@ -735,6 +736,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     this.#runMigrationStep(17, "v0.10-schema-v17-task-tree-budgets", () => migrateTaskTreeBudgetSchemaV17(this.#db));
     this.#runMigrationStep(18, "v0.10-schema-v18-provider-usage-ledger", () => migrateProviderUsageLedgerSchemaV18(this.#db));
     this.#runMigrationStep(19, "v0.10-schema-v19-task-host-ownership", () => migrateTaskHostOwnershipSchemaV19(this.#db));
+    this.#runMigrationStep(20, "v0.10-schema-v20-task-execution-preference", () => migrateTaskExecutionPreferenceSchemaV20(this.#db));
   }
 
   #withMigrationLock(migrate: () => void): void {

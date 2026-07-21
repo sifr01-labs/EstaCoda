@@ -180,7 +180,7 @@ Output is bounded, redacted, source-labeled, and explicitly marked as untrusted 
 
 ## Delegation Tool
 
-`delegate_task` creates a fixed durable Task graph and returns its handle immediately. It does not run or await a child inside the provider turn. A single request creates one Step; a batch creates independent Steps under one Task. The durable scheduler owns execution, concurrency, cancellation, recovery, results, usage, and settlement.
+`delegate_task` creates a fixed durable Task graph and returns its handle immediately. It does not run or await a child inside the provider turn. A single request creates one Step; a batch creates independent Steps under one Task. The immutable `executionPreference` is `auto` or `background`: interactive `auto` work is claimed by the process Task host, while `background` bypasses foreground admission. The durable scheduler owns execution, concurrency, cancellation, recovery, results, usage, and settlement.
 
 Single-task input:
 

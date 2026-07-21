@@ -13,6 +13,7 @@ import {
 import { resolveTaskWorkspaceBinding } from "../workflow/task-workspace.js";
 import { readConfig } from "../config/runtime-config.js";
 import { isolateLtr } from "../ui/bidi.js";
+import type { TaskExecutionPreference } from "../contracts/task.js";
 import type { CliCommandResult, CliOptions } from "./cli.js";
 
 type TaskCommandLocale = "en" | "ar";
@@ -21,7 +22,7 @@ export type TaskCommandContext = {
   args: readonly string[];
   service: TaskOperatorService;
   authorizedSessionId?: string;
-  begin?: (objective: string, creatorSessionId?: string) => Promise<TaskBeginOutcome>;
+  begin?: (objective: string, creatorSessionId?: string, executionPreference?: TaskExecutionPreference) => Promise<TaskBeginOutcome>;
   workspaceTrusted?: (projection: TaskStatusProjection) => Promise<boolean>;
   backgroundHost?: () => Promise<"active" | "inactive">;
   locale?: TaskCommandLocale;
@@ -41,7 +42,11 @@ export async function taskCommand(options: CliOptions, args: string[]): Promise<
   try {
     db = await createSQLiteSessionDB({ path: paths.sessionsSqlitePath });
     const store = new SQLiteTaskStore({ db: db.db, profileId });
-    const service = new TaskOperatorService({ store });
+    const initialBackgroundHost = await detectTaskBackgroundHost({ homeDir, profileId });
+    const service = new TaskOperatorService({
+      store,
+      backgroundContinuation: () => initialBackgroundHost === "active" ? "available" : "unavailable"
+    });
     const profilePaths = resolveProfileStateHome({ homeDir, profileId });
     locale = (await readConfig(profilePaths.configPath)).config.ui?.language === "ar" ? "ar" : "en";
     const trust = new WorkspaceTrustStore({ homeDir });
@@ -49,7 +54,7 @@ export async function taskCommand(options: CliOptions, args: string[]): Promise<
       args,
       service,
       locale,
-      begin: async (objective, creatorSessionId) => {
+      begin: async (objective, creatorSessionId, executionPreference) => {
         if (!(await trust.isTrusted(options.workspaceRoot))) {
           throw new Error("Task creation requires a trusted workspace.");
         }
@@ -68,7 +73,12 @@ export async function taskCommand(options: CliOptions, args: string[]): Promise<
         });
         try {
           return {
-            task: service.begin({ objective: normalizedObjective, workspace, creatorSessionId: creatorSession.id }),
+            task: service.begin({
+              objective: normalizedObjective,
+              workspace,
+              creatorSessionId: creatorSession.id,
+              executionPreference
+            }),
             creatorSessionId: creatorSession.id
           };
         } catch (error) {
@@ -82,7 +92,7 @@ export async function taskCommand(options: CliOptions, args: string[]): Promise<
         const task = store.getTask(projection.taskId);
         return task !== null && await trust.isTrusted(task.workspace.canonicalPath);
       },
-      backgroundHost: async () => detectTaskBackgroundHost({ homeDir, profileId })
+      backgroundHost: async () => initialBackgroundHost
     });
     return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
   } catch {
@@ -126,20 +136,28 @@ export async function executeTaskCommand(context: TaskCommandContext): Promise<{
           "إنشاء المهام غير متاح في بيئة التشغيل هذه."));
         const parsed = parseBegin(rest, locale, context.authorizedSessionId === undefined);
         if (!parsed.ok) return fail(parsed.message);
-        const created = await context.begin(parsed.objective, parsed.sessionId ?? context.authorizedSessionId);
+        const created = await context.begin(
+          parsed.objective,
+          parsed.sessionId ?? context.authorizedSessionId,
+          parsed.executionPreference
+        );
         const task = created.task;
-        const host = await context.backgroundHost?.() ?? "unknown";
+        const host = await context.backgroundHost?.();
+        const continuation = effectiveBackgroundContinuation(task, host);
         return ok([
           `${copy(locale, "Created Task", "تم إنشاء المهمة")}: ${technical(locale, task.taskId)}`,
           context.authorizedSessionId === undefined
             ? `${copy(locale, "Creator session", "جلسة المنشئ")}: ${technical(locale, created.creatorSessionId)}`
             : undefined,
           `${copy(locale, "Status", "الحالة")}: ${technical(locale, task.status)}`,
+          `${copy(locale, "Execution", "التنفيذ")}: ${technical(locale, displayExecution(task))}`,
+          `${copy(locale, "Execution preference", "تفضيل التنفيذ")}: ${technical(locale, task.executionPreference)}`,
+          `${copy(locale, "Foreground owner", "مالك التنفيذ الأمامي")}: ${copy(locale, task.foregroundOwnerActive ? "active" : "inactive", task.foregroundOwnerActive ? "نشط" : "غير نشط")}`,
+          `${copy(locale, "Background continuation", "الاستمرار في الخلفية")}: ${technical(locale, continuation)}`,
           `${copy(locale, "Steps", "الخطوات")}: ${task.progress.total}`,
-          `${copy(locale, "Background host", "المضيف الخلفي")}: ${technical(locale, host)}`,
-          host === "inactive" ? copy(locale,
-            "The Task is durable and queued, but no active background host was detected.",
-            "المهمة محفوظة ودائمة وفي قائمة الانتظار، لكن لم يُكتشف مضيف خلفي نشط.") : undefined
+          task.executionWaitingReason === undefined
+            ? undefined
+            : `${copy(locale, "Waiting reason", "سبب الانتظار")}: ${oneLine(task.executionWaitingReason)}`
         ].filter((line): line is string => line !== undefined).join("\n"));
       }
       case "list": {
@@ -150,6 +168,7 @@ export async function executeTaskCommand(context: TaskCommandContext): Promise<{
         return ok(tasks.map((task) => [
           technical(locale, task.taskId),
           technical(locale, task.status),
+          technical(locale, displayExecution(task)),
           `${task.progress.completed}/${task.progress.total}`,
           oneLine(task.objective)
         ].join("\t")).join("\n"));
@@ -206,7 +225,7 @@ export function taskHelp(locale: TaskCommandLocale = "en", inSession = false): s
   const prefix = inSession ? "/task" : "task";
   return [
     copy(locale, "Durable Task commands", "أوامر المهام الدائمة"),
-    `  ${technical(locale, `${prefix} begin${inSession ? "" : " [--session <id>]"} <objective>`)}`,
+    `  ${technical(locale, `${prefix} begin${inSession ? "" : " [--session <id>]"} [--background] <objective>`)}`,
     `  ${technical(locale, `${prefix} list [limit]`)}`,
     `  ${technical(locale, `${prefix} show <task-id>`)}`,
     `  ${technical(locale, `${prefix} pause <task-id>`)}`,
@@ -224,10 +243,15 @@ function renderTask(
   locale: TaskCommandLocale
 ): string {
   const waiting = task.progress.waiting_for_input + task.progress.waiting_for_approval;
+  const continuation = effectiveBackgroundContinuation(task, backgroundHost);
   const lines = [
     `${copy(locale, "Task", "المهمة")} ${technical(locale, task.taskId)} · ${oneLine(task.objective)}`,
     "",
     `${copy(locale, "Status", "الحالة")}: ${technical(locale, task.status)}`,
+    `${copy(locale, "Execution", "التنفيذ")}: ${technical(locale, displayExecution(task))}`,
+    `${copy(locale, "Execution preference", "تفضيل التنفيذ")}: ${technical(locale, task.executionPreference)}`,
+    `${copy(locale, "Foreground owner", "مالك التنفيذ الأمامي")}: ${copy(locale, task.foregroundOwnerActive ? "active" : "inactive", task.foregroundOwnerActive ? "نشط" : "غير نشط")}`,
+    `${copy(locale, "Background continuation", "الاستمرار في الخلفية")}: ${technical(locale, continuation)}`,
     copy(locale,
       `Progress: ${task.progress.completed} of ${task.progress.total} Steps complete`,
       `التقدم: اكتملت ${task.progress.completed} من ${task.progress.total} خطوة`),
@@ -241,6 +265,7 @@ function renderTask(
       : `${copy(locale, "Primary result", "النتيجة الرئيسية")}: ${technical(locale, task.results.find((result) => result.primary)!.handle)}`,
     workspaceTrusted === undefined ? undefined : `${copy(locale, "Workspace", "مساحة العمل")}: ${workspaceTrusted ? copy(locale, "trusted", "موثوقة") : copy(locale, "not trusted", "غير موثوقة")}`,
     backgroundHost === undefined ? undefined : `${copy(locale, "Background host", "المضيف الخلفي")}: ${technical(locale, backgroundHost)}`,
+    task.executionWaitingReason === undefined ? undefined : `${copy(locale, "Execution waiting reason", "سبب انتظار التنفيذ")}: ${oneLine(task.executionWaitingReason)}`,
     task.waitReason === undefined ? undefined : `${copy(locale, "Waiting reason", "سبب الانتظار")}: ${oneLine(task.waitReason)}`,
     task.failure === undefined ? undefined : `${copy(locale, "Failure", "الفشل")}: ${technical(locale, task.failure.class)}`
   ];
@@ -251,8 +276,9 @@ function parseBegin(
   args: readonly string[],
   locale: TaskCommandLocale,
   allowSession: boolean
-): { ok: true; objective: string; sessionId?: string } | { ok: false; message: string } {
+): { ok: true; objective: string; sessionId?: string; executionPreference: TaskExecutionPreference } | { ok: false; message: string } {
   let sessionId: string | undefined;
+  let executionPreference: TaskExecutionPreference = "auto";
   const objective: string[] = [];
   for (let index = 0; index < args.length; index++) {
     const value = args[index]!;
@@ -264,14 +290,28 @@ function parseBegin(
       if (next === undefined || next.startsWith("-")) return { ok: false, message: copy(locale, "--session requires a session ID.", "يتطلب --session معرّف جلسة.") };
       sessionId = next;
       index += 1;
+    } else if (value === "--background") {
+      executionPreference = "background";
     } else if (value.startsWith("-")) {
       return { ok: false, message: `${copy(locale, "Unknown task begin option", "خيار غير معروف لأمر task begin")}: ${value}` };
     } else objective.push(value);
   }
   const text = objective.join(" ").trim();
   return text.length === 0
-    ? { ok: false, message: `${copy(locale, "Usage", "الاستخدام")}: task begin [--session <id>] <objective>` }
-    : { ok: true, objective: text, ...(sessionId === undefined ? {} : { sessionId }) };
+    ? { ok: false, message: `${copy(locale, "Usage", "الاستخدام")}: task begin [--session <id>] [--background] <objective>` }
+    : { ok: true, objective: text, executionPreference, ...(sessionId === undefined ? {} : { sessionId }) };
+}
+
+function effectiveBackgroundContinuation(
+  task: TaskStatusProjection,
+  host: "active" | "inactive" | undefined
+): TaskStatusProjection["backgroundContinuation"] {
+  if (task.backgroundContinuation !== "unknown") return task.backgroundContinuation;
+  return host === undefined ? "unknown" : host === "active" ? "available" : "unavailable";
+}
+
+function displayExecution(task: TaskStatusProjection): TaskStatusProjection["execution"] | "settled" {
+  return ["completed", "partial", "failed", "cancelled"].includes(task.status) ? "settled" : task.execution;
 }
 
 function parseLimit(args: readonly string[], locale: TaskCommandLocale): { ok: true; value: number } | { ok: false; message: string } {

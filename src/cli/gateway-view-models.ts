@@ -85,6 +85,11 @@ export type GatewayStatusData = {
     readonly running: number;
     readonly waiting: number;
     readonly terminal: number;
+    readonly foregroundOwned: number;
+    readonly backgroundOwned: number;
+    readonly waitingForHost: number;
+    readonly autoPreference: number;
+    readonly backgroundPreference: number;
   };
 };
 
@@ -152,7 +157,12 @@ function buildDurableTasksBlock(summary: NonNullable<GatewayStatusData["durableT
       kv("Queued", summary.queued),
       kv("Running", summary.running),
       kv("Waiting", summary.waiting),
-      kv("Terminal", summary.terminal)
+      kv("Terminal", summary.terminal),
+      kv("Execution: foreground", summary.foregroundOwned),
+      kv("Execution: background", summary.backgroundOwned),
+      kv("Execution: waiting", summary.waitingForHost),
+      kv("Preference: auto", summary.autoPreference),
+      kv("Preference: background", summary.backgroundPreference)
     ]
   });
 }

@@ -42,6 +42,12 @@ describe("TaskOperatorService", () => {
     const step = store.listSteps(task.id, task.activePlanRevisionId!)[0]!;
 
     expect(created).toMatchObject({ status: "queued", progress: { total: 1, pending: 1 } });
+    expect(created).toMatchObject({
+      executionPreference: "auto",
+      execution: "waiting",
+      foregroundOwnerActive: false,
+      backgroundContinuation: "unknown"
+    });
     expect(store.listSessionLinks(task.id)).toEqual([
       expect.objectContaining({ sessionId: "owner", relationship: "creator" })
     ]);
@@ -56,6 +62,35 @@ describe("TaskOperatorService", () => {
     expect(step.authorityPolicy.blockedTools).toContain("terminal.run");
   });
 
+  it("projects live host ownership and safe continuation readiness", () => {
+    const readyService = new TaskOperatorService({
+      store,
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+      backgroundContinuation: () => "available"
+    });
+    const created = readyService.begin({
+      objective: "Inspect host ownership.",
+      workspace: workspace(),
+      creatorSessionId: "owner"
+    });
+    store.acquireTaskHostLease({
+      taskId: created.taskId,
+      workspaceIdentityHash: workspace().identityHash,
+      ownerId: "foreground-owner-secret",
+      kind: "foreground",
+      acquiredAt: "2026-01-01T00:00:00.000Z",
+      expiresAt: "2026-01-01T00:01:00.000Z"
+    });
+
+    const projected = readyService.status(created.taskId, "owner");
+    expect(projected).toMatchObject({
+      execution: "foreground",
+      foregroundOwnerActive: true,
+      backgroundContinuation: "available"
+    });
+    expect(JSON.stringify(projected)).not.toContain("foreground-owner-secret");
+  });
+
   it("atomically binds an authorized gateway completion destination at creation", () => {
     const created = service.begin({
       objective: "Inspect the runtime and report back.",
@@ -66,7 +101,7 @@ describe("TaskOperatorService", () => {
     });
     const task = store.getTask(created.taskId)!;
 
-    expect(task.source).toBe("gateway");
+    expect(task).toMatchObject({ source: "gateway", executionPreference: "background" });
     expect(store.listSessionLinks(task.id)).toEqual([
       expect.objectContaining({ sessionId: "owner", relationship: "creator" })
     ]);

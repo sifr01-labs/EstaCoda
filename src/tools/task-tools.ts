@@ -11,7 +11,7 @@ export function createTaskTools(options: {
   return [{
     name: "task.status",
     description:
-      "Inspect bounded status, Step progress, usage completeness, and result handles for a durable Task linked to this session. Does not expose workspace paths, prompts, tool inputs, credentials, or full result bodies.",
+      "Inspect bounded lifecycle status, execution ownership/readiness, Step progress, usage completeness, and result handles for a durable Task linked to this session. Does not expose workspace paths, host identities, prompts, tool inputs, credentials, or full result bodies.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -36,6 +36,11 @@ export function createTaskTools(options: {
           content: [
             `Task ${status.taskId}`,
             `Status: ${status.status}`,
+            `Execution: ${["completed", "partial", "failed", "cancelled"].includes(status.status) ? "settled" : status.execution}`,
+            `Execution preference: ${status.executionPreference}`,
+            `Foreground owner: ${status.foregroundOwnerActive ? "active" : "inactive"}`,
+            `Background continuation: ${status.backgroundContinuation}`,
+            ...(status.executionWaitingReason === undefined ? [] : [`Execution waiting reason: ${status.executionWaitingReason}`]),
             `Progress: ${status.progress.completed}/${status.progress.total} Steps completed`,
             `Running: ${status.progress.running}`,
             `Waiting: ${status.progress.waiting_for_input + status.progress.waiting_for_approval}`,

@@ -947,6 +947,7 @@ function makeGraph(
     rootTaskId: "task-alpha",
     originSessionId: "creator-alpha",
     source: "cli",
+    executionPreference: "auto",
     creationKey: "create-alpha",
     objective: "Execute a deterministic durable Task.",
     status: "queued",

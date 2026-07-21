@@ -40,6 +40,10 @@ function projection() {
     objective: "Inspect",
     status: "running",
     source: "cli",
+    executionPreference: "auto",
+    execution: "foreground",
+    foregroundOwnerActive: true,
+    backgroundContinuation: "available",
     progress: {
       pending: 0,
       ready: 0,

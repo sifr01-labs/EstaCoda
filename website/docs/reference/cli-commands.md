@@ -366,7 +366,7 @@ estacoda memory finalization prune [--keep N]
 ## Durable Tasks
 
 ```bash
-estacoda task begin [--session <session-id>] <objective>
+estacoda task begin [--session <session-id>] [--background] <objective>
 estacoda task list [limit]
 estacoda task show <task-id>
 estacoda task pause <task-id>
@@ -377,6 +377,8 @@ estacoda task result <task-id>
 ```
 
 **State touched:** Profile-scoped durable Task records in the global session SQLite database; Task result bodies remain in the selected profile's private result store.
+
+The default immutable execution preference is `auto` (interactive foreground first, then gateway takeover). `--background` selects direct gateway ownership. `task list` and `task show` distinguish lifecycle status from current execution ownership and report safe background-continuation readiness.
 
 **Behavior:** `begin` requires a trusted workspace and creates one conservative agent Step. Without `--session`, it creates a visible profile-owned creator session and prints that session ID with the Task handle. With `--session`, the named session must already exist in the selected profile. `show` reports bounded progress, running/waiting counts, usage/pricing completeness, workspace trust, result count, and background-host state. `pause`, `resume`, `cancel`, and explicit `retry` mutate durable state. `result` lists opaque handles and summaries, not full bodies or local paths. A command-local `--profile` override never changes the active profile.
 

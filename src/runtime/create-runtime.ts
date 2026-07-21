@@ -100,7 +100,7 @@ import { readCachedUpdateInfo } from "../lifecycle/update-engine.js";
 import { detectInstallMethod } from "../lifecycle/install-method.js";
 import { buildStartupUpdateHint } from "../lifecycle/startup-update.js";
 import { createSessionId } from "../session/session-id.js";
-import { isTaskDeliveryDestination, type TaskDeliveryDestination, type TaskSource } from "../contracts/task.js";
+import { isTaskDeliveryDestination, type TaskDeliveryDestination, type TaskExecutionPreference, type TaskSource } from "../contracts/task.js";
 
 export type TaskCreationOrigin = {
   source: Extract<TaskSource, "cli" | "gateway" | "runtime">;
@@ -208,6 +208,8 @@ export type RuntimeOptions = {
   taskCreationOrigin?: TaskCreationOrigin;
   /** Process-level activation hook invoked after a durable Task graph is committed. */
   onTaskCreated?: (taskId: string) => Promise<void>;
+  /** Process-local view of whether a compatible gateway can continue durable Tasks. */
+  taskBackgroundContinuation?: TaskStatusProjection["backgroundContinuation"];
 };
 
 type RuntimeBranding = Pick<
@@ -313,7 +315,7 @@ export type Runtime = {
   /** Available only for profile-backed runtimes that can host durable agent Steps. */
   taskAgentExecutor?: AgentStepExecutor;
   taskOperator?: TaskOperatorService;
-  beginTask?(objective: string): Promise<TaskStatusProjection>;
+  beginTask?(objective: string, options?: { executionPreference?: TaskExecutionPreference }): Promise<TaskStatusProjection>;
   /** Scopes Task provenance to one authorized surface invocation, including cached runtimes. */
   withTaskCreationOrigin?<T>(origin: TaskCreationOrigin, work: () => Promise<T>): Promise<T>;
 };
@@ -345,7 +347,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         contentRoot: profilePaths.taskResultsPath,
         sessionDb
       });
-  const taskOperatorService = taskStore === undefined ? undefined : new TaskOperatorService({ store: taskStore });
+  const taskOperatorService = taskStore === undefined ? undefined : new TaskOperatorService({
+    store: taskStore,
+    backgroundContinuation: () => options.taskBackgroundContinuation ?? "unknown"
+  });
   const closeSessionDbOnDispose = options.closeSessionDbOnDispose ?? true;
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
   const taskWorkspace = taskStore === undefined ? undefined : await resolveTaskWorkspaceBinding(workspaceRoot);
@@ -961,6 +966,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           config: options.delegationConfig ?? DEFAULT_DELEGATION_CONFIG,
           visibleTools: () => toolRegistry.list(),
           completionDestination: () => currentTaskCreationOrigin().completionDestination,
+          executionPreference: () => currentTaskCreationOrigin().source === "gateway" ? "background" : "auto",
+          backgroundContinuation: () => options.taskBackgroundContinuation ?? "unknown",
           onTaskCreated: options.onTaskCreated
         }),
     trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot),
@@ -1025,7 +1032,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     taskOperator: taskOperatorService,
     beginTask: taskOperatorService === undefined || taskWorkspace === undefined
       ? undefined
-      : async (objective) => {
+      : async (objective, beginOptions = {}) => {
           if (!activeTrustedWorkspace && !(await trustStore.isTrusted(workspaceRoot))) {
             throw new Error("Task creation requires a trusted workspace.");
           }
@@ -1035,10 +1042,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             workspace: taskWorkspace,
             creatorSessionId: sessionRuntimeContext.currentSessionId(),
             source: origin.source,
+            executionPreference: beginOptions.executionPreference,
             completionDestination: origin.completionDestination
           });
-          await options.onTaskCreated?.(task.taskId);
-          return task;
+          if (task.executionPreference === "auto") await options.onTaskCreated?.(task.taskId);
+          return taskOperatorService.status(task.taskId, sessionRuntimeContext.currentSessionId());
         },
     withTaskCreationOrigin(origin, work) {
       return taskCreationOriginContext.run(normalizeTaskCreationOrigin(origin), work);

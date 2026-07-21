@@ -8,6 +8,7 @@ import type {
   TaskDeliveryBinding,
   TaskDeliveryDestination,
   TaskEvent,
+  TaskExecutionPreference,
   TaskGuidance,
   TaskPlanRevision,
   TaskSource,
@@ -45,6 +46,7 @@ export type CreateFixedTaskInput = {
   /** Every executable fixed Task has an explicit profile-owned authorization root. */
   creatorSessionId: string;
   source: TaskSource;
+  executionPreference?: TaskExecutionPreference;
   creationKey?: string;
   /** Stable origin attribution for a root Task; descendants inherit it unchanged. */
   originTurnId?: string;
@@ -130,6 +132,7 @@ export class FixedTaskService {
         parentAttemptId: parent.attemptId
       }),
       source: normalized.source,
+      executionPreference: normalized.executionPreference,
       ...(normalized.creationKey === undefined ? {} : { creationKey: normalized.creationKey }),
       objective: normalized.objective,
       status: "queued",
@@ -359,8 +362,9 @@ export class FixedTaskService {
 
 type NormalizedCreateFixedTaskInput = Omit<
   CreateFixedTaskInput,
-  "creationKey" | "originTurnId" | "objective" | "steps" | "planReason" | "completionDelivery"
+  "creationKey" | "originTurnId" | "objective" | "steps" | "planReason" | "completionDelivery" | "executionPreference"
 > & {
+  executionPreference: TaskExecutionPreference;
   creationKey?: string;
   originTurnId?: string;
   objective: string;
@@ -417,6 +421,7 @@ function normalizeCreateInput(input: CreateFixedTaskInput): NormalizedCreateFixe
   }
   return {
     ...input,
+    executionPreference: normalizeExecutionPreference(input.executionPreference),
     ...(parent === undefined ? {} : { parent }),
     creatorSessionId,
     ...(originTurnId === undefined ? {} : { originTurnId }),
@@ -466,6 +471,7 @@ function matchesInput(graph: FixedTaskGraph, input: NormalizedCreateFixedTaskInp
     graph.task.parentTaskId === input.parent?.taskId &&
     graph.task.parentAttemptId === input.parent?.attemptId &&
     graph.task.source === input.source &&
+    graph.task.executionPreference === input.executionPreference &&
     graph.task.creationKey === input.creationKey &&
     graph.task.objective === input.objective &&
     graph.revision.reason === input.planReason &&
@@ -474,6 +480,12 @@ function matchesInput(graph: FixedTaskGraph, input: NormalizedCreateFixedTaskInp
     isDeepStrictEqual(graph.task.authorityPolicy, input.authorityPolicy) &&
     isDeepStrictEqual(graph.task.budgetPolicy, input.budgetPolicy) &&
     isDeepStrictEqual(actualSteps, expectedSteps);
+}
+
+function normalizeExecutionPreference(value: TaskExecutionPreference | undefined): TaskExecutionPreference {
+  if (value === undefined) return "auto";
+  if (value !== "auto" && value !== "background") throw new Error("Task execution preference is invalid.");
+  return value;
 }
 
 function normalizeCompletionDelivery(

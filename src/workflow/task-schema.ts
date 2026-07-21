@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 
-export const TASK_SCHEMA_VERSION = 19;
+export const TASK_SCHEMA_VERSION = 20;
 
 const OBSOLETE_EXECUTION_TABLES = [
   "workflow_event_summaries",
@@ -44,6 +44,7 @@ export function migrateTaskSchemaV10(db: SQLiteDatabase): void {
       parent_task_id text,
       parent_attempt_id text,
       source text not null check(source in ('cli', 'gateway', 'delegation', 'runtime')),
+      execution_preference text not null default 'auto' check(execution_preference in ('auto', 'background')),
       creation_key text,
       objective text not null check(length(objective) > 0),
       status text not null check(status in (
@@ -932,6 +933,26 @@ export function migrateTaskHostOwnershipSchemaV19(db: SQLiteDatabase): void {
         and host_lease_generation + 1 = new.fencing_token;
       select case when changes() <> 1
         then raise(abort, 'Task host lease fencing token is stale') end;
+    end;
+  `);
+}
+
+/** Persists immutable foreground-first versus direct-background Task admission. */
+export function migrateTaskExecutionPreferenceSchemaV20(db: SQLiteDatabase): void {
+  const taskColumns = db.query<{ name: string }>("pragma table_info(tasks)").all();
+  if (!taskColumns.some((column) => column.name === "execution_preference")) {
+    db.exec(
+      "alter table tasks add column execution_preference text not null default 'auto' check(execution_preference in ('auto', 'background'))"
+    );
+  }
+  db.exec(`
+    create index if not exists idx_tasks_profile_execution_preference
+      on tasks(profile_id, execution_preference, status, updated_at desc);
+    create trigger if not exists trg_tasks_execution_preference_immutable
+    before update of execution_preference on tasks
+    when new.execution_preference <> old.execution_preference
+    begin
+      select raise(abort, 'Task execution preference is immutable');
     end;
   `);
 }

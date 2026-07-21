@@ -1661,8 +1661,8 @@ export async function handleSlashCommand(input: {
         authorizedSessionId: input.runtime.sessionId,
         begin: input.runtime.beginTask === undefined
           ? undefined
-          : async (objective) => ({
-              task: await input.runtime.beginTask!(objective),
+          : async (objective, _creatorSessionId, executionPreference) => ({
+              task: await input.runtime.beginTask!(objective, { executionPreference }),
               creatorSessionId: input.runtime.sessionId
             }),
         workspaceTrusted: async () => input.runtime.isWorkspaceTrusted(),
@@ -3018,6 +3018,11 @@ function taskProjectionToCard(task: TaskStatusProjection): TaskCardState {
     taskId: task.taskId,
     objective: task.objective,
     status: task.status,
+    executionPreference: task.executionPreference,
+    execution: task.execution,
+    foregroundOwnerActive: task.foregroundOwnerActive,
+    backgroundContinuation: task.backgroundContinuation,
+    ...(task.executionWaitingReason === undefined ? {} : { executionWaitingReason: task.executionWaitingReason }),
     progress: {
       completed: task.progress.completed,
       skipped: task.progress.skipped,

@@ -13,6 +13,7 @@ import {
   MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH
 } from "../contracts/delegation.js";
 import type { DurableDelegationService } from "../delegation/durable-delegation-service.js";
+import type { TaskExecutionPreference } from "../contracts/task.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 
 export type DelegationToolOptions = {
@@ -30,6 +31,7 @@ type DelegateTaskInput = {
   role?: DelegateRole;
   modelOverride?: DelegateModelOverride;
   synthesis?: unknown;
+  executionPreference?: TaskExecutionPreference;
 };
 
 export function createDelegationTools(options: DelegationToolOptions): RegisteredTool[] {
@@ -42,7 +44,7 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
     {
       name: "delegate_task",
       description: [
-        "Create durable background Tasks for bounded subtasks with explicit context and tool access.",
+        "Create durable Tasks for bounded subtasks with explicit context and tool access.",
         "Returns a Task handle immediately; use Task status and result surfaces to follow completion.",
         `Supports one task or up to ${delegationConfig.maxBatchTasks} batch tasks.`,
         "An optional synthesis objective adds one fixed terminal Step after every worker.",
@@ -102,6 +104,11 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
               modelOverride: modelOverrideSchema()
             },
             required: ["objective"]
+          },
+          executionPreference: {
+            type: "string",
+            enum: ["auto", "background"],
+            description: "auto starts in the interactive host when available; background sends the Task directly to the gateway."
           }
         }
       },
@@ -134,21 +141,35 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
           tasks,
           ...(parsed.synthesis === undefined ? {} : { synthesis: parsed.synthesis }),
           trustedWorkspace: await options.trustedWorkspace(),
+          executionPreference: input.executionPreference,
           ...(parsed.mode === "batch" && parsed.recoveredTasksFromJsonString === true
             ? { recoveredTasksFromJsonString: true }
             : {})
         });
+        const settled = ["completed", "partial", "failed", "cancelled"].includes(handle.status);
         return {
           ok: true,
           content: [
             `Created durable Task ${handle.taskId}.`,
             `Status: ${handle.status}`,
+            `Execution: ${settled ? "settled" : handle.execution}`,
+            `Execution preference: ${handle.executionPreference}`,
+            `Background continuation: ${handle.backgroundContinuation}`,
+            ...(handle.executionWaitingReason === undefined ? [] : [`Waiting reason: ${handle.executionWaitingReason}`]),
             `Steps: ${handle.stepCount}`,
             ...(handle.synthesisStepId === undefined ? [] : [
               `Workers: ${handle.workerStepIds.length}`,
               `Synthesis Step: ${handle.synthesisStepId}`
             ]),
-            handle.childTask ? `Parent Task: ${handle.parentTaskId}` : "Task will continue independently of this turn."
+            handle.childTask
+              ? `Parent Task: ${handle.parentTaskId}`
+              : settled
+                ? "Task is settled and its durable results are available through Task result surfaces."
+                : handle.execution === "foreground"
+                  ? "Task is running in this session and its progress is durable."
+                  : handle.backgroundContinuation === "available"
+                    ? "Task is durable and available for background continuation."
+                    : "Task is durable, but no active background continuation was detected."
           ].join("\n"),
           metadata: handle
         };
@@ -183,6 +204,15 @@ type ParsedDelegateTaskInput =
   | { ok: false; error: { ok: false; content: string; metadata: Record<string, unknown> } };
 
 function parseDelegateTaskInput(input: DelegateTaskInput, config: DelegationConfig): ParsedDelegateTaskInput {
+  if (input.executionPreference !== undefined && input.executionPreference !== "auto" && input.executionPreference !== "background") {
+    return {
+      ok: false,
+      error: structuredValidationError(
+        "delegate_task executionPreference must be auto or background.",
+        "invalid-execution-preference"
+      )
+    };
+  }
   const synthesis = normalizeSynthesis(input.synthesis);
   if (!synthesis.ok) {
     return { ok: false, error: structuredValidationError(synthesis.message, synthesis.code) };

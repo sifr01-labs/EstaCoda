@@ -184,7 +184,7 @@ Controls are intentionally small:
 
 ## Delegating Tasks
 
-`delegate_task` creates background Tasks for independent inspection, research, or coding work. It returns a Task handle immediately, so the creating conversation does not have to stay open until the work finishes.
+`delegate_task` creates durable Tasks for independent inspection, research, or coding work. In an interactive session its default `auto` preference starts work in the current EstaCoda process; progress remains durable and an eligible gateway can take over when that process exits. Remote gateway creation defaults to background ownership. Set `"executionPreference": "background"` to send work directly to the gateway from the beginning.
 
 Single and batch inputs keep the same shape:
 
@@ -193,11 +193,12 @@ Single and batch inputs keep the same shape:
   "tasks": [
     { "task": "Inspect config defaults." },
     { "task": "Inspect gateway behavior.", "allowedTools": ["file.read", "file.grep"] }
-  ]
+  ],
+  "executionPreference": "auto"
 }
 ```
 
-A batch becomes one durable Task with one independent Step per item. The scheduler enforces configured concurrency, timeout, retry, cancellation, usage, approval, and result policies. The tool result contains the Task ID, queued status, Step count, and whether the call created a root or linked child Task.
+A batch becomes one durable Task with one independent Step per item. The scheduler enforces configured concurrency, timeout, retry, cancellation, usage, approval, and result policies. The tool result contains the Task ID, lifecycle status, execution preference, live foreground/background/waiting ownership, background-continuation readiness, Step count, and whether the call created a root or linked child Task. It never claims independent continuation when no eligible host is detected.
 
 Add an explicit fixed synthesis Step when the Task should return one combined answer:
 
@@ -218,7 +219,7 @@ The initial immutable plan contains all workers and one terminal synthesis Step.
 
 Delegated authority is deliberately narrower than the creating runtime. Parent-visible tools are intersected with the requested tools and default risk policy before the Step is persisted. Worker Steps cannot delegate. Orchestrator Steps may create linked child Tasks only while their persisted authority retains child depth; the child workspace, authority, and budget cannot exceed the active parent Step. Child call, token, and estimated-cost budgets are reserved atomically, so repeated calls divide one parent ceiling instead of creating new budget. Live concurrency, elapsed time, and actual usage are enforced across the complete Task tree.
 
-Provider tool-call IDs make creation idempotent. Replaying the same call returns the existing Task; reusing the identity for a different definition fails closed. `delegate_task` is unavailable when profile-bound durable Task storage is unavailable—there is no in-memory fallback.
+Provider tool-call IDs make creation idempotent. The execution preference is part of that immutable definition: replaying the same call returns the existing Task, while changing the preference or any other definition under the same identity fails closed. `delegate_task` is unavailable when profile-bound durable Task storage is unavailable—there is no in-memory fallback.
 
 Use `task.status` with the returned Task ID to inspect bounded progress from a linked session. It reports Step counts, active work, usage completeness, and result handles without exposing local paths, prompts, tool inputs, credentials, or full result bodies.
 

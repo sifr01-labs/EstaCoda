@@ -106,6 +106,36 @@ describe("DurableDelegationService", () => {
     expect(activated).toHaveBeenCalledWith(handle.taskId);
   });
 
+  it("persists direct-background preference, skips foreground activation, and replay-checks it", async () => {
+    const activated = vi.fn(async () => undefined);
+    const service = new DurableDelegationService({
+      store,
+      creatorSessionId: () => "parent",
+      workspace: workspace(),
+      config: DEFAULT_DELEGATION_CONFIG,
+      visibleTools,
+      backgroundContinuation: () => "unavailable",
+      onTaskCreated: activated
+    });
+    const request = {
+      toolCallId: "call-background-preference",
+      trustedWorkspace: true as const,
+      executionPreference: "background" as const,
+      tasks: [{ task: "Wait for the gateway" }]
+    };
+
+    const handle = await service.createAndActivate(request);
+    expect(handle).toMatchObject({
+      executionPreference: "background",
+      execution: "waiting",
+      backgroundContinuation: "unavailable"
+    });
+    expect(store.getTask(handle.taskId)).toMatchObject({ executionPreference: "background" });
+    expect(activated).not.toHaveBeenCalled();
+    expect(() => service.create({ ...request, executionPreference: "auto" }))
+      .toThrow(FixedTaskCreationConflictError);
+  });
+
   it("creates one immutable fan-out graph with a terminal synthesis primary Result Step", () => {
     const service = rootService(store);
     const request = {

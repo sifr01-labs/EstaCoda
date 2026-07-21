@@ -39,7 +39,7 @@ export type ForegroundTaskStartResult = {
   claimed: boolean;
   lease?: TaskHostLease;
   dispatch?: TaskSchedulerRunResult;
-  reason?: "host-stopping" | "task-missing" | "task-terminal" | "workspace-mismatch" | "owned-by-other-host";
+  reason?: "host-stopping" | "task-missing" | "task-terminal" | "workspace-mismatch" | "background-preferred" | "owned-by-other-host";
 };
 
 /**
@@ -257,7 +257,8 @@ export class ForegroundTaskHost {
   #claimAvailableTasks(): void {
     const tasks = this.#store.listTasks({ statuses: RUNNABLE_TASK_STATUSES, limit: 1_000 });
     for (const task of tasks) {
-      if (task.workspace.identityHash !== this.#workspaceIdentityHash || this.#owned.has(task.id)) continue;
+      if (task.executionPreference === "background" ||
+        task.workspace.identityHash !== this.#workspaceIdentityHash || this.#owned.has(task.id)) continue;
       const existingLease = this.#store.getTaskHostLease(task.id);
       if (existingLease?.kind !== "foreground") continue;
       this.#claimTask(task.id);
@@ -290,6 +291,7 @@ export class ForegroundTaskHost {
     const task = this.#store.getTask(taskId);
     if (task === null) return { taskId, claimed: false, reason: "task-missing" };
     if (isTerminalTaskStatus(task.status)) return { taskId, claimed: false, reason: "task-terminal" };
+    if (task.executionPreference === "background") return { taskId, claimed: false, reason: "background-preferred" };
     if (task.workspace.identityHash !== this.#workspaceIdentityHash) {
       return { taskId, claimed: false, reason: "workspace-mismatch" };
     }

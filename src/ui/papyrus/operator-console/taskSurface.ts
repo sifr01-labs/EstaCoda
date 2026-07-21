@@ -21,6 +21,11 @@ type TaskCopy = {
   inspectHint: string;
   objective: string;
   status: string;
+  execution: string;
+  executionPreference: string;
+  foregroundOwner: string;
+  backgroundContinuation: string;
+  executionWaitingReason: string;
   planRevision: string;
   dependencies: string;
   childTasks: string;
@@ -43,6 +48,11 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     inspectHint: "Ctrl+T or Tab focus · Enter inspect",
     objective: "Objective",
     status: "Status",
+    execution: "Execution",
+    executionPreference: "Execution preference",
+    foregroundOwner: "Foreground owner",
+    backgroundContinuation: "Background continuation",
+    executionWaitingReason: "Execution waiting reason",
     planRevision: "Plan revision",
     dependencies: "Dependencies",
     childTasks: "Child Tasks",
@@ -63,6 +73,11 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     inspectHint: "Ctrl+T أو Tab للتركيز · Enter للفحص",
     objective: "الهدف",
     status: "الحالة",
+    execution: "التنفيذ",
+    executionPreference: "تفضيل التنفيذ",
+    foregroundOwner: "مالك التنفيذ الأمامي",
+    backgroundContinuation: "الاستمرار في الخلفية",
+    executionWaitingReason: "سبب انتظار التنفيذ",
     planRevision: "مراجعة الخطة",
     dependencies: "الاعتماديات",
     childTasks: "المهام الفرعية",
@@ -118,7 +133,7 @@ export function renderTaskCardSurface(
     estimatedCostUsd: card.usage.estimatedCostUsd,
     costComplete: card.usage.pricingComplete
   }, { locale: options.locale, compact: true });
-  rows.push(`${formatStatus(card.status)} · ${formatDuration(card.elapsedMs)} · ${cost} · ${copy.inspectHint}`);
+  rows.push(`${formatStatus(card.status)} · ${isolateIfArabic(formatExecution(card), options.locale)} · ${formatDuration(card.elapsedMs)} · ${cost} · ${copy.inspectHint}`);
   return rows.slice(0, height).map((row) => padVisibleEnd(truncateVisible(row, width, "…"), width));
 }
 
@@ -179,6 +194,17 @@ export function taskInspectionContentLines(
   addSection(lines, copy.results, card.results.length === 0
     ? [copy.none]
     : card.results.map((result) => `${result.primary ? `${copy.primaryResult} · ` : ""}${isolate(result.handle)} · ${result.kind} · ${formatBytes(result.byteLength)}${result.summary === undefined ? "" : ` · ${result.summary}`}`));
+  addSection(lines, copy.execution, [
+    isolateIfArabic(formatExecution(card), locale),
+    `${copy.executionPreference}: ${isolate(card.executionPreference)}`,
+    `${copy.foregroundOwner}: ${card.foregroundOwnerActive
+      ? locale === "ar" ? "نشط" : "active"
+      : locale === "ar" ? "غير نشط" : "inactive"}`,
+    `${copy.backgroundContinuation}: ${isolate(card.backgroundContinuation)}`
+  ]);
+  if (card.executionWaitingReason !== undefined) {
+    addSection(lines, copy.executionWaitingReason, wrapText(card.executionWaitingReason, contentWidth));
+  }
   addSection(lines, copy.recentActivity, card.recentActivity.length === 0
     ? [copy.none]
     : card.recentActivity.map((activity) => `${formatTimestamp(activity.timestamp)} · ${activity.label}`));
@@ -341,6 +367,12 @@ function progressPercent(card: TaskCardState): number {
 
 function formatStatus(status: TaskCardState["status"]): string {
   return status.replaceAll("_", " ");
+}
+
+function formatExecution(card: TaskCardState): string {
+  return ["completed", "partial", "failed", "cancelled"].includes(card.status)
+    ? "settled"
+    : card.execution;
 }
 
 function formatDuration(value: number): string {

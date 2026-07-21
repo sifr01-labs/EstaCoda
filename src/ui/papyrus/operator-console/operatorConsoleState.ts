@@ -135,6 +135,11 @@ export type TaskCardState = {
   readonly taskId: string;
   readonly objective: string;
   readonly status: "planning" | "queued" | "running" | "waiting_for_host" | "waiting_for_input" | "waiting_for_approval" | "paused" | "completed" | "partial" | "failed" | "cancelled";
+  readonly executionPreference: "auto" | "background";
+  readonly execution: "foreground" | "background" | "waiting";
+  readonly foregroundOwnerActive: boolean;
+  readonly backgroundContinuation: "available" | "unavailable" | "unknown";
+  readonly executionWaitingReason?: string;
   readonly progress: {
     readonly completed: number;
     readonly skipped: number;

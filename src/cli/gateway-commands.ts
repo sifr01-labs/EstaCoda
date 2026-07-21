@@ -182,13 +182,25 @@ export async function runGatewayStatus(
     executionDb = sessionDb;
     executionStore = new CronExecutionStore({ db: sessionDb.db });
     sessionFinalization = new SessionFinalizationQueue({ db: sessionDb.db }).summarize(selected.profileId);
-    const tasks = new SQLiteTaskStore({ db: sessionDb.db, profileId: selected.profileId }).listTasks({ limit: 1_000 });
+    const taskStore = new SQLiteTaskStore({ db: sessionDb.db, profileId: selected.profileId });
+    const tasks = taskStore.listTasks({ limit: 1_000 });
+    const activeTasks = tasks.filter((task) => !["completed", "partial", "failed", "cancelled"].includes(task.status));
+    const activeTaskIds = new Set(activeTasks.map((task) => task.id));
+    const now = Date.now();
+    const activeLeases = taskStore.listTaskHostLeases({ limit: 1_000 })
+      .filter((lease) => activeTaskIds.has(lease.taskId) && Date.parse(lease.expiresAt) > now);
+    const leasedTaskIds = new Set(activeLeases.map((lease) => lease.taskId));
     durableTasks = {
-      active: tasks.filter((task) => !["completed", "partial", "failed", "cancelled"].includes(task.status)).length,
+      active: activeTasks.length,
       queued: tasks.filter((task) => task.status === "queued").length,
       running: tasks.filter((task) => task.status === "running").length,
       waiting: tasks.filter((task) => task.status.startsWith("waiting_")).length,
-      terminal: tasks.filter((task) => ["completed", "partial", "failed", "cancelled"].includes(task.status)).length
+      terminal: tasks.filter((task) => ["completed", "partial", "failed", "cancelled"].includes(task.status)).length,
+      foregroundOwned: activeLeases.filter((lease) => lease.kind === "foreground").length,
+      backgroundOwned: activeLeases.filter((lease) => lease.kind === "background").length,
+      waitingForHost: activeTasks.filter((task) => !leasedTaskIds.has(task.id)).length,
+      autoPreference: activeTasks.filter((task) => task.executionPreference === "auto").length,
+      backgroundPreference: activeTasks.filter((task) => task.executionPreference === "background").length
     };
   } catch { /* ignore */ }
 

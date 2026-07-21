@@ -276,7 +276,7 @@ Manage local browser/CDP connection.
 ### `/task <subcommand>`
 
 ```text
-/task begin <objective>
+/task begin [--background] <objective>
 /task list [limit]
 /task show <task-id>
 /task pause <task-id>
@@ -288,7 +288,7 @@ Manage local browser/CDP connection.
 
 **State touched:** Profile-scoped durable Task records. Result bodies remain in the profile's private result store.
 
-**Behavior:** `/task begin` creates and links a conservative Task to the active session. In-session reads require a Task/session link; lifecycle mutations require the creator link. Status and result output is bounded and omits workspace paths, prompts, tool inputs, credentials, and full result bodies.
+**Behavior:** `/task begin` creates and links a conservative Task to the active session. By default the interactive process starts it immediately and the gateway can take over later. `--background` durably sends it to the gateway from the beginning. Status distinguishes lifecycle state from live foreground/background/waiting ownership and reports bounded continuation readiness without owner identities. In-session reads require a Task/session link; lifecycle mutations require the creator link.
 
 ---
 

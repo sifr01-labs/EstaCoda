@@ -433,6 +433,7 @@ function makeGraph(): { task: Task; revision: TaskPlanRevision; steps: TaskStep[
     rootTaskId: "task-alpha",
     originSessionId: "creator-alpha",
     source: "cli",
+    executionPreference: "auto",
     creationKey: "create-alpha",
     objective: "Produce a durable result.",
     status: "queued",

@@ -20,9 +20,27 @@ describe("createDelegationTools", () => {
         allowedTools: { type: "array" },
         role: { enum: ["leaf", "orchestrator"] },
         modelOverride: { required: ["model"] },
-        synthesis: { required: ["objective"] }
+        synthesis: { required: ["objective"] },
+        executionPreference: { enum: ["auto", "background"] }
       }
     });
+  });
+
+  it("forwards direct-background execution and reports truthful readiness", async () => {
+    const create = vi.fn(() => ({
+      ...handle("task-background", 1),
+      executionPreference: "background" as const,
+      execution: "waiting" as const,
+      backgroundContinuation: "unavailable" as const,
+      executionWaitingReason: "Waiting for an active background host."
+    }));
+    const [tool] = tools(create);
+    const result = await tool!.run({ task: "Run later", executionPreference: "background" }, { toolCallId: "background-call" });
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ executionPreference: "background" }));
+    expect(result.content).toContain("Execution: waiting");
+    expect(result.content).toContain("Background continuation: unavailable");
+    expect(result.content).not.toContain("will continue independently");
   });
 
   it("forwards an explicit synthesis objective as a fixed terminal Step request", async () => {
@@ -114,6 +132,7 @@ describe("createDelegationTools", () => {
     [{ tasks: [{ task: "A", role: "invalid" }] }, "invalid-task-object"],
     [{ task: "A", synthesis: {} }, "invalid-synthesis"],
     [{ task: "A", synthesis: { objective: "S", extra: true } }, "invalid-synthesis"],
+    [{ task: "A", executionPreference: "later" }, "invalid-execution-preference"],
     [{ modelOverride: { model: "x".repeat(MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH + 1) }, task: "A" }, "invalid-model-override"],
     [{ modelOverride: { model: "m", provider: "x".repeat(MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH + 1) }, task: "A" }, "invalid-model-override"]
   ])("rejects malformed input %#", async (input, code) => {
@@ -145,6 +164,9 @@ function handle(taskId: string, stepCount: number) {
   return {
     taskId,
     status: "queued" as const,
+    executionPreference: "auto" as const,
+    execution: "foreground" as const,
+    backgroundContinuation: "available" as const,
     stepCount,
     childTask: false,
     idempotentReplay: false

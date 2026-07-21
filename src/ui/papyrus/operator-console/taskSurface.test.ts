@@ -143,6 +143,10 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
     taskId: "T-104",
     objective: "Competitor comparison",
     status: "running",
+    executionPreference: "auto",
+    execution: "foreground",
+    foregroundOwnerActive: true,
+    backgroundContinuation: "available",
     progress: { completed: 1, skipped: 0, total: 3 },
     planRevision: { revision: 2, status: "active" },
     steps: [

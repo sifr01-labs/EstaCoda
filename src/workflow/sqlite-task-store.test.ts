@@ -25,6 +25,7 @@ import {
   migrateTaskTreeBudgetSchemaV17,
   migrateTaskSchedulerSchemaV11,
   migrateTaskHostOwnershipSchemaV19,
+  migrateTaskExecutionPreferenceSchemaV20,
   migrateTaskVerticalSliceSchemaV15,
   TASK_SCHEMA_VERSION
 } from "./task-schema.js";
@@ -1088,6 +1089,37 @@ describe("Task host ownership schema v19 migration", () => {
   });
 });
 
+describe("Task execution preference schema v20 migration", () => {
+  it("backfills auto preference and constrains future writes idempotently", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-task-preference-migration-"));
+    const database = openDefaultSQLiteDatabase({ path: join(tempDir, "task-preference.sqlite") });
+    try {
+      database.exec(`
+        create table tasks(
+          id text primary key,
+          profile_id text not null,
+          status text not null,
+          updated_at text not null
+        );
+        insert into tasks values ('task', 'alpha', 'queued', '${NOW}');
+      `);
+
+      migrateTaskExecutionPreferenceSchemaV20(database);
+      migrateTaskExecutionPreferenceSchemaV20(database);
+
+      expect(database.query<{ execution_preference: string }>(
+        "select execution_preference from tasks where id = 'task'"
+      ).get()).toEqual({ execution_preference: "auto" });
+      expect(() => database.query(
+        "update tasks set execution_preference = 'background' where id = 'task'"
+      ).run()).toThrow(/immutable/i);
+    } finally {
+      database.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
 const NOW = "2030-01-01T00:00:00.000Z";
 
 function makeGraph(profileId: "alpha" | "beta") {
@@ -1102,6 +1134,7 @@ function makeGraph(profileId: "alpha" | "beta") {
     rootTaskId: taskId,
     originSessionId: creatorSessionId,
     source: "cli",
+    executionPreference: "auto",
     creationKey: `create-${suffix}`,
     objective: "Research and summarize the requested topic.",
     status: "queued",

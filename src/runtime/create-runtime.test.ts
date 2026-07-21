@@ -2894,6 +2894,35 @@ describe("createRuntime MCP trust gating", () => {
     }
   });
 
+  it("sends explicitly background operator Tasks directly to the gateway path", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = await createSQLiteSessionDB({ path: join(options.workspaceRoot, "background-operator-task-sessions.sqlite") });
+    await sessionDb.createSession({ id: options.sessionId, profileId: "default" });
+    const onTaskCreated = vi.fn(async () => undefined);
+    const runtime = await createRuntime({
+      ...options,
+      sessionDb,
+      onTaskCreated,
+      taskBackgroundContinuation: "available"
+    });
+    try {
+      await runtime.trustWorkspace?.();
+      const task = await runtime.beginTask?.("Execute this Task in the background.", {
+        executionPreference: "background"
+      });
+
+      expect(task).toMatchObject({
+        executionPreference: "background",
+        execution: "waiting",
+        foregroundOwnerActive: false,
+        backgroundContinuation: "available"
+      });
+      expect(onTaskCreated).not.toHaveBeenCalled();
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("persists and delivers one terminal completion for a gateway-created Task after restart", async () => {
     const options = await minimalRuntimeOptions();
     const databasePath = join(options.workspaceRoot, "gateway-task-sessions.sqlite");

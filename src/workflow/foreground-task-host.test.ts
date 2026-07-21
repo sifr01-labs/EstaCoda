@@ -103,6 +103,22 @@ describe("ForegroundTaskHost", () => {
     expect(dispose).toHaveBeenCalledOnce();
   });
 
+  it("never claims a Task explicitly sent to the background host", async () => {
+    const graph = makeGraph("task-background-only", [step("task-background-only", "work", 0)]);
+    graph.task.executionPreference = "background";
+    store.createTaskGraph(graph);
+    const executor = new FakeTaskStepExecutor(() => ({ outcome: "succeeded", results: [] }));
+    const host = makeHost(executor, "foreground-background-rejection");
+
+    await expect(host.startTask("task-background-only")).resolves.toMatchObject({
+      claimed: false,
+      reason: "background-preferred"
+    });
+    expect(store.getTaskHostLease("task-background-only")).toBeNull();
+    expect(executor.executions).toEqual([]);
+    await host.shutdown();
+  });
+
   it("automatically dispatches synthesis after parallel workers finish", async () => {
     const workerA = step("task-synthesis", "worker-a", 0);
     const workerB = step("task-synthesis", "worker-b", 1);
@@ -547,6 +563,7 @@ function makeGraph(taskId: string, steps: TaskStep[]): {
       rootTaskId: taskId,
       originSessionId: "creator-alpha",
       source: "cli",
+      executionPreference: "auto",
       creationKey: `create-${taskId}`,
       objective: `Complete ${taskId}.`,
       status: "queued",

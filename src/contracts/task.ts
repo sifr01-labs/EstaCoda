@@ -87,6 +87,7 @@ export type TaskAttemptStatus =
   | "expired";
 
 export type TaskSource = "cli" | "gateway" | "delegation" | "runtime";
+export type TaskExecutionPreference = "auto" | "background";
 
 export type TaskActor = {
   kind: "user" | "agent" | "system";
@@ -215,6 +216,8 @@ export type Task = {
   parentTaskId?: TaskId;
   parentAttemptId?: TaskAttemptId;
   source: TaskSource;
+  /** Immutable host admission preference. Auto permits foreground-first execution; background never does. */
+  executionPreference: TaskExecutionPreference;
   /** Distinct from Attempt.dispatchKey; deduplicates Task creation requests. */
   creationKey?: string;
   objective: string;

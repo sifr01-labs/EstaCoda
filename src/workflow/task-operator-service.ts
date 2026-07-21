@@ -7,6 +7,8 @@ import type {
   TaskAttemptStatus,
   TaskDeliveryDestination,
   TaskEvent,
+  TaskExecutionPreference,
+  TaskHostLease,
   TaskResult,
   TaskStatus,
   TaskStep,
@@ -46,6 +48,11 @@ export type TaskStatusProjection = {
   objective: string;
   status: TaskStatus;
   source: Task["source"];
+  executionPreference: TaskExecutionPreference;
+  execution: "foreground" | "background" | "waiting";
+  foregroundOwnerActive: boolean;
+  backgroundContinuation: "available" | "unavailable" | "unknown";
+  executionWaitingReason?: string;
   parentTaskId?: string;
   childTasks: readonly {
     taskId: string;
@@ -103,11 +110,18 @@ export class TaskOperatorService {
   readonly #store: TaskStore;
   readonly #now: () => Date;
   readonly #eventId: () => string;
+  readonly #backgroundContinuation: () => TaskStatusProjection["backgroundContinuation"];
 
-  constructor(options: { store: TaskStore; now?: () => Date; eventId?: () => string }) {
+  constructor(options: {
+    store: TaskStore;
+    now?: () => Date;
+    eventId?: () => string;
+    backgroundContinuation?: () => TaskStatusProjection["backgroundContinuation"];
+  }) {
     this.#store = options.store;
     this.#now = options.now ?? (() => new Date());
     this.#eventId = options.eventId ?? randomUUID;
+    this.#backgroundContinuation = options.backgroundContinuation ?? (() => "unknown");
   }
 
   begin(input: {
@@ -115,13 +129,17 @@ export class TaskOperatorService {
     workspace: TaskWorkspaceBinding;
     creatorSessionId: string;
     source?: "cli" | "gateway" | "runtime";
+    executionPreference?: TaskExecutionPreference;
     completionDestination?: TaskDeliveryDestination;
   }): TaskStatusProjection {
     const objective = normalizeTaskOperatorObjective(input.objective);
     const authority = operatorTaskAuthority();
+    const source = input.source ?? "cli";
+    const executionPreference = input.executionPreference ?? (source === "gateway" ? "background" : "auto");
     const graph = new FixedTaskService({ store: this.#store, now: this.#now }).create({
       creatorSessionId: input.creatorSessionId,
-      source: input.source ?? "cli",
+      source,
+      executionPreference,
       objective,
       workspace: input.workspace,
       authorityPolicy: authority,
@@ -285,6 +303,9 @@ export class TaskOperatorService {
     progress.total = steps.length;
     const attempts = this.#store.listAttempts(task.id);
     const projectionNow = this.#now();
+    const hostLease = activeHostLease(this.#store.getTaskHostLease(task.id), projectionNow);
+    const execution = hostLease?.kind ?? "waiting";
+    const backgroundContinuation = this.#backgroundContinuation();
     const attemptsByStep = groupAttemptsByStep(attempts);
     const activityByAttempt = this.#latestActivityByAttempt(task.id);
     const planRevision = task.activePlanRevisionId === undefined
@@ -299,6 +320,11 @@ export class TaskOperatorService {
       objective: safeText(task.objective, 240),
       status: task.status,
       source: task.source,
+      executionPreference: task.executionPreference,
+      execution,
+      foregroundOwnerActive: execution === "foreground",
+      backgroundContinuation,
+      ...executionWaitingReason(task, execution, backgroundContinuation),
       ...(task.parentTaskId === undefined ? {} : { parentTaskId: task.parentTaskId }),
       childTasks: this.#store.listChildTasks(task.id).slice(0, MAX_PROJECTED_CHILD_TASKS).map((child) => ({
         taskId: child.id,
@@ -501,6 +527,35 @@ function emptyProgress(): TaskProgress {
     skipped: 0,
     cancelled: 0,
     total: 0
+  };
+}
+
+function activeHostLease(lease: TaskHostLease | null, now: Date): TaskHostLease | undefined {
+  if (lease === null) return undefined;
+  const expiresAt = Date.parse(lease.expiresAt);
+  return Number.isFinite(expiresAt) && expiresAt > now.getTime() ? lease : undefined;
+}
+
+function executionWaitingReason(
+  task: Task,
+  execution: TaskStatusProjection["execution"],
+  backgroundContinuation: TaskStatusProjection["backgroundContinuation"]
+): { executionWaitingReason?: string } {
+  if (execution !== "waiting" || isTerminalTaskStatus(task.status)) return {};
+  if (task.waitReason !== undefined) return { executionWaitingReason: safeText(task.waitReason.summary, 240) };
+  if (task.executionPreference === "background") {
+    return {
+      executionWaitingReason: backgroundContinuation === "available"
+        ? "Waiting for the background host to claim this Task."
+        : backgroundContinuation === "unavailable"
+          ? "Waiting for an active background host."
+          : "Waiting for a compatible background host."
+    };
+  }
+  return {
+    executionWaitingReason: backgroundContinuation === "unavailable"
+      ? "Waiting for an eligible host; no active background continuation is available."
+      : "Waiting for an eligible Task host."
   };
 }
 

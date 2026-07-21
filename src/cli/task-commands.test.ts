@@ -44,7 +44,7 @@ describe("Task commands", () => {
 
     await expect(executeTaskCommand({ args: ["list"], service, authorizedSessionId: "owner" })).resolves.toEqual({
       ok: true,
-      output: `${created.taskId}\tqueued\t0/1\tInspect deterministic output`
+      output: `${created.taskId}\tqueued\twaiting\t0/1\tInspect deterministic output`
     });
     const shown = await executeTaskCommand({
       args: ["show", created.taskId],
@@ -58,6 +58,8 @@ describe("Task commands", () => {
     expect(shown.output).toContain("Estimated cost: $0.0000 (incomplete)");
     expect(shown.output).toContain("Workspace: trusted");
     expect(shown.output).toContain("Background host: inactive");
+    expect(shown.output).toContain("Execution: waiting");
+    expect(shown.output).toContain("Background continuation: unavailable");
     expect(shown.output).not.toContain(root);
     db.close();
   });
@@ -115,6 +117,28 @@ describe("Task commands", () => {
     ]);
     expect(new SQLiteTaskStore({ db: db.db, profileId: "default" }).listTasks()[0])
       .toMatchObject({ creatorSessionId: "selected-owner" });
+    db.close();
+  });
+
+  it("persists --background and reports that no foreground owner is active", async () => {
+    await new WorkspaceTrustStore({ homeDir: root }).grant(root);
+    const result = await taskCommand({ argv: [], workspaceRoot: root, homeDir: root }, [
+      "begin",
+      "--background",
+      "Run",
+      "through",
+      "the",
+      "gateway"
+    ]);
+
+    expect(result).toMatchObject({ handled: true, exitCode: 0 });
+    expect(result.output).toContain("Execution: waiting");
+    expect(result.output).toContain("Execution preference: background");
+    expect(result.output).toContain("Foreground owner: inactive");
+    expect(result.output).toContain("Background continuation: unavailable");
+    const db = await createSQLiteSessionDB({ path: resolveGlobalStateHome({ homeDir: root }).sessionsSqlitePath });
+    expect(new SQLiteTaskStore({ db: db.db, profileId: "default" }).listTasks()[0])
+      .toMatchObject({ executionPreference: "background" });
     db.close();
   });
 
