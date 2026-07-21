@@ -3,16 +3,8 @@ import type { SQLiteDatabase, SQLiteValue } from "../storage/sqlite.js";
 
 export function insertProviderUsageEntry(db: SQLiteDatabase, entry: ProviderUsageEntry): void {
   assertProviderUsageEntry(entry);
-  const session = db.query<{ id: string }>(
-    "select id from sessions where profile_id = ? and id = ?"
-  ).get(entry.profileId, entry.sessionId);
-  const visibleTurn = db.query<{ role: string }>(
-    `select messages.role
-     from messages join sessions on sessions.id = messages.session_id
-     where sessions.profile_id = ? and messages.id = ? and messages.role = 'user'`
-  ).get(entry.profileId, entry.visibleTurnId);
-  if (session === null || visibleTurn?.role !== "user") {
-    throw new Error("Provider usage attribution does not belong to its profile Session and visible turn.");
+  if (!visibleTurnBelongsToExecutionLineage(db, entry)) {
+    throw new Error("Provider usage visible turn does not belong to its execution Session compression lineage.");
   }
   db.query(`insert into provider_usage_entries (
     id, profile_id, session_id, visible_turn_id, request_key, provider, model,
@@ -36,6 +28,55 @@ export function insertProviderUsageEntry(db: SQLiteDatabase, entry: ProviderUsag
   ).get(entry.profileId, entry.requestKey);
   if (persisted === null || stableValue(rowToProviderUsageEntry(persisted)) !== stableValue(entry)) {
     throw new Error(`Provider usage request key ${entry.requestKey} conflicts with another entry.`);
+  }
+}
+
+function visibleTurnBelongsToExecutionLineage(
+  db: SQLiteDatabase,
+  entry: Pick<ProviderUsageEntry, "profileId" | "sessionId" | "visibleTurnId">
+): boolean {
+  const lineage = new Set<string>();
+  let currentId = entry.sessionId;
+  let complete = false;
+  for (let depth = 0; depth < 32; depth++) {
+    if (lineage.has(currentId)) return false;
+    const current = db.query<SessionLineageRow>(
+      `select id, parent_session_id, end_reason, metadata_json
+       from sessions where profile_id = ? and id = ?`
+    ).get(entry.profileId, currentId);
+    if (current === null) return false;
+    lineage.add(current.id);
+    const compactedFrom = compactedFromSessionId(current.metadata_json);
+    if (current.parent_session_id === null || compactedFrom !== current.parent_session_id) {
+      complete = true;
+      break;
+    }
+    const parent = db.query<SessionLineageRow>(
+      `select id, parent_session_id, end_reason, metadata_json
+       from sessions where profile_id = ? and id = ?`
+    ).get(entry.profileId, current.parent_session_id);
+    if (parent === null || parent.end_reason !== "compression") {
+      complete = true;
+      break;
+    }
+    currentId = parent.id;
+  }
+  if (!complete) return false;
+  const turn = db.query<{ session_id: string }>(
+    "select session_id from messages where id = ? and role = 'user'"
+  ).get(entry.visibleTurnId);
+  return turn !== null && lineage.has(turn.session_id);
+}
+
+function compactedFromSessionId(metadataJson: string | null): string | undefined {
+  if (metadataJson === null) return undefined;
+  try {
+    const metadata = JSON.parse(metadataJson) as unknown;
+    if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) return undefined;
+    const value = (metadata as Record<string, unknown>).compactedFromSessionId;
+    return typeof value === "string" ? value : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -170,4 +211,11 @@ type ProviderUsageRow = {
   step_id: string | null;
   attempt_id: string | null;
   dispatched_at: string;
+};
+
+type SessionLineageRow = {
+  id: string;
+  parent_session_id: string | null;
+  end_reason: string | null;
+  metadata_json: string | null;
 };

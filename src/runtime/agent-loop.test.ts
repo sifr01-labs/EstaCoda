@@ -159,6 +159,8 @@ function successfulProviderExecution(content: string): ProviderExecutionResult {
       {
         provider: model.provider,
         model: model.id,
+        state: "dispatched",
+        dispatchedAt: "2030-01-01T00:00:00.000Z",
         ok: true,
         content
       }
@@ -174,6 +176,8 @@ function streamedProviderExecution(content: string, streamDiagnostics: ProviderS
       {
         provider: model.provider,
         model: model.id,
+        state: "dispatched",
+        dispatchedAt: "2030-01-01T00:00:00.000Z",
         ok: true,
         content,
         streamDiagnostics
@@ -203,6 +207,8 @@ function failedProviderExecution(): ProviderExecutionResult {
       {
         provider: model.provider,
         model: model.id,
+        state: "dispatched",
+        dispatchedAt: "2030-01-01T00:00:00.000Z",
         ok: false,
         errorClass: "network",
         content: "network unavailable"
@@ -226,6 +232,8 @@ function fallbackProviderExecution(content: string): ProviderExecutionResult {
       {
         provider: model.provider,
         model: model.id,
+        state: "dispatched",
+        dispatchedAt: "2030-01-01T00:00:00.000Z",
         ok: false,
         errorClass: "rate-limit",
         credentialId: "PRIMARY_API_KEY",
@@ -234,6 +242,8 @@ function fallbackProviderExecution(content: string): ProviderExecutionResult {
       {
         provider: "fallback-provider",
         model: "fallback-model",
+        state: "dispatched",
+        dispatchedAt: "2030-01-01T00:00:01.000Z",
         ok: true,
         credentialId: "FALLBACK_API_KEY",
         content

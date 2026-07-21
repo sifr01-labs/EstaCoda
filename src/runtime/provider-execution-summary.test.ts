@@ -26,6 +26,8 @@ function attempt(input: {
   return {
     provider: input.provider,
     model: input.model,
+    state: "dispatched",
+    dispatchedAt: "2030-01-01T00:00:00.000Z",
     ok: input.ok,
     content: input.ok ? "ok" : "failed",
     ...(input.errorClass === undefined ? {} : { errorClass: input.errorClass }),

@@ -1634,6 +1634,8 @@ describe("assembleProviderContinuationPrompt", () => {
           {
             provider: "kimi",
             model: "kimi-current-model",
+            state: "dispatched",
+            dispatchedAt: "2030-01-01T00:00:00.000Z",
             ok: true,
             content: ""
           }
@@ -1862,6 +1864,8 @@ function providerExecution(
       {
         provider: model.provider,
         model: model.id,
+        state: "dispatched",
+        dispatchedAt: "2030-01-01T00:00:00.000Z",
         ok: true,
         content
       }

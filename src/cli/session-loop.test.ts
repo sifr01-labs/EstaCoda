@@ -1938,6 +1938,8 @@ function providerExecutionPrimarySuccess(
       {
         provider,
         model,
+        state: "dispatched",
+        dispatchedAt: "2030-01-01T00:00:00.000Z",
         ok: true,
         content: "Mock response",
       },
@@ -1960,6 +1962,8 @@ function providerExecutionFallbackSuccess(): ProviderExecutionResult {
       {
         provider: "mock",
         model: "mock-model",
+        state: "dispatched",
+        dispatchedAt: "2030-01-01T00:00:00.000Z",
         credentialId: "secret-primary-credential",
         ok: false,
         errorClass: "rate-limit",
@@ -1968,6 +1972,8 @@ function providerExecutionFallbackSuccess(): ProviderExecutionResult {
       {
         provider: "fallback-provider",
         model: "fallback-model",
+        state: "dispatched",
+        dispatchedAt: "2030-01-01T00:00:01.000Z",
         credentialId: "secret-fallback-credential",
         ok: true,
         content: "Fallback response",
@@ -1990,6 +1996,8 @@ function providerExecutionFallbackSuccessWithModel(model: string): ProviderExecu
       {
         provider: "mock",
         model: "mock-model",
+        state: "dispatched",
+        dispatchedAt: "2030-01-01T00:00:00.000Z",
         credentialId: "secret-primary-credential",
         ok: false,
         errorClass: "rate-limit",
@@ -1998,6 +2006,8 @@ function providerExecutionFallbackSuccessWithModel(model: string): ProviderExecu
       {
         provider: "fallback-provider",
         model,
+        state: "dispatched",
+        dispatchedAt: "2030-01-01T00:00:01.000Z",
         credentialId: "secret-fallback-credential",
         ok: true,
         content: "Fallback response",
@@ -2014,6 +2024,8 @@ function providerExecutionFailed(): ProviderExecutionResult {
       {
         provider: "mock",
         model: "mock-model",
+        state: "dispatched",
+        dispatchedAt: "2030-01-01T00:00:00.000Z",
         credentialId: "secret-primary-credential",
         ok: false,
         errorClass: "network",

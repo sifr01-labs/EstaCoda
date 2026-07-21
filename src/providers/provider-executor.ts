@@ -10,6 +10,7 @@ import type {
   ProviderFinishReason,
   ProviderLoopRuntimeMetadata,
   ProviderReasoningMetadata,
+  ProviderAttemptState,
   ProviderRouteRole,
   ProviderStreamDiagnostics,
   ProviderStreamFinish,
@@ -23,15 +24,12 @@ import { isOAuthAuthMethod } from "./oauth/oauth-types.js";
 import { loadOAuthStore } from "./oauth/oauth-store.js";
 import { refreshOAuthToken } from "./oauth/oauth-refresh.js";
 
-export type ProviderAttempt = {
+export type ProviderAttempt = ProviderAttemptState & {
   provider: string;
   model: string;
   /** Exact position and semantic role in the resolved route chain. */
   routeIndex?: number;
   routeRole?: ProviderRouteRole;
-  /** True only after invoking a provider adapter. Preflight route failures are not calls. */
-  dispatched?: boolean;
-  dispatchedAt?: string;
   credentialId?: string;
   ok: boolean;
   errorClass?: string;
@@ -43,6 +41,23 @@ export type ProviderAttempt = {
   reasoningMetadata?: ProviderReasoningMetadata;
   streamDiagnostics?: ProviderStreamDiagnostics;
 };
+
+/** Runtime guard for injected executors and persisted/untyped boundaries. */
+export function assertProviderAttemptState(attempt: ProviderAttempt): void {
+  const candidate = attempt as ProviderAttempt & { state?: unknown; dispatchedAt?: unknown };
+  if (candidate.state === "preflight") {
+    if ("dispatchedAt" in candidate) {
+      throw new Error("A preflight provider Attempt cannot have a dispatch timestamp.");
+    }
+    return;
+  }
+  if (candidate.state === "dispatched" &&
+      typeof candidate.dispatchedAt === "string" &&
+      Number.isFinite(Date.parse(candidate.dispatchedAt))) {
+    return;
+  }
+  throw new Error("Provider Attempt dispatch state is missing or invalid.");
+}
 
 export type ProviderExecutionResult = {
   ok: boolean;
@@ -144,7 +159,7 @@ export class ProviderExecutor {
           {
             provider: request.provider ?? "none",
             model: request.model ?? "none",
-            dispatched: false,
+            state: "preflight",
             ok: false,
             errorClass: "missing-route",
             content: "No explicit primary route is available. Production execution requires a resolved model route."
@@ -186,7 +201,7 @@ export class ProviderExecutor {
         attempts.push({
           provider: route.provider,
           model: route.id,
-          dispatched: false,
+          state: "preflight",
           ok: false,
           errorClass: "unsupported",
           content: preferenceFailure
@@ -212,7 +227,7 @@ export class ProviderExecutor {
         attempts.push({
           provider: route.provider,
           model: route.id,
-          dispatched: false,
+          state: "preflight",
           ok: false,
           errorClass: provider === undefined ? undefined : "unsupported",
           content: reason
@@ -237,7 +252,7 @@ export class ProviderExecutor {
         attempts.push({
           provider: route.provider,
           model: route.id,
-          dispatched: false,
+          state: "preflight",
           ok: false,
           errorClass: "unsupported",
           content: reason
@@ -266,7 +281,7 @@ export class ProviderExecutor {
         attempts.push({
           provider: route.provider,
           model: route.id,
-          dispatched: false,
+          state: "preflight",
           ok: false,
           errorClass: "unsupported",
           content: reason
@@ -297,7 +312,7 @@ export class ProviderExecutor {
         attempts.push({
           provider: route.provider,
           model: route.id,
-          dispatched: false,
+          state: "preflight",
           ok: false,
           errorClass: "auth",
           content: errorContent
@@ -377,7 +392,7 @@ export class ProviderExecutor {
           model: route.id,
           routeIndex: index,
           routeRole: routeRoleForIndex(index),
-          dispatched: true,
+          state: "dispatched",
           dispatchedAt,
           credentialId: credential?.id,
           ok: callResponse.ok,

@@ -350,6 +350,8 @@ function successfulResponse(text: string): AgentLoopResponse {
       attempts: [{
         provider: "local",
         model: "test-model",
+        state: "dispatched",
+        dispatchedAt: "2030-01-01T00:00:00.000Z",
         ok: true,
         content: text,
         usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 }

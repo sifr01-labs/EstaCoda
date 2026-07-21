@@ -5,7 +5,7 @@ import type {
   ProviderUsageQuery,
   ProviderUsageTotals
 } from "../contracts/provider-usage.js";
-import type { ProviderExecutionResult } from "./provider-executor.js";
+import { assertProviderAttemptState, type ProviderExecutionResult } from "./provider-executor.js";
 import { estimateProviderUsage } from "./provider-usage-estimator.js";
 
 export type ProviderUsageTaskAttribution = {
@@ -26,10 +26,8 @@ export function providerUsageEntriesFromExecution(input: {
   task?: ProviderUsageTaskAttribution;
 }): ProviderUsageEntry[] {
   return input.execution.attempts.flatMap((attempt, providerAttemptIndex) => {
-    if (attempt.dispatched !== true) return [];
-    if (attempt.dispatchedAt === undefined || !Number.isFinite(Date.parse(attempt.dispatchedAt))) {
-      throw new Error("A dispatched provider request is missing its dispatch timestamp.");
-    }
+    assertProviderAttemptState(attempt);
+    if (attempt.state === "preflight") return [];
     const inferredRouteIndex = input.routes.findIndex((route) =>
       route.provider === attempt.provider && route.id === attempt.model
     );

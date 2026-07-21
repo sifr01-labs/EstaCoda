@@ -25,6 +25,7 @@ import type {
   ProviderFinishReason,
   ProviderId,
   ProviderLoopRuntimeMetadata,
+  ProviderAttemptState,
   ProviderReasoningMetadata,
   ProviderRouteRole,
   ProviderStreamDiagnostics,
@@ -325,11 +326,9 @@ export type SessionEvent =
       ok: boolean;
       finishReason?: ProviderFinishReason;
       incompleteReason?: string;
-      attempts: Array<{
+      attempts: Array<ProviderAttemptState & {
         provider: string;
         model: string;
-        dispatched?: boolean;
-        dispatchedAt?: string;
         credentialId?: string;
         ok: boolean;
         errorClass?: ProviderErrorClass | string;
@@ -349,11 +348,9 @@ export type SessionEvent =
       ok: boolean;
       finishReason?: ProviderFinishReason;
       incompleteReason?: string;
-      attempts: Array<{
+      attempts: Array<ProviderAttemptState & {
         provider: string;
         model: string;
-        dispatched?: boolean;
-        dispatchedAt?: string;
         credentialId?: string;
         ok: boolean;
         errorClass?: ProviderErrorClass | string;

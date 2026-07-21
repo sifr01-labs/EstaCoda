@@ -80,6 +80,8 @@ describe("SessionRecallService", () => {
             {
               provider: "test",
               model: "session-search",
+              state: "dispatched" as const,
+              dispatchedAt: "2030-01-01T00:00:00.000Z",
               ok: true,
               content: "safe summary"
             }
@@ -327,6 +329,8 @@ function auxiliaryOptions(summary = "provider summary", ok = true) {
           {
             provider: "test",
             model: "session-search",
+            state: "dispatched" as const,
+            dispatchedAt: "2030-01-01T00:00:00.000Z",
             ok,
             content: summary,
             errorClass: ok ? undefined : "server"

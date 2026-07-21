@@ -49,6 +49,8 @@ export const missingToolFailureCase: EvalCase = {
         attempts: [{
           provider: "fake",
           model: "fake-model",
+          state: "dispatched",
+          dispatchedAt: "2030-01-01T00:00:00.000Z",
           ok: false,
           content: "",
           errorClass: "model-unavailable"

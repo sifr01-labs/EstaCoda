@@ -12,6 +12,7 @@ import type {
 } from "../contracts/session.js";
 import type { FailureRecord } from "../contracts/failure.js";
 import type { ProviderUsageEntry, ProviderUsageQuery } from "../contracts/provider-usage.js";
+import { verifiedCompressionLineage } from "./session-lineage.js";
 import { tokenizeSearchTerms } from "../search/fts-query.js";
 import { providerUsageMatches } from "../providers/provider-usage-ledger.js";
 
@@ -194,13 +195,14 @@ export class InMemorySessionDB implements SessionDB {
 
   async recordProviderUsageEntries(entries: readonly ProviderUsageEntry[]): Promise<void> {
     for (const entry of entries) {
-      const session = this.#sessions.get(entry.sessionId);
-      const turn = [...this.#messages.entries()].find(([sessionId, messages]) =>
-        this.#sessions.get(sessionId)?.profileId === entry.profileId &&
-        messages.some((message) => message.id === entry.visibleTurnId && message.role === "user")
-      );
-      if (session === undefined || session.profileId !== entry.profileId || turn === undefined) {
-        throw new Error("Provider usage attribution does not belong to its profile Session and visible turn.");
+      const lineage = await verifiedCompressionLineage(this, entry.sessionId, entry.profileId);
+      const visibleTurnOwned = lineage?.some((session) =>
+        this.#messages.get(session.id)?.some((message) =>
+          message.id === entry.visibleTurnId && message.role === "user"
+        ) === true
+      ) === true;
+      if (!visibleTurnOwned) {
+        throw new Error("Provider usage visible turn does not belong to its execution Session compression lineage.");
       }
       const key = `${entry.profileId}\0${entry.requestKey}`;
       const existing = this.#providerUsage.get(key);

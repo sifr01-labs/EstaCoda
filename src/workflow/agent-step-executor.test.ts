@@ -628,7 +628,7 @@ function response(overrides: Partial<AgentLoopResponse> = {}): AgentLoopResponse
         {
           provider: "openai",
           model: "fallback-model",
-          dispatched: true,
+          state: "dispatched",
           dispatchedAt: NOW,
           ok: false,
           content: "",
@@ -637,7 +637,7 @@ function response(overrides: Partial<AgentLoopResponse> = {}): AgentLoopResponse
         {
           provider: "openai",
           model: "child-model",
-          dispatched: true,
+          state: "dispatched",
           dispatchedAt: NOW,
           ok: true,
           content: FULL_RESULT,

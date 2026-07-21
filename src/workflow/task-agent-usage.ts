@@ -1,7 +1,7 @@
 import type { ResolvedModelRoute } from "../contracts/provider.js";
 import type { ProviderUsageEntry } from "../contracts/provider-usage.js";
 import type { TaskUsageTotals } from "../contracts/task.js";
-import type { ProviderExecutionResult } from "../providers/provider-executor.js";
+import { assertProviderAttemptState, type ProviderExecutionResult } from "../providers/provider-executor.js";
 import { estimateProviderUsage } from "../providers/provider-usage-estimator.js";
 import { providerUsageTotals } from "../providers/provider-usage-ledger.js";
 import type { AgentLoopRouteInput } from "../runtime/agent-loop-builder.js";
@@ -13,7 +13,8 @@ export function taskUsageFromAgentResponse(
 ): TaskUsageTotals {
   const catalog = routeCatalog(routes);
   const estimates = (execution?.attempts ?? []).flatMap((attempt, index) => {
-    if (attempt.dispatched !== true) return [];
+    assertProviderAttemptState(attempt);
+    if (attempt.state === "preflight") return [];
     const indexedRoute = attempt.routeIndex === undefined ? undefined : catalog[attempt.routeIndex];
     const route = indexedRoute?.provider === attempt.provider && indexedRoute.id === attempt.model
       ? indexedRoute

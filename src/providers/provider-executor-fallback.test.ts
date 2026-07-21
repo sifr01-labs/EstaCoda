@@ -139,6 +139,10 @@ describe("ProviderExecutor fallback behavior", () => {
     expect(result.attempts.length).toBe(2);
     expect(result.attempts[0].provider).toBe("primary");
     expect(result.attempts[1].provider).toBe("fallback1");
+    expect(result.attempts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ state: "dispatched", dispatchedAt: expect.any(String), ok: false }),
+      expect.objectContaining({ state: "dispatched", dispatchedAt: expect.any(String), ok: true })
+    ]));
     expect(fallback2.calls.length).toBe(0);
   });
 

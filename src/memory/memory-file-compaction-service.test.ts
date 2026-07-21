@@ -450,6 +450,8 @@ function fakeProviderExecutor(content: string, ok: boolean) {
         {
           provider: "test",
           model: "memory-compact",
+          state: "dispatched" as const,
+          dispatchedAt: "2030-01-01T00:00:00.000Z",
           ok,
           content,
           errorClass: ok ? undefined : "server"

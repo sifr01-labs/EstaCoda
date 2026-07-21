@@ -60,6 +60,8 @@ function executionResult(route: ResolvedModelRoute, ok: boolean, content = ok ? 
       {
         provider: route.provider,
         model: route.id,
+        state: "dispatched",
+        dispatchedAt: "2030-01-01T00:00:00.000Z",
         ok,
         errorClass: ok ? undefined : "server",
         content,

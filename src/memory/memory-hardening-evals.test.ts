@@ -990,6 +990,8 @@ function makeCompactionService(input: {
           {
             provider: "test",
             model: "memory-compaction",
+            state: "dispatched" as const,
+            dispatchedAt: "2030-01-01T00:00:00.000Z",
             ok: true,
             content: input.providerContent
           }

@@ -246,6 +246,8 @@ describe("ProviderExecutor route-based execution", () => {
       expect(result.ok).toBe(false);
       expect(result.attempts.length).toBe(1);
       expect(result.attempts[0].errorClass).toBe("auth");
+      expect(result.attempts[0]).toMatchObject({ state: "preflight" });
+      expect(result.attempts[0]).not.toHaveProperty("dispatchedAt");
       expect(result.attempts[0].content).toBe("Missing env var MISSING_ROUTE_KEY");
       expect(adapter.calls.length).toBe(0);
     } finally {
@@ -341,6 +343,7 @@ describe("ProviderExecutor route-based execution", () => {
     expect(result.ok).toBe(false);
     expect(result.attempts.length).toBe(1);
     expect(result.attempts[0].errorClass).toBe("missing-route");
+    expect(result.attempts[0]).toMatchObject({ state: "preflight" });
     expect(result.attempts[0].content).toContain("No explicit primary route");
     expect(adapter.calls.length).toBe(0);
   });

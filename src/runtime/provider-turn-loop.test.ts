@@ -62,6 +62,7 @@ const primaryRoute: ResolvedModelRoute = {
   baseUrl: "https://primary.example.com/v1",
   apiKeyEnv: "PRIMARY_KEY"
 };
+const DISPATCHED_AT = "2030-01-01T00:00:00.000Z";
 
 const nativeHistoryRoute = {
   ...primaryRoute,
@@ -214,6 +215,8 @@ async function createCompressionHarness() {
       {
         provider: "test-provider",
         model: "test-model",
+        state: "dispatched",
+        dispatchedAt: DISPATCHED_AT,
         ok: true,
         content: "mock-response"
       }
@@ -377,6 +380,8 @@ function providerExecution(
     {
       provider: "test-provider",
       model: "test-model",
+      state: "dispatched" as const,
+      dispatchedAt: DISPATCHED_AT,
       ok: true,
       content,
       ...(response.finishReason === undefined ? {} : { finishReason: response.finishReason }),
@@ -408,6 +413,8 @@ function incompleteStreamExecution(partialContent: string | undefined): Provider
       {
         provider: "test-provider",
         model: "test-model",
+        state: "dispatched",
+        dispatchedAt: DISPATCHED_AT,
         ok: false,
         errorClass: "incomplete-stream",
         content: "Provider stream ended before completion after partial output.",
@@ -1006,7 +1013,7 @@ describe("ProviderTurnLoop provider availability", () => {
         {
           provider: "test-provider",
           model: "test-model",
-          dispatched: true,
+          state: "dispatched",
           dispatchedAt: "2030-01-01T00:00:00.000Z",
           ok: false,
           errorClass: "timeout",
@@ -1016,7 +1023,7 @@ describe("ProviderTurnLoop provider availability", () => {
         {
           provider: "fallback-provider",
           model: "fallback-model",
-          dispatched: false,
+          state: "preflight",
           ok: false,
           errorClass: "auth",
           content: ""
@@ -1163,6 +1170,8 @@ describe("ProviderTurnLoop semantic session compression", () => {
         attempts: [{
           provider: primaryRoute.provider,
           model: primaryRoute.id,
+          state: "dispatched",
+          dispatchedAt: DISPATCHED_AT,
           ok: true,
           content: "response without usage"
         }],
@@ -1252,6 +1261,8 @@ describe("ProviderTurnLoop semantic session compression", () => {
         attempts: [{
           provider: fallbackRoute.provider,
           model: fallbackRoute.id,
+          state: "dispatched",
+          dispatchedAt: DISPATCHED_AT,
           ok: true,
           content: "fallback-response"
         }],
@@ -2327,6 +2338,8 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
             {
               provider: "test-provider",
               model: "test-model",
+              state: "dispatched",
+              dispatchedAt: DISPATCHED_AT,
               ok: true,
               content: "streamed answer",
               streamDiagnostics
@@ -3024,6 +3037,8 @@ describe("ProviderTurnLoop length-truncated text continuation", () => {
         {
           provider: "test-provider",
           model: "test-model",
+          state: "dispatched",
+          dispatchedAt: DISPATCHED_AT,
           ok: false,
           errorClass: "server",
           content: "primary failed"
@@ -3031,6 +3046,8 @@ describe("ProviderTurnLoop length-truncated text continuation", () => {
         {
           provider: "test-provider",
           model: "test-model-fallback",
+          state: "dispatched",
+          dispatchedAt: DISPATCHED_AT,
           ok: true,
           content: "Fallback par",
           finishReason: "length"
@@ -3081,6 +3098,8 @@ describe("ProviderTurnLoop length-truncated text continuation", () => {
         {
           provider: "test-provider",
           model: "test-model",
+          state: "dispatched",
+          dispatchedAt: DISPATCHED_AT,
           ok: false,
           errorClass: "server",
           content: "primary failed"
@@ -3088,6 +3107,8 @@ describe("ProviderTurnLoop length-truncated text continuation", () => {
         {
           provider: "test-provider",
           model: "test-model-fallback",
+          state: "dispatched",
+          dispatchedAt: DISPATCHED_AT,
           ok: true,
           content: "FallbackA par",
           finishReason: "length"
@@ -3113,6 +3134,8 @@ describe("ProviderTurnLoop length-truncated text continuation", () => {
             {
               provider: "test-provider",
               model: "test-model-fallback",
+              state: "dispatched",
+              dispatchedAt: DISPATCHED_AT,
               ok: false,
               errorClass: "server",
               content: "fallback A continuation failed"
@@ -3120,6 +3143,8 @@ describe("ProviderTurnLoop length-truncated text continuation", () => {
             {
               provider: "test-provider",
               model: "test-model-second-fallback",
+              state: "dispatched",
+              dispatchedAt: DISPATCHED_AT,
               ok: true,
               content: "partial from fallbackB.",
               finishReason: "stop"
@@ -3384,6 +3409,8 @@ describe("ProviderTurnLoop truncated tool-call safety", () => {
         {
           provider: "test-provider",
           model: "test-model",
+          state: "dispatched",
+          dispatchedAt: DISPATCHED_AT,
           ok: false,
           errorClass: "server",
           content: "primary failed"
@@ -3391,6 +3418,8 @@ describe("ProviderTurnLoop truncated tool-call safety", () => {
         {
           provider: "test-provider",
           model: "test-model-fallback",
+          state: "dispatched",
+          dispatchedAt: DISPATCHED_AT,
           ok: true,
           content: "",
           finishReason: "length"
@@ -3536,6 +3565,8 @@ describe("ProviderTurnLoop truncated tool-call safety", () => {
             {
               provider: "test-provider",
               model: "test-model",
+              state: "dispatched",
+              dispatchedAt: DISPATCHED_AT,
               ok: false,
               errorClass: "server",
               content: "retry failed"
@@ -3634,6 +3665,8 @@ describe("ProviderTurnLoop explicit route propagation", () => {
         {
           provider: "test-provider",
           model: "test-model",
+          state: "dispatched",
+          dispatchedAt: DISPATCHED_AT,
           ok: true,
           content: "mock-response"
         }
@@ -3710,6 +3743,8 @@ describe("ProviderTurnLoop explicit route propagation", () => {
         {
           provider: "test-provider",
           model: "test-model",
+          state: "dispatched",
+          dispatchedAt: DISPATCHED_AT,
           ok: true,
           content: "mock-response"
         }
@@ -3835,6 +3870,8 @@ describe("ProviderTurnLoop explicit route propagation", () => {
         {
           provider: "test-provider",
           model: "test-model",
+          state: "dispatched",
+          dispatchedAt: DISPATCHED_AT,
           ok: true,
           content: "mock-response"
         }

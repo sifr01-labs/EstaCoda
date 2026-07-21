@@ -84,6 +84,54 @@ describe("SQLiteSessionDB", () => {
       await expect(db.recordProviderUsageEntries([{ ...entry, totalTokens: 121 }])).rejects.toThrow(/conflicts/);
       await expect(db.recordProviderUsageEntries([{ ...entry, id: "usage-2", requestKey: "bad-turn", visibleTurnId: "missing" }]))
         .rejects.toThrow(/visible turn/);
+      await expect(db.recordProviderUsageEntries([{
+        ...entry,
+        id: "usage-3",
+        requestKey: "unrelated-turn",
+        visibleTurnId: "other-turn"
+      }])).rejects.toThrow(/compression lineage/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("accepts provider usage attributed to a verified compressed-session ancestor", async () => {
+    const db = new SQLiteSessionDB({ path: dbPath });
+    try {
+      await db.createSession({ id: "parent", profileId: "alpha", endReason: "compression" });
+      await db.appendMessage({ id: "parent-turn", sessionId: "parent", role: "user", content: "Original turn" });
+      await db.createSession({
+        id: "child",
+        profileId: "alpha",
+        parentSessionId: "parent",
+        metadata: { compactedFromSessionId: "parent" }
+      });
+      const entry = {
+        id: "compressed-usage",
+        profileId: "alpha",
+        sessionId: "child",
+        visibleTurnId: "parent-turn",
+        requestKey: "compressed-request",
+        provider: "openai",
+        model: "gpt-test",
+        routeRole: "primary" as const,
+        routeIndex: 0,
+        providerAttemptIndex: 0,
+        inputTokens: 10,
+        outputTokens: 2,
+        reasoningTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        totalTokens: 12,
+        estimatedCostUsd: 0.001,
+        usageComplete: true,
+        pricingComplete: true,
+        incompleteReasons: [],
+        dispatchedAt: "2030-01-01T00:00:00.000Z"
+      };
+
+      await expect(db.recordProviderUsageEntries([entry])).resolves.toBeUndefined();
+      await expect(db.listProviderUsageEntries("alpha", { sessionId: "child" })).resolves.toEqual([entry]);
     } finally {
       db.close();
     }

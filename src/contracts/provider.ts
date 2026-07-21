@@ -164,6 +164,11 @@ export type ProviderRouteRole =
   | "override"
   | "unknown";
 
+/** Explicitly distinguishes local route rejection from an adapter invocation. */
+export type ProviderAttemptState =
+  | { state: "preflight" }
+  | { state: "dispatched"; dispatchedAt: string };
+
 export type ProviderStreamFinish =
   | "done"
   | "error"

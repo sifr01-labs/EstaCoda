@@ -7,17 +7,31 @@ import {
   taskUsageFromEntries
 } from "./task-agent-usage.js";
 
+const DISPATCHED_AT = "2030-01-01T00:00:00.000Z";
+
 describe("taskUsageFromAgentResponse", () => {
+  it("rejects injected provider Attempts that omit dispatch state", () => {
+    const malformed = {
+      ok: false,
+      fallbackUsed: false,
+      attempts: [{ provider: "openai", model: "primary", ok: false, content: "" }],
+      toolCalls: []
+    } as unknown as ProviderExecutionResult;
+
+    expect(() => taskUsageFromAgentResponse(malformed, routes())).toThrow(/dispatch state/i);
+  });
+
   it("excludes preflight failures and retains failed requests that reached a provider", () => {
     const execution: ProviderExecutionResult = {
       ok: false,
       fallbackUsed: true,
       attempts: [
-        { provider: "openai", model: "primary", dispatched: false, ok: false, errorClass: "auth", content: "" },
+        { provider: "openai", model: "primary", state: "preflight", ok: false, errorClass: "auth", content: "" },
         {
           provider: "deepseek",
           model: "fallback",
-          dispatched: true,
+          state: "dispatched",
+          dispatchedAt: DISPATCHED_AT,
           ok: false,
           errorClass: "timeout",
           content: ""
@@ -48,7 +62,8 @@ describe("taskUsageFromAgentResponse", () => {
       attempts: [{
         provider: "openai",
         model: "primary",
-        dispatched: true,
+        state: "dispatched",
+        dispatchedAt: DISPATCHED_AT,
         ok: true,
         content: "done",
         usage: {
@@ -80,7 +95,8 @@ describe("taskUsageFromAgentResponse", () => {
         {
           provider: "openai",
           model: "primary",
-          dispatched: true,
+          state: "dispatched",
+          dispatchedAt: DISPATCHED_AT,
           ok: false,
           content: "",
           usage: { inputTokens: 1_000, outputTokens: 100, totalTokens: 1_100, reasoningTokens: 40 }
@@ -88,7 +104,8 @@ describe("taskUsageFromAgentResponse", () => {
         {
           provider: "deepseek",
           model: "fallback",
-          dispatched: true,
+          state: "dispatched",
+          dispatchedAt: DISPATCHED_AT,
           ok: true,
           content: "done",
           usage: { inputTokens: 2_000, outputTokens: 300, totalTokens: 2_300, reasoningTokens: 50 }
@@ -117,11 +134,12 @@ describe("taskUsageFromAgentResponse", () => {
       ok: false,
       fallbackUsed: false,
       attempts: [
-        { provider: "openai", model: "primary", dispatched: true, ok: false, content: "" },
+        { provider: "openai", model: "primary", state: "dispatched", dispatchedAt: DISPATCHED_AT, ok: false, content: "" },
         {
           provider: "unknown",
           model: "unpriced",
-          dispatched: true,
+          state: "dispatched",
+          dispatchedAt: DISPATCHED_AT,
           ok: false,
           content: "",
           usage: { inputTokens: 25, outputTokens: 5, totalTokens: 30 }
@@ -156,7 +174,8 @@ describe("taskUsageFromAgentResponse", () => {
       attempts: [{
         provider: "openai",
         model: "primary",
-        dispatched: true,
+        state: "dispatched",
+        dispatchedAt: DISPATCHED_AT,
         ok: true,
         content: "done",
         usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120, reasoningTokens: 15 }
@@ -181,7 +200,7 @@ describe("task usage ledger", () => {
         attempts: [{
           provider: "openai",
           model: "primary",
-          dispatched: true,
+          state: "dispatched",
           dispatchedAt: "2030-01-01T00:00:00.000Z",
           ok: true,
           content: "done",
@@ -209,7 +228,7 @@ describe("task usage ledger", () => {
         attempts: [{
           provider: "deepseek",
           model: "fallback",
-          dispatched: true,
+          state: "dispatched",
           dispatchedAt: "2030-01-01T00:00:01.000Z",
           ok: true,
           content: "done",
@@ -270,7 +289,7 @@ describe("task usage ledger", () => {
           model: primary.id,
           routeIndex: 1,
           routeRole: "fallback",
-          dispatched: true,
+          state: "dispatched",
           dispatchedAt: "2030-01-01T00:00:00.000Z",
           ok: true,
           content: "done",

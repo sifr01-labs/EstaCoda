@@ -5,6 +5,7 @@ import type { MemoryPromptContext } from "../contracts/memory.js";
 import type {
   ModelProfile,
   ProviderFinishReason,
+  ProviderAttemptState,
   ProviderLoopRuntimeMetadata,
   ProviderMessage,
   ProviderRequest,
@@ -39,7 +40,13 @@ import { SUMMARY_FORMAT_VERSION } from "../prompt/semantic-compressor.js";
 import type { ConversationContinuationState } from "./conversation-continuation-state.js";
 import { normalizeProviderMessagesStrict } from "../providers/provider-message-normalizer.js";
 import type { PromptBudgetReport, PromptSemanticCompressionReport } from "../contracts/prompt.js";
-import type { ProviderAttempt, ProviderExecutionResult, ProviderExecutor, ProviderRuntimeEvent } from "../providers/provider-executor.js";
+import {
+  assertProviderAttemptState,
+  type ProviderAttempt,
+  type ProviderExecutionResult,
+  type ProviderExecutor,
+  type ProviderRuntimeEvent
+} from "../providers/provider-executor.js";
 import {
   providerUsageEntriesFromExecution,
   type ProviderUsageTaskAttribution
@@ -1515,11 +1522,9 @@ function estimateProviderToolFeedbackTokens(executions: ToolExecutionRecord[]): 
   }, 0);
 }
 
-function providerAttemptEventPayload(attempt: ProviderAttempt): {
+function providerAttemptEventPayload(attempt: ProviderAttempt): ProviderAttemptState & {
   provider: string;
   model: string;
-  dispatched: boolean;
-  dispatchedAt?: string;
   credentialId?: string;
   ok: boolean;
   errorClass?: string;
@@ -1529,13 +1534,13 @@ function providerAttemptEventPayload(attempt: ProviderAttempt): {
   reasoningMetadata?: ProviderAttempt["reasoningMetadata"];
   streamDiagnostics?: ProviderAttempt["streamDiagnostics"];
 } {
+  assertProviderAttemptState(attempt);
   return {
     provider: attempt.provider,
     model: attempt.model,
-    dispatched: attempt.dispatched ?? (
-      attempt.errorClass !== "unsupported" && attempt.errorClass !== "missing-route" && attempt.errorClass !== "auth"
-    ),
-    ...(attempt.dispatchedAt === undefined ? {} : { dispatchedAt: attempt.dispatchedAt }),
+    ...(attempt.state === "preflight"
+      ? { state: "preflight" as const }
+      : { state: "dispatched" as const, dispatchedAt: attempt.dispatchedAt }),
     ok: attempt.ok,
     ...(attempt.credentialId === undefined ? {} : { credentialId: attempt.credentialId }),
     ...(attempt.errorClass === undefined ? {} : { errorClass: attempt.errorClass }),

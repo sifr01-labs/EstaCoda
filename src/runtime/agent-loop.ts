@@ -1311,7 +1311,7 @@ export class AgentLoop {
       const entries = await this.#sessionDb.listProviderUsageEntries(this.#profileId, {
         visibleTurnId
       });
-      const dispatchedProviderRequest = response.providerExecution?.attempts.some((attempt) => attempt.dispatched) === true;
+      const dispatchedProviderRequest = response.providerExecution?.attempts.some((attempt) => attempt.state === "dispatched") === true;
       mainAgent = usageCostSummaryFromEntries(entries, {
         emptyUsageIsComplete: !dispatchedProviderRequest
       });
