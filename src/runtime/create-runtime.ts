@@ -345,6 +345,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const taskStore = sessionDb instanceof SQLiteSessionDB
     ? new SQLiteTaskStore({ db: sessionDb.db, profileId })
     : undefined;
+  const providerSpendController = sessionDb instanceof SQLiteSessionDB
+    ? new SQLiteProviderSpendController({ db: sessionDb.db, profileId })
+    : undefined;
   const taskResultService = taskStore === undefined
     ? undefined
     : new TaskResultService({
@@ -356,6 +359,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const taskOperatorService = taskStore === undefined ? undefined : new TaskOperatorService({
     store: taskStore,
     defaultTaskSpendingLimit: options.budgets?.task,
+    ...(providerSpendController === undefined ? {} : {
+      spendingScope: (kind, ownerId) => providerSpendController.getScope(kind, ownerId)
+    }),
     backgroundContinuation: () => options.taskBackgroundContinuation ?? "unknown"
   });
   const closeSessionDbOnDispose = options.closeSessionDbOnDispose ?? true;
@@ -452,9 +458,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     registry: providerRegistry,
     homeDir: globalPaths.homeDir,
     profileId,
-    ...(sessionDb instanceof SQLiteSessionDB
-      ? { spendController: new SQLiteProviderSpendController({ db: sessionDb.db, profileId }) }
-      : { allowUnenforcedAttributedSpend: true }),
+    ...(providerSpendController === undefined
+      ? { allowUnenforcedAttributedSpend: true }
+      : { spendController: providerSpendController }),
     usageRecorder: createProviderUsageRecorder({
       profileId,
       record: (entries) => sessionDb.recordProviderUsageEntries(entries),
@@ -1127,7 +1133,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         sessionDb,
         taskStore,
         sessionId: sessionRuntimeContext.currentSessionId(),
-        profileId
+        profileId,
+        ...(providerSpendController === undefined ? {} : {
+          spendingScope: (ownerId) => providerSpendController.getScope("session", ownerId)
+        })
       });
     },
     async inspectMemoryPromotions() {

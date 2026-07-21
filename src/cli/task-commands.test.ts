@@ -55,7 +55,7 @@ describe("Task commands", () => {
     });
     expect(shown.ok).toBe(true);
     expect(shown.output).toContain(`Task ${created.taskId} · Inspect deterministic output`);
-    expect(shown.output).toContain("Estimated cost: $0.0000 (incomplete)");
+    expect(shown.output).toContain("Estimated cost: unavailable");
     expect(shown.output).toContain("Workspace: trusted");
     expect(shown.output).toContain("Background host: inactive");
     expect(shown.output).toContain("Execution: waiting");

@@ -9,6 +9,10 @@ import type { DeliveryTarget } from "../channels/delivery-router.js";
 import { TASK_RESULT_PAGE_MAX_CHARS, type TaskResultService } from "./task-result-service.js";
 import type { TaskStore } from "./task-store.js";
 import { taskPrimaryResult, taskPrimaryResultStepId } from "./task-primary-result.js";
+import { listStepTreeAttempts, listTaskTreeUsageEntries } from "./task-tree-accounting.js";
+import { taskUsageFromEntries } from "./task-agent-usage.js";
+import { formatUsageCost, formatUsdAmount } from "../ui/usage-cost-format.js";
+import { spendingBudgetSummary } from "../providers/provider-spend-projection.js";
 
 const MAX_DELIVERY_TEXT_CHARS = 100_000;
 const MAX_DELIVERY_RESULTS = 64;
@@ -40,6 +44,7 @@ export class TaskCompletionDeliveryService {
   readonly #router: TaskCompletionDeliveryRouter;
   readonly #now: () => Date;
   readonly #id: () => string;
+  readonly #locale: "en" | "ar";
 
   constructor(options: {
     store: TaskStore;
@@ -47,12 +52,14 @@ export class TaskCompletionDeliveryService {
     router: TaskCompletionDeliveryRouter;
     now?: () => Date;
     id?: () => string;
+    locale?: "en" | "ar";
   }) {
     this.#store = options.store;
     this.#resultService = options.resultService;
     this.#router = options.router;
     this.#now = options.now ?? (() => new Date());
     this.#id = options.id ?? randomUUID;
+    this.#locale = options.locale ?? "en";
   }
 
   bind(input: BindTaskCompletionDeliveryInput): TaskDeliveryBinding {
@@ -179,6 +186,30 @@ export class TaskCompletionDeliveryService {
       `Objective: ${boundText(task.objective, 2_000)}`
     ];
     if (task.failure !== undefined) lines.push(`Failure: ${boundText(task.failure.class, 80)}`);
+    const usageEntries = listTaskTreeUsageEntries(this.#store, task.id);
+    const taskUsage = taskUsageFromEntries(usageEntries);
+    lines.push("", `${copy(this.#locale, "Task total", "إجمالي المهمة")}: ${formatTaskUsage(taskUsage, this.#locale)}`);
+    if (task.activePlanRevisionId !== undefined) {
+      for (const step of this.#store.listSteps(task.id, task.activePlanRevisionId)) {
+        const attemptIds = new Set(listStepTreeAttempts(this.#store, task.id, step.id).map((attempt) => attempt.id));
+        const stepUsage = taskUsageFromEntries(usageEntries.filter((entry) =>
+          entry.attemptId !== undefined && attemptIds.has(entry.attemptId)
+        ));
+        lines.push(`${boundText(step.title, 160)}: ${formatTaskUsage(stepUsage, this.#locale)}`);
+      }
+    }
+    const root = task.id === task.rootTaskId ? task : this.#store.getTask(task.rootTaskId);
+    if (root?.spendingLimit !== undefined) {
+      const budget = spendingBudgetSummary(root.spendingLimit, undefined, taskUsage.estimatedCostUsd);
+      lines.push(
+        "",
+        copy(this.#locale, "Task spending", "إنفاق المهمة"),
+        `${copy(this.#locale, "Spent", "المنفق")}: ${formatUsdAmount(budget.spentCostUsd, this.#locale)}`,
+        `${copy(this.#locale, "Reserved", "المحجوز")}: ${formatUsdAmount(budget.reservedCostUsd, this.#locale)}`,
+        `${copy(this.#locale, "Remaining", "المتبقي")}: ${formatUsdAmount(budget.remainingCostUsd, this.#locale)}`,
+        `${copy(this.#locale, "Limit", "الحد")}: ${formatUsdAmount(budget.maxEstimatedCostUsd, this.#locale)}`
+      );
+    }
 
     const availableResults = this.#store.listResults(task.id)
       .filter((result) => result.status === "available");
@@ -226,6 +257,22 @@ export class TaskCompletionDeliveryService {
     } while (content.length < MAX_DELIVERY_TEXT_CHARS);
     return content;
   }
+}
+
+function formatTaskUsage(
+  usage: import("../contracts/task.js").TaskUsageTotals,
+  locale: "en" | "ar"
+): string {
+  return formatUsageCost({
+    estimatedCostUsd: usage.pricingComplete || usage.estimatedCostUsd > 0
+      ? usage.estimatedCostUsd
+      : undefined,
+    costComplete: usage.pricingComplete
+  }, { locale });
+}
+
+function copy(locale: "en" | "ar", english: string, arabic: string): string {
+  return locale === "ar" ? arabic : english;
 }
 
 function validateDestination(destination: TaskDeliveryDestination): TaskDeliveryDestination {

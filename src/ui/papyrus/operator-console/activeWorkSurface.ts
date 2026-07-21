@@ -88,7 +88,7 @@ export function getCompletedActiveWorkSurfaceDesiredHeight(
 ): number {
   const durableItems = activeWorkItemsForCompletedSurface(state);
   if (durableItems.length === 0) return 0;
-  return durableItems.length + 4 + (turnUsage === undefined ? 0 : 2);
+  return durableItems.length + 4 + (turnUsage === undefined ? 0 : turnUsage.provisional ? 5 : 4);
 }
 
 export function renderActiveWorkSurface(
@@ -493,11 +493,19 @@ function formatCompletionFooterRows(
   const summary = formatActiveWorkSummary(state, { locale, includeActive: false });
   if (turnUsage === undefined) return [truncateVisibleCells(summary, contentWidth)];
   const mainLabel = locale === "ar" ? "الوكيل الرئيسي" : "Main agent";
+  const auxiliaryLabel = locale === "ar" ? "النماذج المساعدة" : "Auxiliary models";
+  const delegatedLabel = locale === "ar" ? "العمل المفوض" : "Delegated work";
   const totalLabel = locale === "ar" ? "إجمالي الدور" : "Turn total";
+  const soFar = turnUsage.provisional ? locale === "ar" ? " حتى الآن" : " so far" : "";
   return [
     truncateVisibleCells(summary, contentWidth),
     truncateVisibleCells(`${mainLabel} · ${formatUsageCost(turnUsage.mainAgent, { locale })}`, contentWidth),
-    truncateVisibleCells(`${totalLabel} · ${formatUsageCost(turnUsage.total, { locale })}`, contentWidth)
+    truncateVisibleCells(`${auxiliaryLabel} · ${formatUsageCost(turnUsage.auxiliaryModels, { locale })}`, contentWidth),
+    truncateVisibleCells(`${delegatedLabel}${soFar} · ${formatUsageCost(turnUsage.delegatedWork, { locale })}`, contentWidth),
+    truncateVisibleCells(`${totalLabel}${soFar} · ${formatUsageCost(turnUsage.total, { locale })}`, contentWidth),
+    ...(turnUsage.provisional
+      ? [truncateVisibleCells(locale === "ar" ? "لا يزال العمال قيد التنفيذ" : "Workers still running", contentWidth)]
+      : [])
   ];
 }
 

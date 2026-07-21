@@ -1954,7 +1954,15 @@ function promptTaskCard(): TaskCardState {
     backgroundContinuation: "available",
     progress: { completed: 1, skipped: 0, total: 1 },
     planRevision: { revision: 1, status: "active" },
-    steps: [{ stepId: "step-1", title: "Finish work", status: "completed", dependsOn: [], childTaskPolicy: "forbid" }],
+    steps: [{
+      stepId: "step-1",
+      title: "Finish work",
+      status: "completed",
+      dependsOn: [],
+      childTaskPolicy: "forbid",
+      usage: { providerCalls: 1, totalTokens: 10, estimatedCostUsd: 0.001, usageComplete: true, pricingComplete: true },
+      attempts: []
+    }],
     childTasks: [],
     recentActivity: [{ kind: "attempt-completed", label: "Attempt completed", timestamp: "2026-07-20T10:00:00.000Z" }],
     elapsedMs: 1_000,

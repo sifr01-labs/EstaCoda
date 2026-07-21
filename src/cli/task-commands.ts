@@ -5,6 +5,7 @@ import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { readGatewayState } from "../gateway/supervisor-state.js";
 import { isStalePid } from "../gateway/pid-file.js";
 import { SQLiteTaskStore } from "../workflow/sqlite-task-store.js";
+import { SQLiteProviderSpendController } from "../workflow/sqlite-provider-spend.js";
 import {
   normalizeTaskOperatorObjective,
   TaskOperatorService,
@@ -13,6 +14,7 @@ import {
 import { resolveTaskWorkspaceBinding } from "../workflow/task-workspace.js";
 import { normalizeBudgetConfig, readConfig } from "../config/runtime-config.js";
 import { isolateLtr } from "../ui/bidi.js";
+import { formatUsageCost, formatUsdAmount } from "../ui/usage-cost-format.js";
 import type { TaskExecutionPreference } from "../contracts/task.js";
 import type { CliCommandResult, CliOptions } from "./cli.js";
 
@@ -42,6 +44,7 @@ export async function taskCommand(options: CliOptions, args: string[]): Promise<
   try {
     db = await createSQLiteSessionDB({ path: paths.sessionsSqlitePath });
     const store = new SQLiteTaskStore({ db: db.db, profileId });
+    const spendController = new SQLiteProviderSpendController({ db: db.db, profileId });
     const initialBackgroundHost = await detectTaskBackgroundHost({ homeDir, profileId });
     const profilePaths = resolveProfileStateHome({ homeDir, profileId });
     const profileConfig = (await readConfig(profilePaths.configPath)).config;
@@ -49,6 +52,7 @@ export async function taskCommand(options: CliOptions, args: string[]): Promise<
     const service = new TaskOperatorService({
       store,
       defaultTaskSpendingLimit: budgets.task,
+      spendingScope: (kind, ownerId) => spendController.getScope(kind, ownerId),
       backgroundContinuation: () => initialBackgroundHost === "active" ? "available" : "unavailable"
     });
     locale = profileConfig.ui?.language === "ar" ? "ar" : "en";
@@ -261,8 +265,22 @@ function renderTask(
       `التقدم: اكتملت ${task.progress.completed} من ${task.progress.total} خطوة`),
     `${copy(locale, "Running", "قيد التنفيذ")}: ${task.progress.running}`,
     `${copy(locale, "Waiting", "قيد الانتظار")}: ${waiting}`,
-    `${copy(locale, "Estimated cost", "التكلفة التقديرية")}: $${task.usage.estimatedCostUsd.toFixed(4)}${task.usage.pricingComplete ? "" : copy(locale, " (incomplete)", " (غير مكتمل)")}`,
+    `${copy(locale, "Estimated cost", "التكلفة التقديرية")}: ${formatTaskUsageCost(task.usage, locale)}`,
     `${copy(locale, "Usage", "الاستخدام")}: ${task.usage.totalTokens} ${copy(locale, "tokens", "رمزًا")}${task.usage.usageComplete ? "" : copy(locale, " (incomplete)", " (غير مكتمل)")}`,
+    task.spending === undefined ? undefined : "",
+    task.spending === undefined ? undefined : copy(locale, "Task spending", "إنفاق المهمة"),
+    task.spending === undefined ? undefined : `${copy(locale, "Spent", "المنفق")}: ${formatUsdAmount(task.spending.spentCostUsd, locale)}`,
+    task.spending === undefined ? undefined : `${copy(locale, "Reserved", "المحجوز")}: ${formatUsdAmount(task.spending.reservedCostUsd, locale)}`,
+    task.spending === undefined ? undefined : `${copy(locale, "Remaining", "المتبقي")}: ${formatUsdAmount(task.spending.remainingCostUsd, locale)}`,
+    task.spending === undefined ? undefined : `${copy(locale, "Limit", "الحد")}: ${formatUsdAmount(task.spending.maxEstimatedCostUsd, locale)}`,
+    task.steps.length === 0 ? undefined : "",
+    task.steps.length === 0 ? undefined : copy(locale, "Worker and Step spending", "إنفاق العمال والخطوات"),
+    ...task.steps.flatMap((step) => [
+      `${step.title}: ${formatTaskUsageCost(step.usage, locale)}`,
+      ...step.attempts.map((attempt) =>
+        `  ${copy(locale, "Attempt", "المحاولة")} #${attempt.attemptNumber} · ${technical(locale, attempt.status)} · ${formatTaskUsageCost(attempt.usage, locale)}`
+      )
+    ]),
     `${copy(locale, "Results", "النتائج")}: ${task.results.length}`,
     task.results.find((result) => result.primary) === undefined
       ? undefined
@@ -274,6 +292,18 @@ function renderTask(
     task.failure === undefined ? undefined : `${copy(locale, "Failure", "الفشل")}: ${technical(locale, task.failure.class)}`
   ];
   return lines.filter((line): line is string => line !== undefined).join("\n");
+}
+
+function formatTaskUsageCost(
+  usage: import("../contracts/task.js").TaskUsageTotals,
+  locale: TaskCommandLocale
+): string {
+  return formatUsageCost({
+    estimatedCostUsd: usage.pricingComplete || usage.estimatedCostUsd > 0
+      ? usage.estimatedCostUsd
+      : undefined,
+    costComplete: usage.pricingComplete
+  }, { locale });
 }
 
 function parseBegin(

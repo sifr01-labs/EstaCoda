@@ -597,7 +597,7 @@ describe("Papyrus operator console active work surface", () => {
       items: [item("read", "succeeded", { toolName: "read_file", target: "src/app.ts" })],
     }), {
       width: 72,
-      turnUsage: { turnId: "turn-1", mainAgent: usage, total: usage },
+      turnUsage: { turnId: "turn-1", mainAgent: usage, auxiliaryModels: usage, delegatedWork: usage, total: usage, provisional: false },
     }).join("\n");
 
     expect(output).toContain("Main agent · ≈ $0.14");
@@ -622,7 +622,7 @@ describe("Papyrus operator console active work surface", () => {
       items: [item("read", "succeeded")],
     }), {
       width: 72,
-      turnUsage: { turnId: "turn-1", mainAgent: partial, total: partial },
+      turnUsage: { turnId: "turn-1", mainAgent: partial, auxiliaryModels: partial, delegatedWork: partial, total: partial, provisional: false },
     }).join("\n");
 
     expect(output).toContain("at least ≈ $0.84");

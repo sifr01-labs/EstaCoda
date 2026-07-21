@@ -10,7 +10,7 @@ import type {
   TaskCardStepState,
   TaskSurfaceState,
 } from "./operatorConsoleState.js";
-import { formatUsageCost } from "../../usage-cost-format.js";
+import { formatUsageCost, formatUsdAmount } from "../../usage-cost-format.js";
 
 const MAX_CARD_STEPS = 4;
 const LTR_START = "\u2068";
@@ -34,6 +34,14 @@ type TaskCopy = {
   recentActivity: string;
   toolCategory: string;
   usageCost: string;
+  usageIncomplete: string;
+  stepSpending: string;
+  attempts: string;
+  taskSpending: string;
+  spent: string;
+  reserved: string;
+  remaining: string;
+  limit: string;
   results: string;
   primaryResult: string;
   waitingReason: string;
@@ -61,6 +69,14 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     recentActivity: "Recent safe activity",
     toolCategory: "Current tool category",
     usageCost: "Usage and cost",
+    usageIncomplete: "usage incomplete",
+    stepSpending: "Worker and Step spending",
+    attempts: "Attempts",
+    taskSpending: "Task spending",
+    spent: "Spent",
+    reserved: "Reserved",
+    remaining: "Remaining",
+    limit: "Limit",
     results: "Results and artifacts",
     primaryResult: "primary",
     waitingReason: "Waiting reason",
@@ -86,6 +102,14 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     recentActivity: "النشاط الآمن الأخير",
     toolCategory: "فئة الأداة الحالية",
     usageCost: "الاستخدام والتكلفة",
+    usageIncomplete: "الاستخدام غير مكتمل",
+    stepSpending: "إنفاق العمال والخطوات",
+    attempts: "المحاولات",
+    taskSpending: "إنفاق المهمة",
+    spent: "المنفق",
+    reserved: "المحجوز",
+    remaining: "المتبقي",
+    limit: "الحد",
     results: "النتائج والملفات",
     primaryResult: "النتيجة الرئيسية",
     waitingReason: "سبب الانتظار",
@@ -189,8 +213,20 @@ export function taskInspectionContentLines(
     `${card.usage.providerCalls} calls · ${card.usage.totalTokens} tokens · ${formatUsageCost({
       estimatedCostUsd: card.usage.estimatedCostUsd,
       costComplete: card.usage.pricingComplete
-    }, { locale })}` + `${card.usage.usageComplete ? "" : " · usage incomplete"}`,
+    }, { locale })}` + `${card.usage.usageComplete ? "" : ` · ${copy.usageIncomplete}`}`,
   ]);
+  addSection(lines, copy.stepSpending, card.steps.length === 0
+    ? [copy.none]
+    : card.steps.map((step) => `${step.title}: ${formatCardUsage(step.usage, locale)}`));
+  addSection(lines, copy.attempts, attemptUsageLines(card, locale, copy.none));
+  if (card.spending !== undefined) {
+    addSection(lines, copy.taskSpending, [
+      `${copy.spent}: ${formatUsdAmount(card.spending.spentCostUsd, locale)}`,
+      `${copy.reserved}: ${formatUsdAmount(card.spending.reservedCostUsd, locale)}`,
+      `${copy.remaining}: ${formatUsdAmount(card.spending.remainingCostUsd, locale)}`,
+      `${copy.limit}: ${formatUsdAmount(card.spending.maxEstimatedCostUsd, locale)}`
+    ]);
+  }
   addSection(lines, copy.results, card.results.length === 0
     ? [copy.none]
     : card.results.map((result) => `${result.primary ? `${copy.primaryResult} · ` : ""}${isolate(result.handle)} · ${result.kind} · ${formatBytes(result.byteLength)}${result.summary === undefined ? "" : ` · ${result.summary}`}`));
@@ -342,7 +378,27 @@ function formatStepRow(step: TaskCardStepState, unicode: boolean, locale: Operat
     step.activeAttempt?.status ??
     step.status;
   const duration = step.activeAttempt === undefined ? "" : `  ${formatDuration(step.activeAttempt.elapsedMs)}`;
-  return `  ${symbol} ${step.title}  ${isolateIfArabic(activity, locale)}${duration}`;
+  const cost = formatCardUsage(step.usage, locale ?? "en");
+  return `  ${symbol} ${step.title}  ${isolateIfArabic(activity, locale)}${duration}  ${cost}`;
+}
+
+function attemptUsageLines(
+  card: TaskCardState,
+  locale: OperatorConsoleLocale,
+  none: string
+): readonly string[] {
+  const attempts = card.steps.flatMap((step) => step.attempts.map((attempt) => ({ step, attempt })));
+  if (attempts.length === 0) return [none];
+  return attempts.map(({ step, attempt }) =>
+    `${step.title} · #${attempt.attemptNumber} · ${isolateIfArabic(attempt.status, locale)} · ${formatCardUsage(attempt.usage, locale)}`
+  );
+}
+
+function formatCardUsage(usage: TaskCardState["usage"], locale: OperatorConsoleLocale): string {
+  return formatUsageCost({
+    estimatedCostUsd: usage.estimatedCostUsd,
+    costComplete: usage.pricingComplete
+  }, { locale, compact: true });
 }
 
 function stepStatusSymbol(status: TaskCardStepState["status"], unicode: boolean): string {

@@ -75,6 +75,92 @@ describe("TaskOperatorService", () => {
     });
   });
 
+  it("projects immutable charged failures through Attempt, Step, and Task totals", async () => {
+    const created = service.begin({
+      objective: "Project charged retries.",
+      workspace: workspace(),
+      creatorSessionId: "owner"
+    });
+    const task = store.getTask(created.taskId)!;
+    const step = store.listSteps(task.id, task.activePlanRevisionId!)[0]!;
+    const attempt = failedAttempt(task.id, step.id, step.planRevisionId);
+    store.atomicWrite((tx) => tx.createAttempt(attempt));
+    await db.recordProviderUsageEntries([{
+      id: "usage-failed-attempt",
+      profileId: "alpha",
+      sessionId: "owner",
+      requestKey: "failed-attempt-request",
+      provider: "priced",
+      model: "model",
+      routeRole: "fallback",
+      routeIndex: 1,
+      providerAttemptIndex: 1,
+      sourceKind: "task",
+      pricing: {
+        currency: "USD",
+        inputPerMillionTokens: 1,
+        outputPerMillionTokens: 1,
+        fingerprint: "pricing-v1"
+      },
+      pricingFingerprint: "pricing-v1",
+      inputTokens: 100,
+      outputTokens: 20,
+      reasoningTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalTokens: 120,
+      estimatedCostUsd: 0.25,
+      usageComplete: true,
+      pricingComplete: true,
+      incompleteReasons: [],
+      taskId: task.id,
+      rootTaskId: task.id,
+      planRevisionId: step.planRevisionId,
+      stepId: step.id,
+      attemptId: attempt.id,
+      dispatchedAt: now()
+    }]);
+
+    const projected = service.status(task.id, "owner");
+    expect(projected.usage).toMatchObject({ providerCalls: 1, estimatedCostUsd: 0.25 });
+    expect(projected.steps[0]?.usage).toMatchObject({ providerCalls: 1, estimatedCostUsd: 0.25 });
+    expect(projected.steps[0]?.attempts).toEqual([
+      expect.objectContaining({
+        attemptId: attempt.id,
+        status: "failed",
+        usage: expect.objectContaining({ providerCalls: 1, estimatedCostUsd: 0.25 })
+      })
+    ]);
+  });
+
+  it("projects durable Task budget balances without inventing a second ledger", () => {
+    const bounded = new TaskOperatorService({
+      store,
+      defaultTaskSpendingLimit: { maxEstimatedCostUsd: 1, warningThresholdPercent: 80 },
+      spendingScope: (_kind, ownerId) => ({
+        profileId: "alpha",
+        kind: "root_task",
+        ownerId,
+        maxEstimatedCostUsd: 1,
+        warningThresholdPercent: 80,
+        spentCostUsd: 0.42,
+        reservedCostUsd: 0.18,
+        state: "available",
+        ownerCreatedAt: now(),
+        createdAt: now()
+      })
+    }).begin({ objective: "Show budget state.", workspace: workspace(), creatorSessionId: "owner" });
+
+    expect(bounded.spending).toEqual({
+      spentCostUsd: 0.42,
+      reservedCostUsd: 0.18,
+      remainingCostUsd: 0.4,
+      maxEstimatedCostUsd: 1,
+      warningThresholdPercent: 80,
+      state: "available"
+    });
+  });
+
   it("projects live host ownership and safe continuation readiness", () => {
     const readyService = new TaskOperatorService({
       store,

@@ -47,6 +47,40 @@ describe("loadSessionCostUsage", () => {
     });
   });
 
+  it("projects the logical session limit with settled and reserved capacity", async () => {
+    const db = new InMemorySessionDB();
+    await db.createSession({
+      id: "budgeted",
+      profileId: "alpha",
+      spendingLimit: { maxEstimatedCostUsd: 2, warningThresholdPercent: 75 }
+    });
+
+    await expect(loadSessionCostUsage({
+      sessionDb: db,
+      profileId: "alpha",
+      sessionId: "budgeted",
+      spendingScope: (ownerId) => ({
+        profileId: "alpha",
+        kind: "session",
+        ownerId,
+        maxEstimatedCostUsd: 2,
+        warningThresholdPercent: 75,
+        spentCostUsd: 0.8,
+        reservedCostUsd: 0.3,
+        state: "available",
+        ownerCreatedAt: "2030-01-01T00:00:00.000Z",
+        createdAt: "2030-01-01T00:00:00.000Z"
+      })
+    })).resolves.toMatchObject({
+      budget: {
+        spentCostUsd: 0.8,
+        reservedCostUsd: 0.3,
+        remainingCostUsd: 0.9,
+        maxEstimatedCostUsd: 2
+      }
+    });
+  });
+
   it("adds originating asynchronous Task trees once and ignores unrelated Tasks", async () => {
     const db = new InMemorySessionDB();
     await createTurn(db, "session", "turn");

@@ -31,6 +31,11 @@ export function formatUsageCost(
     : `at least ${estimate}`;
 }
 
+export function formatUsdAmount(value: number, locale: "en" | "ar" = "en"): string {
+  const amount = `$${formatUsd(Number.isFinite(value) && value >= 0 ? value : 0)}`;
+  return locale === "ar" ? isolateLtr(amount) : amount;
+}
+
 function formatUsd(value: number): string {
   if (value === 0 || value >= 0.01) return value.toFixed(2);
   return value.toFixed(4);

@@ -79,6 +79,8 @@ describe("TaskCompletionDeliveryService", () => {
     expect(targets).toEqual([{ kind: "channel", platform: "telegram", chatId: "chat-1", threadId: "thread-1" }]);
     expect(text).toContain("A durable answer.");
     expect(text).toContain("Artifact handle: task-result:handle-2");
+    expect(text).toContain("Task total:");
+    expect(text).toContain("Produce result: unavailable");
     expect(text).not.toContain(tempDir);
     await expect(service.runOnce()).resolves.toEqual({ recovered: 0, claimed: 0, delivered: 0, failed: 0 });
     expect(deliverText).toHaveBeenCalledTimes(1);

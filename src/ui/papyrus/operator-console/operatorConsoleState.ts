@@ -5,7 +5,7 @@ import {
 } from "./focusModel.js";
 import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
 import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
-import type { UsageCostSummary } from "../../../contracts/usage-cost.js";
+import type { SessionCostSummary, SpendingBudgetSummary } from "../../../contracts/usage-cost.js";
 
 export type OperatorConsoleMode = "session" | "setup";
 
@@ -43,7 +43,7 @@ export type StatusRailState = {
     readonly elapsedMs: number;
     readonly startedAtMs?: number;
   };
-  readonly sessionCost?: Pick<UsageCostSummary, "estimatedCostUsd" | "costComplete">;
+  readonly sessionCost?: Pick<SessionCostSummary, "estimatedCostUsd" | "costComplete" | "budget">;
   readonly security?: {
     readonly yolo: boolean;
   };
@@ -115,13 +115,37 @@ export type TaskCardStepState = {
   readonly status: "pending" | "ready" | "running" | "waiting_for_input" | "waiting_for_approval" | "completed" | "failed" | "skipped" | "cancelled";
   readonly dependsOn: readonly string[];
   readonly childTaskPolicy: "forbid" | "fire_and_forget";
+  readonly usage: TaskCardUsageState;
+  readonly attempts: readonly TaskCardAttemptState[];
   readonly activeAttempt?: {
+    readonly attemptId: string;
+    readonly taskId: string;
     readonly attemptNumber: number;
     readonly status: "queued" | "leased" | "running" | "waiting_for_input" | "waiting_for_approval" | "completed" | "failed" | "cancelled" | "interrupted" | "expired";
     readonly elapsedMs: number;
     readonly currentActivity?: string;
     readonly currentToolCategory?: string;
+    readonly usage: TaskCardUsageState;
   };
+};
+
+export type TaskCardUsageState = {
+  readonly providerCalls: number;
+  readonly totalTokens: number;
+  readonly estimatedCostUsd?: number;
+  readonly usageComplete: boolean;
+  readonly pricingComplete: boolean;
+};
+
+export type TaskCardAttemptState = {
+  readonly attemptId: string;
+  readonly taskId: string;
+  readonly attemptNumber: number;
+  readonly status: "queued" | "leased" | "running" | "waiting_for_input" | "waiting_for_approval" | "completed" | "failed" | "cancelled" | "interrupted" | "expired";
+  readonly elapsedMs: number;
+  readonly currentActivity?: string;
+  readonly currentToolCategory?: string;
+  readonly usage: TaskCardUsageState;
 };
 
 export type TaskCardActivityState = {
@@ -155,13 +179,8 @@ export type TaskCardState = {
   readonly recentActivity: readonly TaskCardActivityState[];
   readonly currentToolCategory?: string;
   readonly elapsedMs: number;
-  readonly usage: {
-    readonly providerCalls: number;
-    readonly totalTokens: number;
-    readonly estimatedCostUsd?: number;
-    readonly usageComplete: boolean;
-    readonly pricingComplete: boolean;
-  };
+  readonly usage: TaskCardUsageState;
+  readonly spending?: SpendingBudgetSummary;
   readonly results: readonly {
     readonly handle: string;
     readonly kind: string;

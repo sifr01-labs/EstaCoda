@@ -179,7 +179,16 @@ describe("LiveOperatorConsoleController", () => {
           status: "running",
           dependsOn: [],
           childTaskPolicy: "forbid",
-          activeAttempt: { attemptNumber: 1, status: "running", elapsedMs: 3_000 },
+          usage: { providerCalls: 1, totalTokens: 100, estimatedCostUsd: 0.001, usageComplete: true, pricingComplete: true },
+          attempts: [],
+          activeAttempt: {
+            attemptId: "attempt-1",
+            taskId: "T-live-1",
+            attemptNumber: 1,
+            status: "running",
+            elapsedMs: 3_000,
+            usage: { providerCalls: 1, totalTokens: 100, estimatedCostUsd: 0.001, usageComplete: true, pricingComplete: true }
+          },
         }],
         childTasks: [],
         recentActivity: [],

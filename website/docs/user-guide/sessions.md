@@ -32,6 +32,12 @@ Sessions are separate by default. A CLI session and a Telegram session for the s
 
 Profile isolation is strict. A session created under profile `work` cannot see sessions created under profile `personal`, even if both are on the same machine. Sessions share the global `sessions.sqlite` file, but every access is scoped by `profile_id`.
 
+## Usage and Spending
+
+After each visible turn, the CLI attributes estimated provider spending to Main agent, Auxiliary models, Delegated work, and the Turn total. If delegated workers are still active, the amounts are labeled “so far” and continue updating from durable usage records. The session status rail shows the accumulated session amount and, when configured, its spending limit and currently reserved capacity.
+
+Task and session limits are monetary controls; token counts remain read-only usage details. Estimated cost includes charged failures, retries, fallbacks, synthesis, auxiliary calls, and descendant Tasks. When pricing or usage data is incomplete, the UI marks the amount as partial or unavailable instead of presenting an unverified zero.
+
 ---
 
 ## Session Commands

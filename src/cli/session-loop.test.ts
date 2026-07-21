@@ -704,10 +704,20 @@ describe("runSessionLoop — user prompt rail behavior", () => {
 
   it("renders delivered turn cost and a durable delegated Task handle", async () => {
     const outputChunks: string[] = [];
-    const usage = usageSummary(0.04);
+    const mainUsage = usageSummary(0.04);
+    const auxiliaryUsage = usageSummary(0.01);
+    const delegatedUsage = usageSummary(0.02);
+    const totalUsage = usageSummary(0.07);
     const runtime = createMockRuntime({
       handle: async () => mockResponse({
-        turnUsage: { turnId: "turn-1", mainAgent: usage, total: usage },
+        turnUsage: {
+          turnId: "turn-1",
+          mainAgent: mainUsage,
+          auxiliaryModels: auxiliaryUsage,
+          delegatedWork: delegatedUsage,
+          total: totalUsage,
+          provisional: false
+        },
         toolExecutions: [{
           tool: {
             name: "delegate_task",
@@ -745,7 +755,11 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     });
 
     const rendered = outputChunks.join("");
-    expect(rendered).toContain("Turn cost ≈ $0.04");
+    expect(rendered).toContain("Main agent: ≈ $0.04");
+    expect(rendered).toContain("Auxiliary models: ≈ $0.01");
+    expect(rendered).toContain("Delegated work so far: ≈ $0.02");
+    expect(rendered).toContain("Turn total so far: ≈ $0.07");
+    expect(rendered).toContain("Workers still running");
     expect(rendered).toContain("Delegated Task T-104 · running");
   });
 

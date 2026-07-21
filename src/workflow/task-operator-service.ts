@@ -15,6 +15,9 @@ import type {
   TaskUsageTotals,
   TaskWorkspaceBinding
 } from "../contracts/task.js";
+import type { ProviderSpendScopeKind, ProviderSpendingScope } from "../contracts/provider-spend.js";
+import type { ProviderUsageEntry } from "../contracts/provider-usage.js";
+import type { SpendingBudgetSummary } from "../contracts/usage-cost.js";
 import {
   TASK_GRAPH_LIMITS,
   TASK_ORIGIN_COMPLETION_DELIVERY_KEY,
@@ -23,7 +26,11 @@ import {
 } from "../contracts/task.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import { taskUsageFromEntries } from "./task-agent-usage.js";
-import { listTaskTreeUsageEntries } from "./task-tree-accounting.js";
+import {
+  listStepTreeAttempts,
+  listTaskTreeUsageEntries
+} from "./task-tree-accounting.js";
+import { spendingBudgetSummary } from "../providers/provider-spend-projection.js";
 import { FixedTaskService } from "./fixed-task-service.js";
 import type { InitialTaskHostLeaseInput, TaskStore } from "./task-store.js";
 import { taskToolCategory } from "./task-safe-activity.js";
@@ -71,6 +78,7 @@ export type TaskStatusProjection = {
   currentToolCategory?: string;
   elapsedMs: number;
   usage: TaskUsageTotals;
+  spending?: SpendingBudgetSummary;
   results: readonly (Pick<TaskResult, "id" | "handle" | "kind" | "status" | "byteLength" | "mimeType" | "summary"> & {
     primary: boolean;
   })[];
@@ -81,6 +89,8 @@ export type TaskStatusProjection = {
 };
 
 export type TaskAttemptProjection = {
+  attemptId: string;
+  taskId: string;
   attemptNumber: number;
   status: TaskAttemptStatus;
   startedAt?: string;
@@ -88,6 +98,7 @@ export type TaskAttemptProjection = {
   elapsedMs: number;
   currentActivity?: string;
   currentToolCategory?: string;
+  usage: TaskUsageTotals;
 };
 
 export type TaskStepProjection = {
@@ -96,6 +107,8 @@ export type TaskStepProjection = {
   status: TaskStep["status"];
   dependsOn: readonly string[];
   childTaskPolicy: TaskStep["childTaskPolicy"];
+  usage: TaskUsageTotals;
+  attempts: readonly TaskAttemptProjection[];
   activeAttempt?: TaskAttemptProjection;
 };
 
@@ -113,6 +126,7 @@ export class TaskOperatorService {
   readonly #eventId: () => string;
   readonly #backgroundContinuation: () => TaskStatusProjection["backgroundContinuation"];
   readonly #defaultTaskSpendingLimit: SpendingLimit | undefined;
+  readonly #spendingScope: ((kind: ProviderSpendScopeKind, ownerId: string) => ProviderSpendingScope | null) | undefined;
 
   constructor(options: {
     store: TaskStore;
@@ -120,12 +134,14 @@ export class TaskOperatorService {
     eventId?: () => string;
     backgroundContinuation?: () => TaskStatusProjection["backgroundContinuation"];
     defaultTaskSpendingLimit?: SpendingLimit;
+    spendingScope?: (kind: ProviderSpendScopeKind, ownerId: string) => ProviderSpendingScope | null;
   }) {
     this.#store = options.store;
     this.#now = options.now ?? (() => new Date());
     this.#eventId = options.eventId ?? randomUUID;
     this.#backgroundContinuation = options.backgroundContinuation ?? (() => "unknown");
     this.#defaultTaskSpendingLimit = cloneSpendingLimit(options.defaultTaskSpendingLimit);
+    this.#spendingScope = options.spendingScope;
   }
 
   begin(input: {
@@ -307,6 +323,8 @@ export class TaskOperatorService {
     for (const step of steps) progress[step.status] += 1;
     progress.total = steps.length;
     const attempts = this.#store.listAttempts(task.id);
+    const treeUsageEntries = listTaskTreeUsageEntries(this.#store, task.id);
+    const usageByAttempt = groupUsageByAttempt(treeUsageEntries);
     const projectionNow = this.#now();
     const hostLease = activeHostLease(this.#store.getTaskHostLease(task.id), projectionNow);
     const execution = hostLease?.kind ?? "waiting";
@@ -344,18 +362,32 @@ export class TaskOperatorService {
           status: planRevision.status
         }
       }),
-      steps: steps.slice(0, MAX_PROJECTED_STEPS).map((step) => ({
-        stepId: step.id,
-        title: safeText(step.title, 160),
-        status: step.status,
-        dependsOn: step.dependsOn.slice(0, TASK_GRAPH_LIMITS.maxDependenciesPerStep),
-        childTaskPolicy: step.childTaskPolicy,
-        ...projectActiveAttempt(attemptsByStep.get(step.id), activityByAttempt, projectionNow)
-      })),
+      steps: steps.slice(0, MAX_PROJECTED_STEPS).map((step) => {
+        const stepAttempts = listStepTreeAttempts(this.#store, task.id, step.id);
+        const stepAttemptIds = new Set(stepAttempts.map((attempt) => attempt.id));
+        return {
+          stepId: step.id,
+          title: safeText(step.title, 160),
+          status: step.status,
+          dependsOn: step.dependsOn.slice(0, TASK_GRAPH_LIMITS.maxDependenciesPerStep),
+          childTaskPolicy: step.childTaskPolicy,
+          usage: taskUsageFromEntries(treeUsageEntries.filter((entry) =>
+            entry.attemptId !== undefined && stepAttemptIds.has(entry.attemptId)
+          )),
+          attempts: stepAttempts.map((attempt) => projectAttempt(
+            attempt,
+            usageByAttempt.get(attempt.id) ?? [],
+            activityByAttempt,
+            projectionNow
+          )),
+          ...projectActiveAttempt(attemptsByStep.get(step.id), usageByAttempt, activityByAttempt, projectionNow)
+        };
+      }),
       recentActivity,
       ...(currentToolCategory === undefined ? {} : { currentToolCategory }),
       elapsedMs: elapsedMs(task.startedAt ?? task.createdAt, task.completedAt ?? task.cancelledAt, projectionNow),
-      usage: taskUsageFromEntries(listTaskTreeUsageEntries(this.#store, task.id)),
+      usage: taskUsageFromEntries(treeUsageEntries),
+      ...this.#taskSpending(task, treeUsageEntries),
       results: projectedResults.slice(0, MAX_PROJECTED_RESULTS).map((result) => ({
         id: result.id,
         handle: result.handle,
@@ -376,6 +408,25 @@ export class TaskOperatorService {
       }),
       createdAt: task.createdAt,
       updatedAt: task.updatedAt
+    };
+  }
+
+  #taskSpending(
+    task: Task,
+    treeUsageEntries: readonly ProviderUsageEntry[]
+  ): { readonly spending?: SpendingBudgetSummary } {
+    const root = task.id === task.rootTaskId ? task : this.#store.getTask(task.rootTaskId);
+    if (root?.spendingLimit === undefined) return {};
+    const scope = this.#spendingScope?.("root_task", root.id);
+    const fallbackEntries = root.id === task.id
+      ? treeUsageEntries
+      : listTaskTreeUsageEntries(this.#store, root.id);
+    return {
+      spending: spendingBudgetSummary(
+        root.spendingLimit,
+        scope,
+        taskUsageFromEntries(fallbackEntries).estimatedCostUsd
+      )
     };
   }
 
@@ -590,8 +641,22 @@ function groupAttemptsByStep(attempts: readonly TaskAttempt[]): ReadonlyMap<stri
   return grouped;
 }
 
+function groupUsageByAttempt(
+  entries: readonly ProviderUsageEntry[]
+): ReadonlyMap<string, readonly ProviderUsageEntry[]> {
+  const grouped = new Map<string, ProviderUsageEntry[]>();
+  for (const entry of entries) {
+    if (entry.attemptId === undefined) continue;
+    const attemptEntries = grouped.get(entry.attemptId) ?? [];
+    attemptEntries.push(entry);
+    grouped.set(entry.attemptId, attemptEntries);
+  }
+  return grouped;
+}
+
 function projectActiveAttempt(
   attempts: readonly TaskAttempt[] | undefined,
+  usageByAttempt: ReadonlyMap<string, readonly ProviderUsageEntry[]>,
   activityByAttempt: ReadonlyMap<string, ReturnType<typeof eventActivity>>,
   now: Date
 ): { readonly activeAttempt?: TaskAttemptProjection } {
@@ -601,15 +666,33 @@ function projectActiveAttempt(
   if (attempt === undefined) return {};
   const activity = activityByAttempt.get(attempt.id);
   return {
-    activeAttempt: {
-      attemptNumber: attempt.attemptNumber,
-      status: attempt.status,
-      ...(attempt.startedAt === undefined ? {} : { startedAt: attempt.startedAt }),
-      ...(attempt.completedAt === undefined ? {} : { completedAt: attempt.completedAt }),
-      elapsedMs: elapsedMs(attempt.startedAt ?? attempt.createdAt, attempt.completedAt, now),
-      ...(activity === undefined ? {} : { currentActivity: activity.label }),
-      ...(activity?.toolCategory === undefined ? {} : { currentToolCategory: activity.toolCategory })
-    }
+    activeAttempt: projectAttempt(
+      attempt,
+      usageByAttempt.get(attempt.id) ?? [],
+      activityByAttempt,
+      now
+    )
+  };
+}
+
+function projectAttempt(
+  attempt: TaskAttempt,
+  usageEntries: readonly ProviderUsageEntry[],
+  activityByAttempt: ReadonlyMap<string, ReturnType<typeof eventActivity>>,
+  now: Date
+): TaskAttemptProjection {
+  const activity = activityByAttempt.get(attempt.id);
+  return {
+    attemptId: attempt.id,
+    taskId: attempt.taskId,
+    attemptNumber: attempt.attemptNumber,
+    status: attempt.status,
+    ...(attempt.startedAt === undefined ? {} : { startedAt: attempt.startedAt }),
+    ...(attempt.completedAt === undefined ? {} : { completedAt: attempt.completedAt }),
+    elapsedMs: elapsedMs(attempt.startedAt ?? attempt.createdAt, attempt.completedAt, now),
+    ...(activity === undefined ? {} : { currentActivity: activity.label }),
+    ...(activity?.toolCategory === undefined ? {} : { currentToolCategory: activity.toolCategory }),
+    usage: taskUsageFromEntries(usageEntries)
   };
 }
 

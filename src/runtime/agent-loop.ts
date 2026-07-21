@@ -1317,23 +1317,43 @@ export class AgentLoop {
 
   async #withTurnUsage(response: AgentLoopResponse, visibleTurnId: string): Promise<AgentLoopResponse> {
     let mainAgent: UsageCostSummary;
+    let auxiliaryModels: UsageCostSummary;
+    let delegatedWork: UsageCostSummary;
+    let total: UsageCostSummary;
     try {
       const entries = await this.#sessionDb.listProviderUsageEntries(this.#profileId, {
         visibleTurnId
       });
       const dispatchedProviderRequest = response.providerExecution?.attempts.some((attempt) => attempt.state === "dispatched") === true;
-      mainAgent = usageCostSummaryFromEntries(entries, {
+      mainAgent = usageCostSummaryFromEntries(entries.filter((entry) =>
+        entry.taskId === undefined && entry.sourceKind === "main"
+      ), {
+        emptyUsageIsComplete: !dispatchedProviderRequest
+      });
+      auxiliaryModels = usageCostSummaryFromEntries(entries.filter((entry) =>
+        entry.taskId === undefined && entry.sourceKind === "auxiliary"
+      ), { emptyUsageIsComplete: true });
+      delegatedWork = usageCostSummaryFromEntries(entries.filter((entry) => entry.taskId !== undefined), {
+        emptyUsageIsComplete: true
+      });
+      total = usageCostSummaryFromEntries(entries, {
         emptyUsageIsComplete: !dispatchedProviderRequest
       });
     } catch {
       mainAgent = unavailableUsageCostSummary("turn-usage-read-failed");
+      auxiliaryModels = unavailableUsageCostSummary("turn-usage-read-failed");
+      delegatedWork = unavailableUsageCostSummary("turn-usage-read-failed");
+      total = unavailableUsageCostSummary("turn-usage-read-failed");
     }
     return {
       ...response,
       turnUsage: {
         turnId: visibleTurnId,
         mainAgent,
-        total: mainAgent
+        auxiliaryModels,
+        delegatedWork,
+        total,
+        provisional: false
       }
     };
   }

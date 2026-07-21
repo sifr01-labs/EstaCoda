@@ -186,6 +186,8 @@ function projectionToCard(task: TaskStatusProjection): TaskCardState {
       status: step.status,
       dependsOn: step.dependsOn,
       childTaskPolicy: step.childTaskPolicy,
+      usage: step.usage,
+      attempts: step.attempts,
       ...(step.activeAttempt === undefined ? {} : { activeAttempt: step.activeAttempt })
     })),
     childTasks: task.childTasks,
@@ -193,6 +195,7 @@ function projectionToCard(task: TaskStatusProjection): TaskCardState {
     ...(task.currentToolCategory === undefined ? {} : { currentToolCategory: task.currentToolCategory }),
     elapsedMs: task.elapsedMs,
     usage: task.usage,
+    ...(task.spending === undefined ? {} : { spending: task.spending }),
     results: task.results,
     ...(task.waitReason === undefined ? {} : { waitReason: task.waitReason }),
     ...(task.failure === undefined ? {} : { failure: task.failure }),

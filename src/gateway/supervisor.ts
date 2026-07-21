@@ -1303,6 +1303,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       resolveWorkspace: resolveTaskWorkspaceBinding,
       isWorkspaceTrusted: (canonicalPath) => trustStore.isTrusted(canonicalPath),
       approvalService: taskApprovalService,
+      locale: config.ui?.language === "ar" ? "ar" : "en",
       logWarning,
       createExecutorRuntime: async (workspace) => {
         const workspaceTrusted = await trustStore.isTrusted(workspace.canonicalPath);

@@ -705,7 +705,10 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       let pendingSteeringNote: string | undefined;
       let steeringRetryUsed = false;
       const mainAgentUsageParts: UsageCostSummary[] = [];
+      const auxiliaryUsageParts: UsageCostSummary[] = [];
+      const delegatedUsageParts: UsageCostSummary[] = [];
       const totalUsageParts: UsageCostSummary[] = [];
+      const delegatedTaskStates = new Map<string, string | undefined>();
       while (retryText !== undefined) {
         activeTurn = new AbortController();
         activeTurnCancelMessage = "Cancelling current turn. Press Ctrl+C again or type /exit to leave.";
@@ -1008,9 +1011,20 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         const response = await responsePromise;
         if (response.turnUsage !== undefined) {
           mainAgentUsageParts.push(response.turnUsage.mainAgent);
+          auxiliaryUsageParts.push(response.turnUsage.auxiliaryModels);
+          delegatedUsageParts.push(response.turnUsage.delegatedWork);
           totalUsageParts.push(response.turnUsage.total);
         }
-        const deliveredTurnUsage = combinedTurnUsage(response.turnUsage, mainAgentUsageParts, totalUsageParts);
+        recordDelegatedTaskStates(response.toolExecutions, delegatedTaskStates);
+        const delegatedWorkActive = hasActiveDelegatedTask(delegatedTaskStates, runtime);
+        const deliveredTurnUsage = combinedTurnUsage(
+          response.turnUsage,
+          mainAgentUsageParts,
+          auxiliaryUsageParts,
+          delegatedUsageParts,
+          totalUsageParts,
+          delegatedWorkActive
+        );
         await refreshSessionCost(true);
         const willRetryForSteering = pendingSteeringNote !== undefined && !steeringRetryUsed;
         const completedActiveWork = operatorConsoleLiveFrame?.completeActiveWork();
@@ -1072,13 +1086,16 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	        }
 	        output.write(renderer.render(assistantVm));
         if (!completedCostRendered && deliveredTurnUsage !== undefined) {
-          output.write(`\n${formatTurnCostLine(deliveredTurnUsage, renderer.locale === "ar" ? "ar" : "en")}\n`);
+          output.write(`\n${formatTurnCostLines(deliveredTurnUsage, renderer.locale === "ar" ? "ar" : "en").join("\n")}\n`);
         }
         for (const notice of delegatedTaskNotices(response.toolExecutions, runtime, renderer.locale === "ar" ? "ar" : "en")) {
           output.write(`${notice}\n`);
         }
         mainAgentUsageParts.length = 0;
+        auxiliaryUsageParts.length = 0;
+        delegatedUsageParts.length = 0;
         totalUsageParts.length = 0;
+        delegatedTaskStates.clear();
         if (turnVoiceMode === "tts") {
           const playback = await playCliResponseIfEnabled({
             runtime,
@@ -2824,21 +2841,69 @@ function truncateSingleLine(value: string, maxLength: number): string {
 function combinedTurnUsage(
   current: TurnUsageSummary | undefined,
   mainAgentParts: readonly UsageCostSummary[],
-  totalParts: readonly UsageCostSummary[]
+  auxiliaryParts: readonly UsageCostSummary[],
+  delegatedParts: readonly UsageCostSummary[],
+  totalParts: readonly UsageCostSummary[],
+  provisional: boolean
 ): TurnUsageSummary | undefined {
   if (mainAgentParts.length === 0 || totalParts.length === 0) return undefined;
   return {
     turnId: current?.turnId ?? "combined-turn",
     mainAgent: mergeUsageCostSummaries(mainAgentParts),
+    auxiliaryModels: mergeUsageCostSummaries(auxiliaryParts),
+    delegatedWork: mergeUsageCostSummaries(delegatedParts),
     total: mergeUsageCostSummaries(totalParts),
+    provisional
   };
 }
 
-function formatTurnCostLine(usage: TurnUsageSummary, locale: "en" | "ar"): string {
-  const cost = formatUsageCost(usage.total, { locale });
-  return locale === "ar"
-    ? isolateRtl(`تكلفة الدور ${cost}`)
-    : `Turn cost ${cost}`;
+function formatTurnCostLines(usage: TurnUsageSummary, locale: "en" | "ar"): readonly string[] {
+  const suffix = usage.provisional ? copyForLocale(locale, " so far", " حتى الآن") : "";
+  return [
+    `${copyForLocale(locale, "Main agent", "الوكيل الرئيسي")}: ${formatUsageCost(usage.mainAgent, { locale })}`,
+    `${copyForLocale(locale, "Auxiliary models", "النماذج المساعدة")}: ${formatUsageCost(usage.auxiliaryModels, { locale })}`,
+    `${copyForLocale(locale, "Delegated work", "العمل المفوض")}${suffix}: ${formatUsageCost(usage.delegatedWork, { locale })}`,
+    `${copyForLocale(locale, "Turn total", "إجمالي الدور")}${suffix}: ${formatUsageCost(usage.total, { locale })}`,
+    ...(usage.provisional ? [copyForLocale(locale, "Workers still running", "لا يزال العمال قيد التنفيذ")] : [])
+  ];
+}
+
+function copyForLocale(locale: "en" | "ar", english: string, arabic: string): string {
+  return locale === "ar" ? arabic : english;
+}
+
+function recordDelegatedTaskStates(
+  executions: readonly ToolExecutionRecord[],
+  taskStates: Map<string, string | undefined>
+): void {
+  for (const execution of executions) {
+    if (execution.tool.name !== "delegate_task" || execution.result?.ok !== true) continue;
+    const taskId = execution.result.metadata?.taskId;
+    if (typeof taskId !== "string" || taskId.length === 0) continue;
+    const status = execution.result.metadata?.status;
+    taskStates.set(taskId, typeof status === "string" ? status : undefined);
+  }
+}
+
+function hasActiveDelegatedTask(
+  taskStates: ReadonlyMap<string, string | undefined>,
+  runtime: Runtime
+): boolean {
+  for (const [taskId, recordedStatus] of taskStates) {
+    if (runtime.taskOperator === undefined) {
+      if (recordedStatus === undefined || !["completed", "partial", "failed", "cancelled"].includes(recordedStatus)) {
+        return true;
+      }
+      continue;
+    }
+    try {
+      const status = runtime.taskOperator.status(taskId, runtime.sessionId).status;
+      if (!["completed", "partial", "failed", "cancelled"].includes(status)) return true;
+    } catch {
+      return true;
+    }
+  }
+  return false;
 }
 
 function delegatedTaskNotices(
@@ -3035,13 +3100,27 @@ function taskProjectionToCard(task: TaskStatusProjection): TaskCardState {
       status: step.status,
       dependsOn: [...step.dependsOn],
       childTaskPolicy: step.childTaskPolicy,
+      usage: taskUsageToCard(step.usage),
+      attempts: step.attempts.map((attempt) => ({
+        attemptId: attempt.attemptId,
+        taskId: attempt.taskId,
+        attemptNumber: attempt.attemptNumber,
+        status: attempt.status,
+        elapsedMs: attempt.elapsedMs,
+        ...(attempt.currentActivity === undefined ? {} : { currentActivity: attempt.currentActivity }),
+        ...(attempt.currentToolCategory === undefined ? {} : { currentToolCategory: attempt.currentToolCategory }),
+        usage: taskUsageToCard(attempt.usage)
+      })),
       ...(step.activeAttempt === undefined ? {} : {
         activeAttempt: {
+          attemptId: step.activeAttempt.attemptId,
+          taskId: step.activeAttempt.taskId,
           attemptNumber: step.activeAttempt.attemptNumber,
           status: step.activeAttempt.status,
           elapsedMs: step.activeAttempt.elapsedMs,
           ...(step.activeAttempt.currentActivity === undefined ? {} : { currentActivity: step.activeAttempt.currentActivity }),
           ...(step.activeAttempt.currentToolCategory === undefined ? {} : { currentToolCategory: step.activeAttempt.currentToolCategory }),
+          usage: taskUsageToCard(step.activeAttempt.usage)
         },
       }),
     })),
@@ -3049,15 +3128,8 @@ function taskProjectionToCard(task: TaskStatusProjection): TaskCardState {
     recentActivity: task.recentActivity.map((activity) => ({ ...activity })),
     ...(task.currentToolCategory === undefined ? {} : { currentToolCategory: task.currentToolCategory }),
     elapsedMs: task.elapsedMs,
-    usage: {
-      providerCalls: task.usage.providerCalls,
-      totalTokens: task.usage.totalTokens,
-      ...(task.usage.pricingComplete || task.usage.estimatedCostUsd > 0
-        ? { estimatedCostUsd: task.usage.estimatedCostUsd }
-        : {}),
-      usageComplete: task.usage.usageComplete,
-      pricingComplete: task.usage.pricingComplete,
-    },
+    usage: taskUsageToCard(task.usage),
+    ...(task.spending === undefined ? {} : { spending: { ...task.spending } }),
     results: task.results.map((result) => ({
       handle: result.handle,
       kind: result.kind,
@@ -3070,6 +3142,18 @@ function taskProjectionToCard(task: TaskStatusProjection): TaskCardState {
     ...(task.failure === undefined ? {} : { failure: { ...task.failure } }),
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
+  };
+}
+
+function taskUsageToCard(usage: import("../contracts/task.js").TaskUsageTotals): TaskCardState["usage"] {
+  return {
+    providerCalls: usage.providerCalls,
+    totalTokens: usage.totalTokens,
+    ...(usage.pricingComplete || usage.estimatedCostUsd > 0
+      ? { estimatedCostUsd: usage.estimatedCostUsd }
+      : {}),
+    usageComplete: usage.usageComplete,
+    pricingComplete: usage.pricingComplete
   };
 }
 

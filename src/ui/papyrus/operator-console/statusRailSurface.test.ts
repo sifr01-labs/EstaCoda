@@ -69,6 +69,27 @@ describe("Papyrus operator console status rail surface", () => {
     expect(renderStatusRailSurface(partial, { width: 16 })).toContain("≥ $0.84");
   });
 
+  it("shows the session limit and reserved capacity without breaking narrow rails", () => {
+    const budgeted = status({
+      sessionCost: {
+        estimatedCostUsd: 0.42,
+        costComplete: true,
+        budget: {
+          spentCostUsd: 0.42,
+          reservedCostUsd: 0.18,
+          remainingCostUsd: 0.4,
+          maxEstimatedCostUsd: 1,
+          warningThresholdPercent: 80,
+          state: "available"
+        }
+      }
+    });
+
+    expect(renderStatusRailSurface(budgeted, { width: 120 }))
+      .toContain("session ≈ $0.42/$1.00 +$0.18 reserved");
+    expect(renderStatusRailSurface(budgeted, { width: 28 })).toContain("≈ $0.42/$1.00");
+  });
+
   it("uses isolated Arabic cost text", () => {
     const output = renderStatusRailSurface(status({
       sessionCost: { estimatedCostUsd: 0.84, costComplete: false },

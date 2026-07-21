@@ -69,6 +69,7 @@ export class SupervisorTaskBackgroundHost {
     heartbeatIntervalMs?: number;
     now?: () => Date;
     logWarning?: (message: string) => void;
+    locale?: "en" | "ar";
   }) {
     this.#store = options.store;
     this.#createExecutorRuntime = options.createExecutorRuntime;
@@ -108,7 +109,8 @@ export class SupervisorTaskBackgroundHost {
     const delivery = new TaskCompletionDeliveryService({
       store: options.store,
       resultService: options.resultService,
-      router: options.router
+      router: options.router,
+      locale: options.locale
     });
     this.#host = new TaskBackgroundHost({
       scheduler: {

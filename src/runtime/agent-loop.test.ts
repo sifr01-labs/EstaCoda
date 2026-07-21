@@ -467,7 +467,10 @@ describe("AgentLoop provider availability gating", () => {
 
     expect(response.turnUsage).toMatchObject({
       mainAgent: { providerCalls: 1, estimatedCostUsd: 0.14, costComplete: true },
+      auxiliaryModels: { providerCalls: 0, estimatedCostUsd: 0, costComplete: true },
+      delegatedWork: { providerCalls: 0, estimatedCostUsd: 0, costComplete: true },
       total: { providerCalls: 1, estimatedCostUsd: 0.14, costComplete: true },
+      provisional: false,
     });
   });
 

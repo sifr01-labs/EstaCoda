@@ -35,7 +35,7 @@ describe("durable Task surfaces", () => {
       selectedTaskId: card.taskId,
       inspectedTaskId: card.taskId,
       scrollOffset: 0,
-    }, { width: 80, height: 40, isTty: true });
+    }, { width: 80, height: 52, isTty: true });
     const text = lines.join("\n");
 
     expect(text).toContain("Objective");
@@ -46,6 +46,10 @@ describe("durable Task surfaces", () => {
     expect(text).toContain("T-child-1");
     expect(text).toContain("running");
     expect(text).toContain("Usage and cost");
+    expect(text).toContain("Worker and Step spending");
+    expect(text).toContain("Attempts");
+    expect(text).toContain("Task spending");
+    expect(text).toContain("Reserved: $0.18");
     expect(text).toContain("result://safe-1");
     expect(text).not.toContain("raw tool input");
     expect(text).not.toContain("worker-session-secret");
@@ -156,16 +160,30 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
         status: "running",
         dependsOn: [],
         childTaskPolicy: "forbid",
-        activeAttempt: {
+        usage: cardUsage(0.006),
+        attempts: [{
+          attemptId: "attempt-a-1",
+          taskId: "T-104",
           attemptNumber: 1,
           status: "running",
           elapsedMs: 198_000,
           currentActivity: "Browsing",
           currentToolCategory: "browser",
+          usage: cardUsage(0.006)
+        }],
+        activeAttempt: {
+          attemptId: "attempt-a-1",
+          taskId: "T-104",
+          attemptNumber: 1,
+          status: "running",
+          elapsedMs: 198_000,
+          currentActivity: "Browsing",
+          currentToolCategory: "browser",
+          usage: cardUsage(0.006)
         },
       },
-      { stepId: "step-b", title: "Define comparison criteria", status: "completed", dependsOn: [], childTaskPolicy: "forbid" },
-      { stepId: "step-c", title: "Compare findings", status: "pending", dependsOn: ["step-a", "step-b"], childTaskPolicy: "forbid" },
+      { stepId: "step-b", title: "Define comparison criteria", status: "completed", dependsOn: [], childTaskPolicy: "forbid", usage: cardUsage(0.0063), attempts: [] },
+      { stepId: "step-c", title: "Compare findings", status: "pending", dependsOn: ["step-a", "step-b"], childTaskPolicy: "forbid", usage: cardUsage(0), attempts: [] },
     ],
     childTasks: [],
     recentActivity: [
@@ -180,6 +198,14 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
       usageComplete: true,
       pricingComplete: true,
     },
+    spending: {
+      spentCostUsd: 0.42,
+      reservedCostUsd: 0.18,
+      remainingCostUsd: 0.4,
+      maxEstimatedCostUsd: 1,
+      warningThresholdPercent: 80,
+      state: "available"
+    },
     results: [{
       handle: "result://safe-1",
       kind: "artifact",
@@ -191,6 +217,16 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
     createdAt: "2026-07-20T09:59:00.000Z",
     updatedAt: "2026-07-20T10:03:18.000Z",
     ...overrides,
+  };
+}
+
+function cardUsage(estimatedCostUsd: number): TaskCardState["usage"] {
+  return {
+    providerCalls: estimatedCostUsd > 0 ? 1 : 0,
+    totalTokens: estimatedCostUsd > 0 ? 100 : 0,
+    estimatedCostUsd,
+    usageComplete: true,
+    pricingComplete: true
   };
 }
 

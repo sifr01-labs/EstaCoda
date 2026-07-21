@@ -74,7 +74,8 @@ export function operatorConsoleStatusRailState(input: {
     ...(input.sessionCost === undefined ? {} : {
       sessionCost: {
         estimatedCostUsd: input.sessionCost.estimatedCostUsd,
-        costComplete: input.sessionCost.costComplete
+        costComplete: input.sessionCost.costComplete,
+        ...(input.sessionCost.budget === undefined ? {} : { budget: input.sessionCost.budget })
       }
     }),
     ...(runtime.securityMode?.() === "open"
@@ -123,7 +124,8 @@ export function sessionStatusRailViewModel(input: {
     currentTurnSeconds,
     sessionCost: input.sessionCost === undefined ? undefined : {
       estimatedCostUsd: input.sessionCost.estimatedCostUsd,
-      costComplete: input.sessionCost.costComplete
+      costComplete: input.sessionCost.costComplete,
+      ...(input.sessionCost.budget === undefined ? {} : { budget: input.sessionCost.budget })
     },
     contextUsage: input.contextUsage ?? (contextWindow !== undefined
       ? { total: contextWindow }
