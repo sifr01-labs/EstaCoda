@@ -10,6 +10,7 @@ import { renderSessionCompactionResult, type CompactResult } from "../prompt/ses
 import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolver.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { createProviderUsageRecorder } from "../providers/provider-usage-ledger.js";
+import { SQLiteProviderSpendController } from "../workflow/sqlite-provider-spend.js";
 import {
   buildSessionsHelpViewModel,
   buildSessionsListViewModel,
@@ -112,6 +113,7 @@ export async function runSessionsCommand(
           registry: runtimeConfig.providerRegistry,
           homeDir: runtimeConfig.homeDir,
           profileId: runtimeConfig.profileId,
+          spendController: new SQLiteProviderSpendController({ db: db.db, profileId }),
           usageRecorder: createProviderUsageRecorder({
             profileId,
             record: (entries) => db.recordProviderUsageEntries(entries),

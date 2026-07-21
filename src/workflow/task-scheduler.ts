@@ -13,6 +13,7 @@ import type {
   TaskUsageTotals
 } from "../contracts/task.js";
 import type { ProviderUsageEntry } from "../contracts/provider-usage.js";
+import { providerSpendDenialMessage } from "../providers/provider-spend-policy.js";
 import {
   TASK_GRAPH_LIMITS,
   isTerminalTaskAttemptStatus,
@@ -1052,7 +1053,8 @@ export class TaskScheduler {
     settlement: TaskExecutorSettlement
   ): Promise<"completed" | "failed" | "cancelled" | "waiting"> {
     if (settlement.outcome !== "succeeded" && settlement.outcome !== "failed" &&
-        settlement.outcome !== "cancelled" && settlement.outcome !== "waiting_for_approval") {
+        settlement.outcome !== "cancelled" && settlement.outcome !== "waiting_for_approval" &&
+        settlement.outcome !== "spending_denied") {
       this.#settleFailure(
         taskId,
         attemptId,
@@ -1095,6 +1097,10 @@ export class TaskScheduler {
         emptyUsage()
       );
       return "failed";
+    }
+    if (settlement.outcome === "spending_denied") {
+      this.#settleSpendingDenied(taskId, stepId, attemptId, lease, settlement, usage);
+      return "waiting";
     }
     if (settlement.outcome === "failed") {
       let normalizedFailure: TaskFailure;
@@ -1297,6 +1303,76 @@ export class TaskScheduler {
       store.appendEvent(this.#event(context.task, "task-state-changed", now, {
         data: { from: "running", to: "waiting_for_approval", reasonCode: "approval-required" }
       }));
+    });
+  }
+
+  #settleSpendingDenied(
+    taskId: string,
+    stepId: string,
+    attemptId: string,
+    lease: TaskAttemptLease,
+    settlement: Extract<TaskExecutorSettlement, { outcome: "spending_denied" }>,
+    usage: TaskUsageTotals
+  ): void {
+    const now = this.#now().toISOString();
+    this.#store.atomicWrite((store) => {
+      const context = this.#assertCurrentLease(store, taskId, attemptId, lease, false);
+      const step = store.getStep(stepId);
+      if (step === null || step.status !== "running") throw new TaskSchedulerLeaseLostError();
+      const finalUsage = this.#recordUsageEntries(store, context.attempt, settlement.usageEntries, usage);
+      const interruption = failure(
+        `provider-spend-${settlement.reason.toLowerCase().replaceAll("_", "-")}`,
+        providerSpendDenialMessage(settlement.reason),
+        false,
+        false
+      );
+      store.updateAttempt({
+        ...context.attempt,
+        status: "interrupted",
+        failure: interruption,
+        usage: finalUsage,
+        workerSessionId: settlement.workerSessionId ?? context.attempt.workerSessionId,
+        trajectoryId: settlement.trajectoryId ?? context.attempt.trajectoryId,
+        updatedAt: now,
+        completedAt: now
+      });
+      store.updateStep({ ...step, status: "ready", updatedAt: now });
+      const currentTask = store.getTask(taskId);
+      if (currentTask?.status === "running" || currentTask?.status === "queued") {
+        store.updateTask({
+          ...currentTask,
+          status: "paused",
+          updatedAt: now,
+          waitReason: {
+            kind: "execution_limit",
+            summary: providerSpendDenialMessage(settlement.reason),
+            requestedAt: now
+          }
+        });
+      }
+      if (!store.releaseAttemptLease(fenceInput(lease))) throw new TaskSchedulerLeaseLostError();
+      store.appendEvent(this.#event(context.task, "usage-recorded", now, {
+        attemptId,
+        stepId,
+        planRevisionId: step.planRevisionId,
+        data: usageEventData(finalUsage)
+      }));
+      store.appendEvent(this.#event(context.task, "attempt-interrupted", now, {
+        attemptId,
+        stepId,
+        planRevisionId: step.planRevisionId,
+        data: { reasonCode: settlement.reason, recoverable: true }
+      }));
+      store.appendEvent(this.#event(context.task, "step-state-changed", now, {
+        stepId,
+        planRevisionId: step.planRevisionId,
+        data: { from: "running", to: "ready", reasonCode: settlement.reason }
+      }));
+      if (currentTask?.status === "running" || currentTask?.status === "queued") {
+        store.appendEvent(this.#event(context.task, "task-state-changed", now, {
+          data: { from: currentTask.status, to: "paused", reasonCode: settlement.reason }
+        }));
+      }
     });
   }
 

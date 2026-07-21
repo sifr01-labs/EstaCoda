@@ -8,6 +8,7 @@ import type {
   TaskUsageTotals
 } from "../contracts/task.js";
 import type { ProviderUsageEntry } from "../contracts/provider-usage.js";
+import type { ProviderSpendDenialReason } from "../contracts/provider-spend.js";
 import type { TaskApprovalRequest } from "./task-approval-service.js";
 
 export const TASK_STEP_HOST_HANDOFF_ABORT_REASON = "task-step-host-handoff";
@@ -40,6 +41,14 @@ export type TaskExecutorSettlement =
   | {
       outcome: "waiting_for_approval";
       approval: TaskApprovalRequest;
+      usage?: TaskUsageTotals;
+      usageEntries?: readonly ProviderUsageEntry[];
+      workerSessionId?: string;
+      trajectoryId?: string;
+    }
+  | {
+      outcome: "spending_denied";
+      reason: ProviderSpendDenialReason;
       usage?: TaskUsageTotals;
       usageEntries?: readonly ProviderUsageEntry[];
       workerSessionId?: string;

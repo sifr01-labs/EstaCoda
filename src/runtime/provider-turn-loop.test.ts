@@ -141,7 +141,7 @@ async function createProviderTurnLoopForTest(
 ): Promise<ProviderTurnLoop> {
   const registry = new ProviderRegistry();
   registry.register(createMockAdapter());
-  const providerExecutor = new ProviderExecutor({ registry });
+  const providerExecutor = new ProviderExecutor({ registry, allowUnenforcedAttributedSpend: true });
   const sessionDb = new InMemorySessionDB();
   const sessionId = `test-session-${Date.now()}-${Math.random()}`;
   await sessionDb.createSession({ id: sessionId, profileId: "default", title: "test" });
@@ -196,7 +196,7 @@ async function createProviderTurnLoopForTest(
 async function createCompressionHarness() {
   const registry = new ProviderRegistry();
   registry.register(createMockAdapter());
-  const providerExecutor = new ProviderExecutor({ registry });
+  const providerExecutor = new ProviderExecutor({ registry, allowUnenforcedAttributedSpend: true });
   const completeSpy = vi.spyOn(providerExecutor, "complete").mockResolvedValue({
     ok: true,
     response: {
@@ -1003,7 +1003,7 @@ describe("ProviderTurnLoop streaming callbacks", () => {
 });
 
 describe("ProviderTurnLoop provider availability", () => {
-  it("records ordinary provider requests against the persisted visible user turn", async () => {
+  it("passes the persisted visible user turn to the canonical provider boundary", async () => {
     const harness = await createCompressionHarness();
     await appendHistory(harness.sessionDb, harness.sessionId, "history");
     harness.completeSpy.mockResolvedValueOnce({
@@ -1034,16 +1034,17 @@ describe("ProviderTurnLoop provider availability", () => {
 
     await runBasicProviderTurn(harness.loop(), { visibleTurnId: `${harness.sessionId}-latest` });
 
-    const entries = await harness.sessionDb.listProviderUsageEntries("default", {
-      visibleTurnId: `${harness.sessionId}-latest`
-    });
-    expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({
-      sessionId: harness.sessionId,
-      provider: "test-provider",
-      providerAttemptIndex: 0,
-      usageComplete: true
-    });
+    expect(harness.completeSpy).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Object),
+      expect.objectContaining({
+        usage: expect.objectContaining({
+          sourceKind: "main",
+          executionSessionId: harness.sessionId,
+          visibleTurnId: `${harness.sessionId}-latest`
+        })
+      })
+    );
   });
 
   it("can run provider when executor and configured model are present", async () => {
@@ -1425,7 +1426,7 @@ describe("ProviderTurnLoop OpenAI-compatible stream recovery", () => {
         }
       }));
 
-      const providerExecutor = new ProviderExecutor({ registry });
+      const providerExecutor = new ProviderExecutor({ registry, allowUnenforcedAttributedSpend: true });
       const openAIModel: ModelProfile = {
         id: "gpt-test",
         provider: "openai",
@@ -3651,7 +3652,7 @@ describe("ProviderTurnLoop explicit route propagation", () => {
   it("uses the per-turn memory prompt context when assembling provider prompts", async () => {
     const registry = new ProviderRegistry();
     registry.register(createMockAdapter());
-    const providerExecutor = new ProviderExecutor({ registry });
+    const providerExecutor = new ProviderExecutor({ registry, allowUnenforcedAttributedSpend: true });
     const completeSpy = vi.spyOn(providerExecutor, "complete").mockResolvedValue({
       ok: true,
       response: {
@@ -3729,7 +3730,7 @@ describe("ProviderTurnLoop explicit route propagation", () => {
     const registry = new ProviderRegistry();
     registry.register(createMockAdapter());
 
-    const providerExecutor = new ProviderExecutor({ registry });
+    const providerExecutor = new ProviderExecutor({ registry, allowUnenforcedAttributedSpend: true });
     const completeSpy = vi.spyOn(providerExecutor, "complete").mockResolvedValue({
       ok: true,
       response: {
@@ -3856,7 +3857,7 @@ describe("ProviderTurnLoop explicit route propagation", () => {
     const registry = new ProviderRegistry();
     registry.register(createMockAdapter());
 
-    const providerExecutor = new ProviderExecutor({ registry });
+    const providerExecutor = new ProviderExecutor({ registry, allowUnenforcedAttributedSpend: true });
     const completeSpy = vi.spyOn(providerExecutor, "complete").mockResolvedValue({
       ok: true,
       response: {

@@ -89,7 +89,10 @@ export type ProviderSpendDenialReason =
   | "SESSION_LIMIT_EXHAUSTED"
   | "TASK_LIMIT_EXHAUSTED"
   | "SESSION_CAPACITY_RESERVED"
-  | "TASK_CAPACITY_RESERVED";
+  | "TASK_CAPACITY_RESERVED"
+  | "PRICING_UNAVAILABLE"
+  | "REQUEST_CANNOT_BE_SAFELY_BOUNDED"
+  | "SPEND_CONTROLLER_UNAVAILABLE";
 
 export type ProviderSpendReservationResult =
   | { ok: true; attempt: ProviderSpendAttempt }

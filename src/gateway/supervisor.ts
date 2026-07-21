@@ -18,6 +18,7 @@ import { CronExecutionStore } from "../cron/cron-execution-store.js";
 import { createFileCronJobLock } from "../cron/cron-lock.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { createProviderUsageRecorder } from "../providers/provider-usage-ledger.js";
+import { SQLiteProviderSpendController } from "../workflow/sqlite-provider-spend.js";
 import type { MemoryCurationCheckpointResult } from "../memory/memory-curation-service.js";
 import { curateSessionFinalizationJob } from "../memory/session-finalization-curator.js";
 import {
@@ -266,6 +267,7 @@ async function buildGatewaySecurityAssessorConfig(
         registry: config.providerRegistry,
         homeDir: config.homeDir,
         profileId: config.profileId,
+        spendController: new SQLiteProviderSpendController({ db: sessionDb.db, profileId: config.profileId }),
         usageRecorder: createProviderUsageRecorder({
           profileId: config.profileId,
           record: (entries) => sessionDb.recordProviderUsageEntries(entries),
@@ -295,6 +297,7 @@ async function buildGatewaySecurityAssessorConfig(
       registry: config.providerRegistry,
       homeDir: config.homeDir,
       profileId: config.profileId,
+      spendController: new SQLiteProviderSpendController({ db: sessionDb.db, profileId: config.profileId }),
       usageRecorder: createProviderUsageRecorder({
         profileId: config.profileId,
         record: (entries) => sessionDb.recordProviderUsageEntries(entries),
@@ -1018,6 +1021,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           registry: config.providerRegistry,
           homeDir: config.homeDir,
           profileId: config.profileId,
+          spendController: new SQLiteProviderSpendController({ db: sessionDb.db, profileId }),
           usageRecorder: createProviderUsageRecorder({
             profileId,
             record: (entries) => sessionDb.recordProviderUsageEntries(entries),

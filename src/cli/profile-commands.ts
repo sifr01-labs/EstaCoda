@@ -24,6 +24,7 @@ import { executeAuxiliaryTask } from "../providers/auxiliary-executor.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { createProviderUsageRecorder } from "../providers/provider-usage-ledger.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
+import { SQLiteProviderSpendController } from "../workflow/sqlite-provider-spend.js";
 
 export async function profileCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [subcommand, ...rest] = args;
@@ -143,6 +144,7 @@ async function createProductionProfileContextGenerator(options: CliOptions): Pro
           registry: loaded.providerRegistry,
           homeDir: loaded.homeDir,
           profileId: loaded.profileId,
+          spendController: new SQLiteProviderSpendController({ db: sessionDb.db, profileId: loaded.profileId }),
           usageRecorder: createProviderUsageRecorder({
             profileId: loaded.profileId,
             record: (entries) => sessionDb.recordProviderUsageEntries(entries),

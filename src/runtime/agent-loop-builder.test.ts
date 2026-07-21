@@ -673,7 +673,10 @@ async function createBuilderHarness(input: {
     homeDir
   });
   const providerRegistry = new ProviderRegistry();
-  const providerExecutor = new ProviderExecutor({ registry: providerRegistry });
+  const providerExecutor = new ProviderExecutor({
+    registry: providerRegistry,
+    allowUnenforcedAttributedSpend: true
+  });
   const promotionStore = new MemoryPromotionStore({
     path: join(workspaceRoot, "promotions.json"),
     persistence: memoryPersistenceService

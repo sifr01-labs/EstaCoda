@@ -153,7 +153,8 @@ export function formatProviderTruthStatus(input: {
 
 export async function diagnoseProviderLive(
   config: LoadedRuntimeConfig,
-  usageRecorder: NonNullable<ProviderExecutorOptions["usageRecorder"]>
+  usageRecorder: NonNullable<ProviderExecutorOptions["usageRecorder"]>,
+  spendController?: ProviderExecutorOptions["spendController"]
 ): Promise<ProviderLiveDiagnostic> {
   if (config.model.provider === "unconfigured" || config.model.id === "unconfigured") {
     return {
@@ -167,6 +168,9 @@ export async function diagnoseProviderLive(
     registry: config.providerRegistry,
     homeDir: config.homeDir,
     profileId: config.profileId,
+    ...(spendController === undefined
+      ? { allowUnenforcedAttributedSpend: true }
+      : { spendController }),
     usageRecorder
   });
   const execution = await executor.complete({

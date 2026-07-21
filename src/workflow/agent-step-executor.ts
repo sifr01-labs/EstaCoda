@@ -292,6 +292,15 @@ export class AgentStepExecutor implements TaskStepExecutor {
       if (hasStructuredBlock(response, events)) {
         return { outcome: "failed", failure: taskFailure("security-deny", false), ...metering, ...common };
       }
+      if (response.providerExecution?.spendDenialReason !== undefined) {
+        endReason = "task-step-spending-denied";
+        return {
+          outcome: "spending_denied",
+          reason: response.providerExecution.spendDenialReason,
+          ...metering,
+          ...common
+        };
+      }
       if (response.providerExecution?.ok === false) {
         const providerFailure = classifyProviderFailure(response.providerExecution.attempts.at(-1)?.errorClass);
         return { outcome: "failed", failure: providerFailure, ...metering, ...common };

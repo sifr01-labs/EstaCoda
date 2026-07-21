@@ -195,6 +195,44 @@ describe("SQLiteProviderSpendController", () => {
     expect(result).toMatchObject({ ok: true, attempt: { allocations: [] } });
   });
 
+  it("keeps a synthesis earmark inside the root Task and Session limits", () => {
+    const graph = synthesisTaskGraph();
+    const taskStore = new SQLiteTaskStore({ db: sessionDb.db, profileId: PROFILE_ID });
+    taskStore.createTaskGraph(graph);
+    taskStore.atomicWrite((store) => {
+      store.createAttempt(taskAttemptFor(graph.task.id, graph.revision.id, graph.steps[0]!.id, "attempt-earmark-worker"));
+      store.createAttempt(taskAttemptFor(graph.task.id, graph.revision.id, graph.steps[1]!.id, "attempt-earmark-synthesis"));
+    });
+
+    const worker = controller.reserve(spendRequest({
+      requestKey: "earmark-worker",
+      taskId: graph.task.id,
+      rootTaskId: graph.task.id,
+      planRevisionId: graph.revision.id,
+      stepId: graph.steps[0]!.id,
+      attemptId: "attempt-earmark-worker",
+      maximumEstimatedCostUsd: 4.5
+    }), CREATED_AT);
+    expect(worker).toMatchObject({
+      ok: false,
+      reason: "TASK_CAPACITY_RESERVED",
+      availableCostUsd: 4
+    });
+
+    const synthesis = controller.reserve(spendRequest({
+      requestKey: "earmark-synthesis",
+      taskId: graph.task.id,
+      rootTaskId: graph.task.id,
+      planRevisionId: graph.revision.id,
+      stepId: graph.steps[1]!.id,
+      attemptId: "attempt-earmark-synthesis",
+      maximumEstimatedCostUsd: 4.5
+    }), CREATED_AT);
+    expect(synthesis).toMatchObject({ ok: true, attempt: { reservedCostUsd: 4.5 } });
+    expect(controller.getScope("root_task", graph.task.id)?.reservedCostUsd).toBe(4.5);
+    expect(controller.getScope("session", "origin")?.reservedCostUsd).toBe(4.5);
+  });
+
   it("fails closed when materialized balances or immutable scope policy are tampered with", () => {
     controller.reserve(spendRequest(), CREATED_AT);
     sessionDb.db.query(
@@ -375,6 +413,58 @@ function taskAttempt(): TaskAttempt {
     resultIds: [],
     createdAt: CREATED_AT,
     updatedAt: CREATED_AT
+  };
+}
+
+function synthesisTaskGraph(): { task: Task; revision: TaskPlanRevision; steps: TaskStep[] } {
+  const base = taskGraph();
+  const taskId = "task-earmark";
+  const revisionId = "revision-earmark";
+  const worker: TaskStep = {
+    ...base.steps[0]!,
+    id: "step-earmark-worker",
+    taskId,
+    planRevisionId: revisionId,
+    key: "worker",
+    executionLimits: { ...base.steps[0]!.executionLimits, maxTotalTokens: 8_000 }
+  };
+  const synthesis: TaskStep = {
+    ...base.steps[0]!,
+    id: "step-earmark-synthesis",
+    taskId,
+    planRevisionId: revisionId,
+    key: "synthesis",
+    position: 1,
+    dependsOn: [worker.id],
+    executor: { kind: "agent", role: "synthesis" },
+    executionLimits: { ...base.steps[0]!.executionLimits, maxTotalTokens: 2_000 }
+  };
+  return {
+    task: {
+      ...base.task,
+      id: taskId,
+      rootTaskId: taskId,
+      creationKey: "create-earmark",
+      activePlanRevisionId: revisionId
+    },
+    revision: { ...base.revision, id: revisionId, taskId },
+    steps: [worker, synthesis]
+  };
+}
+
+function taskAttemptFor(
+  taskId: string,
+  planRevisionId: string,
+  stepId: string,
+  id: string
+): TaskAttempt {
+  return {
+    ...taskAttempt(),
+    id,
+    taskId,
+    planRevisionId,
+    stepId,
+    dispatchKey: `dispatch-${id}`
   };
 }
 

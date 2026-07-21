@@ -20,6 +20,7 @@ import {
 
 const BALANCE_EPSILON_USD = 1e-9;
 const RECOVERY_UNCERTAINTY_REASON = "dispatch-outcome-unknown-after-recovery";
+const TERMINAL_SYNTHESIS_STEP_STATUSES = new Set(["completed", "failed", "skipped", "cancelled"]);
 
 export class ProviderSpendIntegrityError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -89,7 +90,11 @@ export class SQLiteProviderSpendController {
       const scopes = resolved.scopes.map((source) => this.#ensureScope(source, reservedAt));
       for (const scope of scopes) {
         this.#assertScopeBalance(scope);
-        const denial = reservationDenial(scope, resolved.request.maximumEstimatedCostUsd);
+        const denial = reservationDenial(
+          scope,
+          resolved.request.maximumEstimatedCostUsd,
+          this.#synthesisEarmarkUsd(scope, resolved.request)
+        );
         if (denial !== undefined) return denial;
       }
 
@@ -408,6 +413,56 @@ export class SQLiteProviderSpendController {
     }
   }
 
+  /**
+   * Protects fixed-plan synthesis using its proportional execution share. The earmark is
+   * inside the immutable root-Task limit and is waived only for the synthesis request
+   * that is consuming it. Session admission also honors earmarks from budgeted root Tasks.
+   */
+  #synthesisEarmarkUsd(scope: ProviderSpendingScope, request: ProviderSpendRequest): number {
+    const roots = scope.kind === "root_task"
+      ? this.#db.query<SynthesisRootRow>(
+          `select id, spending_limit_json from tasks
+           where profile_id = ? and id = ? and root_task_id = id`
+        ).all(this.#profileId, scope.ownerId)
+      : this.#db.query<SynthesisRootRow>(
+          `select task.id, task.spending_limit_json from tasks task
+           join sessions origin on origin.profile_id = task.profile_id and origin.id = task.origin_session_id
+           where task.profile_id = ? and task.root_task_id = task.id
+             and (task.origin_session_id = ? or origin.spending_scope_session_id = ?)
+             and task.spending_limit_json is not null
+             and task.status in ('planning', 'queued', 'running', 'waiting_for_host',
+               'waiting_for_input', 'waiting_for_approval', 'paused')`
+        ).all(this.#profileId, scope.ownerId, scope.ownerId);
+    let totalEarmark = 0;
+    for (const root of roots) {
+      if (root.spending_limit_json === null) continue;
+      const rootLimit = parseSpendingLimit(root.spending_limit_json).maxEstimatedCostUsd;
+      const steps = this.#db.query<SynthesisStepRow>(
+        `select step.id, step.status, step.executor_json, step.execution_limits_json
+         from task_steps step
+         join tasks task on task.profile_id = step.profile_id and task.id = step.task_id
+         where step.profile_id = ? and task.root_task_id = ?
+           and step.plan_revision_id = task.active_plan_revision_id`
+      ).all(this.#profileId, root.id);
+      let allTokenCapacity = 0;
+      let protectedSynthesisCapacity = 0;
+      for (const step of steps) {
+        const executionLimits = parseExecutionLimits(step.execution_limits_json);
+        allTokenCapacity += executionLimits.maxTotalTokens;
+        const executor = parseTaskExecutor(step.executor_json);
+        const isCurrentRequest = request.rootTaskId === root.id && request.stepId === step.id;
+        if (executor.kind === "agent" && executor.role === "synthesis" &&
+            !TERMINAL_SYNTHESIS_STEP_STATUSES.has(step.status) && !isCurrentRequest) {
+          protectedSynthesisCapacity += executionLimits.maxTotalTokens;
+        }
+      }
+      if (allTokenCapacity > 0 && protectedSynthesisCapacity > 0) {
+        totalEarmark += rootLimit * Math.min(1, protectedSynthesisCapacity / allTokenCapacity);
+      }
+    }
+    return Math.min(scope.maxEstimatedCostUsd, totalEarmark);
+  }
+
   #releaseReservedAttempt(attempt: ProviderSpendAttempt, releasedAt: string): void {
     this.#assertAllocationsBalanced(attempt);
     this.#db.query(
@@ -625,10 +680,11 @@ export class SQLiteProviderSpendController {
 
 function reservationDenial(
   scope: ProviderSpendingScope,
-  requestedCostUsd: number
+  requestedCostUsd: number,
+  earmarkedCostUsd = 0
 ): Extract<ProviderSpendReservationResult, { ok: false }> | undefined {
   const withoutReservations = Math.max(0, scope.maxEstimatedCostUsd - scope.spentCostUsd);
-  const available = Math.max(0, withoutReservations - scope.reservedCostUsd);
+  const available = Math.max(0, withoutReservations - scope.reservedCostUsd - earmarkedCostUsd);
   // Admission is deliberately conservative: floating-point drift may deny a request,
   // but it must never admit one beyond the configured hard ceiling.
   if (requestedCostUsd <= available) return undefined;
@@ -658,6 +714,34 @@ function parseSpendingLimit(json: string): SpendingLimit {
     return value;
   } catch (error) {
     throw new ProviderSpendIntegrityError("Provider spending scope owner has an invalid limit.", { cause: error });
+  }
+}
+
+function parseExecutionLimits(json: string): { maxTotalTokens: number } {
+  try {
+    const value = JSON.parse(json) as { maxTotalTokens?: unknown };
+    if (!Number.isSafeInteger(value.maxTotalTokens) || (value.maxTotalTokens as number) < 0) {
+      throw new Error("maxTotalTokens is invalid");
+    }
+    return { maxTotalTokens: value.maxTotalTokens as number };
+  } catch (error) {
+    throw new ProviderSpendIntegrityError("Task synthesis execution limits are invalid.", { cause: error });
+  }
+}
+
+function parseTaskExecutor(json: string): { kind: string; role?: string } {
+  try {
+    const value = JSON.parse(json) as { kind?: unknown; role?: unknown };
+    if (typeof value.kind !== "string" ||
+        (value.role !== undefined && typeof value.role !== "string")) {
+      throw new Error("executor is invalid");
+    }
+    return {
+      kind: value.kind,
+      ...(value.role === undefined ? {} : { role: value.role as string })
+    };
+  } catch (error) {
+    throw new ProviderSpendIntegrityError("Task synthesis executor is invalid.", { cause: error });
   }
 }
 
@@ -767,6 +851,18 @@ type TaskSpendRow = {
   root_id: string;
   spending_limit_json: string | null;
   created_at: string;
+};
+
+type SynthesisRootRow = {
+  id: string;
+  spending_limit_json: string | null;
+};
+
+type SynthesisStepRow = {
+  id: string;
+  status: string;
+  executor_json: string;
+  execution_limits_json: string;
 };
 
 type SpendingScopeRow = {

@@ -144,6 +144,40 @@ describe("executeAuxiliaryTask", () => {
     ]);
   });
 
+  it("propagates an exact spending denial without attempting the auxiliary fallback", async () => {
+    const route = fakeRoute({ id: "auxiliary-model" });
+    const mainRoute = fakeRoute({ id: "main-model" });
+    const complete = vi.fn(async (): Promise<ProviderExecutionResult> => ({
+      ok: false,
+      fallbackUsed: false,
+      attempts: [{
+        provider: route.provider,
+        model: route.id,
+        state: "preflight",
+        ok: false,
+        errorClass: "spend-denied",
+        content: "No provider request was sent."
+      }],
+      spendDenialReason: "SESSION_CAPACITY_RESERVED",
+      toolCalls: []
+    }));
+
+    const result = await executeAuxiliaryTask({
+      route: fakeAuxiliaryRoute({ route, fallbackToMain: true }),
+      mainRoute,
+      providerExecutor: { complete },
+      request
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: "failed",
+      fallbackUsed: false,
+      spendDenialReason: "SESSION_CAPACITY_RESERVED"
+    });
+    expect(complete).toHaveBeenCalledOnce();
+  });
+
   it("preserves safe provider final-state metadata without copying raw reasoning", async () => {
     const route = fakeRoute({ provider: "openai", id: "gpt-4.1-mini" });
     const providerResult = executionResult(route, true, "primary ok");

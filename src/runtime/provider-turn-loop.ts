@@ -16,6 +16,7 @@ import type {
 } from "../contracts/provider.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision } from "../contracts/security.js";
+import type { ProviderUsageContext } from "../contracts/provider-usage.js";
 import type {
   ReplacementSessionMessage,
   SessionContextWindowUsage,
@@ -47,10 +48,7 @@ import {
   type ProviderExecutor,
   type ProviderRuntimeEvent
 } from "../providers/provider-executor.js";
-import {
-  providerUsageEntriesFromExecution,
-  type ProviderUsageTaskAttribution
-} from "../providers/provider-usage-ledger.js";
+import type { ProviderUsageTaskAttribution } from "../providers/provider-usage-ledger.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { stableToolCallId } from "../tools/tool-call-planner.js";
@@ -630,9 +628,9 @@ export class ProviderTurnLoop {
       signal: input.signal,
       onEvent: input.onEvent,
       onDelta: input.onDelta,
-      onSegmentBreak: input.onSegmentBreak
+      onSegmentBreak: input.onSegmentBreak,
+      visibleTurnId: input.visibleTurnId
     });
-    if (input.visibleTurnId !== undefined) await this.#recordProviderUsage(execution, input.visibleTurnId);
     if (execution.response?.usage?.inputTokens !== undefined) {
       await this.#recordContextWindowUsage(execution, prompt.budget, input.onEvent);
     }
@@ -764,9 +762,9 @@ export class ProviderTurnLoop {
       signal: input.signal,
       onEvent: input.onEvent,
       onDelta: input.onDelta,
-      onSegmentBreak: input.onSegmentBreak
+      onSegmentBreak: input.onSegmentBreak,
+      visibleTurnId: input.visibleTurnId
     });
-    if (input.visibleTurnId !== undefined) await this.#recordProviderUsage(execution, input.visibleTurnId);
     if (execution.response?.usage?.inputTokens !== undefined) {
       await this.#recordContextWindowUsage(execution, prompt.budget, input.onEvent);
     }
@@ -827,6 +825,7 @@ export class ProviderTurnLoop {
     onEvent?: RuntimeEventSink;
     onDelta?: (text: string) => void;
     onSegmentBreak?: (reason?: string) => void | Promise<void>;
+    visibleTurnId?: string;
   }): Promise<ProviderExecutionResult> {
     const initial = await this.#completeProviderRequestWithTruncatedToolRetry(input);
     return await this.#continueLengthTruncatedTextResponse({
@@ -847,6 +846,7 @@ export class ProviderTurnLoop {
     onEvent?: RuntimeEventSink;
     onDelta?: (text: string) => void;
     onSegmentBreak?: (reason?: string) => void | Promise<void>;
+    visibleTurnId?: string;
   }): Promise<ProviderExecutionResult> {
     const primaryRoute = input.primaryRoute ?? this.#primaryModelRoute;
     const fallbackChain = input.fallbackChain ?? this.#modelFallbackRoutes;
@@ -861,6 +861,7 @@ export class ProviderTurnLoop {
       signal: input.signal,
       primaryRoute,
       fallbackChain,
+      usage: await this.#nextProviderUsageContext(input.visibleTurnId),
       onEvent: initialEvents.onEvent
     });
 
@@ -922,6 +923,7 @@ export class ProviderTurnLoop {
       signal: input.signal,
       primaryRoute: retryPrimaryRoute,
       fallbackChain: retryChain.slice(1),
+      usage: await this.#nextProviderUsageContext(input.visibleTurnId),
       onEvent: retryEvents.onEvent
     });
     const retryExecution = rebaseRetryRouteIdentity(retryExecutionRaw, retryChain, originalRouteChain);
@@ -952,6 +954,7 @@ export class ProviderTurnLoop {
     onEvent?: RuntimeEventSink;
     onDelta?: (text: string) => void;
     onSegmentBreak?: (reason?: string) => void | Promise<void>;
+    visibleTurnId?: string;
   }): Promise<ProviderExecutionResult> {
     if (!isLengthTruncatedTextExecution(input.initial)) {
       return input.initial;
@@ -1135,39 +1138,27 @@ export class ProviderTurnLoop {
     return this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
   }
 
-  async #recordProviderUsage(execution: ProviderExecutionResult, visibleTurnId: string): Promise<void> {
+  async #nextProviderUsageContext(visibleTurnId: string | undefined): Promise<ProviderUsageContext> {
     const sessionId = this.#currentSessionId();
     const session = await this.#sessionDb.getSession(sessionId);
     const task = this.#taskExecution;
-    const entries = providerUsageEntriesFromExecution({
-      execution,
-      profileId: this.#profileId,
-      context: {
-        requestKey: [sessionId, visibleTurnId, String(this.#providerRequestSequence++)].join("\0"),
-        sourceKind: task === undefined ? "main" : "task",
-        executionSessionId: sessionId,
-        ...(session?.spendingScopeSessionId === undefined
-          ? {}
-          : { sessionBudgetScopeId: session.spendingScopeSessionId }),
-        ...(task === undefined
-          ? { visibleTurnId }
-          : task.originTurnId === undefined
-          ? {}
-          : { visibleTurnId: task.originTurnId }),
-        ...(task === undefined ? {} : {
-          taskId: task.taskId,
-          rootTaskId: task.rootTaskId,
-          planRevisionId: task.planRevisionId,
-          stepId: task.stepId,
-          attemptId: task.attemptId
-        })
-      },
-      routes: [
-        ...(this.#primaryModelRoute === undefined ? [] : [this.#primaryModelRoute]),
-        ...this.#modelFallbackRoutes
-      ]
-    });
-    if (entries.length > 0) await this.#sessionDb.recordProviderUsageEntries(entries);
+    const effectiveVisibleTurnId = task === undefined ? visibleTurnId : task.originTurnId;
+    return {
+      requestKey: [sessionId, effectiveVisibleTurnId ?? "session", String(this.#providerRequestSequence++)].join("\0"),
+      sourceKind: task === undefined ? "main" : "task",
+      executionSessionId: sessionId,
+      ...(session?.spendingScopeSessionId === undefined
+        ? {}
+        : { sessionBudgetScopeId: session.spendingScopeSessionId }),
+      ...(effectiveVisibleTurnId === undefined ? {} : { visibleTurnId: effectiveVisibleTurnId }),
+      ...(task === undefined ? {} : {
+        taskId: task.taskId,
+        rootTaskId: task.rootTaskId,
+        planRevisionId: task.planRevisionId,
+        stepId: task.stepId,
+        attemptId: task.attemptId
+      })
+    };
   }
 
   async #recordNativeHistoryDiagnostics(prompt: ProviderPromptAssembly, routeRole: string): Promise<void> {

@@ -282,6 +282,62 @@ describe("AgentStepExecutor", () => {
     expect(createChild).not.toHaveBeenCalled();
   });
 
+  it("propagates the exact provider spending denial to the Task scheduler", async () => {
+    const graph = makeGraph();
+    const childFactory: ChildAgentLoopFactory = {
+      createChild: vi.fn(async (input) => {
+        await sessionDb.createSession({
+          id: "worker-spend-denied",
+          profileId: input.profileId,
+          parentSessionId: input.parentSessionId,
+          metadata: { kind: "task-step-worker", ...(input.taskExecution ?? {}) }
+        });
+        return childRuntime(async () => response({
+          providerExecution: {
+            ok: false,
+            fallbackUsed: false,
+            attempts: [{
+              provider: "openai",
+              model: "child-model",
+              state: "preflight",
+              ok: false,
+              errorClass: "spend-denied",
+              content: "No provider request was sent."
+            }],
+            spendDenialReason: "TASK_CAPACITY_RESERVED",
+            toolCalls: []
+          }
+        }), async () => undefined, {
+          sessionId: "worker-spend-denied",
+          trajectoryId: "trajectory-spend-denied"
+        });
+      })
+    };
+    const executor = new AgentStepExecutor({
+      childFactory,
+      sessionDb,
+      taskStore: store,
+      hostWorkspace: graph.task.workspace,
+      isWorkspaceTrusted: () => true,
+      parentVisibleTools: () => tools(),
+      approvalService: new TaskApprovalService({ store }),
+      securityPolicy: capabilityFirstDefaults
+    });
+
+    await expect(executor.execute({
+      task: graph.task,
+      step: graph.steps[0]!,
+      attempt: attempt(graph),
+      signal: new AbortController().signal,
+      heartbeat: vi.fn(),
+      checkpoint: vi.fn()
+    })).resolves.toMatchObject({
+      outcome: "spending_denied",
+      reason: "TASK_CAPACITY_RESERVED",
+      workerSessionId: "worker-spend-denied"
+    });
+  });
+
   it("continues from a checkpointed worker session and leaves it open during host handoff", async () => {
     const graph = makeGraph();
     await sessionDb.createSession({

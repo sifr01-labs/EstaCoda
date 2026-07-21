@@ -12,6 +12,7 @@ import type {
   ResolvedModelRoute
 } from "../contracts/provider.js";
 import type { ProviderUsageContext } from "../contracts/provider-usage.js";
+import type { ProviderSpendDenialReason } from "../contracts/provider-spend.js";
 import type { ProviderExecutionResult, ProviderExecutor } from "./provider-executor.js";
 
 export type AuxiliaryExecutionAttempt = {
@@ -19,7 +20,7 @@ export type AuxiliaryExecutionAttempt = {
   provider: string;
   model: string;
   ok: boolean;
-  errorClass?: ProviderErrorClass | "aborted" | "exception";
+  errorClass?: ProviderErrorClass | "aborted" | "exception" | "spend-denied";
   content: string;
   finishReason?: ProviderFinishReason;
   incompleteReason?: string;
@@ -42,6 +43,7 @@ export type AuxiliaryExecutionResult = {
   fallbackUsed: boolean;
   attempts: AuxiliaryExecutionAttempt[];
   diagnostics: string[];
+  spendDenialReason?: ProviderSpendDenialReason;
 };
 
 export type ExecuteAuxiliaryTaskInput = {
@@ -113,6 +115,16 @@ export async function executeAuxiliaryTask(input: ExecuteAuxiliaryTaskInput): Pr
       }
 
       const primaryAttempts = toAuxiliaryAttempts(primary.result, "primary");
+      if (primary.result.spendDenialReason !== undefined) {
+        return {
+          ok: false,
+          status: "failed",
+          fallbackUsed: false,
+          attempts: primaryAttempts,
+          diagnostics: [],
+          spendDenialReason: primary.result.spendDenialReason
+        };
+      }
       if (primary.result.ok) {
         return {
           ok: true,
@@ -158,7 +170,10 @@ export async function executeAuxiliaryTask(input: ExecuteAuxiliaryTaskInput): Pr
         response: fallback.result.response,
         fallbackUsed: true,
         attempts: [...primaryAttempts, ...fallbackAttempts],
-        diagnostics: []
+        diagnostics: [],
+        ...(fallback.result.spendDenialReason === undefined
+          ? {}
+          : { spendDenialReason: fallback.result.spendDenialReason })
       };
     } finally {
       permit.release();

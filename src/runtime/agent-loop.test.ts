@@ -12,6 +12,7 @@ import type { SkillDefinition } from "../contracts/skill.js";
 import type { ToolDefinition } from "../contracts/tool.js";
 import type { TrajectoryStore } from "../contracts/trajectory-store.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
+import { providerSpendDenialMessage } from "../providers/provider-spend-policy.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { deriveAgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
@@ -1176,6 +1177,43 @@ describe("AgentLoop provider availability gating", () => {
         }
       ]
     });
+  });
+
+  it("returns a deterministic local spending denial without a provider-authored explanation", async () => {
+    const denialReason = "SESSION_LIMIT_EXHAUSTED" as const;
+    const providerExecution: ProviderExecutionResult = {
+      ok: false,
+      fallbackUsed: false,
+      attempts: [{
+        provider: model.provider,
+        model: model.id,
+        state: "preflight",
+        ok: false,
+        errorClass: "spend-denied",
+        content: providerSpendDenialMessage(denialReason)
+      }],
+      spendDenialReason: denialReason,
+      toolCalls: []
+    };
+    const { loop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution
+    });
+
+    const response = await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(response.text).toBe(providerSpendDenialMessage(denialReason));
+    expect(response.text).not.toContain("Provider note:");
+    expect(response.text).not.toContain("I matched the test-skill skill");
+    const agentMessages = (await sessionDb.listMessages(sessionId)).filter((message) => message.role === "agent");
+    expect(agentMessages.map((message) => message.content)).toEqual([
+      providerSpendDenialMessage(denialReason)
+    ]);
   });
 
   it("persists the trajectory snapshot when a turn returns successfully", async () => {

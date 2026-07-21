@@ -123,7 +123,7 @@ describe("ProviderExecutor route-based execution", () => {
     const adapter = createMockAdapter({ id: "test-provider" });
     registry.register(adapter);
     const usageRecorder = vi.fn(async () => {});
-    executor = new ProviderExecutor({ registry, usageRecorder });
+    executor = new ProviderExecutor({ registry, usageRecorder, allowUnenforcedAttributedSpend: true });
     const route = createDefaultRoute({ provider: "test-provider" });
 
     const result = await executor.complete({ messages: [] }, {}, {

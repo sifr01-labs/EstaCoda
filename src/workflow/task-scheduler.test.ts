@@ -1025,6 +1025,51 @@ describe("TaskScheduler", () => {
     expect(store.getTask("task-alpha")?.status).toBe("completed");
   });
 
+  it("pauses on an exact spending denial while preserving completed Results", async () => {
+    store.createTaskGraph(makeGraph([
+      makeStep("research-before-limit", 0),
+      makeStep("synthesis-after-limit", 1, {
+        dependsOn: ["step-research-before-limit"],
+        executor: { kind: "agent", role: "synthesis" }
+      })
+    ]));
+    const executor = new FakeTaskStepExecutor(({ step }) => step.executor.role === "synthesis"
+      ? {
+          outcome: "spending_denied",
+          reason: "TASK_LIMIT_EXHAUSTED",
+          usage: usage(0, 0, 0)
+        }
+      : {
+          outcome: "succeeded",
+          results: [{ kind: "text", content: "preserved research" }]
+        });
+    const scheduler = makeScheduler(executor);
+
+    await expect(scheduler.runOnce()).resolves.toMatchObject({ completed: 1 });
+    const preservedResultId = store.listResults("task-alpha")[0]?.id;
+    expect(preservedResultId).toBeDefined();
+    await expect(scheduler.runOnce()).resolves.toMatchObject({ dispatched: 1, completed: 0, failed: 0 });
+
+    const deniedAttempt = store.listAttempts("task-alpha", "step-synthesis-after-limit")[0];
+    expect(deniedAttempt).toMatchObject({
+      status: "interrupted",
+      failure: { class: "provider-spend-task-limit-exhausted", retryable: false }
+    });
+    expect(store.getStep("step-synthesis-after-limit")?.status).toBe("ready");
+    expect(store.getTask("task-alpha")).toMatchObject({
+      status: "paused",
+      waitReason: {
+        kind: "execution_limit",
+        summary: expect.stringContaining("Task tree has reached")
+      }
+    });
+    expect(store.listResults("task-alpha").map((result) => result.id)).toEqual([preservedResultId]);
+    expect(store.listEvents("task-alpha")).toContainEqual(expect.objectContaining({
+      kind: "task-state-changed",
+      data: expect.objectContaining({ reasonCode: "TASK_LIMIT_EXHAUSTED" })
+    }));
+  });
+
   function now(): Date {
     return new Date(nowMs);
   }

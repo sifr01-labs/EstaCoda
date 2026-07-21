@@ -11,6 +11,7 @@ import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolvePro
 import { collectSetupEntryState, type SetupEntryState } from "../setup/setup-entry-state.js";
 import { repairSQLiteSchema } from "../storage/repair.js";
 import { createProviderUsageRecorder } from "../providers/provider-usage-ledger.js";
+import { SQLiteProviderSpendController } from "../workflow/sqlite-provider-spend.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import {
   diagnoseProviderConfig,
@@ -1266,12 +1267,16 @@ async function diagnoseLiveProviderWithUsage(
 ): Promise<ProviderLiveDiagnostic> {
   const sessionDb = await createSQLiteSessionDB({ path: sessionsSqlitePath });
   try {
-    return await diagnoseProviderLive(config, createProviderUsageRecorder({
-      profileId: config.profileId,
-      record: (entries) => sessionDb.recordProviderUsageEntries(entries),
-      resolveSessionBudgetScopeId: async (sessionId) =>
-        (await sessionDb.getSessionForProfile(sessionId, config.profileId))?.spendingScopeSessionId
-    }));
+    return await diagnoseProviderLive(
+      config,
+      createProviderUsageRecorder({
+        profileId: config.profileId,
+        record: (entries) => sessionDb.recordProviderUsageEntries(entries),
+        resolveSessionBudgetScopeId: async (sessionId) =>
+          (await sessionDb.getSessionForProfile(sessionId, config.profileId))?.spendingScopeSessionId
+      }),
+      new SQLiteProviderSpendController({ db: sessionDb.db, profileId: config.profileId })
+    );
   } finally {
     await sessionDb.close();
   }

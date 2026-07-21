@@ -25,6 +25,7 @@ import type { AgentProfileMode, AgentResponseLanguage, SessionCompressionConfig,
 import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { ContextReferenceExpander } from "../context/context-reference-expander.js";
 import type { ProviderExecutionResult, ProviderRuntimeEvent } from "../providers/provider-executor.js";
+import { providerSpendDenialMessage } from "../providers/provider-spend-policy.js";
 import type { ToolCallPlanner } from "../tools/tool-call-planner.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
@@ -801,11 +802,16 @@ export class AgentLoop {
           }
         : {
             ...fallbackResponse,
-            text: appendArtifactSummary([
-              fallbackResponse.text,
-              "",
-              `Provider note: ${summarizeProviderFailure(effectiveProviderExecution)}`
-            ].join("\n"), artifacts),
+            text: effectiveProviderExecution.spendDenialReason === undefined
+              ? appendArtifactSummary([
+                  fallbackResponse.text,
+                  "",
+                  `Provider note: ${summarizeProviderFailure(effectiveProviderExecution)}`
+                ].join("\n"), artifacts)
+              : appendArtifactSummary(
+                  providerSpendDenialMessage(effectiveProviderExecution.spendDenialReason),
+                  artifacts
+                ),
             toolExecutions,
             toolPlans,
             skillOutcomes,

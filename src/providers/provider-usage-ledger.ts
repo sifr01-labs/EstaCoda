@@ -7,7 +7,11 @@ import type {
   ProviderUsageTotals
 } from "../contracts/provider-usage.js";
 import type { ProviderPricingSnapshot } from "../contracts/provider-spend.js";
-import { assertProviderAttemptState, type ProviderExecutionResult } from "./provider-executor.js";
+import {
+  assertProviderAttemptState,
+  type ProviderAttempt,
+  type ProviderExecutionResult
+} from "./provider-executor.js";
 import { estimateProviderUsage } from "./provider-usage-estimator.js";
 
 export type ProviderUsageTaskAttribution = {
@@ -30,50 +34,73 @@ export function providerUsageEntriesFromExecution(input: {
   return input.execution.attempts.flatMap((attempt, providerAttemptIndex) => {
     assertProviderAttemptState(attempt);
     if (attempt.state === "preflight") return [];
-    const inferredRouteIndex = input.routes.findIndex((route) =>
-      route.provider === attempt.provider && route.id === attempt.model
-    );
-    if (attempt.routeIndex !== undefined &&
-        (!Number.isSafeInteger(attempt.routeIndex) || attempt.routeIndex < 0)) {
-      throw new Error("A dispatched provider request has an invalid resolved route index.");
-    }
-    const routeIndex = input.context.routeIndex ?? attempt.routeIndex ?? Math.max(0, inferredRouteIndex);
-    const route = attempt.routeIndex === undefined && inferredRouteIndex < 0
-      ? undefined
-      : input.routes[attempt.routeIndex ?? Math.max(0, inferredRouteIndex)];
-    if (attempt.routeIndex !== undefined &&
-        (route?.provider !== attempt.provider || route.id !== attempt.model)) {
-      throw new Error("A dispatched provider request does not match its resolved route.");
-    }
-    const routeRole = input.context.routeRole ?? attempt.routeRole ?? (
-      inferredRouteIndex < 0 ? "unknown" as const : routeIndex === 0 ? "primary" as const : "fallback" as const
-    );
-    const requestIdentity = [input.context.requestKey, String(providerAttemptIndex)].join("\0");
-    const requestKey = `sha256:${createHash("sha256").update(requestIdentity).digest("hex")}`;
-    const pricing = providerPricingSnapshot(attempt.provider, attempt.model, route);
-    return [{
-      id: createHash("sha256").update(`${input.profileId}\0${requestKey}`).digest("hex"),
-      profileId: input.profileId,
-      ...(input.context.executionSessionId === undefined ? {} : { sessionId: input.context.executionSessionId }),
-      ...(input.context.sessionBudgetScopeId === undefined ? {} : {
-        sessionBudgetScopeId: input.context.sessionBudgetScopeId
-      }),
-      ...(input.context.visibleTurnId === undefined ? {} : { visibleTurnId: input.context.visibleTurnId }),
-      requestKey,
-      provider: attempt.provider,
-      model: attempt.model,
-      routeRole,
-      routeIndex,
+    return [providerUsageEntryFromAttempt({
+      attempt,
       providerAttemptIndex,
-      sourceKind: input.context.sourceKind,
-      ...(input.context.auxiliaryKind === undefined ? {} : { auxiliaryKind: input.context.auxiliaryKind }),
-      pricing,
-      pricingFingerprint: pricing.fingerprint,
-      ...estimateProviderUsage(attempt.usage, route, providerAttemptIndex),
-      ...taskAttribution(input.context),
-      dispatchedAt: attempt.dispatchedAt
-    }];
+      profileId: input.profileId,
+      context: input.context,
+      routes: input.routes
+    })];
   });
+}
+
+export function providerUsageEntryFromAttempt(input: {
+  attempt: ProviderAttempt & { state: "dispatched"; dispatchedAt: string };
+  providerAttemptIndex: number;
+  profileId: string;
+  context: ProviderUsageContext;
+  routes: readonly ResolvedModelRoute[];
+}): ProviderUsageEntry {
+  assertProviderUsageContext(input.context);
+  const { attempt, providerAttemptIndex } = input;
+  assertProviderAttemptState(attempt);
+  const inferredRouteIndex = input.routes.findIndex((route) =>
+    route.provider === attempt.provider && route.id === attempt.model
+  );
+  if (attempt.routeIndex !== undefined &&
+      (!Number.isSafeInteger(attempt.routeIndex) || attempt.routeIndex < 0)) {
+    throw new Error("A dispatched provider request has an invalid resolved route index.");
+  }
+  const routeIndex = input.context.routeIndex ?? attempt.routeIndex ?? Math.max(0, inferredRouteIndex);
+  const route = attempt.routeIndex === undefined && inferredRouteIndex < 0
+    ? undefined
+    : input.routes[attempt.routeIndex ?? Math.max(0, inferredRouteIndex)];
+  if (attempt.routeIndex !== undefined &&
+      (route?.provider !== attempt.provider || route.id !== attempt.model)) {
+    throw new Error("A dispatched provider request does not match its resolved route.");
+  }
+  const routeRole = input.context.routeRole ?? attempt.routeRole ?? (
+    inferredRouteIndex < 0 ? "unknown" as const : routeIndex === 0 ? "primary" as const : "fallback" as const
+  );
+  const requestKey = providerUsageRequestKey(input.context.requestKey, providerAttemptIndex);
+  const pricing = providerPricingSnapshot(attempt.provider, attempt.model, route);
+  return {
+    id: createHash("sha256").update(`${input.profileId}\0${requestKey}`).digest("hex"),
+    profileId: input.profileId,
+    ...(input.context.executionSessionId === undefined ? {} : { sessionId: input.context.executionSessionId }),
+    ...(input.context.sessionBudgetScopeId === undefined ? {} : {
+      sessionBudgetScopeId: input.context.sessionBudgetScopeId
+    }),
+    ...(input.context.visibleTurnId === undefined ? {} : { visibleTurnId: input.context.visibleTurnId }),
+    requestKey,
+    provider: attempt.provider,
+    model: attempt.model,
+    routeRole,
+    routeIndex,
+    providerAttemptIndex,
+    sourceKind: input.context.sourceKind,
+    ...(input.context.auxiliaryKind === undefined ? {} : { auxiliaryKind: input.context.auxiliaryKind }),
+    pricing,
+    pricingFingerprint: pricing.fingerprint,
+    ...estimateProviderUsage(attempt.usage, route, providerAttemptIndex),
+    ...taskAttribution(input.context),
+    dispatchedAt: attempt.dispatchedAt
+  };
+}
+
+export function providerUsageRequestKey(baseRequestKey: string, providerAttemptIndex: number): string {
+  const requestIdentity = [baseRequestKey, String(providerAttemptIndex)].join("\0");
+  return `sha256:${createHash("sha256").update(requestIdentity).digest("hex")}`;
 }
 
 export function createProviderUsageRecorder(input: {
@@ -128,7 +155,7 @@ export function providerUsageMatches(entry: ProviderUsageEntry, query: ProviderU
     (query.attemptId === undefined || entry.attemptId === query.attemptId);
 }
 
-function providerPricingSnapshot(
+export function providerPricingSnapshot(
   provider: string,
   model: string,
   route: ResolvedModelRoute | undefined
