@@ -11,7 +11,7 @@ import {
   type TaskStatusProjection
 } from "../workflow/task-operator-service.js";
 import { resolveTaskWorkspaceBinding } from "../workflow/task-workspace.js";
-import { readConfig } from "../config/runtime-config.js";
+import { normalizeBudgetConfig, readConfig } from "../config/runtime-config.js";
 import { isolateLtr } from "../ui/bidi.js";
 import type { TaskExecutionPreference } from "../contracts/task.js";
 import type { CliCommandResult, CliOptions } from "./cli.js";
@@ -43,12 +43,15 @@ export async function taskCommand(options: CliOptions, args: string[]): Promise<
     db = await createSQLiteSessionDB({ path: paths.sessionsSqlitePath });
     const store = new SQLiteTaskStore({ db: db.db, profileId });
     const initialBackgroundHost = await detectTaskBackgroundHost({ homeDir, profileId });
+    const profilePaths = resolveProfileStateHome({ homeDir, profileId });
+    const profileConfig = (await readConfig(profilePaths.configPath)).config;
+    const budgets = normalizeBudgetConfig(profileConfig.budgets);
     const service = new TaskOperatorService({
       store,
+      defaultTaskSpendingLimit: budgets.task,
       backgroundContinuation: () => initialBackgroundHost === "active" ? "available" : "unavailable"
     });
-    const profilePaths = resolveProfileStateHome({ homeDir, profileId });
-    locale = (await readConfig(profilePaths.configPath)).config.ui?.language === "ar" ? "ar" : "en";
+    locale = profileConfig.ui?.language === "ar" ? "ar" : "en";
     const trust = new WorkspaceTrustStore({ homeDir });
     const result = await executeTaskCommand({
       args,
@@ -69,6 +72,7 @@ export async function taskCommand(options: CliOptions, args: string[]): Promise<
         const creatorSession = existingSession ?? await db!.createSession({
           profileId,
           title: taskCreatorSessionTitle(normalizedObjective),
+          ...(budgets.session === undefined ? {} : { spendingLimit: budgets.session }),
           metadata: { kind: "task-operator-origin", source: "cli" }
         });
         try {

@@ -36,17 +36,29 @@ export function insertProviderUsageEntry(db: SQLiteDatabase, entry: ProviderUsag
 
 function providerUsageLineageIsValid(
   db: SQLiteDatabase,
-  entry: Pick<ProviderUsageEntry, "profileId" | "sessionId" | "sessionBudgetScopeId" | "visibleTurnId">
+  entry: Pick<ProviderUsageEntry, "profileId" | "sessionId" | "sessionBudgetScopeId" | "visibleTurnId" | "sourceKind">
 ): boolean {
-  for (const sessionId of [entry.sessionId, entry.sessionBudgetScopeId]) {
-    if (sessionId === undefined) continue;
-    const session = db.query<{ id: string }>(
-      "select id from sessions where profile_id = ? and id = ?"
-    ).get(entry.profileId, sessionId);
-    if (session === null) return false;
+  const executionSession = entry.sessionId === undefined ? null : db.query<SessionLineageRow>(
+    `select id, parent_session_id, end_reason, metadata_json,
+      spending_scope_session_id, spending_limit_json
+     from sessions where profile_id = ? and id = ?`
+  ).get(entry.profileId, entry.sessionId);
+  if (entry.sessionId !== undefined && executionSession === null) return false;
+  if (entry.sessionBudgetScopeId !== undefined) {
+    const scope = db.query<SessionLineageRow>(
+      `select id, parent_session_id, end_reason, metadata_json,
+        spending_scope_session_id, spending_limit_json
+       from sessions where profile_id = ? and id = ?`
+    ).get(entry.profileId, entry.sessionBudgetScopeId);
+    if (scope === null || scope.spending_scope_session_id !== scope.id || scope.spending_limit_json === null ||
+        executionSession?.spending_scope_session_id !== scope.id) return false;
+  } else if (executionSession?.spending_scope_session_id !== null && executionSession !== null) {
+    return false;
   }
   if (entry.visibleTurnId === undefined) return true;
-  const lineageRoot = entry.sessionBudgetScopeId ?? entry.sessionId;
+  const lineageRoot = entry.sourceKind === "task" && executionSession?.parent_session_id !== null
+    ? executionSession?.parent_session_id
+    : entry.sessionId;
   if (lineageRoot === undefined) return false;
   const lineage = new Set<string>();
   let currentId = lineageRoot;
@@ -54,10 +66,13 @@ function providerUsageLineageIsValid(
   for (let depth = 0; depth < 32; depth++) {
     if (lineage.has(currentId)) return false;
     const current = db.query<SessionLineageRow>(
-      `select id, parent_session_id, end_reason, metadata_json
+      `select id, parent_session_id, end_reason, metadata_json,
+        spending_scope_session_id, spending_limit_json
        from sessions where profile_id = ? and id = ?`
     ).get(entry.profileId, currentId);
     if (current === null) return false;
+    if (entry.sessionBudgetScopeId !== undefined &&
+        current.spending_scope_session_id !== entry.sessionBudgetScopeId) return false;
     lineage.add(current.id);
     const compactedFrom = compactedFromSessionId(current.metadata_json);
     if (current.parent_session_id === null || compactedFrom !== current.parent_session_id) {
@@ -65,7 +80,8 @@ function providerUsageLineageIsValid(
       break;
     }
     const parent = db.query<SessionLineageRow>(
-      `select id, parent_session_id, end_reason, metadata_json
+      `select id, parent_session_id, end_reason, metadata_json,
+        spending_scope_session_id, spending_limit_json
        from sessions where profile_id = ? and id = ?`
     ).get(entry.profileId, current.parent_session_id);
     if (parent === null || parent.end_reason !== "compression") {
@@ -279,4 +295,6 @@ type SessionLineageRow = {
   parent_session_id: string | null;
   end_reason: string | null;
   metadata_json: string | null;
+  spending_scope_session_id: string | null;
+  spending_limit_json: string | null;
 };

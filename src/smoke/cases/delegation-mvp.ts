@@ -75,7 +75,7 @@ async function smokeDurableCreation(context: SmokeContext): Promise<void> {
     const task = store.getTask(first.taskId);
     assert(first.status === "queued", "delegate_task must return a queued handle immediately");
     assert(replay.taskId === first.taskId && replay.idempotentReplay, "provider call replay must reuse the durable Task");
-    assert(task?.budgetPolicy.maxConcurrentAttempts === 2, "durable Task must preserve configured delegation concurrency");
+    assert(task?.executionLimits.maxConcurrentAttempts === 2, "durable Task must preserve configured delegation concurrency");
     const steps = store.listSteps(first.taskId, task?.activePlanRevisionId ?? "missing");
     const synthesis = steps.find((step) => step.executor.role === "synthesis");
     assert(steps.length === 3, "synthesized batch delegation must persist workers and one terminal Step");

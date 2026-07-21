@@ -114,7 +114,9 @@ export async function runSessionsCommand(
           profileId: runtimeConfig.profileId,
           usageRecorder: createProviderUsageRecorder({
             profileId,
-            record: (entries) => db.recordProviderUsageEntries(entries)
+            record: (entries) => db.recordProviderUsageEntries(entries),
+            resolveSessionBudgetScopeId: async (sessionId) =>
+              (await db.getSessionForProfile(sessionId, profileId))?.spendingScopeSessionId
           })
         })
       }).recall(query);

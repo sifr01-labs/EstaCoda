@@ -19,6 +19,7 @@ import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import { DurableDelegationService } from "../delegation/durable-delegation-service.js";
 import type { TaskWorkspaceBinding } from "../contracts/task.js";
 import type { InitialTaskHostLeaseInput, TaskStore } from "../workflow/task-store.js";
+import type { SpendingLimit } from "../contracts/budget.js";
 import {
   applyChildToolAccessResult,
   resolveChildToolAccess,
@@ -129,6 +130,7 @@ export type DefaultChildAgentLoopFactoryOptions = {
   taskWorkspace?: TaskWorkspaceBinding;
   taskHostAdmission?: () => InitialTaskHostLeaseInput | undefined;
   onTaskCreated?: (taskId: string) => Promise<void>;
+  defaultTaskSpendingLimit?: SpendingLimit;
   id?: () => string;
 };
 
@@ -161,6 +163,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
   readonly #taskWorkspace: TaskWorkspaceBinding | undefined;
   readonly #taskHostAdmission: (() => InitialTaskHostLeaseInput | undefined) | undefined;
   readonly #onTaskCreated: ((taskId: string) => Promise<void>) | undefined;
+  readonly #defaultTaskSpendingLimit: SpendingLimit | undefined;
   readonly #id: () => string;
 
   constructor(options: DefaultChildAgentLoopFactoryOptions) {
@@ -182,6 +185,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
     this.#taskWorkspace = options.taskWorkspace;
     this.#taskHostAdmission = options.taskHostAdmission;
     this.#onTaskCreated = options.onTaskCreated;
+    this.#defaultTaskSpendingLimit = options.defaultTaskSpendingLimit;
     this.#id = options.id ?? (() => `child_${crypto.randomUUID()}`);
   }
 
@@ -245,6 +249,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
             creatorSessionId: () => sessionRuntimeContext.currentSessionId(),
             workspace: this.#taskWorkspace!,
             config: this.#delegationConfig,
+            defaultTaskSpendingLimit: this.#defaultTaskSpendingLimit,
             visibleTools: () => toolRegistry.list(),
             activeTaskExecution: input.taskExecution,
             taskHostAdmission: this.#taskHostAdmission,
@@ -290,10 +295,17 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
       rejectedRequestedTools: [],
       rejectedRequestedToolsets: []
     };
+    const spendingOrigin = input.taskExecution === undefined
+      ? await this.#sessionDb.getSession(input.parentSessionId)
+      : await this.#taskSpendingOrigin(input.taskExecution.taskId);
     const childSession = resumedSession ?? await this.#sessionDb.createSession({
       id: childSessionId,
       profileId: input.profileId,
       parentSessionId: input.parentSessionId,
+      ...(spendingOrigin?.spendingScopeSessionId === undefined ? {} : {
+        spendingScopeSessionId: spendingOrigin.spendingScopeSessionId,
+        spendingLimit: spendingOrigin.spendingLimit
+      }),
       title: `${input.taskExecution === undefined ? "Delegated" : "Task Step"}: ${input.task.slice(0, 60)}`,
       metadata: {
         kind: input.taskExecution === undefined ? "delegated-child" : "task-step-worker",
@@ -335,6 +347,12 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
         await this.#builder.cleanupSession(builtSession);
       }
     };
+  }
+
+  async #taskSpendingOrigin(taskId: string): Promise<SessionRecord | undefined> {
+    const task = this.#taskStore?.getTask(taskId);
+    if (task === null || task === undefined) return undefined;
+    return await this.#sessionDb.getSession(task.originSessionId);
   }
 }
 

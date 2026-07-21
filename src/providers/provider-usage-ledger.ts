@@ -79,12 +79,18 @@ export function providerUsageEntriesFromExecution(input: {
 export function createProviderUsageRecorder(input: {
   profileId: string;
   record(entries: readonly ProviderUsageEntry[]): Promise<void>;
+  resolveSessionBudgetScopeId?(executionSessionId: string): Promise<string | undefined>;
 }): NonNullable<import("./provider-executor.js").ProviderExecutorOptions["usageRecorder"]> {
   return async ({ execution, context, routes }) => {
+    const sessionBudgetScopeId = context.sessionBudgetScopeId ?? (
+      context.executionSessionId === undefined
+        ? undefined
+        : await input.resolveSessionBudgetScopeId?.(context.executionSessionId)
+    );
     const entries = providerUsageEntriesFromExecution({
       execution,
       profileId: input.profileId,
-      context,
+      context: sessionBudgetScopeId === undefined ? context : { ...context, sessionBudgetScopeId },
       routes
     });
     if (entries.length > 0) await input.record(entries);

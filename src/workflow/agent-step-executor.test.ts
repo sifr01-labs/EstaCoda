@@ -452,11 +452,10 @@ function makeGraph(): { task: Task; revision: TaskPlanRevision; steps: TaskStep[
     status: "queued",
     workspace: { canonicalPath: "/workspace/project", identityHash: "workspace-hash" },
     authorityPolicy: policy,
-    budgetPolicy: {
+    executionLimits: {
       maxConcurrentAttempts: 1,
       maxProviderCalls: 10,
       maxTotalTokens: 100_000,
-      maxEstimatedCostUsd: 10,
       maxWallClockMs: 300_000
     },
     activePlanRevisionId: "revision-alpha",
@@ -490,7 +489,7 @@ function makeGraph(): { task: Task; revision: TaskPlanRevision; steps: TaskStep[
     executor: { kind: "agent", role: "worker", model: { provider: "openai", id: "child-model" } },
     childTaskPolicy: "forbid",
     authorityPolicy: policy,
-    budget: { maxProviderCalls: 5, maxTotalTokens: 50_000, maxEstimatedCostUsd: 5, maxWallClockMs: 120_000 },
+    executionLimits: { maxProviderCalls: 5, maxTotalTokens: 50_000, maxWallClockMs: 120_000 },
     retryPolicy: {
       maxAttempts: 1,
       initialBackoffMs: 0,

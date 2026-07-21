@@ -55,7 +55,6 @@ export async function assessCommandRiskDetailed(
       ...(options.executionSessionId === undefined ? {} : {
         usage: {
           executionSessionId: options.executionSessionId,
-          sessionBudgetScopeId: options.executionSessionId
         }
       }),
       request: {

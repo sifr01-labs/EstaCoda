@@ -1267,7 +1267,9 @@ async function diagnoseLiveProviderWithUsage(
   try {
     return await diagnoseProviderLive(config, createProviderUsageRecorder({
       profileId: config.profileId,
-      record: (entries) => sessionDb.recordProviderUsageEntries(entries)
+      record: (entries) => sessionDb.recordProviderUsageEntries(entries),
+      resolveSessionBudgetScopeId: async (sessionId) =>
+        (await sessionDb.getSessionForProfile(sessionId, config.profileId))?.spendingScopeSessionId
     }));
   } finally {
     await sessionDb.close();

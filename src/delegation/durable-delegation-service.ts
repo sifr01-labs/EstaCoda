@@ -3,12 +3,12 @@ import type { DelegateSynthesis, DelegateTaskItem, DelegationConfig } from "../c
 import type {
   TaskAuthorityDisposition,
   TaskAuthorityPolicy,
-  TaskBudgetPolicy,
+  TaskExecutionLimits,
   TaskDeliveryDestination,
   TaskExecutionPreference,
   TaskIdempotency,
   TaskRetryPolicy,
-  TaskStepBudget,
+  TaskStepExecutionLimits,
   TaskWorkspaceBinding
 } from "../contracts/task.js";
 import {
@@ -21,10 +21,15 @@ import type { ToolDefinition, ToolRiskClass } from "../contracts/tool.js";
 import { resolveChildToolAccess } from "./toolset-security.js";
 import { FixedTaskService, type FixedTaskGraph, type FixedTaskStepInput } from "../workflow/fixed-task-service.js";
 import type { InitialTaskHostLeaseInput, TaskStore } from "../workflow/task-store.js";
+import {
+  DEFAULT_SPENDING_WARNING_THRESHOLD_PERCENT,
+  assertSpendingLimit,
+  cloneSpendingLimit,
+  type SpendingLimit
+} from "../contracts/budget.js";
 
 const STEP_PROVIDER_CALLS = 45;
 const STEP_TOTAL_TOKENS = 1_000_000;
-const STEP_ESTIMATED_COST_USD = 100;
 const STEP_RESULT_BYTES = 1_048_576;
 
 export type ActiveTaskExecution = {
@@ -42,6 +47,8 @@ export type DurableDelegationRequest = {
   trustedWorkspace: boolean;
   recoveredTasksFromJsonString?: boolean;
   executionPreference?: TaskExecutionPreference;
+  /** Optional root-Task-only narrowing of the configured estimated-cost ceiling. */
+  spendingLimit?: Pick<SpendingLimit, "maxEstimatedCostUsd">;
 };
 
 export type DurableDelegationHandle = {
@@ -75,6 +82,7 @@ export class DurableDelegationService {
   readonly #backgroundContinuation: (() => DurableDelegationHandle["backgroundContinuation"]) | undefined;
   readonly #taskHostAdmission: (() => InitialTaskHostLeaseInput | undefined) | undefined;
   readonly #onTaskCreated: ((taskId: string) => Promise<void>) | undefined;
+  readonly #defaultTaskSpendingLimit: SpendingLimit | undefined;
 
   constructor(options: {
     store: TaskStore;
@@ -88,6 +96,7 @@ export class DurableDelegationService {
     backgroundContinuation?: () => DurableDelegationHandle["backgroundContinuation"];
     taskHostAdmission?: () => InitialTaskHostLeaseInput | undefined;
     onTaskCreated?: (taskId: string) => Promise<void>;
+    defaultTaskSpendingLimit?: SpendingLimit;
     fixedTasks?: FixedTaskService;
   }) {
     this.#store = options.store;
@@ -102,6 +111,7 @@ export class DurableDelegationService {
     this.#backgroundContinuation = options.backgroundContinuation;
     this.#taskHostAdmission = options.taskHostAdmission;
     this.#onTaskCreated = options.onTaskCreated;
+    this.#defaultTaskSpendingLimit = cloneSpendingLimit(options.defaultTaskSpendingLimit);
   }
 
   async createAndActivate(request: DurableDelegationRequest): Promise<DurableDelegationHandle> {
@@ -119,6 +129,12 @@ export class DurableDelegationService {
     const sessionId = boundedToken(this.#creatorSessionId(), "creator session ID");
     const completionDestination = this.#completionDestination?.();
     const parent = this.#parentContext();
+    if (parent !== undefined && request.spendingLimit !== undefined) {
+      throw new Error("A child Task inherits the root Task spending scope and cannot redefine it.");
+    }
+    const spendingLimit = parent === undefined
+      ? resolveRootSpendingLimit(this.#defaultTaskSpendingLimit, request.spendingLimit)
+      : undefined;
     const executionPreference = request.executionPreference ?? this.#executionPreference?.() ?? parent?.executionPreference ?? "auto";
     if (executionPreference !== "auto" && executionPreference !== "background") {
       throw new Error("Delegation execution preference is invalid.");
@@ -137,11 +153,11 @@ export class DurableDelegationService {
       : [...stepAuthorities, synthesisAuthority];
     const taskAuthority = mergeAuthorities(allAuthorities);
     const totalStepCount = request.tasks.length + (request.synthesis === undefined ? 0 : 1);
-    const budgets = delegationBudgets(
+    const executionLimits = delegationExecutionLimits(
       totalStepCount,
       this.#config.maxConcurrentChildren,
       this.#config.childTimeoutSeconds,
-      parent?.budget
+      parent?.executionLimits
     );
     const workerSteps = request.tasks.map((item, index): FixedTaskStepInput => {
       const authority = stepAuthorities[index]!;
@@ -165,7 +181,7 @@ export class DurableDelegationService {
           ? "fire_and_forget"
           : "forbid",
         authorityPolicy: authority,
-        budget: budgets.step,
+        executionLimits: executionLimits.step,
         retryPolicy: delegatedRetryPolicy(idempotency),
         failurePolicy: {
           onAttemptsExhausted: request.tasks.length === 1 && request.synthesis === undefined ? "fail_task" : "mark_partial",
@@ -199,7 +215,7 @@ export class DurableDelegationService {
         },
         childTaskPolicy: "forbid",
         authorityPolicy: synthesisAuthority!,
-        budget: budgets.step,
+        executionLimits: executionLimits.step,
         retryPolicy: delegatedRetryPolicy(synthesisIdempotency!),
         failurePolicy: { onAttemptsExhausted: "fail_task", optional: false },
         idempotency: synthesisIdempotency!,
@@ -218,7 +234,8 @@ export class DurableDelegationService {
         : `Complete ${request.tasks.length} delegated Steps as one durable Task.`,
       workspace: this.#workspace,
       authorityPolicy: taskAuthority,
-      budgetPolicy: budgets.task,
+      ...(spendingLimit === undefined ? {} : { spendingLimit }),
+      executionLimits: executionLimits.task,
       steps,
       planReason: "Created by delegate_task as durable delegated work.",
       ...(initialHostLease === undefined ? {} : { initialHostLease }),
@@ -269,7 +286,7 @@ export class DurableDelegationService {
     taskId: string;
     attemptId: string;
     authority: TaskAuthorityPolicy;
-    budget: TaskStepBudget;
+    executionLimits: TaskStepExecutionLimits;
     executionPreference: TaskExecutionPreference;
   } | undefined {
     if (this.#activeTaskExecution === undefined) return undefined;
@@ -289,7 +306,7 @@ export class DurableDelegationService {
       taskId: task.id,
       attemptId: attempt.id,
       authority: step.authorityPolicy,
-      budget: step.budget,
+      executionLimits: step.executionLimits,
       executionPreference: task.executionPreference
     };
   }
@@ -371,30 +388,27 @@ function delegatedRetryPolicy(idempotency: TaskIdempotency): TaskRetryPolicy {
   };
 }
 
-function delegationBudgets(
+function delegationExecutionLimits(
   stepCount: number,
   maxConcurrentChildren: number,
   timeoutSeconds: number,
-  ceiling?: TaskStepBudget
+  ceiling?: TaskStepExecutionLimits
 ): {
-  task: TaskBudgetPolicy;
-  step: TaskStepBudget;
+  task: TaskExecutionLimits;
+  step: TaskStepExecutionLimits;
 } {
   const wall = Math.max(1, Math.floor(timeoutSeconds * 1_000));
   const totalCalls = STEP_PROVIDER_CALLS * stepCount;
   const totalTokens = STEP_TOTAL_TOKENS * stepCount;
-  const totalCost = STEP_ESTIMATED_COST_USD * stepCount;
-  const task: TaskBudgetPolicy = ceiling === undefined ? {
+  const task: TaskExecutionLimits = ceiling === undefined ? {
     maxConcurrentAttempts: Math.min(stepCount, maxConcurrentChildren, TASK_GRAPH_LIMITS.maxConcurrentAttempts),
     maxProviderCalls: totalCalls,
     maxTotalTokens: totalTokens,
-    maxEstimatedCostUsd: totalCost,
     maxWallClockMs: wall
   } : {
     maxConcurrentAttempts: Math.min(stepCount, maxConcurrentChildren, TASK_GRAPH_LIMITS.maxConcurrentAttempts),
     maxProviderCalls: ceiling.maxProviderCalls,
     maxTotalTokens: ceiling.maxTotalTokens,
-    maxEstimatedCostUsd: ceiling.maxEstimatedCostUsd,
     maxWallClockMs: ceiling.maxWallClockMs
   };
   return {
@@ -402,10 +416,27 @@ function delegationBudgets(
     step: {
       maxProviderCalls: ceiling === undefined ? STEP_PROVIDER_CALLS : Math.floor(ceiling.maxProviderCalls / stepCount),
       maxTotalTokens: ceiling === undefined ? STEP_TOTAL_TOKENS : Math.floor(ceiling.maxTotalTokens / stepCount),
-      maxEstimatedCostUsd: ceiling === undefined ? STEP_ESTIMATED_COST_USD : ceiling.maxEstimatedCostUsd / stepCount,
       maxWallClockMs: ceiling === undefined ? wall : ceiling.maxWallClockMs
     }
   };
+}
+
+function resolveRootSpendingLimit(
+  configuredDefault: SpendingLimit | undefined,
+  requested: Pick<SpendingLimit, "maxEstimatedCostUsd"> | undefined
+): SpendingLimit | undefined {
+  if (requested === undefined) return cloneSpendingLimit(configuredDefault);
+  const maxEstimatedCostUsd = requested.maxEstimatedCostUsd;
+  const candidate: SpendingLimit = {
+    maxEstimatedCostUsd,
+    warningThresholdPercent: configuredDefault?.warningThresholdPercent ??
+      DEFAULT_SPENDING_WARNING_THRESHOLD_PERCENT
+  };
+  assertSpendingLimit(candidate, "Requested Task spending limit");
+  if (configuredDefault !== undefined && maxEstimatedCostUsd > configuredDefault.maxEstimatedCostUsd) {
+    throw new Error("A delegated Task spending limit cannot exceed the configured Task default.");
+  }
+  return candidate;
 }
 
 function mergeAuthorities(authorities: readonly TaskAuthorityPolicy[]): TaskAuthorityPolicy {

@@ -307,11 +307,10 @@ function researchReportDefinition(): CreateFixedTaskInput {
     objective: "Research three sources, synthesize the findings, and publish a governed report.",
     workspace: { canonicalPath: "/workspace/project", identityHash: "workspace-hash" },
     authorityPolicy: taskAuthority,
-    budgetPolicy: {
+    executionLimits: {
       maxConcurrentAttempts: 3,
       maxProviderCalls: 20,
       maxTotalTokens: 100_000,
-      maxEstimatedCostUsd: 10,
       maxWallClockMs: 600_000
     },
     steps: [
@@ -349,7 +348,7 @@ function step(
     executor: { kind: "agent" as const, role: key.startsWith("research-") ? "worker" as const : "orchestrator" as const },
     childTaskPolicy: "forbid" as const,
     authorityPolicy,
-    budget: { maxProviderCalls: 5, maxTotalTokens: 25_000, maxEstimatedCostUsd: 3, maxWallClockMs: 300_000 },
+    executionLimits: { maxProviderCalls: 5, maxTotalTokens: 25_000, maxWallClockMs: 300_000 },
     retryPolicy: {
       maxAttempts: 2,
       initialBackoffMs: 0,

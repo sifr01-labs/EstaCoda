@@ -240,6 +240,7 @@ async function main(): Promise<void> {
       providerConfigs: latestConfig.config.providers,
       auxiliaryModels: latestConfig.auxiliaryModels,
       compression: latestConfig.compression,
+      budgets: latestConfig.budgets,
       memory: latestConfig.memory,
       externalMemory: latestConfig.externalMemory,
       mcpServers: latestConfig.mcp.servers,

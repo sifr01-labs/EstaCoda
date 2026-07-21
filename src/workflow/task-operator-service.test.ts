@@ -42,6 +42,8 @@ describe("TaskOperatorService", () => {
     const step = store.listSteps(task.id, task.activePlanRevisionId!)[0]!;
 
     expect(created).toMatchObject({ status: "queued", progress: { total: 1, pending: 1 } });
+    expect(task.spendingLimit).toBeUndefined();
+    expect(task.executionLimits).not.toHaveProperty("maxEstimatedCostUsd");
     expect(created).toMatchObject({
       executionPreference: "auto",
       execution: "waiting",
@@ -60,6 +62,17 @@ describe("TaskOperatorService", () => {
     expect(step.authorityPolicy.riskClassPolicy["workspace-write"]).toBe("require_approval");
     expect(step.authorityPolicy.riskClassPolicy["external-side-effect"]).toBe("forbid");
     expect(step.authorityPolicy.blockedTools).toContain("terminal.run");
+  });
+
+  it("snapshots an optional configured monetary default on new root Tasks", () => {
+    const bounded = new TaskOperatorService({
+      store,
+      defaultTaskSpendingLimit: { maxEstimatedCostUsd: 4, warningThresholdPercent: 70 }
+    }).begin({ objective: "Bound this Task.", workspace: workspace(), creatorSessionId: "owner" });
+    expect(store.getTask(bounded.taskId)?.spendingLimit).toEqual({
+      maxEstimatedCostUsd: 4,
+      warningThresholdPercent: 70
+    });
   });
 
   it("projects live host ownership and safe continuation readiness", () => {

@@ -1,4 +1,5 @@
 import type { ChannelKind } from "./channel.js";
+import type { SpendingLimit } from "./budget.js";
 import type { ContextReference } from "./context.js";
 import type { IntentRoute } from "./intent.js";
 import type { ProviderErrorClass } from "./provider.js";
@@ -41,6 +42,9 @@ export type SessionRecord = {
   createdAt: string;
   updatedAt: string;
   parentSessionId?: string;
+  /** Owner Session for the optional immutable logical-session monetary scope. */
+  spendingScopeSessionId?: string;
+  spendingLimit?: SpendingLimit;
   endedAt?: string;
   endReason?: string;
   metadata?: Record<string, unknown>;
@@ -614,6 +618,8 @@ export type CreateSessionInput = {
   profileId: string;
   title?: string;
   parentSessionId?: string;
+  spendingScopeSessionId?: string;
+  spendingLimit?: SpendingLimit;
   endedAt?: string;
   endReason?: string;
   metadata?: Record<string, unknown>;

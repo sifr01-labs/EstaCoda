@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 
-export const TASK_SCHEMA_VERSION = 21;
+export const TASK_SCHEMA_VERSION = 22;
 
 const OBSOLETE_EXECUTION_TABLES = [
   "workflow_event_summaries",
@@ -1050,5 +1050,143 @@ export function migrateCanonicalProviderUsageSchemaV21(db: SQLiteDatabase): void
       on provider_usage_entries(profile_id, task_id, dispatched_at);
     create index idx_provider_usage_root_task
       on provider_usage_entries(profile_id, root_task_id, dispatched_at);
+  `);
+}
+
+/** Separates execution safeguards from immutable, optional monetary policy scopes. */
+export function migrateExecutionLimitsAndSpendingPolicySchemaV22(db: SQLiteDatabase): void {
+  const taskColumns = db.query<{ name: string }>("pragma table_info(tasks)").all();
+  if (taskColumns.some((column) => column.name === "execution_limits_json")) return;
+  db.exec(`
+    alter table sessions add column spending_scope_session_id text;
+    alter table sessions add column spending_limit_json text;
+
+    drop trigger if exists trg_task_child_requires_budget_reservation;
+    drop trigger if exists trg_task_budget_reservation_immutable;
+    drop index if exists idx_task_budget_reservations_parent;
+    drop index if exists idx_task_budget_reservations_root;
+
+    alter table tasks rename column budget_policy_json to execution_limits_json;
+    alter table tasks add column spending_limit_json text;
+    alter table task_steps rename column budget_json to execution_limits_json;
+
+    update tasks
+      set execution_limits_json = json_remove(execution_limits_json, '$.maxEstimatedCostUsd');
+    update task_steps
+      set execution_limits_json = json_remove(execution_limits_json, '$.maxEstimatedCostUsd');
+
+    alter table task_budget_reservations rename to task_execution_reservations;
+    alter table task_execution_reservations drop column max_estimated_cost_usd;
+
+    create index idx_task_execution_reservations_parent
+      on task_execution_reservations(profile_id, parent_task_id, parent_step_id, created_at);
+    create index idx_task_execution_reservations_root
+      on task_execution_reservations(profile_id, root_task_id, created_at);
+
+    create trigger trg_session_spending_scope_insert_valid
+    before insert on sessions
+    begin
+      select case when
+        (new.spending_scope_session_id is null) <> (new.spending_limit_json is null)
+        or (new.spending_limit_json is not null and (
+          not json_valid(new.spending_limit_json)
+          or json_type(new.spending_limit_json) <> 'object'
+          or exists (select 1 from json_each(new.spending_limit_json)
+            where key not in ('maxEstimatedCostUsd', 'warningThresholdPercent'))
+          or json_type(new.spending_limit_json, '$.maxEstimatedCostUsd') is null
+          or json_type(new.spending_limit_json, '$.maxEstimatedCostUsd') not in ('integer', 'real')
+          or json_extract(new.spending_limit_json, '$.maxEstimatedCostUsd') < 0
+          or json_type(new.spending_limit_json, '$.warningThresholdPercent') is null
+          or json_type(new.spending_limit_json, '$.warningThresholdPercent') not in ('integer', 'real')
+          or json_extract(new.spending_limit_json, '$.warningThresholdPercent') < 0
+          or json_extract(new.spending_limit_json, '$.warningThresholdPercent') > 100
+        ))
+      then raise(abort, 'Session spending scope is invalid') end;
+      select case when new.spending_scope_session_id is not null
+        and new.spending_scope_session_id <> new.id
+        and not exists (
+          select 1 from sessions owner
+          where owner.profile_id = new.profile_id
+            and owner.id = new.spending_scope_session_id
+            and owner.spending_scope_session_id = owner.id
+            and owner.spending_limit_json = new.spending_limit_json
+        )
+      then raise(abort, 'Session spending scope owner is invalid') end;
+    end;
+
+    create trigger trg_session_spending_scope_immutable
+    before update of spending_scope_session_id, spending_limit_json on sessions
+    when new.spending_scope_session_id is not old.spending_scope_session_id
+      or new.spending_limit_json is not old.spending_limit_json
+    begin
+      select raise(abort, 'Session spending scope is immutable');
+    end;
+
+    create trigger trg_task_spending_scope_insert_valid
+    before insert on tasks
+    begin
+      select case when new.parent_task_id is not null and new.spending_limit_json is not null
+        then raise(abort, 'Child Tasks cannot own spending scopes') end;
+      select case when new.spending_limit_json is not null and (
+        not json_valid(new.spending_limit_json)
+        or json_type(new.spending_limit_json) <> 'object'
+        or exists (select 1 from json_each(new.spending_limit_json)
+          where key not in ('maxEstimatedCostUsd', 'warningThresholdPercent'))
+        or json_type(new.spending_limit_json, '$.maxEstimatedCostUsd') is null
+        or json_type(new.spending_limit_json, '$.maxEstimatedCostUsd') not in ('integer', 'real')
+        or json_extract(new.spending_limit_json, '$.maxEstimatedCostUsd') < 0
+        or json_type(new.spending_limit_json, '$.warningThresholdPercent') is null
+        or json_type(new.spending_limit_json, '$.warningThresholdPercent') not in ('integer', 'real')
+        or json_extract(new.spending_limit_json, '$.warningThresholdPercent') < 0
+        or json_extract(new.spending_limit_json, '$.warningThresholdPercent') > 100
+      )
+        then raise(abort, 'Task spending scope is invalid') end;
+    end;
+
+    create trigger trg_task_policy_immutable
+    before update of authority_policy_json, spending_limit_json, execution_limits_json on tasks
+    when new.authority_policy_json is not old.authority_policy_json
+      or new.spending_limit_json is not old.spending_limit_json
+      or new.execution_limits_json is not old.execution_limits_json
+    begin
+      select raise(abort, 'Task authority, spending policy, and execution limits are immutable');
+    end;
+
+    create trigger trg_task_step_execution_limits_immutable
+    before update of execution_limits_json on task_steps
+    when new.execution_limits_json is not old.execution_limits_json
+    begin
+      select raise(abort, 'Task Step execution limits are immutable');
+    end;
+
+    create trigger trg_task_execution_reservation_immutable
+    before update on task_execution_reservations
+    begin
+      select raise(abort, 'Task execution reservations are immutable');
+    end;
+
+    create trigger trg_task_child_requires_execution_reservation
+    before insert on tasks
+    when new.parent_task_id is not null
+    begin
+      select case when not exists (
+        select 1
+        from task_execution_reservations reservation
+        join task_attempts parent_attempt
+          on parent_attempt.profile_id = reservation.profile_id
+          and parent_attempt.task_id = reservation.parent_task_id
+          and parent_attempt.id = reservation.parent_attempt_id
+        where reservation.profile_id = new.profile_id
+          and reservation.child_task_id = new.id
+          and reservation.root_task_id = new.root_task_id
+          and reservation.parent_task_id = new.parent_task_id
+          and reservation.parent_attempt_id = new.parent_attempt_id
+          and reservation.parent_step_id = parent_attempt.step_id
+          and reservation.max_concurrent_attempts = json_extract(new.execution_limits_json, '$.maxConcurrentAttempts')
+          and reservation.max_provider_calls = json_extract(new.execution_limits_json, '$.maxProviderCalls')
+          and reservation.max_total_tokens = json_extract(new.execution_limits_json, '$.maxTotalTokens')
+          and reservation.max_wall_clock_ms = json_extract(new.execution_limits_json, '$.maxWallClockMs')
+      ) then raise(abort, 'Child Task execution reservation is required') end;
+    end;
   `);
 }

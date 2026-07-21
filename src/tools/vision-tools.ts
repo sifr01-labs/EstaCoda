@@ -153,7 +153,6 @@ export async function analyzeImageWithVision(
     usage: {
       ...(usage.executionSessionId === undefined ? {} : {
         executionSessionId: usage.executionSessionId,
-        sessionBudgetScopeId: usage.executionSessionId
       }),
       ...(usage.visibleTurnId === undefined ? {} : { visibleTurnId: usage.visibleTurnId })
     },

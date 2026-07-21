@@ -145,7 +145,9 @@ async function createProductionProfileContextGenerator(options: CliOptions): Pro
           profileId: loaded.profileId,
           usageRecorder: createProviderUsageRecorder({
             profileId: loaded.profileId,
-            record: (entries) => sessionDb.recordProviderUsageEntries(entries)
+            record: (entries) => sessionDb.recordProviderUsageEntries(entries),
+            resolveSessionBudgetScopeId: async (sessionId) =>
+              (await sessionDb.getSessionForProfile(sessionId, loaded.profileId))?.spendingScopeSessionId
           })
         }),
         scopeKey: input.profileId,

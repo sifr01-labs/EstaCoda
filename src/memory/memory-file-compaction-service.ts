@@ -443,7 +443,6 @@ export class MemoryFileCompactionService {
       ...(this.#sessionId === undefined ? {} : {
         usage: {
           executionSessionId: this.#sessionId,
-          sessionBudgetScopeId: this.#sessionId
         }
       })
     });

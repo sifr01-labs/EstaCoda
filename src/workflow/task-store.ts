@@ -4,7 +4,7 @@ import type {
   TaskApprovalStatus,
   TaskAttempt,
   TaskAttemptLease,
-  TaskBudgetReservation,
+  TaskExecutionReservation,
   TaskDeliveryBinding,
   TaskDeliveryStatus,
   TaskEvent,
@@ -134,8 +134,8 @@ export interface TaskStore {
   getTaskByCreationKey(creationKey: string): Task | null;
   listTasks(options?: ListTasksOptions): Task[];
   listChildTasks(parentTaskId: string): Task[];
-  reserveChildTaskBudget(reservation: TaskBudgetReservation): void;
-  listChildTaskBudgetReservations(parentTaskId: string, parentStepId?: string): TaskBudgetReservation[];
+  reserveChildTaskExecution(reservation: TaskExecutionReservation): void;
+  listChildTaskExecutionReservations(parentTaskId: string, parentStepId?: string): TaskExecutionReservation[];
   acquireTaskHostLease(input: AcquireTaskHostLeaseInput): TaskHostLease | null;
   renewTaskHostLease(input: RenewTaskHostLeaseInput): TaskHostLease | null;
   releaseTaskHostLease(input: ReleaseTaskHostLeaseInput): boolean;

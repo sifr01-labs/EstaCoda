@@ -28,6 +28,7 @@ import { FixedTaskService } from "./fixed-task-service.js";
 import type { InitialTaskHostLeaseInput, TaskStore } from "./task-store.js";
 import { taskToolCategory } from "./task-safe-activity.js";
 import { orderTaskResults, taskPrimaryResult } from "./task-primary-result.js";
+import { cloneSpendingLimit, type SpendingLimit } from "../contracts/budget.js";
 
 const ACTIVE_ATTEMPT_STATUSES: readonly TaskAttemptStatus[] = [
   "leased",
@@ -111,17 +112,20 @@ export class TaskOperatorService {
   readonly #now: () => Date;
   readonly #eventId: () => string;
   readonly #backgroundContinuation: () => TaskStatusProjection["backgroundContinuation"];
+  readonly #defaultTaskSpendingLimit: SpendingLimit | undefined;
 
   constructor(options: {
     store: TaskStore;
     now?: () => Date;
     eventId?: () => string;
     backgroundContinuation?: () => TaskStatusProjection["backgroundContinuation"];
+    defaultTaskSpendingLimit?: SpendingLimit;
   }) {
     this.#store = options.store;
     this.#now = options.now ?? (() => new Date());
     this.#eventId = options.eventId ?? randomUUID;
     this.#backgroundContinuation = options.backgroundContinuation ?? (() => "unknown");
+    this.#defaultTaskSpendingLimit = cloneSpendingLimit(options.defaultTaskSpendingLimit);
   }
 
   begin(input: {
@@ -144,11 +148,11 @@ export class TaskOperatorService {
       objective,
       workspace: input.workspace,
       authorityPolicy: authority,
-      budgetPolicy: {
+      ...(this.#defaultTaskSpendingLimit === undefined ? {} : { spendingLimit: this.#defaultTaskSpendingLimit }),
+      executionLimits: {
         maxConcurrentAttempts: 1,
         maxProviderCalls: 45,
         maxTotalTokens: 1_000_000,
-        maxEstimatedCostUsd: 100,
         maxWallClockMs: 30 * 60 * 1_000
       },
       steps: [{
@@ -159,10 +163,9 @@ export class TaskOperatorService {
         executor: { kind: "agent", role: "worker" },
         childTaskPolicy: "forbid",
         authorityPolicy: authority,
-        budget: {
+        executionLimits: {
           maxProviderCalls: 45,
           maxTotalTokens: 1_000_000,
-          maxEstimatedCostUsd: 100,
           maxWallClockMs: 30 * 60 * 1_000
         },
         retryPolicy: {

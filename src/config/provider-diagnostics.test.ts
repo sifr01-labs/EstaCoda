@@ -85,6 +85,7 @@ function loadedConfig(input: {
       mirrorWrites: false
     },
     delegation: normalizeDelegationConfig(undefined),
+    budgets: {},
     browser: { backend: "unconfigured", autoLaunch: false, supervised: false },
     imageGen: { provider: "fal", model: "test", useGateway: false },
     gateway: { lifecycleNotifications: { enabled: false } },

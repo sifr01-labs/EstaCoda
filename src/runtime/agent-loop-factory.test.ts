@@ -26,6 +26,11 @@ import {
 describe("DefaultChildAgentLoopFactory", () => {
   it("creates a child session with delegated metadata and suppressed runtime features", async () => {
     const db = new InMemorySessionDB();
+    await db.createSession({
+      id: "parent-1",
+      profileId: "default",
+      spendingLimit: { maxEstimatedCostUsd: 20, warningThresholdPercent: 80 }
+    });
     const built = fakeBuiltSession();
     const builder = fakeBuilder(built);
     const factory = new DefaultChildAgentLoopFactory({
@@ -54,6 +59,8 @@ describe("DefaultChildAgentLoopFactory", () => {
     expect(session).toMatchObject({
       id: "child-1",
       parentSessionId: "parent-1",
+      spendingScopeSessionId: "parent-1",
+      spendingLimit: { maxEstimatedCostUsd: 20, warningThresholdPercent: 80 },
       metadata: {
         kind: "delegated-child",
         parentSessionId: "parent-1",

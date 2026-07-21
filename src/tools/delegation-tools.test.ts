@@ -21,7 +21,8 @@ describe("createDelegationTools", () => {
         role: { enum: ["leaf", "orchestrator"] },
         modelOverride: { required: ["model"] },
         synthesis: { required: ["objective"] },
-        executionPreference: { enum: ["auto", "background"] }
+        executionPreference: { enum: ["auto", "background"] },
+        spendingLimit: { required: ["maxEstimatedCostUsd"] }
       }
     });
   });
@@ -41,6 +42,24 @@ describe("createDelegationTools", () => {
     expect(result.content).toContain("Execution: waiting");
     expect(result.content).toContain("Background continuation: unavailable");
     expect(result.content).not.toContain("will continue independently");
+  });
+
+  it("validates and forwards an optional monetary Task ceiling", async () => {
+    const create = vi.fn(() => handle("task-budget", 1));
+    const [tool] = tools(create);
+    await tool!.run({
+      task: "Bounded work",
+      spendingLimit: { maxEstimatedCostUsd: 2 }
+    }, { toolCallId: "budget-call" });
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      spendingLimit: { maxEstimatedCostUsd: 2 }
+    }));
+
+    const invalid = await tool!.run({
+      task: "Invalid bounded work",
+      spendingLimit: { maxEstimatedCostUsd: Number.POSITIVE_INFINITY }
+    }, { toolCallId: "invalid-budget-call" });
+    expect(invalid).toMatchObject({ ok: false, metadata: { code: "invalid-spending-limit" } });
   });
 
   it("forwards an explicit synthesis objective as a fixed terminal Step request", async () => {

@@ -531,7 +531,7 @@ function childRunnerConfig(
     ...config,
     childTimeoutSeconds: Math.max(1, Math.ceil(Math.min(
       config.childTimeoutSeconds * 1_000,
-      step.budget.maxWallClockMs
+      step.executionLimits.maxWallClockMs
     ) / 1_000)),
     heartbeatSeconds: Math.min(config.heartbeatSeconds, maxHeartbeatSeconds, safeHeartbeatSeconds)
   };

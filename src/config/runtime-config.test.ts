@@ -6,6 +6,7 @@ import {
   loadRuntimeConfig,
   normalizeDelegationConfig,
   normalizeAuxiliaryModels,
+  normalizeBudgetConfig,
   normalizeExternalMemoryConfig,
   normalizeModelFallbacks,
   normalizeSessionCompressionConfig,
@@ -33,6 +34,31 @@ function profileEnvPath(homeDir: string): string {
 function whatsappAuthDir(homeDir: string): string {
   return join(resolveProfileStateHome({ homeDir, profileId: "default" }).gatewayStatePath, "whatsapp-auth");
 }
+
+describe("normalizeBudgetConfig", () => {
+  it("keeps Task and session spending limits disabled when omitted", () => {
+    expect(normalizeBudgetConfig(undefined)).toEqual({});
+  });
+
+  it("normalizes monetary limits and defaults the warning threshold", () => {
+    expect(normalizeBudgetConfig({
+      task: { maxEstimatedCostUsd: 5 },
+      session: { maxEstimatedCostUsd: 0, warningThresholdPercent: 60 }
+    })).toEqual({
+      task: { maxEstimatedCostUsd: 5, warningThresholdPercent: 80 },
+      session: { maxEstimatedCostUsd: 0, warningThresholdPercent: 60 }
+    });
+  });
+
+  it("rejects missing, negative, non-finite, and out-of-range monetary policy", () => {
+    expect(() => normalizeBudgetConfig({ task: {} })).toThrow(/requires/i);
+    expect(() => normalizeBudgetConfig({ task: { maxEstimatedCostUsd: -1 } })).toThrow(/non-negative/i);
+    expect(() => normalizeBudgetConfig({ task: { maxEstimatedCostUsd: Number.NaN } })).toThrow(/finite/i);
+    expect(() => normalizeBudgetConfig({
+      task: { maxEstimatedCostUsd: 1, warningThresholdPercent: 101 }
+    })).toThrow(/between 0 and 100/i);
+  });
+});
 
 async function withAllowPrivateUrlsEnv<T>(value: string | undefined, run: () => Promise<T>): Promise<T> {
   const previous = process.env.ESTACODA_ALLOW_PRIVATE_URLS;

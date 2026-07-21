@@ -44,6 +44,31 @@ describe("SQLiteSessionDB", () => {
     }
   });
 
+  it("persists immutable logical-session spending scopes", async () => {
+    const db = new SQLiteSessionDB({ path: dbPath });
+    try {
+      const root = await db.createSession({
+        id: "spend-root",
+        profileId: "alpha",
+        spendingLimit: { maxEstimatedCostUsd: 12, warningThresholdPercent: 75 }
+      });
+      const child = await db.createSession({
+        id: "spend-child",
+        profileId: "alpha",
+        parentSessionId: root.id,
+        spendingScopeSessionId: root.id,
+        spendingLimit: root.spendingLimit
+      });
+      expect(child).toMatchObject({ spendingScopeSessionId: root.id, spendingLimit: root.spendingLimit });
+      expect(() => db.db.query(
+        "update sessions set spending_limit_json = ? where id = ?"
+      ).run(JSON.stringify({ maxEstimatedCostUsd: 99, warningThresholdPercent: 75 }), root.id))
+        .toThrow(/immutable/i);
+    } finally {
+      db.close();
+    }
+  });
+
   it("persists and projects one canonical provider ledger by visible turn and session", async () => {
     const db = new SQLiteSessionDB({ path: dbPath });
     try {
@@ -101,18 +126,27 @@ describe("SQLiteSessionDB", () => {
   it("accepts provider usage attributed to a verified compressed-session ancestor", async () => {
     const db = new SQLiteSessionDB({ path: dbPath });
     try {
-      await db.createSession({ id: "parent", profileId: "alpha", endReason: "compression" });
+      const spendingLimit = { maxEstimatedCostUsd: 5, warningThresholdPercent: 80 };
+      await db.createSession({
+        id: "parent",
+        profileId: "alpha",
+        endReason: "compression",
+        spendingLimit
+      });
       await db.appendMessage({ id: "parent-turn", sessionId: "parent", role: "user", content: "Original turn" });
       await db.createSession({
         id: "child",
         profileId: "alpha",
         parentSessionId: "parent",
+        spendingScopeSessionId: "parent",
+        spendingLimit,
         metadata: { compactedFromSessionId: "parent" }
       });
       const entry = {
         id: "compressed-usage",
         profileId: "alpha",
         sessionId: "child",
+        sessionBudgetScopeId: "parent",
         visibleTurnId: "parent-turn",
         requestKey: "compressed-request",
         provider: "openai",

@@ -72,7 +72,6 @@ export class LlmSkillRouteShadowReranker implements SkillRouteShadowReranker {
         auxiliaryKind: "skill_rerank",
         ...(input.executionSessionId === undefined ? {} : {
           executionSessionId: input.executionSessionId,
-          sessionBudgetScopeId: input.executionSessionId
         }),
         ...(input.visibleTurnId === undefined ? {} : { visibleTurnId: input.visibleTurnId })
       }

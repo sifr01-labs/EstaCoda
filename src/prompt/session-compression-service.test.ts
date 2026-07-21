@@ -231,7 +231,8 @@ describe("SessionCompressionService", () => {
   });
 
   it("compactNow preserves the parent transcript by rotating to a compacted child session", async () => {
-    const { db, sessionId } = await sessionDbWithMessages(8);
+    const spendingLimit = { maxEstimatedCostUsd: 20, warningThresholdPercent: 80 };
+    const { db, sessionId } = await sessionDbWithMessages(8, "session-a", spendingLimit);
     const originalMessages = await db.listMessages(sessionId);
     const service = new SessionCompressionService({
       sessionDb: db,
@@ -269,6 +270,8 @@ describe("SessionCompressionService", () => {
     );
     expect(child).toEqual(expect.objectContaining({
       parentSessionId: sessionId,
+      spendingScopeSessionId: sessionId,
+      spendingLimit,
       metadata: expect.objectContaining({
         compactedFromSessionId: sessionId,
         compactionTrigger: "manual",
@@ -977,9 +980,13 @@ describe("SessionCompressionService", () => {
   });
 });
 
-async function sessionDbWithMessages(count: number, sessionId = "session-a") {
+async function sessionDbWithMessages(
+  count: number,
+  sessionId = "session-a",
+  spendingLimit?: { maxEstimatedCostUsd: number; warningThresholdPercent: number }
+) {
   const db = new InMemorySessionDB({ now: () => new Date("2030-01-01T00:00:00.000Z") });
-  await db.createSession({ id: sessionId, profileId: "profile" });
+  await db.createSession({ id: sessionId, profileId: "profile", spendingLimit });
   await appendMessages(db, sessionId, count);
   return { db, sessionId };
 }

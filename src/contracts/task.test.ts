@@ -256,20 +256,23 @@ describe("validateTaskPlan", () => {
     ]));
   });
 
-  it("rejects invalid and Task-exceeding budgets", () => {
+  it("rejects invalid and Task-exceeding execution limits", () => {
     const invalid = validPlan();
     invalid.task = {
       ...invalid.task,
-      budgetPolicy: { ...invalid.task.budgetPolicy, maxConcurrentAttempts: 0 }
+      executionLimits: { ...invalid.task.executionLimits, maxConcurrentAttempts: 0 }
     };
-    expect(issueCodes(validateTaskPlan(invalid))).toContain("task-budget-invalid");
+    expect(issueCodes(validateTaskPlan(invalid))).toContain("task-execution-limits-invalid");
 
     const excessive = validPlan();
     excessive.steps = [{
       ...excessive.steps[0]!,
-      budget: { ...excessive.steps[0]!.budget, maxEstimatedCostUsd: excessive.task.budgetPolicy.maxEstimatedCostUsd + 1 }
+      executionLimits: {
+        ...excessive.steps[0]!.executionLimits,
+        maxProviderCalls: excessive.task.executionLimits.maxProviderCalls + 1
+      }
     }];
-    expect(issueCodes(validateTaskPlan(excessive))).toContain("step-budget-exceeds-task");
+    expect(issueCodes(validateTaskPlan(excessive))).toContain("step-execution-limits-exceed-task");
   });
 
   it("requires retry safety and internally consistent result limits", () => {
@@ -349,11 +352,10 @@ function validPlan(): TaskPlanValidationInput {
         identityHash: "workspace-hash"
       },
       authorityPolicy: taskAuthority(),
-      budgetPolicy: {
+      executionLimits: {
         maxConcurrentAttempts: 2,
         maxProviderCalls: 20,
         maxTotalTokens: 100_000,
-        maxEstimatedCostUsd: 5,
         maxWallClockMs: 3_600_000
       }
     },
@@ -390,10 +392,9 @@ function step(id: string, position: number, dependsOn: readonly string[] = []): 
     executor: { kind: "agent", role: "worker" },
     childTaskPolicy: "forbid",
     authorityPolicy: stepAuthority(),
-    budget: {
+    executionLimits: {
       maxProviderCalls: 5,
       maxTotalTokens: 20_000,
-      maxEstimatedCostUsd: 1,
       maxWallClockMs: 600_000
     },
     retryPolicy: {

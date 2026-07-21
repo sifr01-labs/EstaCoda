@@ -1137,6 +1137,7 @@ export class ProviderTurnLoop {
 
   async #recordProviderUsage(execution: ProviderExecutionResult, visibleTurnId: string): Promise<void> {
     const sessionId = this.#currentSessionId();
+    const session = await this.#sessionDb.getSession(sessionId);
     const task = this.#taskExecution;
     const entries = providerUsageEntriesFromExecution({
       execution,
@@ -1145,7 +1146,9 @@ export class ProviderTurnLoop {
         requestKey: [sessionId, visibleTurnId, String(this.#providerRequestSequence++)].join("\0"),
         sourceKind: task === undefined ? "main" : "task",
         executionSessionId: sessionId,
-        sessionBudgetScopeId: task?.originSessionId ?? sessionId,
+        ...(session?.spendingScopeSessionId === undefined
+          ? {}
+          : { sessionBudgetScopeId: session.spendingScopeSessionId }),
         ...(task === undefined
           ? { visibleTurnId }
           : task.originTurnId === undefined

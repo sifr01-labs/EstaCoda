@@ -64,7 +64,7 @@ describe("DurableDelegationService", () => {
       originTurnId: "visible-turn-alpha"
     });
     expect(task.parentTaskId).toBeUndefined();
-    expect(task.budgetPolicy.maxConcurrentAttempts).toBe(2);
+    expect(task.executionLimits.maxConcurrentAttempts).toBe(2);
     expect(steps.map((step) => step.executor.role)).toEqual(["worker", "orchestrator"]);
     expect(steps.map((step) => step.childTaskPolicy)).toEqual(["forbid", "fire_and_forget"]);
     expect(steps.map((step) => step.idempotency)).toEqual(["retry_safe", "unknown"]);
@@ -84,6 +84,54 @@ describe("DurableDelegationService", () => {
     expect(store.listSessionLinks(task.id)).toEqual([
       expect.objectContaining({ taskId: task.id, sessionId: "parent", relationship: "creator" })
     ]);
+  });
+
+  it("snapshots the configured root spending limit and only permits finite narrowing", () => {
+    const configured = new DurableDelegationService({
+      store,
+      creatorSessionId: () => "parent",
+      workspace: workspace(),
+      config: DEFAULT_DELEGATION_CONFIG,
+      visibleTools,
+      defaultTaskSpendingLimit: { maxEstimatedCostUsd: 5, warningThresholdPercent: 80 }
+    });
+    const inherited = configured.create({
+      toolCallId: "call-budget-default",
+      trustedWorkspace: true,
+      tasks: [{ task: "Use the configured ceiling" }]
+    });
+    const narrowed = configured.create({
+      toolCallId: "call-budget-narrow",
+      trustedWorkspace: true,
+      tasks: [{ task: "Use a lower ceiling" }],
+      spendingLimit: { maxEstimatedCostUsd: 2 }
+    });
+
+    expect(store.getTask(inherited.taskId)?.spendingLimit).toEqual({
+      maxEstimatedCostUsd: 5,
+      warningThresholdPercent: 80
+    });
+    expect(store.getTask(narrowed.taskId)?.spendingLimit).toEqual({
+      maxEstimatedCostUsd: 2,
+      warningThresholdPercent: 80
+    });
+    expect(() => configured.create({
+      toolCallId: "call-budget-widen",
+      trustedWorkspace: true,
+      tasks: [{ task: "Try to widen the ceiling" }],
+      spendingLimit: { maxEstimatedCostUsd: 6 }
+    })).toThrow(/cannot exceed/i);
+
+    const defaultOff = rootService(store).create({
+      toolCallId: "call-budget-opt-in",
+      trustedWorkspace: true,
+      tasks: [{ task: "Opt in to a finite ceiling" }],
+      spendingLimit: { maxEstimatedCostUsd: 1 }
+    });
+    expect(store.getTask(defaultOff.taskId)?.spendingLimit).toEqual({
+      maxEstimatedCostUsd: 1,
+      warningThresholdPercent: 80
+    });
   });
 
   it("activates a Task only after its durable graph is visible", async () => {
@@ -323,15 +371,15 @@ describe("DurableDelegationService", () => {
       }
     });
     expect(child.authorityPolicy.maxChildDepth).toBe(1);
-    expect(child.budgetPolicy.maxProviderCalls).toBeLessThanOrEqual(parent.stepBudget.maxProviderCalls);
-    expect(store.listChildTaskBudgetReservations(parent.taskId)).toEqual([
+    expect(child.executionLimits.maxProviderCalls).toBeLessThanOrEqual(parent.stepExecutionLimits.maxProviderCalls);
+    expect(store.listChildTaskExecutionReservations(parent.taskId)).toEqual([
       expect.objectContaining({
         childTaskId: child.id,
         rootTaskId: parentTask.rootTaskId,
         parentTaskId: parent.taskId,
         parentStepId: parent.stepId,
         parentAttemptId: parent.attemptId,
-        budget: child.budgetPolicy
+        executionLimits: child.executionLimits
       })
     ]);
     expect(store.listSessionLinks(child.id)).toEqual(expect.arrayContaining([
@@ -386,9 +434,19 @@ describe("DurableDelegationService", () => {
       toolCallId: "nested-budget-two",
       trustedWorkspace: true,
       tasks: [{ task: "Second nested review" }]
-    })).toThrow(/remaining budget/i);
+    })).toThrow(/remaining execution capacity/i);
     expect(store.listChildTasks(parent.taskId).map((task) => task.id)).toEqual([first.taskId]);
-    expect(store.listChildTaskBudgetReservations(parent.taskId)).toHaveLength(1);
+    expect(store.listChildTaskExecutionReservations(parent.taskId)).toHaveLength(1);
+  });
+
+  it("prevents child Tasks from redefining the root monetary scope", () => {
+    const parent = createParentAttempt(store);
+    expect(() => nestedService(store, parent).create({
+      toolCallId: "nested-spending-limit",
+      trustedWorkspace: true,
+      tasks: [{ task: "Nested review" }],
+      spendingLimit: { maxEstimatedCostUsd: 1 }
+    })).toThrow(/inherits the root Task spending scope/i);
   });
 
   it("rolls a reservation back when the child graph cannot be persisted", () => {
@@ -401,7 +459,7 @@ describe("DurableDelegationService", () => {
       objective: "Invalid child graph",
       workspace: workspace(),
       authorityPolicy: childAuthority,
-      budgetPolicy: { maxConcurrentAttempts: 1, ...parentStep.budget },
+      executionLimits: { maxConcurrentAttempts: 1, ...parentStep.executionLimits },
       parent: { taskId: parent.taskId, attemptId: parent.attemptId },
       createdBy: {
         kind: "agent",
@@ -417,7 +475,7 @@ describe("DurableDelegationService", () => {
         executor: { kind: "agent", role: "worker" },
         childTaskPolicy: "forbid",
         authorityPolicy: childAuthority,
-        budget: parentStep.budget,
+        executionLimits: parentStep.executionLimits,
         retryPolicy: parentStep.retryPolicy,
         failurePolicy: parentStep.failurePolicy,
         idempotency: "unknown",
@@ -426,7 +484,7 @@ describe("DurableDelegationService", () => {
     })).toThrow(/invalid/i);
 
     expect(store.listChildTasks(parent.taskId)).toEqual([]);
-    expect(store.listChildTaskBudgetReservations(parent.taskId)).toEqual([]);
+    expect(store.listChildTaskExecutionReservations(parent.taskId)).toEqual([]);
   });
 
   it("serializes competing child reservations so only one can consume the remaining ceiling", async () => {
@@ -450,7 +508,7 @@ describe("DurableDelegationService", () => {
       expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
       expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
       expect(store.listChildTasks(parent.taskId)).toHaveLength(1);
-      expect(store.listChildTaskBudgetReservations(parent.taskId)).toHaveLength(1);
+      expect(store.listChildTaskExecutionReservations(parent.taskId)).toHaveLength(1);
     } finally {
       competingDb.close();
     }
@@ -511,7 +569,7 @@ describe("DurableDelegationService", () => {
     expect(store.getTask(child.taskId)?.status).toBe("failed");
     expect(store.listAttempts(child.taskId)[0]).toMatchObject({
       status: "failed",
-      failure: { class: "budget-exceeded" }
+      failure: { class: "execution-limit-exceeded" }
     });
     expect(new TaskOperatorService({ store }).status(parent.taskId, "parent").usage).toMatchObject({
       providerCalls: 2,
@@ -600,7 +658,7 @@ describe("DurableDelegationService", () => {
     const result = await taskScheduler.runOnce();
     expect(result).toMatchObject({ dispatched: 0 });
     expect(result.warnings).toEqual(expect.arrayContaining([
-      expect.stringContaining("ancestor-task-wall-clock-budget-exhausted")
+      expect.stringContaining("ancestor-task-wall-clock-limit-exhausted")
     ]));
     expect(executor.executions).toEqual([]);
     expect(store.getTask(child.taskId)?.status).toBe("paused");
@@ -742,10 +800,9 @@ function createParentAttempt(
   withLease = false
 ) {
   const authority = authorityPolicy(2);
-  const stepBudget = {
+  const stepExecutionLimits = {
     maxProviderCalls: 40,
     maxTotalTokens: 100_000,
-    maxEstimatedCostUsd: 10,
     maxWallClockMs: 60_000
   };
   const graph = new FixedTaskService({ store }).create({
@@ -755,7 +812,7 @@ function createParentAttempt(
     objective: "Parent Task",
     workspace: workspace(),
     authorityPolicy: authority,
-    budgetPolicy: { maxConcurrentAttempts: 1, ...stepBudget },
+    executionLimits: { maxConcurrentAttempts: 1, ...stepExecutionLimits },
     steps: [{
       key: "parent-step",
       title: "Parent Step",
@@ -764,7 +821,7 @@ function createParentAttempt(
       executor: { kind: "agent", role: "orchestrator" },
       childTaskPolicy,
       authorityPolicy: authority,
-      budget: stepBudget,
+      executionLimits: stepExecutionLimits,
       retryPolicy: {
         maxAttempts: 1,
         initialBackoffMs: 0,
@@ -817,7 +874,7 @@ function createParentAttempt(
     planRevisionId: graph.revision.id,
     stepId: graph.steps[0]!.id,
     attemptId,
-    stepBudget
+    stepExecutionLimits
   };
 }
 

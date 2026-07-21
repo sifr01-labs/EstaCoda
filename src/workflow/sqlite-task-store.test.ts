@@ -904,14 +904,14 @@ describe("Task tree budget schema v17 migration", () => {
         maxConcurrentAttempts: 2,
         maxProviderCalls: 20,
         maxTotalTokens: 2_000,
-        maxEstimatedCostUsd: 2,
+        maxEstimatedCostUsd: 200,
         maxWallClockMs: 60_000
       });
       const childBudget = JSON.stringify({
         maxConcurrentAttempts: 1,
         maxProviderCalls: 10,
         maxTotalTokens: 1_000,
-        maxEstimatedCostUsd: 1,
+        maxEstimatedCostUsd: 100,
         maxWallClockMs: 30_000
       });
       database.exec(`
@@ -1160,11 +1160,10 @@ function makeGraph(profileId: "alpha" | "beta") {
     status: "queued",
     workspace: { canonicalPath: "/workspace/project", identityHash: "workspace-hash" },
     authorityPolicy: taskAuthority(),
-    budgetPolicy: {
+    executionLimits: {
       maxConcurrentAttempts: 2,
       maxProviderCalls: 20,
       maxTotalTokens: 100_000,
-      maxEstimatedCostUsd: 5,
       maxWallClockMs: 3_600_000
     },
     activePlanRevisionId: revisionId,
@@ -1222,10 +1221,9 @@ function makeStep(input: {
     executor: { kind: "agent", role: "worker" },
     childTaskPolicy: "forbid",
     authorityPolicy: stepAuthority(),
-    budget: {
+    executionLimits: {
       maxProviderCalls: 5,
       maxTotalTokens: 20_000,
-      maxEstimatedCostUsd: 1,
       maxWallClockMs: 600_000
     },
     retryPolicy: {
@@ -1352,7 +1350,7 @@ const TASK_TABLES = [
   "provider_usage_entries",
   "task_approval_links",
   "task_delivery_bindings",
-  "task_budget_reservations"
+  "task_execution_reservations"
 ] as const;
 
 const OBSOLETE_EXECUTION_TABLES = [

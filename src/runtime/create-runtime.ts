@@ -152,6 +152,7 @@ export type RuntimeOptions = {
   projectMemoryRoot?: string;
   auxiliaryModels?: AuxiliaryModelConfig;
   compression?: LoadedRuntimeConfig["compression"];
+  budgets?: LoadedRuntimeConfig["budgets"];
   homeDir?: string;
   workspaceTrusted?: boolean;
   webFetch?: WebFetchLike;
@@ -353,6 +354,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       });
   const taskOperatorService = taskStore === undefined ? undefined : new TaskOperatorService({
     store: taskStore,
+    defaultTaskSpendingLimit: options.budgets?.task,
     backgroundContinuation: () => options.taskBackgroundContinuation ?? "unknown"
   });
   const closeSessionDbOnDispose = options.closeSessionDbOnDispose ?? true;
@@ -451,7 +453,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     profileId,
     usageRecorder: createProviderUsageRecorder({
       profileId,
-      record: (entries) => sessionDb.recordProviderUsageEntries(entries)
+      record: (entries) => sessionDb.recordProviderUsageEntries(entries),
+      resolveSessionBudgetScopeId: async (executionSessionId) => {
+        const session = await sessionDb.getSession(executionSessionId);
+        return session?.profileId === profileId ? session.spendingScopeSessionId : undefined;
+      }
     })
   });
   const processManager = new ProcessManager({ workspaceRoot });
@@ -481,6 +487,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       id: sessionId,
       profileId,
       title: "EstaCoda session",
+      ...(options.budgets?.session === undefined ? {} : { spendingLimit: options.budgets.session }),
       metadata: {
         workspaceRoot,
         ...(options.sessionMetadata ?? {})
@@ -948,6 +955,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     responseLabel: runtimeBranding.responseLabel,
     workspaceRoot,
     delegationConfig: options.delegationConfig,
+    defaultTaskSpendingLimit: options.budgets?.task,
     skillConfig: options.skillConfig,
     ui: options.ui,
     agentProfile: options.agentProfile,
@@ -975,6 +983,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           creatorSessionId: () => sessionRuntimeContext.currentSessionId(),
           workspace: taskWorkspace,
           config: options.delegationConfig ?? DEFAULT_DELEGATION_CONFIG,
+          defaultTaskSpendingLimit: options.budgets?.task,
           visibleTools: () => toolRegistry.list(),
           completionDestination: () => currentTaskCreationOrigin().completionDestination,
           executionPreference: () => currentTaskCreationOrigin().source === "gateway" ? "background" : "auto",

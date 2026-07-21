@@ -513,6 +513,36 @@ describe("createRuntime token branding", () => {
     }
   });
 
+  it("applies session spending defaults prospectively without rewriting resumed sessions", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "existing-unbounded", profileId: "default" });
+    const resumed = await createRuntime({
+      ...options,
+      sessionId: "existing-unbounded",
+      sessionDb,
+      closeSessionDbOnDispose: false,
+      budgets: { session: { maxEstimatedCostUsd: 10, warningThresholdPercent: 80 } }
+    });
+    const created = await createRuntime({
+      ...options,
+      sessionId: "new-bounded",
+      sessionDb,
+      closeSessionDbOnDispose: false,
+      budgets: { session: { maxEstimatedCostUsd: 10, warningThresholdPercent: 80 } }
+    });
+    try {
+      await expect(sessionDb.getSession("existing-unbounded")).resolves.not.toHaveProperty("spendingLimit");
+      await expect(sessionDb.getSession("new-bounded")).resolves.toMatchObject({
+        spendingScopeSessionId: "new-bounded",
+        spendingLimit: { maxEstimatedCostUsd: 10, warningThresholdPercent: 80 }
+      });
+    } finally {
+      await resumed.dispose();
+      await created.dispose();
+    }
+  });
+
   it("accepts resolved tokens and uses token branding", async () => {
     const tokens = resolveTokens("standard", "dark", "kemetBlue");
     const options = await minimalRuntimeOptions({ tokens });

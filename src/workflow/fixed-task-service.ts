@@ -4,7 +4,7 @@ import type {
   Task,
   TaskActor,
   TaskAuthorityPolicy,
-  TaskBudgetPolicy,
+  TaskExecutionLimits,
   TaskDeliveryBinding,
   TaskDeliveryDestination,
   TaskEvent,
@@ -21,6 +21,7 @@ import {
   isTerminalTaskStatus
 } from "../contracts/task.js";
 import type { InitialTaskHostLeaseInput, TaskStore } from "./task-store.js";
+import { assertSpendingLimit, cloneSpendingLimit, type SpendingLimit } from "../contracts/budget.js";
 
 const MAX_GUIDANCE_RECORDS = 64;
 
@@ -32,7 +33,7 @@ export type FixedTaskStepInput = Pick<
   | "executor"
   | "childTaskPolicy"
   | "authorityPolicy"
-  | "budget"
+  | "executionLimits"
   | "retryPolicy"
   | "failurePolicy"
   | "idempotency"
@@ -53,7 +54,9 @@ export type CreateFixedTaskInput = {
   objective: string;
   workspace: TaskWorkspaceBinding;
   authorityPolicy: TaskAuthorityPolicy;
-  budgetPolicy: TaskBudgetPolicy;
+  /** Optional immutable monetary policy. Root Tasks only; descendants inherit the root scope. */
+  spendingLimit?: SpendingLimit;
+  executionLimits: TaskExecutionLimits;
   steps: readonly FixedTaskStepInput[];
   planReason?: string;
   createdBy?: TaskActor;
@@ -140,7 +143,10 @@ export class FixedTaskService {
       status: "queued",
       workspace: normalized.workspace,
       authorityPolicy: normalized.authorityPolicy,
-      budgetPolicy: normalized.budgetPolicy,
+      ...(parent !== undefined || normalized.spendingLimit === undefined
+        ? {}
+        : { spendingLimit: normalized.spendingLimit }),
+      executionLimits: normalized.executionLimits,
       activePlanRevisionId: revisionId,
       createdBy,
       createdAt: timestamp,
@@ -194,14 +200,14 @@ export class FixedTaskService {
       this.#store.atomicWrite((store) => {
         if (normalized.parent !== undefined) {
           const parentContext = this.#validateParent(normalized, task, store);
-          store.reserveChildTaskBudget({
+          store.reserveChildTaskExecution({
             profileId: task.profileId,
             childTaskId: task.id,
             rootTaskId: task.rootTaskId,
             parentTaskId: parentContext.task.id,
             parentStepId: parentContext.step.id,
             parentAttemptId: parentContext.attempt.id,
-            budget: task.budgetPolicy,
+            executionLimits: task.executionLimits,
             createdAt: timestamp
           });
         }
@@ -261,8 +267,8 @@ export class FixedTaskService {
     if (!isChildTaskAuthorityAllowed(input.authorityPolicy, step.authorityPolicy)) {
       throw new Error("Child Task authority exceeds the active parent Step authority.");
     }
-    if (!budgetNarrowerOrEqual(input.budgetPolicy, step.budget)) {
-      throw new Error("Child Task budget exceeds the active parent Step budget.");
+    if (!executionLimitsNarrowerOrEqual(input.executionLimits, step.executionLimits)) {
+      throw new Error("Child Task execution limits exceed the active parent Step execution limits.");
     }
     return { task, attempt, step };
   }
@@ -413,6 +419,9 @@ function normalizeCreateInput(input: CreateFixedTaskInput): NormalizedCreateFixe
       throw new Error("A root fixed Task actor must be its creator session.");
     }
   } else {
+    if (input.spendingLimit !== undefined) {
+      throw new Error("A child fixed Task inherits the root Task spending scope and cannot redefine it.");
+    }
     if (originTurnId !== undefined) {
       throw new Error("A child fixed Task inherits origin turn attribution from its parent.");
     }
@@ -438,6 +447,9 @@ function normalizeCreateInput(input: CreateFixedTaskInput): NormalizedCreateFixe
       ? {}
       : { creationKey: boundedToken(input.creationKey, "Task creation key", 256) }),
     objective: boundedText(input.objective, "Task objective", 8_000),
+    ...(input.spendingLimit === undefined
+      ? {}
+      : { spendingLimit: normalizeSpendingLimit(input.spendingLimit) }),
     planReason: boundedText(input.planReason ?? "Initial fixed Task plan.", "Plan reason", 1_000),
     steps
   };
@@ -453,7 +465,7 @@ function matchesInput(graph: FixedTaskGraph, input: NormalizedCreateFixedTaskInp
     executor: step.executor,
     childTaskPolicy: step.childTaskPolicy,
     authorityPolicy: step.authorityPolicy,
-    budget: step.budget,
+    executionLimits: step.executionLimits,
     retryPolicy: step.retryPolicy,
     failurePolicy: step.failurePolicy,
     idempotency: step.idempotency,
@@ -486,7 +498,8 @@ function matchesInput(graph: FixedTaskGraph, input: NormalizedCreateFixedTaskInp
     isDeepStrictEqual(graph.task.createdBy, expectedActor) &&
     isDeepStrictEqual(graph.task.workspace, input.workspace) &&
     isDeepStrictEqual(graph.task.authorityPolicy, input.authorityPolicy) &&
-    isDeepStrictEqual(graph.task.budgetPolicy, input.budgetPolicy) &&
+    isDeepStrictEqual(graph.task.spendingLimit, input.spendingLimit) &&
+    isDeepStrictEqual(graph.task.executionLimits, input.executionLimits) &&
     isDeepStrictEqual(actualSteps, expectedSteps);
 }
 
@@ -510,14 +523,18 @@ function normalizeCompletionDelivery(
   };
 }
 
-function budgetNarrowerOrEqual(
-  candidate: TaskBudgetPolicy,
-  ceiling: Omit<TaskBudgetPolicy, "maxConcurrentAttempts">
+function executionLimitsNarrowerOrEqual(
+  candidate: TaskExecutionLimits,
+  ceiling: Omit<TaskExecutionLimits, "maxConcurrentAttempts">
 ): boolean {
   return candidate.maxProviderCalls <= ceiling.maxProviderCalls &&
     candidate.maxTotalTokens <= ceiling.maxTotalTokens &&
-    candidate.maxEstimatedCostUsd <= ceiling.maxEstimatedCostUsd &&
     candidate.maxWallClockMs <= ceiling.maxWallClockMs;
+}
+
+function normalizeSpendingLimit(value: SpendingLimit): SpendingLimit {
+  assertSpendingLimit(value, "Task spending limit");
+  return cloneSpendingLimit(value)!;
 }
 
 function boundedToken(value: string, label: string, maxChars: number): string {

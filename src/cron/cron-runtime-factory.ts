@@ -45,6 +45,7 @@ export async function createIsolatedCronRuntime(input: {
     providerConfigs: latestConfig.config.providers,
     auxiliaryModels: latestConfig.auxiliaryModels,
     compression: latestConfig.compression,
+    budgets: latestConfig.budgets,
     memory: latestConfig.memory,
     externalMemory: latestConfig.externalMemory,
     mcpServers: latestConfig.mcp.servers,

@@ -3,8 +3,8 @@ import type {
   TaskApprovalLink,
   TaskAttempt,
   TaskAttemptLease,
-  TaskBudgetPolicy,
-  TaskBudgetReservation,
+  TaskExecutionLimits,
+  TaskExecutionReservation,
   TaskDeliveryBinding,
   TaskEvent,
   TaskGuidance,
@@ -30,6 +30,7 @@ import {
   validateTaskPlan
 } from "../contracts/task.js";
 import type { SQLiteDatabase, SQLiteValue } from "../storage/sqlite.js";
+import { assertSpendingLimit, cloneSpendingLimit } from "../contracts/budget.js";
 import { insertProviderUsageEntry, selectProviderUsageEntries } from "./sqlite-provider-usage.js";
 import type {
   AcquireTaskAttemptLeaseInput,
@@ -187,8 +188,11 @@ export class SQLiteTaskStore implements TaskStore {
       if (task.rootTaskId !== task.id || task.originSessionId !== task.creatorSessionId) {
         throw new TaskStoreIntegrityError("A root Task must own its root and origin session attribution.");
       }
+      if (task.spendingLimit !== undefined) assertSpendingLimit(task.spendingLimit, "Task spending limit");
     } else if (task.rootTaskId === task.id) {
       throw new TaskStoreIntegrityError("A child Task cannot identify itself as the Task-tree root.");
+    } else if (task.spendingLimit !== undefined) {
+      throw new TaskStoreIntegrityError("A child Task inherits the root Task spending scope and cannot own one.");
     }
     if (task.rootTaskId !== task.id) this.#assertTaskOwned(task.rootTaskId);
     if (task.parentTaskId !== undefined) {
@@ -214,10 +218,10 @@ export class SQLiteTaskStore implements TaskStore {
         id, profile_id, creator_session_id, root_task_id, origin_session_id, origin_turn_id,
         parent_task_id, parent_attempt_id,
         source, execution_preference, creation_key, objective, status, workspace_path, workspace_identity_hash,
-        authority_policy_json, budget_policy_json, active_plan_revision_id,
+        authority_policy_json, spending_limit_json, execution_limits_json, active_plan_revision_id,
         wait_reason_json, failure_json, created_by_json,
         created_at, updated_at, started_at, completed_at, cancelled_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(...taskValues(task));
   }
 
@@ -240,6 +244,9 @@ export class SQLiteTaskStore implements TaskStore {
       creationKey: existing.creationKey,
       objective: existing.objective,
       workspace: existing.workspace,
+      authorityPolicy: existing.authorityPolicy,
+      spendingLimit: existing.spendingLimit,
+      executionLimits: existing.executionLimits,
       createdBy: existing.createdBy,
       createdAt: existing.createdAt
     }, {
@@ -254,6 +261,9 @@ export class SQLiteTaskStore implements TaskStore {
       creationKey: task.creationKey,
       objective: task.objective,
       workspace: task.workspace,
+      authorityPolicy: task.authorityPolicy,
+      spendingLimit: task.spendingLimit,
+      executionLimits: task.executionLimits,
       createdBy: task.createdBy,
       createdAt: task.createdAt
     });
@@ -265,7 +275,7 @@ export class SQLiteTaskStore implements TaskStore {
         creator_session_id = ?, root_task_id = ?, origin_session_id = ?, origin_turn_id = ?,
         parent_task_id = ?, parent_attempt_id = ?, source = ?, execution_preference = ?,
         creation_key = ?, objective = ?, status = ?, workspace_path = ?, workspace_identity_hash = ?,
-        authority_policy_json = ?, budget_policy_json = ?, active_plan_revision_id = ?,
+        authority_policy_json = ?, spending_limit_json = ?, execution_limits_json = ?, active_plan_revision_id = ?,
         wait_reason_json = ?, failure_json = ?, created_by_json = ?, created_at = ?,
         updated_at = ?, started_at = ?, completed_at = ?, cancelled_at = ?
        where id = ? and profile_id = ?`
@@ -309,16 +319,16 @@ export class SQLiteTaskStore implements TaskStore {
     ).all(this.#profileId, parentTaskId).map(rowToTask);
   }
 
-  reserveChildTaskBudget(reservation: TaskBudgetReservation): void {
+  reserveChildTaskExecution(reservation: TaskExecutionReservation): void {
     this.#assertTransactionActive();
-    this.#assertProfile(reservation.profileId, "TaskBudgetReservation", reservation.childTaskId);
+    this.#assertProfile(reservation.profileId, "TaskExecutionReservation", reservation.childTaskId);
     requireBoundedText(reservation.childTaskId, "child Task ID", 256);
     requireBoundedText(reservation.rootTaskId, "root Task ID", 256);
     requireBoundedText(reservation.parentTaskId, "parent Task ID", 256);
     requireBoundedText(reservation.parentStepId, "parent Step ID", 256);
     requireBoundedText(reservation.parentAttemptId, "parent Attempt ID", 256);
-    assertTimestamp(reservation.createdAt, "Task budget reservation creation");
-    assertBudgetPolicy(reservation.budget, "Child Task budget reservation");
+    assertTimestamp(reservation.createdAt, "Task execution limits reservation creation");
+    assertExecutionLimits(reservation.executionLimits, "Child Task execution limits reservation");
     if (this.getTask(reservation.childTaskId) !== null) {
       throw new TaskStoreIntegrityError(`Child Task ${reservation.childTaskId} already exists.`);
     }
@@ -330,47 +340,47 @@ export class SQLiteTaskStore implements TaskStore {
     if (parent === null || root === null || attempt === null || step === null ||
         parent.rootTaskId !== root.id || attempt.taskId !== parent.id || attempt.stepId !== step.id ||
         step.taskId !== parent.id || step.planRevisionId !== attempt.planRevisionId) {
-      throw new TaskStoreIntegrityError("Child Task budget reservation lineage is invalid.");
+      throw new TaskStoreIntegrityError("Child Task execution limits reservation lineage is invalid.");
     }
     if (attempt.status !== "running" || step.childTaskPolicy !== "fire_and_forget" ||
         isTerminalTaskStatus(parent.status)) {
-      throw new TaskStoreIntegrityError("Child Task budget reservations require an active authorized parent Attempt.");
+      throw new TaskStoreIntegrityError("Child Task execution limits reservations require an active authorized parent Attempt.");
     }
-    if (reservation.budget.maxConcurrentAttempts > parent.budgetPolicy.maxConcurrentAttempts ||
-        reservation.budget.maxConcurrentAttempts > root.budgetPolicy.maxConcurrentAttempts ||
-        reservation.budget.maxWallClockMs > parent.budgetPolicy.maxWallClockMs ||
-        reservation.budget.maxWallClockMs > step.budget.maxWallClockMs ||
-        reservation.budget.maxWallClockMs > root.budgetPolicy.maxWallClockMs) {
-      throw new TaskStoreIntegrityError("Child Task concurrency or wall-clock budget exceeds its Task-tree ceiling.");
+    if (reservation.executionLimits.maxConcurrentAttempts > parent.executionLimits.maxConcurrentAttempts ||
+        reservation.executionLimits.maxConcurrentAttempts > root.executionLimits.maxConcurrentAttempts ||
+        reservation.executionLimits.maxWallClockMs > parent.executionLimits.maxWallClockMs ||
+        reservation.executionLimits.maxWallClockMs > step.executionLimits.maxWallClockMs ||
+        reservation.executionLimits.maxWallClockMs > root.executionLimits.maxWallClockMs) {
+      throw new TaskStoreIntegrityError("Child Task concurrency or wall-clock execution limit exceeds its Task-tree ceiling.");
     }
 
-    const taskUsage = sumAttemptBudgetUsage(this.listAttempts(parent.id));
-    const stepUsage = sumAttemptBudgetUsage(this.listAttempts(parent.id, step.id));
-    const taskReservations = this.listChildTaskBudgetReservations(parent.id);
+    const taskUsage = sumAttemptExecutionUsage(this.listAttempts(parent.id));
+    const stepUsage = sumAttemptExecutionUsage(this.listAttempts(parent.id, step.id));
+    const taskReservations = this.listChildTaskExecutionReservations(parent.id);
     const stepReservations = taskReservations.filter((entry) => entry.parentStepId === step.id);
     if (!reservationFits(
       taskUsage,
-      sumReservedBudget(taskReservations),
-      reservation.budget,
-      parent.budgetPolicy
+      sumReservedExecution(taskReservations),
+      reservation.executionLimits,
+      parent.executionLimits
     )) {
-      throw new TaskStoreIntegrityError("Child Task budget reservation exceeds the parent Task's remaining budget.");
+      throw new TaskStoreIntegrityError("Child Task execution reservation exceeds the parent Task's remaining execution capacity.");
     }
     if (!reservationFits(
       stepUsage,
-      sumReservedBudget(stepReservations),
-      reservation.budget,
-      step.budget
+      sumReservedExecution(stepReservations),
+      reservation.executionLimits,
+      step.executionLimits
     )) {
-      throw new TaskStoreIntegrityError("Child Task budget reservation exceeds the parent Step's remaining budget.");
+      throw new TaskStoreIntegrityError("Child Task execution reservation exceeds the parent Step's remaining execution capacity.");
     }
 
     this.#db.query(
-      `insert into task_budget_reservations (
+      `insert into task_execution_reservations (
         child_task_id, profile_id, root_task_id, parent_task_id, parent_step_id, parent_attempt_id,
         max_concurrent_attempts, max_provider_calls, max_total_tokens,
-        max_estimated_cost_usd, max_wall_clock_ms, created_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        max_wall_clock_ms, created_at
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       reservation.childTaskId,
       this.#profileId,
@@ -378,18 +388,17 @@ export class SQLiteTaskStore implements TaskStore {
       reservation.parentTaskId,
       reservation.parentStepId,
       reservation.parentAttemptId,
-      reservation.budget.maxConcurrentAttempts,
-      reservation.budget.maxProviderCalls,
-      reservation.budget.maxTotalTokens,
-      reservation.budget.maxEstimatedCostUsd,
-      reservation.budget.maxWallClockMs,
+      reservation.executionLimits.maxConcurrentAttempts,
+      reservation.executionLimits.maxProviderCalls,
+      reservation.executionLimits.maxTotalTokens,
+      reservation.executionLimits.maxWallClockMs,
       reservation.createdAt
     );
   }
 
-  listChildTaskBudgetReservations(parentTaskId: string, parentStepId?: string): TaskBudgetReservation[] {
+  listChildTaskExecutionReservations(parentTaskId: string, parentStepId?: string): TaskExecutionReservation[] {
     this.#assertTaskOwned(parentTaskId);
-    let sql = `select * from task_budget_reservations
+    let sql = `select * from task_execution_reservations
       where profile_id = ? and parent_task_id = ?`;
     const params: SQLiteValue[] = [this.#profileId, parentTaskId];
     if (parentStepId !== undefined) {
@@ -398,7 +407,7 @@ export class SQLiteTaskStore implements TaskStore {
       params.push(parentStepId);
     }
     sql += " order by created_at, child_task_id";
-    return this.#db.query<BudgetReservationRow>(sql).all(...params).map(rowToBudgetReservation);
+    return this.#db.query<ExecutionReservationRow>(sql).all(...params).map(rowToExecutionReservation);
   }
 
   acquireTaskHostLease(input: AcquireTaskHostLeaseInput): TaskHostLease | null {
@@ -654,7 +663,7 @@ export class SQLiteTaskStore implements TaskStore {
     this.atomicWrite(() => {
       const result = this.#db.query(
         `update task_steps set step_key = ?, position = ?, status = ?, title = ?, objective = ?,
-          executor_json = ?, authority_policy_json = ?, budget_json = ?, retry_policy_json = ?,
+          executor_json = ?, authority_policy_json = ?, execution_limits_json = ?, retry_policy_json = ?,
           failure_policy_json = ?, idempotency = ?, result_policy_json = ?, created_at = ?, updated_at = ?
          where id = ? and profile_id = ? and task_id = ? and plan_revision_id = ?`
       ).run(
@@ -665,7 +674,7 @@ export class SQLiteTaskStore implements TaskStore {
         step.objective,
         stringify(step.executor),
         stringify(step.authorityPolicy),
-        stringify(step.budget),
+        stringify(step.executionLimits),
         stringify(step.retryPolicy),
         stringify(step.failurePolicy),
         step.idempotency,
@@ -1342,7 +1351,7 @@ export class SQLiteTaskStore implements TaskStore {
     this.#db.query(
       `insert into task_steps (
         id, profile_id, task_id, plan_revision_id, step_key, position, status, title,
-        objective, executor_json, child_task_policy, authority_policy_json, budget_json, retry_policy_json,
+        objective, executor_json, child_task_policy, authority_policy_json, execution_limits_json, retry_policy_json,
         failure_policy_json, idempotency, result_policy_json, created_at, updated_at
       ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
@@ -1358,7 +1367,7 @@ export class SQLiteTaskStore implements TaskStore {
       stringify(step.executor),
       step.childTaskPolicy,
       stringify(step.authorityPolicy),
-      stringify(step.budget),
+      stringify(step.executionLimits),
       stringify(step.retryPolicy),
       stringify(step.failurePolicy),
       step.idempotency,
@@ -1539,7 +1548,7 @@ function immutableStepFields(step: TaskStep): unknown {
     executor: step.executor,
     childTaskPolicy: step.childTaskPolicy,
     authorityPolicy: step.authorityPolicy,
-    budget: step.budget,
+    executionLimits: step.executionLimits,
     retryPolicy: step.retryPolicy,
     failurePolicy: step.failurePolicy,
     idempotency: step.idempotency,
@@ -1572,7 +1581,8 @@ function taskValues(task: Task): SQLiteValue[] {
     task.workspace.canonicalPath,
     task.workspace.identityHash,
     stringify(task.authorityPolicy),
-    stringify(task.budgetPolicy),
+    optionalJson(task.spendingLimit),
+    stringify(task.executionLimits),
     task.activePlanRevisionId ?? null,
     optionalJson(task.waitReason),
     optionalJson(task.failure),
@@ -1681,7 +1691,10 @@ function rowToTask(row: TaskRow): Task {
     status: row.status as Task["status"],
     workspace: { canonicalPath: row.workspace_path, identityHash: row.workspace_identity_hash },
     authorityPolicy: parseJson(row.authority_policy_json, "Task.authorityPolicy"),
-    budgetPolicy: parseJson(row.budget_policy_json, "Task.budgetPolicy"),
+    ...(row.spending_limit_json === null
+      ? {}
+      : { spendingLimit: parseSpendingLimit(row.spending_limit_json, "Task.spendingLimit") }),
+    executionLimits: parseJson(row.execution_limits_json, "Task.executionLimits"),
     ...(row.active_plan_revision_id === null ? {} : { activePlanRevisionId: row.active_plan_revision_id }),
     ...(row.wait_reason_json === null ? {} : { waitReason: parseJson(row.wait_reason_json, "Task.waitReason") }),
     ...(row.failure_json === null ? {} : { failure: parseJson(row.failure_json, "Task.failure") }),
@@ -1725,7 +1738,7 @@ function rowToStep(row: StepRow, dependsOn: readonly string[]): TaskStep {
     executor: parseJson(row.executor_json, "TaskStep.executor"),
     childTaskPolicy: row.child_task_policy as TaskStep["childTaskPolicy"],
     authorityPolicy: parseJson(row.authority_policy_json, "TaskStep.authorityPolicy"),
-    budget: parseJson(row.budget_json, "TaskStep.budget"),
+    executionLimits: parseJson(row.execution_limits_json, "TaskStep.executionLimits"),
     retryPolicy: parseJson(row.retry_policy_json, "TaskStep.retryPolicy"),
     failurePolicy: parseJson(row.failure_policy_json, "TaskStep.failurePolicy"),
     idempotency: row.idempotency as TaskStep["idempotency"],
@@ -1801,7 +1814,7 @@ function rowToTaskHostLease(row: TaskHostLeaseRow): TaskHostLease {
   };
 }
 
-function rowToBudgetReservation(row: BudgetReservationRow): TaskBudgetReservation {
+function rowToExecutionReservation(row: ExecutionReservationRow): TaskExecutionReservation {
   return {
     profileId: row.profile_id,
     childTaskId: row.child_task_id,
@@ -1809,11 +1822,10 @@ function rowToBudgetReservation(row: BudgetReservationRow): TaskBudgetReservatio
     parentTaskId: row.parent_task_id,
     parentStepId: row.parent_step_id,
     parentAttemptId: row.parent_attempt_id,
-    budget: {
+    executionLimits: {
       maxConcurrentAttempts: row.max_concurrent_attempts,
       maxProviderCalls: row.max_provider_calls,
       maxTotalTokens: row.max_total_tokens,
-      maxEstimatedCostUsd: row.max_estimated_cost_usd,
       maxWallClockMs: row.max_wall_clock_ms
     },
     createdAt: row.created_at
@@ -1937,6 +1949,16 @@ function parseJson<T>(value: string, field: string): T {
   }
 }
 
+function parseSpendingLimit(value: string, field: string) {
+  const parsed = parseJson<import("../contracts/budget.js").SpendingLimit>(value, field);
+  try {
+    assertSpendingLimit(parsed, field);
+  } catch (error) {
+    throw new TaskStoreIntegrityError(`Stored ${field} is invalid.`, { cause: error });
+  }
+  return cloneSpendingLimit(parsed)!;
+}
+
 function requireNonEmpty(value: string, label: string): string {
   const normalized = value.trim();
   if (normalized.length === 0) throw new TaskStoreIntegrityError(`${label} must not be empty.`);
@@ -1990,48 +2012,43 @@ function assertFencingToken(token: number, label: string): void {
   }
 }
 
-function assertBudgetPolicy(budget: TaskBudgetPolicy, label: string): void {
-  if (!Number.isSafeInteger(budget.maxConcurrentAttempts) || budget.maxConcurrentAttempts < 1 ||
-      !Number.isSafeInteger(budget.maxProviderCalls) || budget.maxProviderCalls < 0 ||
-      !Number.isSafeInteger(budget.maxTotalTokens) || budget.maxTotalTokens < 0 ||
-      !Number.isFinite(budget.maxEstimatedCostUsd) || budget.maxEstimatedCostUsd < 0 ||
-      !Number.isSafeInteger(budget.maxWallClockMs) || budget.maxWallClockMs < 1) {
+function assertExecutionLimits(executionLimits: TaskExecutionLimits, label: string): void {
+  if (!Number.isSafeInteger(executionLimits.maxConcurrentAttempts) || executionLimits.maxConcurrentAttempts < 1 ||
+      !Number.isSafeInteger(executionLimits.maxProviderCalls) || executionLimits.maxProviderCalls < 0 ||
+      !Number.isSafeInteger(executionLimits.maxTotalTokens) || executionLimits.maxTotalTokens < 0 ||
+      !Number.isSafeInteger(executionLimits.maxWallClockMs) || executionLimits.maxWallClockMs < 1) {
     throw new TaskStoreIntegrityError(`${label} is invalid.`);
   }
 }
 
-type ConsumableBudget = Pick<TaskBudgetPolicy, "maxProviderCalls" | "maxTotalTokens" | "maxEstimatedCostUsd">;
+type ConsumableExecution = Pick<TaskExecutionLimits, "maxProviderCalls" | "maxTotalTokens">;
 
-function sumAttemptBudgetUsage(attempts: readonly TaskAttempt[]): ConsumableBudget {
-  return attempts.reduce<ConsumableBudget>((total, attempt) => ({
+function sumAttemptExecutionUsage(attempts: readonly TaskAttempt[]): ConsumableExecution {
+  return attempts.reduce<ConsumableExecution>((total, attempt) => ({
     maxProviderCalls: total.maxProviderCalls + attempt.usage.providerCalls,
-    maxTotalTokens: total.maxTotalTokens + attempt.usage.totalTokens,
-    maxEstimatedCostUsd: total.maxEstimatedCostUsd + attempt.usage.estimatedCostUsd
-  }), emptyConsumableBudget());
+    maxTotalTokens: total.maxTotalTokens + attempt.usage.totalTokens
+  }), emptyConsumableExecution());
 }
 
-function sumReservedBudget(reservations: readonly TaskBudgetReservation[]): ConsumableBudget {
-  return reservations.reduce<ConsumableBudget>((total, reservation) => ({
-    maxProviderCalls: total.maxProviderCalls + reservation.budget.maxProviderCalls,
-    maxTotalTokens: total.maxTotalTokens + reservation.budget.maxTotalTokens,
-    maxEstimatedCostUsd: total.maxEstimatedCostUsd + reservation.budget.maxEstimatedCostUsd
-  }), emptyConsumableBudget());
+function sumReservedExecution(reservations: readonly TaskExecutionReservation[]): ConsumableExecution {
+  return reservations.reduce<ConsumableExecution>((total, reservation) => ({
+    maxProviderCalls: total.maxProviderCalls + reservation.executionLimits.maxProviderCalls,
+    maxTotalTokens: total.maxTotalTokens + reservation.executionLimits.maxTotalTokens
+  }), emptyConsumableExecution());
 }
 
-function emptyConsumableBudget(): ConsumableBudget {
-  return { maxProviderCalls: 0, maxTotalTokens: 0, maxEstimatedCostUsd: 0 };
+function emptyConsumableExecution(): ConsumableExecution {
+  return { maxProviderCalls: 0, maxTotalTokens: 0 };
 }
 
 function reservationFits(
-  usage: ConsumableBudget,
-  reserved: ConsumableBudget,
-  requested: TaskBudgetPolicy,
-  ceiling: ConsumableBudget
+  usage: ConsumableExecution,
+  reserved: ConsumableExecution,
+  requested: TaskExecutionLimits,
+  ceiling: ConsumableExecution
 ): boolean {
   return usage.maxProviderCalls + reserved.maxProviderCalls + requested.maxProviderCalls <= ceiling.maxProviderCalls &&
-    usage.maxTotalTokens + reserved.maxTotalTokens + requested.maxTotalTokens <= ceiling.maxTotalTokens &&
-    usage.maxEstimatedCostUsd + reserved.maxEstimatedCostUsd + requested.maxEstimatedCostUsd <=
-      ceiling.maxEstimatedCostUsd;
+    usage.maxTotalTokens + reserved.maxTotalTokens + requested.maxTotalTokens <= ceiling.maxTotalTokens;
 }
 
 function assertApprovalLink(link: TaskApprovalLink): void {
@@ -2082,7 +2099,8 @@ type TaskRow = {
   workspace_path: string;
   workspace_identity_hash: string;
   authority_policy_json: string;
-  budget_policy_json: string;
+  spending_limit_json: string | null;
+  execution_limits_json: string;
   active_plan_revision_id: string | null;
   wait_reason_json: string | null;
   failure_json: string | null;
@@ -2121,7 +2139,7 @@ type StepRow = {
   executor_json: string;
   child_task_policy: string;
   authority_policy_json: string;
-  budget_json: string;
+  execution_limits_json: string;
   retry_policy_json: string;
   failure_policy_json: string;
   idempotency: string;
@@ -2174,7 +2192,7 @@ type TaskHostLeaseRow = {
   expires_at: string;
 };
 
-type BudgetReservationRow = {
+type ExecutionReservationRow = {
   child_task_id: string;
   profile_id: string;
   root_task_id: string;
@@ -2184,7 +2202,6 @@ type BudgetReservationRow = {
   max_concurrent_attempts: number;
   max_provider_calls: number;
   max_total_tokens: number;
-  max_estimated_cost_usd: number;
   max_wall_clock_ms: number;
   created_at: string;
 };

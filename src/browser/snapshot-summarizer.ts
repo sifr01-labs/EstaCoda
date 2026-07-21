@@ -99,7 +99,6 @@ export async function maybeSummarizeSnapshot(
       usage: {
         ...(input.executionSessionId === undefined ? {} : {
           executionSessionId: input.executionSessionId,
-          sessionBudgetScopeId: input.executionSessionId
         }),
         ...(input.visibleTurnId === undefined ? {} : { visibleTurnId: input.visibleTurnId })
       },

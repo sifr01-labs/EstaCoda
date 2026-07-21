@@ -170,6 +170,7 @@ export function buildGatewayCronRuntimeOptions(input: GatewayCronRuntimeBaseInpu
     providerConfigs: latestConfig.config.providers,
     auxiliaryModels: latestConfig.auxiliaryModels,
     compression: latestConfig.compression,
+    budgets: latestConfig.budgets,
     externalMemory: latestConfig.externalMemory,
     mcpServers: latestConfig.mcp.servers,
     imageGen: latestConfig.imageGen,
@@ -218,6 +219,7 @@ export function buildGatewayCronRuntimeOptions(input: GatewayCronRuntimeBaseInpu
     providerConfigs: latestConfig.config.providers,
     auxiliaryModels: latestConfig.auxiliaryModels,
     compression: latestConfig.compression,
+    budgets: latestConfig.budgets,
     externalMemory: latestConfig.externalMemory,
     mcpServers: latestConfig.mcp.servers,
     imageGen: latestConfig.imageGen,
@@ -266,7 +268,9 @@ async function buildGatewaySecurityAssessorConfig(
         profileId: config.profileId,
         usageRecorder: createProviderUsageRecorder({
           profileId: config.profileId,
-          record: (entries) => sessionDb.recordProviderUsageEntries(entries)
+          record: (entries) => sessionDb.recordProviderUsageEntries(entries),
+          resolveSessionBudgetScopeId: async (sessionId) =>
+            (await sessionDb.getSessionForProfile(sessionId, config.profileId))?.spendingScopeSessionId
         })
       }),
     };
@@ -293,7 +297,9 @@ async function buildGatewaySecurityAssessorConfig(
       profileId: config.profileId,
       usageRecorder: createProviderUsageRecorder({
         profileId: config.profileId,
-        record: (entries) => sessionDb.recordProviderUsageEntries(entries)
+        record: (entries) => sessionDb.recordProviderUsageEntries(entries),
+        resolveSessionBudgetScopeId: async (sessionId) =>
+          (await sessionDb.getSessionForProfile(sessionId, config.profileId))?.spendingScopeSessionId
       })
     }),
   };
@@ -842,6 +848,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       providerConfigs: latestConfig.config.providers,
       auxiliaryModels: latestConfig.auxiliaryModels,
       compression: latestConfig.compression,
+      budgets: latestConfig.budgets,
       externalMemory: latestConfig.externalMemory,
       mcpServers: latestConfig.mcp.servers,
       securityPolicy: input.securityPolicy,
@@ -1013,7 +1020,9 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           profileId: config.profileId,
           usageRecorder: createProviderUsageRecorder({
             profileId,
-            record: (entries) => sessionDb.recordProviderUsageEntries(entries)
+            record: (entries) => sessionDb.recordProviderUsageEntries(entries),
+            resolveSessionBudgetScopeId: async (sessionId) =>
+              (await sessionDb.getSessionForProfile(sessionId, profileId))?.spendingScopeSessionId
           })
         })
       }),

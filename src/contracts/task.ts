@@ -1,5 +1,6 @@
 import type { ProviderId } from "./provider.js";
 import type { ProviderUsageTotals } from "./provider-usage.js";
+import type { SpendingLimit } from "./budget.js";
 import type { ToolRiskClass, ToolsetName } from "./tool.js";
 
 // Durable Task identities are opaque storage keys. They are never authorization boundaries.
@@ -132,25 +133,24 @@ export type TaskAuthorityPolicy = {
   maxChildDepth: number;
 };
 
-export type TaskBudgetPolicy = {
+export type TaskExecutionLimits = {
   maxConcurrentAttempts: number;
   maxProviderCalls: number;
   maxTotalTokens: number;
-  maxEstimatedCostUsd: number;
   maxWallClockMs: number;
 };
 
-export type TaskStepBudget = Omit<TaskBudgetPolicy, "maxConcurrentAttempts">;
+export type TaskStepExecutionLimits = Omit<TaskExecutionLimits, "maxConcurrentAttempts">;
 
-/** Durable admission record proving a child Task divided, rather than expanded, its parent Step budget. */
-export type TaskBudgetReservation = {
+/** Durable admission record proving a child Task divided, rather than expanded, execution capacity. */
+export type TaskExecutionReservation = {
   profileId: string;
   childTaskId: TaskId;
   rootTaskId: TaskId;
   parentTaskId: TaskId;
   parentStepId: TaskStepId;
   parentAttemptId: TaskAttemptId;
-  budget: TaskBudgetPolicy;
+  executionLimits: TaskExecutionLimits;
   createdAt: string;
 };
 
@@ -190,7 +190,7 @@ export type TaskStepResultPolicy = {
 };
 
 export type TaskWaitReason = {
-  kind: "user_input" | "approval" | "eligible_host" | "budget" | "operator";
+  kind: "user_input" | "approval" | "eligible_host" | "execution_limit" | "operator";
   summary: string;
   requestedAt: string;
   approvalId?: string;
@@ -224,7 +224,9 @@ export type Task = {
   status: TaskStatus;
   workspace: TaskWorkspaceBinding;
   authorityPolicy: TaskAuthorityPolicy;
-  budgetPolicy: TaskBudgetPolicy;
+  /** Optional immutable monetary policy. Present only on a root Task. */
+  spendingLimit?: SpendingLimit;
+  executionLimits: TaskExecutionLimits;
   activePlanRevisionId?: TaskPlanRevisionId;
   waitReason?: TaskWaitReason;
   failure?: TaskFailure;
@@ -265,7 +267,7 @@ export type TaskStep = {
   executor: TaskAgentExecutor;
   childTaskPolicy: TaskChildPolicy;
   authorityPolicy: TaskAuthorityPolicy;
-  budget: TaskStepBudget;
+  executionLimits: TaskStepExecutionLimits;
   retryPolicy: TaskRetryPolicy;
   failurePolicy: TaskFailurePolicy;
   idempotency: TaskIdempotency;
@@ -643,9 +645,9 @@ export type TaskPlanValidationIssueCode =
   | "plan-cycle"
   | "step-authority-invalid"
   | "step-authority-exceeds-task"
-  | "task-budget-invalid"
-  | "step-budget-invalid"
-  | "step-budget-exceeds-task"
+  | "task-execution-limits-invalid"
+  | "step-execution-limits-invalid"
+  | "step-execution-limits-exceed-task"
   | "step-retry-policy-invalid"
   | "step-failure-policy-invalid"
   | "step-result-policy-invalid";
@@ -657,7 +659,7 @@ export type TaskPlanValidationIssue = {
 };
 
 export type TaskPlanValidationInput = {
-  task: Pick<Task, "id" | "profileId" | "objective" | "workspace" | "authorityPolicy" | "budgetPolicy">;
+  task: Pick<Task, "id" | "profileId" | "objective" | "workspace" | "authorityPolicy" | "executionLimits">;
   revision: TaskPlanRevision;
   steps: readonly TaskStep[];
 };
@@ -711,7 +713,7 @@ export function validateTaskPlan(
   }
 
   validateTaskAuthority(input.task.authorityPolicy, limits, issues);
-  validateTaskBudget(input.task.budgetPolicy, limits, issues);
+  validateTaskExecutionLimits(input.task.executionLimits, limits, issues);
 
   // A plan over the hard limit is already invalid. Bound deeper validation so model-proposed
   // input cannot cause unbounded validation work.
@@ -806,7 +808,7 @@ export function validateTaskPlan(
     }
 
     validateStepAuthority(step, input.task.authorityPolicy, limits, issues);
-    validateStepBudget(step, input.task.budgetPolicy, issues);
+    validateStepExecutionLimits(step, input.task.executionLimits, issues);
     validateRetryPolicy(step, limits, issues);
     validateFailurePolicy(step, issues);
     validateResultPolicy(step, limits, issues);
@@ -903,20 +905,19 @@ function validateTaskAuthority(
   }
 }
 
-function validateTaskBudget(
-  budget: TaskBudgetPolicy,
+function validateTaskExecutionLimits(
+  executionLimits: TaskExecutionLimits,
   limits: TaskGraphLimits,
   issues: TaskPlanValidationIssue[]
 ): void {
   if (
-    !positiveSafeInteger(budget.maxConcurrentAttempts) ||
-    budget.maxConcurrentAttempts > limits.maxConcurrentAttempts ||
-    !nonNegativeSafeInteger(budget.maxProviderCalls) ||
-    !nonNegativeSafeInteger(budget.maxTotalTokens) ||
-    !nonNegativeFinite(budget.maxEstimatedCostUsd) ||
-    !positiveSafeInteger(budget.maxWallClockMs)
+    !positiveSafeInteger(executionLimits.maxConcurrentAttempts) ||
+    executionLimits.maxConcurrentAttempts > limits.maxConcurrentAttempts ||
+    !nonNegativeSafeInteger(executionLimits.maxProviderCalls) ||
+    !nonNegativeSafeInteger(executionLimits.maxTotalTokens) ||
+    !positiveSafeInteger(executionLimits.maxWallClockMs)
   ) {
-    issues.push(issue("task-budget-invalid", "Task budget contains an invalid or out-of-range limit."));
+    issues.push(issue("task-execution-limits-invalid", "Task execution limits are invalid or out of range."));
   }
 }
 
@@ -936,29 +937,27 @@ function validateStepAuthority(
   }
 }
 
-function validateStepBudget(
+function validateStepExecutionLimits(
   step: TaskStep,
-  ceiling: TaskBudgetPolicy,
+  ceiling: TaskExecutionLimits,
   issues: TaskPlanValidationIssue[]
 ): void {
-  const budget = step.budget;
+  const executionLimits = step.executionLimits;
   if (
-    !nonNegativeSafeInteger(budget.maxProviderCalls) ||
-    !nonNegativeSafeInteger(budget.maxTotalTokens) ||
-    !nonNegativeFinite(budget.maxEstimatedCostUsd) ||
-    !positiveSafeInteger(budget.maxWallClockMs)
+    !nonNegativeSafeInteger(executionLimits.maxProviderCalls) ||
+    !nonNegativeSafeInteger(executionLimits.maxTotalTokens) ||
+    !positiveSafeInteger(executionLimits.maxWallClockMs)
   ) {
-    issues.push(issue("step-budget-invalid", "Step budget contains an invalid limit.", step.id));
+    issues.push(issue("step-execution-limits-invalid", "Step execution limits are invalid.", step.id));
     return;
   }
 
   if (
-    budget.maxProviderCalls > ceiling.maxProviderCalls ||
-    budget.maxTotalTokens > ceiling.maxTotalTokens ||
-    budget.maxEstimatedCostUsd > ceiling.maxEstimatedCostUsd ||
-    budget.maxWallClockMs > ceiling.maxWallClockMs
+    executionLimits.maxProviderCalls > ceiling.maxProviderCalls ||
+    executionLimits.maxTotalTokens > ceiling.maxTotalTokens ||
+    executionLimits.maxWallClockMs > ceiling.maxWallClockMs
   ) {
-    issues.push(issue("step-budget-exceeds-task", "Step budget exceeds its Task budget ceiling.", step.id));
+    issues.push(issue("step-execution-limits-exceed-task", "Step execution limits exceed the Task ceiling.", step.id));
   }
 }
 
@@ -1091,10 +1090,6 @@ function positiveSafeInteger(value: number): boolean {
 
 function nonNegativeSafeInteger(value: number): boolean {
   return Number.isSafeInteger(value) && value >= 0;
-}
-
-function nonNegativeFinite(value: number): boolean {
-  return Number.isFinite(value) && value >= 0;
 }
 
 function uniqueNonEmptyStrings(values: readonly string[]): boolean {

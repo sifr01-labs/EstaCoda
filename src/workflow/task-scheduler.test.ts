@@ -873,8 +873,10 @@ describe("TaskScheduler", () => {
     expect(store.listAttempts("task-alpha")[0]?.status).toBe("expired");
   });
 
-  it("waits for an eligible host and pauses before exceeding a zero provider-call budget", async () => {
-    store.createTaskGraph(makeGraph([makeStep("host", 0)]));
+  it("waits for an eligible host and pauses before exceeding a zero provider-call execution limit", async () => {
+    store.createTaskGraph(makeGraph([makeStep("host", 0, {
+      executionLimits: { maxProviderCalls: 0, maxTotalTokens: 50_000, maxWallClockMs: 300_000 }
+    })], { maxProviderCalls: 0 }));
     acquireDispatchGrants("scheduler-alpha");
     const unavailable = new TaskScheduler({
       store,
@@ -890,14 +892,8 @@ describe("TaskScheduler", () => {
 
     const task = store.getTask("task-alpha")!;
     store.updateTask({ ...task, status: "queued", waitReason: undefined, updatedAt: now().toISOString() });
-    const budgeted = store.getTask("task-alpha")!;
-    store.updateTask({
-      ...budgeted,
-      budgetPolicy: { ...budgeted.budgetPolicy, maxProviderCalls: 0 },
-      updatedAt: now().toISOString()
-    });
     expect((await makeScheduler(new FakeTaskStepExecutor()).runOnce()).dispatched).toBe(0);
-    expect(store.getTask("task-alpha")).toMatchObject({ status: "paused", waitReason: { kind: "budget" } });
+    expect(store.getTask("task-alpha")).toMatchObject({ status: "paused", waitReason: { kind: "execution_limit" } });
   });
 
   it("continues eligible independent work before waiting for a missing executor", async () => {
@@ -934,8 +930,8 @@ describe("TaskScheduler", () => {
 
   it("does not pause active work while a provider-call reservation is still settling", async () => {
     store.createTaskGraph(makeGraph([
-      makeStep("one", 0, { budget: { ...makeStep("one-budget", 0).budget, maxProviderCalls: 1 } }),
-      makeStep("two", 1, { budget: { ...makeStep("two-budget", 1).budget, maxProviderCalls: 1 } })
+      makeStep("one", 0, { executionLimits: { ...makeStep("one-budget", 0).executionLimits, maxProviderCalls: 1 } }),
+      makeStep("two", 1, { executionLimits: { ...makeStep("two-budget", 1).executionLimits, maxProviderCalls: 1 } })
     ], { maxConcurrentAttempts: 2, maxProviderCalls: 1 }));
     const scheduler = makeScheduler(new FakeTaskStepExecutor(({ step }) => ({
       outcome: "succeeded",
@@ -947,7 +943,7 @@ describe("TaskScheduler", () => {
     expect(store.getStep("step-one")?.status).toBe("completed");
     expect(store.getStep("step-two")?.status).toBe("ready");
     expect((await scheduler.runOnce()).dispatched).toBe(0);
-    expect(store.getTask("task-alpha")).toMatchObject({ status: "paused", waitReason: { kind: "budget" } });
+    expect(store.getTask("task-alpha")).toMatchObject({ status: "paused", waitReason: { kind: "execution_limit" } });
   });
 
   it("durably pauses for approval, resumes the same Attempt with a higher fence, and preserves usage", async () => {
@@ -1103,7 +1099,7 @@ const NOW = "2030-01-01T00:00:00.000Z";
 
 function makeGraph(
   steps: TaskStep[],
-  budgetOverrides: Partial<Task["budgetPolicy"]> = {}
+  budgetOverrides: Partial<Task["executionLimits"]> = {}
 ): { task: Task; revision: TaskPlanRevision; steps: TaskStep[] } {
   const task: Task = {
     id: "task-alpha",
@@ -1118,11 +1114,10 @@ function makeGraph(
     status: "queued",
     workspace: { canonicalPath: "/workspace/project", identityHash: "workspace-hash" },
     authorityPolicy: authorityPolicy(),
-    budgetPolicy: {
+    executionLimits: {
       maxConcurrentAttempts: 2,
       maxProviderCalls: 10,
       maxTotalTokens: 100_000,
-      maxEstimatedCostUsd: 10,
       maxWallClockMs: 600_000,
       ...budgetOverrides
     },
@@ -1189,10 +1184,9 @@ function makeStep(
     executor: { kind: "agent", role: "worker" },
     childTaskPolicy: "forbid",
     authorityPolicy: authorityPolicy(),
-    budget: {
+    executionLimits: {
       maxProviderCalls: 5,
       maxTotalTokens: 50_000,
-      maxEstimatedCostUsd: 5,
       maxWallClockMs: 300_000
     },
     retryPolicy: {

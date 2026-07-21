@@ -4,7 +4,7 @@ import type { TaskStore } from "./task-store.js";
 
 const MAX_TASK_TREE_RECORDS = 1_000;
 
-export type TaskBudgetScope = {
+export type TaskExecutionScope = {
   task: Task;
   step: TaskStep;
 };
@@ -54,12 +54,12 @@ export function listStepTreeAttempts(
 }
 
 /** Current Task/Step first, then every immutable ancestor scope that owns this descendant work. */
-export function listTaskBudgetScopes(
+export function listTaskExecutionScopes(
   store: TaskStore,
   task: Task,
   step: TaskStep
-): readonly TaskBudgetScope[] {
-  const scopes: TaskBudgetScope[] = [{ task, step }];
+): readonly TaskExecutionScope[] {
+  const scopes: TaskExecutionScope[] = [{ task, step }];
   const seen = new Set([task.id]);
   let current = task;
   while (current.parentTaskId !== undefined || current.parentAttemptId !== undefined) {

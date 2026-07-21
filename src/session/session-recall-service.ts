@@ -192,7 +192,6 @@ export class SessionRecallService {
       ...(this.#currentSessionId === undefined ? {} : {
         usage: {
           executionSessionId: this.#currentSessionId(),
-          sessionBudgetScopeId: this.#currentSessionId()
         }
       })
     });

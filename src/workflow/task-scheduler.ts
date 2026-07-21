@@ -29,7 +29,7 @@ import type { TaskApprovalService } from "./task-approval-service.js";
 import { cancelTaskInStore } from "./task-operator-service.js";
 import {
   listStepTreeAttempts,
-  listTaskBudgetScopes,
+  listTaskExecutionScopes,
   listTaskTreeAttempts
 } from "./task-tree-accounting.js";
 import {
@@ -272,11 +272,11 @@ export class TaskScheduler {
         hasEligibleExecutor = true;
         if (!this.#retryDelayElapsed(step)) continue;
         if (!this.#hasCapacity(task, step, capacity)) continue;
-        const budgetReason = this.#budgetBlockReason(task, step);
-        if (budgetReason !== undefined) {
+        const limitReason = this.#executionLimitBlockReason(task, step);
+        if (limitReason !== undefined) {
           if ((capacity.task.get(task.id) ?? 0) === 0) {
-            this.#pauseForBudget(task.id, budgetReason);
-            result.warnings.push(`Task ${task.id} paused because ${budgetReason}.`);
+            this.#pauseForExecutionLimit(task.id, limitReason);
+            result.warnings.push(`Task ${task.id} paused because ${limitReason}.`);
           }
           break;
         }
@@ -719,7 +719,7 @@ export class TaskScheduler {
     });
   }
 
-  #pauseForBudget(taskId: string, reasonCode: string): void {
+  #pauseForExecutionLimit(taskId: string, reasonCode: string): void {
     const now = this.#now().toISOString();
     this.#store.atomicWrite((store) => {
       const task = store.getTask(taskId);
@@ -728,7 +728,7 @@ export class TaskScheduler {
         ...task,
         status: "paused",
         updatedAt: now,
-        waitReason: { kind: "budget", summary: `Scheduler budget boundary: ${reasonCode}.`, requestedAt: now }
+        waitReason: { kind: "execution_limit", summary: `Scheduler execution-limit boundary: ${reasonCode}.`, requestedAt: now }
       };
       store.updateTask(next);
       store.appendEvent(this.#event(task, "task-state-changed", now, {
@@ -802,7 +802,7 @@ export class TaskScheduler {
             now.getTime()
           )) return null;
       if (!this.#hasDurableCapacity(store, task, step) ||
-          this.#budgetBlockReason(task, step, store, attempt.id) !== undefined) {
+          this.#executionLimitBlockReason(task, step, store, attempt.id) !== undefined) {
         return null;
       }
       const lease = store.acquireAttemptLease({
@@ -1110,8 +1110,8 @@ export class TaskScheduler {
     if (step === null) throw new TaskSchedulerLeaseLostError();
     const results = [...(settlement.results ?? [])];
     let acceptanceFailure = validateResultAcceptance(step, results);
-    if (acceptanceFailure === undefined && !this.#usageWithinBudget(taskId, step, usage)) {
-      acceptanceFailure = failure("budget-exceeded", "Attempt usage exceeded its Task or Step budget.", false, false);
+    if (acceptanceFailure === undefined && !this.#usageWithinExecutionLimits(taskId, step, usage)) {
+      acceptanceFailure = failure("execution-limit-exceeded", "Attempt usage exceeded its Task or Step execution limits.", false, false);
     }
 
     let preparedResults: PreparedTaskResultBatch | undefined;
@@ -1545,43 +1545,37 @@ export class TaskScheduler {
     return !decision.retry || Date.parse(latest.completedAt) + decision.delayMs <= this.#now().getTime();
   }
 
-  #budgetBlockReason(
+  #executionLimitBlockReason(
     task: Task,
     step: TaskStep,
     store: TaskStore = this.#store,
     ignoredAttemptId?: string
   ): string | undefined {
-    const scopes = listTaskBudgetScopes(store, task, step);
+    const scopes = listTaskExecutionScopes(store, task, step);
     for (let index = 0; index < scopes.length; index++) {
       const scope = scopes[index]!;
       const taskAttempts = listTaskTreeAttempts(store, scope.task.id)
         .filter((attempt) => attempt.id !== ignoredAttemptId);
       const stepAttempts = listStepTreeAttempts(store, scope.task.id, scope.step.id)
         .filter((attempt) => attempt.id !== ignoredAttemptId);
-      const taskUsage = sumUsage(taskAttempts.map(attemptBudgetUsage));
-      const stepUsage = sumUsage(stepAttempts.map(attemptBudgetUsage));
+      const taskUsage = sumUsage(taskAttempts.map(attemptExecutionUsage));
+      const stepUsage = sumUsage(stepAttempts.map(attemptExecutionUsage));
       const prefix = index === 0 ? "" : "ancestor-";
-      if (taskUsage.providerCalls >= scope.task.budgetPolicy.maxProviderCalls) {
-        return `${prefix}task-provider-call-budget-exhausted`;
+      if (taskUsage.providerCalls >= scope.task.executionLimits.maxProviderCalls) {
+        return `${prefix}task-provider-call-limit-exhausted`;
       }
-      if (taskUsage.totalTokens >= scope.task.budgetPolicy.maxTotalTokens) {
-        return `${prefix}task-token-budget-exhausted`;
+      if (taskUsage.totalTokens >= scope.task.executionLimits.maxTotalTokens) {
+        return `${prefix}task-token-limit-exhausted`;
       }
-      if (taskUsage.estimatedCostUsd >= scope.task.budgetPolicy.maxEstimatedCostUsd) {
-        return `${prefix}task-cost-budget-exhausted`;
+      if (stepUsage.providerCalls >= scope.step.executionLimits.maxProviderCalls) {
+        return `${prefix}step-provider-call-limit-exhausted`;
       }
-      if (stepUsage.providerCalls >= scope.step.budget.maxProviderCalls) {
-        return `${prefix}step-provider-call-budget-exhausted`;
-      }
-      if (stepUsage.totalTokens >= scope.step.budget.maxTotalTokens) {
-        return `${prefix}step-token-budget-exhausted`;
-      }
-      if (stepUsage.estimatedCostUsd >= scope.step.budget.maxEstimatedCostUsd) {
-        return `${prefix}step-cost-budget-exhausted`;
+      if (stepUsage.totalTokens >= scope.step.executionLimits.maxTotalTokens) {
+        return `${prefix}step-token-limit-exhausted`;
       }
       const startedAt = scope.task.startedAt === undefined ? undefined : Date.parse(scope.task.startedAt);
-      if (startedAt !== undefined && this.#now().getTime() - startedAt >= scope.task.budgetPolicy.maxWallClockMs) {
-        return `${prefix}task-wall-clock-budget-exhausted`;
+      if (startedAt !== undefined && this.#now().getTime() - startedAt >= scope.task.executionLimits.maxWallClockMs) {
+        return `${prefix}task-wall-clock-limit-exhausted`;
       }
       const stepStartedAt = stepAttempts
         .filter((attempt) => attempt.startedAt !== undefined)
@@ -1589,30 +1583,30 @@ export class TaskScheduler {
           const started = Date.parse(attempt.startedAt!);
           return earliest === undefined || started < earliest ? started : earliest;
         }, undefined);
-      if (stepStartedAt !== undefined && this.#now().getTime() - stepStartedAt >= scope.step.budget.maxWallClockMs) {
-        return `${prefix}step-wall-clock-budget-exhausted`;
+      if (stepStartedAt !== undefined && this.#now().getTime() - stepStartedAt >= scope.step.executionLimits.maxWallClockMs) {
+        return `${prefix}step-wall-clock-limit-exhausted`;
       }
     }
     return undefined;
   }
 
-  #usageWithinBudget(taskId: string, step: TaskStep, newUsage: TaskUsageTotals): boolean {
+  #usageWithinExecutionLimits(taskId: string, step: TaskStep, newUsage: TaskUsageTotals): boolean {
     const task = this.#store.getTask(taskId);
     if (task === null) return false;
     const attempts = this.#store.listAttempts(taskId);
     const currentAttemptId = this.#currentAttemptId(attempts, step.id);
     const effectiveNewUsage = { ...newUsage, providerCalls: Math.max(1, newUsage.providerCalls) };
     const nowMs = this.#now().getTime();
-    for (const scope of listTaskBudgetScopes(this.#store, task, step)) {
+    for (const scope of listTaskExecutionScopes(this.#store, task, step)) {
       const priorTask = sumUsage(listTaskTreeAttempts(this.#store, scope.task.id)
         .filter((attempt) => attempt.id !== currentAttemptId)
-        .map(attemptBudgetUsage));
+        .map(attemptExecutionUsage));
       const scopeStepAttempts = listStepTreeAttempts(this.#store, scope.task.id, scope.step.id);
       const priorStepAttempts = scopeStepAttempts
         .filter((attempt) => attempt.id !== currentAttemptId);
-      const priorStep = sumUsage(priorStepAttempts.map(attemptBudgetUsage));
+      const priorStep = sumUsage(priorStepAttempts.map(attemptExecutionUsage));
       const taskWallClockOk = scope.task.startedAt === undefined ||
-        nowMs - Date.parse(scope.task.startedAt) <= scope.task.budgetPolicy.maxWallClockMs;
+        nowMs - Date.parse(scope.task.startedAt) <= scope.task.executionLimits.maxWallClockMs;
       const firstStepStart = scopeStepAttempts
         .filter((attempt) => attempt.startedAt !== undefined)
         .reduce<number | undefined>((earliest, attempt) => {
@@ -1620,10 +1614,10 @@ export class TaskScheduler {
           return earliest === undefined || started < earliest ? started : earliest;
         }, undefined);
       const stepWallClockOk = firstStepStart === undefined ||
-        nowMs - firstStepStart <= scope.step.budget.maxWallClockMs;
+        nowMs - firstStepStart <= scope.step.executionLimits.maxWallClockMs;
       if (!taskWallClockOk || !stepWallClockOk ||
-          !usageFits(addUsage(priorTask, effectiveNewUsage), scope.task.budgetPolicy) ||
-          !usageFits(addUsage(priorStep, effectiveNewUsage), scope.step.budget)) return false;
+          !usageFits(addUsage(priorTask, effectiveNewUsage), scope.task.executionLimits) ||
+          !usageFits(addUsage(priorStep, effectiveNewUsage), scope.step.executionLimits)) return false;
     }
     return true;
   }
@@ -1658,8 +1652,8 @@ export class TaskScheduler {
     const root = store.getTask(task.rootTaskId);
     if (root === null) return false;
     return state.profile < this.#limits.maxProfileConcurrentAttempts &&
-      (state.task.get(task.id) ?? 0) < task.budgetPolicy.maxConcurrentAttempts &&
-      (state.tree.get(task.rootTaskId) ?? 0) < root.budgetPolicy.maxConcurrentAttempts &&
+      (state.task.get(task.id) ?? 0) < task.executionLimits.maxConcurrentAttempts &&
+      (state.tree.get(task.rootTaskId) ?? 0) < root.executionLimits.maxConcurrentAttempts &&
       (state.executor.get(executorKey) ?? 0) < (this.#limits.maxConcurrentByExecutor?.[executorKey] ?? Number.MAX_SAFE_INTEGER) &&
       (state.provider.get(providerKey) ?? 0) < (this.#limits.maxConcurrentByProvider?.[providerKey] ?? Number.MAX_SAFE_INTEGER);
   }
@@ -1905,7 +1899,7 @@ function usageTotalsFromEntries(entries: readonly ProviderUsageEntry[]): TaskUsa
   };
 }
 
-function attemptBudgetUsage(attempt: TaskAttempt): TaskUsageTotals {
+function attemptExecutionUsage(attempt: TaskAttempt): TaskUsageTotals {
   return { ...attempt.usage, providerCalls: Math.max(1, attempt.usage.providerCalls) };
 }
 
@@ -1927,11 +1921,10 @@ function addUsage(left: TaskUsageTotals, right: TaskUsageTotals): TaskUsageTotal
 
 function usageFits(
   usage: TaskUsageTotals,
-  budget: Pick<Task["budgetPolicy"], "maxProviderCalls" | "maxTotalTokens" | "maxEstimatedCostUsd">
+  executionLimits: Pick<Task["executionLimits"], "maxProviderCalls" | "maxTotalTokens">
 ): boolean {
-  return usage.providerCalls <= budget.maxProviderCalls &&
-    usage.totalTokens <= budget.maxTotalTokens &&
-    usage.estimatedCostUsd <= budget.maxEstimatedCostUsd;
+  return usage.providerCalls <= executionLimits.maxProviderCalls &&
+    usage.totalTokens <= executionLimits.maxTotalTokens;
 }
 
 function usageEventData(usage: TaskUsageTotals): Readonly<Record<string, unknown>> {

@@ -57,9 +57,16 @@ describe("provider spend contracts", () => {
 
   it("accepts a Task worker turn attributed to its originating Session budget scope", async () => {
     const db = new InMemorySessionDB();
-    await db.createSession({ id: "origin", profileId: "alpha" });
+    const limit = { maxEstimatedCostUsd: 5, warningThresholdPercent: 80 };
+    await db.createSession({ id: "origin", profileId: "alpha", spendingLimit: limit });
     await db.appendMessage({ id: "origin-turn", sessionId: "origin", role: "user", content: "Delegated work" });
-    await db.createSession({ id: "worker", profileId: "alpha", parentSessionId: "origin" });
+    await db.createSession({
+      id: "worker",
+      profileId: "alpha",
+      parentSessionId: "origin",
+      spendingScopeSessionId: "origin",
+      spendingLimit: limit
+    });
 
     await expect(assertProviderSpendLineage(db, request({
       sourceKind: "task",

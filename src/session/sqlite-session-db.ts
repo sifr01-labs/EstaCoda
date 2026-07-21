@@ -29,12 +29,14 @@ import {
   migrateTaskTreeBudgetSchemaV17,
   migrateTaskCorrectiveFoundationSchemaV14,
   migrateTaskExecutionPreferenceSchemaV20,
+  migrateExecutionLimitsAndSpendingPolicySchemaV22,
   migrateTaskHostOwnershipSchemaV19,
   migrateTaskVerticalSliceSchemaV15,
   migrateTaskSchedulerSchemaV11,
   migrateTaskSchemaV10
 } from "../workflow/task-schema.js";
 import { insertProviderUsageEntry, selectProviderUsageEntries } from "../workflow/sqlite-provider-usage.js";
+import { assertSpendingLimit, cloneSpendingLimit, type SpendingLimit } from "../contracts/budget.js";
 
 type SessionRow = {
   id: string;
@@ -43,6 +45,8 @@ type SessionRow = {
   created_at: string;
   updated_at: string;
   parent_session_id: string | null;
+  spending_scope_session_id: string | null;
+  spending_limit_json: string | null;
   ended_at: string | null;
   end_reason: string | null;
   metadata_json: string | null;
@@ -68,6 +72,8 @@ type SearchRow = MessageRow & {
   session_created_at: string;
   session_updated_at: string;
   session_parent_session_id: string | null;
+  session_spending_scope_session_id: string | null;
+  session_spending_limit_json: string | null;
   session_ended_at: string | null;
   session_end_reason: string | null;
   session_metadata_json: string | null;
@@ -143,6 +149,20 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     const now = this.#now().toISOString();
     const id = input.id ?? this.#id();
     const profileId = input.profileId ?? "default";
+    const spendingLimit = cloneSpendingLimit(input.spendingLimit);
+    const spendingScopeSessionId = spendingLimit === undefined
+      ? undefined
+      : input.spendingScopeSessionId ?? id;
+    if (spendingLimit === undefined && input.spendingScopeSessionId !== undefined) {
+      throw new Error("A Session spending scope requires an immutable spending limit.");
+    }
+    if (spendingScopeSessionId !== undefined && spendingScopeSessionId !== id) {
+      const owner = await this.getSessionForProfile(spendingScopeSessionId, profileId);
+      if (owner === undefined || owner.spendingScopeSessionId !== owner.id ||
+          JSON.stringify(owner.spendingLimit) !== JSON.stringify(spendingLimit)) {
+        throw new Error("A Session can inherit spending only from a matching logical-session scope owner.");
+      }
+    }
 
     this.#db
       .query(
@@ -153,10 +173,12 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
           created_at,
           updated_at,
           parent_session_id,
+          spending_scope_session_id,
+          spending_limit_json,
           ended_at,
           end_reason,
           metadata_json
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         id,
@@ -165,6 +187,8 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
         now,
         now,
         input.parentSessionId ?? null,
+        spendingScopeSessionId ?? null,
+        spendingLimit === undefined ? null : JSON.stringify(spendingLimit),
         input.endedAt ?? null,
         input.endReason ?? null,
         stringifyJson(input.metadata)
@@ -474,6 +498,8 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
           s.created_at as session_created_at,
           s.updated_at as session_updated_at,
           s.parent_session_id as session_parent_session_id,
+          s.spending_scope_session_id as session_spending_scope_session_id,
+          s.spending_limit_json as session_spending_limit_json,
           s.ended_at as session_ended_at,
           s.end_reason as session_end_reason,
           s.metadata_json as session_metadata_json,
@@ -495,6 +521,8 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
         createdAt: row.session_created_at,
         updatedAt: row.session_updated_at,
         parentSessionId: row.session_parent_session_id ?? undefined,
+        spendingScopeSessionId: row.session_spending_scope_session_id ?? undefined,
+        spendingLimit: parseSpendingLimit(row.session_spending_limit_json),
         endedAt: row.session_ended_at ?? undefined,
         endReason: row.session_end_reason ?? undefined,
         metadata: parseJson(row.session_metadata_json)
@@ -739,6 +767,8 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     this.#runMigrationStep(19, "v0.10-schema-v19-task-host-ownership", () => migrateTaskHostOwnershipSchemaV19(this.#db));
     this.#runMigrationStep(20, "v0.10-schema-v20-task-execution-preference", () => migrateTaskExecutionPreferenceSchemaV20(this.#db));
     this.#runMigrationStep(21, "v0.10-schema-v21-canonical-provider-usage", () => migrateCanonicalProviderUsageSchemaV21(this.#db));
+    this.#runMigrationStep(22, "v0.10-schema-v22-execution-limits-and-spending-policy", () =>
+      migrateExecutionLimitsAndSpendingPolicySchemaV22(this.#db));
   }
 
   #withMigrationLock(migrate: () => void): void {
@@ -985,6 +1015,8 @@ function rowToSession(row: SessionRow): SessionRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     parentSessionId: row.parent_session_id ?? undefined,
+    spendingScopeSessionId: row.spending_scope_session_id ?? undefined,
+    spendingLimit: parseSpendingLimit(row.spending_limit_json),
     endedAt: row.ended_at ?? undefined,
     endReason: row.end_reason ?? undefined,
     metadata: parseJson(row.metadata_json)
@@ -1009,6 +1041,13 @@ function stringifyJson(value: Record<string, unknown> | undefined): string | nul
 
 function parseJson(value: string | null): Record<string, unknown> | undefined {
   return value === null ? undefined : (JSON.parse(value) as Record<string, unknown>);
+}
+
+function parseSpendingLimit(value: string | null): SpendingLimit | undefined {
+  if (value === null) return undefined;
+  const parsed = JSON.parse(value) as SpendingLimit;
+  assertSpendingLimit(parsed, "Stored Session spending limit");
+  return cloneSpendingLimit(parsed);
 }
 
 function readSessionModelOverride(metadata: Record<string, unknown> | undefined): SessionModelOverride | undefined {

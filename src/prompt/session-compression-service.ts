@@ -128,6 +128,10 @@ export class SessionCompressionService {
           profileId: parentSession.profileId,
           title: compactedSessionTitle(parentSession),
           parentSessionId: parentSession.id,
+          ...(parentSession.spendingScopeSessionId === undefined ? {} : {
+            spendingScopeSessionId: parentSession.spendingScopeSessionId,
+            spendingLimit: parentSession.spendingLimit
+          }),
           metadata: compactedSessionMetadata(parentSession, {
             compactedAt,
             compactedFromSessionId: parentSession.id,

@@ -2,6 +2,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomInt } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import type { BrowserBackendKind, BrowserCloudProviderKind } from "../contracts/browser.js";
+import {
+  DEFAULT_SPENDING_WARNING_THRESHOLD_PERCENT,
+  assertSpendingLimit,
+  type BudgetConfig,
+  type SpendingLimit
+} from "../contracts/budget.js";
 import type {
   AuxiliaryModelConfig,
   AuxiliaryModelSlotConfig,
@@ -399,6 +405,10 @@ export type EstaCodaConfig = {
   externalMemory?: Partial<ExternalMemoryConfig>;
   external_memory?: Partial<ExternalMemoryConfig>;
   delegation?: DelegationConfigInput;
+  budgets?: {
+    task?: Partial<SpendingLimit>;
+    session?: Partial<SpendingLimit>;
+  };
   browser?: {
     backend?: BrowserBackendKind;
     cloudProvider?: BrowserCloudProviderKind;
@@ -573,6 +583,7 @@ export type LoadedRuntimeConfig = {
   memory: MemoryConfig;
   externalMemory: ExternalMemoryConfig;
   delegation: DelegationConfig;
+  budgets: BudgetConfig;
   browser: {
     backend: BrowserBackendKind;
     cloudProvider?: BrowserCloudProviderKind;
@@ -986,6 +997,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
     memory: normalizeMemoryConfig(config.memory),
     externalMemory: normalizeExternalMemoryConfig(config.externalMemory ?? config.external_memory),
     delegation: normalizeDelegationConfig(config.delegation),
+    budgets: normalizeBudgetConfig(config.budgets),
     browser: normalizeBrowserConfig(config.browser),
     imageGen: normalizeImageGenerationConfig(config.imageGen ?? config.image_gen),
     gateway: normalizeGatewayConfig(config.gateway),
@@ -1646,6 +1658,25 @@ export function normalizeSessionCompressionConfig(
     ...(summaryModelContextLength === undefined ? {} : { summaryModelContextLength }),
     experimental
   };
+}
+
+export function normalizeBudgetConfig(value: EstaCodaConfig["budgets"]): BudgetConfig {
+  return {
+    ...(value?.task === undefined ? {} : { task: normalizeSpendingLimit(value.task, "Task spending limit") }),
+    ...(value?.session === undefined ? {} : { session: normalizeSpendingLimit(value.session, "Session spending limit") })
+  };
+}
+
+function normalizeSpendingLimit(value: Partial<SpendingLimit>, label: string): SpendingLimit {
+  if (value.maxEstimatedCostUsd === undefined) {
+    throw new Error(`${label} requires a maximum estimated cost in USD.`);
+  }
+  const limit: SpendingLimit = {
+    maxEstimatedCostUsd: value.maxEstimatedCostUsd,
+    warningThresholdPercent: value.warningThresholdPercent ?? DEFAULT_SPENDING_WARNING_THRESHOLD_PERCENT
+  };
+  assertSpendingLimit(limit, label);
+  return limit;
 }
 
 const DELEGATION_RISK_CLASSES = new Set<ToolRiskClass>([

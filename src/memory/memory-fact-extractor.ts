@@ -64,7 +64,6 @@ export async function extractMemoryFacts(input: {
     scopeKey: `${input.profileId}:${input.sessionId}`,
     usage: {
       executionSessionId: input.sessionId,
-      sessionBudgetScopeId: input.sessionId
     }
   });
 

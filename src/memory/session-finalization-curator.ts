@@ -87,7 +87,9 @@ export async function curateSessionFinalizationJob(input: {
       profileId: input.profileId,
       usageRecorder: createProviderUsageRecorder({
         profileId: input.profileId,
-        record: (entries) => input.sessionDb.recordProviderUsageEntries(entries)
+        record: (entries) => input.sessionDb.recordProviderUsageEntries(entries),
+        resolveSessionBudgetScopeId: async (sessionId) =>
+          (await input.sessionDb.getSessionForProfile(sessionId, input.profileId))?.spendingScopeSessionId
       })
     });
     const externalMemory = input.config.externalMemory;

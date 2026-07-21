@@ -2,6 +2,31 @@ import { describe, expect, it } from "vitest";
 import { InMemorySessionDB } from "./in-memory-session-db.js";
 
 describe("InMemorySessionDB", () => {
+  it("snapshots optional logical-session spending scopes and validates inheritance", async () => {
+    const db = new InMemorySessionDB();
+    const configured = { maxEstimatedCostUsd: 20, warningThresholdPercent: 80 };
+    const root = await db.createSession({ id: "budget-root", profileId: "profile", spendingLimit: configured });
+    configured.maxEstimatedCostUsd = 99;
+
+    expect(root).toMatchObject({
+      spendingScopeSessionId: "budget-root",
+      spendingLimit: { maxEstimatedCostUsd: 20, warningThresholdPercent: 80 }
+    });
+    await expect(db.createSession({
+      id: "budget-child",
+      profileId: "profile",
+      spendingScopeSessionId: root.id,
+      spendingLimit: root.spendingLimit
+    })).resolves.toMatchObject({ spendingScopeSessionId: root.id, spendingLimit: root.spendingLimit });
+    await expect(db.createSession({ id: "off", profileId: "profile" })).resolves.not.toHaveProperty("spendingLimit");
+    await expect(db.createSession({
+      id: "invalid-child",
+      profileId: "profile",
+      spendingScopeSessionId: root.id,
+      spendingLimit: { maxEstimatedCostUsd: 21, warningThresholdPercent: 80 }
+    })).rejects.toThrow(/matching logical-session scope owner/i);
+  });
+
   it("sets, reads, and clears a typed session model override", async () => {
     const db = new InMemorySessionDB({
       now: () => new Date("2030-01-01T00:00:00.000Z")

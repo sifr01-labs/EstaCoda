@@ -773,6 +773,7 @@ export class AcpServer {
       providerConfigs: config.config.providers,
       auxiliaryModels: config.auxiliaryModels,
       compression: config.compression,
+      budgets: config.budgets,
       externalMemory: config.externalMemory,
       mcpServers: config.mcp.servers,
       browser: config.browser,
@@ -804,7 +805,11 @@ export class AcpServer {
             profileId: config.profileId,
             usageRecorder: createProviderUsageRecorder({
               profileId: config.profileId,
-              record: (entries) => this.#sessionDb.recordProviderUsageEntries(entries)
+              record: (entries) => this.#sessionDb.recordProviderUsageEntries(entries),
+              resolveSessionBudgetScopeId: async (sessionId) => {
+                const session = await this.#sessionDb.getSession(sessionId);
+                return session?.profileId === config.profileId ? session.spendingScopeSessionId : undefined;
+              }
             })
           }),
           sessionId: options.sessionId

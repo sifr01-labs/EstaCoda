@@ -32,6 +32,7 @@ type DelegateTaskInput = {
   modelOverride?: DelegateModelOverride;
   synthesis?: unknown;
   executionPreference?: TaskExecutionPreference;
+  spendingLimit?: unknown;
 };
 
 export function createDelegationTools(options: DelegationToolOptions): RegisteredTool[] {
@@ -109,6 +110,15 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
             type: "string",
             enum: ["auto", "background"],
             description: "auto starts in the interactive host when available; background sends the Task directly to the gateway."
+          },
+          spendingLimit: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              maxEstimatedCostUsd: { type: "number", minimum: 0 }
+            },
+            required: ["maxEstimatedCostUsd"],
+            description: "Optional estimated-cost ceiling for this root Task. It may narrow, but never widen, the configured default."
           }
         }
       },
@@ -143,6 +153,7 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
           ...(parsed.synthesis === undefined ? {} : { synthesis: parsed.synthesis }),
           trustedWorkspace: await options.trustedWorkspace(),
           executionPreference: input.executionPreference,
+          ...(parsed.spendingLimit === undefined ? {} : { spendingLimit: parsed.spendingLimit }),
           ...(parsed.mode === "batch" && parsed.recoveredTasksFromJsonString === true
             ? { recoveredTasksFromJsonString: true }
             : {})
@@ -199,9 +210,11 @@ function requireProviderDependency<T>(provider: string, dependency: string, valu
   return value;
 }
 
+type ParsedSpendingLimit = { maxEstimatedCostUsd: number };
+
 type ParsedDelegateTaskInput =
-  | { ok: true; mode: "single"; task: string; modelOverride?: DelegateModelOverride; synthesis?: DelegateSynthesis }
-  | { ok: true; mode: "batch"; tasks: DelegateTaskItem[]; synthesis?: DelegateSynthesis; recoveredTasksFromJsonString?: boolean }
+  | { ok: true; mode: "single"; task: string; modelOverride?: DelegateModelOverride; synthesis?: DelegateSynthesis; spendingLimit?: ParsedSpendingLimit }
+  | { ok: true; mode: "batch"; tasks: DelegateTaskItem[]; synthesis?: DelegateSynthesis; spendingLimit?: ParsedSpendingLimit; recoveredTasksFromJsonString?: boolean }
   | { ok: false; error: { ok: false; content: string; metadata: Record<string, unknown> } };
 
 function parseDelegateTaskInput(input: DelegateTaskInput, config: DelegationConfig): ParsedDelegateTaskInput {
@@ -213,6 +226,10 @@ function parseDelegateTaskInput(input: DelegateTaskInput, config: DelegationConf
         "invalid-execution-preference"
       )
     };
+  }
+  const spendingLimit = normalizeSpendingLimit(input.spendingLimit);
+  if (!spendingLimit.ok) {
+    return { ok: false, error: structuredValidationError(spendingLimit.message, spendingLimit.code) };
   }
   const synthesis = normalizeSynthesis(input.synthesis);
   if (!synthesis.ok) {
@@ -238,6 +255,7 @@ function parseDelegateTaskInput(input: DelegateTaskInput, config: DelegationConf
       mode: "batch",
       tasks: normalized.tasks,
       synthesis: synthesis.value,
+      spendingLimit: spendingLimit.value,
       recoveredTasksFromJsonString: recovered.recoveredTasksFromJsonString
     };
   }
@@ -270,8 +288,36 @@ function parseDelegateTaskInput(input: DelegateTaskInput, config: DelegationConf
     mode: "single",
     task,
     modelOverride: modelOverride.value,
-    synthesis: synthesis.value
+    synthesis: synthesis.value,
+    spendingLimit: spendingLimit.value
   };
+}
+
+function normalizeSpendingLimit(
+  value: unknown
+): { ok: true; value?: ParsedSpendingLimit } | { ok: false; code: string; message: string } {
+  if (value === undefined) return { ok: true };
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { ok: false, code: "invalid-spending-limit", message: "delegate_task spendingLimit must be an object." };
+  }
+  const record = value as Record<string, unknown>;
+  const unknownKeys = Object.keys(record).filter((key) => key !== "maxEstimatedCostUsd");
+  if (unknownKeys.length > 0) {
+    return {
+      ok: false,
+      code: "invalid-spending-limit",
+      message: `delegate_task spendingLimit contains unknown fields: ${unknownKeys.join(", ")}.`
+    };
+  }
+  if (typeof record.maxEstimatedCostUsd !== "number" ||
+      !Number.isFinite(record.maxEstimatedCostUsd) || record.maxEstimatedCostUsd < 0) {
+    return {
+      ok: false,
+      code: "invalid-spending-limit",
+      message: "delegate_task spendingLimit.maxEstimatedCostUsd must be a finite non-negative number."
+    };
+  }
+  return { ok: true, value: { maxEstimatedCostUsd: record.maxEstimatedCostUsd } };
 }
 
 function normalizeSynthesis(

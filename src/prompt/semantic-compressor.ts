@@ -370,7 +370,6 @@ export class SemanticCompressor {
       scopeKey: input.scopeKey,
       usage: {
         executionSessionId: input.sessionId,
-        sessionBudgetScopeId: input.sessionId
       }
     });
 

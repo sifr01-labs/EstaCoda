@@ -12,6 +12,7 @@ import type {
 } from "../contracts/session.js";
 import type { FailureRecord } from "../contracts/failure.js";
 import type { ProviderUsageEntry, ProviderUsageQuery } from "../contracts/provider-usage.js";
+import { cloneSpendingLimit } from "../contracts/budget.js";
 import { verifiedCompressionLineage } from "./session-lineage.js";
 import { tokenizeSearchTerms } from "../search/fts-query.js";
 import { providerUsageMatches } from "../providers/provider-usage-ledger.js";
@@ -39,6 +40,22 @@ export class InMemorySessionDB implements SessionDB {
       throw new Error(`Session already exists: ${id}`);
     }
 
+    const spendingLimit = cloneSpendingLimit(input.spendingLimit);
+    const spendingScopeSessionId = spendingLimit === undefined
+      ? undefined
+      : input.spendingScopeSessionId ?? id;
+    if (spendingLimit === undefined && input.spendingScopeSessionId !== undefined) {
+      throw new Error("A Session spending scope requires an immutable spending limit.");
+    }
+    if (spendingScopeSessionId !== undefined && spendingScopeSessionId !== id) {
+      const owner = this.#sessions.get(spendingScopeSessionId);
+      if (owner === undefined || owner.profileId !== input.profileId ||
+          owner.spendingScopeSessionId !== owner.id ||
+          JSON.stringify(owner.spendingLimit) !== JSON.stringify(spendingLimit)) {
+        throw new Error("A Session can inherit spending only from a matching logical-session scope owner.");
+      }
+    }
+
     const session: SessionRecord = {
       id,
       profileId: input.profileId,
@@ -46,6 +63,8 @@ export class InMemorySessionDB implements SessionDB {
       createdAt: now,
       updatedAt: now,
       parentSessionId: input.parentSessionId,
+      ...(spendingScopeSessionId === undefined ? {} : { spendingScopeSessionId }),
+      ...(spendingLimit === undefined ? {} : { spendingLimit }),
       endedAt: input.endedAt,
       endReason: input.endReason,
       metadata: input.metadata
@@ -293,6 +312,7 @@ function scoreMessage(content: string, terms: string[]): number {
 function cloneSession(session: SessionRecord): SessionRecord {
   return {
     ...session,
+    ...(session.spendingLimit === undefined ? {} : { spendingLimit: cloneSpendingLimit(session.spendingLimit) }),
     metadata: session.metadata === undefined ? undefined : structuredClone(session.metadata)
   };
 }
