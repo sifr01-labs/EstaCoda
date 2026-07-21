@@ -57,6 +57,11 @@ export type ApprovalResult = {
   approval: PendingApproval;
 };
 
+export type PendingApprovalCreationOptions = {
+  /** Stable caller-owned key used to recover one durable approval after replay. */
+  idempotencyKey?: string;
+};
+
 type PendingApprovalRow = {
   id: string;
   session_id: string;
@@ -123,18 +128,27 @@ export class GatewayApprovalQueue {
   }
 
   async createPendingApproval(
-    approval: Omit<PendingApproval, "id" | "status">
+    approval: Omit<PendingApproval, "id" | "status">,
+    options: PendingApprovalCreationOptions = {}
   ): Promise<PendingApproval> {
     const profileId = requireScopeValue(approval.profileId, "profileId");
     const sessionId = requireScopeValue(approval.sessionId, "sessionId");
     const approvalKind = approval.approvalKind ?? "command";
+    const id = options.idempotencyKey === undefined
+      ? this.#idFactory()
+      : idempotentApprovalId(profileId, sessionId, options.idempotencyKey);
+    const existing = this.#getScopedRow(id, { profileId, sessionId });
+    if (existing !== null) {
+      assertApprovalReplayMatches(existing, approval, approvalKind);
+      return rowToPendingApproval(existing, { includePayload: false });
+    }
     if (approvalKind === "command") {
       const command = approval.commandPayload ?? approval.commandPreview;
       const hardline = assessHardlineFloor(command);
       if (hardline !== undefined) {
         return {
           ...approval,
-          id: this.#idFactory(),
+          id,
           profileId,
           sessionId,
           approvalKind,
@@ -155,7 +169,7 @@ export class GatewayApprovalQueue {
       if (preflight?.decision === "deny") {
         return {
           ...approval,
-          id: this.#idFactory(),
+          id,
           profileId,
           sessionId,
           approvalKind,
@@ -168,10 +182,10 @@ export class GatewayApprovalQueue {
       }
     }
 
-    const id = this.#idFactory();
+    const insert = options.idempotencyKey === undefined ? "insert" : "insert or ignore";
     this.#db
       .query(
-        `insert into pending_approvals (
+        `${insert} into pending_approvals (
           id,
           session_id,
           profile_id,
@@ -210,6 +224,7 @@ export class GatewayApprovalQueue {
     if (row === null) {
       throw new Error("Pending approval disappeared before creation completed.");
     }
+    assertApprovalReplayMatches(row, approval, approvalKind);
     return rowToPendingApproval(row, { includePayload: false });
   }
 
@@ -397,6 +412,35 @@ export class GatewayApprovalQueue {
     }
 
     throw new Error("Pending approval not found for this profile or session scope.");
+  }
+}
+
+function idempotentApprovalId(profileId: string, sessionId: string, key: string): string {
+  const normalized = key.trim();
+  if (normalized.length === 0 || normalized.length > 256 || /[\u0000-\u001F\u007F]/u.test(normalized)) {
+    throw new Error("Gateway approval idempotency key must be a bounded non-empty token.");
+  }
+  return `approval_${createHash("sha256").update(JSON.stringify([profileId, sessionId, normalized])).digest("hex")}`;
+}
+
+function assertApprovalReplayMatches(
+  row: PendingApprovalRow,
+  approval: Omit<PendingApproval, "id" | "status">,
+  approvalKind: PendingApprovalKind
+): void {
+  if (
+    row.profile_id !== approval.profileId ||
+    row.session_id !== approval.sessionId ||
+    row.command_preview !== approval.commandPreview ||
+    row.command_hash !== approval.commandHash ||
+    row.tool_name !== approval.toolName ||
+    row.approval_kind !== approvalKind ||
+    row.requested_at !== approval.requestedAt.toISOString() ||
+    row.expires_at !== approval.expiresAt.toISOString() ||
+    row.channel !== approval.channel ||
+    row.chat_id !== (approval.chatId ?? null)
+  ) {
+    throw new Error("Gateway approval idempotency key was reused for a different request.");
   }
 }
 

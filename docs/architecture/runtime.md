@@ -131,7 +131,7 @@ Tool authority is resolved before provider schemas are built:
 5. Strip excluded toolsets: browser, media, and MCP by default.
 6. Apply explicit `allowedTools` / `allowedToolsets` as further narrowing, not expansion.
 
-The Task approval policy evaluates hardline command denies first and persists any approval wait against the Task Attempt. It does not inherit a provider turn's pending approvals or treat Task handles as authorization.
+The Task approval policy evaluates hardline command denies first and persists any approval wait against the Task Attempt. Foreground and gateway Task hosts use the same profile-owned SQLite approval queue, bind resolution to the creator session, and replay queue insertion by durable approval-link ID. A foreground exit therefore transfers approval reconciliation through Task host ownership instead of creating a second prompt or grant. The policy does not inherit a provider turn's pending approvals or treat Task handles as authorization.
 
 Gateway interrupt protection is runtime/session scoped. `ChannelGateway` checks the active runtime's `hasActiveSubagents(parentSessionId)` for the active turn; under interrupt busy policy, ordinary messages queue while subagents are active. `/stop`, `/approve`, `/deny`, `/status`, and existing control flows continue to bypass normal blocked-message queues.
 

@@ -4,12 +4,15 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Task, TaskAuthorityPolicy, TaskPlanRevision, TaskStep } from "../contracts/task.js";
 import { TASK_TOOL_RISK_CLASSES } from "../contracts/task.js";
+import { GatewayApprovalQueue } from "../gateway/approval-queue.js";
+import { WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import type { AgentStepExecutor } from "./agent-step-executor.js";
 import { FakeTaskStepExecutor } from "./fake-task-step-executor.js";
 import { ForegroundTaskHost } from "./foreground-task-host.js";
 import { SQLiteTaskStore } from "./sqlite-task-store.js";
 import { SupervisorTaskBackgroundHost } from "./supervisor-task-background-host.js";
+import { TaskApprovalService } from "./task-approval-service.js";
 import { TaskResultService } from "./task-result-service.js";
 
 const NOW = "2030-01-01T00:00:00.000Z";
@@ -281,6 +284,101 @@ describe("ForegroundTaskHost", () => {
 
     finishOld!();
     await vi.waitFor(() => expect(store.listResults("task-handoff")).toHaveLength(1));
+    await background.dispose();
+  });
+
+  it("keeps a foreground approval durable and lets the background host resume the same Attempt", async () => {
+    store.createTaskGraph(makeGraph("task-approval-handoff", [step("task-approval-handoff", "approval", 0)]));
+    const queue = new GatewayApprovalQueue({
+      db: sessionDb.db,
+      controller: new WorkspaceApprovalController(),
+      now
+    });
+    const foregroundApprovals = new TaskApprovalService({
+      store,
+      queue,
+      now,
+      id: () => nextId("task-approval")
+    });
+    const foregroundExecutor = new FakeTaskStepExecutor(() => ({
+      outcome: "waiting_for_approval",
+      approval: {
+        toolName: "file.write",
+        riskClass: "workspace-write",
+        targetFingerprint: `sha256:${"a".repeat(64)}`,
+        targetPreview: "write the durable artifact"
+      }
+    }));
+    const foreground = new ForegroundTaskHost({
+      store,
+      resultService,
+      executor: foregroundExecutor,
+      approvalService: foregroundApprovals,
+      ownerId: "foreground-approval-handoff",
+      workspaceIdentityHash: "workspace-hash",
+      leaseMs: 600_000,
+      heartbeatIntervalMs: 300_000,
+      now
+    });
+
+    await foreground.startTask("task-approval-handoff");
+    await vi.waitFor(() => expect(store.getTask("task-approval-handoff")?.status).toBe("waiting_for_approval"));
+    await foreground.runOnce();
+    const attemptId = store.listAttempts("task-approval-handoff")[0]!.id;
+    const link = store.listApprovalLinks({ taskId: "task-approval-handoff" })[0]!;
+    expect(link).toMatchObject({
+      status: "pending",
+      authorizedSessionId: "creator-alpha",
+      pendingApprovalId: expect.any(String)
+    });
+    expect(await queue.listPending({ profileId: "alpha", sessionId: "creator-alpha" })).toEqual([
+      expect.objectContaining({ id: link.pendingApprovalId, sessionId: "creator-alpha" })
+    ]);
+    expect(store.getTaskHostLease("task-approval-handoff")).toMatchObject({
+      ownerId: "foreground-approval-handoff",
+      kind: "foreground"
+    });
+
+    await foreground.shutdown();
+    expect(store.getTaskHostLease("task-approval-handoff")).toBeNull();
+    expect(store.getTask("task-approval-handoff")?.status).toBe("waiting_for_approval");
+    await queue.resolveApproval(link.pendingApprovalId!, "approved", "operator", {
+      profileId: "alpha",
+      sessionId: "creator-alpha"
+    });
+
+    const backgroundExecutor = new FakeTaskStepExecutor(() => ({
+      outcome: "succeeded",
+      results: [{ kind: "text", content: "approved after handoff" }]
+    }));
+    const backgroundApprovals = new TaskApprovalService({ store, queue, now });
+    const taskAgentExecutor = {
+      kind: "agent" as const,
+      canExecute: () => true,
+      execute: backgroundExecutor.execute.bind(backgroundExecutor)
+    } as unknown as AgentStepExecutor;
+    const background = new SupervisorTaskBackgroundHost({
+      store,
+      resultService,
+      router: { deliverText: async () => new Map() },
+      ownerId: "background-approval-handoff",
+      resolveWorkspace: async (canonicalPath) => ({ canonicalPath, identityHash: "workspace-hash" }),
+      isWorkspaceTrusted: () => true,
+      createExecutorRuntime: async () => ({ taskAgentExecutor, dispose: async () => undefined }),
+      approvalService: backgroundApprovals,
+      leaseMs: 600_000,
+      heartbeatIntervalMs: 300_000,
+      now
+    });
+
+    await expect(background.runOnce()).resolves.toMatchObject({
+      skipped: false,
+      scheduler: { dispatched: 1, completed: 1 }
+    });
+    expect(backgroundExecutor.executions[0]?.attempt.id).toBe(attemptId);
+    expect(backgroundExecutor.executions[0]?.attempt.lease?.fencingToken).toBe(2);
+    expect(store.getTask("task-approval-handoff")?.status).toBe("completed");
+    expect(store.getApprovalLink(link.id)?.status).toBe("approved");
     await background.dispose();
   });
 

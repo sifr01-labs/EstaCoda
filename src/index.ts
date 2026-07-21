@@ -23,8 +23,10 @@ import { createSQLiteSessionDB } from "./session/session-setup.js";
 import { scheduleStartupUpdatePrefetch, shouldScheduleStartupUpdatePrefetch } from "./lifecycle/startup-update.js";
 import { resolveSetupCopy } from "./setup/setup-copy.js";
 import { createSessionId, resolveStartupSessionId } from "./session/session-id.js";
+import { GatewayApprovalQueue } from "./gateway/approval-queue.js";
 import { ForegroundTaskHost } from "./workflow/foreground-task-host.js";
 import { SQLiteTaskStore } from "./workflow/sqlite-task-store.js";
+import { TaskApprovalService } from "./workflow/task-approval-service.js";
 import { TaskResultService } from "./workflow/task-result-service.js";
 import { resolveTaskWorkspaceBinding } from "./workflow/task-workspace.js";
 
@@ -326,6 +328,13 @@ async function main(): Promise<void> {
   if (argv.length === 0 && canRunInteractive()) {
     const foregroundSessionDb = await openLocalSessionDb();
     const foregroundStore = new SQLiteTaskStore({ db: foregroundSessionDb.db, profileId });
+    const foregroundApprovalService = new TaskApprovalService({
+      store: foregroundStore,
+      queue: new GatewayApprovalQueue({
+        db: foregroundSessionDb.db,
+        controller: cliApprovalController
+      })
+    });
     const foregroundWorkspace = await resolveTaskWorkspaceBinding(workspaceRoot);
     const profilePaths = resolveProfileStateHome({ homeDir, profileId });
     const host = new ForegroundTaskHost({
@@ -338,6 +347,7 @@ async function main(): Promise<void> {
       }),
       ownerId: `foreground-task-host-${process.pid}-${Date.now()}`,
       workspaceIdentityHash: foregroundWorkspace.identityHash,
+      approvalService: foregroundApprovalService,
       createExecutorRuntime: async () => {
         const executorRuntime = await buildRuntime({
           sessionId: createSessionId(),

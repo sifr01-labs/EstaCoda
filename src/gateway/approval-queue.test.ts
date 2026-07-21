@@ -93,6 +93,67 @@ async function waitForPending(queue: GatewayApprovalQueue, profileId = "profile-
 }
 
 describe("GatewayApprovalQueue", () => {
+  it("replays one identical durable approval without inserting a duplicate", async () => {
+    const { sessionDb, queue } = await setup();
+    try {
+      const request = approval({ commandPayload: "touch ./artifact.txt" });
+
+      const first = await queue.createPendingApproval(request, { idempotencyKey: "task-approval:link-a" });
+      const replay = await queue.createPendingApproval(request, { idempotencyKey: "task-approval:link-a" });
+
+      expect(replay).toEqual(first);
+      expect(await queue.listPending({ profileId: "profile-a", sessionId: "session-a" })).toEqual([first]);
+      expect(sessionDb.db.query<{ count: number }>("select count(*) as count from pending_approvals").get()?.count).toBe(1);
+
+      await queue.resolveApproval(first.id, "approved", "operator", {
+        profileId: "profile-a",
+        sessionId: "session-a"
+      });
+      await expect(queue.createPendingApproval(request, { idempotencyKey: "task-approval:link-a" }))
+        .resolves.toMatchObject({ id: first.id, status: "approved" });
+      expect(await queue.listPending({ profileId: "profile-a", sessionId: "session-a" })).toEqual([]);
+      expect(sessionDb.db.query<{ count: number }>("select count(*) as count from pending_approvals").get()?.count).toBe(1);
+    } finally {
+      sessionDb.close();
+    }
+  });
+
+  it("rejects reuse of an approval idempotency key for different work", async () => {
+    const { sessionDb, queue } = await setup();
+    try {
+      await queue.createPendingApproval(approval({ commandPayload: "touch ./artifact-a.txt" }), {
+        idempotencyKey: "task-approval:link-a"
+      });
+
+      await expect(queue.createPendingApproval(approval({ commandPayload: "touch ./artifact-b.txt" }), {
+        idempotencyKey: "task-approval:link-a"
+      })).rejects.toThrow(/reused for a different request/);
+      expect(sessionDb.db.query<{ count: number }>("select count(*) as count from pending_approvals").get()?.count).toBe(1);
+    } finally {
+      sessionDb.close();
+    }
+  });
+
+  it("namespaces durable approval replay keys by profile and creator session", async () => {
+    const { sessionDb, queue } = await setup();
+    try {
+      const first = await queue.createPendingApproval(approval(), { idempotencyKey: "task-approval:link-a" });
+      const otherSession = await queue.createPendingApproval(approval({ sessionId: "session-b" }), {
+        idempotencyKey: "task-approval:link-a"
+      });
+      const otherProfile = await queue.createPendingApproval(approval({ profileId: "profile-b" }), {
+        idempotencyKey: "task-approval:link-a"
+      });
+
+      expect(new Set([first.id, otherSession.id, otherProfile.id]).size).toBe(3);
+      expect(await queue.listPending({ profileId: "profile-a", sessionId: "session-a" })).toHaveLength(1);
+      expect(await queue.listPending({ profileId: "profile-a", sessionId: "session-b" })).toHaveLength(1);
+      expect(await queue.listPending({ profileId: "profile-b", sessionId: "session-a" })).toHaveLength(1);
+    } finally {
+      sessionDb.close();
+    }
+  });
+
   it("inserts a pending approval with a concrete profileId", async () => {
     const { sessionDb, queue } = await setup();
     try {

@@ -2,11 +2,14 @@ import { createHash, randomUUID } from "node:crypto";
 import type { SecurityAssessment, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import { assessSecurityPolicy } from "../contracts/security.js";
 import type { Task, TaskApprovalLink, TaskAttempt, TaskStep } from "../contracts/task.js";
-import type { PendingApproval } from "../gateway/approval-queue.js";
+import type { PendingApproval, PendingApprovalCreationOptions } from "../gateway/approval-queue.js";
 import type { TaskStore } from "./task-store.js";
 
 type ApprovalQueue = {
-  createPendingApproval(approval: Omit<PendingApproval, "id" | "status">): Promise<PendingApproval>;
+  createPendingApproval(
+    approval: Omit<PendingApproval, "id" | "status">,
+    options?: PendingApprovalCreationOptions
+  ): Promise<PendingApproval>;
   getApproval(id: string, scope: { profileId: string; sessionId?: string }): Promise<PendingApproval | undefined>;
 };
 
@@ -27,7 +30,7 @@ export type TaskApprovalServiceOptions = {
 
 const DEFAULT_APPROVAL_TTL_MS = 24 * 60 * 60 * 1_000;
 
-/** Bridges an in-process security ask to the durable, session-authorized gateway queue. */
+/** Bridges an in-process security ask to the shared durable, session-authorized approval queue. */
 export class TaskApprovalService {
   readonly #store: TaskStore;
   readonly #queue: ApprovalQueue | undefined;
@@ -166,17 +169,20 @@ export class TaskApprovalService {
 
   async #enqueue(link: TaskApprovalLink): Promise<void> {
     if (this.#queue === undefined) return;
-    const pending = await this.#queue.createPendingApproval({
-      sessionId: link.authorizedSessionId,
-      profileId: link.profileId,
-      commandPreview: link.targetPreview,
-      commandHash: link.targetFingerprint,
-      toolName: link.toolName,
-      approvalKind: "command",
-      requestedAt: new Date(link.requestedAt),
-      expiresAt: new Date(link.expiresAt),
-      channel: "cli"
-    });
+    const pending = await this.#queue.createPendingApproval(
+      {
+        sessionId: link.authorizedSessionId,
+        profileId: link.profileId,
+        commandPreview: link.targetPreview,
+        commandHash: link.targetFingerprint,
+        toolName: link.toolName,
+        approvalKind: "command",
+        requestedAt: new Date(link.requestedAt),
+        expiresAt: new Date(link.expiresAt),
+        channel: "cli"
+      },
+      { idempotencyKey: `task-approval:${link.id}` }
+    );
     const now = this.#now().toISOString();
     const status = pending.status === "pending" ? "pending" : pending.status;
     this.#store.atomicWrite((store) => store.updateApprovalLink({

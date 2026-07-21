@@ -418,7 +418,7 @@ export class SQLiteTaskStore implements TaskStore {
       const owner = this.#db.query<{ host_lease_generation: number }>(
         `select host_lease_generation from tasks
          where id = ? and profile_id = ? and workspace_identity_hash = ?
-           and status in ('queued', 'running', 'waiting_for_host')`
+           and status in ('queued', 'running', 'waiting_for_host', 'waiting_for_approval')`
       ).get(input.taskId, this.#profileId, workspaceIdentityHash);
       if (owner === null) return null;
 

@@ -12,7 +12,12 @@ import type { TaskResultService } from "./task-result-service.js";
 import type { TaskStore } from "./task-store.js";
 import type { TaskApprovalService } from "./task-approval-service.js";
 
-const RUNNABLE_TASK_STATUSES: readonly Task["status"][] = ["queued", "running", "waiting_for_host"];
+const RUNNABLE_TASK_STATUSES: readonly Task["status"][] = [
+  "queued",
+  "running",
+  "waiting_for_host",
+  "waiting_for_approval"
+];
 const EXECUTOR_CREATION_RETRY_MS = 30_000;
 const DEFAULT_HOST_LEASE_MS = 30_000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 10_000;

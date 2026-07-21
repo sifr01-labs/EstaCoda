@@ -10,7 +10,12 @@ import {
 } from "./task-scheduler.js";
 import type { TaskStore } from "./task-store.js";
 
-const RUNNABLE_TASK_STATUSES: readonly Task["status"][] = ["queued", "running", "waiting_for_host"];
+const RUNNABLE_TASK_STATUSES: readonly Task["status"][] = [
+  "queued",
+  "running",
+  "waiting_for_host",
+  "waiting_for_approval"
+];
 const DEFAULT_HOST_LEASE_MS = 30_000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 10_000;
 const DEFAULT_HANDOFF_SETTLE_GRACE_MS = 1_000;
