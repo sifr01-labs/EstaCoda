@@ -87,13 +87,26 @@ describe("DurableDelegationService", () => {
   it("activates a Task only after its durable graph is visible", async () => {
     const activated = vi.fn(async (taskId: string) => {
       expect(store.getTask(taskId)).toMatchObject({ id: taskId, status: "queued" });
+      expect(store.getTaskHostLease(taskId)).toMatchObject({
+        ownerId: "foreground-parent",
+        kind: "foreground",
+        fencingToken: 1
+      });
     });
+    const taskHostAdmission = vi.fn(() => ({
+      workspaceIdentityHash: workspace().identityHash,
+      ownerId: "foreground-parent",
+      kind: "foreground" as const,
+      acquiredAt: "2030-01-01T00:00:00.000Z",
+      expiresAt: "2030-01-01T00:01:00.000Z"
+    }));
     const service = new DurableDelegationService({
       store,
       creatorSessionId: () => "parent",
       workspace: workspace(),
       config: DEFAULT_DELEGATION_CONFIG,
       visibleTools,
+      taskHostAdmission,
       onTaskCreated: activated
     });
 
@@ -104,6 +117,7 @@ describe("DurableDelegationService", () => {
     });
 
     expect(activated).toHaveBeenCalledWith(handle.taskId);
+    expect(taskHostAdmission).toHaveBeenCalledOnce();
   });
 
   it("persists direct-background preference, skips foreground activation, and replay-checks it", async () => {

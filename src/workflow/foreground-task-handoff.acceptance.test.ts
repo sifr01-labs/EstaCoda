@@ -77,6 +77,7 @@ describe("interactive foreground execution and gateway handoff acceptance", () =
         primaryTaskId ??= taskId;
         await foreground.startTask(taskId);
       },
+      taskHostAdmission: () => foreground.taskCreationAdmission(),
       backgroundContinuation: "unavailable"
     });
 
@@ -447,6 +448,7 @@ describe("interactive foreground execution and gateway handoff acceptance", () =
     workspace: typeof WORKSPACE_A | typeof WORKSPACE_B;
     creatorSessionId: () => string;
     onTaskCreated?: (taskId: string) => Promise<void>;
+    taskHostAdmission?: ConstructorParameters<typeof DurableDelegationService>[0]["taskHostAdmission"];
     backgroundContinuation: "available" | "unavailable";
   }): DurableDelegationService {
     return new DurableDelegationService({
@@ -456,6 +458,7 @@ describe("interactive foreground execution and gateway handoff acceptance", () =
       config: DEFAULT_DELEGATION_CONFIG,
       visibleTools: () => [RESULT_READER],
       backgroundContinuation: () => input.backgroundContinuation,
+      taskHostAdmission: input.taskHostAdmission,
       onTaskCreated: input.onTaskCreated
     });
   }

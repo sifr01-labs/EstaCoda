@@ -197,6 +197,7 @@ async function main(): Promise<void> {
   const activateForegroundTask = async (taskId: string): Promise<void> => {
     await foregroundTaskHost?.startTask(taskId);
   };
+  const foregroundTaskAdmission = () => foregroundTaskHost?.taskCreationAdmission();
 
   async function buildRuntime(input: {
     sessionId?: string;
@@ -265,6 +266,7 @@ async function main(): Promise<void> {
       approvalController: cliApprovalController,
       workspaceTrusted: nowTrusted,
       taskBackgroundContinuation: taskBackgroundHost === "active" ? "available" : "unavailable",
+      taskHostAdmission: foregroundTaskAdmission,
       onTaskCreated: activateForegroundTask
     });
   }

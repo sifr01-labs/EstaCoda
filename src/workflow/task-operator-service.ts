@@ -25,7 +25,7 @@ import { redactSensitiveText } from "../utils/redaction.js";
 import { taskUsageFromEntries } from "./task-agent-usage.js";
 import { listTaskTreeUsageEntries } from "./task-tree-accounting.js";
 import { FixedTaskService } from "./fixed-task-service.js";
-import type { TaskStore } from "./task-store.js";
+import type { InitialTaskHostLeaseInput, TaskStore } from "./task-store.js";
 import { taskToolCategory } from "./task-safe-activity.js";
 import { orderTaskResults, taskPrimaryResult } from "./task-primary-result.js";
 
@@ -131,6 +131,7 @@ export class TaskOperatorService {
     source?: "cli" | "gateway" | "runtime";
     executionPreference?: TaskExecutionPreference;
     completionDestination?: TaskDeliveryDestination;
+    initialHostLease?: InitialTaskHostLeaseInput;
   }): TaskStatusProjection {
     const objective = normalizeTaskOperatorObjective(input.objective);
     const authority = operatorTaskAuthority();
@@ -179,6 +180,7 @@ export class TaskOperatorService {
         resultPolicy: { kind: "text", required: true, maxBytes: 1_048_576 }
       }],
       planReason: "Created by an explicit Task operator command.",
+      ...(input.initialHostLease === undefined ? {} : { initialHostLease: input.initialHostLease }),
       ...(input.completionDestination === undefined ? {} : {
         completionDelivery: {
           deliveryKey: TASK_ORIGIN_COMPLETION_DELIVERY_KEY,

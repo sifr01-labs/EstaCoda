@@ -26,6 +26,8 @@ export type CreateTaskGraphInput = {
   steps: readonly TaskStep[];
   /** Creation journal records persisted atomically with the graph. */
   initialEvents?: readonly TaskEvent[];
+  /** Optional first host ownership record persisted atomically with a new graph. */
+  initialHostLease?: InitialTaskHostLeaseInput;
 };
 
 export type ListTasksOptions = {
@@ -62,13 +64,17 @@ export type ReleaseTaskAttemptLeaseInput = {
   fencingToken: number;
 };
 
-export type AcquireTaskHostLeaseInput = {
-  taskId: string;
+export type InitialTaskHostLeaseInput = {
   workspaceIdentityHash: string;
   ownerId: string;
-  kind: TaskHostKind;
+  kind: "foreground";
   acquiredAt: string;
   expiresAt: string;
+};
+
+export type AcquireTaskHostLeaseInput = Omit<InitialTaskHostLeaseInput, "kind"> & {
+  taskId: string;
+  kind: TaskHostKind;
 };
 
 export type RenewTaskHostLeaseInput = {

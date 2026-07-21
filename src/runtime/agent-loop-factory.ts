@@ -18,7 +18,7 @@ import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import { DurableDelegationService } from "../delegation/durable-delegation-service.js";
 import type { TaskWorkspaceBinding } from "../contracts/task.js";
-import type { TaskStore } from "../workflow/task-store.js";
+import type { InitialTaskHostLeaseInput, TaskStore } from "../workflow/task-store.js";
 import {
   applyChildToolAccessResult,
   resolveChildToolAccess,
@@ -125,6 +125,7 @@ export type DefaultChildAgentLoopFactoryOptions = {
   agentProfile?: ConstructorParameters<typeof AgentLoop>[0]["agentProfile"];
   taskStore?: TaskStore;
   taskWorkspace?: TaskWorkspaceBinding;
+  taskHostAdmission?: () => InitialTaskHostLeaseInput | undefined;
   onTaskCreated?: (taskId: string) => Promise<void>;
   id?: () => string;
 };
@@ -156,6 +157,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
   readonly #agentProfile: ConstructorParameters<typeof AgentLoop>[0]["agentProfile"];
   readonly #taskStore: TaskStore | undefined;
   readonly #taskWorkspace: TaskWorkspaceBinding | undefined;
+  readonly #taskHostAdmission: (() => InitialTaskHostLeaseInput | undefined) | undefined;
   readonly #onTaskCreated: ((taskId: string) => Promise<void>) | undefined;
   readonly #id: () => string;
 
@@ -176,6 +178,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
     this.#agentProfile = options.agentProfile;
     this.#taskStore = options.taskStore;
     this.#taskWorkspace = options.taskWorkspace;
+    this.#taskHostAdmission = options.taskHostAdmission;
     this.#onTaskCreated = options.onTaskCreated;
     this.#id = options.id ?? (() => `child_${crypto.randomUUID()}`);
   }
@@ -242,6 +245,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
             config: this.#delegationConfig,
             visibleTools: () => toolRegistry.list(),
             activeTaskExecution: input.taskExecution,
+            taskHostAdmission: this.#taskHostAdmission,
             onTaskCreated: this.#onTaskCreated
           }),
       trustedWorkspace: async () => input.trustedWorkspace,

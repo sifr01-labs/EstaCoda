@@ -108,9 +108,27 @@ export class SQLiteTaskStore implements TaskStore {
     )) {
       throw new TaskStoreIntegrityError("Initial Task events must belong to the supplied Task graph.");
     }
+    if (input.initialHostLease !== undefined && (
+      input.task.executionPreference !== "auto" ||
+      input.initialHostLease.kind !== "foreground" ||
+      input.initialHostLease.workspaceIdentityHash !== input.task.workspace.identityHash
+    )) {
+      throw new TaskStoreIntegrityError(
+        "Initial Task host ownership must be a foreground lease for an auto-executing Task in the same workspace."
+      );
+    }
 
     this.atomicWrite((store) => {
       store.createTask(input.task);
+      if (input.initialHostLease !== undefined) {
+        const lease = store.acquireTaskHostLease({
+          taskId: input.task.id,
+          ...input.initialHostLease
+        });
+        if (lease === null) {
+          throw new TaskStoreIntegrityError(`Initial foreground ownership could not be established for Task ${input.task.id}.`);
+        }
+      }
       this.#insertPlanRevisionRecord(input.revision);
       for (const step of input.steps) {
         this.#insertStepRecord(step);

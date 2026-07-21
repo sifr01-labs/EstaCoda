@@ -20,7 +20,7 @@ import {
   isTaskDeliveryDestination,
   isTerminalTaskStatus
 } from "../contracts/task.js";
-import type { TaskStore } from "./task-store.js";
+import type { InitialTaskHostLeaseInput, TaskStore } from "./task-store.js";
 
 const MAX_GUIDANCE_RECORDS = 64;
 
@@ -62,6 +62,8 @@ export type CreateFixedTaskInput = {
     deliveryKey: string;
     destination: TaskDeliveryDestination;
   };
+  /** Foreground admission persisted in the same transaction as a new Task graph. */
+  initialHostLease?: InitialTaskHostLeaseInput;
   parent?: {
     taskId: string;
     attemptId: string;
@@ -203,7 +205,13 @@ export class FixedTaskService {
             createdAt: timestamp
           });
         }
-        store.createTaskGraph({ task, revision, steps, initialEvents });
+        store.createTaskGraph({
+          task,
+          revision,
+          steps,
+          initialEvents,
+          ...(normalized.initialHostLease === undefined ? {} : { initialHostLease: normalized.initialHostLease })
+        });
         if (task.parentTaskId !== undefined && task.originSessionId !== task.creatorSessionId) {
           store.linkSession({
             taskId: task.id,

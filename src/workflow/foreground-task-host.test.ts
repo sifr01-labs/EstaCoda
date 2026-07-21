@@ -47,6 +47,21 @@ describe("ForegroundTaskHost", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
+  it("provides deterministic admission data for atomic foreground Task creation", async () => {
+    const host = makeHost(new FakeTaskStepExecutor(() => ({ outcome: "succeeded", results: [] })), "foreground-admission");
+
+    expect(host.taskCreationAdmission()).toEqual({
+      workspaceIdentityHash: "workspace-hash",
+      ownerId: "foreground-admission",
+      kind: "foreground",
+      acquiredAt: NOW,
+      expiresAt: "2030-01-01T00:10:00.000Z"
+    });
+
+    await host.shutdown();
+    expect(host.taskCreationAdmission()).toBeUndefined();
+  });
+
   it("claims a newly created Task and confirms dispatch before its Attempt settles", async () => {
     store.createTaskGraph(makeGraph("task-one", [step("task-one", "work", 0)]));
     let finish: (() => void) | undefined;

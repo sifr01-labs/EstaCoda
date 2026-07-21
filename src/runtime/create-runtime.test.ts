@@ -11,6 +11,7 @@ import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { SQLiteTaskStore } from "../workflow/sqlite-task-store.js";
 import { TaskCompletionDeliveryService } from "../workflow/task-completion-delivery.js";
 import { TaskResultService } from "../workflow/task-result-service.js";
+import { resolveTaskWorkspaceBinding } from "../workflow/task-workspace.js";
 import { SessionFinalizationQueue } from "../session/session-finalization-queue.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
@@ -2841,7 +2842,21 @@ describe("createRuntime MCP trust gating", () => {
       complete: provider
     });
     const onTaskCreated = vi.fn(async () => undefined);
-    const runtime = await createRuntime({ ...options, providerRegistry: registry, sessionDb, onTaskCreated });
+    const taskWorkspace = await resolveTaskWorkspaceBinding(options.workspaceRoot);
+    const taskHostAdmission = vi.fn(() => ({
+      workspaceIdentityHash: taskWorkspace.identityHash,
+      ownerId: "foreground-runtime",
+      kind: "foreground" as const,
+      acquiredAt: "2030-01-01T00:00:00.000Z",
+      expiresAt: "2030-01-01T00:01:00.000Z"
+    }));
+    const runtime = await createRuntime({
+      ...options,
+      providerRegistry: registry,
+      sessionDb,
+      taskHostAdmission,
+      onTaskCreated
+    });
     try {
       await runtime.trustWorkspace?.();
       const request = {
@@ -2866,9 +2881,15 @@ describe("createRuntime MCP trust gating", () => {
       expect(firstHandle).toMatchObject({ status: "queued", stepCount: 2 });
       expect(replayHandle).toMatchObject({ taskId: firstHandle?.taskId, idempotentReplay: true });
       expect(task).toMatchObject({ source: "delegation", status: "queued", creatorSessionId: runtime.sessionId });
+      expect(taskStore.getTaskHostLease(task!.id)).toMatchObject({
+        ownerId: "foreground-runtime",
+        kind: "foreground",
+        fencingToken: 1
+      });
       expect(steps.map((step) => step.executor.role)).toEqual(["worker", "orchestrator"]);
       expect(steps[1]?.executor.model).toEqual({ id: "mock-model" });
       expect(onTaskCreated).toHaveBeenCalledTimes(2);
+      expect(taskHostAdmission).toHaveBeenCalledTimes(1);
       expect(onTaskCreated).toHaveBeenNthCalledWith(1, firstHandle?.taskId);
       expect(provider).not.toHaveBeenCalled();
       expect((await sessionDb.listSessions("default")).map((session) => session.id)).toEqual([runtime.sessionId]);
@@ -2882,12 +2903,28 @@ describe("createRuntime MCP trust gating", () => {
     const sessionDb = await createSQLiteSessionDB({ path: join(options.workspaceRoot, "operator-task-sessions.sqlite") });
     await sessionDb.createSession({ id: options.sessionId, profileId: "default" });
     const onTaskCreated = vi.fn(async () => undefined);
-    const runtime = await createRuntime({ ...options, sessionDb, onTaskCreated });
+    const taskWorkspace = await resolveTaskWorkspaceBinding(options.workspaceRoot);
+    const taskHostAdmission = vi.fn(() => ({
+      workspaceIdentityHash: taskWorkspace.identityHash,
+      ownerId: "foreground-operator",
+      kind: "foreground" as const,
+      acquiredAt: "2030-01-01T00:00:00.000Z",
+      expiresAt: "2030-01-01T00:01:00.000Z"
+    }));
+    const runtime = await createRuntime({ ...options, sessionDb, taskHostAdmission, onTaskCreated });
     try {
       await runtime.trustWorkspace?.();
       const task = await runtime.beginTask?.("Execute this Task in the foreground.");
+      const taskStore = new SQLiteTaskStore({ db: sessionDb.db, profileId: "default" });
 
       expect(task?.status).toBe("queued");
+      expect(task?.execution).toBe("foreground");
+      expect(taskStore.getTaskHostLease(task!.taskId)).toMatchObject({
+        ownerId: "foreground-operator",
+        kind: "foreground",
+        fencingToken: 1
+      });
+      expect(taskHostAdmission).toHaveBeenCalledOnce();
       expect(onTaskCreated).toHaveBeenCalledWith(task?.taskId);
     } finally {
       await runtime.dispose();

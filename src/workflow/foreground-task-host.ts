@@ -13,7 +13,7 @@ import {
   type TaskSchedulerDispatchResult,
   type TaskSchedulerRunResult
 } from "./task-scheduler.js";
-import type { TaskStore } from "./task-store.js";
+import type { InitialTaskHostLeaseInput, TaskStore } from "./task-store.js";
 
 const RUNNABLE_TASK_STATUSES: readonly Task["status"][] = [
   "queued",
@@ -132,6 +132,20 @@ export class ForegroundTaskHost {
 
   get ownerId(): string {
     return this.#ownerId;
+  }
+
+  /** Builds the ownership record that must be committed with a new foreground Task. */
+  taskCreationAdmission(): InitialTaskHostLeaseInput | undefined {
+    if (this.#stopping) return undefined;
+    this.#ensureStarted();
+    const now = this.#now();
+    return {
+      workspaceIdentityHash: this.#workspaceIdentityHash,
+      ownerId: this.#ownerId,
+      kind: "foreground",
+      acquiredAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + this.#leaseMs).toISOString()
+    };
   }
 
   /** Recovers interrupted foreground Tasks and starts the heartbeat loop. */

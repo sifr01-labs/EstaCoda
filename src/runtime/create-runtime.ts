@@ -75,6 +75,7 @@ import { availableToolsetsFromTools } from "../cron/cron-runtime-validation.js";
 import { SQLiteTaskStore } from "../workflow/sqlite-task-store.js";
 import { TaskResultService } from "../workflow/task-result-service.js";
 import { TaskOperatorService, type TaskStatusProjection } from "../workflow/task-operator-service.js";
+import type { InitialTaskHostLeaseInput } from "../workflow/task-store.js";
 import { AgentStepExecutor } from "../workflow/agent-step-executor.js";
 import { TaskApprovalService } from "../workflow/task-approval-service.js";
 import { createTaskArtifactContentResolver } from "../workflow/task-artifact-content.js";
@@ -208,6 +209,8 @@ export type RuntimeOptions = {
   taskCreationOrigin?: TaskCreationOrigin;
   /** Process-level activation hook invoked after a durable Task graph is committed. */
   onTaskCreated?: (taskId: string) => Promise<void>;
+  /** Supplies foreground ownership to persist atomically with an interactive Task graph. */
+  taskHostAdmission?: () => InitialTaskHostLeaseInput | undefined;
   /** Process-local view of whether a compatible gateway can continue durable Tasks. */
   taskBackgroundContinuation?: TaskStatusProjection["backgroundContinuation"];
 };
@@ -943,6 +946,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     agentProfile: options.agentProfile,
     taskStore,
     taskWorkspace,
+    taskHostAdmission: options.taskHostAdmission,
     onTaskCreated: options.onTaskCreated
   });
   const builtSession = await builder.buildSession({
@@ -968,6 +972,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           completionDestination: () => currentTaskCreationOrigin().completionDestination,
           executionPreference: () => currentTaskCreationOrigin().source === "gateway" ? "background" : "auto",
           backgroundContinuation: () => options.taskBackgroundContinuation ?? "unknown",
+          taskHostAdmission: options.taskHostAdmission,
           onTaskCreated: options.onTaskCreated
         }),
     trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot),
@@ -1037,12 +1042,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             throw new Error("Task creation requires a trusted workspace.");
           }
           const origin = currentTaskCreationOrigin();
+          const executionPreference = beginOptions.executionPreference ?? (origin.source === "gateway" ? "background" : "auto");
+          const initialHostLease = executionPreference === "auto" ? options.taskHostAdmission?.() : undefined;
           const task = taskOperatorService.begin({
             objective,
             workspace: taskWorkspace,
             creatorSessionId: sessionRuntimeContext.currentSessionId(),
             source: origin.source,
-            executionPreference: beginOptions.executionPreference,
+            executionPreference,
+            ...(initialHostLease === undefined ? {} : { initialHostLease }),
             completionDestination: origin.completionDestination
           });
           if (task.executionPreference === "auto") await options.onTaskCreated?.(task.taskId);

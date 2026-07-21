@@ -20,7 +20,7 @@ import {
 import type { ToolDefinition, ToolRiskClass } from "../contracts/tool.js";
 import { resolveChildToolAccess } from "./toolset-security.js";
 import { FixedTaskService, type FixedTaskGraph, type FixedTaskStepInput } from "../workflow/fixed-task-service.js";
-import type { TaskStore } from "../workflow/task-store.js";
+import type { InitialTaskHostLeaseInput, TaskStore } from "../workflow/task-store.js";
 
 const STEP_PROVIDER_CALLS = 45;
 const STEP_TOTAL_TOKENS = 1_000_000;
@@ -72,6 +72,7 @@ export class DurableDelegationService {
   readonly #completionDestination: (() => TaskDeliveryDestination | undefined) | undefined;
   readonly #executionPreference: (() => TaskExecutionPreference) | undefined;
   readonly #backgroundContinuation: (() => DurableDelegationHandle["backgroundContinuation"]) | undefined;
+  readonly #taskHostAdmission: (() => InitialTaskHostLeaseInput | undefined) | undefined;
   readonly #onTaskCreated: ((taskId: string) => Promise<void>) | undefined;
 
   constructor(options: {
@@ -84,6 +85,7 @@ export class DurableDelegationService {
     completionDestination?: () => TaskDeliveryDestination | undefined;
     executionPreference?: () => TaskExecutionPreference;
     backgroundContinuation?: () => DurableDelegationHandle["backgroundContinuation"];
+    taskHostAdmission?: () => InitialTaskHostLeaseInput | undefined;
     onTaskCreated?: (taskId: string) => Promise<void>;
     fixedTasks?: FixedTaskService;
   }) {
@@ -97,6 +99,7 @@ export class DurableDelegationService {
     this.#completionDestination = options.completionDestination;
     this.#executionPreference = options.executionPreference;
     this.#backgroundContinuation = options.backgroundContinuation;
+    this.#taskHostAdmission = options.taskHostAdmission;
     this.#onTaskCreated = options.onTaskCreated;
   }
 
@@ -121,6 +124,9 @@ export class DurableDelegationService {
     }
     const creationKey = delegationCreationKey(this.#store.profileId, sessionId, request.toolCallId);
     const existing = this.#store.getTaskByCreationKey(creationKey);
+    const initialHostLease = existing === null && executionPreference === "auto"
+      ? this.#taskHostAdmission?.()
+      : undefined;
     const stepAuthorities = request.tasks.map((item) => this.#authorityFor(item, parent?.authority));
     const synthesisAuthority = request.synthesis === undefined
       ? undefined
@@ -214,6 +220,7 @@ export class DurableDelegationService {
       budgetPolicy: budgets.task,
       steps,
       planReason: "Created by delegate_task as durable delegated work.",
+      ...(initialHostLease === undefined ? {} : { initialHostLease }),
       ...(parent === undefined ? { originTurnId: request.toolCallId } : {}),
       ...(completionDestination === undefined ? {} : {
         completionDelivery: {
