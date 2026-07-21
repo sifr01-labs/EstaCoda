@@ -10,6 +10,7 @@ import type { Runtime } from "../runtime/create-runtime.js";
 import { setupVerificationCopy, type SetupVerificationCopy } from "./setup-verification-copy.js";
 import { setupOutputLine, setupTechnicalToken } from "./setup-prompts.js";
 import { diagnoseBrowserSetup, type BrowserSetupDiagnostic } from "./browser-diagnostics.js";
+import type { BudgetConfig, SpendingLimit } from "../contracts/budget.js";
 
 export type SetupVerificationResult = {
   ok: boolean;
@@ -66,6 +67,7 @@ export type SetupVerificationReport = {
   readonly browserDiagnostic?: BrowserSetupDiagnostic;
   readonly toolStatus: SetupVerificationToolStatus;
   readonly configSources: readonly string[];
+  readonly budgets?: BudgetConfig;
   readonly warnings: readonly string[];
   readonly issueCodes: readonly SetupVerificationIssueCode[];
 };
@@ -190,6 +192,7 @@ export async function collectSetupVerificationReport(
     browserDiagnostic: browser,
     toolStatus,
     configSources: config.sources,
+    budgets: config.budgets,
     warnings,
     issueCodes,
   };
@@ -243,6 +246,8 @@ export function renderSetupVerificationReport(
     renderVerificationPair(copy, copy.verification.workspaceTrust, report.workspaceTrusted ? copy.setupCheck.trusted : copy.setupCheck.notTrusted),
     renderVerificationPair(copy, copy.verification.securityMode, `${setupTechnicalToken(locale, report.securityModeLabel)} (${setupTechnicalToken(locale, report.securityModeValue)})`),
     renderVerificationPair(copy, copy.verification.workflowLearning, `${setupTechnicalToken(locale, report.skillAutonomyLabel)} (${setupTechnicalToken(locale, report.skillAutonomyValue)})`),
+    renderVerificationPair(copy, copy.verification.taskSpendingLimit, renderSpendingLimit(report.budgets?.task, copy)),
+    renderVerificationPair(copy, copy.verification.sessionSpendingLimit, renderSpendingLimit(report.budgets?.session, copy)),
     renderVerificationPair(copy, copy.verification.readOnlyToolCheck, renderToolStatus(report.toolStatus, copy)),
     renderVerificationPair(copy, copy.verification.browserBackend, browserDiagnostic.label),
     renderVerificationPair(copy, copy.verification.configSources, report.configSources.length > 0
@@ -272,6 +277,15 @@ export function renderSetupVerificationReport(
   }
 
   return lines.join("\n");
+}
+
+function renderSpendingLimit(
+  limit: SpendingLimit | undefined,
+  copy: SetupVerificationCopy
+): string {
+  if (limit === undefined) return copy.verification.off;
+  const value = `$${limit.maxEstimatedCostUsd.toFixed(2)} USD · ${limit.warningThresholdPercent}%`;
+  return setupTechnicalToken(copy.locale === "ar" ? "ar" : "en", value);
 }
 
 function defaultBrowserDiagnostic(copy: SetupVerificationCopy): BrowserSetupDiagnostic {

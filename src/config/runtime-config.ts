@@ -826,6 +826,11 @@ export type SkillSetupInput = {
   autonomy?: SkillAutonomy;
 };
 
+export type BudgetSetupInput = {
+  scope: "task" | "session";
+  spendingLimit?: SpendingLimit;
+};
+
 export type UiSetupInput = {
   language?: UiLanguage;
   flavor?: UiFlavor;
@@ -1104,6 +1109,10 @@ function patchConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
     delegation: {
       ...(merged.delegation ?? {}),
       ...(config.delegation ?? {})
+    },
+    budgets: {
+      ...(merged.budgets ?? {}),
+      ...(config.budgets ?? {})
     },
     browser: {
       ...(merged.browser ?? {}),
@@ -3003,6 +3012,49 @@ export async function setupSkillConfig(options: {
   return {
     path: targetPath,
     config
+  };
+}
+
+export async function setupBudgetConfig(options: {
+  workspaceRoot: string;
+  homeDir?: string;
+  profileId?: string;
+  input: BudgetSetupInput;
+}): Promise<{
+  path: string;
+  config: EstaCodaConfig;
+}> {
+  if (options.input.scope !== "task" && options.input.scope !== "session") {
+    throw new Error("Budget setup scope must be task or session.");
+  }
+  if (options.input.spendingLimit !== undefined) {
+    assertSpendingLimit(options.input.spendingLimit, `${options.input.scope} spending limit`);
+  }
+  const targetPath = resolveConfigMutationPath(options);
+  const existing = await readConfig(targetPath);
+  const budgets: NonNullable<EstaCodaConfig["budgets"]> = {
+    ...(existing.config.budgets ?? {}),
+  };
+  if (options.input.spendingLimit === undefined) {
+    delete budgets[options.input.scope];
+  } else {
+    budgets[options.input.scope] = {
+      maxEstimatedCostUsd: options.input.spendingLimit.maxEstimatedCostUsd,
+      warningThresholdPercent: options.input.spendingLimit.warningThresholdPercent,
+    };
+  }
+  const config: EstaCodaConfig = {
+    ...existing.config,
+    ...(Object.keys(budgets).length === 0 ? {} : { budgets }),
+  };
+  if (Object.keys(budgets).length === 0) {
+    delete config.budgets;
+  }
+
+  await saveRuntimeConfig(targetPath, config);
+  return {
+    path: targetPath,
+    config,
   };
 }
 

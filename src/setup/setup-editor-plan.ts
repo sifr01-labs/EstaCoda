@@ -9,6 +9,7 @@ export type SetupEditorSectionId =
   | "credentials"
   | "security-mode"
   | "workflow-learning"
+  | "budgets"
   | "interface-preference"
   | "workspace-trust"
   | "optional-capabilities"
@@ -22,6 +23,7 @@ export type SetupEditorSensitiveSurface =
   | "credential-reference"
   | "security-policy"
   | "workflow-learning"
+  | "spending-policy"
   | "interface-preference"
   | "workspace-trust"
   | "optional-capability"
@@ -125,6 +127,7 @@ function normalSections(state: SetupEntryState, mode: SetupEditorPlanMode): Setu
     credentialsSection(state),
     securityModeSection(state),
     workflowLearningSection(state),
+    budgetsSection(state),
     interfacePreferenceSection(),
     workspaceTrustSection(state),
     optionalCapabilitiesSection(),
@@ -354,6 +357,57 @@ function workflowLearningSection(state: SetupEntryState): SetupEditorSection {
       }),
     ],
   });
+}
+
+function budgetsSection(state: SetupEntryState): SetupEditorSection {
+  return section({
+    id: "budgets",
+    copyKey: "setupEditor.sections.budgets",
+    required: false,
+    sensitiveSurface: "spending-policy",
+    status: "ready",
+    data: {
+      task: state.budgets.task,
+      session: state.budgets.session,
+    },
+    warnings: [],
+    blockers: [],
+    actions: [
+      setupEditorAction({
+        id: "edit-spending-limit-for-task",
+        copyKey: "setupEditor.actions.editTaskSpendingLimit",
+        sectionId: "budgets",
+        effect: "draft-config-patch",
+        readOnly: false,
+        requiresExplicitApply: true,
+        patch: scopedPatch(["budgets.task"]),
+        reviewValues: spendingLimitReviewValues("task", state.budgets.task),
+      }),
+      setupEditorAction({
+        id: "edit-spending-limit-for-session",
+        copyKey: "setupEditor.actions.editSessionSpendingLimit",
+        sectionId: "budgets",
+        effect: "draft-config-patch",
+        readOnly: false,
+        requiresExplicitApply: true,
+        patch: scopedPatch(["budgets.session"]),
+        reviewValues: spendingLimitReviewValues("session", state.budgets.session),
+      }),
+    ],
+  });
+}
+
+function spendingLimitReviewValues(
+  scope: "task" | "session",
+  limit: SetupEntryState["budgets"]["task"]
+): Record<string, string | boolean | number | undefined> {
+  return {
+    budgetScope: scope,
+    enabled: limit !== undefined,
+    maxEstimatedCostUsd: limit?.maxEstimatedCostUsd,
+    maxEstimatedCostDisplay: limit === undefined ? undefined : `$${limit.maxEstimatedCostUsd.toFixed(2)} USD`,
+    warningThresholdPercent: limit?.warningThresholdPercent,
+  };
 }
 
 function interfacePreferenceSection(): SetupEditorSection {

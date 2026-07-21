@@ -10,6 +10,7 @@ export type OnboardingWizardDraftStepId =
   | "primary-credential"
   | "security-mode"
   | "workflow-learning"
+  | "spending-policy"
   | "optional-capabilities"
   | "verify";
 
@@ -36,6 +37,7 @@ export type SetupDraftKind =
   | "credential-reference"
   | "security-mode"
   | "workflow-learning"
+  | "spending-policy"
   | "ui-preferences"
   | "workspace-trust"
   | "optional-capability"
@@ -49,6 +51,7 @@ export type SetupDraftRiskSurface =
   | "credential-reference"
   | "security-policy"
   | "workflow-learning"
+  | "spending-policy"
   | "interface-preference"
   | "workspace-trust"
   | "optional-capability"
@@ -412,6 +415,19 @@ function draftFromEditorAction(
     });
   }
 
+  if (action.id === "edit-spending-limit-for-task" || action.id === "edit-spending-limit-for-session") {
+    return configDraft({
+      id: editorDraftId(action),
+      kind: "spending-policy",
+      source,
+      riskSurface: "spending-policy",
+      scope: action.patch?.fields ?? [],
+      configPath: options.configPath,
+      summaryKey: spendingPolicySummaryKey(action.reviewValues),
+      values: action.reviewValues ?? {},
+    });
+  }
+
   if (action.id === "edit-language") {
     return configDraft({
       id: editorDraftId(action),
@@ -530,6 +546,14 @@ function draftFromEditorAction(
     summaryKey: `setupDrafts.${action.id}.summary`,
     values: { actionId: action.id },
   });
+}
+
+function spendingPolicySummaryKey(
+  values: SetupEditorActionDraft["reviewValues"]
+): string {
+  const scope = values?.budgetScope === "session" ? "session" : "task";
+  const state = values?.enabled === true ? "set" : "off";
+  return `setupDrafts.spendingPolicy.${scope}.${state}.summary`;
 }
 
 function configDraft(input: {
@@ -746,6 +770,9 @@ function kindForEditorAction(action: SetupEditorActionDraft): SetupDraftKind {
       return "security-mode";
     case "edit-workflow-learning":
       return "workflow-learning";
+    case "edit-spending-limit-for-task":
+    case "edit-spending-limit-for-session":
+      return "spending-policy";
     case "edit-language":
       return "ui-preferences";
     case "review-optional-capabilities":
@@ -775,6 +802,7 @@ function riskSurfaceForAction(action: SetupEditorActionDraft): SetupDraftRiskSur
     "credential-reference": "credential-reference",
     "security-policy": "security-policy",
     "workflow-learning": "workflow-learning",
+    "spending-policy": "spending-policy",
     "interface-preference": "interface-preference",
     "workspace-trust": "workspace-trust",
     "optional-capability": "optional-capability",
@@ -788,8 +816,10 @@ function riskSurfaceForAction(action: SetupEditorActionDraft): SetupDraftRiskSur
       ? "credential-reference"
       : action.sectionId === "security-mode"
         ? "security-policy"
-        : action.sectionId === "workflow-learning"
+      : action.sectionId === "workflow-learning"
         ? "workflow-learning"
+        : action.sectionId === "budgets"
+          ? "spending-policy"
           : action.sectionId === "interface-preference"
             ? "interface-preference"
             : action.sectionId === "optional-capabilities"

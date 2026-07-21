@@ -15,6 +15,7 @@ export type SetupReviewManifestSection =
   | "remote-control-surfaces"
   | "security-mode"
   | "workflow-learning"
+  | "spending-policy"
   | "verification-checks"
   | "launch-handoff"
   | "blockers"
@@ -217,6 +218,9 @@ function linesForDraft(draft: SetupDraft): SetupReviewManifestLine[] {
     case "workflow-learning":
       lines.push(lineFromDraft(draft, "workflow-learning", { idSuffix: "workflow" }));
       break;
+    case "spending-policy":
+      lines.push(lineFromDraft(draft, "spending-policy", { idSuffix: "spending" }));
+      break;
     case "optional-capability":
       lines.push(...optionalCapabilityLines(draft));
       break;
@@ -350,6 +354,7 @@ function groupSections(
     "remote-control-surfaces": lines.filter((line) => line.section === "remote-control-surfaces"),
     "security-mode": lines.filter((line) => line.section === "security-mode"),
     "workflow-learning": lines.filter((line) => line.section === "workflow-learning"),
+    "spending-policy": lines.filter((line) => line.section === "spending-policy"),
     "verification-checks": lines.filter((line) => line.section === "verification-checks"),
     "launch-handoff": lines.filter((line) => line.section === "launch-handoff"),
     blockers: lines.filter((line) => line.section === "blockers"),

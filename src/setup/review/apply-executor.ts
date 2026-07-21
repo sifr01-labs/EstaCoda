@@ -25,6 +25,7 @@ import {
   readConfig,
   setupSecurityConfig,
   setupSkillConfig,
+  setupBudgetConfig,
   setupModelFallbackConfig,
   setupAuxiliaryModelConfig,
   setupDiscordConfig,
@@ -316,6 +317,12 @@ async function applyConfigPatch(
     case "setupModules.workflow-learning.draft":
       await applyWorkflowLearning(operation, options);
       return [];
+    case "setupDrafts.spendingPolicy.task.set.summary":
+    case "setupDrafts.spendingPolicy.task.off.summary":
+    case "setupDrafts.spendingPolicy.session.set.summary":
+    case "setupDrafts.spendingPolicy.session.off.summary":
+      await applySpendingPolicy(operation, options);
+      return [];
     case "setupDrafts.uiPreferences.summary":
       await applyUiPreferences(operation, options);
       return [];
@@ -561,6 +568,42 @@ async function applyWorkflowLearning(
     ...target,
     input: {
       autonomy,
+    },
+  });
+}
+
+async function applySpendingPolicy(
+  operation: SetupApplyOperation,
+  options: ReviewedSetupApplyExecutorOptions
+): Promise<void> {
+  const scope = operation.review.values.budgetScope;
+  const enabled = operation.review.values.enabled;
+  if ((scope !== "task" && scope !== "session") || typeof enabled !== "boolean") {
+    throw new Error("Spending policy apply requires a valid Task or session scope and enabled state.");
+  }
+  const expectedSummaryKey = `setupDrafts.spendingPolicy.${scope}.${enabled ? "set" : "off"}.summary`;
+  if (operation.review.summaryKey !== expectedSummaryKey) {
+    throw new Error("Spending policy review metadata does not match the reviewed scope and state.");
+  }
+  const target = configApplyTarget(operation, options);
+  if (!enabled) {
+    await setupBudgetConfig({
+      ...target,
+      input: { scope },
+    });
+    return;
+  }
+
+  const maxEstimatedCostUsd = numberValue(operation.review.values.maxEstimatedCostUsd);
+  const warningThresholdPercent = numberValue(operation.review.values.warningThresholdPercent);
+  if (maxEstimatedCostUsd === undefined || warningThresholdPercent === undefined) {
+    throw new Error("Enabled spending policy requires maximum estimated cost and warning threshold values.");
+  }
+  await setupBudgetConfig({
+    ...target,
+    input: {
+      scope,
+      spendingLimit: { maxEstimatedCostUsd, warningThresholdPercent },
     },
   });
 }

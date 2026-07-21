@@ -53,6 +53,7 @@ function state(kind: SetupEntryStateKind, overrides: Partial<SetupEntryState> = 
     stateDirectoryWritable: kind !== "state-not-writable",
     missingCredentials: kind === "missing-secret" ? { envVars: ["OPENAI_API_KEY"], providers: ["openai"] } : { envVars: [], providers: [] },
     setupVerification: report,
+    budgets: {},
     warnings: report.warnings,
     blockers: kind === "configured-ready" ? [] : [`${kind} blocker`],
     model: {
@@ -109,6 +110,7 @@ describe("buildSetupEditorPlan", () => {
       "credentials",
       "security-mode",
       "workflow-learning",
+      "budgets",
       "interface-preference",
       "workspace-trust",
       "optional-capabilities",
@@ -207,6 +209,31 @@ describe("buildSetupEditorPlan", () => {
     }));
   });
 
+  it("exposes disabled-by-default Task and session monetary limits without token controls", () => {
+    const plan = buildSetupEditorPlan(state("configured-ready", {
+      budgets: {
+        task: { maxEstimatedCostUsd: 5, warningThresholdPercent: 80 },
+      },
+    }));
+    const budgets = section(plan, "budgets");
+
+    expect(budgets.required).toBe(false);
+    expect(budgets.sensitiveSurface).toBe("spending-policy");
+    expect(budgets.data).toEqual({
+      task: { maxEstimatedCostUsd: 5, warningThresholdPercent: 80 },
+      session: undefined,
+    });
+    expect(budgets.actions.map((action) => action.id)).toEqual([
+      "edit-spending-limit-for-task",
+      "edit-spending-limit-for-session",
+    ]);
+    expect(budgets.actions.map((action) => action.patch?.fields)).toEqual([
+      ["budgets.task"],
+      ["budgets.session"],
+    ]);
+    expect(JSON.stringify(budgets)).not.toMatch(/token|provider.?call/iu);
+  });
+
   it("keeps action drafts declarative and non-mutating", () => {
     const plan = buildSetupEditorPlan(state("configured-ready"));
 
@@ -285,6 +312,8 @@ describe("buildSetupEditorPlan", () => {
       "edit-auxiliary-model-route",
       "edit-security-mode",
       "edit-workflow-learning",
+      "edit-spending-limit-for-task",
+      "edit-spending-limit-for-session",
       "edit-language",
       "configure-channels",
       "configure-voice",

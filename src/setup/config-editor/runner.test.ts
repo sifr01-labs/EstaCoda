@@ -22,6 +22,7 @@ import {
   promptOptionalCapabilityAction,
   promptedBrowserCapabilityMode,
   promptSecurityMode,
+  promptSpendingLimit,
   promptSttCapability,
   promptTtsCapability,
   promptVisionCapability,
@@ -123,6 +124,8 @@ describe("runConfigEditor", () => {
     expect(output.join("")).toContain("Models used for assessment, compression, recall, and memory.");
     expect(output.join("")).toContain("edit-security-mode");
     expect(output.join("")).toContain("edit-workflow-learning");
+    expect(output.join("")).toContain("edit-spending-limit-for-task - Default Task spending limit — Off");
+    expect(output.join("")).toContain("edit-spending-limit-for-session - Default session spending limit — Off");
     expect(output.join("")).toContain("edit-language - Language");
     expect(output.join("")).toContain("configure-channels");
     expect(output.join("")).toContain("configure-voice");
@@ -250,6 +253,8 @@ describe("runConfigEditor", () => {
       "configure-browser",
       "edit-security-mode",
       "edit-workflow-learning",
+      "edit-spending-limit-for-task",
+      "edit-spending-limit-for-session",
       "edit-language",
       "run-doctor",
       "exit",
@@ -1298,6 +1303,81 @@ describe("runConfigEditor", () => {
     expect(result.applyPlanningResult?.kind).toBe("apply-plan-ready");
     expect(config.skills?.autonomy).toBe("autonomous");
     expect(config.skills?.externalDirs).toEqual(["/tmp/estacoda-skills"]);
+  });
+
+  it("applies reviewed Task spending limits while preserving the session limit and unrelated config", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      budgets: {
+        session: { maxEstimatedCostUsd: 20, warningThresholdPercent: 70 },
+      },
+      security: { approvalMode: "adaptive" },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: ["configure", "0", "80"] }),
+      defaultActionId: "edit-spending-limit-for-task",
+      applyExecutor: createReviewedSetupApplyExecutor({ homeDir: tempDir, workspaceRoot }),
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      budgets?: Record<string, { maxEstimatedCostUsd: number; warningThresholdPercent: number }>;
+      security?: { approvalMode?: string };
+      model?: unknown;
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("edit-spending-limit-for-task");
+    expect(result.reviewManifest?.sections["spending-policy"]).toHaveLength(1);
+    expect(result.reviewManifest?.sections["files-to-write-update"][0]?.target).toEqual(expect.objectContaining({
+      scope: ["budgets.task"],
+      preserveUnrelatedConfig: true,
+    }));
+    expect(config.budgets).toEqual({
+      task: { maxEstimatedCostUsd: 0, warningThresholdPercent: 80 },
+      session: { maxEstimatedCostUsd: 20, warningThresholdPercent: 70 },
+    });
+    expect(config.security?.approvalMode).toBe("adaptive");
+    expect(config.model).toEqual((localReadyConfig() as { model: unknown }).model);
+    expect(JSON.stringify(result.reviewManifest)).not.toMatch(/maxTotalTokens|maxProviderCalls/iu);
+    expect(result.applyEndState?.kind).toBe("verified-ready");
+    if (result.applyEndState?.kind === "verified-ready") {
+      expect(result.applyEndState.verification.budgets?.task).toEqual({
+        maxEstimatedCostUsd: 0,
+        warningThresholdPercent: 80,
+      });
+    }
+  });
+
+  it("turns off only the selected spending limit", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      budgets: {
+        task: { maxEstimatedCostUsd: 5, warningThresholdPercent: 80 },
+        session: { maxEstimatedCostUsd: 20, warningThresholdPercent: 75 },
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: ["off"] }),
+      defaultActionId: "edit-spending-limit-for-task",
+      applyExecutor: createReviewedSetupApplyExecutor({ homeDir: tempDir, workspaceRoot }),
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      budgets?: Record<string, unknown>;
+    };
+
+    expect(result.completed).toBe(true);
+    expect(config.budgets).toEqual({
+      session: { maxEstimatedCostUsd: 20, warningThresholdPercent: 75 },
+    });
+    expect(result.reviewManifest?.sections["spending-policy"][0]?.review.summaryKey)
+      .toBe("setupDrafts.spendingPolicy.task.off.summary");
   });
 
   it("applies reviewed language changes through shared interface preference prompts", async () => {
@@ -5500,6 +5580,32 @@ describe("runConfigEditor", () => {
     expect(result.initialDecision.setupEditorPlanSession?.plan.safeForNormalConfigEditing).toBe(false);
     expect(result.initialDecision.setupEditorPlanSession?.plan.actions.some((action) => action.patch !== undefined)).toBe(false);
   });
+
+  it("validates monetary and warning inputs while accepting zero", async () => {
+    const result = await promptSpendingLimit(
+      fakePrompt({ values: ["configure", "-1", "0", "101", "80"] }),
+      { scope: "task" }
+    );
+
+    expect(result).toEqual({
+      kind: "selected",
+      spendingLimit: { maxEstimatedCostUsd: 0, warningThresholdPercent: 80 },
+    });
+  });
+
+  it("isolates configured USD values in the Arabic spending-limit prompt", async () => {
+    const prompt = fakePrompt({ values: ["off"] });
+    const selectInputs = captureSelectInputs(prompt);
+
+    const result = await promptSpendingLimit(prompt, {
+      scope: "session",
+      current: { maxEstimatedCostUsd: 20, warningThresholdPercent: 80 },
+    }, "ar");
+
+    expect(result).toEqual({ kind: "selected" });
+    expect(selectInputs[0]?.title).toBe("حد الإنفاق الافتراضي للجلسات");
+    expect(selectInputs[0]?.statusLines?.[0]?.text).toContain(isolateLtr("$20.00 USD"));
+  });
 });
 
 describe("setupEditorReviewSelectedAreaLabel", () => {
@@ -5531,6 +5637,7 @@ function minimalManifest(sourceBundleIds: readonly string[] = []): SetupReviewMa
       "remote-control-surfaces": [],
       "security-mode": [],
       "workflow-learning": [],
+      "spending-policy": [],
       "verification-checks": [],
       "launch-handoff": [],
       blockers: [],

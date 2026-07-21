@@ -15,6 +15,8 @@ export type SetupVerificationCopy = {
     readonly workspaceTrust: string;
     readonly securityMode: string;
     readonly workflowLearning: string;
+    readonly taskSpendingLimit: string;
+    readonly sessionSpendingLimit: string;
     readonly readOnlyToolCheck: string;
     readonly browserBackend: string;
     readonly configSources: string;
@@ -24,6 +26,7 @@ export type SetupVerificationCopy = {
     readonly presentMode: (mode: string) => string;
     readonly skipped: string;
     readonly ready: string;
+    readonly off: string;
     readonly browserStates: {
       readonly notConfigured: string;
       readonly disabled: string;
@@ -77,6 +80,8 @@ export function setupVerificationCopy(locale: SetupCopyLocale | string): SetupVe
       workspaceTrust: copy(locale, "setupVerification.workspaceTrust"),
       securityMode: copy(locale, "setupVerification.securityMode"),
       workflowLearning: copy(locale, "setupVerification.workflowLearning"),
+      taskSpendingLimit: copy(locale, "setupVerification.taskSpendingLimit"),
+      sessionSpendingLimit: copy(locale, "setupVerification.sessionSpendingLimit"),
       readOnlyToolCheck: copy(locale, "setupVerification.readOnlyToolCheck"),
       browserBackend: copy(locale, "setupVerification.browserBackend"),
       configSources: copy(locale, "setupVerification.configSources"),
@@ -86,6 +91,7 @@ export function setupVerificationCopy(locale: SetupCopyLocale | string): SetupVe
       presentMode: (mode) => format(locale, "setupVerification.status.presentMode", { mode }),
       skipped: copy(locale, "setupVerification.status.skipped"),
       ready: copy(locale, "setupVerification.status.ready"),
+      off: copy(locale, "setupVerification.status.off"),
       browserStates: {
         notConfigured: copy(locale, "setupVerification.browser.status.notConfigured"),
         disabled: copy(locale, "setupVerification.browser.status.disabled"),

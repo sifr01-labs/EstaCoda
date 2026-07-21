@@ -75,6 +75,7 @@ const REVIEW_SECTION_COPY_KEYS: Record<SetupReviewManifestSection, SetupCopyKey>
   "remote-control-surfaces": "setupReview.sections.remoteControlSurfaces",
   "security-mode": "setupReview.sections.securityMode",
   "workflow-learning": "setupReview.sections.workflowLearning",
+  "spending-policy": "setupReview.sections.spendingPolicy",
   "verification-checks": "setupReview.sections.verificationChecks",
   "launch-handoff": "setupReview.sections.launchHandoff",
   blockers: "setupReview.sections.blockers",

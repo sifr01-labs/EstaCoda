@@ -77,6 +77,7 @@ import {
   promptFallbackRouteAction,
   promptOptionalCapabilityAction,
   promptSecurityMode,
+  promptSpendingLimit,
   promptVoiceCapability,
   promptWorkflowLearning,
   promptWorkspaceTrustConfirmation,
@@ -552,6 +553,9 @@ async function handleAction(
       return handleSecurityModeAction(options, initialDecision, session, action);
     case "edit-workflow-learning":
       return handleWorkflowLearningAction(options, initialDecision, session, action);
+    case "edit-spending-limit-for-task":
+    case "edit-spending-limit-for-session":
+      return handleSpendingLimitAction(options, initialDecision, session, action);
     case "edit-language":
       return handleLanguageAction(options, initialDecision, session, action);
     case "edit-primary-model-route":
@@ -748,6 +752,37 @@ async function handleWorkflowLearningAction(
     reviewValues: {
       ...editorAction.reviewValues,
       workflowLearning: workflowLearning.value,
+    },
+  });
+}
+
+async function handleSpendingLimitAction(
+  options: LocalizedConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
+  action: ConfigEditorRenderedAction
+): Promise<ConfigEditorRunnerResult> {
+  const editorAction = requireEditorAction(action);
+  const scope = action.id === "edit-spending-limit-for-task" ? "task" : "session";
+  const result = await promptSpendingLimit(options.prompt, {
+    scope,
+    current: initialDecision.state.budgets[scope],
+  }, options.locale);
+  if (result.kind === "back") {
+    return menuBackResult(initialDecision, action.id);
+  }
+
+  return reviewAndApplyAction(options, initialDecision, session, {
+    ...editorAction,
+    reviewValues: {
+      ...editorAction.reviewValues,
+      budgetScope: scope,
+      enabled: result.spendingLimit !== undefined,
+      maxEstimatedCostUsd: result.spendingLimit?.maxEstimatedCostUsd,
+      maxEstimatedCostDisplay: result.spendingLimit === undefined
+        ? undefined
+        : `$${result.spendingLimit.maxEstimatedCostUsd.toFixed(2)} USD`,
+      warningThresholdPercent: result.spendingLimit?.warningThresholdPercent,
     },
   });
 }

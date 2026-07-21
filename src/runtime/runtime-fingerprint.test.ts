@@ -210,6 +210,22 @@ describe("computeRuntimeFingerprint", () => {
     expect(fp1).not.toEqual(fp2);
   });
 
+  it("spending defaults change the runtime fingerprint", () => {
+    const base = fakeLoadedRuntimeConfig({ budgets: {} });
+    const opts = fakeOptions();
+    const withoutLimits = computeRuntimeFingerprint(base, opts);
+    const withTaskLimit = computeRuntimeFingerprint(fakeLoadedRuntimeConfig({
+      budgets: {
+        task: { maxEstimatedCostUsd: 5, warningThresholdPercent: 80 },
+      },
+    }), opts);
+
+    expect(withoutLimits.budgetsHash).toBeDefined();
+    expect(withTaskLimit.budgetsHash).toBeDefined();
+    expect(withoutLimits.budgetsHash).not.toBe(withTaskLimit.budgetsHash);
+    expect(withoutLimits).not.toEqual(withTaskLimit);
+  });
+
   it("primary model route endpoint metadata changes fingerprint", () => {
     const base = fakeLoadedRuntimeConfig({
       primaryModelRoute: {

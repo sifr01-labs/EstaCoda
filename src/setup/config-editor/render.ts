@@ -1,6 +1,6 @@
 import type { SetupEditorPlanSession, SetupRouteAction, SetupRouteActionId, SetupRouteDecision } from "../setup-router.js";
 import type { SetupEditorActionDraft, SetupEditorActionId } from "../setup-editor-actions.js";
-import { formatSetupCopy, setupCopyText, type SetupPromptValue } from "../setup-prompts.js";
+import { formatSetupCopy, setupCopyText, setupTechnicalToken, type SetupPromptValue } from "../setup-prompts.js";
 import type { SetupCopyLocale } from "../setup-copy.js";
 
 export type ConfigEditorRenderedAction = {
@@ -28,6 +28,8 @@ const PR6_EDITOR_ACTION_ORDER: readonly SetupEditorActionId[] = [
   "repair-workspace-trust",
   "edit-security-mode",
   "edit-workflow-learning",
+  "edit-spending-limit-for-task",
+  "edit-spending-limit-for-session",
   "edit-language",
 ];
 
@@ -206,15 +208,31 @@ function renderEditorAction(
   copyValues: Record<string, SetupPromptValue>,
   locale: SetupCopyLocale
 ): ConfigEditorRenderedAction {
+  const baseLabel = formatSetupCopy(locale, action.copyKey, copyValues);
   return {
     id: action.id,
-    label: formatSetupCopy(locale, action.copyKey, copyValues),
+    label: spendingLimitActionLabel(action, baseLabel, locale),
     description: editorActionDescription(action, locale),
     group: action.effect === "exit" ? "navigation" : undefined,
     readOnly: action.readOnly,
     source: "editor",
     editorAction: action,
   };
+}
+
+function spendingLimitActionLabel(
+  action: SetupEditorActionDraft,
+  baseLabel: string,
+  locale: SetupCopyLocale
+): string {
+  if (action.id !== "edit-spending-limit-for-task" && action.id !== "edit-spending-limit-for-session") {
+    return baseLabel;
+  }
+  const maximum = action.reviewValues?.maxEstimatedCostUsd;
+  const status = action.reviewValues?.enabled === true && typeof maximum === "number"
+    ? setupTechnicalToken(locale, `$${maximum.toFixed(2)} USD`)
+    : setupCopyText(locale, "setupEditor.budgets.off");
+  return `${baseLabel} — ${status}`;
 }
 
 function syntheticAction(id: SetupRouteActionId, locale: SetupCopyLocale): ConfigEditorRenderedAction {
@@ -299,6 +317,10 @@ function editorActionDescription(action: SetupEditorActionDraft, locale: SetupCo
       return setupCopyText(locale, "setupEditor.actions.editSecurityMode.description");
     case "edit-workflow-learning":
       return setupCopyText(locale, "setupEditor.actions.editWorkflowLearning.description");
+    case "edit-spending-limit-for-task":
+      return setupCopyText(locale, "setupEditor.actions.editTaskSpendingLimit.description");
+    case "edit-spending-limit-for-session":
+      return setupCopyText(locale, "setupEditor.actions.editSessionSpendingLimit.description");
     case "edit-language":
       return setupCopyText(locale, "setupEditor.actions.chooseLanguage.description");
     case "configure-channels":

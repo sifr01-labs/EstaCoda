@@ -8,6 +8,10 @@ import type { PromptCardStatusLine } from "../../contracts/view-model.js";
 import type { BrowserEngineKind, ImageGenerationProvider, SttProvider, TtsProvider } from "../../config/runtime-config.js";
 import type { ModelFallbackConfig } from "../../config/runtime-config.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
+import {
+  DEFAULT_SPENDING_WARNING_THRESHOLD_PERCENT,
+  type SpendingLimit,
+} from "../../contracts/budget.js";
 import type { SetupReviewManifest } from "../setup-review-manifest.js";
 import type {
   OpenAICompatibleAuthSelection,
@@ -154,6 +158,126 @@ export type ConfigEditorPostApplyActionId =
   | "accept-limited-mode"
   | "repair-again"
   | "exit";
+
+export type SpendingLimitPromptResult =
+  | { readonly kind: "back" }
+  | { readonly kind: "selected"; readonly spendingLimit?: SpendingLimit };
+
+export async function promptSpendingLimit(
+  prompt: Prompt,
+  input: {
+    readonly scope: "task" | "session";
+    readonly current?: SpendingLimit;
+  },
+  locale: SetupCopyLocale = "en"
+): Promise<SpendingLimitPromptResult> {
+  const titleKey = input.scope === "task"
+    ? "setupEditor.budgets.task.title"
+    : "setupEditor.budgets.session.title";
+  const appliesKey = input.scope === "task"
+    ? "setupEditor.budgets.task.applies"
+    : "setupEditor.budgets.session.applies";
+  const current = input.current === undefined
+    ? setupCopyText(locale, "setupEditor.budgets.off")
+    : setupTechnicalToken(locale, formatUsd(input.current.maxEstimatedCostUsd));
+  const mode = await promptSetupChoiceResult(prompt, {
+    title: setupCopyText(locale, titleKey),
+    message: `${setupCopyText(locale, appliesKey)}\n`,
+    statusLines: setupCurrentStatusLines(locale, current),
+    columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
+    tableWidth: setupChoiceTableWidth(locale),
+    tableMaxWidth: setupChoiceTableMaxWidth(locale),
+    tableAlign: setupChoiceTableAlign(locale),
+    showColumnHeaders: false,
+    allowBack: true,
+    choices: [
+      {
+        id: "configure",
+        label: setupCopyText(locale, "setupEditor.budgets.configure"),
+        description: setupCopyText(locale, "setupEditor.budgets.configure.description"),
+        value: "configure" as const,
+        current: input.current !== undefined,
+      },
+      {
+        id: "off",
+        label: setupCopyText(locale, "setupEditor.budgets.off"),
+        description: setupCopyText(locale, "setupEditor.budgets.off.description"),
+        value: "off" as const,
+        current: input.current === undefined,
+      },
+    ],
+    defaultValue: input.current === undefined ? "off" as const : "configure" as const,
+  });
+  if (mode.kind === "back") return mode;
+  if (mode.value === "off") return { kind: "selected" };
+
+  const suggestedMaximum = input.current?.maxEstimatedCostUsd ?? (input.scope === "task" ? 5 : 20);
+  const maxEstimatedCostUsd = await promptBoundedNumber(prompt, {
+    title: setupCopyText(locale, titleKey),
+    question: setupCopyText(locale, "setupEditor.budgets.maximum.question"),
+    description: setupCopyText(locale, "setupEditor.budgets.maximum.description"),
+    invalid: setupCopyText(locale, "setupEditor.budgets.maximum.invalid"),
+    defaultValue: suggestedMaximum,
+    minimum: 0,
+  }, locale);
+  const warningThresholdPercent = await promptBoundedNumber(prompt, {
+    title: setupCopyText(locale, titleKey),
+    question: setupCopyText(locale, "setupEditor.budgets.warning.question"),
+    description: setupCopyText(locale, "setupEditor.budgets.warning.description"),
+    invalid: setupCopyText(locale, "setupEditor.budgets.warning.invalid"),
+    defaultValue: input.current?.warningThresholdPercent ?? DEFAULT_SPENDING_WARNING_THRESHOLD_PERCENT,
+    minimum: 0,
+    maximum: 100,
+  }, locale);
+
+  return {
+    kind: "selected",
+    spendingLimit: { maxEstimatedCostUsd, warningThresholdPercent },
+  };
+}
+
+async function promptBoundedNumber(
+  prompt: Prompt,
+  input: {
+    readonly title: string;
+    readonly question: string;
+    readonly description: string;
+    readonly invalid: string;
+    readonly defaultValue: number;
+    readonly minimum: number;
+    readonly maximum?: number;
+  },
+  locale: SetupCopyLocale
+): Promise<number> {
+  const target = setupPromptContext(prompt, locale);
+  for (;;) {
+    const raw = await promptSetupStringWithDefault(
+      target,
+      setupOutputLine(locale, `${input.question} `),
+      String(input.defaultValue),
+      input.description,
+      input.title
+    );
+    const value = Number(raw);
+    if (
+      Number.isFinite(value) &&
+      value >= input.minimum &&
+      (input.maximum === undefined || value <= input.maximum)
+    ) {
+      return value;
+    }
+    await showSetupCard(target, {
+      title: input.title,
+      bodyLines: [input.invalid],
+      options: [],
+    });
+  }
+}
+
+function formatUsd(value: number): string {
+  return `$${value.toFixed(2)} USD`;
+}
 
 export async function promptConfigEditorAction(
   prompt: Prompt,
@@ -731,6 +855,10 @@ export function setupEditorReviewSelectedAreaLabel(
       return locale === "ar" ? "اللغة" : "Language";
     case "edit-workflow-learning":
       return locale === "ar" ? "تطوّر الوكيل" : "Agent Evolution";
+    case "edit-spending-limit-for-task":
+      return locale === "ar" ? "الميزانيات · المهام" : "Budgets · Tasks";
+    case "edit-spending-limit-for-session":
+      return locale === "ar" ? "الميزانيات · الجلسات" : "Budgets · Sessions";
     default:
       return selectedAreaLabel(locale, "Model", "النموذج", locale === "ar" ? "الأساسي" : "Primary");
   }

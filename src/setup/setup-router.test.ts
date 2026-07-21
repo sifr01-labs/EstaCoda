@@ -57,6 +57,7 @@ function state(kind: SetupEntryStateKind, overrides: Partial<SetupEntryState> = 
     stateDirectoryWritable: kind !== "state-not-writable",
     missingCredentials: kind === "missing-secret" ? { envVars: ["OPENAI_API_KEY"], providers: [] } : { envVars: [], providers: [] },
     setupVerification: report,
+    budgets: {},
     warnings: report.warnings,
     blockers: kind === "configured-ready" ? [] : [`${kind} blocker`],
     model: {

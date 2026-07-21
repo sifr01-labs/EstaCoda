@@ -9,6 +9,7 @@ import type { ModelsDevRegistryOptions } from "../model-catalog/models-dev-regis
 import type { FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
 import type { SetupVerificationReport } from "./verification.js";
 import { collectSetupVerificationReport } from "./verification.js";
+import type { BudgetConfig } from "../contracts/budget.js";
 
 export type SetupEntryStateKind =
   | "new-user"
@@ -48,6 +49,7 @@ export type SetupEntryState = {
   readonly stateDirectoryWritable: boolean;
   readonly missingCredentials: MissingCredentialInfo;
   readonly setupVerification: SetupVerificationReport;
+  readonly budgets: BudgetConfig;
   readonly warnings: readonly string[];
   readonly blockers: readonly string[];
   readonly model?: {
@@ -89,6 +91,7 @@ export async function collectSetupEntryState(
       stateDirectoryWritable: true,
       missingCredentials: { envVars: [], providers: [] },
       setupVerification: brokenVerificationReport(message),
+      budgets: {},
       warnings: [message],
       blockers: [message],
       error: message,
@@ -137,6 +140,7 @@ export async function collectSetupEntryState(
     stateDirectoryWritable: verificationReport.stateWritable,
     missingCredentials,
     setupVerification: verificationReport,
+    budgets: loaded.budgets,
     warnings: [...new Set(verificationReport.warnings)],
     blockers,
     model: {

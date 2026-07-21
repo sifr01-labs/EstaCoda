@@ -66,6 +66,18 @@ describe("renderSetupVerificationReport", () => {
     expect(output).not.toContain(copy.verification.warningsTitle);
   });
 
+  it("renders Task and session spending defaults as read-only verification details", () => {
+    const copy = setupVerificationCopyEn;
+    const output = renderSetupVerificationReport(makeReport({
+      budgets: {
+        task: { maxEstimatedCostUsd: 5, warningThresholdPercent: 80 },
+      },
+    }), copy);
+
+    expect(output).toContain(`${copy.verification.taskSpendingLimit}: $5.00 USD · 80%`);
+    expect(output).toContain(`${copy.verification.sessionSpendingLimit}: ${copy.verification.off}`);
+  });
+
   it("renders warnings when present", () => {
     const copy = setupVerificationCopyEn;
     const report = makeReport({

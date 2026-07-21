@@ -1187,6 +1187,7 @@ function fallbackSetupEntryState(
       warnings: [message],
       issueCodes: ["doctor-setup-state-invalid"]
     },
+    budgets: {},
     warnings: [message],
     blockers: [message],
     error: message

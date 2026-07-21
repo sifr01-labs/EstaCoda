@@ -17,7 +17,8 @@ import {
   setupAuxiliaryModelConfig,
   setupImageGenerationConfig,
   setupWebConfig,
-  setupVoiceConfig
+  setupVoiceConfig,
+  setupBudgetConfig
 } from "./runtime-config.js";
 import { DEFAULT_DELEGATION_CONFIG } from "./delegation-defaults.js";
 import { DEFAULT_MEMORY_CONFIG } from "./memory-config.js";
@@ -57,6 +58,52 @@ describe("normalizeBudgetConfig", () => {
     expect(() => normalizeBudgetConfig({
       task: { maxEstimatedCostUsd: 1, warningThresholdPercent: 101 }
     })).toThrow(/between 0 and 100/i);
+  });
+});
+
+describe("setupBudgetConfig", () => {
+  it("updates one monetary scope and preserves unrelated configuration", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "estacoda-budget-config-"));
+    try {
+      const configPath = profileConfigPath(homeDir);
+      await mkdir(dirname(configPath), { recursive: true });
+      await writeFile(configPath, JSON.stringify({
+        model: { provider: "local", id: "test" },
+        budgets: {
+          session: { maxEstimatedCostUsd: 20, warningThresholdPercent: 75 },
+        },
+        security: { approvalMode: "adaptive" },
+      }), "utf8");
+
+      const result = await setupBudgetConfig({
+        workspaceRoot: "/workspace",
+        homeDir,
+        input: {
+          scope: "task",
+          spendingLimit: { maxEstimatedCostUsd: 0, warningThresholdPercent: 80 },
+        },
+      });
+
+      expect(result.config.budgets).toEqual({
+        task: { maxEstimatedCostUsd: 0, warningThresholdPercent: 80 },
+        session: { maxEstimatedCostUsd: 20, warningThresholdPercent: 75 },
+      });
+      expect(result.config.model).toEqual({ provider: "local", id: "test" });
+      expect(result.config.security?.approvalMode).toBe("adaptive");
+    } finally {
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects invalid spending values before writing config", async () => {
+    await expect(setupBudgetConfig({
+      workspaceRoot: "/workspace",
+      homeDir: "/not-used",
+      input: {
+        scope: "task",
+        spendingLimit: { maxEstimatedCostUsd: Number.POSITIVE_INFINITY, warningThresholdPercent: 80 },
+      },
+    })).rejects.toThrow(/finite/iu);
   });
 });
 

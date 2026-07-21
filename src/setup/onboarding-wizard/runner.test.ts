@@ -496,6 +496,7 @@ function remoteControlManifest(channelIds: readonly ("telegram" | "discord" | "w
       "remote-control-surfaces": lines,
       "security-mode": [],
       "workflow-learning": [],
+      "spending-policy": [],
       "verification-checks": [],
       "launch-handoff": [],
       blockers: [],
