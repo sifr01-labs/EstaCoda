@@ -1,4 +1,5 @@
 import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
+import { formatUsageCost, formatUsageCostNotice } from "../ui/usage-cost-format.js";
 import type { TaskOperatorService } from "../workflow/task-operator-service.js";
 
 export const TASK_STATUS_MAX_RESULT_CHARS = 12_000;
@@ -31,6 +32,7 @@ export function createTaskTools(options: {
       }
       try {
         const status = options.service!.status(input.task_id, options.currentSessionId());
+        const cost = taskUsageCostSummary(status.usage);
         return {
           ok: true,
           content: [
@@ -46,8 +48,9 @@ export function createTaskTools(options: {
             `Waiting: ${status.progress.waiting_for_input + status.progress.waiting_for_approval}`,
             `Results: ${status.results.length}`,
             `Usage: ${status.usage.totalTokens} tokens${status.usage.usageComplete ? "" : " (incomplete)"}`,
-            `Estimated cost: $${status.usage.estimatedCostUsd.toFixed(4)}${status.usage.pricingComplete ? "" : " (incomplete)"}`
-          ].join("\n"),
+            `Estimated cost: ${formatUsageCost(cost)}`,
+            formatUsageCostNotice(cost)
+          ].filter((line): line is string => line !== undefined).join("\n"),
           metadata: status
         };
       } catch {
@@ -55,6 +58,17 @@ export function createTaskTools(options: {
       }
     }
   }];
+}
+
+function taskUsageCostSummary(
+  usage: import("../contracts/task.js").TaskUsageTotals
+): { estimatedCostUsd?: number; costComplete: boolean } {
+  return {
+    estimatedCostUsd: usage.pricingComplete || usage.estimatedCostUsd > 0
+      ? usage.estimatedCostUsd
+      : undefined,
+    costComplete: usage.pricingComplete
+  };
 }
 
 export const taskToolProvider: SessionToolProvider = {

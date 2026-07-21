@@ -38,6 +38,8 @@ After each visible turn, the CLI attributes estimated provider spending to Main 
 
 Task and session limits are monetary controls; token counts remain read-only usage details. Estimated cost includes charged failures, retries, fallbacks, synthesis, auxiliary calls, and descendant Tasks. When pricing or usage data is incomplete, the UI marks the amount as partial or unavailable instead of presenting an unverified zero.
 
+`$0.00` always means a recorded zero. A complete estimate appears as `$0.42`; a known lower bound appears as `at least $0.42` with a pricing-availability explanation; and `unavailable` means EstaCoda cannot show a trustworthy monetary estimate. Compact status rails use `≥ $0.42` for the same lower-bound state.
+
 ---
 
 ## Session Commands

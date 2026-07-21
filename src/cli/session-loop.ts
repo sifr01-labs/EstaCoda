@@ -130,7 +130,7 @@ import type {
 } from "../ui/papyrus/operator-console/operatorConsoleState.js";
 import type { SessionCostSummary, TurnUsageSummary, UsageCostSummary } from "../contracts/usage-cost.js";
 import { mergeUsageCostSummaries, unavailableUsageCostSummary } from "../providers/provider-usage-projection.js";
-import { formatUsageCost } from "../ui/usage-cost-format.js";
+import { formatUsageCost, formatUsageCostNotice } from "../ui/usage-cost-format.js";
 import { isolateLtr, isolateRtl } from "../ui/bidi.js";
 
 export type SessionLoopOptions = {
@@ -2859,11 +2859,13 @@ function combinedTurnUsage(
 
 function formatTurnCostLines(usage: TurnUsageSummary, locale: "en" | "ar"): readonly string[] {
   const suffix = usage.provisional ? copyForLocale(locale, " so far", " حتى الآن") : "";
+  const pricingNotice = formatUsageCostNotice(usage.total, { locale });
   return [
     `${copyForLocale(locale, "Main agent", "الوكيل الرئيسي")}: ${formatUsageCost(usage.mainAgent, { locale })}`,
     `${copyForLocale(locale, "Auxiliary models", "النماذج المساعدة")}: ${formatUsageCost(usage.auxiliaryModels, { locale })}`,
     `${copyForLocale(locale, "Delegated work", "العمل المفوض")}${suffix}: ${formatUsageCost(usage.delegatedWork, { locale })}`,
     `${copyForLocale(locale, "Turn total", "إجمالي الدور")}${suffix}: ${formatUsageCost(usage.total, { locale })}`,
+    ...(pricingNotice === undefined ? [] : [pricingNotice]),
     ...(usage.provisional ? [copyForLocale(locale, "Workers still running", "لا يزال العمال قيد التنفيذ")] : [])
   ];
 }

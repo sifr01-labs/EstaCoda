@@ -11,7 +11,7 @@ import type { TaskStore } from "./task-store.js";
 import { taskPrimaryResult, taskPrimaryResultStepId } from "./task-primary-result.js";
 import { listStepTreeAttempts, listTaskTreeUsageEntries } from "./task-tree-accounting.js";
 import { taskUsageFromEntries } from "./task-agent-usage.js";
-import { formatUsageCost, formatUsdAmount } from "../ui/usage-cost-format.js";
+import { formatUsageCost, formatUsageCostNotice, formatUsdAmount } from "../ui/usage-cost-format.js";
 import { spendingBudgetSummary } from "../providers/provider-spend-projection.js";
 
 const MAX_DELIVERY_TEXT_CHARS = 100_000;
@@ -189,6 +189,8 @@ export class TaskCompletionDeliveryService {
     const usageEntries = listTaskTreeUsageEntries(this.#store, task.id);
     const taskUsage = taskUsageFromEntries(usageEntries);
     lines.push("", `${copy(this.#locale, "Task total", "إجمالي المهمة")}: ${formatTaskUsage(taskUsage, this.#locale)}`);
+    const pricingNotice = formatUsageCostNotice(taskUsageCostSummary(taskUsage), { locale: this.#locale });
+    if (pricingNotice !== undefined) lines.push(pricingNotice);
     if (task.activePlanRevisionId !== undefined) {
       for (const step of this.#store.listSteps(task.id, task.activePlanRevisionId)) {
         const attemptIds = new Set(listStepTreeAttempts(this.#store, task.id, step.id).map((attempt) => attempt.id));
@@ -263,12 +265,18 @@ function formatTaskUsage(
   usage: import("../contracts/task.js").TaskUsageTotals,
   locale: "en" | "ar"
 ): string {
-  return formatUsageCost({
+  return formatUsageCost(taskUsageCostSummary(usage), { locale });
+}
+
+function taskUsageCostSummary(
+  usage: import("../contracts/task.js").TaskUsageTotals
+): { estimatedCostUsd?: number; costComplete: boolean } {
+  return {
     estimatedCostUsd: usage.pricingComplete || usage.estimatedCostUsd > 0
       ? usage.estimatedCostUsd
       : undefined,
     costComplete: usage.pricingComplete
-  }, { locale });
+  };
 }
 
 function copy(locale: "en" | "ar", english: string, arabic: string): string {

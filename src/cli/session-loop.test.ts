@@ -755,12 +755,53 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     });
 
     const rendered = outputChunks.join("");
-    expect(rendered).toContain("Main agent: ≈ $0.04");
-    expect(rendered).toContain("Auxiliary models: ≈ $0.01");
-    expect(rendered).toContain("Delegated work so far: ≈ $0.02");
-    expect(rendered).toContain("Turn total so far: ≈ $0.07");
+    expect(rendered).toContain("Main agent: $0.04");
+    expect(rendered).toContain("Auxiliary models: $0.01");
+    expect(rendered).toContain("Delegated work so far: $0.02");
+    expect(rendered).toContain("Turn total so far: $0.07");
     expect(rendered).toContain("Workers still running");
     expect(rendered).toContain("Delegated Task T-104 · running");
+  });
+
+  it("renders a partial turn cost as a lower bound with one pricing notice", async () => {
+    const outputChunks: string[] = [];
+    const partial = { ...usageSummary(0.42), costComplete: false, incompleteReasons: ["pricing-missing"] };
+    const runtime = createMockRuntime({
+      handle: async () => mockResponse({
+        turnUsage: {
+          turnId: "turn-partial",
+          mainAgent: partial,
+          auxiliaryModels: usageSummary(0),
+          delegatedWork: usageSummary(0),
+          total: partial,
+          provisional: false
+        }
+      })
+    });
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: false,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ isTTY: false, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => ["price this", "/exit"][promptIndex++] ?? "/exit",
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("Turn total: at least $0.42");
+    expect(rendered.match(/Some provider pricing was unavailable/gu)).toHaveLength(1);
+    expect(rendered).not.toContain("≈");
   });
 
   it("restores persisted session cost onto the status rail", async () => {
@@ -769,7 +810,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     });
     const { raw } = await captureStartupSession({ runtime });
 
-    expect(stripAnsi(raw)).toContain("session ≈ $0.73");
+    expect(stripAnsi(raw)).toContain("session $0.73");
   });
 
   it("shows assistant response progress when enabled", async () => {

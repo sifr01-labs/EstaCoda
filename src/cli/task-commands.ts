@@ -14,7 +14,7 @@ import {
 import { resolveTaskWorkspaceBinding } from "../workflow/task-workspace.js";
 import { normalizeBudgetConfig, readConfig } from "../config/runtime-config.js";
 import { isolateLtr } from "../ui/bidi.js";
-import { formatUsageCost, formatUsdAmount } from "../ui/usage-cost-format.js";
+import { formatUsageCost, formatUsageCostNotice, formatUsdAmount } from "../ui/usage-cost-format.js";
 import type { TaskExecutionPreference } from "../contracts/task.js";
 import type { CliCommandResult, CliOptions } from "./cli.js";
 
@@ -252,6 +252,7 @@ function renderTask(
 ): string {
   const waiting = task.progress.waiting_for_input + task.progress.waiting_for_approval;
   const continuation = effectiveBackgroundContinuation(task, backgroundHost);
+  const taskCost = taskUsageCostSummary(task.usage);
   const lines = [
     `${copy(locale, "Task", "المهمة")} ${technical(locale, task.taskId)} · ${oneLine(task.objective)}`,
     "",
@@ -265,7 +266,8 @@ function renderTask(
       `التقدم: اكتملت ${task.progress.completed} من ${task.progress.total} خطوة`),
     `${copy(locale, "Running", "قيد التنفيذ")}: ${task.progress.running}`,
     `${copy(locale, "Waiting", "قيد الانتظار")}: ${waiting}`,
-    `${copy(locale, "Estimated cost", "التكلفة التقديرية")}: ${formatTaskUsageCost(task.usage, locale)}`,
+    `${copy(locale, "Estimated cost", "التكلفة التقديرية")}: ${formatUsageCost(taskCost, { locale })}`,
+    formatUsageCostNotice(taskCost, { locale }),
     `${copy(locale, "Usage", "الاستخدام")}: ${task.usage.totalTokens} ${copy(locale, "tokens", "رمزًا")}${task.usage.usageComplete ? "" : copy(locale, " (incomplete)", " (غير مكتمل)")}`,
     task.spending === undefined ? undefined : "",
     task.spending === undefined ? undefined : copy(locale, "Task spending", "إنفاق المهمة"),
@@ -298,12 +300,18 @@ function formatTaskUsageCost(
   usage: import("../contracts/task.js").TaskUsageTotals,
   locale: TaskCommandLocale
 ): string {
-  return formatUsageCost({
+  return formatUsageCost(taskUsageCostSummary(usage), { locale });
+}
+
+function taskUsageCostSummary(
+  usage: import("../contracts/task.js").TaskUsageTotals
+): { estimatedCostUsd?: number; costComplete: boolean } {
+  return {
     estimatedCostUsd: usage.pricingComplete || usage.estimatedCostUsd > 0
       ? usage.estimatedCostUsd
       : undefined,
     costComplete: usage.pricingComplete
-  }, { locale });
+  };
 }
 
 function parseBegin(

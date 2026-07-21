@@ -12,7 +12,7 @@ import type {
 } from "./operatorConsoleState.js";
 import { styleBold, styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 import type { TurnUsageSummary } from "../../../contracts/usage-cost.js";
-import { formatUsageCost } from "../../usage-cost-format.js";
+import { formatUsageCost, formatUsageCostNotice } from "../../usage-cost-format.js";
 
 export type ActiveWorkSurfaceRenderOptions = {
   readonly width: number;
@@ -88,7 +88,10 @@ export function getCompletedActiveWorkSurfaceDesiredHeight(
 ): number {
   const durableItems = activeWorkItemsForCompletedSurface(state);
   if (durableItems.length === 0) return 0;
-  return durableItems.length + 4 + (turnUsage === undefined ? 0 : turnUsage.provisional ? 5 : 4);
+  const usageRows = turnUsage === undefined
+    ? 0
+    : 4 + (turnUsage.provisional ? 1 : 0) + (formatUsageCostNotice(turnUsage.total) === undefined ? 0 : 1);
+  return durableItems.length + 4 + usageRows;
 }
 
 export function renderActiveWorkSurface(
@@ -497,12 +500,14 @@ function formatCompletionFooterRows(
   const delegatedLabel = locale === "ar" ? "العمل المفوض" : "Delegated work";
   const totalLabel = locale === "ar" ? "إجمالي الدور" : "Turn total";
   const soFar = turnUsage.provisional ? locale === "ar" ? " حتى الآن" : " so far" : "";
+  const pricingNotice = formatUsageCostNotice(turnUsage.total, { locale });
   return [
     truncateVisibleCells(summary, contentWidth),
     truncateVisibleCells(`${mainLabel} · ${formatUsageCost(turnUsage.mainAgent, { locale })}`, contentWidth),
     truncateVisibleCells(`${auxiliaryLabel} · ${formatUsageCost(turnUsage.auxiliaryModels, { locale })}`, contentWidth),
     truncateVisibleCells(`${delegatedLabel}${soFar} · ${formatUsageCost(turnUsage.delegatedWork, { locale })}`, contentWidth),
     truncateVisibleCells(`${totalLabel}${soFar} · ${formatUsageCost(turnUsage.total, { locale })}`, contentWidth),
+    ...(pricingNotice === undefined ? [] : [truncateVisibleCells(pricingNotice, contentWidth)]),
     ...(turnUsage.provisional
       ? [truncateVisibleCells(locale === "ar" ? "لا يزال العمال قيد التنفيذ" : "Workers still running", contentWidth)]
       : [])

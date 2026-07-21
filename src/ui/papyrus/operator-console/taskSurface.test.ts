@@ -77,6 +77,14 @@ describe("durable Task surfaces", () => {
 
     expect(renderTaskCardSurface({ cards: [partial], scrollOffset: 0 }, { width: 72, isTty: true }).join("\n"))
       .toContain("≥ $0.84");
+    const partialInspection = renderTaskInspectionSurface({
+      cards: [partial],
+      selectedTaskId: partial.taskId,
+      inspectedTaskId: partial.taskId,
+      scrollOffset: 0,
+    }, { width: 72, height: 52, isTty: true }).join("\n");
+    expect(partialInspection).toContain("at least $0.84");
+    expect(partialInspection).toContain("Some provider pricing was unavailable");
     const inspection = renderTaskInspectionSurface({
       cards: [unavailable],
       selectedTaskId: unavailable.taskId,

@@ -9,8 +9,41 @@ describe("task.status", () => {
 
     expect(status).toHaveBeenCalledWith("task-1", "session-1");
     expect(result).toMatchObject({ ok: true, metadata: { taskId: "task-1", status: "running" } });
+    expect(result.content).toContain("Estimated cost: $0.01");
     expect(result.content).not.toContain("/private/workspace");
     expect(result.content).not.toContain("secret");
+  });
+
+  it("distinguishes partial, unavailable, and recorded-zero cost", async () => {
+    const partial = projection();
+    partial.usage.estimatedCostUsd = 0.42;
+    partial.usage.pricingComplete = false;
+    const [partialTool] = createTaskTools({
+      service: { status: () => partial } as never,
+      currentSessionId: () => "session-1"
+    });
+    const partialResult = await partialTool!.run({ task_id: "task-1" });
+    expect(partialResult.content).toContain("Estimated cost: at least $0.42");
+    expect(partialResult.content).toContain("Some provider pricing was unavailable");
+
+    const unavailable = projection();
+    unavailable.usage.estimatedCostUsd = 0;
+    unavailable.usage.pricingComplete = false;
+    const [unavailableTool] = createTaskTools({
+      service: { status: () => unavailable } as never,
+      currentSessionId: () => "session-1"
+    });
+    expect((await unavailableTool!.run({ task_id: "task-1" })).content)
+      .toContain("Estimated cost: unavailable");
+
+    const zero = projection();
+    zero.usage.estimatedCostUsd = 0;
+    const [zeroTool] = createTaskTools({
+      service: { status: () => zero } as never,
+      currentSessionId: () => "session-1"
+    });
+    expect((await zeroTool!.run({ task_id: "task-1" })).content)
+      .toContain("Estimated cost: $0.00");
   });
 
   it("fails closed with one indistinguishable not-found response", async () => {

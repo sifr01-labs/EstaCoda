@@ -600,8 +600,8 @@ describe("Papyrus operator console active work surface", () => {
       turnUsage: { turnId: "turn-1", mainAgent: usage, auxiliaryModels: usage, delegatedWork: usage, total: usage, provisional: false },
     }).join("\n");
 
-    expect(output).toContain("Main agent · ≈ $0.14");
-    expect(output).toContain("Turn total · ≈ $0.14");
+    expect(output).toContain("Main agent · $0.14");
+    expect(output).toContain("Turn total · $0.14");
   });
 
   it("renders partial turn cost as a lower bound", () => {
@@ -625,7 +625,8 @@ describe("Papyrus operator console active work surface", () => {
       turnUsage: { turnId: "turn-1", mainAgent: partial, auxiliaryModels: partial, delegatedWork: partial, total: partial, provisional: false },
     }).join("\n");
 
-    expect(output).toContain("at least ≈ $0.84");
+    expect(output).toContain("at least $0.84");
+    expect(output).toContain("Some provider pricing was unavailable");
     expect(output).not.toContain("$0.0000 · incomplete");
   });
 

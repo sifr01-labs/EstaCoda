@@ -10,7 +10,7 @@ import type {
   TaskCardStepState,
   TaskSurfaceState,
 } from "./operatorConsoleState.js";
-import { formatUsageCost, formatUsdAmount } from "../../usage-cost-format.js";
+import { formatUsageCost, formatUsageCostNotice, formatUsdAmount } from "../../usage-cost-format.js";
 
 const MAX_CARD_STEPS = 4;
 const LTR_START = "\u2068";
@@ -209,11 +209,15 @@ export function taskInspectionContentLines(
       ));
   addSection(lines, copy.activeAttempt, activeAttemptLines(card, copy.none));
   addSection(lines, copy.toolCategory, [card.currentToolCategory === undefined ? copy.none : isolate(card.currentToolCategory)]);
+  const taskCost = {
+    estimatedCostUsd: card.usage.estimatedCostUsd,
+    costComplete: card.usage.pricingComplete
+  };
+  const pricingNotice = formatUsageCostNotice(taskCost, { locale });
   addSection(lines, copy.usageCost, [
-    `${card.usage.providerCalls} calls · ${card.usage.totalTokens} tokens · ${formatUsageCost({
-      estimatedCostUsd: card.usage.estimatedCostUsd,
-      costComplete: card.usage.pricingComplete
-    }, { locale })}` + `${card.usage.usageComplete ? "" : ` · ${copy.usageIncomplete}`}`,
+    `${card.usage.providerCalls} calls · ${card.usage.totalTokens} tokens · ${formatUsageCost(taskCost, { locale })}` +
+      `${card.usage.usageComplete ? "" : ` · ${copy.usageIncomplete}`}`,
+    ...(pricingNotice === undefined ? [] : [pricingNotice])
   ]);
   addSection(lines, copy.stepSpending, card.steps.length === 0
     ? [copy.none]

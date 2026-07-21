@@ -63,8 +63,8 @@ describe("Papyrus operator console status rail surface", () => {
       sessionCost: { estimatedCostUsd: 0.84, costComplete: false },
     });
 
-    expect(renderStatusRailSurface(complete, { width: 80 })).toContain("session ≈ $0.73");
-    expect(renderStatusRailSurface(complete, { width: 30 })).toContain("≈ $0.73");
+    expect(renderStatusRailSurface(complete, { width: 80 })).toContain("session $0.73");
+    expect(renderStatusRailSurface(complete, { width: 30 })).toContain("$0.73");
     expect(renderStatusRailSurface(partial, { width: 30 })).toContain("≥ $0.84");
     expect(renderStatusRailSurface(partial, { width: 16 })).toContain("≥ $0.84");
   });
@@ -86,8 +86,8 @@ describe("Papyrus operator console status rail surface", () => {
     });
 
     expect(renderStatusRailSurface(budgeted, { width: 120 }))
-      .toContain("session ≈ $0.42/$1.00 +$0.18 reserved");
-    expect(renderStatusRailSurface(budgeted, { width: 28 })).toContain("≈ $0.42/$1.00");
+      .toContain("session $0.42/$1.00 +$0.18 reserved");
+    expect(renderStatusRailSurface(budgeted, { width: 28 })).toContain("$0.42/$1.00");
   });
 
   it("uses isolated Arabic cost text", () => {

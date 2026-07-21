@@ -1965,7 +1965,7 @@ describe("PlainRenderer — prompt chrome rails", () => {
       turnState: "idle",
       sessionCost: { estimatedCostUsd: 0.73, costComplete: true },
       showTurnState: false,
-    }))).toBe("* gpt-5.5 | session ≈ $0.73");
+    }))).toBe("* gpt-5.5 | session $0.73");
     expect(renderSessionStatusRail(buildSessionStatusRailViewModel({
       modelLabel: "gpt-5.5",
       turnState: "idle",
@@ -2022,7 +2022,7 @@ describe("PlainRenderer — prompt chrome rails", () => {
       turnState: "idle",
       sessionCost: { estimatedCostUsd: 0.73, costComplete: true },
     }), "ar");
-    expect(out).toContain(isolateLtr("≈ $0.73"));
+    expect(out).toContain(isolateLtr("$0.73"));
     expect(out).toContain(isolateRtl("الجلسة"));
   });
 

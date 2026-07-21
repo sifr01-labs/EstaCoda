@@ -6,29 +6,47 @@ export type UsageCostFormatOptions = {
   readonly compact?: boolean;
 };
 
+export type UsageCostPresentationState = "exact" | "partial" | "unavailable";
+
 /** Renders complete, partial, and unavailable estimates without presenting unknown cost as zero. */
 export function formatUsageCost(
   usage: Pick<UsageCostSummary, "estimatedCostUsd" | "costComplete">,
   options: UsageCostFormatOptions = {}
 ): string {
   const locale = options.locale ?? "en";
-  if (
-    usage.estimatedCostUsd === undefined ||
-    !Number.isFinite(usage.estimatedCostUsd) ||
-    usage.estimatedCostUsd < 0 ||
-    (!usage.costComplete && usage.estimatedCostUsd === 0)
-  ) {
+  const state = usageCostPresentationState(usage);
+  if (state === "unavailable") {
     return locale === "ar" ? isolateRtl("غير متاح") : "unavailable";
   }
-  const estimate = `≈ $${formatUsd(usage.estimatedCostUsd)}`;
-  if (usage.costComplete) return locale === "ar" ? isolateLtr(estimate) : estimate;
+  const estimate = `$${formatUsd(usage.estimatedCostUsd!)}`;
+  if (state === "exact") return locale === "ar" ? isolateLtr(estimate) : estimate;
   if (options.compact === true) {
-    const compact = `≥ $${formatUsd(usage.estimatedCostUsd)}`;
+    const compact = `≥ ${estimate}`;
     return locale === "ar" ? isolateLtr(compact) : compact;
   }
   return locale === "ar"
     ? `${isolateRtl("على الأقل")} ${isolateLtr(estimate)}`
     : `at least ${estimate}`;
+}
+
+export function usageCostPresentationState(
+  usage: Pick<UsageCostSummary, "estimatedCostUsd" | "costComplete">
+): UsageCostPresentationState {
+  const estimate = usage.estimatedCostUsd;
+  if (estimate === undefined || !Number.isFinite(estimate) || estimate < 0) return "unavailable";
+  if (usage.costComplete) return "exact";
+  return estimate > 0 ? "partial" : "unavailable";
+}
+
+/** Expanded surfaces use this once per aggregate; compact rails communicate partial cost with ≥. */
+export function formatUsageCostNotice(
+  usage: Pick<UsageCostSummary, "estimatedCostUsd" | "costComplete">,
+  options: Pick<UsageCostFormatOptions, "locale"> = {}
+): string | undefined {
+  if (usageCostPresentationState(usage) !== "partial") return undefined;
+  return options.locale === "ar"
+    ? isolateRtl("تعذر الحصول على بعض أسعار موفر النموذج")
+    : "Some provider pricing was unavailable";
 }
 
 export function formatUsdAmount(value: number, locale: "en" | "ar" = "en"): string {
