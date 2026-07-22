@@ -157,7 +157,7 @@ describe("active work runtime mapper", () => {
     expect(state.items).toEqual([{
       id: "subagent:child-session-1",
       toolName: "delegate_task",
-      displayLabel: "Worker 2",
+      displayLabel: "Subagent 2",
       source: "subagent",
       groupId: "batch-1",
       taskIndex: 1,
@@ -194,6 +194,7 @@ describe("active work runtime mapper", () => {
       parentSessionId: "parent-session",
       role: "leaf" as const,
       depth: 1,
+      taskId: "task-durable-1",
       taskIndex: 0,
       taskLabel: "Inspect delegation",
       batchTaskCount: 1
@@ -225,6 +226,7 @@ describe("active work runtime mapper", () => {
       detail: "src/delegation/progress-relay.ts",
       status: "succeeded"
     }]);
+    expect(state.items[0]?.taskId).toBe("task-durable-1");
   });
 
   it("keeps only the six most recent worker activities", () => {
@@ -315,7 +317,7 @@ describe("active work runtime mapper", () => {
       childEvent: { kind: "tool-result", tool: "file.read", ok: false },
     })).toMatchObject({
       id: "subagent:child-session-2",
-      displayLabel: "Orchestrator",
+      displayLabel: "Subagent",
       source: "subagent",
       groupId: "subagent-2",
       status: "running",
@@ -385,7 +387,7 @@ describe("active work runtime mapper", () => {
     }
   });
 
-  it("localizes delegated child labels without surfacing provider or cancellation details", () => {
+  it("keeps stable Subagent labels while localizing activity without surfacing provider or cancellation details", () => {
     const mapper = new ActiveWorkRuntimeEventMapper({ locale: "ar" });
     const base = {
       kind: "delegation-progress" as const,
@@ -420,7 +422,7 @@ describe("active work runtime mapper", () => {
     ].join(" ");
 
     expect(providerEvent).toMatchObject({
-      displayLabel: "عامل 1",
+      displayLabel: "Subagent 1",
       status: "running",
       summary: "يفكر",
       target: "يفكر",
@@ -433,11 +435,11 @@ describe("active work runtime mapper", () => {
     expect(formatPlainDelegationProgressEvent({
       ...base,
       childEvent: { kind: "agent-start", sessionId: "child-secret" },
-    }, "ar")).toBe("عامل 1: بدء العمل");
+    }, "ar")).toBe("Subagent 1: بدء العمل");
     expect(formatPlainDelegationProgressEvent({
       ...base,
       childEvent: { kind: "delegation-result", status: "timeout" },
-    }, "ar")).toBe("عامل 1: انتهت المهلة");
+    }, "ar")).toBe("Subagent 1: انتهت المهلة");
     expect(visibleText).not.toContain("private-provider");
     expect(visibleText).not.toContain("private-model");
     expect(visibleText).not.toContain("private cancellation detail");

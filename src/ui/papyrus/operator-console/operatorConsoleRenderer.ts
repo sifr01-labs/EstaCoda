@@ -90,6 +90,8 @@ function renderRegionLines(
       locale: state.locale,
       isTty: state.terminal.isTty,
       focusedTaskId: state.focus.target.kind === "taskCard" ? state.focus.target.taskId : undefined,
+      style: state.style,
+      motionElapsedMs: state.motionElapsedMs,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "taskInspection") {

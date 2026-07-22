@@ -200,7 +200,7 @@ function createRegionDescriptors(
       kind: "taskCards",
       priority: TASK_CARD_PRIORITY,
       minHeight: 1,
-      desiredHeight: getTaskCardSurfaceDesiredHeight(state.tasks),
+      desiredHeight: getTaskCardSurfaceDesiredHeight(state.tasks, terminal.width),
     });
   }
 
@@ -245,10 +245,23 @@ function shouldShowActiveWorkRegion(state: OperatorConsoleState): boolean {
   if (!hasActiveWork(state.activeWork)) return false;
   if (state.activeWork.completedAtMs !== undefined) return true;
   if (hasRunningDelegationWork(state.activeWork)) {
+    if (hasMatchingDurableSubagentCards(state)) return false;
     return !hasLiveStreamingTail(state.streaming);
   }
   if (!SHOW_LIVE_ACTIVE_WORK_REGION) return false;
   return !hasStreamingSurface(state.streaming);
+}
+
+function hasMatchingDurableSubagentCards(state: OperatorConsoleState): boolean {
+  const projectedTaskIds = new Set(
+    state.tasks.cards
+      .filter((card) => card.subagents.length > 0)
+      .map((card) => card.taskId)
+  );
+  const runningTaskIds = state.activeWork.items
+    .filter((item) => item.source === "subagent" && item.status === "running" && item.taskId !== undefined)
+    .map((item) => item.taskId!);
+  return runningTaskIds.length > 0 && runningTaskIds.every((taskId) => projectedTaskIds.has(taskId));
 }
 
 function createSetupRegionDescriptors(

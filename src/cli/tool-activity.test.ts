@@ -784,8 +784,8 @@ describe("Session-loop tool activity rail wiring", () => {
     }, builder, renderer, streamState, undefined, turnOutput);
 
     const written = (output.write as ReturnType<typeof vi.fn>).mock.calls.map((call: unknown[]) => call[0]).join("");
-    expect(written).toContain("Worker 2: started");
-    expect(written).toContain("Worker 2: failed");
+    expect(written).toContain("Subagent 2: started");
+    expect(written).toContain("Subagent 2: failed");
     expect(written).not.toContain("Read File");
     expect(written).not.toContain("child-session-secret");
     expect(written).not.toContain("batch-secret");

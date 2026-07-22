@@ -29,6 +29,7 @@ export type ActiveWorkRuntimeEvent = {
   readonly displayLabel?: string;
   readonly source?: "tool" | "subagent";
   readonly groupId?: string;
+  readonly taskId?: string;
   readonly taskIndex?: number;
   readonly taskLabel?: string;
   readonly batchTaskCount?: number;
@@ -141,6 +142,7 @@ export class ActiveWorkRuntimeEventMapper {
       displayLabel: delegationChildLabel(event.role, event.taskIndex, this.#locale),
       source: "subagent",
       groupId: event.batchId ?? event.subagentId,
+      ...(event.taskId === undefined ? {} : { taskId: event.taskId }),
       taskIndex: event.taskIndex,
       taskLabel: event.taskLabel,
       batchTaskCount: event.batchTaskCount,
@@ -284,6 +286,9 @@ function createActiveWorkItem(
     ...(event.groupId === undefined && existing?.groupId === undefined
       ? {}
       : { groupId: event.groupId ?? existing?.groupId }),
+    ...(event.taskId === undefined && existing?.taskId === undefined
+      ? {}
+      : { taskId: event.taskId ?? existing?.taskId }),
     ...(event.taskIndex === undefined && existing?.taskIndex === undefined
       ? {}
       : { taskIndex: normalizeTaskIndex(event.taskIndex ?? existing?.taskIndex) }),
@@ -327,14 +332,11 @@ function createActiveWorkItem(
 }
 
 function delegationChildLabel(
-  role: Extract<RuntimeEvent, { kind: "delegation-progress" }>["role"],
+  _role: Extract<RuntimeEvent, { kind: "delegation-progress" }>["role"],
   taskIndex: number | undefined,
-  locale: ToolDisplayLocale
+  _locale: ToolDisplayLocale
 ): string {
-  const roleLabel = locale === "ar"
-    ? role === "orchestrator" ? "منسق" : "عامل"
-    : role === "orchestrator" ? "Orchestrator" : "Worker";
-  return taskIndex === undefined ? roleLabel : `${roleLabel} ${taskIndex + 1}`;
+  return taskIndex === undefined ? "Subagent" : `Subagent ${taskIndex + 1}`;
 }
 
 function delegationActivityLabel(

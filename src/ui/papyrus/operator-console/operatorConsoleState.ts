@@ -281,6 +281,7 @@ export type ActiveWorkItem = {
   readonly displayLabel?: string;
   readonly source?: "tool" | "subagent";
   readonly groupId?: string;
+  readonly taskId?: string;
   readonly taskIndex?: number;
   readonly taskLabel?: string;
   readonly batchTaskCount?: number;

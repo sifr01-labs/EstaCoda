@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { resolveTokens } from "../../../theme/token-resolver.js";
 import {
+  createOperatorConsoleStyle,
   createInitialOperatorConsoleState,
   createOperatorConsoleLayout,
+  getTaskCardSurfaceDesiredHeight,
   renderOperatorConsoleTextLines,
   renderTaskCardSurface,
   renderTaskInspectionSurface,
@@ -9,22 +12,131 @@ import {
   resolveOperatorConsoleInputSurface,
   routeTaskSurfaceKey,
   type TaskCardState,
+  type TaskCardSubagentState,
 } from "./index.js";
 
 describe("durable Task surfaces", () => {
-  it("renders a retained settled card with bounded step detail", () => {
-    const card = makeCard({ status: "completed", elapsedMs: 198_000 });
+  it("renders one Subagent as exactly seven borderless grey rows with semantic title and truthful footer", () => {
+    const style = createOperatorConsoleStyle({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const card = makeCard({
+      subagents: [makeSubagent(1, {
+        assistantPreview: "I found the relevant comparison data.",
+        trace: Array.from({ length: 5 }, (_, index) => ({
+          eventId: `event-${index}`,
+          kind: "tool-result",
+          label: `Safe activity ${index + 1}`,
+          category: index % 2 === 0 ? "read" : "search",
+          timestamp: `2026-07-20T10:00:0${index}.000Z`,
+          subagentIndex: 1,
+        })),
+      })],
+    });
     const lines = renderTaskCardSurface({ cards: [card], selectedTaskId: card.taskId, scrollOffset: 0 }, {
       width: 72,
       isTty: true,
       focusedTaskId: card.taskId,
+      style,
+      motionElapsedMs: 105,
     });
+    const text = stripAnsi(lines.join("\n"));
 
-    expect(lines.join("\n")).toContain("T-104");
-    expect(lines.join("\n")).toContain("Define comparison criteria");
-    expect(lines.join("\n")).toContain("Browsing");
-    expect(lines.join("\n")).toContain("completed");
+    expect(lines).toHaveLength(8);
+    expect(lines.slice(1)).toHaveLength(7);
+    expect(text).toContain("Task 1/1");
+    expect(text).toContain("Subagent 1 · Research Company 1");
+    expect(text).toContain("+3 earlier activities");
+    expect(text).toContain("I found the relevant comparison data.");
+    expect(text).toContain("running · 03:18 · 100 tokens · $0.0060");
+    expect(text).not.toMatch(/[╭╮╰╯│]/u);
+    expect(lines.slice(1).every((line) => line.includes("\x1b[48;2;37;37;37m"))).toBe(true);
+    expect(lines[0]).toContain("\x1b[38;2;64;224;208m");
+    expect(lines[1]).toContain("\x1b[38;2;78;161;255m");
     expect(lines.every((line) => visibleWidth(line) <= 72)).toBe(true);
+  });
+
+  it("uses column-major 1-3 | 4-6 placement, equal widths, and +N more instead of squeezing", () => {
+    const four = makeCard({ subagents: Array.from({ length: 4 }, (_, index) => makeSubagent(index + 1)) });
+    const wide = renderTaskCardSurface({ cards: [four], scrollOffset: 0 }, { width: 100, isTty: true });
+
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [four], scrollOffset: 0 }, 100)).toBe(24);
+    expect(wide).toHaveLength(24);
+    expect(wide[1]).toContain("Subagent 1");
+    expect(wide[1]).toContain("Subagent 4");
+    expect(wide[9]).toContain("Subagent 2");
+    expect(wide[17]).toContain("Subagent 3");
+    expect(wide.every((line) => visibleWidth(line) === 100)).toBe(true);
+
+    const narrow = renderTaskCardSurface({ cards: [four], scrollOffset: 0 }, { width: 72, isTty: true });
+    const narrowText = narrow.join("\n");
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [four], scrollOffset: 0 }, 72)).toBe(25);
+    expect(narrowText).toContain("Subagent 1");
+    expect(narrowText).toContain("Subagent 2");
+    expect(narrowText).toContain("Subagent 3");
+    expect(narrowText).not.toContain("Subagent 4 ·");
+    expect(narrowText).toContain("+1 more Subagents");
+  });
+
+  it("adds a third column only when seven Subagents remain readable", () => {
+    const card = makeCard({ subagents: Array.from({ length: 7 }, (_, index) => makeSubagent(index + 1)) });
+    const threeColumns = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 140, isTty: true });
+    const twoColumns = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 100, isTty: true });
+
+    expect(threeColumns[1]).toContain("Subagent 1");
+    expect(threeColumns[1]).toContain("Subagent 4");
+    expect(threeColumns[1]).toContain("Subagent 7");
+    expect(threeColumns.join("\n")).not.toContain("more Subagents");
+    expect(twoColumns.join("\n")).toContain("+1 more Subagents");
+  });
+
+  it("never clips a visible card below seven rows and uses a compact tiny-terminal fallback", () => {
+    const card = makeCard({ subagents: Array.from({ length: 4 }, (_, index) => makeSubagent(index + 1)) });
+    const constrained = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 100, height: 9 });
+    const tiny = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 36, height: 5 });
+
+    expect(constrained).toHaveLength(9);
+    expect(constrained.join("\n")).toContain("Subagent 1");
+    expect(constrained.join("\n")).toContain("Subagent 2");
+    expect(constrained.join("\n")).toContain("+2 more Subagents");
+    expect(tiny).toHaveLength(5);
+    expect(tiny.join("\n")).toContain("Subagent 1 · running");
+    expect(tiny.join("\n")).toContain("Subagent 4 · running");
+    expect(tiny.join("\n")).not.toMatch(/[╭╮╰╯│]/u);
+  });
+
+  it("updates the latest safe activity without changing stable Subagent identity", () => {
+    const first = makeCard({ subagents: [makeSubagent(1, { currentActivity: "Reading package.json" })] });
+    const next = makeCard({ subagents: [makeSubagent(1, { currentActivity: "Editing dashboard route" })] });
+    const before = renderTaskCardSurface({ cards: [first], scrollOffset: 0 }, { width: 72 }).join("\n");
+    const after = renderTaskCardSurface({ cards: [next], scrollOffset: 0 }, { width: 72 }).join("\n");
+
+    expect(before).toContain("Subagent 1");
+    expect(after).toContain("Subagent 1");
+    expect(before).toContain("Reading package.json");
+    expect(after).toContain("Editing dashboard route");
+    expect(after).not.toContain("Reading package.json");
+  });
+
+  it("uses light surface tokens and degrades to deterministic ASCII in plain mode", () => {
+    const lightStyle = createOperatorConsoleStyle({
+      tokens: resolveTokens("standard", "light", "kemetBlue"),
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const plainStyle = createOperatorConsoleStyle({
+      tokens: resolveTokens("plain", "dark", "kemetBlue"),
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const card = makeCard({ subagents: [makeSubagent(1)] });
+    const light = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 72, style: lightStyle });
+    const plain = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 72, style: plainStyle });
+
+    expect(light.slice(1).every((line) => line.includes("\x1b[48;2;245;245;245m"))).toBe(true);
+    expect(plain.join("\n")).not.toMatch(/\u001B\[/u);
+    expect(plain.join("\n")).toContain(". Subagent 1");
+    expect(plain.join("\n")).toContain("> Reading company 1");
+    expect(plain.every((line) => visibleWidth(line) === 72)).toBe(true);
   });
 
   it("renders the full safe inspection projection without raw bodies or internal worker handles", () => {
@@ -88,16 +200,12 @@ describe("durable Task surfaces", () => {
 
   it("keeps retained Task card cost honest for partial and unavailable accounting", () => {
     const partial = makeCard({
-      usage: {
-        providerCalls: 3,
-        totalTokens: 2_400,
-        estimatedCostUsd: 0.84,
-        usageComplete: true,
-        pricingComplete: false,
-      },
+      subagents: [makeSubagent(1, { usage: { total: partialCardUsage(0.84, 2_400) } })],
+      usage: partialCardUsage(0.84, 2_400),
     });
     const unavailable = makeCard({
       taskId: "T-105",
+      subagents: [makeSubagent(1, { usage: { total: unavailableCardUsage() } })],
       usage: {
         providerCalls: 1,
         totalTokens: 0,
@@ -108,6 +216,8 @@ describe("durable Task surfaces", () => {
 
     expect(renderTaskCardSurface({ cards: [partial], scrollOffset: 0 }, { width: 72, isTty: true }).join("\n"))
       .toContain("≥ $0.84");
+    expect(renderTaskCardSurface({ cards: [unavailable], scrollOffset: 0 }, { width: 72, isTty: true }).join("\n"))
+      .toContain("unavailable");
     const partialInspection = renderTaskInspectionSurface({
       cards: [partial],
       selectedTaskId: partial.taskId,
@@ -158,7 +268,7 @@ describe("durable Task surfaces", () => {
     const lines = renderOperatorConsoleTextLines(state, createOperatorConsoleLayout(state));
     const text = lines.join("\n");
 
-    expect(text).toContain("المهام");
+    expect(text).toContain("المهمة");
     expect(text).toContain("\u2068T-104\u2069");
     expect(text).not.toMatch(/\u001B\[/u);
     expect(lines.every((line) => visibleWidth(line) <= 28)).toBe(true);
@@ -315,6 +425,55 @@ function cardUsage(estimatedCostUsd: number): TaskCardState["usage"] {
   };
 }
 
+function partialCardUsage(estimatedCostUsd: number, totalTokens: number): TaskCardState["usage"] {
+  return {
+    providerCalls: 3,
+    totalTokens,
+    estimatedCostUsd,
+    usageComplete: true,
+    pricingComplete: false,
+  };
+}
+
+function unavailableCardUsage(): TaskCardState["usage"] {
+  return {
+    providerCalls: 1,
+    totalTokens: 0,
+    usageComplete: false,
+    pricingComplete: false,
+  };
+}
+
+function makeSubagent(
+  index: number,
+  overrides: Partial<TaskCardSubagentState> = {}
+): TaskCardSubagentState {
+  const usage = cardUsage(0.006 * index);
+  return {
+    stepId: `step-${index}`,
+    position: index - 1,
+    displayIndex: index,
+    displayLabel: `Subagent ${index}`,
+    title: `Research Company ${index}`,
+    objective: `Research Company ${index}`,
+    role: "worker",
+    status: "running",
+    dependsOn: [],
+    elapsedMs: 198_000,
+    currentActivity: `Reading company ${index}`,
+    currentToolCategory: "read",
+    usage: { total: usage, currentAttempt: usage },
+    attempts: [],
+    trace: [],
+    results: [],
+    ...overrides,
+  };
+}
+
 function visibleWidth(value: string): number {
-  return [...value.replace(/[\u2066-\u2069]/gu, "")].length;
+  return [...stripAnsi(value).replace(/[\u2066-\u2069]/gu, "")].length;
+}
+
+function stripAnsi(value: string): string {
+  return value.replace(/\u001B\[[0-?]*[ -/]*[@-~]/gu, "");
 }

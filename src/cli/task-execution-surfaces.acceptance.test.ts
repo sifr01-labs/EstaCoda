@@ -154,9 +154,10 @@ describe("Task execution ownership surface acceptance", () => {
     });
     const lines = renderOperatorConsoleTextLines(state, createOperatorConsoleLayout(state));
     const plain = lines.join("\n");
-    expect(plain).toContain("المهام");
+    expect(plain).toContain("المهمة");
     expect(plain).toContain(`\u2068${automatic.taskId.slice(0, 12)}`);
-    expect(plain).toContain("\u2068foreground\u2069");
+    expect(plain).toContain("Subagent 1");
+    expect(plain).toContain("pending");
     expect(plain).not.toMatch(/\u001B\[/u);
     expect(lines.every((line) => visibleWidth(line) <= 30)).toBe(true);
   });
