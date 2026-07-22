@@ -2,6 +2,7 @@ import type { ParsedKeypress } from "../../input/parseKeypress.js";
 import { createOperatorConsoleHitRegions, findOperatorConsoleHitRegion } from "./operatorConsoleHitRegions.js";
 import { createOperatorConsoleLayout, type OperatorConsoleLayout } from "./operatorConsoleLayout.js";
 import type { OperatorConsoleState } from "./operatorConsoleState.js";
+import { setFocus } from "./focusModel.js";
 import { routeTaskSurfaceKey, routeTaskSurfacePointer } from "./taskSurface.js";
 
 export type OperatorConsoleInputSurface =
@@ -43,6 +44,23 @@ export function isMouseModeToggle(event: ParsedKeypress): boolean {
   return event.type === "key" && event.ctrl === true && event.key === "g";
 }
 
+export function isHardInterruptInput(event: ParsedKeypress): boolean {
+  return event.type === "key" && event.ctrl === true && event.key === "c";
+}
+
+/** Input that belongs to the prompt editor rather than a focused navigation surface. */
+export function isPromptEditingInput(event: ParsedKeypress): boolean {
+  if (event.type === "text" || event.type === "paste") return true;
+  if (event.type !== "key") return false;
+  if (event.key === "backspace" || event.key === "delete") return true;
+  if (event.key === "enter" && event.alt === true) return true;
+  return event.ctrl === true && ["a", "d", "e", "u"].includes(event.key);
+}
+
+function isFocusedAttachmentRemovalInput(event: ParsedKeypress): boolean {
+  return event.type === "key" && event.ctrl === true && event.key === "u";
+}
+
 export function setOperatorConsoleMouseMode(
   state: OperatorConsoleState,
   active: boolean
@@ -71,6 +89,9 @@ export function routeOperatorConsoleInput(input: {
     liveFocus,
     steer: input.steer,
   });
+  if (isHardInterruptInput(input.event)) {
+    return { state: input.state, surface, handled: false };
+  }
   if (input.event.type === "mouse") {
     if (input.state.tasks.mouseModeActive !== true) {
       return { state: input.state, surface, handled: false };
@@ -121,6 +142,19 @@ export function routeOperatorConsoleInput(input: {
     const viewportHeight = layout.regions.find((region) => region.kind === "taskInspection")?.height;
     const routed = routeTaskSurfaceKey(input.state, input.event, viewportHeight ?? input.state.terminal.height);
     return { state: routed.state, surface: "taskInspection", handled: routed.handled };
+  }
+  if (
+    isPromptEditingInput(input.event) &&
+    (liveFocus || (surface === "attachment" && !isFocusedAttachmentRemovalInput(input.event)))
+  ) {
+    return {
+      state: {
+        ...input.state,
+        focus: setFocus(input.state.focus, { kind: "prompt" }),
+      },
+      surface: input.steer ? "steer" : "prompt",
+      handled: false,
+    };
   }
   if (surface === "approval" || surface === "typeahead" || surface === "attachment") {
     return { state: input.state, surface, handled: false };

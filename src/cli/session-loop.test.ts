@@ -2949,6 +2949,20 @@ describe("runSessionLoop — active turn spinner", () => {
       mode: "drafting",
       draft: "focus only on approval cards",
     });
+    const baseDraft = "focus only on approval cards";
+    input.press("🙂", { name: "🙂", sequence: "🙂" });
+    expect(host.getState().steer?.draft).toBe(`${baseDraft}🙂`);
+    input.press("\u007f", { name: "backspace", sequence: "\u007f" });
+    expect(host.getState().steer?.draft).toBe(baseDraft);
+    input.press("سَ", { name: "سَ", sequence: "سَ" });
+    expect(host.getState().steer?.draft).toBe(`${baseDraft}سَ`);
+    input.press("\u007f", { name: "backspace", sequence: "\u007f" });
+    expect(host.getState().steer?.draft).toBe(baseDraft);
+    input.press("\u001b[D", { name: "left", sequence: "\u001b[D" });
+    input.press("X", { name: "X", sequence: "X" });
+    expect(host.getState().steer?.draft).toBe("focus only on approval cardXs");
+    input.press("\u007f", { name: "backspace", sequence: "\u007f" });
+    expect(host.getState().steer?.draft).toBe(baseDraft);
     const rendered = stripAnsi(outputChunks.join(""));
     expect(rendered).toContain("Steer current turn");
     expect(rendered).toContain("focus only on approval cards");

@@ -141,6 +141,8 @@ Focus rules locked for v1:
 - `Enter` opens an attachment preview only when attachment focus is active.
 - `Esc` removes a focused attachment or cancels steer draft/queued steer.
 - `Ctrl+C` remains the hard active-turn interrupt.
+- Typing or using prompt-editing controls while a main-session Task/Subagent is
+  focused returns focus to the prompt before applying the edit.
 
 ## Phase-Mapped Target Renders
 
@@ -401,7 +403,8 @@ events, and `Return to live` use the same actions as their keyboard routes.
 `Up`/`Down`, `Page Up`/`Page Down`,
 `Home`, and `End` navigate or scroll according to the active inspection target;
 `Escape` first releases an active Mouse Mode, then unwinds Subagent to Task to
-main session without losing the underlying session state. Typing/pasting,
+main session without losing the underlying session state. Typing, pasting, or
+using prompt-editing controls such as Backspace, Delete, and line-edit shortcuts,
 clicking outside an interactive Task region, closing inspection, or losing the
 Task region also releases Mouse Mode. Whole-Task selection adjusts scroll to
 keep the selected Subagent visible. Wheel input scrolls only inside inspection

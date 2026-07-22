@@ -665,6 +665,66 @@ describe("durable Task surfaces", () => {
     expect(resolve()).toBe("prompt");
   });
 
+  it("returns editing and hard-interrupt input from main-session Task focus to the prompt", () => {
+    const card = makeCard({ subagents: [makeSubagent(1)] });
+    const initial = createInitialOperatorConsoleState({
+      terminal: { width: 90, height: 30, isTty: true },
+      tasks: { cards: [card], selectedTaskId: card.taskId, scrollOffset: 0 },
+    });
+    const focused = routeTaskSurfaceKey(initial, { type: "key", key: "tab" }).state;
+    expect(routeTaskSurfaceKey(focused, { type: "key", key: "down" }).state).toBe(focused);
+
+    for (const event of [
+      { type: "text", text: "x" } as const,
+      { type: "paste", text: "pasted" } as const,
+      { type: "key", key: "backspace" } as const,
+      { type: "key", key: "delete" } as const,
+      { type: "key", key: "u", ctrl: true } as const,
+      { type: "key", key: "enter", alt: true } as const,
+    ]) {
+      const routed = routeOperatorConsoleInput({
+        state: focused,
+        event,
+        approval: false,
+        typeahead: false,
+        attachment: false,
+        steer: true,
+      });
+      expect(routed.handled).toBe(false);
+      expect(routed.surface).toBe("steer");
+      expect(routed.state.focus.target).toEqual({ kind: "prompt" });
+    }
+
+    const interrupt = routeOperatorConsoleInput({
+      state: focused,
+      event: { type: "key", key: "c", ctrl: true },
+      approval: false,
+      typeahead: false,
+      attachment: false,
+      steer: true,
+    });
+    expect(interrupt.handled).toBe(false);
+    expect(interrupt.state.focus.target).toEqual({ kind: "taskCard", taskId: card.taskId });
+
+    const inspected = routeTaskSurfaceKey(focused, { type: "key", key: "enter" }).state;
+    expect(routeOperatorConsoleInput({
+      state: inspected,
+      event: { type: "key", key: "backspace" },
+      approval: false,
+      typeahead: false,
+      attachment: false,
+      steer: true,
+    }).handled).toBe(true);
+    expect(routeOperatorConsoleInput({
+      state: inspected,
+      event: { type: "key", key: "c", ctrl: true },
+      approval: false,
+      typeahead: false,
+      attachment: false,
+      steer: true,
+    }).handled).toBe(false);
+  });
+
   it("routes Task and Subagent hit regions with equivalent keyboard paths", () => {
     const card = makeCard({ subagents: [makeSubagent(1), makeSubagent(2)] });
     const initial = createInitialOperatorConsoleState({

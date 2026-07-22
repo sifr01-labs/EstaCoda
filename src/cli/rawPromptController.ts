@@ -36,7 +36,9 @@ import {
   createPastedTextAttachment,
   formatSubmittedPromptWithAttachmentContent,
   formatSubmittedPromptWithAttachmentPreview,
+  isHardInterruptInput,
   isMouseModeToggle,
+  isPromptEditingInput,
   removeAttachmentAndRepairFocus,
   reconcileTaskSurfaceState,
   routeApprovalKey,
@@ -541,14 +543,15 @@ export class RawPromptController {
 
       const routeSharedOperatorConsoleInput = (event: ParsedKeypress) => {
         if (this.#operatorConsole?.enabled !== true) return undefined;
-        const routed = routeOperatorConsoleInput({
-          state: createInitialOperatorConsoleState({
+        const consoleState = createInitialOperatorConsoleState({
           locale: this.#operatorConsole.locale,
           terminal: currentTerminal(),
           attachments,
           tasks: taskSurface,
           focus: attachmentFocus,
-          }),
+        });
+        const routed = routeOperatorConsoleInput({
+          state: consoleState,
           event,
           approval: attachmentFocus.target.kind === "approval",
           typeahead: isTypeaheadActive(),
@@ -556,7 +559,6 @@ export class RawPromptController {
             (attachments.length > 0 && event.type === "key" && event.key === "tab"),
           steer: false,
         });
-        if (!routed.handled) return routed;
         const inspectionClosed = taskSurface.inspectedTaskId !== undefined &&
           routed.state.tasks.inspectedTaskId === undefined;
         if (routed.releaseMouseMode === true || inspectionClosed) {
@@ -567,6 +569,9 @@ export class RawPromptController {
           routed.releaseMouseMode !== true && !inspectionClosed && routed.state.tasks.mouseModeActive === true
         ).tasks;
         attachmentFocus = routed.state.focus;
+        if (!routed.handled) return routed;
+        // A handled navigation event is also an explicit projection refresh: Task
+        // data can change independently while the idle prompt is waiting.
         render();
         return routed;
       };
@@ -585,6 +590,10 @@ export class RawPromptController {
       const dispatchParsedEvents = (events: readonly ParsedKeypress[]) => {
         if (settled) return;
         for (const event of events) {
+          if (isHardInterruptInput(event)) {
+            finish({ type: "cancel" });
+            return;
+          }
           if (this.#operatorConsole?.enabled === true && isMouseModeToggle(event)) {
             setMouseMode(taskSurface.mouseModeActive !== true);
             continue;
@@ -593,7 +602,7 @@ export class RawPromptController {
             setMouseMode(false);
             continue;
           }
-          if (taskSurface.mouseModeActive === true && (event.type === "text" || event.type === "paste")) {
+          if (taskSurface.mouseModeActive === true && isPromptEditingInput(event)) {
             setMouseMode(false);
           }
           if (handleApprovalFocusEntry(event)) continue;

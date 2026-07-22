@@ -236,6 +236,40 @@ describe("raw prompt controller", () => {
     expect(read.output.writes.join("")).toContain("Activity trace");
   });
 
+  it("edits normally after Escape returns from Task inspection to the main session", async () => {
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        getTasks: () => [promptTaskCard()],
+      },
+    });
+
+    read.input.send("\t");
+    read.input.send("\r");
+    read.input.send("\u001b");
+    await flushKeypressTimers();
+    read.input.send("ab\u007f\r");
+
+    await expect(read.pending).resolves.toEqual({ type: "submit", text: "a" });
+  });
+
+  it("keeps Ctrl-C global while Task inspection owns focus", async () => {
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        getTasks: () => [promptTaskCard()],
+      },
+    });
+
+    read.input.send("\t");
+    read.input.send("\r");
+    read.input.send("\u0003");
+
+    await expect(read.pending).resolves.toEqual({ type: "cancel" });
+  });
+
   it("opens Subagent cards and breadcrumbs from SGR mouse input while idle", async () => {
     const read = startPendingOperatorConsoleRead({
       operatorConsole: {
@@ -944,6 +978,26 @@ describe("raw prompt controller", () => {
       type: "submit",
       text: ["[Pasted text 1]", "second pasted payload"].join("\n"),
       displayText: ["Pasted text · 1 line · 21 chars", "second pasted payload"].join("\n"),
+    });
+  });
+
+  it("returns attachment focus to the prompt before editing text", async () => {
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+      },
+    });
+
+    read.input.send(`${PASTE_START}source material${PASTE_END}`);
+    await Promise.resolve();
+    read.input.send("\t");
+    read.input.send("ab\u007f\r");
+
+    await expect(read.pending).resolves.toEqual({
+      type: "submit",
+      text: ["a", "", "[Pasted text 1]", "source material"].join("\n"),
+      displayText: ["a", "", "Pasted text · 1 line · 15 chars", "source material"].join("\n"),
     });
   });
 

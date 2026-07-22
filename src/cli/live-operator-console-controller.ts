@@ -7,7 +7,9 @@ import {
   createActiveWorkRuntimeState,
   getActiveWorkSurfaceDesiredHeight,
   hasRunningDelegationWork,
+  isHardInterruptInput,
   isMouseModeToggle,
+  isPromptEditingInput,
   normalizeActiveWorkRuntimeEventId,
   type ActiveWorkItem,
   type ActiveWorkRuntimeEvent,
@@ -127,6 +129,7 @@ export class LiveOperatorConsoleController {
   }
 
   routeInput(event: ParsedKeypress): boolean {
+    if (isHardInterruptInput(event)) return false;
     if (isMouseModeToggle(event)) {
       this.setMouseModeActive(this.#tasks.mouseModeActive !== true);
       return true;
@@ -135,9 +138,8 @@ export class LiveOperatorConsoleController {
       this.setMouseModeActive(false);
       return true;
     }
-    if (this.#tasks.mouseModeActive === true && (event.type === "text" || event.type === "paste")) {
+    if (this.#tasks.mouseModeActive === true && isPromptEditingInput(event)) {
       this.setMouseModeActive(false);
-      return false;
     }
     const state = this.#runtimeHost.getState();
     const routed = routeOperatorConsoleInput({
@@ -148,18 +150,21 @@ export class LiveOperatorConsoleController {
       attachment: state.focus.target.kind === "attachment",
       steer: true,
     });
-    if (!routed.handled) return false;
+    const stateChanged = routed.state !== state;
     const inspectionClosed = this.#tasks.inspectedTaskId !== undefined &&
       routed.state.tasks.inspectedTaskId === undefined;
     const releaseMouseMode = routed.releaseMouseMode === true || inspectionClosed;
-    this.#tasks = setOperatorConsoleMouseMode(
-      routed.state,
-      !releaseMouseMode && routed.state.tasks.mouseModeActive === true
-    ).tasks;
-    if (releaseMouseMode) this.#onMouseModeChange?.(false);
-    this.#runtimeHost.setTasks(this.#tasks);
-    this.#runtimeHost.setFocus(routed.state.focus);
-    this.refresh();
+    if (stateChanged || releaseMouseMode) {
+      this.#tasks = setOperatorConsoleMouseMode(
+        routed.state,
+        !releaseMouseMode && routed.state.tasks.mouseModeActive === true
+      ).tasks;
+      if (releaseMouseMode) this.#onMouseModeChange?.(false);
+      this.#runtimeHost.setTasks(this.#tasks);
+      this.#runtimeHost.setFocus(routed.state.focus);
+      this.refresh();
+    }
+    if (!routed.handled) return false;
     return true;
   }
 

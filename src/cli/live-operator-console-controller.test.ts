@@ -236,7 +236,7 @@ describe("LiveOperatorConsoleController", () => {
     expect(text).not.toContain("Finished Task");
   });
 
-  it("uses the shared Task router during active steering without swallowing prompt text", () => {
+  it("returns prompt editing and hard interrupts after active Task inspection", () => {
     const output = createOutput();
     const { controller, runtimeHost } = createControllerFixture(output, {
       getTasks: () => [makeLiveTask()],
@@ -250,6 +250,20 @@ describe("LiveOperatorConsoleController", () => {
     expect(runtimeHost.getState().tasks.inspectedTaskId).toBe("T-live-1");
     expect(controller.routeInput({ type: "key", key: "escape" })).toBe(true);
     expect(runtimeHost.getState().tasks.inspectedTaskId).toBeUndefined();
+    expect(runtimeHost.getState().focus.target).toEqual({ kind: "taskCard", taskId: "T-live-1" });
+
+    output.clear();
+    expect(controller.routeInput({ type: "key", key: "backspace" })).toBe(false);
+    expect(runtimeHost.getState().focus.target).toEqual({ kind: "prompt" });
+    expect(output.text()).not.toBe("");
+
+    expect(controller.routeInput({ type: "key", key: "tab" })).toBe(true);
+    expect(controller.routeInput({ type: "key", key: "c", ctrl: true })).toBe(false);
+    expect(runtimeHost.getState().focus.target).toEqual({ kind: "taskCard", taskId: "T-live-1" });
+
+    output.clear();
+    expect(controller.routeInput({ type: "key", key: "down" })).toBe(true);
+    expect(output.text()).toBe("");
   });
 
   it("captures the mouse only for explicit Task interaction and releases before steering text", () => {
@@ -265,6 +279,16 @@ describe("LiveOperatorConsoleController", () => {
     expect(mouseChanges).toEqual([true]);
     expect(runtimeHost.getState().tasks.mouseModeActive).toBe(true);
     expect(stripAnsi(output.text())).toContain("[Mouse Mode]");
+
+    output.clear();
+    expect(controller.routeInput({
+      type: "mouse",
+      action: "release",
+      button: "primary",
+      x: 0,
+      y: 0,
+    })).toBe(true);
+    expect(output.text()).toBe("");
 
     expect(controller.routeInput({ type: "text", text: "x" })).toBe(false);
     expect(mouseChanges).toEqual([true, false]);

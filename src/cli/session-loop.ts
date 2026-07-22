@@ -72,6 +72,7 @@ import {
   type TurnActivityState,
 } from "../ui/papyrus/operator-console/index.js";
 import type { ParsedKeypress } from "../ui/input/parseKeypress.js";
+import { applyKeypress, createLineEditorState } from "../ui/input/lineEditor.js";
 import { createKeypressStreamDispatcher } from "../ui/input/keyPressStreamDispatcher.js";
 import { createTerminalLifecycle, type TerminalLifecycle } from "../ui/input/terminalLifecycle.js";
 import { centerVisibleBlock, measureVisibleWidth, truncateVisible } from "../ui/renderers/layout.js";
@@ -829,10 +830,10 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           writeTurnBoundaryRows(block.text.split("\n"), { redrawLiveFrame: true });
         }
 
-        function currentDraftSteerState(draft: string): SteerState {
+        function currentDraftSteerState(draft: string, cursorOffset: number = draft.length): SteerState {
           return {
             draft,
-            cursorOffset: draft.length,
+            cursorOffset,
             mode: "drafting",
           };
         }
@@ -867,13 +868,6 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             return;
           }
 
-          if (event.type === "key" && event.key === "backspace") {
-            if (current?.mode !== "drafting") return;
-            const nextDraft = current.draft.slice(0, -1);
-            setOperatorConsoleSteerState(nextDraft.length === 0 ? undefined : currentDraftSteerState(nextDraft));
-            return;
-          }
-
           if (event.type === "key" && event.ctrl === true && event.key === "u") {
             if (current?.mode === "drafting") {
               setOperatorConsoleSteerState(undefined);
@@ -897,15 +891,23 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             return;
           }
 
-          if (event.type !== "text" && event.type !== "paste") {
-            return;
-          }
           if (queued !== undefined) {
-            setOperatorConsoleSteerState(currentQueuedSteerState(queued));
             return;
           }
-          const nextDraft = `${current?.mode === "drafting" ? current.draft : ""}${event.text}`;
-          setOperatorConsoleSteerState(currentDraftSteerState(nextDraft));
+          const line = applyKeypress(
+            createLineEditorState(
+              current?.mode === "drafting" ? current.draft : "",
+              current?.mode === "drafting" ? current.cursorOffset : 0
+            ),
+            event
+          ).state;
+          const unchanged = current?.mode === "drafting"
+            ? line.text === current.draft && line.cursor === current.cursorOffset
+            : line.text.length === 0 && line.cursor === 0;
+          if (unchanged) return;
+          setOperatorConsoleSteerState(
+            line.text.length === 0 ? undefined : currentDraftSteerState(line.text, line.cursor)
+          );
         }
 
         function startOperatorConsoleSteerInput(): (() => void) | undefined {

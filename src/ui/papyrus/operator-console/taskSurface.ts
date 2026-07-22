@@ -449,7 +449,7 @@ export function routeTaskSurfaceKey(
         state: { ...state, focus: setFocus(state.focus, { kind: "prompt" }) },
         handled: true,
       };
-      default: return { state, handled: true };
+      default: return { state, handled: false };
     }
   }
 
@@ -501,7 +501,7 @@ export function routeTaskSurfaceKey(
       state: { ...state, focus: setFocus(state.focus, { kind: "prompt" }) },
       handled: true,
     };
-    default: return { state, handled: true };
+    default: return { state, handled: false };
   }
 }
 
@@ -640,7 +640,9 @@ function closeInspection(state: OperatorConsoleState, focusPrompt = false): Oper
 }
 
 function setTaskScroll(state: OperatorConsoleState, offset: number, maxOffset: number): OperatorConsoleState {
-  return { ...state, tasks: { ...state.tasks, scrollOffset: Math.max(0, Math.min(maxOffset, offset)) } };
+  const scrollOffset = Math.max(0, Math.min(maxOffset, offset));
+  if (scrollOffset === state.tasks.scrollOffset) return state;
+  return { ...state, tasks: { ...state.tasks, scrollOffset } };
 }
 
 function setTaskTraceSelection(
@@ -755,6 +757,11 @@ function selectRelativeTask(state: OperatorConsoleState, delta: number): Operato
 function selectTaskAt(state: OperatorConsoleState, index: number): OperatorConsoleState {
   const task = state.tasks.cards[index];
   if (task === undefined) return state;
+  if (
+    state.tasks.selectedTaskId === task.taskId &&
+    state.focus.target.kind === "taskCard" &&
+    state.focus.target.taskId === task.taskId
+  ) return state;
   return {
     ...state,
     tasks: { ...state.tasks, selectedTaskId: task.taskId },
@@ -781,6 +788,11 @@ function visibleSubagents(card: TaskCardState, width: number, height: number): r
 }
 
 function focusTaskHeader(state: OperatorConsoleState, card: TaskCardState): OperatorConsoleState {
+  if (
+    state.tasks.selectedTaskId === card.taskId &&
+    state.focus.target.kind === "taskCard" &&
+    state.focus.target.taskId === card.taskId
+  ) return state;
   return {
     ...state,
     tasks: { ...state.tasks, selectedTaskId: card.taskId },
@@ -793,6 +805,12 @@ function focusMainSubagent(
   card: TaskCardState,
   subagent: TaskCardSubagentState
 ): OperatorConsoleState {
+  if (
+    state.tasks.selectedTaskId === card.taskId &&
+    state.focus.target.kind === "taskSubagent" &&
+    state.focus.target.taskId === card.taskId &&
+    state.focus.target.stepId === subagent.stepId
+  ) return state;
   return {
     ...state,
     tasks: { ...state.tasks, selectedTaskId: card.taskId },
