@@ -6,6 +6,7 @@ import {
   createOperatorConsoleLayout,
   createOperatorConsoleHitRegions,
   findOperatorConsoleHitRegion,
+  getTaskCardHitTargets,
   getTaskCardSurfaceDesiredHeight,
   reconcileTaskSurfaceState,
   renderOperatorConsoleTextLines,
@@ -297,6 +298,85 @@ describe("durable Task surfaces", () => {
     expect(text).not.toContain("Worker finished");
     expect(text).not.toContain("Usage recorded");
     expect(text).toContain("completed · 03:18");
+  });
+
+  it("surfaces active parent synthesis and collapses settled Subagent cards", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const style = createOperatorConsoleStyle({
+      tokens,
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const card = makeSynthesisCard("running");
+    const state = { cards: [card], selectedTaskId: card.taskId, scrollOffset: 0 };
+    const lines = renderTaskCardSurface(state, { width: 100, isTty: true });
+    const text = lines.join("\n");
+    const inspection = taskInspectionContentLines(card, 100).join("\n");
+
+    expect(getTaskCardSurfaceDesiredHeight(state, 100)).toBe(14);
+    expect(lines).toHaveLength(14);
+    expect(text).toContain("Parent synthesis · Synthesize delegated results");
+    expect(text).toContain("Synthesizing 3 Subagent results");
+    expect(text).toContain("Comparing overlapping recommendations");
+    expect(text).toContain("Activity trace · 2 events");
+    expect(text).toContain("Preparing final response");
+    expect(text).not.toContain("Usage recorded");
+    expect(text.match(/Subagent [123]/gu)).toHaveLength(3);
+    expect(text).not.toContain("Result ready");
+    expect(text).not.toContain("Accepted worker summary");
+    expect(inspection).toContain("Accepted worker summary 1");
+    expect(lines.every((line) => visibleWidth(line) === 100)).toBe(true);
+
+    const targets = getTaskCardHitTargets(state, 100, 14);
+    expect(targets[0]).toMatchObject({ kind: "taskHeader", y: 0, height: 8 });
+    expect(targets.filter((target) => target.kind === "subagentCard")).toEqual([
+      expect.objectContaining({ stepId: "step-1", y: 9, height: 1 }),
+      expect.objectContaining({ stepId: "step-2", y: 11, height: 1 }),
+      expect.objectContaining({ stepId: "step-3", y: 13, height: 1 }),
+    ]);
+
+    const styled = renderTaskCardSurface(state, { width: 100, isTty: true, style, motionElapsedMs: 105 });
+    expect(styled[1]).toContain(ansiFg(tokens.contract.palette.brand));
+    expect(styled[2]).toContain(ansiFg(tokens.contract.palette.action));
+    expect(styled[4]).toContain(ansiFg(tokens.contract.trace.read));
+    expect(styled[4]).toContain(ansiFg(tokens.contract.trace.answer));
+    expect(styled[9]).toContain("\x1b[48;2;37;37;37m");
+
+    const six = makeSynthesisCard("running", 6);
+    const sixLines = renderTaskCardSurface({ cards: [six], scrollOffset: 0 }, { width: 100 });
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [six], scrollOffset: 0 }, 100)).toBe(14);
+    expect(sixLines[9]).toContain("Subagent 1");
+    expect(sixLines[9]).toContain("Subagent 4");
+    expect(sixLines.join("\n")).toContain("Synthesizing 6 Subagent results");
+  });
+
+  it("collapses workers only while synthesis is active and keeps constrained output truthful", () => {
+    const pending = makeSynthesisCard("pending");
+    const running = makeSynthesisCard("running");
+    const completed = makeSynthesisCard("completed");
+
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [pending], scrollOffset: 0 }, 100)).toBe(24);
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [running], scrollOffset: 0 }, 100)).toBe(14);
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [completed], scrollOffset: 0 }, 100)).toBe(24);
+    expect(renderTaskCardSurface({ cards: [pending], scrollOffset: 0 }, { width: 100 }).join("\n"))
+      .not.toContain("Parent synthesis");
+    expect(renderTaskCardSurface({ cards: [completed], scrollOffset: 0 }, { width: 100 }).join("\n"))
+      .not.toContain("Parent synthesis");
+    expect(renderTaskCardSurface({ cards: [makeSynthesisCard("ready")], scrollOffset: 0 }, { width: 100 }).join("\n"))
+      .toContain("Preparing to synthesize 3 Subagent results");
+    expect(renderTaskCardSurface({ cards: [makeSynthesisCard("waiting_for_approval")], scrollOffset: 0 }, { width: 100 }).join("\n"))
+      .toContain("Synthesis waiting for approval");
+
+    const constrained = renderTaskCardSurface(
+      { cards: [running], scrollOffset: 0 },
+      { width: 72, height: 10, locale: "ar" },
+    );
+    const constrainedText = constrained.join("\n");
+    expect(constrained).toHaveLength(10);
+    expect(constrainedText).toContain("تجميع الوكيل الرئيسي");
+    expect(constrainedText).toContain("يتم تجميع 3 من نتائج الوكلاء الفرعيين");
+    expect(constrainedText).toContain("+3 وكلاء فرعيون إضافيون");
+    expect(constrainedText).not.toMatch(/\u001B\[/u);
+    expect(constrained.map(visibleWidth)).toEqual(Array.from({ length: 10 }, () => 72));
   });
 
   it("refreshes projections by stable ID without reordering cards or resetting inspection", () => {
@@ -1152,6 +1232,129 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
     updatedAt: "2026-07-20T10:03:18.000Z",
     ...overrides,
   };
+}
+
+function makeSynthesisCard(
+  synthesisStatus: TaskCardState["steps"][number]["status"],
+  subagentCount = 3
+): TaskCardState {
+  const subagents = Array.from({ length: subagentCount }, (_, index) => {
+    const displayIndex = index + 1;
+    return makeSubagent(displayIndex, {
+      status: "completed",
+      results: [{
+        id: `result-worker-${displayIndex}`,
+        handle: `result://worker-${displayIndex}`,
+        kind: "summary",
+        disposition: "accepted",
+        status: "available",
+        byteLength: 240,
+        primary: true,
+        stepId: `step-${displayIndex}`,
+        summary: `Accepted worker summary ${displayIndex}`,
+      }],
+    });
+  });
+  const active = synthesisStatus === "running" ||
+    synthesisStatus === "waiting_for_input" ||
+    synthesisStatus === "waiting_for_approval";
+  const hasAttempt = synthesisStatus !== "pending" && synthesisStatus !== "ready";
+  const attemptStatus = synthesisStatus === "completed"
+    ? "completed" as const
+    : synthesisStatus === "waiting_for_input"
+      ? "waiting_for_input" as const
+      : synthesisStatus === "waiting_for_approval"
+        ? "waiting_for_approval" as const
+        : "running" as const;
+  const synthesisAttempt = {
+    attemptId: "attempt-synthesis-1",
+    taskId: "T-104",
+    stepId: "step-synthesis",
+    attemptNumber: 1,
+    status: attemptStatus,
+    createdAt: "2026-07-20T10:03:18.000Z",
+    updatedAt: "2026-07-20T10:03:30.000Z",
+    startedAt: "2026-07-20T10:03:18.000Z",
+    ...(synthesisStatus === "completed" ? { completedAt: "2026-07-20T10:03:30.000Z" } : {}),
+    elapsedMs: 12_000,
+    currentActivity: "Comparing overlapping recommendations",
+    currentToolCategory: "read",
+    assistantPreview: "Preparing final response",
+    usage: cardUsage(0.03),
+  };
+  const synthesisStep: TaskCardState["steps"][number] = {
+    stepId: "step-synthesis",
+    position: 3,
+    title: "Synthesize delegated results",
+    objective: `Merge the ${subagentCount} worker reports into one final response.`,
+    executorRole: "synthesis",
+    status: synthesisStatus,
+    dependsOn: subagents.map((subagent) => subagent.stepId),
+    childTaskPolicy: "forbid",
+    usage: cardUsage(0.03),
+    attempts: hasAttempt ? [synthesisAttempt] : [],
+    ...(hasAttempt ? { latestAttempt: synthesisAttempt } : {}),
+    ...(active ? { activeAttempt: synthesisAttempt } : {}),
+  };
+  const results = subagents.flatMap((subagent) => subagent.results);
+  return makeCard({
+    status: synthesisStatus === "completed" ? "completed" : "running",
+    progress: {
+      completed: subagentCount + (synthesisStatus === "completed" ? 1 : 0),
+      skipped: 0,
+      total: subagentCount + 1,
+    },
+    steps: [
+      ...subagents.map((subagent) => ({
+        stepId: subagent.stepId,
+        position: subagent.position,
+        title: subagent.title,
+        objective: subagent.objective,
+        executorRole: subagent.role,
+        status: subagent.status,
+        dependsOn: subagent.dependsOn,
+        childTaskPolicy: "forbid" as const,
+        usage: subagent.usage.total,
+        attempts: subagent.attempts,
+      })),
+      synthesisStep,
+    ],
+    subagents,
+    trace: {
+      events: [
+        {
+          eventId: "synthesis-reading",
+          kind: "attempt-progressed",
+          label: "Comparing overlapping recommendations · Synthesize delegated results",
+          category: "read",
+          timestamp: "2026-07-20T10:03:20.000Z",
+          stepId: "step-synthesis",
+          attemptId: "attempt-synthesis-1",
+        },
+        {
+          eventId: "synthesis-answer",
+          kind: "attempt-progressed",
+          label: "Preparing final response · Synthesize delegated results",
+          category: "answer",
+          timestamp: "2026-07-20T10:03:29.000Z",
+          stepId: "step-synthesis",
+          attemptId: "attempt-synthesis-1",
+        },
+        {
+          eventId: "synthesis-usage",
+          kind: "usage-recorded",
+          label: "Usage recorded · Synthesize delegated results",
+          category: "plan",
+          timestamp: "2026-07-20T10:03:30.000Z",
+          stepId: "step-synthesis",
+          attemptId: "attempt-synthesis-1",
+        },
+      ],
+      hasEarlierEvents: false,
+    },
+    recentActivity: [],
+    results,
+  });
 }
 
 function cardUsage(estimatedCostUsd: number): TaskCardState["usage"] {

@@ -1,7 +1,11 @@
 import type { ParsedKeypress } from "../../input/parseKeypress.js";
 import { padVisibleEnd, truncateVisible, wrapText } from "../../renderers/layout.js";
 import { semanticMotionFrame } from "../../semantic-motion.js";
-import { navigateActivityTrace, type TraceNavigationAction } from "./activityTraceSurface.js";
+import {
+  navigateActivityTrace,
+  renderActivityTraceSurface,
+  type TraceNavigationAction,
+} from "./activityTraceSurface.js";
 import { setFocus } from "./focusModel.js";
 import type {
   OperatorConsoleLocale,
@@ -10,6 +14,7 @@ import type {
   OperatorConsoleState,
   TaskCardActivityState,
   TaskCardState,
+  TaskCardStepState,
   TaskCardSubagentState,
   TaskSurfaceState,
 } from "./operatorConsoleState.js";
@@ -31,6 +36,10 @@ const SUBAGENT_ACTIVITY_ROWS = 3;
 const SUBAGENT_ROWS_PER_COLUMN = 3;
 const SUBAGENT_COLUMN_GAP = 2;
 const SUBAGENT_ROW_GAP = 1;
+const COLLAPSED_SUBAGENT_CARD_HEIGHT = 1;
+const COLLAPSED_SUBAGENT_ROW_GAP = 1;
+const PARENT_SYNTHESIS_STAGE_HEIGHT = 7;
+const PARENT_SYNTHESIS_STAGE_GAP = 1;
 const MIN_SUBAGENT_CARD_WIDTH = 44;
 const MAX_SUBAGENT_TITLE_WORDS = 8;
 const MAX_SUBAGENT_TITLE_WIDTH = 64;
@@ -50,6 +59,11 @@ type TaskCopy = {
   resultReady: string;
   resultUnavailable: string;
   noResultSummary: string;
+  parentSynthesis: string;
+  preparingSynthesis: (count: number) => string;
+  synthesizingResults: (count: number) => string;
+  synthesisWaitingForInput: string;
+  synthesisWaitingForApproval: string;
   tokens: string;
   moreSubagents: string;
 };
@@ -68,6 +82,11 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     resultReady: "Result ready",
     resultUnavailable: "Result unavailable",
     noResultSummary: "No result summary available",
+    parentSynthesis: "Parent synthesis",
+    preparingSynthesis: (count) => `Preparing to synthesize ${count} Subagent ${count === 1 ? "result" : "results"}`,
+    synthesizingResults: (count) => `Synthesizing ${count} Subagent ${count === 1 ? "result" : "results"}`,
+    synthesisWaitingForInput: "Synthesis waiting for input",
+    synthesisWaitingForApproval: "Synthesis waiting for approval",
     tokens: "tokens",
     moreSubagents: "more Subagents",
   },
@@ -84,6 +103,11 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     resultReady: "النتيجة جاهزة",
     resultUnavailable: "النتيجة غير متاحة",
     noResultSummary: "لا يتوفر ملخص للنتيجة",
+    parentSynthesis: "تجميع الوكيل الرئيسي",
+    preparingSynthesis: (count) => `يتم التحضير لتجميع ${count} من نتائج الوكلاء الفرعيين`,
+    synthesizingResults: (count) => `يتم تجميع ${count} من نتائج الوكلاء الفرعيين`,
+    synthesisWaitingForInput: "التجميع بانتظار إدخال",
+    synthesisWaitingForApproval: "التجميع بانتظار الموافقة",
     tokens: "رمز",
     moreSubagents: "وكلاء فرعيون إضافيون",
   },
@@ -180,6 +204,14 @@ export function reconcileTaskSurfaceState(
 export function getTaskCardSurfaceDesiredHeight(state: TaskSurfaceState, width = 80): number {
   const card = selectedTask(state);
   if (card === undefined) return 0;
+  const synthesis = activeParentSynthesisStep(card);
+  if (synthesis !== undefined) {
+    const grid = resolveSubagentGrid(card.subagents.length, dimension(width));
+    return 1 +
+      PARENT_SYNTHESIS_STAGE_HEIGHT +
+      PARENT_SYNTHESIS_STAGE_GAP +
+      collapsedSubagentGridHeight(grid);
+  }
   if (card.subagents.length === 0) return 2;
   const grid = resolveSubagentGrid(card.subagents.length, dimension(width));
   return 1 +
@@ -208,6 +240,10 @@ export function renderTaskCardSurface(
   const copy = COPY[options.locale ?? "en"];
   const isFocused = options.focusedTaskId === card.taskId;
   const header = formatTaskHeader(card, state, copy, isFocused, options.style);
+  const synthesis = activeParentSynthesisStep(card);
+  if (synthesis !== undefined) {
+    return renderParentSynthesisTaskSurface(card, synthesis, header, copy, options, width, height);
+  }
   if (card.subagents.length === 0) {
     const summary = `${formatStatus(card.status)} · ${isolateIfArabic(formatExecution(card), options.locale)} · ${formatDuration(card.elapsedMs)} · ${formatCardUsage(card.usage, options.locale ?? "en")} · ${copy.inspectHint}`;
     return padSurfaceRows([header, summary], height, width);
@@ -257,15 +293,40 @@ export function getTaskCardHitTargets(
   const normalizedWidth = dimension(width);
   const normalizedHeight = dimension(height);
   if (card === undefined || normalizedWidth === 0 || normalizedHeight === 0) return [];
+  const synthesis = activeParentSynthesisStep(card);
+  const taskTargetHeight = synthesis === undefined
+    ? 1
+    : Math.min(normalizedHeight, 1 + PARENT_SYNTHESIS_STAGE_HEIGHT);
   const targets: TaskCardHitTarget[] = [{
     kind: "taskHeader",
     taskId: card.taskId,
     x: 0,
     y: 0,
     width: normalizedWidth,
-    height: 1,
+    height: taskTargetHeight,
   }];
   if (card.subagents.length === 0) return targets;
+  if (synthesis !== undefined) {
+    const layout = resolveCollapsedSynthesisLayout(card, normalizedWidth, normalizedHeight);
+    const columnWidth = resolveEqualColumnWidth(normalizedWidth, layout.grid.columns);
+    for (let columnIndex = 0; columnIndex < layout.grid.columns; columnIndex += 1) {
+      for (let rowIndex = 0; rowIndex < layout.grid.rows; rowIndex += 1) {
+        const subagentIndex = columnIndex * layout.grid.rows + rowIndex;
+        const subagent = card.subagents[subagentIndex];
+        if (subagent === undefined || subagentIndex >= layout.visibleCount) continue;
+        targets.push({
+          kind: "subagentCard",
+          taskId: card.taskId,
+          stepId: subagent.stepId,
+          x: columnIndex * (columnWidth + SUBAGENT_COLUMN_GAP),
+          y: layout.workerTop + rowIndex * (COLLAPSED_SUBAGENT_CARD_HEIGHT + COLLAPSED_SUBAGENT_ROW_GAP),
+          width: columnWidth,
+          height: COLLAPSED_SUBAGENT_CARD_HEIGHT,
+        });
+      }
+    }
+    return targets;
+  }
   const grid = resolveSubagentGrid(card.subagents.length, normalizedWidth);
   const fitted = fitSubagentGridToHeight(grid, card.subagents.length, normalizedHeight);
   if (fitted.rows === 0) {
@@ -779,6 +840,9 @@ function selectTaskAt(state: OperatorConsoleState, index: number): OperatorConso
 }
 
 function visibleSubagentGrid(card: TaskCardState, width: number, height: number): SubagentGrid {
+  if (activeParentSynthesisStep(card) !== undefined) {
+    return resolveCollapsedSynthesisLayout(card, dimension(width), dimension(height)).grid;
+  }
   const grid = resolveSubagentGrid(card.subagents.length, dimension(width));
   const fitted = fitSubagentGridToHeight(grid, card.subagents.length, dimension(height));
   if (fitted.rows > 0) return fitted;
@@ -788,6 +852,10 @@ function visibleSubagentGrid(card: TaskCardState, width: number, height: number)
 
 function visibleSubagents(card: TaskCardState, width: number, height: number): readonly TaskCardSubagentState[] {
   const normalizedHeight = dimension(height);
+  if (activeParentSynthesisStep(card) !== undefined) {
+    const layout = resolveCollapsedSynthesisLayout(card, dimension(width), normalizedHeight);
+    return card.subagents.slice(0, layout.visibleCount);
+  }
   const grid = resolveSubagentGrid(card.subagents.length, dimension(width));
   const fitted = fitSubagentGridToHeight(grid, card.subagents.length, normalizedHeight);
   const visibleCount = fitted.rows > 0
@@ -892,6 +960,168 @@ type TaskCardRenderOptions = {
   readonly style?: OperatorConsoleStyle;
   readonly motionElapsedMs?: number;
 };
+
+type CollapsedSynthesisLayout = {
+  readonly grid: SubagentGrid;
+  readonly workerTop: number;
+  readonly visibleCount: number;
+};
+
+function activeParentSynthesisStep(card: TaskCardState): TaskCardStepState | undefined {
+  if (card.subagents.length === 0 || !card.subagents.every((subagent) => isSettledSubagent(subagent.status))) {
+    return undefined;
+  }
+  return card.steps.find((step) =>
+    step.executorRole === "synthesis" &&
+    (step.status === "ready" ||
+      step.status === "running" ||
+      step.status === "waiting_for_input" ||
+      step.status === "waiting_for_approval")
+  );
+}
+
+function collapsedSubagentGridHeight(grid: SubagentGrid): number {
+  if (grid.rows === 0) return grid.hiddenCount > 0 ? 1 : 0;
+  return grid.rows * COLLAPSED_SUBAGENT_CARD_HEIGHT +
+    Math.max(0, grid.rows - 1) * COLLAPSED_SUBAGENT_ROW_GAP +
+    (grid.hiddenCount > 0 ? 1 : 0);
+}
+
+function fitCollapsedSubagentGridToHeight(
+  grid: SubagentGrid,
+  count: number,
+  height: number
+): SubagentGrid {
+  for (let rows = grid.rows; rows > 0; rows -= 1) {
+    const hiddenCount = Math.max(0, count - rows * grid.columns);
+    const candidate = { columns: grid.columns, rows, hiddenCount };
+    if (collapsedSubagentGridHeight(candidate) <= height) return candidate;
+  }
+  return { columns: grid.columns, rows: 0, hiddenCount: count };
+}
+
+function resolveCollapsedSynthesisLayout(
+  card: TaskCardState,
+  width: number,
+  height: number
+): CollapsedSynthesisLayout {
+  const stageHeight = Math.min(PARENT_SYNTHESIS_STAGE_HEIGHT, Math.max(0, height - 1));
+  const remaining = Math.max(0, height - 1 - stageHeight);
+  const hasStageGap = remaining > PARENT_SYNTHESIS_STAGE_GAP;
+  const workerTop = 1 + stageHeight + (hasStageGap ? PARENT_SYNTHESIS_STAGE_GAP : 0);
+  const workerHeight = hasStageGap ? remaining - PARENT_SYNTHESIS_STAGE_GAP : 0;
+  const grid = fitCollapsedSubagentGridToHeight(
+    resolveSubagentGrid(card.subagents.length, width),
+    card.subagents.length,
+    workerHeight
+  );
+  return {
+    grid,
+    workerTop,
+    visibleCount: Math.min(card.subagents.length, grid.rows * grid.columns),
+  };
+}
+
+function renderParentSynthesisTaskSurface(
+  card: TaskCardState,
+  synthesis: TaskCardStepState,
+  header: string,
+  copy: TaskCopy,
+  options: TaskCardRenderOptions,
+  width: number,
+  height: number
+): readonly string[] {
+  const stageHeight = Math.min(PARENT_SYNTHESIS_STAGE_HEIGHT, Math.max(0, height - 1));
+  const rows: string[] = [padVisibleEnd(truncateVisible(header, width, "…"), width)];
+  rows.push(...renderParentSynthesisStage(card, synthesis, copy, options, width, stageHeight));
+  const layout = resolveCollapsedSynthesisLayout(card, width, height);
+  if (layout.workerTop > rows.length) rows.push("".padEnd(width));
+  const visibleSubagents = card.subagents.slice(0, layout.visibleCount);
+  const columnWidth = resolveEqualColumnWidth(width, layout.grid.columns);
+  for (let rowIndex = 0; rowIndex < layout.grid.rows; rowIndex += 1) {
+    if (rowIndex > 0) rows.push("".padEnd(width));
+    const summaries = Array.from({ length: layout.grid.columns }, (_, columnIndex) => {
+      const subagent = visibleSubagents[columnIndex * layout.grid.rows + rowIndex];
+      if (subagent === undefined) return "".padEnd(columnWidth);
+      const summary = `${formatSubagentTitle(
+        subagent,
+        options,
+        options.focusedSubagentStepId === subagent.stepId
+      )} · ${formatSubagentFooter(subagent, copy, options)}`;
+      const background = options.style?.tokens.contract.surface.bgElevated ?? "";
+      return styleBackgroundRow(options.style, ` ${summary}`, columnWidth, background);
+    });
+    rows.push(padVisibleEnd(truncateVisible(
+      summaries.join(" ".repeat(SUBAGENT_COLUMN_GAP)),
+      width,
+      "…"
+    ), width));
+  }
+  const hiddenCount = card.subagents.length - visibleSubagents.length;
+  if (hiddenCount > 0 && rows.length < height) rows.push(`+${hiddenCount} ${copy.moreSubagents}`);
+  return padSurfaceRows(rows, height, width);
+}
+
+function renderParentSynthesisStage(
+  card: TaskCardState,
+  synthesis: TaskCardStepState,
+  copy: TaskCopy,
+  options: TaskCardRenderOptions,
+  width: number,
+  height: number
+): readonly string[] {
+  if (height === 0) return [];
+  const style = options.style;
+  const tokens = style?.tokens.contract;
+  const attempt = synthesis.activeAttempt ?? synthesis.latestAttempt;
+  const symbol = parentSynthesisStatusSymbol(synthesis, style, options.motionElapsedMs);
+  const title = tokens === undefined
+    ? copy.parentSynthesis
+    : styleColor(style, styleBold(style, copy.parentSynthesis), tokens.palette.brand);
+  const description = styleSecondary(style, conciseSubagentTitle(synthesis.title));
+  const titleRow = `${symbol} ${title} ${styleMuted(style, "·")} ${description}`;
+  const resultCount = card.subagents.filter((subagent) => subagent.status === "completed").length;
+  const headlineText = parentSynthesisHeadline(synthesis, resultCount, copy);
+  const currentActivity = semanticParentSynthesisActivityLabel(
+    attempt?.currentActivity,
+    traceCategoryForTool(attempt?.currentToolCategory),
+    synthesis
+  );
+  const headline = currentActivity === undefined
+    ? headlineText
+    : `${headlineText} ${styleMuted(style, "·")} ${currentActivity}`;
+  const headlineColor = synthesis.status === "waiting_for_input" || synthesis.status === "waiting_for_approval"
+    ? tokens?.palette.caution
+    : tokens?.palette.action;
+  const styledHeadline = headlineColor === undefined ? headline : styleColor(style, headline, headlineColor);
+  const traceEvents = card.trace.events.flatMap((event) => {
+    if (event.stepId !== synthesis.stepId || !isMainCardActivityEvent(event)) return [];
+    const label = semanticParentSynthesisActivityLabel(event.label, event.category, synthesis);
+    return label === undefined ? [] : [{ ...event, label }];
+  });
+  const traceCard: TaskCardState = {
+    ...card,
+    subagents: [],
+    trace: { events: traceEvents, hasEarlierEvents: false },
+    recentActivity: traceEvents.slice(-12).reverse(),
+  };
+  const traceRows = renderActivityTraceSurface(traceCard, { followLive: true }, {
+    width,
+    locale: options.locale,
+    style,
+  });
+  const paddedTraceRows = Array.from({ length: 4 }, (_, index) => traceRows[index] ?? "");
+  const usage = attempt?.usage ?? synthesis.usage;
+  const elapsedMs = attempt?.elapsedMs ?? 0;
+  const status = styleParentSynthesisStatus(formatSubagentStatus(synthesis.status), synthesis.status, style);
+  const footer = `${status} ${styleMuted(style, `· ${formatDuration(elapsedMs)} · ${formatCompactTokenCount(usage.totalTokens)} ${copy.tokens} · ${formatCardUsage(usage, options.locale ?? "en")}`)}`;
+  const fullRows = [titleRow, styledHeadline, ...paddedTraceRows, footer];
+  if (height === 1) return [padVisibleEnd(truncateVisible(titleRow, width, "…"), width)];
+  const fittedRows = height >= fullRows.length
+    ? fullRows
+    : [titleRow, ...fullRows.slice(1, Math.max(1, height - 1)), footer];
+  return padSurfaceRows(fittedRows.slice(0, height), height, width);
+}
 
 function formatTaskHeader(
   card: TaskCardState,
@@ -1081,6 +1311,56 @@ function subagentStatusSymbol(
     return tokens === undefined ? "!" : styleColor(style, "!", tokens.palette.caution);
   }
   return tokens === undefined ? "." : styleColor(style, tokens.glyph.bullet, tokens.text.muted);
+}
+
+function parentSynthesisStatusSymbol(
+  synthesis: TaskCardStepState,
+  style: OperatorConsoleStyle | undefined,
+  motionElapsedMs: number | undefined
+): string {
+  const tokens = style?.tokens.contract;
+  if (synthesis.status === "ready" || synthesis.status === "running") {
+    if (tokens === undefined) return ">";
+    const motion = tokens.motion.worker;
+    const elapsed = tokens.behavior.allowAnimation ? motionElapsedMs : 0;
+    return styleColor(style, semanticMotionFrame(motion, elapsed, synthesis.position * 2), motion.color);
+  }
+  if (synthesis.status === "waiting_for_input" || synthesis.status === "waiting_for_approval") {
+    return tokens === undefined ? "!" : styleColor(style, "!", tokens.palette.caution);
+  }
+  return tokens === undefined ? "." : styleColor(style, tokens.glyph.bullet, tokens.text.muted);
+}
+
+function parentSynthesisHeadline(
+  synthesis: TaskCardStepState,
+  subagentCount: number,
+  copy: TaskCopy
+): string {
+  if (synthesis.status === "waiting_for_input") return copy.synthesisWaitingForInput;
+  if (synthesis.status === "waiting_for_approval") return copy.synthesisWaitingForApproval;
+  return synthesis.status === "ready"
+    ? copy.preparingSynthesis(subagentCount)
+    : copy.synthesizingResults(subagentCount);
+}
+
+function semanticParentSynthesisActivityLabel(
+  value: string | undefined,
+  category: TaskCardActivityState["category"],
+  synthesis: TaskCardStepState
+): string | undefined {
+  let label = normalizeCardText(value);
+  if (label === undefined) return undefined;
+  for (const suffix of [` · ${synthesis.title}`, ` · ${synthesis.objective}`]) {
+    if (label.endsWith(suffix)) label = label.slice(0, -suffix.length).trimEnd();
+  }
+  if (/^Attempt waiting$/iu.test(label)) return "Waiting for input";
+  if (/^(?:Worker (?:started|finished)|Starting delegated work|Result ready|Step status changed|Usage recorded|Attempt (?:queued|started|completed|checkpointed|failed|cancelled|interrupted|lease expired)|Worker assigned|Result recorded)$/iu.test(label)) {
+    return undefined;
+  }
+  if (/^(?:Tool activity|Read|Search|Edit|Terminal command) (?:started|finished)$/iu.test(label)) {
+    return semanticGenericActivity(category, /finished$/iu.test(label));
+  }
+  return label;
 }
 
 function subagentActivityRows(subagent: TaskCardSubagentState): {
@@ -1284,6 +1564,20 @@ function styleSubagentStatus(
   if (status === "failed" || status === "cancelled") return styleColor(style, value, tokens.severity.error);
   if (status === "waiting_for_input" || status === "waiting_for_approval") return styleColor(style, value, tokens.palette.caution);
   if (status === "running") return styleColor(style, value, tokens.palette.action);
+  return styleColor(style, value, tokens.text.secondary);
+}
+
+function styleParentSynthesisStatus(
+  value: string,
+  status: TaskCardStepState["status"],
+  style: OperatorConsoleStyle | undefined
+): string {
+  const tokens = style?.tokens.contract;
+  if (tokens === undefined) return value;
+  if (status === "waiting_for_input" || status === "waiting_for_approval") {
+    return styleColor(style, value, tokens.palette.caution);
+  }
+  if (status === "ready" || status === "running") return styleColor(style, value, tokens.palette.action);
   return styleColor(style, value, tokens.text.secondary);
 }
 

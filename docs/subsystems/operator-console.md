@@ -380,6 +380,22 @@ matching the established short session-ID convention while preserving the Task
 namespace. The exact durable Task ID remains visible in inspection and remains
 the only value used for focus, hit regions, routing, commands, and persistence.
 
+When every delegated Subagent is settled and the durable synthesis Step is
+`ready`, `running`, `waiting_for_input`, or `waiting_for_approval`, the
+main-session Task region gives the parent stage visual priority. It shows a
+distinct `Parent synthesis` panel sourced from that Step's persisted status,
+current Attempt, safe activity, usage, and semantic trace. The panel reports
+the factual number of Subagent results being synthesized and never invents
+intermediate prose or a completion percentage. Audit-only lifecycle events do
+not become its selected activity callout.
+
+While that parent stage is active, settled seven-row Subagent cards collapse to
+individually focusable one-row summaries beneath it. Their exact Step IDs and
+mouse/keyboard routes do not change, and their complete safe activity and
+accepted result summaries remain available in inspection. The parent panel
+opens whole-Task inspection. Before synthesis becomes active, and after it
+settles, the ordinary seven-row Subagent presentation remains in effect.
+
 One to three Subagents stack vertically. Four to six use two equal-width,
 column-major columns when both remain readable. A third column is added only at
 a readable width; otherwise the surface keeps complete seven-row cards and
