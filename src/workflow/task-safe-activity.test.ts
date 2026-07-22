@@ -19,7 +19,7 @@ describe("safe durable Task activity", () => {
 
     expect(activity).toEqual({
       kind: "tool",
-      label: "Tool activity started",
+      label: "Reviewing sources",
       traceCategory: "plan",
       toolCategory: "browser"
     });
@@ -71,5 +71,41 @@ describe("safe durable Task activity", () => {
       traceCategory: "answer",
       assistantPreview: "A bounded safe answer"
     });
+    expect(taskActivityFromDelegationProgress({
+      kind: "delegation-progress",
+      subagentId: "attempt-1",
+      childSessionId: "worker-1",
+      parentSessionId: "parent-1",
+      role: "leaf",
+      depth: 1,
+      childEvent: { kind: "agent-final" }
+    })).toEqual({
+      kind: "worker",
+      label: "Result ready",
+      traceCategory: "finish"
+    });
+  });
+
+  it("uses semantic categorical labels without retaining tool arguments", () => {
+    const activity = (tool: string) => taskActivityFromDelegationProgress({
+      kind: "delegation-progress",
+      subagentId: "attempt-1",
+      childSessionId: "worker-1",
+      parentSessionId: "parent-1",
+      role: "leaf",
+      depth: 1,
+      childEvent: { kind: "tool-start", tool, displayPreview: "must-not-persist" }
+    });
+
+    expect(activity("file.read")).toMatchObject({ label: "Reading files", traceCategory: "read" });
+    expect(activity("file.patch")).toMatchObject({ label: "Writing changes", traceCategory: "edit" });
+    expect(activity("terminal.run")).toMatchObject({ label: "Running command", traceCategory: "terminal" });
+    expect(activity("memory.read")).toMatchObject({ label: "Inspecting memory", traceCategory: "read" });
+    expect(JSON.stringify([
+      activity("file.read"),
+      activity("file.patch"),
+      activity("terminal.run"),
+      activity("memory.read")
+    ])).not.toContain("must-not-persist");
   });
 });

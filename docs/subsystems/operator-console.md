@@ -365,7 +365,14 @@ status/elapsed/tokens/cost footer. The interior continually refreshes with the
 latest retained safe activity. Cards use the elevated grey surface token,
 whitespace gutters instead of permanent perimeter borders, and the existing
 worker motion token while running. Focus adds the action-color leading rail and
-title treatment.
+title treatment. The main card is a presentation projection: lifecycle and
+accounting events such as `Worker finished`, Step-state changes, Attempt
+bookkeeping, and usage recording remain available in inspection but do not
+consume its activity rows. Running cards show semantic safe work such as
+searching, reading, writing, or preparing an answer. Completed cards replace
+those transient rows with `Result ready` and up to three wrapped lines from the
+accepted result summary, falling back to the retained assistant preview only
+when no result summary exists.
 
 One to three Subagents stack vertically. Four to six use two equal-width,
 column-major columns when both remain readable. A third column is added only at

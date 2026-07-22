@@ -177,7 +177,7 @@ describe("AgentStepExecutor", () => {
     expect(store.listEvents(graph.task.id, { kinds: ["attempt-progressed"] })).toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          activity: { kind: "tool", label: "Read started", traceCategory: "read", toolCategory: "files" }
+          activity: { kind: "tool", label: "Reading files", traceCategory: "read", toolCategory: "files" }
         })
       })
     );

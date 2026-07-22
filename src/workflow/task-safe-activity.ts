@@ -8,23 +8,25 @@ export function taskActivityFromDelegationProgress(event: DelegationProgressEven
   const child = event.childEvent;
   switch (child.kind) {
     case "agent-start":
-      return { kind: "worker", label: "Worker started", traceCategory: "plan" };
+      return { kind: "worker", label: "Starting delegated work", traceCategory: "plan" };
     case "tool-start": {
       const traceCategory = taskTraceCategoryFromTool(child.tool);
+      const toolCategory = taskToolCategory(child.tool);
       return {
         kind: "tool",
-        label: toolActivityLabel(traceCategory, false),
+        label: toolActivityLabel(traceCategory, toolCategory, false),
         traceCategory,
-        toolCategory: taskToolCategory(child.tool),
+        toolCategory,
       };
     }
     case "tool-result": {
       const traceCategory = child.ok === false ? "failed" : taskTraceCategoryFromTool(child.tool);
+      const toolCategory = taskToolCategory(child.tool);
       return {
         kind: "tool",
-        label: child.ok === false ? "Tool activity failed" : toolActivityLabel(traceCategory, true),
+        label: child.ok === false ? "Activity failed" : toolActivityLabel(traceCategory, toolCategory, true),
         traceCategory,
-        toolCategory: taskToolCategory(child.tool),
+        toolCategory,
       };
     }
     case "provider-attempt":
@@ -52,13 +54,13 @@ export function taskActivityFromDelegationProgress(event: DelegationProgressEven
         assistantPreview: child.preview
       };
     case "agent-final":
-      return { kind: "worker", label: "Worker finished", traceCategory: "finish" };
+      return { kind: "worker", label: "Result ready", traceCategory: "finish" };
     case "agent-cancelled":
       return { kind: "worker", label: "Worker cancelled", traceCategory: "failed" };
     case "delegation-result":
       return {
         kind: "worker",
-        label: `Worker ${child.status ?? "settled"}`,
+        label: child.status === "completed" ? "Result ready" : `Delegated work ${child.status ?? "settled"}`,
         traceCategory: child.status === "completed"
           ? "finish"
           : child.status === "blocked"
@@ -101,15 +103,28 @@ export function taskToolCategory(toolName: string | undefined): string {
   }
 }
 
-function toolActivityLabel(category: TaskTraceCategory, finished: boolean): string {
-  const action = (() => {
-    switch (category) {
-      case "terminal": return "Terminal command";
-      case "search": return "Search";
-      case "read": return "Read";
-      case "edit": return "Edit";
-      default: return "Tool activity";
+function toolActivityLabel(category: TaskTraceCategory, toolCategory: string, finished: boolean): string {
+  switch (category) {
+    case "terminal": return finished ? "Command completed" : "Running command";
+    case "search": return finished ? "Search completed" : "Searching";
+    case "read": {
+      if (toolCategory === "memory" || toolCategory === "configuration") {
+        return finished ? `${capitalize(toolCategory)} inspected` : `Inspecting ${toolCategory}`;
+      }
+      if (toolCategory === "web" || toolCategory === "browser") {
+        return finished ? "Sources reviewed" : "Reviewing sources";
+      }
+      return finished ? "Files reviewed" : "Reading files";
     }
-  })();
-  return finished ? `${action} finished` : `${action} started`;
+    case "edit": return finished ? "Changes written" : "Writing changes";
+    default:
+      if (toolCategory === "web" || toolCategory === "browser") {
+        return finished ? "Sources reviewed" : "Reviewing sources";
+      }
+      return finished ? "Inspection completed" : "Inspecting task context";
+  }
+}
+
+function capitalize(value: string): string {
+  return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`;
 }

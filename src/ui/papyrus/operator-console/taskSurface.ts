@@ -1,5 +1,5 @@
 import type { ParsedKeypress } from "../../input/parseKeypress.js";
-import { padVisibleEnd, truncateVisible } from "../../renderers/layout.js";
+import { padVisibleEnd, truncateVisible, wrapText } from "../../renderers/layout.js";
 import { semanticMotionFrame } from "../../semantic-motion.js";
 import { navigateActivityTrace, type TraceNavigationAction } from "./activityTraceSurface.js";
 import { setFocus } from "./focusModel.js";
@@ -47,6 +47,9 @@ type TaskCopy = {
   earlierActivities: string;
   noEarlierActivity: string;
   waitingForActivity: string;
+  resultReady: string;
+  resultUnavailable: string;
+  noResultSummary: string;
   tokens: string;
   moreSubagents: string;
 };
@@ -62,6 +65,9 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     earlierActivities: "earlier activities",
     noEarlierActivity: "no earlier activity",
     waitingForActivity: "Waiting for safe activity",
+    resultReady: "Result ready",
+    resultUnavailable: "Result unavailable",
+    noResultSummary: "No result summary available",
     tokens: "tokens",
     moreSubagents: "more Subagents",
   },
@@ -75,6 +81,9 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     earlierActivities: "أنشطة سابقة",
     noEarlierActivity: "لا يوجد نشاط سابق",
     waitingForActivity: "بانتظار نشاط آمن",
+    resultReady: "النتيجة جاهزة",
+    resultUnavailable: "النتيجة غير متاحة",
+    noResultSummary: "لا يتوفر ملخص للنتيجة",
     tokens: "رمز",
     moreSubagents: "وكلاء فرعيون إضافيون",
   },
@@ -957,20 +966,35 @@ function renderSubagentCard(
   focused: boolean
 ): readonly string[] {
   const activity = subagentActivityRows(subagent);
-  const visibleActivity = activity.rows.slice(0, SUBAGENT_ACTIVITY_ROWS);
   const title = formatSubagentTitle(subagent, options, focused);
   const history = formatSubagentHistoryCount(activity.hiddenCount, copy, options.style);
-  const activityRows = Array.from({ length: SUBAGENT_ACTIVITY_ROWS }, (_, index) => {
-    const row = visibleActivity[index];
-    if (row !== undefined) return formatSubagentActivity(row, options.style);
-    if (index === 0) return styleMuted(options.style, copy.waitingForActivity);
-    return "";
-  });
-  const summary = formatSubagentPreviewOrSummary(subagent, options.style);
   const footer = formatSubagentFooter(subagent, copy, options);
   const background = options.style?.tokens.contract.surface.bgElevated ?? "";
-  return [title, history, ...activityRows, summary, footer]
+  const contentRows = isSettledSubagent(subagent.status)
+    ? [
+        formatSettledSubagentState(subagent, copy, options.style),
+        ...formatSettledSubagentSummary(subagent, copy, Math.max(1, width - 3), options.style),
+      ]
+    : [
+        ...formatRunningSubagentActivity(activity.rows, copy, options.style),
+        formatSubagentPreview(subagent, options.style),
+      ];
+  return [title, history, ...contentRows, footer]
     .map((row) => styleBackgroundRow(options.style, ` ${row}`, width, background));
+}
+
+function formatRunningSubagentActivity(
+  activity: readonly SubagentActivityRow[],
+  copy: TaskCopy,
+  style: OperatorConsoleStyle | undefined
+): readonly string[] {
+  const visibleActivity = activity.slice(0, SUBAGENT_ACTIVITY_ROWS);
+  return Array.from({ length: SUBAGENT_ACTIVITY_ROWS }, (_, index) => {
+    const row = visibleActivity[index];
+    if (row !== undefined) return formatSubagentActivity(row, style);
+    if (index === 0) return styleMuted(style, copy.waitingForActivity);
+    return "";
+  });
 }
 
 function renderCompactSubagentFallback(
@@ -1059,7 +1083,11 @@ function subagentActivityRows(subagent: TaskCardSubagentState): {
 } {
   const rows: SubagentActivityRow[] = [];
   const seen = new Set<string>();
-  const currentActivity = normalizeCardText(subagent.currentActivity ?? subagent.activeAttempt?.currentActivity);
+  const currentActivity = semanticSubagentActivityLabel(
+    subagent.currentActivity ?? subagent.activeAttempt?.currentActivity,
+    traceCategoryForTool(subagent.currentToolCategory ?? subagent.activeAttempt?.currentToolCategory),
+    subagent
+  );
   if (currentActivity !== undefined) {
     rows.push({
       label: currentActivity,
@@ -1069,7 +1097,8 @@ function subagentActivityRows(subagent: TaskCardSubagentState): {
     seen.add(currentActivity.toLocaleLowerCase());
   }
   for (const event of [...subagent.trace].reverse()) {
-    const label = normalizeCardText(event.label);
+    if (!isMainCardActivityEvent(event) || event.category === "answer") continue;
+    const label = semanticSubagentActivityLabel(event.label, event.category, subagent);
     if (label === undefined || seen.has(label.toLocaleLowerCase())) continue;
     rows.push({ label, category: event.category, live: false });
     seen.add(label.toLocaleLowerCase());
@@ -1078,6 +1107,64 @@ function subagentActivityRows(subagent: TaskCardSubagentState): {
     rows,
     hiddenCount: Math.max(0, rows.length - SUBAGENT_ACTIVITY_ROWS),
   };
+}
+
+function isMainCardActivityEvent(event: TaskCardActivityState): boolean {
+  switch (event.kind) {
+    case "task-created":
+    case "task-state-changed":
+    case "plan-revision-created":
+    case "plan-revision-validated":
+    case "plan-revision-activated":
+    case "plan-revision-rejected":
+    case "plan-revision-superseded":
+    case "step-state-changed":
+    case "attempt-created":
+    case "attempt-leased":
+    case "attempt-started":
+    case "attempt-completed":
+    case "attempt-failed":
+    case "attempt-cancelled":
+    case "attempt-interrupted":
+    case "attempt-expired":
+    case "usage-recorded":
+    case "result-recorded":
+      return false;
+    default:
+      return true;
+  }
+}
+
+function semanticSubagentActivityLabel(
+  value: string | undefined,
+  category: TaskCardActivityState["category"],
+  subagent: TaskCardSubagentState
+): string | undefined {
+  let label = normalizeCardText(value);
+  if (label === undefined) return undefined;
+  for (const suffix of [` · ${subagent.title}`, ` · ${subagent.objective}`]) {
+    if (label.endsWith(suffix)) label = label.slice(0, -suffix.length).trimEnd();
+  }
+  if (/^Attempt waiting$/iu.test(label)) return "Waiting for input";
+  if (/^(?:Worker (?:started|finished)|Starting delegated work|Result ready|Step status changed|Usage recorded|Attempt (?:queued|started|completed|checkpointed|failed|cancelled|interrupted|lease expired)|Worker assigned|Result recorded)$/iu.test(label)) {
+    return undefined;
+  }
+  if (/^(?:Tool activity|Read|Search|Edit|Terminal command) (?:started|finished)$/iu.test(label)) {
+    return semanticGenericActivity(category, /finished$/iu.test(label));
+  }
+  return label;
+}
+
+function semanticGenericActivity(category: TaskCardActivityState["category"], finished: boolean): string {
+  switch (category) {
+    case "terminal": return finished ? "Command completed" : "Running command";
+    case "search": return finished ? "Search completed" : "Searching";
+    case "read": return finished ? "Files reviewed" : "Reading files";
+    case "edit": return finished ? "Changes written" : "Writing changes";
+    case "wait": return "Waiting for input";
+    case "failed": return "Activity failed";
+    default: return finished ? "Inspection completed" : "Inspecting task context";
+  }
 }
 
 function formatSubagentHistoryCount(
@@ -1107,7 +1194,7 @@ function formatSubagentActivity(
   return `${styledGlyph} ${activity.label}`;
 }
 
-function formatSubagentPreviewOrSummary(
+function formatSubagentPreview(
   subagent: TaskCardSubagentState,
   style: OperatorConsoleStyle | undefined
 ): string {
@@ -1121,13 +1208,52 @@ function formatSubagentPreviewOrSummary(
     const color = style?.tokens.contract.trace.answer;
     return `${color === undefined ? glyph : styleColor(style, glyph, color)} ${preview}`;
   }
-  if (!isSettledSubagent(subagent.status)) return "";
+  return "";
+}
+
+function formatSettledSubagentState(
+  subagent: TaskCardSubagentState,
+  copy: TaskCopy,
+  style: OperatorConsoleStyle | undefined
+): string {
+  const successful = subagent.status === "completed";
+  const label = successful
+    ? copy.resultReady
+    : subagent.status === "skipped" ? formatSubagentStatus(subagent.status) : copy.resultUnavailable;
+  const tokens = style?.tokens.contract;
+  const glyph = successful
+    ? tokens?.glyph.trace.event ?? ">"
+    : tokens?.glyph.cross ?? "!";
+  const color = successful ? tokens?.severity.ok : tokens?.severity.error;
+  return `${color === undefined ? glyph : styleColor(style, glyph, color)} ${label}`;
+}
+
+function formatSettledSubagentSummary(
+  subagent: TaskCardSubagentState,
+  copy: TaskCopy,
+  width: number,
+  style: OperatorConsoleStyle | undefined
+): readonly string[] {
   const resultSummary = normalizeCardText(
     subagent.results.find((result) => result.primary && result.disposition === "accepted")?.summary ??
-    subagent.results.find((result) => result.disposition === "accepted")?.summary
+    subagent.results.find((result) => result.disposition === "accepted")?.summary ??
+    subagent.results.find((result) => result.primary)?.summary ??
+    subagent.results.find((result) => result.summary !== undefined)?.summary
   );
-  const summary = resultSummary ?? formatSubagentStatus(subagent.status);
-  return `${subagentStatusSymbol(subagent, style, 0)} ${summary}`;
+  const preview = normalizeCardText(
+    subagent.assistantPreview ??
+    subagent.latestAttempt?.assistantPreview
+  );
+  const summary = resultSummary ?? preview ?? copy.noResultSummary;
+  const wrapped = wrapText(summary, width);
+  const visible = wrapped.slice(0, SUBAGENT_ACTIVITY_ROWS);
+  if (wrapped.length > SUBAGENT_ACTIVITY_ROWS && visible.length > 0) {
+    visible[visible.length - 1] = truncateVisible(`${visible[visible.length - 1]}…`, width, "…");
+  }
+  return Array.from({ length: SUBAGENT_ACTIVITY_ROWS }, (_, index) => {
+    const line = visible[index];
+    return line === undefined ? "" : `  ${styleSecondary(style, line)}`;
+  });
 }
 
 function formatSubagentFooter(

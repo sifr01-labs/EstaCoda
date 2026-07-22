@@ -210,6 +210,69 @@ describe("durable Task surfaces", () => {
     expect(after).not.toContain("Reading package.json");
   });
 
+  it("keeps audit events out of running cards and shows semantic work instead", () => {
+    const subagent = makeSubagent(1, {
+      currentActivity: "Comparing trust-boundary mechanisms",
+      assistantPreview: "Writing recommendations",
+      trace: [
+        { eventId: "semantic", kind: "attempt-progressed", label: "Inspecting memory architecture · Research Company 1", category: "read", timestamp: "2026-07-20T10:00:00.000Z" },
+        { eventId: "finished", kind: "attempt-progressed", label: "Worker finished · Research Company 1", category: "finish", timestamp: "2026-07-20T10:00:01.000Z" },
+        { eventId: "step", kind: "step-state-changed", label: "Step status changed · Research Company 1", category: "finish", timestamp: "2026-07-20T10:00:02.000Z" },
+        { eventId: "usage", kind: "usage-recorded", label: "Usage recorded · Research Company 1", category: "plan", timestamp: "2026-07-20T10:00:03.000Z" },
+      ],
+    });
+    const card = makeCard({ subagents: [subagent] });
+    const text = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 72 }).join("\n");
+    const inspection = subagentInspectionContentLines(card, subagent, 72).join("\n");
+
+    expect(text).toContain("Comparing trust-boundary mechanisms");
+    expect(text).toContain("Inspecting memory architecture");
+    expect(text).toContain("Writing recommendations");
+    expect(text).not.toContain("Worker finished");
+    expect(text).not.toContain("Step status changed");
+    expect(text).not.toContain("Usage recorded");
+    expect(inspection).toContain("Worker finished");
+    expect(inspection).toContain("Step status changed");
+    expect(inspection).toContain("Usage recorded");
+  });
+
+  it("uses three completed-card rows for a wrapped result summary", () => {
+    const subagent = makeSubagent(1, {
+      status: "completed",
+      currentActivity: "Worker finished",
+      assistantPreview: "A shorter provider preview.",
+      trace: [
+        { eventId: "finished", kind: "attempt-progressed", label: "Worker finished · Research Company 1", category: "finish", timestamp: "2026-07-20T10:00:01.000Z" },
+        { eventId: "usage", kind: "usage-recorded", label: "Usage recorded · Research Company 1", category: "plan", timestamp: "2026-07-20T10:00:02.000Z" },
+      ],
+      results: [{
+        id: "result-1",
+        handle: "result://one",
+        kind: "summary",
+        disposition: "accepted",
+        status: "available",
+        byteLength: 240,
+        primary: true,
+        summary: "Found that EstaCoda already has strong file and profile boundaries, but memory writes need explicit provenance and review semantics. Produced 7 recommendations.",
+      }],
+    });
+    const card = makeCard({ subagents: [subagent] });
+    const lines = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 72 });
+    const text = stripAnsi(lines.join("\n"));
+    const compactText = text.replace(/\s+/gu, " ");
+
+    expect(lines).toHaveLength(8);
+    expect(lines.slice(1)).toHaveLength(7);
+    expect(text).toContain("Result ready");
+    expect(compactText).toContain("Found that EstaCoda already has strong file and profile boundaries");
+    expect(compactText).toContain("memory writes need explicit provenance and review semantics");
+    expect(compactText).toContain("Produced 7 recommendations.");
+    expect(text).not.toContain("A shorter provider preview.");
+    expect(text).not.toContain("Worker finished");
+    expect(text).not.toContain("Usage recorded");
+    expect(text).toContain("completed · 03:18");
+  });
+
   it("refreshes projections by stable ID without reordering cards or resetting inspection", () => {
     const first = makeCard({ taskId: "T-first", objective: "First Task" });
     const second = makeCard({
