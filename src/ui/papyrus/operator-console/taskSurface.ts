@@ -917,9 +917,15 @@ function formatTaskHeader(
     ? styleColor(style, styleBold(style, mouseHint), tokens.palette.action)
     : styleMuted(style, mouseHint);
   const separator = styleMuted(style, "·");
-  const taskId = styleMuted(style, isolate(card.taskId));
+  const taskId = styleMuted(style, isolate(formatTaskDisplayId(card.taskId)));
   const progress = styleMuted(style, `${settled} of ${card.progress.total} ${copy.stepsSettled}`);
   return `${styledRail} ${styledTitle} ${separator} ${taskId} ${separator} ${styledMouseHint} ${separator} ${card.objective} ${separator} ${progress}`;
+}
+
+function formatTaskDisplayId(taskId: string): string {
+  const uuid = taskId.match(/^([A-Za-z][A-Za-z0-9_-]{0,15}[_-])?([0-9a-f]{8})-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu);
+  if (uuid !== null) return `${uuid[1] ?? ""}${uuid[2]}`;
+  return taskId;
 }
 
 function resolveSubagentGrid(count: number, width: number): SubagentGrid {

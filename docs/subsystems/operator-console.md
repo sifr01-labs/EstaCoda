@@ -374,6 +374,12 @@ those transient rows with `Result ready` and up to three wrapped lines from the
 accepted result summary, falling back to the retained assistant preview only
 when no result summary exists.
 
+The main-session Task header uses a compact display identity: generated
+`task_<uuid>` values render as `task_` plus the first eight UUID characters,
+matching the established short session-ID convention while preserving the Task
+namespace. The exact durable Task ID remains visible in inspection and remains
+the only value used for focus, hit regions, routing, commands, and persistence.
+
 One to three Subagents stack vertically. Four to six use two equal-width,
 column-major columns when both remain readable. A third column is added only at
 a readable width; otherwise the surface keeps complete seven-row cards and

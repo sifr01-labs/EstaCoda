@@ -97,6 +97,32 @@ describe("durable Task surfaces", () => {
     expect(arabicText).not.toContain("Delegated work 2");
   });
 
+  it("uses a compact Task ID in the main header while retaining the full ID in inspection", () => {
+    const taskId = "task_37c8496f-f9b2-4568-8552-73c95e35c81f";
+    const card = makeCard({ taskId });
+    const main = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 100 });
+    const inspection = renderTaskInspectionSurface({
+      cards: [card],
+      inspectedTaskId: taskId,
+      inspection: { followLive: true },
+      scrollOffset: 0,
+    }, { width: 100, height: 8 });
+
+    expect(main[0]).toContain("\u2068task_37c8496f\u2069");
+    expect(main[0]).not.toContain(taskId);
+    expect(inspection[0]).toContain(`\u2068${taskId}\u2069`);
+    expect(main[0]).toContain("Ctrl+G mouse");
+    expect(main[0]).toContain("Competitor comparison");
+    expect(main.every((line) => visibleWidth(line) <= 100)).toBe(true);
+
+    const customTaskId = "customer-import-batch";
+    const custom = renderTaskCardSurface(
+      { cards: [makeCard({ taskId: customTaskId })], scrollOffset: 0 },
+      { width: 100 },
+    );
+    expect(custom[0]).toContain(`\u2068${customTaskId}\u2069`);
+  });
+
   it("uses column-major 1-3 | 4-6 placement, equal widths, and +N more instead of squeezing", () => {
     const four = makeCard({ subagents: Array.from({ length: 4 }, (_, index) => makeSubagent(index + 1)) });
     const wide = renderTaskCardSurface({ cards: [four], scrollOffset: 0 }, { width: 100, isTty: true });
