@@ -68,6 +68,7 @@ const ATTACHMENTS_PRIORITY = 5;
 const TRANSCRIPT_PRIORITY = 6;
 const STARTUP_PRIORITY = 7;
 const TASK_CARD_PRIORITY = 4;
+const PROMPT_GAP_PRIORITY = 8;
 const SHOW_LIVE_ACTIVE_WORK_REGION = false;
 
 export function createOperatorConsoleLayout(
@@ -213,6 +214,15 @@ function createRegionDescriptors(
     });
   }
 
+  if (hasTaskCards(state.tasks)) {
+    descriptors.push({
+      kind: "promptGap",
+      priority: PROMPT_GAP_PRIORITY,
+      minHeight: 1,
+      desiredHeight: 2,
+    });
+  }
+
   descriptors.push({
     kind: "prompt",
     priority: PROMPT_PRIORITY,
@@ -340,12 +350,14 @@ function surfaceOrderIndex(kind: OperatorConsoleRegionKind): number {
       return 9;
     case "attachments":
       return 10;
-    case "prompt":
+    case "promptGap":
       return 11;
-    case "slashMenu":
+    case "prompt":
       return 12;
-    case "statusRail":
+    case "slashMenu":
       return 13;
+    case "statusRail":
+      return 14;
   }
 }
 

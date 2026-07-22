@@ -22,12 +22,15 @@ import {
 
 describe("durable Task surfaces", () => {
   it("renders one Subagent as exactly seven borderless grey rows with semantic title and truthful footer", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
     const style = createOperatorConsoleStyle({
-      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      tokens,
       capabilities: { supportsColor: true, supportsTrueColor: true },
     });
     const card = makeCard({
       subagents: [makeSubagent(1, {
+        title: "Research how modern AI agents improve themselves autonomously. Cover academic techniques",
+        objective: "Full research objective retained for detailed inspection",
         assistantPreview: "I found the relevant comparison data.",
         trace: Array.from({ length: 5 }, (_, index) => ({
           eventId: `event-${index}`,
@@ -51,14 +54,20 @@ describe("durable Task surfaces", () => {
     expect(lines).toHaveLength(8);
     expect(lines.slice(1)).toHaveLength(7);
     expect(text).toContain("Task 1/1");
-    expect(text).toContain("Subagent 1 · Research Company 1");
+    expect(text).toContain("Subagent 1 · Research how modern AI agents improve themselves auto…");
+    expect(text).not.toContain("Full research objective retained for detailed inspection");
+    expect(subagentInspectionContentLines(card, card.subagents[0]!, 72).join("\n"))
+      .toContain("Full research objective retained for detailed inspection");
     expect(text).toContain("+3 earlier activities");
     expect(text).toContain("I found the relevant comparison data.");
     expect(text).toContain("running · 03:18 · 100 tokens · $0.0060");
     expect(text).not.toMatch(/[╭╮╰╯│]/u);
     expect(lines.slice(1).every((line) => line.includes("\x1b[48;2;37;37;37m"))).toBe(true);
     expect(lines[0]).toContain("\x1b[38;2;64;224;208m");
-    expect(lines[1]).toContain("\x1b[38;2;78;161;255m");
+    expect(lines[1]).toContain(ansiFg(tokens.contract.palette.accent));
+    expect(lines[1]).toContain(ansiFg(tokens.contract.text.secondary));
+    expect(lines.at(-1)).toContain(ansiFg(tokens.contract.palette.action));
+    expect(lines.at(-1)).toContain(ansiFg(tokens.contract.text.muted));
     expect(lines.every((line) => visibleWidth(line) <= 72)).toBe(true);
   });
 
@@ -1031,4 +1040,12 @@ function visibleWidth(value: string): number {
 
 function stripAnsi(value: string): string {
   return value.replace(/\u001B\[[0-?]*[ -/]*[@-~]/gu, "");
+}
+
+function ansiFg(hex: string): string {
+  const clean = hex.replace("#", "");
+  const red = Number.parseInt(clean.slice(0, 2), 16);
+  const green = Number.parseInt(clean.slice(2, 4), 16);
+  const blue = Number.parseInt(clean.slice(4, 6), 16);
+  return `\x1b[38;2;${red};${green};${blue}m`;
 }

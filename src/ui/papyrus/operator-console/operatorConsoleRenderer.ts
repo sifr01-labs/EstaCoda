@@ -47,6 +47,9 @@ function renderRegionLines(
   region: OperatorConsoleRegion
 ): readonly OperatorConsoleRenderedLine[] {
   if (!region.visible || region.height <= 0 || region.width <= 0) return [];
+  if (region.kind === "promptGap") {
+    return Array.from({ length: region.height }, () => ({ region: region.kind, text: "" }));
+  }
   if (region.kind === "startupDashboard") {
     return renderStartupDashboardSurface(state.startup, {
       width: region.width,
@@ -196,6 +199,8 @@ function regionLabel(
       return `Task: ${state.tasks.inspectedTaskId ?? ""}`;
     case "attachments":
       return `Attachments: ${state.attachments.length}`;
+    case "promptGap":
+      return "";
     case "prompt":
       return `Prompt: ${state.prompt.value.length > 0 ? state.prompt.value : ">"}`;
     case "slashMenu":

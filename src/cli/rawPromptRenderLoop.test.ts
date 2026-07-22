@@ -46,7 +46,7 @@ describe("raw prompt render loop", () => {
       },
     });
 
-    expect(rows).toBe(2);
+    expect(rows).toBe(3);
     expect(output.text()).toContain("› review the Papyrus rollout plan");
     expect(output.text()).toContain("kimi-k2.7-code ● · ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k");
     expect(output.text()).toContain("· ◷ 01:12");
@@ -65,7 +65,7 @@ describe("raw prompt render loop", () => {
         terminal: { width: 72, height: 12, isTty: true },
         status: status({ usedTokens: 0, elapsedMs: 0 }),
       },
-    })).toBe(2);
+    })).toBe(3);
 
     const secondRenderStart = output.chunks().length;
     expect(loop.render({
@@ -76,7 +76,7 @@ describe("raw prompt render loop", () => {
         terminal: { width: 72, height: 12, isTty: true },
         status: status({ usedTokens: 0, elapsedMs: 0 }),
       },
-    })).toBe(2);
+    })).toBe(3);
 
     const secondRender = output.chunks().slice(secondRenderStart).join("");
     expect(secondRender.startsWith("\r")).toBe(true);
@@ -494,7 +494,7 @@ describe("raw prompt render loop", () => {
     });
     const text = output.text();
 
-    expect(rows).toBe(2);
+    expect(rows).toBe(3);
     expect(text).toContain("› /h");
     expect(text).not.toContain("> /help - Show help");
     expect(text.indexOf("› /h")).toBeLessThan(text.indexOf("◷ 00:00"));

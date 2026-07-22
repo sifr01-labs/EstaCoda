@@ -505,6 +505,7 @@ export type OperatorConsoleSurface =
   | "taskCards"
   | "taskInspection"
   | "attachments"
+  | "promptGap"
   | "prompt"
   | "slashMenu"
   | "statusRail";
@@ -521,6 +522,7 @@ export const OPERATOR_CONSOLE_SURFACE_ORDER: readonly OperatorConsoleSurface[] =
   "taskCards",
   "taskInspection",
   "attachments",
+  "promptGap",
   "prompt",
   "slashMenu",
   "statusRail",

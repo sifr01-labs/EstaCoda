@@ -25,6 +25,7 @@ export type PromptSurfaceMetrics = {
 
 export const PREFERRED_PROMPT_INPUT_ROWS = 8;
 export const MAX_PROMPT_HEIGHT_RATIO = 0.3;
+export const PROMPT_BOTTOM_PADDING_ROWS = 1;
 
 export function getPromptSurfaceDesiredHeight(
   state: PromptSurfaceState,
@@ -32,8 +33,9 @@ export function getPromptSurfaceDesiredHeight(
 ): number {
   const logicalRows = getPromptLogicalRows(state, terminal.width).length;
   const preferredInputRows = Math.min(PREFERRED_PROMPT_INPUT_ROWS, logicalRows);
-  const absoluteInputRows = Math.max(1, Math.floor(terminal.height * MAX_PROMPT_HEIGHT_RATIO));
-  return Math.max(1, Math.min(preferredInputRows, absoluteInputRows));
+  const absoluteHeight = Math.max(2, Math.floor(terminal.height * MAX_PROMPT_HEIGHT_RATIO));
+  const absoluteInputRows = Math.max(1, absoluteHeight - PROMPT_BOTTOM_PADDING_ROWS);
+  return Math.max(2, Math.min(preferredInputRows, absoluteInputRows) + PROMPT_BOTTOM_PADDING_ROWS);
 }
 
 export function renderPromptSurface(
@@ -50,20 +52,26 @@ export function renderPromptSurface(
   if (height <= 0) return [];
 
   const contentWidth = width;
-  const inputRows = height;
+  const paddingRows = height > 1 ? PROMPT_BOTTOM_PADDING_ROWS : 0;
+  const inputRows = Math.max(1, height - paddingRows);
   const logicalRows = getPromptLogicalRows(state, width);
   const overflow = logicalRows.length > inputRows;
   const cursor = getPromptCursorPosition(state, logicalRows);
   const scrollOffset = getCursorVisibleScrollOffset(state, logicalRows.length, inputRows, overflow, cursor.row);
   const visibleRows = getVisiblePromptRows(logicalRows, scrollOffset, inputRows, overflow);
 
-  return visibleRows.map((row, index) => renderContentRow(
+  const content = visibleRows.map((row, index) => renderContentRow(
     row,
     contentWidth,
     width,
     shouldStylePlaceholderRow(state, scrollOffset, index),
     options.style
   ));
+  const background = options.style?.tokens.contract.surface.bgElevated ?? "";
+  const padding = Array.from({ length: paddingRows }, () =>
+    styleBackgroundRow(options.style, "", width, background)
+  );
+  return [...content, ...padding];
 }
 
 export function getPromptSurfaceMetrics(
@@ -75,7 +83,8 @@ export function getPromptSurfaceMetrics(
     width: options.width,
   }));
   const logicalRows = getPromptLogicalRows(state, options.width);
-  const visibleRows = Math.max(1, height);
+  const paddingRows = height > 1 ? PROMPT_BOTTOM_PADDING_ROWS : 0;
+  const visibleRows = Math.max(1, height - paddingRows);
   const overflow = logicalRows.length > visibleRows;
   const cursor = getPromptCursorPosition(state, logicalRows);
   return {

@@ -48,6 +48,7 @@ describe("Papyrus operator console state model", () => {
       "taskCards",
       "taskInspection",
       "attachments",
+      "promptGap",
       "prompt",
       "slashMenu",
       "statusRail",

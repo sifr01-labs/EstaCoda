@@ -32,6 +32,8 @@ const SUBAGENT_ROWS_PER_COLUMN = 3;
 const SUBAGENT_COLUMN_GAP = 2;
 const SUBAGENT_ROW_GAP = 1;
 const MIN_SUBAGENT_CARD_WIDTH = 44;
+const MAX_SUBAGENT_TITLE_WORDS = 8;
+const MAX_SUBAGENT_TITLE_WIDTH = 64;
 const LTR_START = "\u2068";
 const LTR_END = "\u2069";
 
@@ -886,8 +888,11 @@ function formatTaskHeader(
   const mouseHint = state.mouseModeActive === true ? copy.mouseActiveHint : copy.mouseToggleHint;
   const styledMouseHint = state.mouseModeActive === true && tokens !== undefined
     ? styleColor(style, styleBold(style, mouseHint), tokens.palette.action)
-    : mouseHint;
-  return `${styledRail} ${styledTitle} · ${isolate(card.taskId)} · ${styledMouseHint} · ${card.objective} · ${settled} of ${card.progress.total} ${copy.stepsSettled}`;
+    : styleMuted(style, mouseHint);
+  const separator = styleMuted(style, "·");
+  const taskId = styleMuted(style, isolate(card.taskId));
+  const progress = styleMuted(style, `${settled} of ${card.progress.total} ${copy.stepsSettled}`);
+  return `${styledRail} ${styledTitle} ${separator} ${taskId} ${separator} ${styledMouseHint} ${separator} ${card.objective} ${separator} ${progress}`;
 }
 
 function resolveSubagentGrid(count: number, width: number): SubagentGrid {
@@ -972,7 +977,9 @@ function renderCompactSubagentFallback(
     const title = titleColor === undefined
       ? subagent.displayLabel
       : styleColor(options.style, styleBold(options.style, subagent.displayLabel), titleColor);
-    const summary = `${styledRail} ${title} · ${formatSubagentStatus(subagent.status)} · ${formatDuration(subagent.elapsedMs)} · ${formatCompactTokenCount(usage.totalTokens)} ${copy.tokens} · ${formatCardUsage(usage, options.locale ?? "en")}`;
+    const status = styleSubagentStatus(formatSubagentStatus(subagent.status), subagent.status, options.style);
+    const metadata = styleMuted(options.style, `· ${formatDuration(subagent.elapsedMs)} · ${formatCompactTokenCount(usage.totalTokens)} ${copy.tokens} · ${formatCardUsage(usage, options.locale ?? "en")}`);
+    const summary = `${styledRail} ${title} · ${status} ${metadata}`;
     rows.push(summary);
   }
   const hiddenCount = Math.max(0, card.subagents.length - visible.length);
@@ -988,16 +995,17 @@ function formatSubagentTitle(
   const style = options.style;
   const tokens = style?.tokens.contract;
   const symbol = subagentStatusSymbol(subagent, style, options.motionElapsedMs);
-  const title = `${subagent.displayLabel} · ${subagent.objective}`;
   const titleColor = focused ? tokens?.palette.action : tokens?.palette.accent;
-  const styledTitle = titleColor === undefined
-    ? title
-    : styleColor(style, styleBold(style, title), titleColor);
+  const styledLabel = titleColor === undefined
+    ? subagent.displayLabel
+    : styleColor(style, styleBold(style, subagent.displayLabel), titleColor);
+  const separator = styleMuted(style, "·");
+  const description = styleSecondary(style, conciseSubagentTitle(subagent.title));
   const rail = focused ? tokens?.glyph.progress.thumb ?? ">" : " ";
   const styledRail = focused && tokens !== undefined
     ? styleColor(style, rail, tokens.palette.action)
     : rail;
-  return `${styledRail} ${symbol} ${styledTitle}`;
+  return `${styledRail} ${symbol} ${styledLabel} ${separator} ${description}`;
 }
 
 function subagentStatusSymbol(
@@ -1108,7 +1116,8 @@ function formatSubagentFooter(
 ): string {
   const usage = subagent.usage.currentAttempt ?? subagent.usage.total;
   const status = styleSubagentStatus(formatSubagentStatus(subagent.status), subagent.status, options.style);
-  return `${status} · ${formatDuration(subagent.elapsedMs)} · ${formatCompactTokenCount(usage.totalTokens)} ${copy.tokens} · ${formatCardUsage(usage, options.locale ?? "en")}`;
+  const metadata = styleMuted(options.style, `· ${formatDuration(subagent.elapsedMs)} · ${formatCompactTokenCount(usage.totalTokens)} ${copy.tokens} · ${formatCardUsage(usage, options.locale ?? "en")}`);
+  return `${status} ${metadata}`;
 }
 
 function styleSubagentStatus(
@@ -1140,6 +1149,15 @@ function normalizeCardText(value: string | undefined): string | undefined {
   return normalized === undefined || normalized.length === 0 ? undefined : normalized;
 }
 
+function conciseSubagentTitle(value: string): string {
+  const normalized = normalizeCardText(value) ?? "Subagent task";
+  const words = normalized.split(" ");
+  const wordLimited = words.length > MAX_SUBAGENT_TITLE_WORDS
+    ? `${words.slice(0, MAX_SUBAGENT_TITLE_WORDS).join(" ").replace(/[.,;:!?]+$/u, "")}…`
+    : normalized;
+  return truncateVisible(wordLimited, MAX_SUBAGENT_TITLE_WIDTH, "…");
+}
+
 function formatCompactTokenCount(value: number): string {
   const count = Math.max(0, Number.isFinite(value) ? value : 0);
   if (count < 1_000) return String(Math.floor(count));
@@ -1161,6 +1179,11 @@ function isSettledSubagent(status: TaskCardSubagentState["status"]): boolean {
 
 function styleMuted(style: OperatorConsoleStyle | undefined, value: string): string {
   const color = style?.tokens.contract.text.muted;
+  return color === undefined ? value : styleColor(style, value, color);
+}
+
+function styleSecondary(style: OperatorConsoleStyle | undefined, value: string): string {
+  const color = style?.tokens.contract.text.secondary;
   return color === undefined ? value : styleColor(style, value, color);
 }
 

@@ -14,7 +14,7 @@ describe("Papyrus operator console layout", () => {
 
     expect(regionKinds(layout)).toEqual(["prompt", "statusRail"]);
     expect(region(layout, "prompt")?.visible).toBe(true);
-    expect(region(layout, "prompt")?.height).toBe(1);
+    expect(region(layout, "prompt")?.height).toBe(2);
     expect(region(layout, "statusRail")?.visible).toBe(true);
   });
 
@@ -168,6 +168,17 @@ describe("Papyrus operator console layout", () => {
     expect(regionKinds(unrelated)).toContain("activeWork");
   });
 
+  it("keeps two optional terminal rows between durable Task cards and the prompt", () => {
+    const taskCard = { taskId: "task-current", subagents: [] } as unknown as OperatorConsoleState["tasks"]["cards"][number];
+    const layout = createOperatorConsoleLayout(createState({
+      tasks: { cards: [taskCard], selectedTaskId: taskCard.taskId, scrollOffset: 0 },
+    }), { width: 100, height: 20, isTty: true });
+
+    expect(region(layout, "promptGap")).toMatchObject({ height: 2, visible: true });
+    expect(region(layout, "promptGap")!.y).toBe(region(layout, "taskCards")!.y + region(layout, "taskCards")!.height);
+    expect(region(layout, "prompt")!.y).toBe(region(layout, "promptGap")!.y + 2);
+  });
+
   it("includes turn activity only when turn activity state exists", () => {
     expect(regionKinds(createOperatorConsoleLayout(createState()))).not.toContain("turnActivity");
 
@@ -304,7 +315,7 @@ describe("Papyrus operator console layout", () => {
       },
     }), { width: 80, height: 20, isTty: true });
 
-    expect(region(layout, "prompt")?.height).toBe(4);
+    expect(region(layout, "prompt")?.height).toBe(5);
   });
 
   it("caps multiline prompt allocation at 8 content rows", () => {
@@ -319,7 +330,7 @@ describe("Papyrus operator console layout", () => {
       },
     }), { width: 80, height: 80, isTty: true });
 
-    expect(region(layout, "prompt")?.height).toBe(8);
+    expect(region(layout, "prompt")?.height).toBe(9);
   });
 
   it("caps multiline prompt allocation at 30 percent of terminal height when constrained", () => {
@@ -387,8 +398,8 @@ describe("Papyrus operator console layout", () => {
       }),
     });
 
-    expect(region(createOperatorConsoleLayout(state, { width: 80, height: 24, isTty: true }), "streaming")?.height).toBe(22);
-    expect(region(createOperatorConsoleLayout(state, { width: 80, height: 80, isTty: true }), "streaming")?.height).toBe(78);
+    expect(region(createOperatorConsoleLayout(state, { width: 80, height: 24, isTty: true }), "streaming")?.height).toBe(21);
+    expect(region(createOperatorConsoleLayout(state, { width: 80, height: 80, isTty: true }), "streaming")?.height).toBe(77);
   });
 
   it("keeps region bounds inside the terminal rectangle", () => {

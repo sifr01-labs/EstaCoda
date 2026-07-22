@@ -94,7 +94,8 @@ describe("Papyrus operator console raw prompt host", () => {
     });
 
     expect(frame.rows[0]).toContain("› review the Papyrus rollout plan");
-    expect(frame.rows).toHaveLength(2);
+    expect(frame.rows).toHaveLength(3);
+    expect(frame.rows[1]?.trim()).toBe("");
     expect(frame.cursorRow).toBe(0);
     expect(frame.cursorColumn).toBe(stringWidth("› review the Papyrus rollout plan"));
     expect(frame.rows.at(-1)).toContain("kimi-k2.7-code ● · ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k");

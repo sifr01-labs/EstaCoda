@@ -61,10 +61,11 @@ describe("Papyrus operator console renderer", () => {
     const layout = createOperatorConsoleLayout(state, { width: 80, height: 8, isTty: true });
 
     const output = renderOperatorConsoleTextLines(state, layout);
-    expect(output).toHaveLength(2);
+    expect(output).toHaveLength(3);
     expect(output[0]).toContain("›");
-    expect(output[1]).toContain("model pending ● · ctx [··········] --");
-    expect(output[1]?.endsWith("· ◷ 00:00")).toBe(true);
+    expect(output[1]?.trim()).toBe("");
+    expect(output[2]).toContain("model pending ● · ctx [··········] --");
+    expect(output[2]?.endsWith("· ◷ 00:00")).toBe(true);
   });
 
   it("renders multiline prompt expansion with status rail below", () => {
