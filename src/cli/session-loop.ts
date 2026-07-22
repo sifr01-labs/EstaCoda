@@ -131,7 +131,7 @@ import type {
 } from "../ui/papyrus/operator-console/operatorConsoleState.js";
 import type { SessionCostSummary, TurnUsageSummary, UsageCostSummary } from "../contracts/usage-cost.js";
 import { mergeUsageCostSummaries, unavailableUsageCostSummary } from "../providers/provider-usage-projection.js";
-import { formatUsageCost, formatUsageCostNotice } from "../ui/usage-cost-format.js";
+import { formatTurnUsageFooter } from "../ui/usage-cost-format.js";
 import { isolateLtr, isolateRtl } from "../ui/bidi.js";
 import { resolveWorkspaceStatus } from "./workspace-status.js";
 
@@ -1070,13 +1070,11 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         await refreshSessionCost(true);
         const willRetryForSteering = pendingSteeringNote !== undefined && !steeringRetryUsed;
         const completedActiveWork = operatorConsoleLiveFrame?.completeActiveWork();
-        const completedCostRendered = completedActiveWork !== undefined && !willRetryForSteering;
-        if (completedCostRendered && completedActiveWork !== undefined) {
+        if (completedActiveWork !== undefined && !willRetryForSteering) {
           const completedRows = renderCompletedActiveWorkSurface(completedActiveWork, {
             width: termWidth,
             locale: renderer.locale,
             style: operatorConsoleStyle,
-            turnUsage: deliveredTurnUsage,
           });
           writeTurnBoundaryRows(completedRows.length === 0 ? [] : completedRows);
           operatorConsoleLiveFrame?.resetActiveWork();
@@ -1116,6 +1114,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	        const assistantVm = buildAssistantResponseViewModel({
 	          label: response.label,
           text: response.text,
+          usageFooter: deliveredTurnUsage === undefined
+            ? undefined
+            : formatTurnUsageFooter(deliveredTurnUsage, { locale: renderer.locale === "ar" ? "ar" : "en" }),
           matchedSkills: response.matchedSkills,
 	          progress: options.showResponseProgress === true ? response.progress : undefined,
 	        });
@@ -1127,9 +1128,6 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	          output.write(`${providerServingAlert}\n`);
 	        }
 	        output.write(renderer.render(assistantVm));
-        if (!completedCostRendered && deliveredTurnUsage !== undefined) {
-          output.write(`\n${formatTurnCostLines(deliveredTurnUsage, renderer.locale === "ar" ? "ar" : "en").join("\n")}\n`);
-        }
         for (const notice of delegatedTaskNotices(response.toolExecutions, runtime, renderer.locale === "ar" ? "ar" : "en")) {
           output.write(`${notice}\n`);
         }
@@ -2897,19 +2895,6 @@ function combinedTurnUsage(
     total: mergeUsageCostSummaries(totalParts),
     provisional
   };
-}
-
-function formatTurnCostLines(usage: TurnUsageSummary, locale: "en" | "ar"): readonly string[] {
-  const suffix = usage.provisional ? copyForLocale(locale, " so far", " حتى الآن") : "";
-  const pricingNotice = formatUsageCostNotice(usage.total, { locale });
-  return [
-    `${copyForLocale(locale, "Main agent", "الوكيل الرئيسي")}: ${formatUsageCost(usage.mainAgent, { locale })}`,
-    `${copyForLocale(locale, "Auxiliary models", "النماذج المساعدة")}: ${formatUsageCost(usage.auxiliaryModels, { locale })}`,
-    `${copyForLocale(locale, "Delegated work", "العمل المفوض")}${suffix}: ${formatUsageCost(usage.delegatedWork, { locale })}`,
-    `${copyForLocale(locale, "Turn total", "إجمالي الدور")}${suffix}: ${formatUsageCost(usage.total, { locale })}`,
-    ...(pricingNotice === undefined ? [] : [pricingNotice]),
-    ...(usage.provisional ? [copyForLocale(locale, "Workers still running", "لا يزال العمال قيد التنفيذ")] : [])
-  ];
 }
 
 function copyForLocale(locale: "en" | "ar", english: string, arabic: string): string {

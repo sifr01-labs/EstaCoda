@@ -275,6 +275,7 @@ export interface AssistantResponseViewModel {
   readonly kind: "assistantResponse";
   readonly label: string;
   readonly text: string;
+  readonly usageFooter?: string;
   readonly matchedSkills?: readonly string[];
   readonly progress?: readonly string[];
 }

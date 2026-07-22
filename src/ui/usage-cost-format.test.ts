@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { UsageCostSummary } from "../contracts/usage-cost.js";
 import { LRI, PDI, RLI } from "./bidi.js";
-import { formatUsageCost, formatUsageCostNotice, usageCostPresentationState } from "./usage-cost-format.js";
+import {
+  formatTurnUsageFooter,
+  formatUsageCost,
+  formatUsageCostNotice,
+  usageCostPresentationState,
+} from "./usage-cost-format.js";
 
 describe("formatUsageCost", () => {
   it("renders complete, partial, and unavailable estimates honestly", () => {
@@ -29,6 +34,41 @@ describe("formatUsageCost", () => {
     expect(formatUsageCost(summary({ estimatedCostUsd: 0, costComplete: true }))).toBe("$0.00");
     expect(usageCostPresentationState(summary({ estimatedCostUsd: 0, costComplete: true }))).toBe("exact");
     expect(usageCostPresentationState(summary({ estimatedCostUsd: 0, costComplete: false }))).toBe("unavailable");
+  });
+});
+
+describe("formatTurnUsageFooter", () => {
+  it("combines compact tokens and a complete cost estimate", () => {
+    expect(formatTurnUsageFooter({
+      total: summary({ totalTokens: 15_240, estimatedCostUsd: 0.55 }),
+      provisional: false,
+    })).toBe("15.2k tokens · ≈ $0.55");
+  });
+
+  it("uses independent lower bounds for incomplete usage and cost", () => {
+    expect(formatTurnUsageFooter({
+      total: summary({
+        totalTokens: 15_240,
+        estimatedCostUsd: 0.55,
+        usageComplete: false,
+        costComplete: false,
+      }),
+      provisional: false,
+    })).toBe("≥ 15.2k tokens · ≥ $0.55");
+  });
+
+  it("shows tokens only when pricing is unavailable and bounds provisional totals", () => {
+    expect(formatTurnUsageFooter({
+      total: summary({ totalTokens: 8_800, estimatedCostUsd: undefined, costComplete: false }),
+      provisional: true,
+    })).toBe("≥ 8.8k tokens");
+  });
+
+  it("isolates the compact footer for Arabic output", () => {
+    expect(formatTurnUsageFooter({
+      total: summary({ totalTokens: 120, estimatedCostUsd: 0.03 }),
+      provisional: false,
+    }, { locale: "ar" })).toBe(`${LRI}120 tokens · ≈ $0.03${PDI}`);
   });
 });
 

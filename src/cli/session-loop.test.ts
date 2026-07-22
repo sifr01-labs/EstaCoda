@@ -755,11 +755,12 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     });
 
     const rendered = outputChunks.join("");
-    expect(rendered).toContain("Main agent: $0.04");
-    expect(rendered).toContain("Auxiliary models: $0.01");
-    expect(rendered).toContain("Delegated work so far: $0.02");
-    expect(rendered).toContain("Turn total so far: $0.07");
-    expect(rendered).toContain("Workers still running");
+    expect(rendered).toContain("≥ 120 tokens · ≥ $0.07");
+    expect(rendered).not.toContain("Main agent:");
+    expect(rendered).not.toContain("Auxiliary models:");
+    expect(rendered).not.toContain("Delegated work so far:");
+    expect(rendered).not.toContain("Turn total so far:");
+    expect(rendered).not.toContain("Workers still running");
     expect(rendered).toContain("Delegated Task T-104 · running");
   });
 
@@ -799,9 +800,9 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     });
 
     const rendered = outputChunks.join("");
-    expect(rendered).toContain("Turn total: at least $0.42");
-    expect(rendered.match(/Some provider pricing was unavailable/gu)).toHaveLength(1);
-    expect(rendered).not.toContain("≈");
+    expect(rendered).toContain("120 tokens · ≥ $0.42");
+    expect(rendered).not.toContain("Some provider pricing was unavailable");
+    expect(rendered).not.toContain("Turn total:");
   });
 
   it("restores persisted session cost onto the status rail", async () => {

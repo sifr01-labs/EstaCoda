@@ -11,8 +11,6 @@ import type {
   ToolActivityState,
 } from "./operatorConsoleState.js";
 import { styleBold, styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
-import type { TurnUsageSummary } from "../../../contracts/usage-cost.js";
-import { formatUsageCost, formatUsageCostNotice } from "../../usage-cost-format.js";
 
 export type ActiveWorkSurfaceRenderOptions = {
   readonly width: number;
@@ -20,7 +18,6 @@ export type ActiveWorkSurfaceRenderOptions = {
   readonly locale?: OperatorConsoleLocale;
   readonly style?: OperatorConsoleStyle;
   readonly motionElapsedMs?: number;
-  readonly turnUsage?: TurnUsageSummary;
 };
 
 export type ActiveWorkSummaryOptions = {
@@ -82,16 +79,10 @@ export function getActiveWorkSurfaceDesiredHeight(state: ToolActivityState, widt
   return Math.max(3, activeWorkItemsForLiveSurface(state).length + 2);
 }
 
-export function getCompletedActiveWorkSurfaceDesiredHeight(
-  state: ToolActivityState,
-  turnUsage?: TurnUsageSummary
-): number {
+export function getCompletedActiveWorkSurfaceDesiredHeight(state: ToolActivityState): number {
   const durableItems = activeWorkItemsForCompletedSurface(state);
   if (durableItems.length === 0) return 0;
-  const usageRows = turnUsage === undefined
-    ? 0
-    : 4 + (turnUsage.provisional ? 1 : 0) + (formatUsageCostNotice(turnUsage.total) === undefined ? 0 : 1);
-  return durableItems.length + 4 + usageRows;
+  return durableItems.length + 4;
 }
 
 export function renderActiveWorkSurface(
@@ -376,7 +367,7 @@ export function renderCompletedActiveWorkSurface(
   };
   if (width <= 0 || !hasActiveWork(visibleState)) return [];
 
-  const height = normalizeDimension(options.height ?? getCompletedActiveWorkSurfaceDesiredHeight(visibleState, options.turnUsage));
+  const height = normalizeDimension(options.height ?? getCompletedActiveWorkSurfaceDesiredHeight(visibleState));
   if (height <= 0) return [];
   const copy = resolveActiveWorkCopy(options.locale);
   if (height < 3) return [truncateVisibleCells(formatActiveWorkSummary(visibleState, { locale: options.locale }), width)];
@@ -389,8 +380,7 @@ export function renderCompletedActiveWorkSurface(
     contentWidth,
     options.locale,
     options.style,
-    options.motionElapsedMs,
-    options.turnUsage
+    options.motionElapsedMs
   );
 
   return [
@@ -471,10 +461,9 @@ function renderCompletedActiveWorkContentRows(
   contentWidth: number,
   locale: OperatorConsoleLocale | undefined,
   style: OperatorConsoleStyle | undefined,
-  motionElapsedMs: number | undefined,
-  turnUsage: TurnUsageSummary | undefined
+  motionElapsedMs: number | undefined
 ): readonly string[] {
-  const footer = formatCompletionFooterRows(state, contentWidth, locale, turnUsage);
+  const footer = formatCompletionFooterRows(state, contentWidth, locale);
   if (contentRows <= footer.length) return footer.slice(0, contentRows);
 
   const itemRows = Math.max(0, contentRows - footer.length);
@@ -490,28 +479,10 @@ function renderCompletedActiveWorkContentRows(
 function formatCompletionFooterRows(
   state: ToolActivityState,
   contentWidth: number,
-  locale: OperatorConsoleLocale | undefined,
-  turnUsage: TurnUsageSummary | undefined
+  locale: OperatorConsoleLocale | undefined
 ): readonly string[] {
   const summary = formatActiveWorkSummary(state, { locale, includeActive: false });
-  if (turnUsage === undefined) return [truncateVisibleCells(summary, contentWidth)];
-  const mainLabel = locale === "ar" ? "الوكيل الرئيسي" : "Main agent";
-  const auxiliaryLabel = locale === "ar" ? "النماذج المساعدة" : "Auxiliary models";
-  const delegatedLabel = locale === "ar" ? "العمل المفوض" : "Delegated work";
-  const totalLabel = locale === "ar" ? "إجمالي الدور" : "Turn total";
-  const soFar = turnUsage.provisional ? locale === "ar" ? " حتى الآن" : " so far" : "";
-  const pricingNotice = formatUsageCostNotice(turnUsage.total, { locale });
-  return [
-    truncateVisibleCells(summary, contentWidth),
-    truncateVisibleCells(`${mainLabel} · ${formatUsageCost(turnUsage.mainAgent, { locale })}`, contentWidth),
-    truncateVisibleCells(`${auxiliaryLabel} · ${formatUsageCost(turnUsage.auxiliaryModels, { locale })}`, contentWidth),
-    truncateVisibleCells(`${delegatedLabel}${soFar} · ${formatUsageCost(turnUsage.delegatedWork, { locale })}`, contentWidth),
-    truncateVisibleCells(`${totalLabel}${soFar} · ${formatUsageCost(turnUsage.total, { locale })}`, contentWidth),
-    ...(pricingNotice === undefined ? [] : [truncateVisibleCells(pricingNotice, contentWidth)]),
-    ...(turnUsage.provisional
-      ? [truncateVisibleCells(locale === "ar" ? "لا يزال العمال قيد التنفيذ" : "Workers still running", contentWidth)]
-      : [])
-  ];
+  return [truncateVisibleCells(summary, contentWidth)];
 }
 
 function renderActiveWorkContentRows(

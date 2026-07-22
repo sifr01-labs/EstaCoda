@@ -435,10 +435,13 @@ Task result becomes readable only through the verified result surface after
 settlement. Tool-call transitions update the safe activity checkpoint without
 persisting tool arguments, previews, or result bodies.
 
-For a completed synchronous turn, the active-work footer shows `Main agent`
-and `Turn total`. When there is no completed-work card, the response receives a
-compact `Turn cost` line. Multiple runtime turns caused by one CLI steering
-submission are summed before the final visible response is delivered.
+Every completed response owns one compact, muted usage footer inside the
+assistant message frame, for example `15k tokens · ≈ $0.55`. If trustworthy
+pricing is unavailable, the footer shows tokens only; incomplete totals use a
+`≥` lower bound. Per-route accounting remains available in Task inspection and
+is not repeated in the main transcript or completed-work surface. Multiple
+runtime turns caused by one CLI steering submission are summed before the final
+visible response is delivered.
 
 Interactive input precedence is centralized as: modal Task inspection,
 approval prompt, autocomplete/typeahead, attachment selection, then ordinary

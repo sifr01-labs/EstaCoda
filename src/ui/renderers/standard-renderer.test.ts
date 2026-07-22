@@ -2325,6 +2325,42 @@ describe("StandardRenderer — assistant response", () => {
     expect(out).toContain(`${ansiFgForHex(tokens.contract.text.agentMessage)}Hello, body!`);
   });
 
+  it("renders one muted usage footer inside the assistant frame", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const r = new StandardRenderer({ tokens, capabilities: fullCaps() });
+    const out = r.renderAssistantResponse(buildAssistantResponseViewModel({
+      label: "EstaCoda",
+      text: "Finished the review.",
+      usageFooter: "15.2k tokens · ≈ $0.55",
+    }));
+    const lines = out.split("\n");
+    const footerIndex = lines.findIndex((line) => stripAnsi(line).includes("15.2k tokens · ≈ $0.55"));
+    const borderIndex = lines.findIndex((line) => stripAnsi(line).startsWith("╰"));
+
+    expect(footerIndex).toBeGreaterThan(0);
+    expect(footerIndex).toBeLessThan(borderIndex);
+    expect(lines[footerIndex]).toContain(ansiFgForHex(tokens.contract.text.muted));
+    expect(stripAnsi(out)).not.toContain("Main agent:");
+    expect(stripAnsi(out)).not.toContain("Turn total:");
+  });
+
+  it("wraps the usage footer without losing values on narrow terminals", () => {
+    const caps = { ...fullCaps(), terminalWidth: 24 };
+    const r = new StandardRenderer({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      capabilities: caps,
+    });
+    const out = stripAnsi(r.renderAssistantResponse(buildAssistantResponseViewModel({
+      label: "EstaCoda",
+      text: "Done.",
+      usageFooter: "15.2k tokens · ≈ $0.55",
+    })));
+
+    expect(out).toContain("15.2k tokens");
+    expect(out).toContain("≈ $0.55");
+    expect(out.split("\n").every((line) => measureVisibleWidth(line) <= 24)).toBe(true);
+  });
+
   it("keeps Arabic assistant response text directionally stable", () => {
     const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
     const out = stripAnsi(r.renderAssistantResponse(buildAssistantResponseViewModel({

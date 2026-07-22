@@ -579,55 +579,17 @@ describe("Papyrus operator console active work surface", () => {
     expect(output.every((line) => stringWidth(line) <= 96)).toBe(true);
   });
 
-  it("renders main-agent and complete turn cost in the completed tool footer", () => {
-    const usage = {
-      providerCalls: 1,
-      inputTokens: 100,
-      outputTokens: 20,
-      reasoningTokens: 0,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      totalTokens: 120,
-      estimatedCostUsd: 0.14,
-      usageComplete: true,
-      costComplete: true,
-      incompleteReasons: [],
-    };
+  it("keeps response accounting out of the completed tool footer", () => {
     const output = renderCompletedActiveWorkSurface(createState({
       items: [item("read", "succeeded", { toolName: "read_file", target: "src/app.ts" })],
     }), {
       width: 72,
-      turnUsage: { turnId: "turn-1", mainAgent: usage, auxiliaryModels: usage, delegatedWork: usage, total: usage, provisional: false },
     }).join("\n");
 
-    expect(output).toContain("Main agent · $0.14");
-    expect(output).toContain("Turn total · $0.14");
-  });
-
-  it("renders partial turn cost as a lower bound", () => {
-    const partial = {
-      providerCalls: 1,
-      inputTokens: 100,
-      outputTokens: 20,
-      reasoningTokens: 0,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      totalTokens: 120,
-      estimatedCostUsd: 0.84,
-      usageComplete: true,
-      costComplete: false,
-      incompleteReasons: ["pricing-missing"],
-    };
-    const output = renderCompletedActiveWorkSurface(createState({
-      items: [item("read", "succeeded")],
-    }), {
-      width: 72,
-      turnUsage: { turnId: "turn-1", mainAgent: partial, auxiliaryModels: partial, delegatedWork: partial, total: partial, provisional: false },
-    }).join("\n");
-
-    expect(output).toContain("at least $0.84");
-    expect(output).toContain("Some provider pricing was unavailable");
-    expect(output).not.toContain("$0.0000 · incomplete");
+    expect(output).toContain("1 completed · 0 failed");
+    expect(output).not.toContain("Main agent");
+    expect(output).not.toContain("Turn total");
+    expect(output).not.toContain("$0.14");
   });
 
   it("renders Arabic completed tool logs with localized duration copy within bounds", () => {

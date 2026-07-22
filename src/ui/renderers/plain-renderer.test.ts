@@ -23,6 +23,7 @@ import {
   buildShortcutHintRailViewModel,
   buildSlashMenuViewModel,
   buildUserPromptRailViewModel,
+  buildAssistantResponseViewModel,
   kv,
   listItem,
   timelineEvent,
@@ -63,6 +64,16 @@ import { measureVisibleWidth } from "./layout.js";
 function assertNoAnsi(text: string): void {
   expect(text).not.toMatch(/\x1b\[/);
 }
+
+describe("plain assistant response", () => {
+  it("renders a deterministic compact usage footer", () => {
+    expect(renderAssistantResponse(buildAssistantResponseViewModel({
+      label: "EstaCoda",
+      text: "Finished the review.",
+      usageFooter: "15.2k tokens · ≈ $0.55",
+    }))).toBe("EstaCoda:\nFinished the review.\n\n15.2k tokens · ≈ $0.55");
+  });
+});
 
 function assertAsciiSafe(text: string): void {
   for (const ch of text) {

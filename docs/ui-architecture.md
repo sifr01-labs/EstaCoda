@@ -225,13 +225,13 @@ token count. It holds that value across turns and usage-less responses and
 shows `--/total` before the first measurement or after compaction/model changes.
 Live and assembled-prompt estimates are not rail state.
 
-Delivered responses show their visible-turn estimate. Completed active-work
-cards split this into `Main agent` and `Turn total`; a turn without a completed
-work card uses the compact `Turn cost` line. CLI steering retries are combined
-into the one response ultimately delivered to the transcript. Complete,
-partial, and unavailable pricing render as `≈`, `at least ≈` (or compact `≥`),
-and `unavailable`; unknown pricing is never formatted as an incomplete zero.
-Arabic currency fragments remain LTR-isolated.
+Delivered responses show one compact visible-turn footer inside the assistant
+message frame, such as `15k tokens · ≈ $0.55`. Completed active-work cards do
+not repeat accounting. CLI steering retries are combined into the one response
+ultimately delivered to the transcript. Incomplete token or cost totals render
+as `≥` lower bounds, and unavailable pricing is omitted instead of being
+formatted as zero. Expanded per-route accounting remains in Task inspection.
+Arabic usage fragments remain LTR-isolated.
 
 Do not manually combine removed transient-region calls with Papyrus prompt
 rendering. The raw prompt render loop is only a terminal diff/write/cursor

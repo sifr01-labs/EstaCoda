@@ -1158,6 +1158,10 @@ export function renderAssistantResponse(vm: AssistantResponseViewModel): string 
     ...vm.text.split("\n"),
   ];
 
+  if (vm.usageFooter !== undefined) {
+    lines.push("", vm.usageFooter);
+  }
+
   if (vm.matchedSkills !== undefined && vm.matchedSkills.length > 0) {
     lines.push("");
     lines.push(`skills: ${vm.matchedSkills.join(", ")}`);

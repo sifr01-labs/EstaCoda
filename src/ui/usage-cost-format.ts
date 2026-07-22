@@ -1,4 +1,4 @@
-import type { UsageCostSummary } from "../contracts/usage-cost.js";
+import type { TurnUsageSummary, UsageCostSummary } from "../contracts/usage-cost.js";
 import { isolateLtr, isolateRtl } from "./bidi.js";
 
 export type UsageCostFormatOptions = {
@@ -52,6 +52,33 @@ export function formatUsageCostNotice(
 export function formatUsdAmount(value: number, locale: "en" | "ar" = "en"): string {
   const amount = `$${formatUsd(Number.isFinite(value) && value >= 0 ? value : 0)}`;
   return locale === "ar" ? isolateLtr(amount) : amount;
+}
+
+/** Compact, response-level accounting. Expanded per-route costs belong in Task inspection. */
+export function formatTurnUsageFooter(
+  usage: Pick<TurnUsageSummary, "total" | "provisional">,
+  options: Pick<UsageCostFormatOptions, "locale"> = {}
+): string {
+  const locale = options.locale ?? "en";
+  const tokensComplete = usage.total.usageComplete && !usage.provisional;
+  const tokens = `${tokensComplete ? "" : "≥ "}${formatCompactCount(usage.total.totalTokens)} tokens`;
+  const costState = usageCostPresentationState(usage.total);
+  const cost = costState === "unavailable"
+    ? undefined
+    : `${costState === "exact" && !usage.provisional ? "≈ " : "≥ "}$${formatUsd(usage.total.estimatedCostUsd!)}`;
+  const footer = cost === undefined ? tokens : `${tokens} · ${cost}`;
+  return locale === "ar" ? isolateLtr(footer) : footer;
+}
+
+function formatCompactCount(value: number): string {
+  const count = Math.max(0, Number.isFinite(value) ? Math.floor(value) : 0);
+  if (count < 1_000) return String(count);
+  if (count < 1_000_000) return `${trimCompactDecimal(count / 1_000)}k`;
+  return `${trimCompactDecimal(count / 1_000_000)}m`;
+}
+
+function trimCompactDecimal(value: number): string {
+  return value.toFixed(1).replace(/\.0$/u, "");
 }
 
 function formatUsd(value: number): string {

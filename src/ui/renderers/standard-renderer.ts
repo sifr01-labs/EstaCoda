@@ -1952,7 +1952,11 @@ export class StandardRenderer {
     const requestedWidth = Math.max(24, this.#capabilities.terminalWidth);
     const rawTitle = this.#assistantResponseTitle(vm.label, Math.max(1, requestedWidth - 4));
     const titleWidth = measureVisibleWidth(` ${rawTitle} `);
-    const maxRawContent = Math.max(0, ...vm.text.split("\n").map((line) => measureVisibleWidth(line)));
+    const maxRawContent = Math.max(
+      0,
+      ...vm.text.split("\n").map((line) => measureVisibleWidth(line)),
+      measureVisibleWidth(vm.usageFooter ?? "")
+    );
     const width = Math.min(
       requestedWidth,
       Math.max(40, titleWidth + 4, maxRawContent + 4)
@@ -1967,6 +1971,18 @@ export class StandardRenderer {
           : this.#agentMessage(this.#isRtl() ? this.#natural(wrappedLine) : wrappedLine);
         contentLines.push(bodyLine);
       }
+    }
+
+    if (vm.usageFooter !== undefined) {
+      const rawFooterRows = !this.#isRtl()
+        && measureVisibleWidth(vm.usageFooter) > contentWidth
+        && vm.usageFooter.includes(" · ")
+        ? vm.usageFooter.split(" · ").flatMap((segment) => wrapVisibleLine(segment, contentWidth))
+        : wrapVisibleLine(vm.usageFooter, contentWidth);
+      const footerRows = rawFooterRows.map((row) =>
+        this.#muted(this.#isRtl() ? this.#natural(row) : row)
+      );
+      contentLines.push("", ...footerRows);
     }
 
     const frameTitle = this.#isRtl() ? this.#natural(rawTitle, Math.max(1, width - 4)) : rawTitle;
