@@ -146,6 +146,7 @@ export type TaskCardAttemptState = {
   readonly elapsedMs: number;
   readonly currentActivity?: string;
   readonly currentToolCategory?: string;
+  readonly assistantPreview?: string;
   readonly usage: TaskCardUsageState;
 };
 
@@ -153,6 +154,7 @@ export type TaskCardActivityState = {
   readonly eventId: string;
   readonly kind: string;
   readonly label: string;
+  readonly category: "terminal" | "search" | "plan" | "read" | "edit" | "answer" | "wait" | "finish" | "failed";
   readonly timestamp: string;
   readonly stepId?: string;
   readonly attemptId?: string;
@@ -191,6 +193,7 @@ export type TaskCardSubagentState = {
   readonly elapsedMs: number;
   readonly currentActivity?: string;
   readonly currentToolCategory?: string;
+  readonly assistantPreview?: string;
   readonly usage: {
     readonly total: TaskCardUsageState;
     readonly currentAttempt?: TaskCardUsageState;

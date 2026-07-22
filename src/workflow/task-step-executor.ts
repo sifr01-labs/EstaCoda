@@ -70,10 +70,23 @@ export type TaskAttemptCheckpoint = {
   activity?: TaskAttemptActivity;
 };
 
+export type TaskTraceCategory =
+  | "terminal"
+  | "search"
+  | "plan"
+  | "read"
+  | "edit"
+  | "answer"
+  | "wait"
+  | "finish"
+  | "failed";
+
 export type TaskAttemptActivity = {
-  kind: "worker" | "provider" | "tool";
+  kind: "worker" | "provider" | "tool" | "assistant";
   label: string;
+  traceCategory: TaskTraceCategory;
   toolCategory?: string;
+  assistantPreview?: string;
 };
 
 export type TaskStepExecutionInput = {

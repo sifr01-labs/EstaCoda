@@ -2205,7 +2205,7 @@ function requireToken(value: string, label: string): string {
 }
 
 function normalizeCheckpointActivity(activity: TaskAttemptActivity): TaskAttemptActivity {
-  if (activity.kind !== "worker" && activity.kind !== "provider" && activity.kind !== "tool") {
+  if (activity.kind !== "worker" && activity.kind !== "provider" && activity.kind !== "tool" && activity.kind !== "assistant") {
     throw new Error("Task Attempt activity kind is invalid.");
   }
   const label = activity.label.replace(/\s+/gu, " ").trim();
@@ -2215,11 +2215,45 @@ function normalizeCheckpointActivity(activity: TaskAttemptActivity): TaskAttempt
   const toolCategory = activity.toolCategory === undefined
     ? undefined
     : requireToken(activity.toolCategory, "activity tool category");
+  const traceCategory = normalizeTraceCategory(activity.traceCategory);
+  const assistantPreview = activity.assistantPreview === undefined
+    ? undefined
+    : normalizeAssistantPreview(activity.assistantPreview);
+  if (activity.kind === "assistant" && assistantPreview === undefined) {
+    throw new Error("Task assistant activity requires a safe preview.");
+  }
   return {
     kind: activity.kind,
     label,
-    ...(toolCategory === undefined ? {} : { toolCategory })
+    traceCategory,
+    ...(toolCategory === undefined ? {} : { toolCategory }),
+    ...(assistantPreview === undefined ? {} : { assistantPreview })
   };
+}
+
+function normalizeTraceCategory(value: TaskAttemptActivity["traceCategory"]): TaskAttemptActivity["traceCategory"] {
+  switch (value) {
+    case "terminal":
+    case "search":
+    case "plan":
+    case "read":
+    case "edit":
+    case "answer":
+    case "wait":
+    case "finish":
+    case "failed":
+      return value;
+    default:
+      throw new Error("Task Attempt trace category is invalid.");
+  }
+}
+
+function normalizeAssistantPreview(value: string): string | undefined {
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  if (normalized.length === 0 || normalized.length > 160 || /[\u0000-\u001F\u007F]/u.test(normalized)) {
+    throw new Error("Task assistant preview must be bounded display-safe text.");
+  }
+  return normalized;
 }
 
 function positiveInteger(value: number, label: string): number {

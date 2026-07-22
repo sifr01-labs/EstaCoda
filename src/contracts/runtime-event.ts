@@ -208,6 +208,9 @@ export type RuntimeEvent =
       batchId?: string;
       taskLabel?: string;
       batchTaskCount?: number;
+      taskId?: string;
+      stepId?: string;
+      attemptId?: string;
       childEvent: {
         kind:
           | "agent-start"
@@ -218,6 +221,7 @@ export type RuntimeEvent =
           | "provider-budget-exhausted"
           | "agent-final"
           | "agent-cancelled"
+          | "assistant-preview"
           | "delegation-result";
         sessionId?: string;
         tool?: string;
@@ -240,6 +244,7 @@ export type RuntimeEvent =
         limit?: number;
         observed?: number;
         reason?: string;
+        preview?: string;
         status?: "completed" | "blocked" | "failed" | "timeout" | "cancelled";
       };
     };

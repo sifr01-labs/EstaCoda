@@ -804,7 +804,7 @@ describe("TaskScheduler", () => {
       input.checkpoint({
         workerSessionId: "worker-alpha",
         trajectoryId: "trajectory-alpha",
-        activity: { kind: "tool", label: "Using browser.navigate", toolCategory: "browser" }
+        activity: { kind: "tool", label: "Using browser.navigate", traceCategory: "plan", toolCategory: "browser" }
       });
       return { outcome: "succeeded", results: [{ kind: "text", content: "checkpointed" }] };
     }));
@@ -825,7 +825,7 @@ describe("TaskScheduler", () => {
     expect(store.listEvents("task-alpha", { kinds: ["attempt-progressed"] })).toEqual([
       expect.objectContaining({
         data: expect.objectContaining({
-          activity: { kind: "tool", label: "Using browser.navigate", toolCategory: "browser" }
+          activity: { kind: "tool", label: "Using browser.navigate", traceCategory: "plan", toolCategory: "browser" }
         })
       })
     ]);

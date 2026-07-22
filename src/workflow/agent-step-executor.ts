@@ -32,6 +32,7 @@ const MAX_DEPENDENCY_RESULT_REFERENCES = 64;
 const MAX_TASK_GUIDANCE_RECORDS_IN_CONTEXT = 16;
 const MAX_DEPENDENCY_CONTEXT_CHARS = 16_000;
 const MAX_ARTIFACT_RESULTS = 64;
+export const MAX_PERSISTED_ASSISTANT_PREVIEWS_PER_ATTEMPT = 64;
 
 export type ResolveTaskArtifactContent = (input: {
   artifact: ArtifactRecord;
@@ -210,6 +211,11 @@ export class AgentStepExecutor implements TaskStepExecutor {
         status: "running",
         lastActivityAt: this.#now().toISOString()
       });
+      const siblingSubagents = this.#taskStore
+        .listSteps(input.task.id, input.step.planRevisionId)
+        .filter((step) => step.executor.role === "worker" || step.executor.role === "orchestrator")
+        .sort((left, right) => left.position - right.position);
+      const taskIndex = siblingSubagents.findIndex((step) => step.id === input.step.id);
 
       const runnerResult = await runDelegatedChild({
         child,
@@ -240,6 +246,10 @@ export class AgentStepExecutor implements TaskStepExecutor {
         provider: childProvider(child),
         model: childModel(child),
         effectiveAllowedTools: child.toolAccess.effectiveAllowedTools,
+        ...(taskIndex < 0 ? {} : { taskIndex, batchTaskCount: siblingSubagents.length }),
+        taskId: input.task.id,
+        stepId: input.step.id,
+        attemptId: input.attempt.id,
         parentOnEvent: this.#taskProgressSink(input),
         inputMetadata: {
           durableTask: true,
@@ -347,10 +357,23 @@ export class AgentStepExecutor implements TaskStepExecutor {
   }
 
   #taskProgressSink(input: TaskStepExecutionInput): RuntimeEventSink {
+    let persistedAssistantPreviews = 0;
+    let lastPersistedAssistantPreview: string | undefined;
     return async (event: RuntimeEvent) => {
       if (event.kind === "delegation-progress") {
         const activity = taskActivityFromDelegationProgress(event);
-        if (activity !== undefined) input.checkpoint({ activity });
+        const assistantPreview = activity?.assistantPreview;
+        const canPersist = assistantPreview === undefined || (
+          assistantPreview !== lastPersistedAssistantPreview &&
+          persistedAssistantPreviews < MAX_PERSISTED_ASSISTANT_PREVIEWS_PER_ATTEMPT
+        );
+        if (activity !== undefined && canPersist) {
+          input.checkpoint({ activity });
+          if (assistantPreview !== undefined) {
+            lastPersistedAssistantPreview = assistantPreview;
+            persistedAssistantPreviews++;
+          }
+        }
       }
       await this.#onEvent?.(event);
     };

@@ -43,6 +43,32 @@ describe("runDelegatedChild", () => {
     expect(harness.registry.listActiveSubagents()).toHaveLength(1);
   });
 
+  it("relays only redacted visible deltas with durable Task attribution", async () => {
+    const harness = await createHarness({
+      handle: async (input) => {
+        input.onDelta?.("\x1b[32mFound password: hunter2\x1b[0m");
+        return response({ text: "done" });
+      }
+    });
+
+    await runDelegatedChild({
+      ...harness.input(),
+      taskId: "task-1",
+      stepId: "step-1",
+      attemptId: "attempt-1"
+    });
+
+    expect(harness.events).toContainEqual(expect.objectContaining({
+      kind: "delegation-progress",
+      taskId: "task-1",
+      stepId: "step-1",
+      attemptId: "attempt-1",
+      childEvent: { kind: "assistant-preview", preview: "Found password: [REDACTED]" }
+    }));
+    expect(JSON.stringify(harness.events)).not.toContain("hunter2");
+    expect(JSON.stringify(harness.events)).not.toContain("\x1b");
+  });
+
   it("aborts only the child on timeout and returns a structured timeout result", async () => {
     vi.useFakeTimers();
     const parentController = new AbortController();

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
-import { createDelegationProgressRelay, delegationTaskDisplayLabel } from "./progress-relay.js";
+import {
+  createDelegationAssistantPreviewRelay,
+  createDelegationProgressRelay,
+  delegationTaskDisplayLabel
+} from "./progress-relay.js";
 
 describe("createDelegationProgressRelay", () => {
   it("forwards selected child events with subagent identity", async () => {
@@ -158,6 +162,44 @@ describe("createDelegationProgressRelay", () => {
       batchTaskCount: 10,
       taskLabel: "Inspect token=[redacted]"
     });
+  });
+
+  it("relays bounded redacted visible assistant previews at the configured cadence", async () => {
+    let now = 1_000;
+    const events: RuntimeEvent[] = [];
+    const relay = createDelegationAssistantPreviewRelay({
+      metadata: {
+        ...metadata(),
+        taskId: "task-1",
+        stepId: "step-1",
+        attemptId: "attempt-1"
+      },
+      throttleMs: 1_000,
+      now: () => now,
+      parentOnEvent: (event) => {
+        events.push(event);
+      }
+    });
+
+    relay.push("\x1b[31mChecking password: hunter2\x1b[0m");
+    now += 100;
+    relay.push(" and continuing");
+    now += 1_000;
+    relay.push(" with the safe answer ".repeat(20));
+    await relay.flush();
+
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      kind: "delegation-progress",
+      taskId: "task-1",
+      stepId: "step-1",
+      attemptId: "attempt-1",
+      childEvent: { kind: "assistant-preview", preview: "Checking password: [REDACTED]" }
+    });
+    const finalPreview = (events[1] as Extract<RuntimeEvent, { kind: "delegation-progress" }>).childEvent.preview;
+    expect(finalPreview?.length).toBeLessThanOrEqual(160);
+    expect(JSON.stringify(events)).not.toContain("hunter2");
+    expect(JSON.stringify(events)).not.toContain("\x1b");
   });
 });
 

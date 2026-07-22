@@ -22,7 +22,10 @@ import type {
 import type { AgentLoopRouteInput } from "../runtime/agent-loop-builder.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { createTaskResultTools } from "../tools/task-result-tools.js";
-import { AgentStepExecutor } from "./agent-step-executor.js";
+import {
+  AgentStepExecutor,
+  MAX_PERSISTED_ASSISTANT_PREVIEWS_PER_ATTEMPT
+} from "./agent-step-executor.js";
 import { SQLiteTaskStore } from "./sqlite-task-store.js";
 import { TaskResultService } from "./task-result-service.js";
 import { TaskApprovalService } from "./task-approval-service.js";
@@ -71,6 +74,7 @@ describe("AgentStepExecutor", () => {
     }));
     let childInput: CreateChildAgentLoopInput | undefined;
     let handledInput: AgentLoopInput | undefined;
+    let previewNow = Date.parse(NOW);
     const cleanup = vi.fn(async () => undefined);
     const childFactory: ChildAgentLoopFactory = {
       createChild: vi.fn(async (input) => {
@@ -84,6 +88,10 @@ describe("AgentStepExecutor", () => {
         return childRuntime(async (agentInput) => {
           handledInput = agentInput;
           await agentInput.onEvent?.({ kind: "tool-start", tool: "file.read" });
+          for (let index = 0; index < MAX_PERSISTED_ASSISTANT_PREVIEWS_PER_ATTEMPT + 6; index++) {
+            agentInput.onDelta?.(`Preview ${index} password: hunter2. `);
+            previewNow += 1_001;
+          }
           await sessionDb.saveTrajectory({
             id: "trajectory-alpha",
             profileId: "alpha",
@@ -103,7 +111,8 @@ describe("AgentStepExecutor", () => {
       isWorkspaceTrusted: () => true,
       parentVisibleTools: () => tools(),
       approvalService: new TaskApprovalService({ store }),
-      securityPolicy: capabilityFirstDefaults
+      securityPolicy: capabilityFirstDefaults,
+      now: () => new Date(previewNow)
     });
     acquireHostLease(store, graph.task, "scheduler-alpha");
     const scheduler = new TaskScheduler({
@@ -168,10 +177,15 @@ describe("AgentStepExecutor", () => {
     expect(store.listEvents(graph.task.id, { kinds: ["attempt-progressed"] })).toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          activity: { kind: "tool", label: "Using file.read", toolCategory: "files" }
+          activity: { kind: "tool", label: "Read started", traceCategory: "read", toolCategory: "files" }
         })
       })
     );
+    const assistantActivities = store.listEvents(graph.task.id, { kinds: ["attempt-progressed"] })
+      .map((event) => event.data.activity)
+      .filter((activity) => (activity as { kind?: string } | undefined)?.kind === "assistant");
+    expect(assistantActivities).toHaveLength(MAX_PERSISTED_ASSISTANT_PREVIEWS_PER_ATTEMPT);
+    expect(JSON.stringify(assistantActivities)).not.toContain("hunter2");
     expect(cleanup).toHaveBeenCalledOnce();
   });
 

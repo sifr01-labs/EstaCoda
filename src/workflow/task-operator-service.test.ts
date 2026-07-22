@@ -209,7 +209,25 @@ describe("TaskOperatorService", () => {
         timestamp: "2026-01-01T00:00:04.000Z",
         data: {
           rawToolInput: "must-not-project",
-          activity: { kind: "tool", label: "Reading session guards", toolCategory: "files" }
+          activity: { kind: "tool", label: "Reading session guards", traceCategory: "read", toolCategory: "files" }
+        }
+      });
+      tx.appendEvent({
+        id: "event-retry-preview",
+        profileId: "alpha",
+        taskId: graph.task.id,
+        planRevisionId: graph.revision.id,
+        stepId: researchStep!.id,
+        attemptId: retryAttempt.id,
+        kind: "attempt-progressed",
+        timestamp: "2026-01-01T00:00:04.001Z",
+        data: {
+          activity: {
+            kind: "assistant",
+            label: "Assistant answer",
+            traceCategory: "answer",
+            assistantPreview: "The session guards are mapped safely."
+          }
         }
       });
       tx.recordResult({
@@ -250,8 +268,9 @@ describe("TaskOperatorService", () => {
       displayIndex: 1,
       role: "worker",
       objective: "Research authentication",
-      currentActivity: "Reading session guards",
+      currentActivity: "Assistant answer",
       currentToolCategory: "files",
+      assistantPreview: "The session guards are mapped safely.",
       latestAttempt: {
         attemptId: retryAttempt.id,
         attemptNumber: 2,
@@ -272,7 +291,15 @@ describe("TaskOperatorService", () => {
         eventId: "event-retry-activity",
         attemptId: retryAttempt.id,
         subagentIndex: 1,
+        category: "read",
         label: "Reading session guards · Research authentication"
+      }),
+      expect.objectContaining({
+        eventId: "event-retry-preview",
+        attemptId: retryAttempt.id,
+        subagentIndex: 1,
+        category: "answer",
+        label: "The session guards are mapped safely. · Research authentication"
       })
     ]);
     expect(projection.subagents[0]?.results).toEqual([
@@ -497,7 +524,7 @@ describe("TaskOperatorService", () => {
         timestamp: now(),
         data: {
           rawToolInput: "must-not-project",
-          activity: { kind: "tool", label: "Using browser.navigate", toolCategory: "browser" }
+          activity: { kind: "tool", label: "Using browser.navigate", traceCategory: "plan", toolCategory: "browser" }
         }
       });
       tx.recordResult({

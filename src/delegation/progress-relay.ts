@@ -1,6 +1,7 @@
 import { MAX_DELEGATION_BATCH_TASKS, type DelegateRole } from "../contracts/delegation.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import { redactToolDisplayPreview } from "../tools/tool-target-summary.js";
+import { redactSensitiveText } from "../utils/redaction.js";
 
 export type DelegationProgressMetadata = {
   subagentId: string;
@@ -12,6 +13,9 @@ export type DelegationProgressMetadata = {
   batchId?: string;
   taskLabel?: string;
   batchTaskCount?: number;
+  taskId?: string;
+  stepId?: string;
+  attemptId?: string;
 };
 
 export type ProgressRelayOptions = {
@@ -28,8 +32,16 @@ export type DelegationProgressSummary = {
   inToolExecution: boolean;
 };
 
+export type DelegationAssistantPreviewRelay = {
+  push(delta: string): void;
+  flush(): Promise<void>;
+};
+
 const DEFAULT_THROTTLE_MS = 1_000;
 const MAX_PROGRESS_ACTIVITY_ID_CHARS = 160;
+const MAX_PROGRESS_ATTRIBUTION_ID_CHARS = 256;
+const MAX_ASSISTANT_PREVIEW_CHARS = 160;
+const MAX_ASSISTANT_PREVIEW_BUFFER_CHARS = 2_048;
 const ANSI_PATTERN = /(?:\x1b\][^\x07]*(?:\x07|\x1b\\))|(?:\x1b\[[0-?]*[ -/]*[@-~])|(?:\x1b[ -/]*[@-~])/gu;
 const UNSAFE_DISPLAY_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069]/gu;
 const RELAYED_EVENT_KINDS = new Set<RuntimeEvent["kind"]>([
@@ -70,6 +82,56 @@ export function createDelegationProgressRelay(options: ProgressRelayOptions): Ru
       ...metadata,
       childEvent
     });
+  };
+}
+
+/**
+ * Relays only provider output that has already crossed AgentLoop's visible-delta boundary.
+ * The rolling buffer is bounded before it is redacted and converted to a display-only event.
+ */
+export function createDelegationAssistantPreviewRelay(
+  options: ProgressRelayOptions
+): DelegationAssistantPreviewRelay {
+  const throttleMs = Math.max(0, options.throttleMs ?? DEFAULT_THROTTLE_MS);
+  const now = options.now ?? Date.now;
+  const metadata = normalizeDelegationProgressMetadata(options.metadata);
+  let buffer = "";
+  let lastEmittedAt: number | undefined;
+  let lastPreview: string | undefined;
+  let pending = Promise.resolve();
+
+  const emit = (force: boolean): void => {
+    const preview = sanitizeDelegationAssistantPreview(buffer);
+    if (preview === undefined || preview === lastPreview) return;
+    const currentTime = now();
+    if (!force && lastEmittedAt !== undefined && currentTime - lastEmittedAt < throttleMs) return;
+    lastEmittedAt = currentTime;
+    lastPreview = preview;
+    const event: Extract<RuntimeEvent, { kind: "delegation-progress" }> = {
+      kind: "delegation-progress",
+      ...metadata,
+      childEvent: { kind: "assistant-preview", preview }
+    };
+    options.onActivity?.(event, {
+      kind: "assistant-preview",
+      summary: "assistant-preview",
+      inToolExecution: false
+    });
+    pending = pending
+      .then(async () => options.parentOnEvent?.(event))
+      .then(() => undefined, () => undefined);
+  };
+
+  return {
+    push(delta) {
+      if (typeof delta !== "string" || delta.length === 0) return;
+      buffer = `${buffer}${delta}`.slice(-MAX_ASSISTANT_PREVIEW_BUFFER_CHARS);
+      emit(false);
+    },
+    async flush() {
+      emit(true);
+      await pending;
+    }
   };
 }
 
@@ -210,8 +272,20 @@ export function normalizeDelegationProgressMetadata(
     ...(taskIndex === undefined ? {} : { taskIndex }),
     ...(metadata.batchId === undefined ? {} : { batchId: metadata.batchId }),
     ...(metadata.taskLabel === undefined ? {} : { taskLabel: delegationTaskDisplayLabel(metadata.taskLabel) }),
-    ...(batchTaskCount === undefined ? {} : { batchTaskCount })
+    ...(batchTaskCount === undefined ? {} : { batchTaskCount }),
+    ...optionalAttribution("taskId", metadata.taskId),
+    ...optionalAttribution("stepId", metadata.stepId),
+    ...optionalAttribution("attemptId", metadata.attemptId)
   };
+}
+
+function optionalAttribution<Key extends "taskId" | "stepId" | "attemptId">(
+  key: Key,
+  value: string | undefined
+): Partial<Record<Key, string>> {
+  const normalized = sanitizeDelegationDisplayText(value)?.slice(0, MAX_PROGRESS_ATTRIBUTION_ID_CHARS);
+  if (normalized === undefined || !/^[A-Za-z0-9._:-]+$/u.test(normalized)) return {};
+  return { [key]: normalized } as Partial<Record<Key, string>>;
 }
 
 function normalizeBatchTaskCount(value: number | undefined): number | undefined {
@@ -251,4 +325,12 @@ function sanitizeDelegationDisplayText(value: string | undefined): string | unde
     .trim()
     .replace(/\s+/gu, " ");
   return sanitized.length === 0 ? undefined : sanitized;
+}
+
+export function sanitizeDelegationAssistantPreview(value: string | undefined): string | undefined {
+  const sanitized = sanitizeDelegationDisplayText(value);
+  if (sanitized === undefined) return undefined;
+  const redacted = redactSensitiveText(sanitized);
+  if (redacted.length <= MAX_ASSISTANT_PREVIEW_CHARS) return redacted;
+  return `…${redacted.slice(-(MAX_ASSISTANT_PREVIEW_CHARS - 1))}`;
 }

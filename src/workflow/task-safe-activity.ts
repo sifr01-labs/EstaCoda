@@ -1,5 +1,5 @@
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
-import type { TaskAttemptActivity } from "./task-step-executor.js";
+import type { TaskAttemptActivity, TaskTraceCategory } from "./task-step-executor.js";
 
 type DelegationProgressEvent = Extract<RuntimeEvent, { kind: "delegation-progress" }>;
 
@@ -8,34 +8,74 @@ export function taskActivityFromDelegationProgress(event: DelegationProgressEven
   const child = event.childEvent;
   switch (child.kind) {
     case "agent-start":
-      return { kind: "worker", label: "Worker started" };
-    case "tool-start":
+      return { kind: "worker", label: "Worker started", traceCategory: "plan" };
+    case "tool-start": {
+      const traceCategory = taskTraceCategoryFromTool(child.tool);
       return {
         kind: "tool",
-        label: `Using ${safeToolName(child.tool)}`,
+        label: toolActivityLabel(traceCategory, false),
+        traceCategory,
         toolCategory: taskToolCategory(child.tool),
       };
-    case "tool-result":
+    }
+    case "tool-result": {
+      const traceCategory = child.ok === false ? "failed" : taskTraceCategoryFromTool(child.tool);
       return {
         kind: "tool",
-        label: `${safeToolName(child.tool)} ${child.ok === false ? "failed" : "finished"}`,
+        label: child.ok === false ? "Tool activity failed" : toolActivityLabel(traceCategory, true),
+        traceCategory,
         toolCategory: taskToolCategory(child.tool),
       };
+    }
     case "provider-attempt":
-      return { kind: "provider", label: child.fallback === true ? "Trying fallback provider" : "Waiting for provider" };
+      return {
+        kind: "provider",
+        label: child.fallback === true ? "Trying fallback provider" : "Planning next action",
+        traceCategory: "plan"
+      };
     case "provider-result":
       return child.willFallback === true
-        ? { kind: "provider", label: "Provider route failed; switching fallback" }
-        : { kind: "provider", label: child.ok === false ? "Provider failed" : "Provider finished" };
+        ? { kind: "provider", label: "Provider route failed; switching fallback", traceCategory: "plan" }
+        : {
+            kind: "provider",
+            label: child.ok === false ? "Provider failed" : "Plan updated",
+            traceCategory: child.ok === false ? "failed" : "plan"
+          };
     case "provider-budget-exhausted":
-      return { kind: "provider", label: "Provider budget exhausted" };
+      return { kind: "provider", label: "Provider budget exhausted", traceCategory: "failed" };
+    case "assistant-preview":
+      if (child.preview === undefined) return undefined;
+      return {
+        kind: "assistant",
+        label: "Assistant answer",
+        traceCategory: "answer",
+        assistantPreview: child.preview
+      };
     case "agent-final":
-      return { kind: "worker", label: "Worker finished" };
+      return { kind: "worker", label: "Worker finished", traceCategory: "finish" };
     case "agent-cancelled":
-      return { kind: "worker", label: "Worker cancelled" };
+      return { kind: "worker", label: "Worker cancelled", traceCategory: "failed" };
     case "delegation-result":
-      return { kind: "worker", label: `Worker ${child.status ?? "settled"}` };
+      return {
+        kind: "worker",
+        label: `Worker ${child.status ?? "settled"}`,
+        traceCategory: child.status === "completed"
+          ? "finish"
+          : child.status === "blocked"
+            ? "wait"
+            : "failed"
+      };
   }
+}
+
+/** Maps implementation-specific tool names to the stable trace vocabulary. */
+export function taskTraceCategoryFromTool(toolName: string | undefined): TaskTraceCategory {
+  const normalized = toolName?.toLowerCase() ?? "";
+  if (/(?:^|[._-])(rg|ripgrep|grep|search|find|glob)(?:$|[._-])/u.test(normalized)) return "search";
+  if (/(?:^|[._-])(write|edit|patch|replace|delete|remove|move|copy|mkdir)(?:$|[._-])/u.test(normalized)) return "edit";
+  if (/(?:^|[._-])(read|open|view|fetch|get|list|stat|inspect)(?:$|[._-])/u.test(normalized)) return "read";
+  if (/(?:^|[._-])(terminal|process|execute|shell|command|run)(?:$|[._-])/u.test(normalized)) return "terminal";
+  return "plan";
 }
 
 export function taskToolCategory(toolName: string | undefined): string {
@@ -61,7 +101,15 @@ export function taskToolCategory(toolName: string | undefined): string {
   }
 }
 
-function safeToolName(toolName: string | undefined): string {
-  if (toolName === undefined || !/^[a-zA-Z0-9._-]{1,160}$/u.test(toolName)) return "tool";
-  return toolName;
+function toolActivityLabel(category: TaskTraceCategory, finished: boolean): string {
+  const action = (() => {
+    switch (category) {
+      case "terminal": return "Terminal command";
+      case "search": return "Search";
+      case "read": return "Read";
+      case "edit": return "Edit";
+      default: return "Tool activity";
+    }
+  })();
+  return finished ? `${action} finished` : `${action} started`;
 }

@@ -1969,7 +1969,7 @@ function promptTaskCard(): TaskCardState {
     subagents: [],
     trace: { events: [], hasEarlierEvents: false },
     childTasks: [],
-    recentActivity: [{ eventId: "event-completed", kind: "attempt-completed", label: "Attempt completed", timestamp: "2026-07-20T10:00:00.000Z" }],
+    recentActivity: [{ eventId: "event-completed", kind: "attempt-completed", label: "Attempt completed", category: "finish", timestamp: "2026-07-20T10:00:00.000Z" }],
     elapsedMs: 1_000,
     usage: {
       providerCalls: 1,

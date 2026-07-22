@@ -260,6 +260,7 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
         eventId: "event-attempt-started",
         kind: "attempt-started",
         label: "Attempt started · Research Company A",
+        category: "plan",
         timestamp: "2026-07-20T10:00:00.000Z",
         stepId: "step-a",
         attemptId: "attempt-a-1",
@@ -269,7 +270,7 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
     },
     childTasks: [],
     recentActivity: [
-      { eventId: "event-attempt-started", kind: "attempt-started", label: "Attempt started · Research Company A", timestamp: "2026-07-20T10:00:00.000Z" },
+      { eventId: "event-attempt-started", kind: "attempt-started", label: "Attempt started · Research Company A", category: "plan", timestamp: "2026-07-20T10:00:00.000Z" },
     ],
     currentToolCategory: "browser",
     elapsedMs: 198_000,

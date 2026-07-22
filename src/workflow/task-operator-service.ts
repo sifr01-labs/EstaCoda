@@ -34,6 +34,7 @@ import { spendingBudgetSummary } from "../providers/provider-spend-projection.js
 import { FixedTaskService } from "./fixed-task-service.js";
 import type { InitialTaskHostLeaseInput, TaskStore } from "./task-store.js";
 import { taskToolCategory } from "./task-safe-activity.js";
+import type { TaskTraceCategory } from "./task-step-executor.js";
 import { orderTaskResults, taskPrimaryResult } from "./task-primary-result.js";
 import { cloneSpendingLimit, type SpendingLimit } from "../contracts/budget.js";
 
@@ -103,6 +104,7 @@ export type TaskAttemptProjection = {
   elapsedMs: number;
   currentActivity?: string;
   currentToolCategory?: string;
+  assistantPreview?: string;
   usage: TaskUsageTotals;
 };
 
@@ -125,6 +127,7 @@ export type TaskActivityProjection = {
   eventId: string;
   kind: TaskEvent["kind"];
   label: string;
+  category: TaskTraceCategory;
   timestamp: string;
   stepId?: string;
   attemptId?: string;
@@ -163,6 +166,7 @@ export type TaskSubagentProjection = {
   elapsedMs: number;
   currentActivity?: string;
   currentToolCategory?: string;
+  assistantPreview?: string;
   usage: SubagentUsageProjection;
   attempts: readonly TaskAttemptProjection[];
   latestAttempt?: TaskAttemptProjection;
@@ -502,6 +506,7 @@ export class TaskOperatorService {
         eventId: event.id,
         kind: event.kind,
         label: taskActivityLabel(event, titles),
+        category: taskTraceCategoryFromTaskEvent(event),
         timestamp: event.timestamp,
         ...(event.stepId === undefined ? {} : { stepId: event.stepId }),
         ...(event.attemptId === undefined ? {} : { attemptId: event.attemptId }),
@@ -516,9 +521,26 @@ export class TaskOperatorService {
   #latestActivityByAttempt(taskId: string): ReadonlyMap<string, ReturnType<typeof eventActivity>> {
     const result = new Map<string, NonNullable<ReturnType<typeof eventActivity>>>();
     for (const event of this.#store.listEvents(taskId, { kinds: ["attempt-progressed"], limit: 1_000, order: "desc" })) {
-      if (event.attemptId === undefined || result.has(event.attemptId)) continue;
+      if (event.attemptId === undefined) continue;
       const activity = eventActivity(event);
-      if (activity !== undefined) result.set(event.attemptId, activity);
+      if (activity === undefined) continue;
+      const current = result.get(event.attemptId);
+      if (current === undefined) {
+        result.set(event.attemptId, activity);
+        continue;
+      }
+      if ((current.toolCategory === undefined && activity.toolCategory !== undefined) ||
+          (current.assistantPreview === undefined && activity.assistantPreview !== undefined)) {
+        result.set(event.attemptId, {
+          ...current,
+          ...(current.toolCategory === undefined && activity.toolCategory !== undefined
+            ? { toolCategory: activity.toolCategory }
+            : {}),
+          ...(current.assistantPreview === undefined && activity.assistantPreview !== undefined
+            ? { assistantPreview: activity.assistantPreview }
+            : {})
+        });
+      }
     }
     return result;
   }
@@ -789,6 +811,7 @@ function projectAttempt(
     elapsedMs: elapsedMs(attempt.startedAt ?? attempt.createdAt, attempt.completedAt, now),
     ...(activity === undefined ? {} : { currentActivity: activity.label }),
     ...(activity?.toolCategory === undefined ? {} : { currentToolCategory: activity.toolCategory }),
+    ...(activity?.assistantPreview === undefined ? {} : { assistantPreview: activity.assistantPreview }),
     usage: taskUsageFromEntries(usageEntries)
   };
 }
@@ -840,6 +863,9 @@ function projectSubagent(
     ...(currentAttempt?.currentToolCategory === undefined
       ? {}
       : { currentToolCategory: currentAttempt.currentToolCategory }),
+    ...(currentAttempt?.assistantPreview === undefined
+      ? {}
+      : { assistantPreview: currentAttempt.assistantPreview }),
     usage: {
       total: step.usage,
       ...(currentAttempt === undefined ? {} : { currentAttempt: currentAttempt.usage })
@@ -863,7 +889,7 @@ function taskActivityLabel(event: TaskEvent, stepTitles: ReadonlyMap<string, str
   const step = event.stepId === undefined ? undefined : stepTitles.get(event.stepId);
   const suffix = step === undefined ? "" : ` · ${step}`;
   const activity = eventActivity(event);
-  if (activity !== undefined) return `${activity.label}${suffix}`;
+  if (activity !== undefined) return `${activity.assistantPreview ?? activity.label}${suffix}`;
   switch (event.kind) {
     case "task-created": return "Task created";
     case "task-state-changed": return "Task status changed";
@@ -891,20 +917,75 @@ function taskActivityLabel(event: TaskEvent, stepTitles: ReadonlyMap<string, str
   }
 }
 
-function eventActivity(event: TaskEvent): { readonly label: string; readonly toolCategory?: string } | undefined {
+function eventActivity(event: TaskEvent): {
+  readonly label: string;
+  readonly traceCategory: TaskTraceCategory;
+  readonly toolCategory?: string;
+  readonly assistantPreview?: string;
+} | undefined {
   const activity = event.data.activity;
   if (activity === null || typeof activity !== "object" || Array.isArray(activity)) return undefined;
   const record = activity as Record<string, unknown>;
-  if ((record.kind !== "worker" && record.kind !== "provider" && record.kind !== "tool") ||
+  if ((record.kind !== "worker" && record.kind !== "provider" && record.kind !== "tool" && record.kind !== "assistant") ||
       typeof record.label !== "string" || record.label.length === 0 || record.label.length > 160 ||
       /[\u0000-\u001F\u007F]/u.test(record.label)) return undefined;
+  const traceCategory = taskTraceCategory(record.traceCategory);
+  if (traceCategory === undefined) return undefined;
   const toolCategory = typeof record.toolCategory === "string" && /^[A-Za-z0-9._:-]{1,160}$/u.test(record.toolCategory)
     ? record.toolCategory
     : undefined;
+  const assistantPreview = typeof record.assistantPreview === "string" && record.assistantPreview.length <= 160
+    ? safeText(record.assistantPreview, 160)
+    : undefined;
+  if (record.kind === "assistant" && assistantPreview === undefined) return undefined;
   return {
     label: safeText(record.label, 160),
-    ...(toolCategory === undefined ? {} : { toolCategory })
+    traceCategory,
+    ...(toolCategory === undefined ? {} : { toolCategory }),
+    ...(assistantPreview === undefined ? {} : { assistantPreview })
   };
+}
+
+function taskTraceCategory(value: unknown): TaskTraceCategory | undefined {
+  switch (value) {
+    case "terminal":
+    case "search":
+    case "plan":
+    case "read":
+    case "edit":
+    case "answer":
+    case "wait":
+    case "finish":
+    case "failed":
+      return value;
+    default:
+      return undefined;
+  }
+}
+
+function taskTraceCategoryFromTaskEvent(event: TaskEvent): TaskTraceCategory {
+  const activity = eventActivity(event);
+  if (activity !== undefined) return activity.traceCategory;
+  const status = typeof event.data.to === "string" ? event.data.to : undefined;
+  if (status === "completed" || status === "succeeded") return "finish";
+  if (status === "waiting_for_input" || status === "waiting_for_approval" || status === "blocked") return "wait";
+  if (status === "failed" || status === "cancelled") return "failed";
+  switch (event.kind) {
+    case "attempt-waiting":
+    case "approval-requested":
+      return "wait";
+    case "attempt-completed":
+    case "result-recorded":
+      return "finish";
+    case "attempt-failed":
+    case "attempt-cancelled":
+    case "attempt-interrupted":
+    case "attempt-expired":
+    case "plan-revision-rejected":
+      return "failed";
+    default:
+      return "plan";
+  }
 }
 
 export function normalizeTaskOperatorObjective(value: string): string {

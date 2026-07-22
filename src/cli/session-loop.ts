@@ -3123,6 +3123,7 @@ export function taskProjectionToCard(task: TaskStatusProjection): TaskCardState 
       elapsedMs: subagent.elapsedMs,
       ...(subagent.currentActivity === undefined ? {} : { currentActivity: subagent.currentActivity }),
       ...(subagent.currentToolCategory === undefined ? {} : { currentToolCategory: subagent.currentToolCategory }),
+      ...(subagent.assistantPreview === undefined ? {} : { assistantPreview: subagent.assistantPreview }),
       usage: {
         total: taskUsageToCard(subagent.usage.total),
         ...(subagent.usage.currentAttempt === undefined
@@ -3170,6 +3171,7 @@ function taskAttemptToCard(
     elapsedMs: attempt.elapsedMs,
     ...(attempt.currentActivity === undefined ? {} : { currentActivity: attempt.currentActivity }),
     ...(attempt.currentToolCategory === undefined ? {} : { currentToolCategory: attempt.currentToolCategory }),
+    ...(attempt.assistantPreview === undefined ? {} : { assistantPreview: attempt.assistantPreview }),
     usage: taskUsageToCard(attempt.usage)
   };
 }

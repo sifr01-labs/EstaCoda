@@ -1,6 +1,6 @@
 import type { ChannelKind } from "../contracts/channel.js";
 import type { DelegateRole, DelegationConfig } from "../contracts/delegation.js";
-import type { RuntimeEventSink } from "../contracts/runtime-event.js";
+import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SessionDB } from "../contracts/session.js";
 import type { AgentLoopResponse } from "../runtime/agent-loop.js";
 import type { ChildAgentLoopRuntime } from "../runtime/agent-loop-factory.js";
@@ -10,6 +10,7 @@ import {
   writeDelegationDiagnostic
 } from "./delegation-diagnostics.js";
 import {
+  createDelegationAssistantPreviewRelay,
   createDelegationProgressRelay,
   type DelegationProgressSummary
 } from "./progress-relay.js";
@@ -37,6 +38,9 @@ export type ChildRunnerInput = {
   taskIndex?: number;
   batchTaskCount?: number;
   batchId?: string;
+  taskId?: string;
+  stepId?: string;
+  attemptId?: string;
   parentOnEvent?: RuntimeEventSink;
   prompt?: string;
   inputMetadata?: Record<string, unknown>;
@@ -90,26 +94,37 @@ export async function runDelegatedChild(input: ChildRunnerInput): Promise<ChildR
     };
   }
 
+  const metadata = {
+    subagentId: input.subagentId,
+    childSessionId: input.childSessionId,
+    parentSessionId: input.parentSessionId,
+    role: input.role,
+    depth: input.depth,
+    taskIndex: input.taskIndex,
+    batchId: input.batchId,
+    taskLabel: input.task,
+    batchTaskCount: input.batchTaskCount ?? 1,
+    taskId: input.taskId,
+    stepId: input.stepId,
+    attemptId: input.attemptId
+  };
+  const onActivity = (_event: RuntimeEvent, summary: DelegationProgressSummary) => {
+    state.record(summary);
+    pulse();
+    input.subagentRegistry.updateSubagent(input.subagentId, {
+      lastActivityAt: state.lastActivityAt
+    });
+  };
   const relay = createDelegationProgressRelay({
-    metadata: {
-      subagentId: input.subagentId,
-      childSessionId: input.childSessionId,
-      parentSessionId: input.parentSessionId,
-      role: input.role,
-      depth: input.depth,
-      taskIndex: input.taskIndex,
-      batchId: input.batchId,
-      taskLabel: input.task,
-      batchTaskCount: input.batchTaskCount ?? 1
-    },
+    metadata,
     parentOnEvent: input.parentOnEvent,
-    onActivity: (_event, summary) => {
-      state.record(summary);
-      pulse();
-      input.subagentRegistry.updateSubagent(input.subagentId, {
-        lastActivityAt: state.lastActivityAt
-      });
-    }
+    onActivity
+  });
+  const previewRelay = createDelegationAssistantPreviewRelay({
+    metadata,
+    parentOnEvent: input.parentOnEvent,
+    now: () => (input.now?.() ?? new Date()).getTime(),
+    onActivity
   });
 
   const timeoutMs = Math.max(1, input.delegationConfig.childTimeoutSeconds * 1_000);
@@ -136,6 +151,7 @@ export async function runDelegatedChild(input: ChildRunnerInput): Promise<ChildR
     trustedWorkspace: input.trustedWorkspace,
     signal: input.childAbortController.signal,
     onEvent: relay,
+    onDelta: previewRelay.push,
     inputMetadata: input.inputMetadata ?? {
       delegated: true,
       parentSessionId: input.parentSessionId
@@ -179,6 +195,7 @@ export async function runDelegatedChild(input: ChildRunnerInput): Promise<ChildR
     }
     throw error;
   } finally {
+    await previewRelay.flush();
     if (timeoutId !== undefined) {
       clearTimeout(timeoutId);
     }

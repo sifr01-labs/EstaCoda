@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { taskActivityFromDelegationProgress } from "./task-safe-activity.js";
+import { taskActivityFromDelegationProgress, taskTraceCategoryFromTool } from "./task-safe-activity.js";
 
 describe("safe durable Task activity", () => {
   it("keeps child tool progress categorical and drops previews, arguments, and result bodies", () => {
@@ -17,7 +17,12 @@ describe("safe durable Task activity", () => {
       },
     });
 
-    expect(activity).toEqual({ kind: "tool", label: "Using browser.navigate", toolCategory: "browser" });
+    expect(activity).toEqual({
+      kind: "tool",
+      label: "Tool activity started",
+      traceCategory: "plan",
+      toolCategory: "browser"
+    });
     expect(JSON.stringify(activity)).not.toContain("secret");
   });
 
@@ -39,7 +44,32 @@ describe("safe durable Task activity", () => {
       },
     });
 
-    expect(activity).toEqual({ kind: "provider", label: "Provider route failed; switching fallback" });
+    expect(activity).toEqual({
+      kind: "provider",
+      label: "Provider route failed; switching fallback",
+      traceCategory: "plan"
+    });
     expect(activity).not.toHaveProperty("text");
+  });
+
+  it("presents implementation-specific search and visible answer events with stable categories", () => {
+    expect(taskTraceCategoryFromTool("rg.search")).toBe("search");
+    expect(taskTraceCategoryFromTool("file.read")).toBe("read");
+    expect(taskTraceCategoryFromTool("file.patch")).toBe("edit");
+    expect(taskTraceCategoryFromTool("terminal.run")).toBe("terminal");
+    expect(taskActivityFromDelegationProgress({
+      kind: "delegation-progress",
+      subagentId: "attempt-1",
+      childSessionId: "worker-1",
+      parentSessionId: "parent-1",
+      role: "leaf",
+      depth: 1,
+      childEvent: { kind: "assistant-preview", preview: "A bounded safe answer" }
+    })).toEqual({
+      kind: "assistant",
+      label: "Assistant answer",
+      traceCategory: "answer",
+      assistantPreview: "A bounded safe answer"
+    });
   });
 });

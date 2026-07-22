@@ -356,6 +356,8 @@ function delegationActivityLabel(
       return locale === "ar" ? "إنهاء العمل" : "finalizing";
     case "agent-cancelled":
       return locale === "ar" ? "جارٍ الإلغاء" : "cancelling";
+    case "assistant-preview":
+      return locale === "ar" ? "يكتب الإجابة" : "answering";
     case "delegation-result":
       return delegationResultLabel(event.status, locale);
   }
