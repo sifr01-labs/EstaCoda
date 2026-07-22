@@ -207,7 +207,7 @@ function getPromptCursorPosition(
   });
   const visibleCursorRow = Math.max(0, metrics.cursorRow - metrics.scrollOffset);
   return {
-    row: promptRegionY + visibleCursorRow,
+    row: promptRegionY + metrics.contentStartRow + visibleCursorRow,
     column: metrics.cursorColumn,
   };
 }

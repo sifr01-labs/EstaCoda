@@ -1018,7 +1018,10 @@ function formatSubagentTitle(
     ? subagent.displayLabel
     : styleColor(style, styleBold(style, subagent.displayLabel), titleColor);
   const separator = styleMuted(style, "·");
-  const description = styleSecondary(style, conciseSubagentTitle(subagent.title));
+  const displayTitle = isGenericDelegatedTitle(subagent.title)
+    ? subagent.objective
+    : subagent.title;
+  const description = styleSecondary(style, conciseSubagentTitle(displayTitle));
   const rail = focused ? tokens?.glyph.progress.thumb ?? ">" : " ";
   const styledRail = focused && tokens !== undefined
     ? styleColor(style, rail, tokens.palette.action)
@@ -1174,6 +1177,10 @@ function conciseSubagentTitle(value: string): string {
     ? `${words.slice(0, MAX_SUBAGENT_TITLE_WORDS).join(" ").replace(/[.,;:!?]+$/u, "")}…`
     : normalized;
   return truncateVisible(wordLimited, MAX_SUBAGENT_TITLE_WIDTH, "…");
+}
+
+function isGenericDelegatedTitle(value: string): boolean {
+  return /^Delegated work(?: \d+)?$/iu.test(value.trim());
 }
 
 function formatCompactTokenCount(value: number): string {

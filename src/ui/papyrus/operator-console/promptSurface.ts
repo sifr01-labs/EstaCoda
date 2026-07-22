@@ -19,13 +19,14 @@ export type PromptSurfaceMetrics = {
   readonly visibleRows: number;
   readonly overflow: boolean;
   readonly scrollOffset: number;
+  readonly contentStartRow: number;
   readonly cursorRow: number;
   readonly cursorColumn: number;
 };
 
 export const PREFERRED_PROMPT_INPUT_ROWS = 8;
 export const MAX_PROMPT_HEIGHT_RATIO = 0.3;
-export const PROMPT_BOTTOM_PADDING_ROWS = 1;
+export const PROMPT_HALF_CELL_BAND_ROWS = 2;
 
 export function getPromptSurfaceDesiredHeight(
   state: PromptSurfaceState,
@@ -33,9 +34,9 @@ export function getPromptSurfaceDesiredHeight(
 ): number {
   const logicalRows = getPromptLogicalRows(state, terminal.width).length;
   const preferredInputRows = Math.min(PREFERRED_PROMPT_INPUT_ROWS, logicalRows);
-  const absoluteHeight = Math.max(2, Math.floor(terminal.height * MAX_PROMPT_HEIGHT_RATIO));
-  const absoluteInputRows = Math.max(1, absoluteHeight - PROMPT_BOTTOM_PADDING_ROWS);
-  return Math.max(2, Math.min(preferredInputRows, absoluteInputRows) + PROMPT_BOTTOM_PADDING_ROWS);
+  const absoluteHeight = Math.max(3, Math.floor(terminal.height * MAX_PROMPT_HEIGHT_RATIO));
+  const absoluteInputRows = Math.max(1, absoluteHeight - PROMPT_HALF_CELL_BAND_ROWS);
+  return Math.max(3, Math.min(preferredInputRows, absoluteInputRows) + PROMPT_HALF_CELL_BAND_ROWS);
 }
 
 export function renderPromptSurface(
@@ -52,8 +53,8 @@ export function renderPromptSurface(
   if (height <= 0) return [];
 
   const contentWidth = width;
-  const paddingRows = height > 1 ? PROMPT_BOTTOM_PADDING_ROWS : 0;
-  const inputRows = Math.max(1, height - paddingRows);
+  const chrome = resolvePromptChrome(height);
+  const inputRows = Math.max(1, height - chrome.topRows - chrome.bottomRows);
   const logicalRows = getPromptLogicalRows(state, width);
   const overflow = logicalRows.length > inputRows;
   const cursor = getPromptCursorPosition(state, logicalRows);
@@ -67,11 +68,15 @@ export function renderPromptSurface(
     shouldStylePlaceholderRow(state, scrollOffset, index),
     options.style
   ));
-  const background = options.style?.tokens.contract.surface.bgElevated ?? "";
-  const padding = Array.from({ length: paddingRows }, () =>
-    styleBackgroundRow(options.style, "", width, background)
-  );
-  return [...content, ...padding];
+  const topBand = chrome.topRows === 0
+    ? []
+    : [renderHalfCellBand(options.style, width, "▄")];
+  const bottomBand = chrome.bottomRows === 0
+    ? []
+    : [chrome.halfCellBands
+        ? renderHalfCellBand(options.style, width, "▀")
+        : renderFullPaddingRow(options.style, width)];
+  return [...topBand, ...content, ...bottomBand];
 }
 
 export function getPromptSurfaceMetrics(
@@ -83,8 +88,8 @@ export function getPromptSurfaceMetrics(
     width: options.width,
   }));
   const logicalRows = getPromptLogicalRows(state, options.width);
-  const paddingRows = height > 1 ? PROMPT_BOTTOM_PADDING_ROWS : 0;
-  const visibleRows = Math.max(1, height - paddingRows);
+  const chrome = resolvePromptChrome(height);
+  const visibleRows = Math.max(1, height - chrome.topRows - chrome.bottomRows);
   const overflow = logicalRows.length > visibleRows;
   const cursor = getPromptCursorPosition(state, logicalRows);
   return {
@@ -92,9 +97,34 @@ export function getPromptSurfaceMetrics(
     visibleRows: Math.min(logicalRows.length, visibleRows),
     overflow,
     scrollOffset: getCursorVisibleScrollOffset(state, logicalRows.length, visibleRows, overflow, cursor.row),
+    contentStartRow: chrome.topRows,
     cursorRow: cursor.row,
     cursorColumn: cursor.column,
   };
+}
+
+function resolvePromptChrome(height: number): {
+  readonly topRows: number;
+  readonly bottomRows: number;
+  readonly halfCellBands: boolean;
+} {
+  if (height >= 3) return { topRows: 1, bottomRows: 1, halfCellBands: true };
+  if (height === 2) return { topRows: 0, bottomRows: 1, halfCellBands: false };
+  return { topRows: 0, bottomRows: 0, halfCellBands: false };
+}
+
+function renderHalfCellBand(
+  style: OperatorConsoleStyle | undefined,
+  width: number,
+  glyph: "▄" | "▀"
+): string {
+  if (style === undefined || !style.supportsColor) return "".padEnd(width);
+  return styleColor(style, glyph.repeat(width), style.tokens.contract.surface.bgElevated);
+}
+
+function renderFullPaddingRow(style: OperatorConsoleStyle | undefined, width: number): string {
+  const background = style?.tokens.contract.surface.bgElevated ?? "";
+  return styleBackgroundRow(style, "", width, background);
 }
 
 type PromptLogicalRow = {

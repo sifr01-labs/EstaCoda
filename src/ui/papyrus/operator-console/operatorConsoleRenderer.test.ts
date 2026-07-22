@@ -52,7 +52,7 @@ describe("Papyrus operator console renderer", () => {
     const layout = createOperatorConsoleLayout(state, { width: 80, height: 8, isTty: true });
     const output = renderOperatorConsoleTextLines(state, layout);
 
-    expect(output[0]).toContain("›");
+    expect(output[1]).toContain("›");
     expect(output.at(-1)).toContain("◷ 00:00");
   });
 
@@ -61,11 +61,12 @@ describe("Papyrus operator console renderer", () => {
     const layout = createOperatorConsoleLayout(state, { width: 80, height: 8, isTty: true });
 
     const output = renderOperatorConsoleTextLines(state, layout);
-    expect(output).toHaveLength(3);
-    expect(output[0]).toContain("›");
-    expect(output[1]?.trim()).toBe("");
-    expect(output[2]).toContain("model pending ● · ctx [··········] --");
-    expect(output[2]?.endsWith("· ◷ 00:00")).toBe(true);
+    expect(output).toHaveLength(4);
+    expect(output[0]?.trim()).toBe("");
+    expect(output[1]).toContain("›");
+    expect(output[2]?.trim()).toBe("");
+    expect(output[3]).toContain("model pending ● · ctx [··········] --");
+    expect(output[3]?.endsWith("· ◷ 00:00")).toBe(true);
   });
 
   it("renders multiline prompt expansion with status rail below", () => {
@@ -91,7 +92,7 @@ describe("Papyrus operator console renderer", () => {
     const layout = createOperatorConsoleLayout(state, { width: 72, height: 20, isTty: true });
 
     const output = renderOperatorConsoleTextLines(state, layout);
-    expect(output[0]).toContain("› write a migration plan for:");
+    expect(output[1]).toContain("› write a migration plan for:");
     expect(output).toContainEqual(expect.stringContaining("› write a migration plan for:"));
     expect(output).toContainEqual(expect.stringContaining("  - approval cards"));
     expect(output.at(-1)).toContain("kimi-k2.7-code ● · ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k");
@@ -537,7 +538,7 @@ describe("Papyrus operator console renderer", () => {
     const output = renderOperatorConsoleTextLines(state, layout);
 
     expect(output).not.toContainEqual(expect.stringContaining("Running tools"));
-    expect(output[0]).toContain("›");
+    expect(output[1]).toContain("›");
   });
 
   it("does not reserve attachment rows when attachments are absent", () => {
@@ -546,7 +547,7 @@ describe("Papyrus operator console renderer", () => {
     const output = renderOperatorConsoleTextLines(state, layout);
 
     expect(output).not.toContain("Attachments");
-    expect(output[0]).toContain("›");
+    expect(output[1]).toContain("›");
   });
 
   it("renders slash menu between prompt and status rail", () => {

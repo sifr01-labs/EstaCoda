@@ -71,6 +71,32 @@ describe("durable Task surfaces", () => {
     expect(lines.every((line) => visibleWidth(line) <= 72)).toBe(true);
   });
 
+  it("replaces generic delegated titles with a concise summary of the real objective", () => {
+    const subagent = makeSubagent(1, {
+      title: "Delegated work 1",
+      objective: "Research how modern AI agents improve themselves autonomously using measurable evaluation loops",
+    });
+    const card = makeCard({ subagents: [subagent] });
+    const text = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 72 }).join("\n");
+
+    expect(text).toContain("Subagent 1 · Research how modern AI agents improve themselves auto…");
+    expect(text).not.toContain("Delegated work 1");
+    expect(subagentInspectionContentLines(card, subagent, 72).join("\n"))
+      .toContain("Research how modern AI agents improve themselves autonomously using measurable evaluation loops");
+
+    const arabic = makeSubagent(2, {
+      title: "Delegated work 2",
+      objective: "مراجعة النتائج ومقارنة الأدلة وإعداد ملخص واضح",
+    });
+    const arabicCard = makeCard({ subagents: [arabic] });
+    const arabicText = renderTaskCardSurface(
+      { cards: [arabicCard], scrollOffset: 0 },
+      { width: 72, locale: "ar" }
+    ).join("\n");
+    expect(arabicText).toContain("Subagent 2 · مراجعة النتائج ومقارنة الأدلة وإعداد ملخص واضح");
+    expect(arabicText).not.toContain("Delegated work 2");
+  });
+
   it("uses column-major 1-3 | 4-6 placement, equal widths, and +N more instead of squeezing", () => {
     const four = makeCard({ subagents: Array.from({ length: 4 }, (_, index) => makeSubagent(index + 1)) });
     const wide = renderTaskCardSurface({ cards: [four], scrollOffset: 0 }, { width: 100, isTty: true });
