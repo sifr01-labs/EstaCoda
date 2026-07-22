@@ -178,6 +178,14 @@ describe("AgentStepExecutor", () => {
   it("gives dependent Steps directly executable Task result read inputs without exposing opaque handles", async () => {
     const graph = makeDependencyGraph();
     store.createTaskGraph(graph);
+    resultService.record({
+      id: "failed-dependency-output",
+      taskId: graph.task.id,
+      stepId: graph.steps[0]!.id,
+      kind: "text",
+      disposition: "diagnostic",
+      content: "Incomplete dependency output that must not be synthesized."
+    });
     const dependencyResult = resultService.record({
       id: "dependency-result",
       taskId: graph.task.id,
@@ -252,6 +260,171 @@ describe("AgentStepExecutor", () => {
         resultId: dependencyResult.id
       }
     });
+  });
+
+  it("returns safe read-only failure output as diagnostic content", async () => {
+    const graph = makeGraph();
+    const childFactory: ChildAgentLoopFactory = {
+      createChild: vi.fn(async (input) => {
+        await sessionDb.createSession({
+          id: "worker-read-failure",
+          profileId: input.profileId,
+          parentSessionId: input.parentSessionId,
+          metadata: { kind: "task-step-worker", ...(input.taskExecution ?? {}) }
+        });
+        return childRuntime(async () => response({
+          text: "Partial findings before the read failed.",
+          toolExecutions: [{
+            tool: tool("file.read", "read-only-local", ["files"]),
+            input: { path: "notes.txt" },
+            decision: "allow",
+            riskClass: "read-only-local",
+            result: { ok: false, content: "Read failed." }
+          }]
+        }), async () => undefined, {
+          sessionId: "worker-read-failure",
+          trajectoryId: "trajectory-read-failure"
+        });
+      })
+    };
+    const executor = new AgentStepExecutor({
+      childFactory,
+      sessionDb,
+      taskStore: store,
+      hostWorkspace: graph.task.workspace,
+      isWorkspaceTrusted: () => true,
+      parentVisibleTools: () => tools(),
+      approvalService: new TaskApprovalService({ store }),
+      securityPolicy: capabilityFirstDefaults
+    });
+
+    await expect(executor.execute({
+      task: graph.task,
+      step: graph.steps[0]!,
+      attempt: attempt(graph),
+      signal: new AbortController().signal,
+      heartbeat: vi.fn(),
+      checkpoint: vi.fn()
+    })).resolves.toMatchObject({
+      outcome: "failed",
+      failure: { class: "tool-error" },
+      diagnosticResults: [{ kind: "text", content: "Partial findings before the read failed." }]
+    });
+  });
+
+  it("accepts an exact read retry that succeeds later in the same Attempt", async () => {
+    const graph = makeGraph();
+    const fileRead = tool("file.read", "read-only-local", ["files"]);
+    const childFactory: ChildAgentLoopFactory = {
+      createChild: vi.fn(async (input) => {
+        await sessionDb.createSession({
+          id: "worker-read-recovered",
+          profileId: input.profileId,
+          parentSessionId: input.parentSessionId,
+          metadata: { kind: "task-step-worker", ...(input.taskExecution ?? {}) }
+        });
+        return childRuntime(async () => response({
+          text: "Verified content after retry.",
+          toolExecutions: [
+            {
+              tool: fileRead,
+              input: { path: "notes.txt", line: 1 },
+              decision: "allow",
+              riskClass: "read-only-local",
+              result: { ok: false, content: "Temporary read failure." }
+            },
+            {
+              tool: fileRead,
+              input: { line: 1, path: "notes.txt" },
+              decision: "allow",
+              riskClass: "read-only-local",
+              result: { ok: true, content: "Verified source." }
+            }
+          ]
+        }), async () => undefined, {
+          sessionId: "worker-read-recovered",
+          trajectoryId: "trajectory-read-recovered"
+        });
+      })
+    };
+    const executor = new AgentStepExecutor({
+      childFactory,
+      sessionDb,
+      taskStore: store,
+      hostWorkspace: graph.task.workspace,
+      isWorkspaceTrusted: () => true,
+      parentVisibleTools: () => tools(),
+      approvalService: new TaskApprovalService({ store }),
+      securityPolicy: capabilityFirstDefaults
+    });
+
+    await expect(executor.execute({
+      task: graph.task,
+      step: graph.steps[0]!,
+      attempt: attempt(graph),
+      signal: new AbortController().signal,
+      heartbeat: vi.fn(),
+      checkpoint: vi.fn()
+    })).resolves.toMatchObject({
+      outcome: "succeeded",
+      results: [{ kind: "text", content: "Verified content after retry." }]
+    });
+  });
+
+  it("does not publish diagnostic output from denied or mutating tool activity", async () => {
+    const graph = makeGraph();
+    let responseNumber = 0;
+    const childFactory: ChildAgentLoopFactory = {
+      createChild: vi.fn(async (input) => {
+        responseNumber++;
+        const sessionId = `worker-unsafe-${responseNumber}`;
+        await sessionDb.createSession({
+          id: sessionId,
+          profileId: input.profileId,
+          parentSessionId: input.parentSessionId,
+          metadata: { kind: "task-step-worker", ...(input.taskExecution ?? {}) }
+        });
+        const denied = responseNumber === 1;
+        return childRuntime(async () => response({
+          text: denied ? "Content produced behind a denied boundary." : "Output after a failed mutation.",
+          toolExecutions: [{
+            tool: tool(denied ? "file.read" : "terminal.run", denied ? "read-only-local" : "workspace-write", ["files"]),
+            input: {},
+            decision: denied ? "deny" : "allow",
+            riskClass: denied ? "read-only-local" : "workspace-write",
+            result: { ok: false, content: denied ? "Denied." : "Mutation failed." }
+          }]
+        }), async () => undefined, {
+          sessionId,
+          trajectoryId: `trajectory-unsafe-${responseNumber}`
+        });
+      })
+    };
+    const executor = new AgentStepExecutor({
+      childFactory,
+      sessionDb,
+      taskStore: store,
+      hostWorkspace: graph.task.workspace,
+      isWorkspaceTrusted: () => true,
+      parentVisibleTools: () => tools(),
+      approvalService: new TaskApprovalService({ store }),
+      securityPolicy: capabilityFirstDefaults
+    });
+    const execute = () => executor.execute({
+      task: graph.task,
+      step: graph.steps[0]!,
+      attempt: attempt(graph),
+      signal: new AbortController().signal,
+      heartbeat: vi.fn(),
+      checkpoint: vi.fn()
+    });
+
+    const deniedSettlement = await execute();
+    expect(deniedSettlement).toMatchObject({ outcome: "failed", failure: { class: "security-deny" } });
+    expect(deniedSettlement).not.toHaveProperty("diagnosticResults");
+    const mutatingSettlement = await execute();
+    expect(mutatingSettlement).toMatchObject({ outcome: "failed", failure: { class: "tool-error" } });
+    expect(mutatingSettlement).not.toHaveProperty("diagnosticResults");
   });
 
   it("fails closed before child construction when live workspace trust is absent", async () => {

@@ -215,10 +215,12 @@ export class TaskCompletionDeliveryService {
 
     const availableResults = this.#store.listResults(task.id)
       .filter((result) => result.status === "available");
+    const acceptedResults = availableResults.filter((result) => result.disposition === "accepted");
+    const diagnosticResults = availableResults.filter((result) => result.disposition === "diagnostic");
     const primaryResultStepId = taskPrimaryResultStepId(this.#store, task);
     const primaryResult = taskPrimaryResult(this.#store, task);
     const results = (primaryResultStepId === undefined
-      ? availableResults
+      ? acceptedResults
       : primaryResult === undefined ? [] : [primaryResult])
       .slice(0, MAX_DELIVERY_RESULTS);
     for (const result of results) {
@@ -235,9 +237,23 @@ export class TaskCompletionDeliveryService {
         ? "No durable results were produced."
         : "No durable primary result was produced.");
     }
-    if (availableResults.length > results.length) {
+    if (acceptedResults.length > results.length) {
       const label = primaryResultStepId === undefined ? "additional" : "intermediate";
-      lines.push("", `${availableResults.length - results.length} ${label} result(s) remain available through task.result.read.`);
+      lines.push("", `${acceptedResults.length - results.length} ${label} result(s) remain available through task.result.read.`);
+    }
+    if (diagnosticResults.length > 0) {
+      lines.push(
+        "",
+        copy(this.#locale, "Recovered output", "المخرجات المستردة"),
+        copy(
+          this.#locale,
+          "The Attempt failed. This output may be incomplete and was not accepted as the successful Step result.",
+          "فشلت المحاولة. قد تكون هذه المخرجات غير مكتملة ولم تُقبل كنتيجة ناجحة للخطوة."
+        ),
+        ...diagnosticResults.slice(0, MAX_DELIVERY_RESULTS).map((result) =>
+          `${result.id} (${result.kind}, ${result.byteLength} bytes, handle ${result.handle})`
+        )
+      );
     }
     return boundText(lines.join("\n"), MAX_DELIVERY_TEXT_CHARS);
   }

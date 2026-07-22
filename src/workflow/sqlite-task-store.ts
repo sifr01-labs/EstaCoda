@@ -885,9 +885,9 @@ export class SQLiteTaskStore implements TaskStore {
     }
     this.#db.query(
       `insert into task_results (
-        id, profile_id, task_id, step_id, attempt_id, kind, status, handle,
+        id, profile_id, task_id, step_id, attempt_id, kind, disposition, status, handle,
         byte_length, content_hash, mime_type, summary, created_at, expires_at, pruned_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       result.id,
       this.#profileId,
@@ -895,6 +895,7 @@ export class SQLiteTaskStore implements TaskStore {
       result.stepId ?? null,
       result.attemptId ?? null,
       result.kind,
+      result.disposition,
       result.status,
       result.handle,
       result.byteLength,
@@ -920,6 +921,7 @@ export class SQLiteTaskStore implements TaskStore {
       stepId: existing.stepId,
       attemptId: existing.attemptId,
       kind: existing.kind,
+      disposition: existing.disposition,
       handle: existing.handle,
       byteLength: existing.byteLength,
       contentHash: existing.contentHash,
@@ -932,6 +934,7 @@ export class SQLiteTaskStore implements TaskStore {
       stepId: result.stepId,
       attemptId: result.attemptId,
       kind: result.kind,
+      disposition: result.disposition,
       handle: result.handle,
       byteLength: result.byteLength,
       contentHash: result.contentHash,
@@ -1863,6 +1866,7 @@ function rowToResult(row: ResultRow): TaskResult {
     ...(row.step_id === null ? {} : { stepId: row.step_id }),
     ...(row.attempt_id === null ? {} : { attemptId: row.attempt_id }),
     kind: row.kind as TaskResult["kind"],
+    disposition: row.disposition as TaskResult["disposition"],
     status: row.status as TaskResult["status"],
     handle: row.handle,
     byteLength: row.byte_length,
@@ -2243,6 +2247,7 @@ type ResultRow = {
   step_id: string | null;
   attempt_id: string | null;
   kind: string;
+  disposition: string;
   status: string;
   handle: string;
   byte_length: number;

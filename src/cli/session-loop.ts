@@ -3135,6 +3135,7 @@ function taskProjectionToCard(task: TaskStatusProjection): TaskCardState {
     results: task.results.map((result) => ({
       handle: result.handle,
       kind: result.kind,
+      disposition: result.disposition,
       status: result.status,
       byteLength: result.byteLength,
       primary: result.primary,

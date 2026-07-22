@@ -53,6 +53,29 @@ describe("task.result.read", () => {
     expect(JSON.stringify(response)).not.toContain("/profiles/");
   });
 
+  it("labels inspection-only diagnostic output in result metadata", async () => {
+    const [tool] = createTaskResultTools({
+      service: {
+        readPage: () => ({
+          result: { ...result(), disposition: "diagnostic" },
+          content: "incomplete",
+          offset: 0,
+          totalChars: 10,
+          hasMore: false
+        })
+      } as unknown as TaskResultService,
+      currentSessionId: () => "authorized-session"
+    });
+
+    await expect(tool!.run({ task_id: "task-1", result_id: "result-1" })).resolves.toMatchObject({
+      ok: true,
+      metadata: {
+        disposition: "diagnostic",
+        diagnosticWarning: "The Attempt failed. This output may be incomplete and was not accepted as the successful Step result."
+      }
+    });
+  });
+
   it("fails closed without distinguishing missing from unauthorized results", async () => {
     const [tool] = createTaskResultTools({
       service: {
@@ -93,6 +116,7 @@ function result(): TaskResult {
     profileId: "alpha",
     taskId: "task-1",
     kind: "text",
+    disposition: "accepted",
     status: "available",
     handle: "task-result:opaque",
     byteLength: 30,

@@ -5,6 +5,7 @@ import {
   renderOperatorConsoleTextLines,
   renderTaskCardSurface,
   renderTaskInspectionSurface,
+  taskInspectionContentLines,
   resolveOperatorConsoleInputSurface,
   routeTaskSurfaceKey,
   type TaskCardState,
@@ -53,6 +54,34 @@ describe("durable Task surfaces", () => {
     expect(text).toContain("result://safe-1");
     expect(text).not.toContain("raw tool input");
     expect(text).not.toContain("worker-session-secret");
+  });
+
+  it("separates recovered output from accepted Results and explains its failed status", () => {
+    const lines = taskInspectionContentLines(makeCard({
+      results: [
+        {
+          handle: "task-result:accepted",
+          kind: "text",
+          disposition: "accepted",
+          status: "available",
+          byteLength: 12,
+          primary: true
+        },
+        {
+          handle: "task-result:diagnostic",
+          kind: "text",
+          disposition: "diagnostic",
+          status: "available",
+          byteLength: 18,
+          primary: false
+        }
+      ]
+    }), 100, "en").join("\n");
+
+    expect(lines).toContain("Recovered output");
+    expect(lines).toContain("task-result:diagnostic");
+    expect(lines).toContain("may be incomplete and was not accepted as the successful Step result");
+    expect(lines.indexOf("task-result:accepted")).toBeLessThan(lines.indexOf("Recovered output"));
   });
 
   it("keeps retained Task card cost honest for partial and unavailable accounting", () => {
@@ -217,6 +246,7 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
     results: [{
       handle: "result://safe-1",
       kind: "artifact",
+      disposition: "accepted",
       status: "available",
       byteLength: 2_048,
       primary: true,

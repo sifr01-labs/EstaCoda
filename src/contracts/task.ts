@@ -350,6 +350,7 @@ export type TaskAttempt = {
 
 export type TaskResultKind = "text" | "json" | "artifact" | "summary";
 export type TaskResultStatus = "available" | "pruned";
+export type TaskResultDisposition = "accepted" | "diagnostic";
 
 export type TaskResult = {
   id: TaskResultId;
@@ -358,6 +359,8 @@ export type TaskResult = {
   stepId?: TaskStepId;
   attemptId?: TaskAttemptId;
   kind: TaskResultKind;
+  /** Accepted Results may satisfy dependencies; diagnostic Results are inspection-only output from failed Attempts. */
+  disposition: TaskResultDisposition;
   status: TaskResultStatus;
   /** Opaque model- and UI-safe handle. Never an internal filesystem path. */
   handle: string;

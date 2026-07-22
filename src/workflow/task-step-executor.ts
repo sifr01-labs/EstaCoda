@@ -33,6 +33,8 @@ export type TaskExecutorSettlement =
   | {
       outcome: "failed";
       failure: TaskFailure;
+      /** Safe, inspection-only output. It never satisfies dependencies or changes the failed outcome. */
+      diagnosticResults?: readonly TaskExecutorResultContent[];
       usage?: TaskUsageTotals;
       usageEntries?: readonly ProviderUsageEntry[];
       workerSessionId?: string;

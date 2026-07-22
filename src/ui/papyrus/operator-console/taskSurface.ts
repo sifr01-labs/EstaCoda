@@ -43,6 +43,8 @@ type TaskCopy = {
   remaining: string;
   limit: string;
   results: string;
+  recoveredOutput: string;
+  recoveredOutputWarning: string;
   primaryResult: string;
   waitingReason: string;
   failureReason: string;
@@ -78,6 +80,8 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     remaining: "Remaining",
     limit: "Limit",
     results: "Results and artifacts",
+    recoveredOutput: "Recovered output",
+    recoveredOutputWarning: "The Attempt failed. This output may be incomplete and was not accepted as the successful Step result.",
     primaryResult: "primary",
     waitingReason: "Waiting reason",
     failureReason: "Failure reason",
@@ -111,6 +115,8 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     remaining: "المتبقي",
     limit: "الحد",
     results: "النتائج والملفات",
+    recoveredOutput: "المخرجات المستردة",
+    recoveredOutputWarning: "فشلت المحاولة. قد تكون هذه المخرجات غير مكتملة ولم تُقبل كنتيجة ناجحة للخطوة.",
     primaryResult: "النتيجة الرئيسية",
     waitingReason: "سبب الانتظار",
     failureReason: "سبب الفشل",
@@ -231,9 +237,17 @@ export function taskInspectionContentLines(
       `${copy.limit}: ${formatUsdAmount(card.spending.maxEstimatedCostUsd, locale)}`
     ]);
   }
-  addSection(lines, copy.results, card.results.length === 0
+  const acceptedResults = card.results.filter((result) => result.disposition === "accepted");
+  const diagnosticResults = card.results.filter((result) => result.disposition === "diagnostic");
+  addSection(lines, copy.results, acceptedResults.length === 0
     ? [copy.none]
-    : card.results.map((result) => `${result.primary ? `${copy.primaryResult} · ` : ""}${isolate(result.handle)} · ${result.kind} · ${formatBytes(result.byteLength)}${result.summary === undefined ? "" : ` · ${result.summary}`}`));
+    : acceptedResults.map((result) => `${result.primary ? `${copy.primaryResult} · ` : ""}${isolate(result.handle)} · ${result.kind} · ${formatBytes(result.byteLength)}${result.summary === undefined ? "" : ` · ${result.summary}`}`));
+  if (diagnosticResults.length > 0) {
+    addSection(lines, copy.recoveredOutput, [
+      copy.recoveredOutputWarning,
+      ...diagnosticResults.map((result) => `${isolate(result.handle)} · ${result.kind} · ${formatBytes(result.byteLength)}${result.summary === undefined ? "" : ` · ${result.summary}`}`)
+    ]);
+  }
   addSection(lines, copy.execution, [
     isolateIfArabic(formatExecution(card), locale),
     `${copy.executionPreference}: ${isolate(card.executionPreference)}`,

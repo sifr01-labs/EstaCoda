@@ -211,14 +211,26 @@ export async function executeTaskCommand(context: TaskCommandContext): Promise<{
         if (results.length === 0) return ok(copy(locale,
           `Task ${taskId} has no available results.`,
           `لا توجد نتائج متاحة للمهمة ${taskId}.`));
-        return ok(results.map((result) => [
+        const diagnosticResults = results.filter((result) => result.disposition === "diagnostic");
+        const rows = results.map((result) => [
           technical(locale, result.id),
           technical(locale, result.status),
+          technical(locale, result.disposition),
           technical(locale, result.kind),
           `${result.byteLength} bytes`,
           technical(locale, result.handle),
           result.summary === undefined ? undefined : oneLine(result.summary)
-        ].filter((field): field is string => field !== undefined).join("\t")).join("\n"));
+        ].filter((field): field is string => field !== undefined).join("\t"));
+        return ok([
+          ...rows,
+          ...(diagnosticResults.length === 0 ? [] : [
+            "",
+            copy(locale, "Recovered output", "المخرجات المستردة"),
+            copy(locale,
+              "The Attempt failed. This output may be incomplete and was not accepted as the successful Step result.",
+              "فشلت المحاولة. قد تكون هذه المخرجات غير مكتملة ولم تُقبل كنتيجة ناجحة للخطوة.")
+          ])
+        ].join("\n"));
       }
       default:
         return fail(`${copy(locale, "Unknown Task command", "أمر مهمة غير معروف")}: ${subcommand}\n${taskHelp(locale, context.authorizedSessionId !== undefined)}`);
@@ -253,6 +265,8 @@ function renderTask(
   const waiting = task.progress.waiting_for_input + task.progress.waiting_for_approval;
   const continuation = effectiveBackgroundContinuation(task, backgroundHost);
   const taskCost = taskUsageCostSummary(task.usage);
+  const acceptedResults = task.results.filter((result) => result.disposition === "accepted");
+  const diagnosticResults = task.results.filter((result) => result.disposition === "diagnostic");
   const lines = [
     `${copy(locale, "Task", "المهمة")} ${technical(locale, task.taskId)} · ${oneLine(task.objective)}`,
     "",
@@ -283,7 +297,15 @@ function renderTask(
         `  ${copy(locale, "Attempt", "المحاولة")} #${attempt.attemptNumber} · ${technical(locale, attempt.status)} · ${formatTaskUsageCost(attempt.usage, locale)}`
       )
     ]),
-    `${copy(locale, "Results", "النتائج")}: ${task.results.length}`,
+    `${copy(locale, "Results", "النتائج")}: ${acceptedResults.length}`,
+    diagnosticResults.length === 0
+      ? undefined
+      : `${copy(locale, "Recovered output", "المخرجات المستردة")}: ${diagnosticResults.length}`,
+    diagnosticResults.length === 0
+      ? undefined
+      : copy(locale,
+          "The Attempt failed. This output may be incomplete and was not accepted as the successful Step result.",
+          "فشلت المحاولة. قد تكون هذه المخرجات غير مكتملة ولم تُقبل كنتيجة ناجحة للخطوة."),
     task.results.find((result) => result.primary) === undefined
       ? undefined
       : `${copy(locale, "Primary result", "النتيجة الرئيسية")}: ${technical(locale, task.results.find((result) => result.primary)!.handle)}`,

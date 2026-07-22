@@ -9,7 +9,7 @@ export function taskPrimaryResult(store: TaskStore, task: Task): TaskResult | un
   const synthesisStepId = taskPrimaryResultStepId(store, task);
   if (synthesisStepId === undefined) return undefined;
   return store.listResults(task.id)
-    .find((result) => result.status === "available" && result.stepId === synthesisStepId);
+    .find((result) => result.status === "available" && result.disposition === "accepted" && result.stepId === synthesisStepId);
 }
 
 export function taskPrimaryResultStepId(store: TaskStore, task: Task): string | undefined {

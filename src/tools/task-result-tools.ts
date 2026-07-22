@@ -66,6 +66,10 @@ export function createTaskResultTools(options: {
             resultId: page.result.id,
             resultHandle: page.result.handle,
             kind: page.result.kind,
+            disposition: page.result.disposition,
+            diagnosticWarning: page.result.disposition === "diagnostic"
+              ? "The Attempt failed. This output may be incomplete and was not accepted as the successful Step result."
+              : undefined,
             mimeType: page.result.mimeType,
             contentHash: page.result.contentHash,
             byteLength: page.result.byteLength,

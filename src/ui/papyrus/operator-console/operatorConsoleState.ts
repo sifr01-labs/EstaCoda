@@ -184,6 +184,7 @@ export type TaskCardState = {
   readonly results: readonly {
     readonly handle: string;
     readonly kind: string;
+    readonly disposition: "accepted" | "diagnostic";
     readonly status: string;
     readonly byteLength: number;
     readonly primary: boolean;

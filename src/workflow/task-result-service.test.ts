@@ -142,6 +142,40 @@ describe("TaskResultService", () => {
     })).rejects.toThrow(TaskResultAccessError);
   });
 
+  it("keeps diagnostic output inspection-only while preserving normal session authorization", async () => {
+    const result = service.record({
+      taskId: "task-alpha",
+      stepId: "step-alpha",
+      kind: "summary",
+      disposition: "diagnostic",
+      content: "recovered"
+    });
+
+    expect(result.disposition).toBe("diagnostic");
+    const accepted = service.record({
+      taskId: "task-alpha",
+      stepId: "step-alpha",
+      kind: "text",
+      content: "0123456789"
+    });
+    expect(accepted.disposition).toBe("accepted");
+    expect(store.listResults("task-alpha").map((candidate) => candidate.disposition))
+      .toEqual(["diagnostic", "accepted"]);
+    await expect(service.readPage({
+      taskId: "task-alpha",
+      resultId: result.id,
+      sessionId: "observer-alpha"
+    })).resolves.toMatchObject({
+      content: "recovered",
+      result: { disposition: "diagnostic" }
+    });
+    await expect(service.readPage({
+      taskId: "task-alpha",
+      resultId: result.id,
+      sessionId: "unlinked-alpha"
+    })).rejects.toThrow(TaskResultAccessError);
+  });
+
   it("preserves access only through verified transcript-compaction ancestry", async () => {
     const result = service.record({ taskId: "task-alpha", kind: "summary", content: "survives compaction" });
     await sessionDb.endSession("creator-alpha", "compression");

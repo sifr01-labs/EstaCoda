@@ -33,6 +33,8 @@ export function createTaskTools(options: {
       try {
         const status = options.service!.status(input.task_id, options.currentSessionId());
         const cost = taskUsageCostSummary(status.usage);
+        const acceptedResults = status.results.filter((result) => result.disposition === "accepted");
+        const diagnosticResults = status.results.filter((result) => result.disposition === "diagnostic");
         return {
           ok: true,
           content: [
@@ -46,7 +48,11 @@ export function createTaskTools(options: {
             `Progress: ${status.progress.completed}/${status.progress.total} Steps completed`,
             `Running: ${status.progress.running}`,
             `Waiting: ${status.progress.waiting_for_input + status.progress.waiting_for_approval}`,
-            `Results: ${status.results.length}`,
+            `Results: ${acceptedResults.length}`,
+            ...(diagnosticResults.length === 0 ? [] : [
+              `Recovered output: ${diagnosticResults.length}`,
+              "The Attempt failed. This output may be incomplete and was not accepted as the successful Step result."
+            ]),
             `Usage: ${status.usage.totalTokens} tokens${status.usage.usageComplete ? "" : " (incomplete)"}`,
             `Estimated cost: ${formatUsageCost(cost)}`,
             formatUsageCostNotice(cost)

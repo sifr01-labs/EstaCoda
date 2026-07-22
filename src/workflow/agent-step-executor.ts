@@ -303,15 +303,35 @@ export class AgentStepExecutor implements TaskStepExecutor {
       }
       if (response.providerExecution?.ok === false) {
         const providerFailure = classifyProviderFailure(response.providerExecution.attempts.at(-1)?.errorClass);
-        return { outcome: "failed", failure: providerFailure, ...metering, ...common };
+        return {
+          outcome: "failed",
+          failure: providerFailure,
+          ...safeDiagnosticOutput(response.text, response.toolExecutions),
+          ...metering,
+          ...common
+        };
       }
-      if (response.toolExecutions.some((execution) => execution.result?.ok === false)) {
-        return { outcome: "failed", failure: taskFailure("tool-error", true), ...metering, ...common };
+      if (response.toolExecutions.some((execution, index, executions) =>
+        execution.result?.ok === false && !isRecoveredRead(execution, index, executions)
+      )) {
+        return {
+          outcome: "failed",
+          failure: taskFailure("tool-error", true),
+          ...safeDiagnosticOutput(response.text, response.toolExecutions),
+          ...metering,
+          ...common
+        };
       }
 
       const captured = await captureResults(response.text, response.artifacts, input, this.#resolveArtifactContent);
       if (captured.failure !== undefined) {
-        return { outcome: "failed", failure: captured.failure, ...metering, ...common };
+        return {
+          outcome: "failed",
+          failure: captured.failure,
+          ...safeDiagnosticOutput(response.text, response.toolExecutions),
+          ...metering,
+          ...common
+        };
       }
       endReason = "task-step-completed";
       return { outcome: "succeeded", results: captured.results, ...metering, ...common };
@@ -374,7 +394,8 @@ function filterTaskStepTools(tools: readonly ToolDefinition[], task: Task, step:
 function dependencyContext(store: TaskStore, task: Task, step: TaskStep): string {
   const dependencyIds = new Set(step.dependsOn);
   const references = store.listResults(task.id)
-    .filter((result) => result.status === "available" && result.stepId !== undefined && dependencyIds.has(result.stepId))
+    .filter((result) => result.status === "available" && result.disposition === "accepted" &&
+      result.stepId !== undefined && dependencyIds.has(result.stepId))
     .slice(0, MAX_DEPENDENCY_RESULT_REFERENCES)
     .map((result) => ({
       stepId: result.stepId,
@@ -474,6 +495,52 @@ function hasStructuredBlock(
     event.kind === "tool-gated" && event.decision !== "allow" ||
     event.kind === "security-assessed" && event.assessment.decision !== "allow"
   );
+}
+
+function safeDiagnosticOutput(
+  text: string,
+  toolExecutions: Awaited<ReturnType<ChildAgentLoopRuntime["handle"]>>["toolExecutions"]
+): { diagnosticResults?: readonly TaskExecutorResultContent[] } {
+  if (text.trim().length === 0) return {};
+  // Never republish output associated with a mutating or otherwise privileged action.
+  if (toolExecutions.some((execution) =>
+    execution.riskClass !== "read-only-local" && execution.riskClass !== "read-only-network"
+  )) return {};
+  return {
+    diagnosticResults: [{
+      kind: "text",
+      content: text,
+      mimeType: "text/plain; charset=utf-8",
+      summary: "Recovered output from a failed Attempt; incomplete and not accepted as the Step result."
+    }]
+  };
+}
+
+function isRecoveredRead(
+  failedExecution: Awaited<ReturnType<ChildAgentLoopRuntime["handle"]>>["toolExecutions"][number],
+  failedIndex: number,
+  executions: Awaited<ReturnType<ChildAgentLoopRuntime["handle"]>>["toolExecutions"]
+): boolean {
+  if (failedExecution.riskClass !== "read-only-local" && failedExecution.riskClass !== "read-only-network") return false;
+  const failedInput = stableToolInput(failedExecution.input);
+  return executions.slice(failedIndex + 1).some((candidate) =>
+    candidate.tool.name === failedExecution.tool.name &&
+    candidate.riskClass === failedExecution.riskClass &&
+    candidate.decision === "allow" &&
+    candidate.result?.ok === true &&
+    stableToolInput(candidate.input) === failedInput
+  );
+}
+
+function stableToolInput(value: unknown): string {
+  if (value === undefined) return "undefined";
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? String(value);
+  if (Array.isArray(value)) return `[${value.map(stableToolInput).join(",")}]`;
+  return `{${Object.entries(value as Record<string, unknown>)
+    .filter(([, entry]) => entry !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, entry]) => `${JSON.stringify(key)}:${stableToolInput(entry)}`)
+    .join(",")}}`;
 }
 
 function classifyProviderFailure(errorClass: string | undefined): TaskFailure {

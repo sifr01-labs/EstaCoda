@@ -79,7 +79,7 @@ export type TaskStatusProjection = {
   elapsedMs: number;
   usage: TaskUsageTotals;
   spending?: SpendingBudgetSummary;
-  results: readonly (Pick<TaskResult, "id" | "handle" | "kind" | "status" | "byteLength" | "mimeType" | "summary"> & {
+  results: readonly (Pick<TaskResult, "id" | "handle" | "kind" | "disposition" | "status" | "byteLength" | "mimeType" | "summary"> & {
     primary: boolean;
   })[];
   waitReason?: string;
@@ -392,6 +392,7 @@ export class TaskOperatorService {
         id: result.id,
         handle: result.handle,
         kind: result.kind,
+        disposition: result.disposition,
         status: result.status,
         byteLength: result.byteLength,
         primary: result.id === primaryResult?.id,

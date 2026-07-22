@@ -15,7 +15,7 @@ import {
   writeFileSync
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import type { TaskAttemptLease, TaskResult, TaskResultKind } from "../contracts/task.js";
+import type { TaskAttemptLease, TaskResult, TaskResultDisposition, TaskResultKind } from "../contracts/task.js";
 import { TASK_GRAPH_LIMITS } from "../contracts/task.js";
 import type { SessionDB } from "../contracts/session.js";
 import { verifiedCompressionLineage } from "../session/session-lineage.js";
@@ -31,6 +31,7 @@ export type RecordTaskResultInput = {
   stepId?: string;
   attemptId?: string;
   kind: TaskResultKind;
+  disposition?: TaskResultDisposition;
   content: string | Uint8Array;
   mimeType?: string;
   summary?: string;
@@ -226,6 +227,7 @@ export class TaskResultService {
         data: {
           resultId: result.id,
           kind: result.kind,
+          disposition: result.disposition,
           handle: result.handle,
           byteLength: result.byteLength,
           contentHash: result.contentHash
@@ -335,7 +337,8 @@ export class TaskResultService {
     if (attempt !== null && step !== null && attempt.stepId !== step.id) {
       throw new TaskResultContentError("attempt-step-mismatch", "Result Attempt does not belong to its Step.");
     }
-    if (step !== null) assertResultMatchesStepPolicy(step.resultPolicy.kind, input.kind);
+    const disposition = input.disposition ?? "accepted";
+    if (step !== null && disposition === "accepted") assertResultMatchesStepPolicy(step.resultPolicy.kind, input.kind);
     const id = nonEmpty(input.id ?? this.#id(), "result ID");
     const handle = `task-result:${nonEmpty(this.#handleId(), "result handle ID")}`;
     const now = this.#now().toISOString();
@@ -346,6 +349,7 @@ export class TaskResultService {
       ...(effectiveStepId === undefined ? {} : { stepId: nonEmpty(effectiveStepId, "Step ID") }),
       ...(attemptId === undefined ? {} : { attemptId }),
       kind: input.kind,
+      disposition,
       status: "available",
       handle,
       byteLength: bytes.byteLength,
@@ -366,7 +370,7 @@ export class TaskResultService {
   }
 
   #validatePreparedEntries(store: TaskStore, entries: readonly PreparedTaskResultEntry[]): void {
-    const addedBytesByStep = new Map<string, number>();
+    const addedBytesByStep = new Map<string, Map<TaskResultDisposition, number>>();
     for (const entry of entries) {
       const result = entry.result;
       const task = store.getTask(result.taskId);
@@ -389,20 +393,25 @@ export class TaskResultService {
         throw new TaskResultContentError("attempt-step-mismatch", "Result Attempt does not belong to its Step.");
       }
       if (step === null) continue;
-      assertResultMatchesStepPolicy(step.resultPolicy.kind, result.kind);
-      addedBytesByStep.set(step.id, (addedBytesByStep.get(step.id) ?? 0) + result.byteLength);
+      if (result.disposition === "accepted") assertResultMatchesStepPolicy(step.resultPolicy.kind, result.kind);
+      const byDisposition = addedBytesByStep.get(step.id) ?? new Map<TaskResultDisposition, number>();
+      byDisposition.set(result.disposition, (byDisposition.get(result.disposition) ?? 0) + result.byteLength);
+      addedBytesByStep.set(step.id, byDisposition);
     }
-    for (const [stepId, addedBytes] of addedBytesByStep) {
+    for (const [stepId, byDisposition] of addedBytesByStep) {
       const step = store.getStep(stepId)!;
-      const existingBytes = store.listResults(step.taskId)
-        .filter((candidate) => candidate.status === "available" && candidate.stepId === stepId)
-        .reduce((total, candidate) => total + candidate.byteLength, 0);
-      const resultLimit = Math.min(TASK_GRAPH_LIMITS.maxResultBytesPerStep, step.resultPolicy.maxBytes);
-      if (existingBytes + addedBytes > resultLimit) {
-        throw new TaskResultContentError(
-          "step-result-budget-exceeded",
-          `Task Step result content exceeds its ${resultLimit}-byte limit.`
-        );
+      for (const [disposition, addedBytes] of byDisposition) {
+        const existingBytes = store.listResults(step.taskId)
+          .filter((candidate) => candidate.status === "available" && candidate.stepId === stepId &&
+            candidate.disposition === disposition)
+          .reduce((total, candidate) => total + candidate.byteLength, 0);
+        const resultLimit = Math.min(TASK_GRAPH_LIMITS.maxResultBytesPerStep, step.resultPolicy.maxBytes);
+        if (existingBytes + addedBytes > resultLimit) {
+          throw new TaskResultContentError(
+            "step-result-budget-exceeded",
+            `Task Step ${disposition} result content exceeds its ${resultLimit}-byte limit.`
+          );
+        }
       }
     }
   }

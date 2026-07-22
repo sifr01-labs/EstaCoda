@@ -27,6 +27,7 @@ import {
   migrateTaskSchedulerSchemaV11,
   migrateTaskHostOwnershipSchemaV19,
   migrateTaskExecutionPreferenceSchemaV20,
+  migrateTaskDiagnosticResultsSchemaV24,
   migrateTaskVerticalSliceSchemaV15,
   TASK_SCHEMA_VERSION
 } from "./task-schema.js";
@@ -534,6 +535,38 @@ describe("SQLiteTaskStore", () => {
     expect(() => transactionStore!.createTask({ ...graph.task, activePlanRevisionId: undefined }))
       .toThrow("transaction is no longer active");
     expect(store.getTask(graph.task.id)).toBeNull();
+  });
+});
+
+describe("Task diagnostic Results schema v24 migration", () => {
+  it("classifies existing Results as accepted and installs the disposition index idempotently", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-task-result-v24-"));
+    const database = openDefaultSQLiteDatabase({ path: join(tempDir, "result-v24.sqlite") });
+    try {
+      database.exec(`
+        create table task_results (
+          id text primary key,
+          profile_id text not null,
+          task_id text not null,
+          created_at text not null
+        );
+        insert into task_results(id, profile_id, task_id, created_at)
+          values ('legacy-result', 'alpha', 'task-alpha', '${NOW}');
+      `);
+
+      migrateTaskDiagnosticResultsSchemaV24(database);
+      migrateTaskDiagnosticResultsSchemaV24(database);
+
+      expect(database.query<{ disposition: string }>(
+        "select disposition from task_results where id = 'legacy-result'"
+      ).get()).toEqual({ disposition: "accepted" });
+      expect(database.query<{ name: string }>(
+        "select name from sqlite_master where type = 'index' and name = 'idx_task_results_disposition'"
+      ).get()).toEqual({ name: "idx_task_results_disposition" });
+    } finally {
+      database.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -1291,6 +1324,7 @@ function makeResult(): TaskResult {
     stepId: "step-research-alpha",
     attemptId: "attempt-1",
     kind: "summary",
+    disposition: "accepted",
     status: "available",
     handle: "task-result:result-1",
     byteLength: 128,

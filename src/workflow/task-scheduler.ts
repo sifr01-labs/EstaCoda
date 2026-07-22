@@ -1109,7 +1109,15 @@ export class TaskScheduler {
       } catch {
         normalizedFailure = failure("invalid-failure", "Executor returned an invalid failure record.", false, false);
       }
-      this.#settleFailure(taskId, attemptId, lease, normalizedFailure, usage, settlement.usageEntries);
+      this.#settleFailure(
+        taskId,
+        attemptId,
+        lease,
+        normalizedFailure,
+        usage,
+        settlement.usageEntries,
+        mayPublishDiagnosticResults(normalizedFailure) ? settlement.diagnosticResults : undefined
+      );
       return "failed";
     }
     const step = this.#store.getStep(stepId);
@@ -1412,41 +1420,88 @@ export class TaskScheduler {
     lease: TaskAttemptLease,
     failureRecord: TaskFailure,
     usage: TaskUsageTotals,
-    usageEntries?: readonly ProviderUsageEntry[]
+    usageEntries?: readonly ProviderUsageEntry[],
+    diagnosticResults?: Extract<TaskExecutorSettlement, { outcome: "failed" }>["diagnosticResults"]
   ): void {
     const now = this.#now().toISOString();
-    let abortTask = false;
-    this.#store.atomicWrite((store) => {
-      const context = this.#assertCurrentLease(store, taskId, attemptId, lease, false);
-      const finalUsage = this.#recordUsageEntries(store, context.attempt, usageEntries, usage);
-      const failedAttempt: TaskAttempt = {
-        ...context.attempt,
-        status: "failed",
-        failure: failureRecord,
-        usage: finalUsage,
-        updatedAt: now,
-        completedAt: now
-      };
-      store.updateAttempt(failedAttempt);
-      if (!store.releaseAttemptLease(fenceInput(lease))) throw new TaskSchedulerLeaseLostError();
-      store.appendEvent(this.#event(context.task, "usage-recorded", now, {
-        attemptId,
-        stepId: failedAttempt.stepId,
-        planRevisionId: failedAttempt.planRevisionId,
-        data: usageEventData(finalUsage)
-      }));
-      store.appendEvent(this.#event(context.task, "attempt-failed", now, {
-        attemptId,
-        stepId: failedAttempt.stepId,
-        planRevisionId: failedAttempt.planRevisionId,
-        data: {
-          failureClass: failureRecord.class,
-          retryable: failureRecord.retryable,
-          uncertainSideEffects: failureRecord.uncertainSideEffects
+    const attempt = this.#store.getAttempt(attemptId);
+    if (attempt === null || attempt.taskId !== taskId) throw new TaskSchedulerLeaseLostError();
+    let preparedDiagnostics: PreparedTaskResultBatch | undefined;
+    if (diagnosticResults !== undefined && diagnosticResults.length > 0) {
+      try {
+        preparedDiagnostics = this.#resultService.prepare(
+          diagnosticResults.slice(0, MAX_RESULT_RECORDS_PER_SETTLEMENT).map((result) => ({
+            taskId,
+            stepId: attempt.stepId,
+            attemptId,
+            kind: result.kind,
+            disposition: "diagnostic",
+            content: result.content,
+            mimeType: result.mimeType,
+            summary: result.summary,
+            expiresAt: result.expiresAt,
+            expectedLease: { ownerId: lease.ownerId, fencingToken: lease.fencingToken }
+          }))
+        );
+      } catch (error) {
+        if (error instanceof TaskResultContentError && error.code === "result-fence-lost") {
+          throw new TaskSchedulerLeaseLostError();
         }
-      }));
-      abortTask = this.#applyFailurePolicy(store, context.task, failedAttempt, now);
-    });
+        // Diagnostic output is best-effort and must never mask or change the original failed settlement.
+      }
+    }
+    let abortTask = false;
+    const settle = (prepared: PreparedTaskResultBatch | undefined) => this.#store.atomicWrite((store) => {
+        const context = this.#assertCurrentLease(store, taskId, attemptId, lease, false);
+        let diagnosticResultCount = 0;
+        if (prepared !== undefined) {
+          try {
+            diagnosticResultCount = this.#resultService.publishPrepared(prepared, store).length;
+          } catch (error) {
+            if (error instanceof TaskResultContentError && error.code === "result-fence-lost") {
+              throw new TaskSchedulerLeaseLostError();
+            }
+            throw new TaskSchedulerResultPublicationError({ cause: error });
+          }
+        }
+        const finalUsage = this.#recordUsageEntries(store, context.attempt, usageEntries, usage);
+        const failedAttempt: TaskAttempt = {
+          ...context.attempt,
+          status: "failed",
+          failure: failureRecord,
+          usage: finalUsage,
+          updatedAt: now,
+          completedAt: now
+        };
+        store.updateAttempt(failedAttempt);
+        if (!store.releaseAttemptLease(fenceInput(lease))) throw new TaskSchedulerLeaseLostError();
+        store.appendEvent(this.#event(context.task, "usage-recorded", now, {
+          attemptId,
+          stepId: failedAttempt.stepId,
+          planRevisionId: failedAttempt.planRevisionId,
+          data: usageEventData(finalUsage)
+        }));
+        store.appendEvent(this.#event(context.task, "attempt-failed", now, {
+          attemptId,
+          stepId: failedAttempt.stepId,
+          planRevisionId: failedAttempt.planRevisionId,
+          data: {
+            failureClass: failureRecord.class,
+            retryable: failureRecord.retryable,
+            uncertainSideEffects: failureRecord.uncertainSideEffects,
+            diagnosticResultCount
+          }
+        }));
+        abortTask = this.#applyFailurePolicy(store, context.task, failedAttempt, now);
+      });
+    try {
+      settle(preparedDiagnostics);
+      if (preparedDiagnostics !== undefined) this.#resultService.finalizePrepared(preparedDiagnostics);
+    } catch (error) {
+      if (preparedDiagnostics !== undefined) this.#resultService.discardPrepared(preparedDiagnostics);
+      if (!(error instanceof TaskSchedulerResultPublicationError)) throw error;
+      settle(undefined);
+    }
     if (abortTask) this.#abortTaskExecutions(taskId, attemptId);
   }
 
@@ -1903,6 +1958,13 @@ function normalizeFailure(value: TaskFailure): TaskFailure {
     retryable: value.retryable === true,
     uncertainSideEffects: value.uncertainSideEffects === true
   };
+}
+
+function mayPublishDiagnosticResults(failureRecord: TaskFailure): boolean {
+  if (failureRecord.uncertainSideEffects) return false;
+  return failureRecord.class !== "security-deny" &&
+    failureRecord.class !== "approval-required" &&
+    failureRecord.class !== "approval-request-missing";
 }
 
 function failure(

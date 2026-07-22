@@ -570,6 +570,63 @@ describe("TaskScheduler", () => {
     expect(store.listResults("task-alpha")).toHaveLength(0);
   });
 
+  it("preserves safe failed output as diagnostic without accepting the Step", async () => {
+    const base = makeStep("diagnostic-policy", 0);
+    store.createTaskGraph(makeGraph([makeStep("diagnostic", 0, {
+      retryPolicy: { ...base.retryPolicy, maxAttempts: 1 }
+    })]));
+    const scheduler = makeScheduler(new FakeTaskStepExecutor(() => ({
+      outcome: "failed",
+      failure: { class: "provider-error", message: "Provider stopped early.", retryable: true, uncertainSideEffects: false },
+      diagnosticResults: [{ kind: "text", content: "Useful but incomplete output." }]
+    })));
+
+    expect(await scheduler.runOnce()).toMatchObject({ dispatched: 1, completed: 0, failed: 1 });
+    expect(store.getTask("task-alpha")?.status).toBe("failed");
+    expect(store.getStep("step-diagnostic")?.status).toBe("failed");
+    expect(store.listAttempts("task-alpha")[0]).toMatchObject({
+      status: "failed",
+      failure: { class: "provider-error" }
+    });
+    const [diagnostic] = store.listResults("task-alpha");
+    expect(diagnostic).toMatchObject({
+      attemptId: store.listAttempts("task-alpha")[0]!.id,
+      disposition: "diagnostic",
+      status: "available",
+      kind: "text"
+    });
+    await expect(resultService.readPage({
+      taskId: "task-alpha",
+      resultId: diagnostic!.id,
+      sessionId: "creator-alpha"
+    })).resolves.toMatchObject({
+      content: "Useful but incomplete output.",
+      result: { disposition: "diagnostic" }
+    });
+    expect(store.listEvents("task-alpha", { kinds: ["attempt-failed"] })[0]?.data)
+      .toMatchObject({ diagnosticResultCount: 1 });
+  });
+
+  it("refuses diagnostic publication for security-denied settlements", async () => {
+    const base = makeStep("security-policy", 0);
+    store.createTaskGraph(makeGraph([makeStep("security", 0, {
+      retryPolicy: { ...base.retryPolicy, maxAttempts: 1 }
+    })]));
+    const scheduler = makeScheduler(new FakeTaskStepExecutor(() => ({
+      outcome: "failed",
+      failure: { class: "security-deny", message: "Blocked.", retryable: false, uncertainSideEffects: false },
+      diagnosticResults: [{ kind: "text", content: "must never be published" }]
+    })));
+
+    await scheduler.runOnce();
+
+    expect(store.listAttempts("task-alpha")[0]).toMatchObject({
+      status: "failed",
+      failure: { class: "security-deny" }
+    });
+    expect(store.listResults("task-alpha")).toEqual([]);
+  });
+
   it("retries a failed atomic publication without exposing stale or duplicate Results", async () => {
     store.createTaskGraph(makeGraph([
       makeStep("publish", 0),

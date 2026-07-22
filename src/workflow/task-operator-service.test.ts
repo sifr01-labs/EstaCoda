@@ -325,6 +325,7 @@ describe("TaskOperatorService", () => {
         taskId: task.id,
         stepId: step.id,
         kind: "summary",
+        disposition: "accepted",
         status: "available",
         handle: "task-result://safe",
         byteLength: 42,

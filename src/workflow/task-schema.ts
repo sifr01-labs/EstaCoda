@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 
-export const TASK_SCHEMA_VERSION = 23;
+export const TASK_SCHEMA_VERSION = 24;
 
 const OBSOLETE_EXECUTION_TABLES = [
   "workflow_event_summaries",
@@ -239,6 +239,7 @@ export function migrateTaskSchemaV10(db: SQLiteDatabase): void {
       step_id text,
       attempt_id text,
       kind text not null check(kind in ('text', 'json', 'artifact', 'summary')),
+      disposition text not null default 'accepted' check(disposition in ('accepted', 'diagnostic')),
       status text not null check(status in ('available', 'pruned')),
       handle text not null check(length(handle) > 0),
       byte_length integer not null check(byte_length >= 0),
@@ -954,6 +955,20 @@ export function migrateTaskExecutionPreferenceSchemaV20(db: SQLiteDatabase): voi
     begin
       select raise(abort, 'Task execution preference is immutable');
     end;
+  `);
+}
+
+/** Distinguishes accepted dependency inputs from inspection-only output preserved after failed Attempts. */
+export function migrateTaskDiagnosticResultsSchemaV24(db: SQLiteDatabase): void {
+  const columns = db.query<{ name: string }>("pragma table_info(task_results)").all();
+  if (!columns.some((column) => column.name === "disposition")) {
+    db.exec(
+      "alter table task_results add column disposition text not null default 'accepted' check(disposition in ('accepted', 'diagnostic'))"
+    );
+  }
+  db.exec(`
+    create index if not exists idx_task_results_disposition
+      on task_results(profile_id, task_id, disposition, created_at);
   `);
 }
 
