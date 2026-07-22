@@ -1,6 +1,7 @@
 export * from "./activeWorkCopy.js";
 export * from "./activeWorkRuntimeMapper.js";
 export * from "./activeWorkSurface.js";
+export * from "./activityTraceSurface.js";
 export * from "./assistantMessageFrame.js";
 export * from "./approvalRuntimeMapper.js";
 export * from "./approvalSurface.js";
@@ -26,6 +27,7 @@ export * from "./startupDashboardSurface.js";
 export * from "./startupRuntimeMapper.js";
 export * from "./statusRailSurface.js";
 export * from "./taskSurface.js";
+export * from "./taskOverviewSurface.js";
 export * from "./streamingSurface.js";
 export * from "./transcriptSurface.js";
 export * from "./turnActivitySurface.js";

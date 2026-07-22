@@ -228,7 +228,35 @@ describe("raw prompt controller", () => {
     read.input.send("ok\r");
 
     expect(await read.pending).toEqual({ type: "submit", text: "ok" });
-    expect(read.output.writes.join("")).toContain("Plan revision");
+    expect(read.output.writes.join("")).toContain("Activity trace");
+  });
+
+  it("preserves historical Task trace selection while live Task projections refresh", async () => {
+    let card = promptTaskCardWithTrace(["First event", "Second event"]);
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        getTasks: () => [card],
+      },
+    });
+
+    read.input.send("\t");
+    read.input.send("\r");
+    read.input.send("\u001b[D");
+    await flushKeypressTimers();
+    card = promptTaskCardWithTrace(["First event", "Second event", "New live event"]);
+    const refreshStart = read.output.writes.length;
+    read.input.send("\u001b[A");
+    await flushKeypressTimers();
+    const refreshedOutput = read.output.writes.slice(refreshStart).join("");
+
+    expect(refreshedOutput).toContain("First event");
+    expect(refreshedOutput).toContain("Return to live");
+    expect(refreshedOutput).not.toContain("New live event");
+    read.input.send("\t");
+    read.input.send("ok\r");
+    await expect(read.pending).resolves.toEqual({ type: "submit", text: "ok" });
   });
 
   it("submits ASCII text", async () => {
@@ -1981,6 +2009,24 @@ function promptTaskCard(): TaskCardState {
     results: [],
     createdAt: "2026-07-20T09:59:59.000Z",
     updatedAt: "2026-07-20T10:00:00.000Z",
+  };
+}
+
+function promptTaskCardWithTrace(labels: readonly string[]): TaskCardState {
+  const card = promptTaskCard();
+  return {
+    ...card,
+    status: "running",
+    trace: {
+      events: labels.map((label, index) => ({
+        eventId: `event-${index}`,
+        kind: "attempt-progressed",
+        label,
+        category: index % 2 === 0 ? "read" : "answer",
+        timestamp: `2026-07-20T10:00:0${index}.000Z`,
+      })),
+      hasEarlierEvents: false,
+    },
   };
 }
 

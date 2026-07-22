@@ -1,6 +1,7 @@
 import type { ParsedKeypress } from "../../input/parseKeypress.js";
-import { padVisibleEnd, truncateVisible, wrapText } from "../../renderers/layout.js";
+import { padVisibleEnd, truncateVisible } from "../../renderers/layout.js";
 import { semanticMotionFrame } from "../../semantic-motion.js";
+import { navigateActivityTrace, type TraceNavigationAction } from "./activityTraceSurface.js";
 import { setFocus } from "./focusModel.js";
 import type {
   OperatorConsoleLocale,
@@ -9,17 +10,17 @@ import type {
   OperatorConsoleState,
   TaskCardActivityState,
   TaskCardState,
-  TaskCardStepState,
   TaskCardSubagentState,
   TaskSurfaceState,
 } from "./operatorConsoleState.js";
-import { formatUsageCost, formatUsageCostNotice, formatUsdAmount } from "../../usage-cost-format.js";
+import { formatUsageCost } from "../../usage-cost-format.js";
 import {
   styleBackgroundRow,
   styleBold,
   styleColor,
   type OperatorConsoleStyle,
 } from "./operatorConsoleStyle.js";
+import { renderTaskOverviewSurface, taskOverviewContentLines } from "./taskOverviewSurface.js";
 
 const SUBAGENT_CARD_HEIGHT = 7;
 const SUBAGENT_ACTIVITY_ROWS = 3;
@@ -40,37 +41,6 @@ type TaskCopy = {
   waitingForActivity: string;
   tokens: string;
   moreSubagents: string;
-  objective: string;
-  status: string;
-  execution: string;
-  executionPreference: string;
-  foregroundOwner: string;
-  backgroundContinuation: string;
-  executionWaitingReason: string;
-  planRevision: string;
-  dependencies: string;
-  childTasks: string;
-  activeAttempt: string;
-  elapsed: string;
-  recentActivity: string;
-  toolCategory: string;
-  usageCost: string;
-  usageIncomplete: string;
-  stepSpending: string;
-  attempts: string;
-  taskSpending: string;
-  spent: string;
-  reserved: string;
-  remaining: string;
-  limit: string;
-  results: string;
-  recoveredOutput: string;
-  recoveredOutputWarning: string;
-  primaryResult: string;
-  waitingReason: string;
-  failureReason: string;
-  none: string;
-  closeHint: string;
 };
 
 const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
@@ -84,37 +54,6 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     waitingForActivity: "Waiting for safe activity",
     tokens: "tokens",
     moreSubagents: "more Subagents",
-    objective: "Objective",
-    status: "Status",
-    execution: "Execution",
-    executionPreference: "Execution preference",
-    foregroundOwner: "Foreground owner",
-    backgroundContinuation: "Background continuation",
-    executionWaitingReason: "Execution waiting reason",
-    planRevision: "Plan revision",
-    dependencies: "Dependencies",
-    childTasks: "Child Tasks",
-    activeAttempt: "Active Attempt",
-    elapsed: "Elapsed",
-    recentActivity: "Recent safe activity",
-    toolCategory: "Current tool category",
-    usageCost: "Usage and cost",
-    usageIncomplete: "usage incomplete",
-    stepSpending: "Worker and Step spending",
-    attempts: "Attempts",
-    taskSpending: "Task spending",
-    spent: "Spent",
-    reserved: "Reserved",
-    remaining: "Remaining",
-    limit: "Limit",
-    results: "Results and artifacts",
-    recoveredOutput: "Recovered output",
-    recoveredOutputWarning: "The Attempt failed. This output may be incomplete and was not accepted as the successful Step result.",
-    primaryResult: "primary",
-    waitingReason: "Waiting reason",
-    failureReason: "Failure reason",
-    none: "none",
-    closeHint: "Esc return · Up/Down scroll · PgUp/PgDn page · Home/End jump",
   },
   ar: {
     tasks: "المهام",
@@ -126,37 +65,6 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     waitingForActivity: "بانتظار نشاط آمن",
     tokens: "رمز",
     moreSubagents: "وكلاء فرعيون إضافيون",
-    objective: "الهدف",
-    status: "الحالة",
-    execution: "التنفيذ",
-    executionPreference: "تفضيل التنفيذ",
-    foregroundOwner: "مالك التنفيذ الأمامي",
-    backgroundContinuation: "الاستمرار في الخلفية",
-    executionWaitingReason: "سبب انتظار التنفيذ",
-    planRevision: "مراجعة الخطة",
-    dependencies: "الاعتماديات",
-    childTasks: "المهام الفرعية",
-    activeAttempt: "المحاولة النشطة",
-    elapsed: "المدة",
-    recentActivity: "النشاط الآمن الأخير",
-    toolCategory: "فئة الأداة الحالية",
-    usageCost: "الاستخدام والتكلفة",
-    usageIncomplete: "الاستخدام غير مكتمل",
-    stepSpending: "إنفاق العمال والخطوات",
-    attempts: "المحاولات",
-    taskSpending: "إنفاق المهمة",
-    spent: "المنفق",
-    reserved: "المحجوز",
-    remaining: "المتبقي",
-    limit: "الحد",
-    results: "النتائج والملفات",
-    recoveredOutput: "المخرجات المستردة",
-    recoveredOutputWarning: "فشلت المحاولة. قد تكون هذه المخرجات غير مكتملة ولم تُقبل كنتيجة ناجحة للخطوة.",
-    primaryResult: "النتيجة الرئيسية",
-    waitingReason: "سبب الانتظار",
-    failureReason: "سبب الفشل",
-    none: "لا يوجد",
-    closeHint: "Esc للعودة · ↑/↓ للتمرير · PgUp/PgDn للصفحة · Home/End للانتقال",
   },
 };
 
@@ -239,23 +147,15 @@ export function getTaskInspectionSurfaceDesiredHeight(terminalHeight: number): n
 
 export function renderTaskInspectionSurface(
   state: TaskSurfaceState,
-  options: { readonly width: number; readonly height: number; readonly locale?: OperatorConsoleLocale; readonly isTty?: boolean }
+  options: {
+    readonly width: number;
+    readonly height: number;
+    readonly locale?: OperatorConsoleLocale;
+    readonly isTty?: boolean;
+    readonly style?: OperatorConsoleStyle;
+  }
 ): readonly string[] {
-  const width = dimension(options.width);
-  const height = dimension(options.height);
-  const card = inspectedTask(state);
-  if (width === 0 || height === 0 || card === undefined) return [];
-  const copy = COPY[options.locale ?? "en"];
-  const header = `${copy.tasks} · ${isolate(card.taskId)} · ${formatStatus(card.status)}`;
-  if (height === 1) return [padVisibleEnd(truncateVisible(header, width, "…"), width)];
-  const footer = copy.closeHint;
-  const contentHeight = Math.max(0, height - 2);
-  const content = taskInspectionContentLines(card, width, options.locale);
-  const maxOffset = Math.max(0, content.length - contentHeight);
-  const offset = Math.min(maxOffset, Math.max(0, state.scrollOffset));
-  const visible = content.slice(offset, offset + contentHeight);
-  const rows = [header, ...visible, ...Array.from({ length: Math.max(0, contentHeight - visible.length) }, () => ""), footer];
-  return rows.slice(0, height).map((row) => padVisibleEnd(truncateVisible(row, width, "…"), width));
+  return renderTaskOverviewSurface(state, options);
 }
 
 export function taskInspectionContentLines(
@@ -263,78 +163,7 @@ export function taskInspectionContentLines(
   width: number,
   locale: OperatorConsoleLocale = "en"
 ): readonly string[] {
-  const copy = COPY[locale];
-  const contentWidth = Math.max(1, dimension(width) - 2);
-  const lines: string[] = [];
-  addSection(lines, copy.objective, wrapText(card.objective, contentWidth));
-  addSection(lines, copy.status, [`${formatStatus(card.status)} · ${progressPercent(card)}%`]);
-  addSection(lines, copy.planRevision, [card.planRevision === undefined
-    ? copy.none
-    : `${card.planRevision.revision} · ${card.planRevision.status}`]);
-  addSection(lines, copy.elapsed, [formatDuration(card.elapsedMs)]);
-  addSection(lines, copy.dependencies, dependencyLines(card, copy.none));
-  addSection(lines, copy.childTasks, card.childTasks.length === 0
-    ? [copy.none]
-    : card.childTasks.map((child) =>
-        `${isolate(child.taskId)} · ${formatStatus(child.status)}` +
-        `${child.parentAttemptId === undefined ? "" : ` · Attempt ${isolate(child.parentAttemptId)}`}`
-      ));
-  addSection(lines, copy.activeAttempt, activeAttemptLines(card, copy.none));
-  addSection(lines, copy.toolCategory, [card.currentToolCategory === undefined ? copy.none : isolate(card.currentToolCategory)]);
-  const taskCost = {
-    estimatedCostUsd: card.usage.estimatedCostUsd,
-    costComplete: card.usage.pricingComplete
-  };
-  const pricingNotice = formatUsageCostNotice(taskCost, { locale });
-  addSection(lines, copy.usageCost, [
-    `${card.usage.providerCalls} calls · ${card.usage.totalTokens} tokens · ${formatUsageCost(taskCost, { locale })}` +
-      `${card.usage.usageComplete ? "" : ` · ${copy.usageIncomplete}`}`,
-    ...(pricingNotice === undefined ? [] : [pricingNotice])
-  ]);
-  addSection(lines, copy.stepSpending, card.steps.length === 0
-    ? [copy.none]
-    : card.steps.map((step) => `${step.title}: ${formatCardUsage(step.usage, locale)}`));
-  addSection(lines, copy.attempts, attemptUsageLines(card, locale, copy.none));
-  if (card.spending !== undefined) {
-    addSection(lines, copy.taskSpending, [
-      `${copy.spent}: ${formatUsdAmount(card.spending.spentCostUsd, locale)}`,
-      `${copy.reserved}: ${formatUsdAmount(card.spending.reservedCostUsd, locale)}`,
-      `${copy.remaining}: ${formatUsdAmount(card.spending.remainingCostUsd, locale)}`,
-      `${copy.limit}: ${formatUsdAmount(card.spending.maxEstimatedCostUsd, locale)}`
-    ]);
-  }
-  const acceptedResults = card.results.filter((result) => result.disposition === "accepted");
-  const diagnosticResults = card.results.filter((result) => result.disposition === "diagnostic");
-  addSection(lines, copy.results, acceptedResults.length === 0
-    ? [copy.none]
-    : acceptedResults.map((result) => `${result.primary ? `${copy.primaryResult} · ` : ""}${isolate(result.handle)} · ${result.kind} · ${formatBytes(result.byteLength)}${result.summary === undefined ? "" : ` · ${result.summary}`}`));
-  if (diagnosticResults.length > 0) {
-    addSection(lines, copy.recoveredOutput, [
-      copy.recoveredOutputWarning,
-      ...diagnosticResults.map((result) => `${isolate(result.handle)} · ${result.kind} · ${formatBytes(result.byteLength)}${result.summary === undefined ? "" : ` · ${result.summary}`}`)
-    ]);
-  }
-  addSection(lines, copy.execution, [
-    isolateIfArabic(formatExecution(card), locale),
-    `${copy.executionPreference}: ${isolate(card.executionPreference)}`,
-    `${copy.foregroundOwner}: ${card.foregroundOwnerActive
-      ? locale === "ar" ? "نشط" : "active"
-      : locale === "ar" ? "غير نشط" : "inactive"}`,
-    `${copy.backgroundContinuation}: ${isolate(card.backgroundContinuation)}`
-  ]);
-  if (card.executionWaitingReason !== undefined) {
-    addSection(lines, copy.executionWaitingReason, wrapText(card.executionWaitingReason, contentWidth));
-  }
-  addSection(lines, copy.recentActivity, card.recentActivity.length === 0
-    ? [copy.none]
-    : card.recentActivity.map((activity) => `${formatTimestamp(activity.timestamp)} · ${activity.label}`));
-  if (card.waitReason !== undefined) addSection(lines, copy.waitingReason, wrapText(card.waitReason, contentWidth));
-  if (card.failure !== undefined) {
-    addSection(lines, copy.failureReason, [
-      `${isolate(card.failure.class)} · retryable=${String(card.failure.retryable)} · uncertain-side-effects=${String(card.failure.uncertainSideEffects)}`,
-    ]);
-  }
-  return lines;
+  return taskOverviewContentLines(card, width, { locale });
 }
 
 export function routeTaskSurfaceKey(
@@ -347,7 +176,11 @@ export function routeTaskSurfaceKey(
     const card = inspectedTask(state.tasks);
     if (card === undefined) return { state: closeInspection(state), handled: true };
     const contentHeight = Math.max(1, dimension(viewportHeight) - 2);
-    const maxOffset = Math.max(0, taskInspectionContentLines(card, state.terminal.width, state.locale).length - contentHeight);
+    const maxOffset = Math.max(0, taskOverviewContentLines(card, state.terminal.width, {
+      locale: state.locale,
+      style: state.style,
+      inspection: state.tasks.inspection,
+    }).length - contentHeight);
     switch (keypress.key) {
       case "escape": return { state: closeInspection(state), handled: true };
       case "tab": return { state: closeInspection(state, true), handled: true };
@@ -355,8 +188,10 @@ export function routeTaskSurfaceKey(
       case "down": return { state: setTaskScroll(state, state.tasks.scrollOffset + 1, maxOffset), handled: true };
       case "pageup": return { state: setTaskScroll(state, state.tasks.scrollOffset - contentHeight, maxOffset), handled: true };
       case "pagedown": return { state: setTaskScroll(state, state.tasks.scrollOffset + contentHeight, maxOffset), handled: true };
-      case "home": return { state: setTaskScroll(state, 0, maxOffset), handled: true };
-      case "end": return { state: setTaskScroll(state, maxOffset, maxOffset), handled: true };
+      case "left": return { state: setTaskTraceSelection(state, card, "left"), handled: true };
+      case "right": return { state: setTaskTraceSelection(state, card, "right"), handled: true };
+      case "home": return { state: setTaskTraceSelection(state, card, "home"), handled: true };
+      case "end": return { state: setTaskTraceSelection(state, card, "end"), handled: true };
       default: return { state, handled: true };
     }
   }
@@ -386,7 +221,18 @@ export function routeTaskSurfaceKey(
       const taskId = selectedTask(state.tasks)?.taskId;
       return taskId === undefined
         ? { state, handled: true }
-        : { state: { ...state, tasks: { ...state.tasks, inspectedTaskId: taskId, scrollOffset: 0 } }, handled: true };
+        : {
+            state: {
+              ...state,
+              tasks: {
+                ...state.tasks,
+                inspectedTaskId: taskId,
+                inspection: { followLive: true },
+                scrollOffset: 0,
+              }
+            },
+            handled: true
+          };
     }
     case "escape":
     case "tab": return {
@@ -409,7 +255,12 @@ function closeInspection(state: OperatorConsoleState, focusPrompt = false): Oper
   const taskId = state.tasks.inspectedTaskId ?? selectedTask(state.tasks)?.taskId;
   return {
     ...state,
-    tasks: { ...state.tasks, inspectedTaskId: undefined, scrollOffset: 0 },
+    tasks: {
+      ...state.tasks,
+      inspectedTaskId: undefined,
+      inspection: { followLive: true },
+      scrollOffset: 0,
+    },
     focus: focusPrompt || taskId === undefined
       ? setFocus(state.focus, { kind: "prompt" })
       : setFocus(state.focus, { kind: "taskCard", taskId }),
@@ -418,6 +269,21 @@ function closeInspection(state: OperatorConsoleState, focusPrompt = false): Oper
 
 function setTaskScroll(state: OperatorConsoleState, offset: number, maxOffset: number): OperatorConsoleState {
   return { ...state, tasks: { ...state.tasks, scrollOffset: Math.max(0, Math.min(maxOffset, offset)) } };
+}
+
+function setTaskTraceSelection(
+  state: OperatorConsoleState,
+  card: TaskCardState,
+  action: TraceNavigationAction
+): OperatorConsoleState {
+  return {
+    ...state,
+    tasks: {
+      ...state.tasks,
+      inspection: navigateActivityTrace(card.trace.events, state.tasks.inspection, action, state.terminal.width),
+      scrollOffset: 0,
+    }
+  };
 }
 
 function selectRelativeTask(state: OperatorConsoleState, delta: number): OperatorConsoleState {
@@ -434,25 +300,6 @@ function selectTaskAt(state: OperatorConsoleState, index: number): OperatorConso
     tasks: { ...state.tasks, selectedTaskId: task.taskId },
     focus: setFocus(state.focus, { kind: "taskCard", taskId: task.taskId }),
   };
-}
-
-function addSection(lines: string[], title: string, values: readonly string[]): void {
-  if (lines.length > 0) lines.push("");
-  lines.push(title);
-  lines.push(...values.map((value) => `  ${value}`));
-}
-
-function dependencyLines(card: TaskCardState, none: string): readonly string[] {
-  const titles = new Map(card.steps.map((step) => [step.stepId, step.title]));
-  const withDependencies = card.steps.filter((step) => step.dependsOn.length > 0);
-  if (withDependencies.length === 0) return [none];
-  return withDependencies.map((step) => `${step.title}: ${step.dependsOn.map((id) => titles.get(id) ?? isolate(id)).join(", ")}`);
-}
-
-function activeAttemptLines(card: TaskCardState, none: string): readonly string[] {
-  const active = card.steps.filter((step) => step.activeAttempt !== undefined);
-  if (active.length === 0) return [none];
-  return active.map((step) => `${step.title} · #${step.activeAttempt!.attemptNumber} · ${step.activeAttempt!.status} · ${formatDuration(step.activeAttempt!.elapsedMs)}`);
 }
 
 type SubagentGrid = {
@@ -759,28 +606,11 @@ function padSurfaceRows(rows: readonly string[], height: number, width: number):
   );
 }
 
-function attemptUsageLines(
-  card: TaskCardState,
-  locale: OperatorConsoleLocale,
-  none: string
-): readonly string[] {
-  const attempts = card.steps.flatMap((step) => step.attempts.map((attempt) => ({ step, attempt })));
-  if (attempts.length === 0) return [none];
-  return attempts.map(({ step, attempt }) =>
-    `${step.title} · #${attempt.attemptNumber} · ${isolateIfArabic(attempt.status, locale)} · ${formatCardUsage(attempt.usage, locale)}`
-  );
-}
-
 function formatCardUsage(usage: TaskCardState["usage"], locale: OperatorConsoleLocale): string {
   return formatUsageCost({
     estimatedCostUsd: usage.estimatedCostUsd,
     costComplete: usage.pricingComplete
   }, { locale, compact: true });
-}
-
-function progressPercent(card: TaskCardState): number {
-  if (card.progress.total <= 0) return 0;
-  return Math.round(((card.progress.completed + card.progress.skipped) / card.progress.total) * 100);
 }
 
 function formatStatus(status: TaskCardState["status"]): string {
@@ -801,16 +631,6 @@ function formatDuration(value: number): string {
   return hours > 0
     ? `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
     : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1_024) return `${bytes} B`;
-  return `${(bytes / 1_024).toFixed(1)} KiB`;
-}
-
-function formatTimestamp(timestamp: string): string {
-  const date = new Date(timestamp);
-  return Number.isFinite(date.getTime()) ? date.toISOString().slice(11, 19) : "--:--:--";
 }
 
 function isolate(value: string): string {

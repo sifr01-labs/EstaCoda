@@ -183,6 +183,9 @@ export class RawPromptController {
         cards,
         ...(selectedTaskId === undefined ? {} : { selectedTaskId }),
         ...(inspectedTaskId === undefined ? {} : { inspectedTaskId }),
+        ...(inspectedTaskId === undefined
+          ? { inspection: { followLive: true } }
+          : { inspection: taskSurface.inspection ?? { followLive: true } }),
         scrollOffset: inspectedTaskId === undefined ? 0 : taskSurface.scrollOffset,
       };
       const slashMenu = this.#operatorConsole?.enabled === true

@@ -244,10 +244,17 @@ export type TaskCardState = {
   readonly updatedAt: string;
 };
 
+export type TaskInspectionState = {
+  /** Stable event identity selected for inspection. Omitted while following the live tail. */
+  readonly selectedTraceEventId?: string;
+  readonly followLive: boolean;
+};
+
 export type TaskSurfaceState = {
   readonly cards: readonly TaskCardState[];
   readonly selectedTaskId?: string;
   readonly inspectedTaskId?: string;
+  readonly inspection?: TaskInspectionState;
   readonly scrollOffset: number;
 };
 
@@ -588,6 +595,7 @@ export function createDefaultToolActivityState(): ToolActivityState {
 export function createDefaultTaskSurfaceState(): TaskSurfaceState {
   return {
     cards: [],
+    inspection: { followLive: true },
     scrollOffset: 0,
   };
 }

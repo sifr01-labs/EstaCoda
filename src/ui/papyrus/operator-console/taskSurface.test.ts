@@ -151,21 +151,75 @@ describe("durable Task surfaces", () => {
     }, { width: 80, height: 52, isTty: true });
     const text = lines.join("\n");
 
-    expect(text).toContain("Objective");
-    expect(text).toContain("Plan revision");
-    expect(text).toContain("Dependencies");
-    expect(text).toContain("Active Attempt");
+    expect(text).toContain("Competitor comparison");
+    expect(text).toContain("Activity trace");
+    expect(text).toContain("Subagent 1");
+    expect(text).toContain("Plan Steps");
+    expect(text).toContain("after Research Company A");
+    expect(text).toContain("Approvals");
+    expect(text).toContain("Blockers");
     expect(text).toContain("Child Tasks");
     expect(text).toContain("T-child-1");
     expect(text).toContain("running");
-    expect(text).toContain("Usage and cost");
-    expect(text).toContain("Worker and Step spending");
-    expect(text).toContain("Attempts");
     expect(text).toContain("Task spending");
     expect(text).toContain("Reserved: $0.18");
     expect(text).toContain("result://safe-1");
+    expect(text).toContain("1 of 3 Steps settled");
+    expect(text).not.toMatch(/\d+%/u);
     expect(text).not.toContain("raw tool input");
     expect(text).not.toContain("worker-session-secret");
+  });
+
+  it("places Subagents and Plan side by side when wide and stacks them when narrow", () => {
+    const card = makeCard();
+    const wide = taskInspectionContentLines(card, 120, "en");
+    const narrow = taskInspectionContentLines(card, 72, "en");
+    const wideSection = wide.find((line) => line.includes("Subagents"));
+
+    expect(wideSection).toContain("Plan Steps");
+    expect(narrow.indexOf("Subagents")).toBeLessThan(narrow.indexOf("Plan Steps"));
+    expect(narrow.slice(narrow.indexOf("Subagents"), narrow.indexOf("Plan Steps"))).toContain("");
+  });
+
+  it("surfaces factual approvals and blockers without inventing progress", () => {
+    const base = makeCard();
+    const card = makeCard({
+      status: "waiting_for_approval",
+      waitReason: "Approval required before publishing",
+      steps: base.steps.map((step) => step.stepId === "step-a"
+        ? { ...step, status: "waiting_for_approval" as const }
+        : step.stepId === "step-c"
+          ? { ...step, status: "waiting_for_input" as const }
+          : step),
+    });
+    const text = taskInspectionContentLines(card, 100, "en").join("\n");
+
+    expect(text).toContain("Approvals");
+    expect(text).toContain("Research Company A");
+    expect(text).toContain("Blockers");
+    expect(text).toContain("Approval required before publishing");
+    expect(text).toContain("Compare findings · waiting for input");
+    expect(text).not.toMatch(/\d+%/u);
+  });
+
+  it("uses brand, accent, trace, and severity tokens throughout the Task workspace", () => {
+    const style = createOperatorConsoleStyle({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const card = makeCard();
+    const lines = renderTaskInspectionSurface({
+      cards: [card],
+      inspectedTaskId: card.taskId,
+      inspection: { followLive: true },
+      scrollOffset: 0,
+    }, { width: 100, height: 30, style });
+    const output = lines.join("\n");
+
+    expect(output).toContain("\x1b[38;2;67;137;215m");
+    expect(output).toContain("\x1b[38;2;78;161;255m");
+    expect(output).toContain("\x1b[38;2;184;153;255m");
+    expect(output).toContain("\x1b[38;2;90;172;255m");
   });
 
   it("separates recovered output from accepted Results and explains its failed status", () => {
@@ -194,7 +248,7 @@ describe("durable Task surfaces", () => {
 
     expect(lines).toContain("Recovered output");
     expect(lines).toContain("task-result:diagnostic");
-    expect(lines).toContain("may be incomplete and was not accepted as the successful Step result");
+    expect(lines).toContain("May be incomplete; it was not accepted as a successful result");
     expect(lines.indexOf("task-result:accepted")).toBeLessThan(lines.indexOf("Recovered output"));
   });
 
@@ -224,7 +278,7 @@ describe("durable Task surfaces", () => {
       inspectedTaskId: partial.taskId,
       scrollOffset: 0,
     }, { width: 72, height: 52, isTty: true }).join("\n");
-    expect(partialInspection).toContain("at least $0.84");
+    expect(partialInspection).toContain("≥ $0.84");
     expect(partialInspection).toContain("Some provider pricing was unavailable");
     const inspection = renderTaskInspectionSurface({
       cards: [unavailable],
@@ -250,7 +304,11 @@ describe("durable Task surfaces", () => {
     expect(state.tasks.inspectedTaskId).toBe("T-104");
     expect(createOperatorConsoleLayout(state).regions.map((region) => region.kind)).toEqual(["taskInspection"]);
 
+    state = routeTaskSurfaceKey(state, { type: "key", key: "left" }).state;
+    expect(state.tasks.inspection).toEqual({ followLive: false, selectedTraceEventId: "event-attempt-started" });
     state = routeTaskSurfaceKey(state, { type: "key", key: "end" }).state;
+    expect(state.tasks.inspection).toEqual({ followLive: true });
+    state = routeTaskSurfaceKey(state, { type: "key", key: "pagedown" }).state;
     expect(state.tasks.scrollOffset).toBeGreaterThan(0);
     state = routeTaskSurfaceKey(state, { type: "key", key: "pageup" }).state;
     state = routeTaskSurfaceKey(state, { type: "key", key: "escape" }).state;

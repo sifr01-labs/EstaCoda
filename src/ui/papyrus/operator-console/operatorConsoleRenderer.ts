@@ -100,6 +100,7 @@ function renderRegionLines(
       height: region.height,
       locale: state.locale,
       isTty: state.terminal.isTty,
+      style: state.style,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "activeWork") {
