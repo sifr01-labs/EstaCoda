@@ -32,8 +32,8 @@ export function getPromptSurfaceDesiredHeight(
 ): number {
   const logicalRows = getPromptLogicalRows(state, terminal.width).length;
   const preferredInputRows = Math.min(PREFERRED_PROMPT_INPUT_ROWS, logicalRows);
-  const absoluteInputRows = Math.max(1, Math.floor(terminal.height * MAX_PROMPT_HEIGHT_RATIO) - 2);
-  return Math.max(3, Math.min(preferredInputRows, Math.max(1, absoluteInputRows)) + 2);
+  const absoluteInputRows = Math.max(1, Math.floor(terminal.height * MAX_PROMPT_HEIGHT_RATIO));
+  return Math.max(1, Math.min(preferredInputRows, absoluteInputRows));
 }
 
 export function renderPromptSurface(
@@ -48,29 +48,22 @@ export function renderPromptSurface(
     width,
   }));
   if (height <= 0) return [];
-  if (height < 3) {
-    return [renderFallbackRow(state, width, options.style)];
-  }
 
   const contentWidth = width;
-  const inputRows = Math.max(1, height - 2);
+  const inputRows = height;
   const logicalRows = getPromptLogicalRows(state, width);
   const overflow = logicalRows.length > inputRows;
   const cursor = getPromptCursorPosition(state, logicalRows);
   const scrollOffset = getCursorVisibleScrollOffset(state, logicalRows.length, inputRows, overflow, cursor.row);
   const visibleRows = getVisiblePromptRows(logicalRows, scrollOffset, inputRows, overflow);
 
-  return [
-    renderPaddingRow(width, options.style),
-    ...visibleRows.map((row, index) => renderContentRow(
-      row,
-      contentWidth,
-      width,
-      shouldStylePlaceholderRow(state, scrollOffset, index),
-      options.style
-    )),
-    renderPaddingRow(width, options.style),
-  ];
+  return visibleRows.map((row, index) => renderContentRow(
+    row,
+    contentWidth,
+    width,
+    shouldStylePlaceholderRow(state, scrollOffset, index),
+    options.style
+  ));
 }
 
 export function getPromptSurfaceMetrics(
@@ -82,7 +75,7 @@ export function getPromptSurfaceMetrics(
     width: options.width,
   }));
   const logicalRows = getPromptLogicalRows(state, options.width);
-  const visibleRows = Math.max(1, Math.max(0, height - 2));
+  const visibleRows = Math.max(1, height);
   const overflow = logicalRows.length > visibleRows;
   const cursor = getPromptCursorPosition(state, logicalRows);
   return {
@@ -215,26 +208,6 @@ function renderContentRow(
     : row.prefix.length === 0 ? tokens.text.muted : tokens.text.primary;
   const content = `${prefix}${styleColor(style, row.text, textColor)}`;
   return styleBackgroundRow(style, content, width, tokens.surface.bgElevated);
-}
-
-function renderPaddingRow(width: number, style: OperatorConsoleStyle | undefined): string {
-  const background = style?.tokens.contract.surface.bgElevated ?? "";
-  return styleBackgroundRow(style, "", width, background);
-}
-
-function renderFallbackRow(
-  state: PromptSurfaceState,
-  width: number,
-  style: OperatorConsoleStyle | undefined
-): string {
-  const content = truncateVisibleCells(renderPromptFallbackLine(state), width);
-  const background = style?.tokens.contract.surface.bgElevated ?? "";
-  return styleBackgroundRow(style, content, width, background);
-}
-
-function renderPromptFallbackLine(state: PromptSurfaceState): string {
-  const content = state.value.length === 0 ? state.placeholder ?? ">" : state.value.replace(/\r\n|\n|\r/gu, " ");
-  return `Prompt: ${content.length === 0 ? ">" : content}`;
 }
 
 function shouldStylePlaceholderRow(

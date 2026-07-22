@@ -14,6 +14,7 @@ describe("Papyrus operator console layout", () => {
 
     expect(regionKinds(layout)).toEqual(["prompt", "statusRail"]);
     expect(region(layout, "prompt")?.visible).toBe(true);
+    expect(region(layout, "prompt")?.height).toBe(1);
     expect(region(layout, "statusRail")?.visible).toBe(true);
   });
 
@@ -303,10 +304,10 @@ describe("Papyrus operator console layout", () => {
       },
     }), { width: 80, height: 20, isTty: true });
 
-    expect(region(layout, "prompt")?.height).toBe(6);
+    expect(region(layout, "prompt")?.height).toBe(4);
   });
 
-  it("caps multiline prompt allocation at 8 input rows plus border", () => {
+  it("caps multiline prompt allocation at 8 content rows", () => {
     const value = numberedLines(14);
     const layout = createOperatorConsoleLayout(createState({
       prompt: {
@@ -318,7 +319,7 @@ describe("Papyrus operator console layout", () => {
       },
     }), { width: 80, height: 80, isTty: true });
 
-    expect(region(layout, "prompt")?.height).toBe(10);
+    expect(region(layout, "prompt")?.height).toBe(8);
   });
 
   it("caps multiline prompt allocation at 30 percent of terminal height when constrained", () => {
@@ -386,8 +387,8 @@ describe("Papyrus operator console layout", () => {
       }),
     });
 
-    expect(region(createOperatorConsoleLayout(state, { width: 80, height: 24, isTty: true }), "streaming")?.height).toBe(20);
-    expect(region(createOperatorConsoleLayout(state, { width: 80, height: 80, isTty: true }), "streaming")?.height).toBe(76);
+    expect(region(createOperatorConsoleLayout(state, { width: 80, height: 24, isTty: true }), "streaming")?.height).toBe(22);
+    expect(region(createOperatorConsoleLayout(state, { width: 80, height: 80, isTty: true }), "streaming")?.height).toBe(78);
   });
 
   it("keeps region bounds inside the terminal rectangle", () => {

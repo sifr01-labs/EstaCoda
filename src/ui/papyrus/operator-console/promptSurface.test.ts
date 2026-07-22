@@ -11,39 +11,36 @@ import {
 } from "./index.js";
 
 describe("Papyrus operator console prompt surface", () => {
-  it("renders a borderless prompt with vertical surface padding", () => {
+  it("renders a borderless prompt as a single content row", () => {
     const output = renderPromptSurface(prompt({ value: "review the Papyrus rollout plan" }), {
       width: 72,
-      height: 3,
+      height: 1,
     });
 
-    expect(output[0]).toBe(" ".repeat(72));
-    expect(output[1]).toContain("› review the Papyrus rollout plan");
-    expect(output[2]).toBe(" ".repeat(72));
-    expect(output).toHaveLength(3);
+    expect(output[0]).toContain("› review the Papyrus rollout plan");
+    expect(output).toHaveLength(1);
   });
 
   it("renders an empty prompt marker", () => {
-    const output = renderPromptSurface(prompt({ value: "" }), { width: 40, height: 3 });
+    const output = renderPromptSurface(prompt({ value: "" }), { width: 40, height: 1 });
 
-    expect(output[1]).toContain("›");
+    expect(output[0]).toContain("›");
   });
 
   it("renders slash input as normal prompt content", () => {
-    const output = renderPromptSurface(prompt({ value: "/mo" }), { width: 40, height: 3 });
+    const output = renderPromptSurface(prompt({ value: "/mo" }), { width: 40, height: 1 });
 
-    expect(output[1]).toContain("› /mo");
+    expect(output[0]).toContain("› /mo");
   });
 
   it("renders multiline content without a title", () => {
     const output = renderPromptSurface(prompt({
       multiline: true,
       value: "write a migration plan for:\n- approval cards",
-    }), { width: 72, height: 4 });
+    }), { width: 72, height: 2 });
 
-    expect(output[0]).toBe(" ".repeat(72));
-    expect(output[1]).toContain("› write a migration plan for:");
-    expect(output[2]).toContain("  - approval cards");
+    expect(output[0]).toContain("› write a migration plan for:");
+    expect(output[1]).toContain("  - approval cards");
   });
 
   it("soft-wraps long typed lines and keeps the cursor on the wrapped row", () => {
@@ -67,12 +64,12 @@ describe("Papyrus operator console prompt surface", () => {
     const output = renderPromptSurface(prompt({
       multiline: true,
       value: "write a migration plan for:\n- approval cards\n- pasted attachments",
-    }), { width: 72, height: 5 });
+    }), { width: 72, height: 3 });
 
-    expect(output).toHaveLength(5);
-    expect(output[1]).toContain("› write a migration plan for:");
-    expect(output[2]).toContain("  - approval cards");
-    expect(output[3]).toContain("  - pasted attachments");
+    expect(output).toHaveLength(3);
+    expect(output[0]).toContain("› write a migration plan for:");
+    expect(output[1]).toContain("  - approval cards");
+    expect(output[2]).toContain("  - pasted attachments");
   });
 
   it("caps prompt expansion at the preferred maximum of 8 input rows", () => {
@@ -82,8 +79,8 @@ describe("Papyrus operator console prompt surface", () => {
       cursorOffset: numberedLines(12).length,
     });
 
-    expect(getPromptSurfaceDesiredHeight(state, { height: 80 })).toBe(10);
-    expect(renderPromptSurface(state, { width: 72, terminalHeight: 80 })).toHaveLength(10);
+    expect(getPromptSurfaceDesiredHeight(state, { height: 80 })).toBe(8);
+    expect(renderPromptSurface(state, { width: 72, terminalHeight: 80 })).toHaveLength(8);
   });
 
   it("caps prompt expansion at 30 percent of terminal height when smaller than the preferred maximum", () => {
@@ -114,10 +111,10 @@ describe("Papyrus operator console prompt surface", () => {
         "- status rail",
         "- transcript",
       ].join("\n"),
-    }), { width: 72, height: 10 });
+    }), { width: 72, terminalHeight: 80 });
 
-    expect(output).toHaveLength(10);
-    expect(output.at(-2)).toContain("12 lines · ↑↓ scroll within prompt");
+    expect(output).toHaveLength(8);
+    expect(output.at(-1)).toContain("12 lines · ↑↓ scroll within prompt");
   });
 
   it("keeps the cursor row visible when newline insertion pushes content beyond visible rows", () => {
@@ -132,7 +129,7 @@ describe("Papyrus operator console prompt surface", () => {
     expect(output.join("\n")).not.toContain("› line 1");
     expect(output.join("\n")).toContain("line 7");
     expect(output.join("\n")).toContain("line 9");
-    expect(output.at(-2)).toContain("9 lines · ↑↓ scroll within prompt");
+    expect(output.at(-1)).toContain("9 lines · ↑↓ scroll within prompt");
   });
 
   it("keeps the cursor row visible after resize to a shorter terminal height", () => {
@@ -146,7 +143,7 @@ describe("Papyrus operator console prompt surface", () => {
     const output = renderPromptSurface(state, { width: 72, height: 5 });
     const metrics = getPromptSurfaceMetrics(state, { width: 72, height: 5 });
 
-    expect(metrics.scrollOffset).toBe(6);
+    expect(metrics.scrollOffset).toBe(4);
     expect(metrics.cursorRow).toBe(7);
     expect(output.join("\n")).toContain("line 7");
     expect(output.join("\n")).toContain("line 8");
@@ -198,11 +195,11 @@ describe("Papyrus operator console prompt surface", () => {
     const empty = renderPromptSurface(prompt({
       value: "",
       placeholder: "/help · /tools · /model · /status · /compact · Ctrl+C exit",
-    }), { width: 72, height: 3, style }).join("\n");
+    }), { width: 72, height: 1, style }).join("\n");
     const typed = renderPromptSurface(prompt({
       value: "hello",
       placeholder: "/help · /tools",
-    }), { width: 72, height: 3, style }).join("\n");
+    }), { width: 72, height: 1, style }).join("\n");
 
     expect(empty).toContain(ansiBg(tokens.contract.surface.bgElevated));
     expect(empty).toContain(`${ansiFg(tokens.contract.palette.action)}› `);

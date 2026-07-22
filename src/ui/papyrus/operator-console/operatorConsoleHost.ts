@@ -189,8 +189,8 @@ function getPromptCursorPosition(
   promptRegionY: number,
   promptRegionHeight: number
 ): { readonly row: number; readonly column: number } {
-  if (promptRegionHeight < 3) return { row: promptRegionY, column: 0 };
   if (isSteerInputActive(state.steer) && state.steer !== undefined) {
+    if (promptRegionHeight < 3) return { row: promptRegionY, column: 0 };
     const metrics = getSteerInputSurfaceMetrics(state.steer, {
       width: state.terminal.width,
       height: promptRegionHeight,
@@ -207,7 +207,7 @@ function getPromptCursorPosition(
   });
   const visibleCursorRow = Math.max(0, metrics.cursorRow - metrics.scrollOffset);
   return {
-    row: promptRegionY + 1 + visibleCursorRow,
+    row: promptRegionY + visibleCursorRow,
     column: metrics.cursorColumn,
   };
 }
