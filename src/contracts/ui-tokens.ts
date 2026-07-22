@@ -45,6 +45,7 @@ export interface TokenText {
   primary: string;
   secondary: string;
   muted: string;
+  placeholder: string;
   inverse: string;
   agentMessage: string;
 }

@@ -93,9 +93,10 @@ describe("Papyrus operator console raw prompt host", () => {
       },
     });
 
-    expect(frame.rows[0]).toMatch(/^─+$/u);
+    expect(frame.rows[0]?.trim()).toBe("");
     expect(frame.rows).toContainEqual(expect.stringContaining("› review the Papyrus rollout plan"));
-    expect(frame.rows.at(-1)).toBe("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ ◷ 01:12");
+    expect(frame.rows.at(-1)).toContain("kimi-k2.7-code ● · ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k");
+    expect(frame.rows.at(-1)?.endsWith("· ◷ 01:12")).toBe(true);
     expect(frame.rows.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
@@ -116,7 +117,7 @@ describe("Papyrus operator console raw prompt host", () => {
       },
     });
 
-    expect(frame.rows[0]).toMatch(/^─+$/u);
+    expect(frame.rows[0]?.trim()).toBe("");
     expect(frame.rows).toContainEqual(expect.stringContaining("› write a migration plan for:"));
     expect(frame.rows).toContainEqual(expect.stringContaining("  - approval cards"));
     expect(frame.rows.at(-1)).toContain("◷ 01:12");

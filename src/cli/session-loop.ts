@@ -132,6 +132,7 @@ import type { SessionCostSummary, TurnUsageSummary, UsageCostSummary } from "../
 import { mergeUsageCostSummaries, unavailableUsageCostSummary } from "../providers/provider-usage-projection.js";
 import { formatUsageCost, formatUsageCostNotice } from "../ui/usage-cost-format.js";
 import { isolateLtr, isolateRtl } from "../ui/bidi.js";
+import { resolveWorkspaceStatus } from "./workspace-status.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -173,6 +174,7 @@ export type SessionLoopOptions = {
 const OPERATOR_CONSOLE_FALLBACK_TERMINAL_HEIGHT = 24;
 const OPERATOR_CONSOLE_TASK_REFRESH_INTERVAL_MS = 750;
 const SESSION_COST_REFRESH_INTERVAL_MS = 750;
+const WORKSPACE_STATUS_REFRESH_INTERVAL_MS = 5_000;
 const COMPACTION_PROMPT_PLACEHOLDER = "Compacting session history... Ctrl+C to cancel";
 
 type StatusRailTimerMode = "idle" | "active-turn" | "last-turn";
@@ -352,6 +354,28 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     })
     : undefined;
   operatorConsoleRuntimeHost?.setStyle(operatorConsoleStyle);
+  let latestWorkspaceStatus = operatorConsoleEnabled && options.workspaceRoot !== undefined
+    ? await resolveWorkspaceStatus(options.workspaceRoot)
+    : undefined;
+  let workspaceStatusRefresh: Promise<void> | undefined;
+  let workspaceStatusRefreshedAtMs = Date.now();
+  const refreshWorkspaceStatus = (): Promise<void> => {
+    if (!operatorConsoleEnabled || options.workspaceRoot === undefined) return Promise.resolve();
+    if (workspaceStatusRefresh !== undefined) return workspaceStatusRefresh;
+    if (Date.now() - workspaceStatusRefreshedAtMs < WORKSPACE_STATUS_REFRESH_INTERVAL_MS) {
+      return Promise.resolve();
+    }
+    workspaceStatusRefresh = resolveWorkspaceStatus(options.workspaceRoot)
+      .then((status) => {
+        latestWorkspaceStatus = status;
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        workspaceStatusRefreshedAtMs = Date.now();
+        workspaceStatusRefresh = undefined;
+      });
+    return workspaceStatusRefresh;
+  };
   let latestContextUsage: ContextUsageSnapshot | undefined;
   let latestSessionCost: SessionCostSummary | undefined;
   let sessionCostRefresh: Promise<void> | undefined;
@@ -393,11 +417,13 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   });
   const getOperatorConsoleStatus = () => {
     void refreshSessionCost();
+    void refreshWorkspaceStatus();
     return operatorConsoleStatusRailState({
       runtime,
       renderer,
       contextUsage: latestContextUsage,
       sessionCost: latestSessionCost,
+      workspace: latestWorkspaceStatus,
       timing: railTiming(),
       providerExecutionSummary: lastProviderExecutionSummary
     });

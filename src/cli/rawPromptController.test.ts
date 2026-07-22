@@ -378,7 +378,7 @@ describe("raw prompt controller", () => {
       await expect(pending).resolves.toEqual({ type: "submit", text: "" });
       const rendered = output.writes.join("");
       expect(rendered).toContain("live-model");
-      expect(rendered).toContain("42%");
+      expect(rendered).toContain("42/100");
       expect(rendered).toContain("01:01");
     } finally {
       vi.useRealTimers();
@@ -1079,7 +1079,8 @@ describe("raw prompt controller", () => {
     expect(await read.pending).toEqual({ type: "submit", text: "review the Papyrus rollout plan" });
     const output = read.output.writes.join("");
     expect(output).toContain("› review the Papyrus rollout plan");
-    expect(output).toContain("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ ◷ 01:12");
+    expect(output).toContain("kimi-k2.7-code ● · ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k");
+    expect(output).toContain("· ◷ 01:12");
     expect(output).not.toMatch(/\b(tool|approval|workspace|trust|steering|setup|channel)\b/iu);
     expect(output).not.toMatch(forbiddenManagedRegionOutput);
   });

@@ -43,7 +43,15 @@ export type StatusRailState = {
     readonly elapsedMs: number;
     readonly startedAtMs?: number;
   };
-  readonly sessionCost?: Pick<SessionCostSummary, "estimatedCostUsd" | "costComplete" | "budget">;
+  readonly sessionCost?: Pick<
+    SessionCostSummary,
+    "totalTokens" | "usageComplete" | "estimatedCostUsd" | "costComplete" | "budget"
+  >;
+  readonly workspace?: {
+    readonly label: string;
+    readonly shortLabel: string;
+    readonly branch?: string;
+  };
   readonly security?: {
     readonly yolo: boolean;
   };

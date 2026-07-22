@@ -48,7 +48,8 @@ describe("raw prompt render loop", () => {
 
     expect(rows).toBe(4);
     expect(output.text()).toContain("› review the Papyrus rollout plan");
-    expect(output.text()).toContain("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ ◷ 01:12");
+    expect(output.text()).toContain("kimi-k2.7-code ● · ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k");
+    expect(output.text()).toContain("· ◷ 01:12");
     expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
   });
 
@@ -455,7 +456,7 @@ describe("raw prompt render loop", () => {
     });
 
     expect(Object.keys(host.getState().status).sort()).toEqual(["context", "model", "sessionTimer"]);
-    expect(output.text()).toContain("kimi-k2.7-code ● │ ctx");
+    expect(output.text()).toContain("kimi-k2.7-code ● · ctx");
     expect(output.text()).not.toMatch(/\b(tool|approval|workspace|trust|setup|steer|channel|active)\b/iu);
   });
 
@@ -565,7 +566,7 @@ describe("raw prompt render loop", () => {
     expect(text.indexOf("Attachments")).toBeLessThan(text.indexOf("› summarize this"));
     expect(text).toContain("MVP known issue...");
     expect(text).toContain("› summarize this");
-    expect(text).toContain("kimi-k2.7-code ● │ ctx");
+    expect(text).toContain("kimi-k2.7-code ● · ctx");
     expect(text).not.toMatch(/\b(attachment|pasted text)\b.*session/iu);
     expect(host.getState().attachments[0]?.content).toContain("store outside the prompt");
   });

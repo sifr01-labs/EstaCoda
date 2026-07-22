@@ -10,18 +10,23 @@ import {
 } from "./index.js";
 
 describe("Papyrus operator console status rail surface", () => {
-  it("renders full rail with model, context bar, context numbers, percent, and session timer", () => {
-    expect(renderStatusRailSurface(status(), { width: 80 })).toBe(
-      "kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ ◷ 01:12"
-    );
+  it("renders the full rail with middle dots and the timer anchored right", () => {
+    const output = renderStatusRailSurface(status(), { width: 80 });
+
+    expect(output).toContain("kimi-k2.7-code ● · ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k");
+    expect(output).not.toContain("7%");
+    expect(output).not.toContain("│");
+    expect(output.endsWith("◷ 01:12")).toBe(true);
+    expect(stringWidth(output)).toBe(80);
   });
 
   it("renders YOLO badge between model and context when active", () => {
-    expect(renderStatusRailSurface(status({
+    const output = renderStatusRailSurface(status({
       security: { yolo: true },
-    }), { width: 80 })).toBe(
-      "kimi-k2.7-code ● │ ↯ YOLO │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ ◷ 01:12"
-    );
+    }), { width: 80 });
+
+    expect(output).toContain("kimi-k2.7-code ● · ↯ YOLO · ctx");
+    expect(output.endsWith("◷ 01:12")).toBe(true);
   });
 
   it("contains no tools, approvals, workspace, trust, steer, setup, or channel fields", () => {
@@ -49,29 +54,69 @@ describe("Papyrus operator console status rail surface", () => {
     expect(compactWithoutBadge).toContain("[▰▱▱▱▱▱▱▱▱▱]");
 
     const narrow = renderStatusRailSurface(status(), { width: 30 });
-    expect(narrow).toBe("kimi-k2.7 ● │ ctx 7% │ 01:12");
+    expect(narrow).toBe("kimi-k2.7 ● · ctx 7% · ◷ 01:12");
 
     const minimal = renderStatusRailSurface(status(), { width: 16 });
-    expect(minimal).toBe("kimi ● 7% 01:12");
+    expect(minimal).toBe("7% · 01:12");
   });
 
-  it("keeps complete and partial session cost visible in narrow layouts", () => {
+  it("keeps cumulative session tokens and cost together on the right", () => {
     const complete = status({
-      sessionCost: { estimatedCostUsd: 0.73, costComplete: true },
+      sessionCost: {
+        totalTokens: 31_400,
+        usageComplete: true,
+        estimatedCostUsd: 0.73,
+        costComplete: true,
+      },
     });
     const partial = status({
-      sessionCost: { estimatedCostUsd: 0.84, costComplete: false },
+      sessionCost: {
+        totalTokens: 32_100,
+        usageComplete: false,
+        estimatedCostUsd: 0.84,
+        costComplete: false,
+      },
     });
 
-    expect(renderStatusRailSurface(complete, { width: 80 })).toContain("session $0.73");
+    expect(renderStatusRailSurface(complete, { width: 80 }).endsWith("◷ 01:12 · 31.4k tok · $0.73")).toBe(true);
     expect(renderStatusRailSurface(complete, { width: 30 })).toContain("$0.73");
     expect(renderStatusRailSurface(partial, { width: 30 })).toContain("≥ $0.84");
     expect(renderStatusRailSurface(partial, { width: 16 })).toContain("≥ $0.84");
   });
 
+  it("places workspace and branch after context when width permits", () => {
+    const withWorkspace = status({
+      workspace: {
+        label: "~/Documents/…/EstaCoda",
+        shortLabel: "EstaCoda",
+        branch: "main",
+      },
+      sessionCost: {
+        totalTokens: 31_400,
+        usageComplete: true,
+        estimatedCostUsd: 0.08,
+        costComplete: true,
+      },
+    });
+
+    const wide = renderStatusRailSurface(withWorkspace, { width: 140 });
+    expect(wide).toContain("18.4k/262k · ~/Documents/…/EstaCoda · main");
+    expect(wide.endsWith("◷ 01:12 · 31.4k tok · $0.08")).toBe(true);
+
+    const compact = renderStatusRailSurface(withWorkspace, { width: 95 });
+    expect(compact).toContain("· EstaCoda · main");
+    expect(compact).not.toContain("~/Documents");
+
+    const constrained = renderStatusRailSurface(withWorkspace, { width: 80 });
+    expect(constrained).not.toContain("EstaCoda");
+    expect(constrained.endsWith("◷ 01:12 · 31.4k tok · $0.08")).toBe(true);
+  });
+
   it("shows the session limit and reserved capacity without breaking narrow rails", () => {
     const budgeted = status({
       sessionCost: {
+        totalTokens: 31_400,
+        usageComplete: true,
         estimatedCostUsd: 0.42,
         costComplete: true,
         budget: {
@@ -86,17 +131,35 @@ describe("Papyrus operator console status rail surface", () => {
     });
 
     expect(renderStatusRailSurface(budgeted, { width: 120 }))
-      .toContain("session $0.42/$1.00 +$0.18 reserved");
+      .toContain("31.4k tok · $0.42/$1.00 +$0.18 reserved");
     expect(renderStatusRailSurface(budgeted, { width: 28 })).toContain("$0.42/$1.00");
   });
 
   it("uses isolated Arabic cost text", () => {
     const output = renderStatusRailSurface(status({
-      sessionCost: { estimatedCostUsd: 0.84, costComplete: false },
+      sessionCost: {
+        totalTokens: 32_100,
+        usageComplete: false,
+        estimatedCostUsd: 0.84,
+        costComplete: false,
+      },
     }), { width: 80, locale: "ar" });
 
-    expect(output).toContain("الجلسة");
+    expect(output).toContain("\u2066≥ 32.1k tok\u2069");
     expect(output).toContain("\u2066≥ $0.84\u2069");
+  });
+
+  it("isolates workspace paths and branch names in Arabic mode", () => {
+    const output = renderStatusRailSurface(status({
+      workspace: {
+        label: "~/Documents/…/EstaCoda",
+        shortLabel: "EstaCoda",
+        branch: "feature/prompt-rail",
+      },
+    }), { width: 140, locale: "ar" });
+
+    expect(output).toContain("\u2066~/Documents/…/EstaCoda\u2069");
+    expect(output).toContain("\u2066feature/prompt-rail\u2069");
   });
 
   it("never exceeds the terminal width", () => {
@@ -106,15 +169,17 @@ describe("Papyrus operator console status rail surface", () => {
   });
 
   it("uses deterministic empty model fallback", () => {
-    expect(renderStatusRailSurface(createDefaultStatusRailState(), { width: 80 })).toBe(
-      "model pending ● │ ctx [··········] -- --% │ ◷ 00:00"
-    );
+    const output = renderStatusRailSurface(createDefaultStatusRailState(), { width: 80 });
+
+    expect(output).toContain("model pending ● · ctx [··········] --");
+    expect(output.endsWith("◷ 00:00")).toBe(true);
+    expect(stringWidth(output)).toBe(80);
   });
 
   it("renders a known context limit without fabricating usage", () => {
     expect(renderStatusRailSurface(status({
       context: { totalTokens: 262_000 },
-    }), { width: 80 })).toContain("ctx [··········] --/262k --%");
+    }), { width: 80 })).toContain("ctx [··········] --/262k");
   });
 
   it("formats session timer deterministically", () => {
@@ -159,6 +224,33 @@ describe("Papyrus operator console status rail surface", () => {
     expect(renderStatusRailSurface(status({
       security: { yolo: true },
     }), { width: 80, style })).toContain(`${ansiFg(tokens.contract.palette.caution)}↯ YOLO\x1b[0m`);
+  });
+
+  it("uses semantic hierarchy colors for context, workspace, branch, and session values", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const style = createOperatorConsoleStyle({
+      tokens,
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const output = renderStatusRailSurface(status({
+      workspace: {
+        label: "~/Documents/…/EstaCoda",
+        shortLabel: "EstaCoda",
+        branch: "main",
+      },
+      sessionCost: {
+        totalTokens: 31_400,
+        usageComplete: true,
+        estimatedCostUsd: 0.08,
+        costComplete: true,
+      },
+    }), { width: 140, style });
+
+    expect(output).toContain(`${ansiFg(tokens.contract.text.muted)}ctx\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.interactive.primary)}▰\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.text.secondary)}~/Documents/…/EstaCoda\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.interactive.primary)}main\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.text.secondary)}31.4k tok\x1b[0m`);
   });
 });
 

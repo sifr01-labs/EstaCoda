@@ -122,6 +122,38 @@ describe("OperatorConsoleRuntimeHost", () => {
     expect(host.render().lines.at(-1)).not.toMatch(/\b(tool|approval)\b/iu);
   });
 
+  it("preserves cumulative session telemetry for the right side of the rail", () => {
+    const host = createHost({ width: 140 });
+    host.setStatus({
+      ...status(),
+      workspace: {
+        label: "~/Documents/…/EstaCoda",
+        shortLabel: "EstaCoda",
+        branch: "main",
+      },
+      sessionCost: {
+        totalTokens: 31_400,
+        usageComplete: true,
+        estimatedCostUsd: 0.08,
+        costComplete: true,
+      },
+    });
+
+    expect(host.getState().status.sessionCost).toEqual({
+      totalTokens: 31_400,
+      usageComplete: true,
+      estimatedCostUsd: 0.08,
+      costComplete: true,
+    });
+    expect(host.getState().status.workspace).toEqual({
+      label: "~/Documents/…/EstaCoda",
+      shortLabel: "EstaCoda",
+      branch: "main",
+    });
+    expect(host.render().lines.at(-1)).toContain("~/Documents/…/EstaCoda · main");
+    expect(host.render().lines.at(-1)?.endsWith("◷ 01:12 · 31.4k tok · $0.08")).toBe(true);
+  });
+
   it("updates terminal metrics and keeps rendered lines width-bounded", () => {
     const host = createHost();
 

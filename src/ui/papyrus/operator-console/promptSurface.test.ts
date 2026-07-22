@@ -11,15 +11,15 @@ import {
 } from "./index.js";
 
 describe("Papyrus operator console prompt surface", () => {
-  it("renders a minimal upper/lower prompt frame", () => {
+  it("renders a borderless prompt with vertical surface padding", () => {
     const output = renderPromptSurface(prompt({ value: "review the Papyrus rollout plan" }), {
       width: 72,
       height: 3,
     });
 
-    expect(output[0]).toMatch(/^─+$/u);
+    expect(output[0]).toBe(" ".repeat(72));
     expect(output[1]).toContain("› review the Papyrus rollout plan");
-    expect(output[2]).toMatch(/^─+$/u);
+    expect(output[2]).toBe(" ".repeat(72));
     expect(output).toHaveLength(3);
   });
 
@@ -41,7 +41,7 @@ describe("Papyrus operator console prompt surface", () => {
       value: "write a migration plan for:\n- approval cards",
     }), { width: 72, height: 4 });
 
-    expect(output[0]).toMatch(/^─+$/u);
+    expect(output[0]).toBe(" ".repeat(72));
     expect(output[1]).toContain("› write a migration plan for:");
     expect(output[2]).toContain("  - approval cards");
   });
@@ -189,7 +189,7 @@ describe("Papyrus operator console prompt surface", () => {
     expect(output).not.toMatch(/\[[0-9;?]*[A-Za-z]/u);
   });
 
-  it("colors empty prompt tips with the muted token and hides them while typing", () => {
+  it("uses an elevated background, focused glyph, and dedicated placeholder color", () => {
     const tokens = resolveTokens("standard", "dark", "kemetBlue");
     const style = createOperatorConsoleStyle({
       tokens,
@@ -204,9 +204,12 @@ describe("Papyrus operator console prompt surface", () => {
       placeholder: "/help · /tools",
     }), { width: 72, height: 3, style }).join("\n");
 
-    expect(empty).toContain(`${ansiFg(tokens.contract.text.muted)}› /help`);
+    expect(empty).toContain(ansiBg(tokens.contract.surface.bgElevated));
+    expect(empty).toContain(`${ansiFg(tokens.contract.palette.action)}› `);
+    expect(empty).toContain(`${ansiFg(tokens.contract.text.placeholder)}/help`);
     expect(typed).not.toContain("/tools");
-    expect(typed).not.toContain(ansiFg(tokens.contract.text.muted));
+    expect(typed).toContain(`${ansiFg(tokens.contract.text.primary)}hello`);
+    expect(typed).not.toContain(ansiFg(tokens.contract.text.placeholder));
   });
 
   it("is deterministic and does not mutate state", () => {
@@ -232,6 +235,15 @@ function ansiFg(hex: string): string {
   const g = (bigint >> 8) & 255;
   const b = bigint & 255;
   return `\x1b[38;2;${r};${g};${b}m`;
+}
+
+function ansiBg(hex: string): string {
+  const clean = hex.replace("#", "");
+  const bigint = Number.parseInt(clean, 16);
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8) & 255;
+  const b = bigint & 255;
+  return `\x1b[48;2;${r};${g};${b}m`;
 }
 
 function numberedLines(count: number): string {

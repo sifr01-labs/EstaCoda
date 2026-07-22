@@ -320,6 +320,30 @@ function cloneStatusRailState(status: StatusRailState): StatusRailState {
         ? {}
         : { startedAtMs: normalizeNonNegativeNumber(status.sessionTimer.startedAtMs) }),
     },
+    ...(status.sessionCost === undefined
+      ? {}
+      : {
+          sessionCost: {
+            totalTokens: normalizeNonNegativeInteger(status.sessionCost.totalTokens),
+            usageComplete: status.sessionCost.usageComplete,
+            ...(status.sessionCost.estimatedCostUsd === undefined
+              ? {}
+              : { estimatedCostUsd: normalizeNonNegativeNumber(status.sessionCost.estimatedCostUsd) }),
+            costComplete: status.sessionCost.costComplete,
+            ...(status.sessionCost.budget === undefined
+              ? {}
+              : { budget: { ...status.sessionCost.budget } }),
+          },
+        }),
+    ...(!isStatusWorkspace(status.workspace)
+      ? {}
+      : {
+          workspace: {
+            label: status.workspace.label,
+            shortLabel: status.workspace.shortLabel,
+            ...(status.workspace.branch === undefined ? {} : { branch: status.workspace.branch }),
+          },
+        }),
     ...(status.security?.yolo === true ? { security: { yolo: true } } : {}),
   };
 }
@@ -496,6 +520,11 @@ function isStatusModelState(value: string | undefined): value is StatusRailState
 
 function isStatusModelRoute(value: string | undefined): value is NonNullable<StatusRailState["model"]["route"]> {
   return value === "primary" || value === "fallback" || value === "failed";
+}
+
+function isStatusWorkspace(value: StatusRailState["workspace"] | undefined): value is NonNullable<StatusRailState["workspace"]> {
+  return value !== undefined && value !== null && typeof value === "object" &&
+    typeof value.label === "string" && typeof value.shortLabel === "string";
 }
 
 function normalizeCursorOffset(value: number, text: string): number {

@@ -1,7 +1,11 @@
 import { stringWidth } from "../screen/stringWidth.js";
 import { truncateVisible } from "../../renderers/layout.js";
 import type { PromptSurfaceState, TerminalMetrics } from "./operatorConsoleState.js";
-import { styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
+import {
+  styleBackgroundRow,
+  styleColor,
+  type OperatorConsoleStyle,
+} from "./operatorConsoleStyle.js";
 
 export type PromptSurfaceRenderOptions = {
   readonly width: number;
@@ -44,7 +48,9 @@ export function renderPromptSurface(
     width,
   }));
   if (height <= 0) return [];
-  if (height < 3) return [truncateVisibleCells(renderPromptFallbackLine(state), width)];
+  if (height < 3) {
+    return [renderFallbackRow(state, width, options.style)];
+  }
 
   const contentWidth = width;
   const inputRows = Math.max(1, height - 2);
@@ -55,14 +61,15 @@ export function renderPromptSurface(
   const visibleRows = getVisiblePromptRows(logicalRows, scrollOffset, inputRows, overflow);
 
   return [
-    renderHorizontalBorder(width),
+    renderPaddingRow(width, options.style),
     ...visibleRows.map((row, index) => renderContentRow(
-      row.content,
+      row,
       contentWidth,
       width,
-      shouldStylePlaceholderRow(state, scrollOffset, index) ? options.style : undefined
+      shouldStylePlaceholderRow(state, scrollOffset, index),
+      options.style
     )),
-    renderHorizontalBorder(width),
+    renderPaddingRow(width, options.style),
   ];
 }
 
@@ -188,22 +195,41 @@ function padRows(rows: readonly PromptLogicalRow[], count: number): readonly Pro
   return [...rows, ...Array.from({ length: count - rows.length }, () => staticPromptRow(""))];
 }
 
-function renderHorizontalBorder(width: number): string {
-  return "─".repeat(Math.max(0, width));
-}
-
 function renderContentRow(
-  row: string,
+  row: PromptLogicalRow,
   contentWidth: number,
   width: number,
+  placeholder: boolean,
   style: OperatorConsoleStyle | undefined
 ): string {
   if (width <= 0) return "";
-  const content = padVisibleEnd(truncateVisibleCells(row, contentWidth), contentWidth);
-  const styled = style === undefined
-    ? content
-    : styleColor(style, content, style.tokens.contract.text.muted);
-  return truncateVisibleCells(styled, width);
+  if (style === undefined) {
+    return padVisibleEnd(truncateVisibleCells(row.content, contentWidth), contentWidth);
+  }
+  const tokens = style.tokens.contract;
+  const prefix = row.prefix.length === 0
+    ? ""
+    : styleColor(style, row.prefix, tokens.palette.action);
+  const textColor = placeholder
+    ? tokens.text.placeholder
+    : row.prefix.length === 0 ? tokens.text.muted : tokens.text.primary;
+  const content = `${prefix}${styleColor(style, row.text, textColor)}`;
+  return styleBackgroundRow(style, content, width, tokens.surface.bgElevated);
+}
+
+function renderPaddingRow(width: number, style: OperatorConsoleStyle | undefined): string {
+  const background = style?.tokens.contract.surface.bgElevated ?? "";
+  return styleBackgroundRow(style, "", width, background);
+}
+
+function renderFallbackRow(
+  state: PromptSurfaceState,
+  width: number,
+  style: OperatorConsoleStyle | undefined
+): string {
+  const content = truncateVisibleCells(renderPromptFallbackLine(state), width);
+  const background = style?.tokens.contract.surface.bgElevated ?? "";
+  return styleBackgroundRow(style, content, width, background);
 }
 
 function renderPromptFallbackLine(state: PromptSurfaceState): string {

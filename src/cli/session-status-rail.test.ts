@@ -28,6 +28,47 @@ describe("operatorConsoleStatusRailState", () => {
       percent: 7,
     });
   });
+
+  it("maps cumulative session tokens and cost into right-rail telemetry", () => {
+    expect(operatorConsoleStatusRailState({
+      runtime: runtime("adaptive"),
+      renderer: {} as SessionRenderer,
+      sessionCost: {
+        providerCalls: 2,
+        inputTokens: 12_000,
+        outputTokens: 2_000,
+        reasoningTokens: 400,
+        cacheReadTokens: 10_000,
+        cacheWriteTokens: 0,
+        totalTokens: 24_400,
+        estimatedCostUsd: 0.08,
+        usageComplete: true,
+        costComplete: true,
+        incompleteReasons: [],
+      },
+    }).sessionCost).toEqual({
+      totalTokens: 24_400,
+      usageComplete: true,
+      estimatedCostUsd: 0.08,
+      costComplete: true,
+    });
+  });
+
+  it("maps compact workspace and branch metadata into the operator rail", () => {
+    expect(operatorConsoleStatusRailState({
+      runtime: runtime("adaptive"),
+      renderer: {} as SessionRenderer,
+      workspace: {
+        label: "~/Documents/…/EstaCoda",
+        shortLabel: "EstaCoda",
+        branch: "main",
+      },
+    }).workspace).toEqual({
+      label: "~/Documents/…/EstaCoda",
+      shortLabel: "EstaCoda",
+      branch: "main",
+    });
+  });
 });
 
 function statusForSecurityMode(mode: SecurityApprovalMode) {
