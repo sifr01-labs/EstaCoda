@@ -10,13 +10,13 @@ import {
 } from "./index.js";
 
 describe("Papyrus operator console status rail surface", () => {
-  it("renders the full rail with middle dots and the timer anchored right", () => {
+  it("renders the full rail with the timer immediately after context", () => {
     const output = renderStatusRailSurface(status(), { width: 80 });
 
     expect(output).toContain("kimi-k2.7-code ● · ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k");
     expect(output).not.toContain("7%");
     expect(output).not.toContain("│");
-    expect(output.endsWith("◷ 01:12")).toBe(true);
+    expect(output.trimEnd().endsWith("18.4k/262k · ◷ 01:12")).toBe(true);
     expect(stringWidth(output)).toBe(80);
   });
 
@@ -26,13 +26,13 @@ describe("Papyrus operator console status rail surface", () => {
     }), { width: 80 });
 
     expect(output).toContain("kimi-k2.7-code ● · ↯ YOLO · ctx");
-    expect(output.endsWith("◷ 01:12")).toBe(true);
+    expect(output.trimEnd().endsWith("18.4k/262k · ◷ 01:12")).toBe(true);
   });
 
-  it("contains no tools, approvals, workspace, trust, steer, setup, or channel fields", () => {
+  it("contains no tools, approvals, workspace trust, steer, setup, or channel state", () => {
     const output = renderStatusRailSurface(status(), { width: 80 });
 
-    expect(output).not.toMatch(/\b(tool|approval|workspace|trust|steer|setup|channel)\b/iu);
+    expect(output).not.toMatch(/\b(tool|approval|trust|steer|setup|channel)\b/iu);
   });
 
   it("clamps context bar values below 0 and above 100", () => {
@@ -44,20 +44,20 @@ describe("Papyrus operator console status rail surface", () => {
     expect(renderStatusRailSurface(status(), { width: 80 })).toContain("18.4k/262k");
 
     const compact = renderStatusRailSurface(status(), { width: 55 });
-    expect(compact).toContain("[▰▱▱▱▱▱▱▱▱▱]");
-    expect(compact).not.toContain("18.4k/262k");
+    expect(compact).toContain("ctx 18.4k/262k · ◷ 01:12");
+    expect(compact).not.toContain("7%");
 
-    const compactWithoutBadge = renderStatusRailSurface(status({
+    const compactWithBadge = renderStatusRailSurface(status({
       security: { yolo: true },
     }), { width: 55 });
-    expect(compactWithoutBadge).not.toContain("YOLO");
-    expect(compactWithoutBadge).toContain("[▰▱▱▱▱▱▱▱▱▱]");
+    expect(compactWithBadge).toContain("YOLO");
+    expect(compactWithBadge).toContain("18.4k/262k");
 
     const narrow = renderStatusRailSurface(status(), { width: 30 });
-    expect(narrow).toBe("kimi-k2.7 ● · ctx 7% · ◷ 01:12");
+    expect(narrow.trimEnd()).toBe("ctx 18.4k/262k · ◷ 01:12");
 
     const minimal = renderStatusRailSurface(status(), { width: 16 });
-    expect(minimal).toBe("7% · 01:12");
+    expect(minimal).toBe("18.4k/262k");
   });
 
   it("keeps cumulative session tokens and cost together on the right", () => {
@@ -78,13 +78,15 @@ describe("Papyrus operator console status rail surface", () => {
       },
     });
 
-    expect(renderStatusRailSurface(complete, { width: 80 }).endsWith("◷ 01:12 · 31.4k tok · $0.73")).toBe(true);
+    const completeOutput = renderStatusRailSurface(complete, { width: 80 });
+    expect(completeOutput).toContain("18.4k/262k · ◷ 01:12");
+    expect(completeOutput.endsWith("31.4k tok · $0.73")).toBe(true);
     expect(renderStatusRailSurface(complete, { width: 30 })).toContain("$0.73");
     expect(renderStatusRailSurface(partial, { width: 30 })).toContain("≥ $0.84");
     expect(renderStatusRailSurface(partial, { width: 16 })).toContain("≥ $0.84");
   });
 
-  it("places workspace and branch after context when width permits", () => {
+  it("uses workspace as the identity badge before context when YOLO is off", () => {
     const withWorkspace = status({
       workspace: {
         label: "~/Documents/…/EstaCoda",
@@ -100,16 +102,26 @@ describe("Papyrus operator console status rail surface", () => {
     });
 
     const wide = renderStatusRailSurface(withWorkspace, { width: 140 });
-    expect(wide).toContain("18.4k/262k · ~/Documents/…/EstaCoda · main");
-    expect(wide.endsWith("◷ 01:12 · 31.4k tok · $0.08")).toBe(true);
+    expect(wide).toContain("~/Documents/…/EstaCoda · main · ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k · ◷ 01:12");
+    expect(wide.endsWith("31.4k tok · $0.08")).toBe(true);
 
     const compact = renderStatusRailSurface(withWorkspace, { width: 95 });
-    expect(compact).toContain("· EstaCoda · main");
+    expect(compact).toContain("· EstaCoda · ctx");
     expect(compact).not.toContain("~/Documents");
+    expect(compact).not.toContain("main");
 
     const constrained = renderStatusRailSurface(withWorkspace, { width: 80 });
-    expect(constrained).not.toContain("EstaCoda");
-    expect(constrained.endsWith("◷ 01:12 · 31.4k tok · $0.08")).toBe(true);
+    expect(constrained).toContain("EstaCoda · ctx 18.4k/262k · ◷ 01:12");
+    expect(constrained).not.toContain("[▰");
+    expect(constrained.endsWith("31.4k tok · $0.08")).toBe(true);
+
+    const yolo = renderStatusRailSurface({
+      ...withWorkspace,
+      security: { yolo: true },
+    }, { width: 140 });
+    expect(yolo).toContain("↯ YOLO · ctx");
+    expect(yolo).not.toContain("EstaCoda");
+    expect(yolo).not.toContain("main");
   });
 
   it("shows the session limit and reserved capacity without breaking narrow rails", () => {
@@ -172,7 +184,7 @@ describe("Papyrus operator console status rail surface", () => {
     const output = renderStatusRailSurface(createDefaultStatusRailState(), { width: 80 });
 
     expect(output).toContain("model pending ● · ctx [··········] --");
-    expect(output.endsWith("◷ 00:00")).toBe(true);
+    expect(output.trimEnd().endsWith("◷ 00:00")).toBe(true);
     expect(stringWidth(output)).toBe(80);
   });
 
@@ -248,8 +260,8 @@ describe("Papyrus operator console status rail surface", () => {
 
     expect(output).toContain(`${ansiFg(tokens.contract.text.muted)}ctx\x1b[0m`);
     expect(output).toContain(`${ansiFg(tokens.contract.interactive.primary)}▰\x1b[0m`);
-    expect(output).toContain(`${ansiFg(tokens.contract.text.secondary)}~/Documents/…/EstaCoda\x1b[0m`);
-    expect(output).toContain(`${ansiFg(tokens.contract.interactive.primary)}main\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.interactive.primary)}~/Documents/…/EstaCoda\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.text.secondary)}main\x1b[0m`);
     expect(output).toContain(`${ansiFg(tokens.contract.text.secondary)}31.4k tok\x1b[0m`);
   });
 });

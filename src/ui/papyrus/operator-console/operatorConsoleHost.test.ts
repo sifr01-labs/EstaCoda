@@ -100,7 +100,7 @@ describe("Papyrus operator console raw prompt host", () => {
     expect(frame.cursorRow).toBe(1);
     expect(frame.cursorColumn).toBe(stringWidth("› review the Papyrus rollout plan"));
     expect(frame.rows.at(-1)).toContain("kimi-k2.7-code ● · ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k");
-    expect(frame.rows.at(-1)?.endsWith("· ◷ 01:12")).toBe(true);
+    expect(frame.rows.at(-1)?.trimEnd().endsWith("· ◷ 01:12")).toBe(true);
     expect(frame.rows.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 

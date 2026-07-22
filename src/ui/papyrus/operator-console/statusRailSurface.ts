@@ -26,9 +26,9 @@ export function renderStatusRailSurface(
   const narrowModel = shortenModelLabel(state.model.label, 10);
   const minimalModel = shortenModelLabel(state.model.label, 4);
   const contextPercent = resolveContextPercent(state);
-  const percent = state.context.usedTokens === undefined ? "--%" : formatPercent(contextPercent);
   const timer = formatSessionTimer(state.sessionTimer.elapsedMs);
   const sessionIcon = options.style?.tokens.contract.toolIcon.cronjob ?? "◷";
+  const timerSegment = formatSessionValue(`${sessionIcon} ${timer}`, options.style);
   const bar = formatContextBar(state, contextPercent, options.style);
   const numbers = formatContextNumbers(state);
   const symbol = modelStateSymbol(state.model.state, state.model.route, options.style);
@@ -49,77 +49,89 @@ export function renderStatusRailSurface(
     : `/${formatUsdAmount(budget.maxEstimatedCostUsd, options.locale)} +${formatUsdAmount(budget.reservedCostUsd, options.locale)} ${options.locale === "ar" ? "محجوز" : "reserved"}`;
   const costWithBudget = cost === undefined ? undefined : `${cost}${budgetSuffix}`;
   const sessionFull = joinSegments([
-    formatSessionValue(`${sessionIcon} ${timer}`, options.style),
     formatSessionValue(sessionTokens, options.style),
     formatCostValue(costWithBudget, state, options.style),
   ], options.style);
   const contextFull = formatContextSegment(bar, numbers, options.style);
-  const contextCompact = formatContextSegment(bar, percent, options.style);
-  const workspaceFull = formatWorkspaceSegments(state.workspace, false, options.style, options.locale);
-  const workspaceShort = formatWorkspaceSegments(state.workspace, true, options.style, options.locale);
+  const contextCompact = formatContextNumbersSegment(numbers, options.style);
+  const identityFull = formatIdentitySegments(state, securityBadge, false, options.style, options.locale);
+  const identityShort = formatIdentitySegments(state, securityBadge, true, options.style, options.locale);
 
   const full = alignRight(
-    joinSegments([model, securityBadge, contextFull, ...workspaceFull], options.style),
+    joinSegments([model, ...identityFull, contextFull, timerSegment], options.style),
     sessionFull,
     width,
     options.style
   );
   if (full !== undefined) return full;
 
-  const shortWorkspace = alignRight(
-    joinSegments([model, securityBadge, contextFull, ...workspaceShort], options.style),
+  const shortIdentity = alignRight(
+    joinSegments([model, ...identityShort, contextFull, timerSegment], options.style),
     sessionFull,
     width,
     options.style
   );
-  if (shortWorkspace !== undefined) return shortWorkspace;
+  if (shortIdentity !== undefined) return shortIdentity;
 
-  const compactWorkspace = alignRight(
-    joinSegments([model, securityBadge, contextCompact, ...workspaceShort], options.style),
+  const compactIdentity = alignRight(
+    joinSegments([model, ...identityShort, contextCompact, timerSegment], options.style),
     sessionFull,
     width,
     options.style
   );
-  if (compactWorkspace !== undefined) return compactWorkspace;
+  if (compactIdentity !== undefined) return compactIdentity;
+
+  const fullWithoutIdentity = alignRight(
+    joinSegments([model, contextFull, timerSegment], options.style),
+    sessionFull,
+    width,
+    options.style
+  );
+  if (fullWithoutIdentity !== undefined) return fullWithoutIdentity;
 
   const compact = alignRight(
-    joinSegments([model, securityBadge, contextCompact], options.style),
+    joinSegments([model, contextCompact, timerSegment], options.style),
     sessionFull,
     width,
     options.style
   );
   if (compact !== undefined) return compact;
 
-  const compactWithoutSecurity = alignRight(
-    joinSegments([model, contextCompact], options.style),
-    sessionFull,
-    width,
-    options.style
-  );
-  if (compactWithoutSecurity !== undefined) return compactWithoutSecurity;
-
   const narrowCost = cost === undefined
     ? undefined
     : budget === undefined ? cost : `${cost}/${formatUsdAmount(budget.maxEstimatedCostUsd, options.locale)}`;
   const narrowSession = joinSegments([
-    formatSessionValue(`${sessionIcon} ${timer}`, options.style),
-    narrowCost === undefined ? formatSessionValue(sessionTokens, options.style) : undefined,
+    formatSessionValue(sessionTokens, options.style),
     formatCostValue(narrowCost, state, options.style),
   ], options.style);
   const narrow = alignRight(
-    joinSegments([`${narrowModel} ${symbol}`, `ctx ${percent}`], options.style),
+    joinSegments([`${narrowModel} ${symbol}`, contextCompact, timerSegment], options.style),
     narrowSession,
     width,
     options.style
   );
   if (narrow !== undefined) return narrow;
 
-  if (narrowCost !== undefined) {
-    return truncateVisibleCells(joinSegments([timer, narrowCost], options.style), width);
+  const essential = alignRight(
+    joinSegments([contextCompact, timerSegment], options.style),
+    narrowSession,
+    width,
+    options.style
+  );
+  if (essential !== undefined) return essential;
+
+  const telemetry = joinSegments([sessionTokens, narrowCost], options.style);
+  if (telemetry.length > 0 && stringWidth(telemetry) <= width) {
+    return telemetry;
   }
-  const minimal = joinSegments([`${minimalModel} ${symbol}`, percent, timer], options.style);
+  if (narrowCost !== undefined) {
+    return truncateVisibleCells(narrowCost, width);
+  }
+  const minimal = joinSegments([`${minimalModel} ${symbol}`, numbers, timer], options.style);
   if (stringWidth(minimal) <= width) return minimal;
-  return truncateVisibleCells(joinSegments([percent, timer], options.style), width);
+  const contextAndTimer = joinSegments([numbers, timer], options.style);
+  if (stringWidth(contextAndTimer) <= width) return contextAndTimer;
+  return truncateVisibleCells(numbers, width);
 }
 
 export function renderContextBar(percent: number, cells = CONTEXT_BAR_CELLS): string {
@@ -191,14 +203,19 @@ function formatSecurityBadge(
   return tokens === undefined ? badge : styleColor(style, badge, tokens.palette.caution);
 }
 
-function formatPercent(percent: number): string {
-  return `${Math.round(clampPercent(percent))}%`;
-}
-
 function formatContextNumbers(state: StatusRailState): string {
   const used = state.context.usedTokens === undefined ? "--" : formatTokenCount(state.context.usedTokens);
   if (state.context.totalTokens === undefined) return used;
   return `${used}/${formatTokenCount(state.context.totalTokens)}`;
+}
+
+function formatContextNumbersSegment(
+  value: string,
+  style: OperatorConsoleStyle | undefined
+): string {
+  if (style === undefined) return `ctx ${value}`;
+  const tokens = style.tokens.contract;
+  return `${styleColor(style, "ctx", tokens.text.muted)} ${styleColor(style, value, tokens.text.secondary)}`;
 }
 
 function formatContextSegment(
@@ -256,24 +273,27 @@ function formatSessionTokens(
   return locale === "ar" ? isolateLtr(formatted) : formatted;
 }
 
-function formatWorkspaceSegments(
-  workspace: StatusRailState["workspace"],
+function formatIdentitySegments(
+  state: StatusRailState,
+  securityBadge: string | undefined,
   compact: boolean,
   style: OperatorConsoleStyle | undefined,
   locale: OperatorConsoleLocale | undefined
 ): readonly string[] {
+  if (securityBadge !== undefined) return [securityBadge];
+  const workspace = state.workspace;
   if (workspace === undefined) return [];
   const label = isolateTechnicalToken(compact ? workspace.shortLabel : workspace.label, locale);
-  const branch = workspace.branch === undefined
+  const branch = compact || workspace.branch === undefined
     ? undefined
     : isolateTechnicalToken(workspace.branch, locale);
   if (style === undefined) return [label, branch].filter((value): value is string => value !== undefined);
   const tokens = style.tokens.contract;
   return [
-    styleColor(style, label, tokens.text.secondary),
+    styleColor(style, label, tokens.interactive.primary),
     ...(branch === undefined
       ? []
-      : [styleColor(style, branch, tokens.interactive.primary)]),
+      : [styleColor(style, branch, tokens.text.secondary)]),
   ];
 }
 
@@ -318,7 +338,10 @@ function alignRight(
   width: number,
   style: OperatorConsoleStyle | undefined
 ): string | undefined {
-  if (right.length === 0) return stringWidth(left) <= width ? left : undefined;
+  if (right.length === 0) {
+    const leftWidth = stringWidth(left);
+    return leftWidth <= width ? `${left}${" ".repeat(width - leftWidth)}` : undefined;
+  }
   const minimumWidth = stringWidth(left) + stringWidth(SEGMENT_SEPARATOR) + stringWidth(right);
   if (minimumWidth > width) return undefined;
   const flexibleSpace = width - minimumWidth;

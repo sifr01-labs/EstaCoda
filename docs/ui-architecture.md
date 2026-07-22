@@ -214,16 +214,21 @@ status rail
 setup/select panels where applicable
 ```
 
-The persistent status rail contains only model, context usage/bar, session
-cost, and session timer. Cost is projected from the canonical provider-request
-ledger and remains visible when the layout narrows. Tools, approvals,
-workspace/trust, setup, steering, channel state, and active-turn noise belong
-in contextual surfaces and must not be smuggled into the rail.
+The persistent status rail contains model, one identity badge (`YOLO` when
+active, otherwise the bounded workspace label), context usage/bar followed by
+the session timer, and cumulative session tokens/cost aligned at the far right.
+Cost is projected from the canonical provider-request ledger and remains
+visible when the layout narrows. Tools, approvals, workspace trust/configuration,
+setup, steering, channel state, and active-turn noise belong in contextual
+surfaces and must not be smuggled into the rail.
 
 The context bar uses only the active session's last provider-reported input
 token count. It holds that value across turns and usage-less responses and
 shows `--/total` before the first measurement or after compaction/model changes.
-Live and assembled-prompt estimates are not rail state.
+Responsive layouts retain `used/total`, shortening workspace/branch detail and
+dropping the visual bar before the bounded workspace label or context counts;
+they never substitute a percentage. Live and assembled-prompt estimates are not
+rail state.
 
 Delivered responses show one compact visible-turn footer inside the assistant
 message frame, such as `15k tokens · ≈ $0.55`. Completed active-work cards do

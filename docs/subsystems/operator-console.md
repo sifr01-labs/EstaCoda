@@ -70,19 +70,22 @@ setup/select panels where applicable
 The persistent status rail contains only:
 
 - model
-- context usage / context bar
-- session cost
-- session timer
+- one identity badge: `YOLO` when active, otherwise the bounded workspace label
+- context usage / context bar, followed immediately by the session timer
+- cumulative session tokens and cost aligned at the far right
 
-Tools, approvals, attachments, steering, workspace/trust, setup state, channel
-state, and active-turn noise must not be added to the persistent rail. They get
-contextual surfaces.
+Tools, approvals, attachments, steering, workspace trust/configuration, setup
+state, channel state, and active-turn noise must not be added to the persistent
+rail. They get contextual surfaces. The workspace identity is a sanitized label,
+not a trust or configuration indicator.
 
 Session cost is a projection of persisted canonical provider-request rows. The
-rail prioritizes the cost segment over context detail in narrow layouts. It is
-restored after restart and follows only verified transcript-compression
-ancestry; an ordinary parent or delegated worker-session relationship does not
-join session totals.
+rail keeps `used/total` context counts instead of falling back to a percentage;
+it shortens the workspace identity and removes branch/bar detail before removing
+the bounded workspace label or those counts. At the narrowest widths, cumulative
+cost remains the final priority. Session telemetry is restored after restart and
+follows only verified transcript-compression ancestry; an ordinary parent or
+delegated worker-session relationship does not join session totals.
 
 ## State Model Sketch
 
@@ -749,7 +752,8 @@ Do not reintroduce:
 - tool activity caps in the live active-work model;
 - approval controls that grant permission directly from UI state;
 - steering paths that treat `Ctrl+C` as steer submit/cancel;
-- workspace/trust/setup/tool/approval/steer/channel data in the persistent rail.
+- workspace trust/configuration, setup, tool, approval, steer, or channel data
+  in the persistent rail; only the bounded workspace identity label belongs there.
 
 ## Failure, Debug, And Audit Guidance
 

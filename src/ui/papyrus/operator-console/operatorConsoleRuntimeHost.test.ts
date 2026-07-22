@@ -151,7 +151,8 @@ describe("OperatorConsoleRuntimeHost", () => {
       branch: "main",
     });
     expect(host.render().lines.at(-1)).toContain("~/Documents/…/EstaCoda · main");
-    expect(host.render().lines.at(-1)?.endsWith("◷ 01:12 · 31.4k tok · $0.08")).toBe(true);
+    expect(host.render().lines.at(-1)).toContain("18.4k/262k · ◷ 01:12");
+    expect(host.render().lines.at(-1)?.endsWith("31.4k tok · $0.08")).toBe(true);
   });
 
   it("updates terminal metrics and keeps rendered lines width-bounded", () => {
