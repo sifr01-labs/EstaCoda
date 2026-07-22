@@ -28,6 +28,12 @@ export const plainOverlay: TokenOverlay = {
       empty: "-",
       thumb: ">",
     },
+    trace: {
+      event: ".",
+      selected: "o",
+      live: ">",
+      earlier: "<",
+    },
   },
   toolIcon: {
     terminal: "$",

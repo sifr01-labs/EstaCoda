@@ -1,5 +1,6 @@
 import type { TerminalCapabilities } from "../../../contracts/ui.js";
 import type { ResolvedTokens } from "../../../contracts/ui-tokens.js";
+import { padVisibleEnd, truncateVisible } from "../../renderers/layout.js";
 
 export type OperatorConsoleStyle = {
   readonly tokens: ResolvedTokens;
@@ -35,7 +36,19 @@ export function styleBgColor(
 ): string {
   if (style === undefined || !style.supportsColor) return text;
   const { r, g, b } = hexToRgb(hex);
-  return `\x1b[48;2;${r};${g};${b}m${text}\x1b[0m`;
+  const background = `\x1b[48;2;${r};${g};${b}m`;
+  return `${background}${text.replaceAll("\x1b[0m", `\x1b[0m${background}`)}\x1b[0m`;
+}
+
+export function styleBackgroundRow(
+  style: OperatorConsoleStyle | undefined,
+  text: string,
+  width: number,
+  hex: string
+): string {
+  const normalizedWidth = Math.max(0, Math.floor(width));
+  const padded = padVisibleEnd(truncateVisible(text, normalizedWidth, "…"), normalizedWidth);
+  return styleBgColor(style, padded, hex);
 }
 
 export function styleBold(style: OperatorConsoleStyle | undefined, text: string): string {

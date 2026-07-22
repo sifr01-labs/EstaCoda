@@ -21,6 +21,18 @@ export interface TokenSeverity {
   info: string;
 }
 
+export interface TokenTrace {
+  terminal: string;
+  search: string;
+  plan: string;
+  read: string;
+  edit: string;
+  answer: string;
+  wait: string;
+  finish: string;
+  failed: string;
+}
+
 export interface TokenSurface {
   bg: string;
   bgElevated: string;
@@ -82,6 +94,12 @@ export interface TokenGlyph {
     empty: string;
     thumb: string;
   };
+  trace: {
+    event: string;
+    selected: string;
+    live: string;
+    earlier: string;
+  };
 }
 
 export interface TokenBranding {
@@ -102,6 +120,7 @@ export interface TokenBehavior {
 export interface UiTokenContract {
   readonly palette: TokenColors;
   readonly severity: TokenSeverity;
+  readonly trace: TokenTrace;
   readonly surface: TokenSurface;
   readonly text: TokenText;
   readonly interactive: TokenInteractive;
@@ -114,15 +133,19 @@ export interface UiTokenContract {
 
 // A partial set of overrides that a skin or mode can apply.
 export type TokenOverlay = Partial<
-  Omit<UiTokenContract, "palette" | "severity" | "surface" | "text" | "interactive" | "motion" | "glyph" | "toolIcon" | "branding" | "behavior">
+  Omit<UiTokenContract, "palette" | "severity" | "trace" | "surface" | "text" | "interactive" | "motion" | "glyph" | "toolIcon" | "branding" | "behavior">
 > & {
   palette?: Partial<TokenColors>;
   severity?: Partial<TokenSeverity>;
+  trace?: Partial<TokenTrace>;
   surface?: Partial<TokenSurface>;
   text?: Partial<TokenText>;
   interactive?: Partial<TokenInteractive>;
   motion?: TokenMotionOverlay;
-  glyph?: Partial<TokenGlyph>;
+  glyph?: Partial<Omit<TokenGlyph, "progress" | "trace">> & {
+    progress?: Partial<TokenGlyph["progress"]>;
+    trace?: Partial<TokenGlyph["trace"]>;
+  };
   toolIcon?: Readonly<Record<string, string>>;
   branding?: Partial<TokenBranding>;
   behavior?: Partial<TokenBehavior>;

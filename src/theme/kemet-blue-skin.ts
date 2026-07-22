@@ -47,6 +47,17 @@ export const kemetBlueSkin: ThemeAwareSkin = {
     severity: {
       info: "#5AACFF",
     },
+    trace: {
+      terminal: "#B0B0B0",
+      search: "#5AACFF",
+      plan: "#B899FF",
+      read: "#7BBFFF",
+      edit: "#40E0D0",
+      answer: "#7BD88F",
+      wait: "#FFB454",
+      finish: "#4CAF50",
+      failed: "#EF5350",
+    },
     text: {
       agentMessage: "#FFFFFF",
     },
@@ -69,6 +80,17 @@ export const kemetBlueSkin: ThemeAwareSkin = {
     },
     severity: {
       info: "#0057D9",
+    },
+    trace: {
+      terminal: "#616161",
+      search: "#0057D9",
+      plan: "#6D28D9",
+      read: "#2563EB",
+      edit: "#008C95",
+      answer: "#2E7D32",
+      wait: "#B45309",
+      finish: "#2E7D32",
+      failed: "#C62828",
     },
     motion: {
       waiting: { color: "#0057D9" },

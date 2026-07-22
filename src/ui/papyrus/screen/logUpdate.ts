@@ -1,5 +1,5 @@
 import { cursorPosition, eraseLine } from "../termio/csi.js";
-import type { TextStyle } from "../termio/types.js";
+import type { Color, TextStyle } from "../termio/types.js";
 import type { Diff, Frame } from "./frame.js";
 import { shouldClearScreen } from "./frame.js";
 import { optimize } from "./optimizer.js";
@@ -74,15 +74,29 @@ function serializeStyle(style: TextStyle): string {
   if (style.inverse) codes.push(7);
   if (style.hidden) codes.push(8);
   if (style.strikethrough) codes.push(9);
-  if (style.fg.type === "named") {
-    const index = namedColorIndex(style.fg.name);
-    codes.push(index < 8 ? 30 + index : 90 + index - 8);
-  }
-  if (style.bg.type === "named") {
-    const index = namedColorIndex(style.bg.name);
-    codes.push(index < 8 ? 40 + index : 100 + index - 8);
-  }
+  appendColorCodes(codes, style.fg, 30, 90, 38);
+  appendColorCodes(codes, style.bg, 40, 100, 48);
   return codes.length === 0 ? "" : `\x1b[${codes.join(";")}m`;
+}
+
+function appendColorCodes(
+  codes: number[],
+  color: Color,
+  namedBase: number,
+  brightBase: number,
+  extendedBase: number
+): void {
+  if (color.type === "default") return;
+  if (color.type === "named") {
+    const index = namedColorIndex(color.name);
+    codes.push(index < 8 ? namedBase + index : brightBase + index - 8);
+    return;
+  }
+  if (color.type === "indexed") {
+    codes.push(extendedBase, 5, color.index);
+    return;
+  }
+  codes.push(extendedBase, 2, color.r, color.g, color.b);
 }
 
 function isDefaultStyle(style: TextStyle): boolean {

@@ -11,6 +11,17 @@ describe("resolveTokens", () => {
     expect(r.contract.palette.accent).toBe("#0057D9");
     expect(r.contract.palette.action).toBe("#008C95");
     expect(r.contract.palette.caution).toBe("#B45309");
+    expect(r.contract.trace).toMatchObject({
+      terminal: "#616161",
+      search: "#0057D9",
+      plan: "#6D28D9",
+      read: "#2563EB",
+      edit: "#008C95",
+      answer: "#2E7D32",
+      wait: "#B45309",
+      finish: "#2E7D32",
+      failed: "#C62828",
+    });
     expect(r.contract.behavior.allowAnsiColor).toBe(true);
     expect(r.contract.behavior.allowAnimation).toBe(true);
   });
@@ -23,6 +34,8 @@ describe("resolveTokens", () => {
     expect(r.contract.palette.action).toBe("#40E0D0");
     expect(r.contract.palette.caution).toBe("#FFB454");
     expect(r.contract.surface.bg).toBe("#1A1A1A");
+    expect(r.contract.trace.search).toBe("#5AACFF");
+    expect(r.contract.trace.edit).toBe("#40E0D0");
   });
 
   it("resolves plain + light + kemetBlue", () => {
@@ -34,6 +47,7 @@ describe("resolveTokens", () => {
     expect(r.contract.behavior.allowAnsiColor).toBe(false);
     expect(r.contract.behavior.allowAnimation).toBe(false);
     expect(r.contract.behavior.allowEmoji).toBe(false);
+    expect(r.contract.glyph.trace).toEqual({ event: ".", selected: "o", live: ">", earlier: "<" });
   });
 
   it("resolves plain + dark + kemetBlue", () => {
@@ -87,6 +101,16 @@ describe("theme invariants", () => {
     expect(light.severity.warn).not.toBe(light.palette.brand);
   });
 
+  it("trace colors are complete semantic theme tokens", () => {
+    for (const theme of ["light", "dark"] as const) {
+      const trace = getBaseTheme(theme).trace;
+      expect(Object.keys(trace).sort()).toEqual([
+        "answer", "edit", "failed", "finish", "plan", "read", "search", "terminal", "wait"
+      ]);
+      for (const color of Object.values(trace)) expect(color).toMatch(/^#[0-9A-F]{6}$/u);
+    }
+  });
+
   it("surfaces are neutral in light theme", () => {
     const t = getBaseTheme("light");
     expect(t.surface.bg).toBe("#FFFFFF");
@@ -128,6 +152,11 @@ describe("plain mode invariants", () => {
     for (const icon of Object.values(r.contract.toolIcon)) {
       expect(icon.charCodeAt(0)).toBeLessThan(128);
     }
+  });
+
+  it("plain forces ASCII trace glyphs", () => {
+    const traceGlyphs = resolveTokens("plain", "dark", "kemetBlue").contract.glyph.trace;
+    for (const glyph of Object.values(traceGlyphs)) expect(glyph.charCodeAt(0)).toBeLessThan(128);
   });
 
   it("plain disables ANSI color", () => {
@@ -236,6 +265,12 @@ describe("kemetBlue skin overlay", () => {
     expect(light.contract.palette.accent).toBe("#0057D9");
     expect(dark.contract.palette.accent).toBe("#4EA1FF");
     expect(light.contract.palette.accent).not.toBe(dark.contract.palette.accent);
+  });
+
+  it("resolves trace glyphs independently from progress glyphs", () => {
+    const glyph = resolveTokens("standard", "dark", "kemetBlue").contract.glyph;
+    expect(glyph.trace).toEqual({ event: "■", selected: "□", live: "◆", earlier: "‹" });
+    expect(glyph.trace.event).not.toBe(glyph.progress.filled);
   });
 });
 

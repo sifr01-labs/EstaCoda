@@ -13,6 +13,17 @@ export const darkTheme: UiTokenContract = {
     warn: "#FFA726",
     info: "#888888",
   },
+  trace: {
+    terminal: "#A0A0A0",
+    search: "#64B5F6",
+    plan: "#B39DDB",
+    read: "#90CAF9",
+    edit: "#4DB6AC",
+    answer: "#81C784",
+    wait: "#FFB74D",
+    finish: "#4CAF50",
+    failed: "#EF5350",
+  },
   surface: {
     bg: "#1A1A1A",
     bgElevated: "#252525",
@@ -54,6 +65,12 @@ export const darkTheme: UiTokenContract = {
       filled: "█",
       empty: "░",
       thumb: "▌",
+    },
+    trace: {
+      event: "■",
+      selected: "□",
+      live: "◆",
+      earlier: "‹",
     },
   },
   toolIcon: {

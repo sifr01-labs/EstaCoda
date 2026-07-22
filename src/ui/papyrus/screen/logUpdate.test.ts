@@ -51,6 +51,24 @@ describe("Papyrus logUpdate diff engine", () => {
     expect(renderDiff(diff)).toContain("\x1b[31ma\x1b[0m");
   });
 
+  it("serializes token-ready RGB foreground and background cell styles", () => {
+    const plain = createScreen(2, 1);
+    const styled = createScreen(2, 1);
+    writeToScreen(styled, 0, 0, "\x1b[38;2;1;2;3;48;2;4;5;6ma");
+
+    const diff = diffFrames(createFrame(plain), createFrame(styled));
+
+    expect(diff).toContainEqual(expect.objectContaining({
+      type: "cellRun",
+      content: "a",
+      style: expect.objectContaining({
+        fg: { type: "rgb", r: 1, g: 2, b: 3 },
+        bg: { type: "rgb", r: 4, g: 5, b: 6 }
+      })
+    }));
+    expect(renderDiff(diff)).toContain("\x1b[38;2;1;2;3;48;2;4;5;6ma\x1b[0m");
+  });
+
   it("represents reset/default style when changing from styled to plain", () => {
     const styled = createScreen(3, 1);
     const plain = createScreen(3, 1);
