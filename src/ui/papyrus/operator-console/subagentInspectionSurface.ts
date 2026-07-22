@@ -49,7 +49,7 @@ const COPY: Readonly<Record<OperatorConsoleLocale, SubagentCopy>> = {
     retainedTimeline: "Retained safe activity",
     noActivity: "No retained safe activity yet",
     resultSummary: "Result summary",
-    filesAndArtifacts: "Relevant files, artifacts, and result handles",
+    filesAndArtifacts: "Results and artifacts",
     attempts: "Attempts and retries",
     current: "current",
     dependencies: "Dependencies",
@@ -71,7 +71,7 @@ const COPY: Readonly<Record<OperatorConsoleLocale, SubagentCopy>> = {
     retainedTimeline: "النشاط الآمن المحفوظ",
     noActivity: "لا يوجد نشاط آمن محفوظ بعد",
     resultSummary: "ملخص النتيجة",
-    filesAndArtifacts: "الملفات والمخرجات ومراجع النتائج ذات الصلة",
+    filesAndArtifacts: "النتائج والمخرجات",
     attempts: "المحاولات وإعادات المحاولة",
     current: "الحالية",
     dependencies: "الاعتماديات",
@@ -161,7 +161,16 @@ export function subagentInspectionContentLines(
   const traceCard: TaskCardState = {
     ...card,
     subagents: [subagent],
-    trace: { events: subagent.trace, hasEarlierEvents: false },
+    trace: {
+      events: subagent.trace,
+      ...(subagent.traceSummary?.totalEvents === undefined
+        ? {}
+        : { totalEvents: subagent.traceSummary.totalEvents }),
+      ...(subagent.traceSummary?.categoryCounts === undefined
+        ? {}
+        : { categoryCounts: subagent.traceSummary.categoryCounts }),
+      hasEarlierEvents: subagent.traceSummary?.hasEarlierEvents ?? false,
+    },
   };
   lines.push("", ...renderActivityTraceSurface(traceCard, options.inspection?.subagentTrace, {
     width: contentWidth,

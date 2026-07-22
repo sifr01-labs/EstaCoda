@@ -3167,10 +3167,17 @@ export function taskProjectionToCard(task: TaskStatusProjection): TaskCardState 
       ...(subagent.latestAttempt === undefined ? {} : { latestAttempt: taskAttemptToCard(subagent.latestAttempt) }),
       ...(subagent.activeAttempt === undefined ? {} : { activeAttempt: taskAttemptToCard(subagent.activeAttempt) }),
       trace: subagent.trace.map((event) => ({ ...event })),
+      traceSummary: {
+        totalEvents: subagent.traceSummary.totalEvents,
+        categoryCounts: { ...subagent.traceSummary.categoryCounts },
+        hasEarlierEvents: subagent.traceSummary.hasEarlierEvents
+      },
       results: subagent.results.map(taskResultToCard)
     })),
     trace: {
       events: task.trace.events.map((event) => ({ ...event })),
+      totalEvents: task.trace.totalEvents,
+      categoryCounts: { ...task.trace.categoryCounts },
       hasEarlierEvents: task.trace.hasEarlierEvents
     },
     childTasks: task.childTasks.map((child) => ({ ...child })),

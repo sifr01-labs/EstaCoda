@@ -171,6 +171,8 @@ export type TaskCardActivityState = {
 
 export type TaskCardTraceState = {
   readonly events: readonly TaskCardActivityState[];
+  readonly totalEvents?: number;
+  readonly categoryCounts?: Readonly<Record<TaskCardActivityState["category"], number>>;
   readonly hasEarlierEvents: boolean;
 };
 
@@ -210,6 +212,7 @@ export type TaskCardSubagentState = {
   readonly latestAttempt?: TaskCardAttemptState;
   readonly activeAttempt?: TaskCardAttemptState;
   readonly trace: readonly TaskCardActivityState[];
+  readonly traceSummary?: Omit<TaskCardTraceState, "events">;
   readonly results: readonly TaskCardResultState[];
 };
 

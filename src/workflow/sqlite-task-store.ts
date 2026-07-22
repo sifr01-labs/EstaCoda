@@ -46,6 +46,7 @@ import type {
   RenewTaskAttemptLeaseInput,
   RenewTaskHostLeaseInput,
   SettleTaskDeliveryInput,
+  TaskEventTraceSummary,
   TaskStore
 } from "./task-store.js";
 
@@ -67,6 +68,32 @@ export class TaskStoreIntegrityError extends Error {
     this.name = "TaskStoreIntegrityError";
   }
 }
+
+const TASK_EVENT_TRACE_CATEGORY_SQL = `case
+  when json_type(data_json, '$.activity') = 'object'
+    and json_extract(data_json, '$.activity.kind') in ('worker', 'provider', 'tool', 'assistant')
+    and json_type(data_json, '$.activity.label') = 'text'
+    and length(json_extract(data_json, '$.activity.label')) between 1 and 160
+    and json_extract(data_json, '$.activity.traceCategory') in
+      ('terminal', 'search', 'plan', 'read', 'edit', 'answer', 'wait', 'finish', 'failed')
+    and (
+      json_extract(data_json, '$.activity.kind') <> 'assistant'
+      or (
+        json_type(data_json, '$.activity.assistantPreview') = 'text'
+        and length(json_extract(data_json, '$.activity.assistantPreview')) <= 160
+      )
+    )
+    then json_extract(data_json, '$.activity.traceCategory')
+  when json_extract(data_json, '$.to') in ('completed', 'succeeded') then 'finish'
+  when json_extract(data_json, '$.to') in ('waiting_for_input', 'waiting_for_approval', 'blocked') then 'wait'
+  when json_extract(data_json, '$.to') in ('failed', 'cancelled') then 'failed'
+  when kind in ('attempt-waiting', 'approval-requested') then 'wait'
+  when kind in ('attempt-completed', 'result-recorded') then 'finish'
+  when kind in (
+    'attempt-failed', 'attempt-cancelled', 'attempt-interrupted', 'attempt-expired', 'plan-revision-rejected'
+  ) then 'failed'
+  else 'plan'
+end`;
 
 export class SQLiteTaskStore implements TaskStore {
   readonly #db: SQLiteDatabase;
@@ -1026,6 +1053,25 @@ export class SQLiteTaskStore implements TaskStore {
       : " order by timestamp, id limit ?";
     params.push(boundedLimit(options.limit));
     return this.#db.query<EventRow>(sql).all(...params).map(rowToEvent);
+  }
+
+  summarizeEventTrace(taskId: string): TaskEventTraceSummary {
+    if (this.getTask(taskId) === null) return { totalEvents: 0, counts: [] };
+    const rows = this.#db.query<EventTraceCountRow>(
+      `select step_id, ${TASK_EVENT_TRACE_CATEGORY_SQL} as category, count(*) as event_count
+       from task_events
+       where profile_id = ? and task_id = ?
+       group by step_id, category
+       order by step_id, category`
+    ).all(this.#profileId, taskId);
+    return {
+      totalEvents: rows.reduce((total, row) => total + row.event_count, 0),
+      counts: rows.map((row) => ({
+        ...(row.step_id === null ? {} : { stepId: row.step_id }),
+        category: row.category,
+        count: row.event_count
+      }))
+    };
   }
 
   linkSession(link: TaskSessionLink): void {
@@ -2269,6 +2315,12 @@ type EventRow = {
   kind: string;
   timestamp: string;
   data_json: string;
+};
+
+type EventTraceCountRow = {
+  step_id: string | null;
+  category: "terminal" | "search" | "plan" | "read" | "edit" | "answer" | "wait" | "finish" | "failed";
+  event_count: number;
 };
 
 type SessionLinkRow = {

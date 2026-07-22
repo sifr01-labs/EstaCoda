@@ -97,13 +97,20 @@ export function renderActivityTraceSurface(
   const tokens = style?.tokens.contract;
   const followLive = inspection?.followLive ?? true;
   const window = getActivityTraceWindow(card.trace.events, inspection, width);
-  const eventLabel = card.trace.events.length === 1 ? copy.event : copy.events;
-  const title = `${copy.activityTrace} · ${card.trace.events.length} ${eventLabel}`;
+  const totalEvents = card.trace.totalEvents ?? card.trace.events.length;
+  const categoryCounts = card.trace.categoryCounts ?? countTraceCategories(card.trace.events);
+  const eventLabel = totalEvents === 1 ? copy.event : copy.events;
+  const title = `${copy.activityTrace} · ${totalEvents} ${eventLabel}`;
   const styledTitle = tokens === undefined
     ? title
     : styleColor(style, styleBold(style, title), tokens.palette.accent);
   if (window.selectedEvent === undefined) {
-    return [styledTitle, `  ${copy.noActivity}`, formatTraceCounters(card.trace.events, locale, style)];
+    return [
+      styledTitle,
+      `  ${copy.noActivity}`,
+      ...(card.trace.hasEarlierEvents ? [`  ${tokens?.glyph.trace.earlier ?? "<"} ${copy.earlierOmitted}`] : []),
+      formatTraceCounters(categoryCounts, locale, style),
+    ];
   }
 
   const omitted = card.trace.hasEarlierEvents
@@ -138,7 +145,7 @@ export function renderActivityTraceSurface(
     styledTitle,
     truncateVisible(traceLine, width, "…"),
     truncateVisible(callout, width, "…"),
-    formatTraceCounters(card.trace.events, locale, style, card.trace.hasEarlierEvents),
+    formatTraceCounters(categoryCounts, locale, style),
     ...(followLive ? [] : [`  ${copy.returnToLive}`]),
   ];
 }
@@ -229,23 +236,31 @@ function traceEventOrigin(
 }
 
 function formatTraceCounters(
-  events: readonly TaskCardActivityState[],
+  counts: Readonly<Record<TaskCardActivityState["category"], number>>,
   locale: OperatorConsoleLocale,
-  style: OperatorConsoleStyle | undefined,
-  retainedOnly = false
+  style: OperatorConsoleStyle | undefined
 ): string {
   const tokens = style?.tokens.contract;
-  const counts = new Map<TaskCardActivityState["category"], number>();
-  for (const event of events) counts.set(event.category, (counts.get(event.category) ?? 0) + 1);
   const values = TRACE_CATEGORIES.flatMap((category) => {
-    const count = counts.get(category) ?? 0;
+    const count = counts[category];
     if (count === 0) return [];
     const glyph = tokens?.glyph.trace.event ?? ".";
     const color = tokens?.trace[category];
     const styledGlyph = color === undefined ? glyph : styleColor(style, glyph, color);
     return [`${styledGlyph} ${formatCategory(category, locale)} ×${count}`];
   });
-  return `  ${retainedOnly ? `${COPY[locale].retained} · ` : ""}${values.join("  ")}`;
+  return `  ${values.join("  ")}`;
+}
+
+function countTraceCategories(
+  events: readonly TaskCardActivityState[]
+): Record<TaskCardActivityState["category"], number> {
+  const result = Object.fromEntries(TRACE_CATEGORIES.map((category) => [category, 0])) as Record<
+    TaskCardActivityState["category"],
+    number
+  >;
+  for (const event of events) result[event.category] += 1;
+  return result;
 }
 
 function formatCategory(category: TaskCardActivityState["category"], locale: OperatorConsoleLocale): string {

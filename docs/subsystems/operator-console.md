@@ -379,22 +379,27 @@ square is the inspected event; the separate live-tail marker is the newest
 event. Selecting history disables follow-live and exposes `Return to live`.
 Overflow uses a bounded readable window with an earlier-event count. The view
 may state `N of M Steps settled`, but never derives or renders a Task completion
-percentage.
+percentage. All-time counters come from profile-scoped aggregate metadata; the
+projection does not load or expose omitted Event payloads.
 
 Subagent inspection reuses the workspace filtered by stable Step ID. It shows
 the Subagent objective, current safe activity, usage/cost, complete retained
 safe trace, assistant preview/final result, retry Attempts, dependencies,
 blockers, results, and artifacts. `Complete retained safe trace` does not mean
 raw reasoning, raw prompts, credentials, tool arguments/results, or unbounded
-provider text.
+provider text. The Results and artifacts section is limited to projected result
+handles and summaries; it does not claim a separate file-access history.
 
 `Tab` (when no higher-priority typeahead or attachment surface owns it) or
-`Ctrl+T` focuses Task cards, arrow keys change selection, and `Enter` opens the
-focused Task or Subagent. Trace events and `Return to live` are selectable with
+`Ctrl+T` focuses the Task header. `Up`/`Down` change Tasks, `Right` enters the
+visible Subagent grid, and the arrow keys then move among complete visible
+Subagent cards. `Enter` opens the focused Task header or opens a focused
+Subagent directly. Trace events and `Return to live` are selectable with
 the same keyboard and SGR mouse routes. `Up`/`Down`, `Page Up`/`Page Down`,
 `Home`, and `End` navigate or scroll according to the active inspection target;
 `Escape` unwinds Subagent to Task to main session without losing the underlying
-session state. Wheel input scrolls inspection, and terminal cleanup disables
+session state. Whole-Task selection adjusts scroll to keep the selected
+Subagent visible. Wheel input scrolls inspection, and terminal cleanup disables
 mouse tracking on normal exit, failure, and suspend.
 
 The existing Task refresh updates projections and newly settled provider usage

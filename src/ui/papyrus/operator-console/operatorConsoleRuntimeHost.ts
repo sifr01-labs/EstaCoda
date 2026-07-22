@@ -404,10 +404,23 @@ function cloneTaskSurfaceState(tasks: TaskSurfaceState): TaskSurfaceState {
           ? {}
           : { activeAttempt: { ...subagent.activeAttempt, usage: { ...subagent.activeAttempt.usage } } }),
         trace: subagent.trace.map((event) => ({ ...event })),
+        ...(subagent.traceSummary === undefined ? {} : {
+          traceSummary: {
+            ...(subagent.traceSummary.totalEvents === undefined
+              ? {}
+              : { totalEvents: subagent.traceSummary.totalEvents }),
+            ...(subagent.traceSummary.categoryCounts === undefined
+              ? {}
+              : { categoryCounts: { ...subagent.traceSummary.categoryCounts } }),
+            hasEarlierEvents: subagent.traceSummary.hasEarlierEvents
+          }
+        }),
         results: subagent.results.map((result) => ({ ...result }))
       })),
       trace: {
         events: card.trace.events.map((event) => ({ ...event })),
+        ...(card.trace.totalEvents === undefined ? {} : { totalEvents: card.trace.totalEvents }),
+        ...(card.trace.categoryCounts === undefined ? {} : { categoryCounts: { ...card.trace.categoryCounts } }),
         hasEarlierEvents: card.trace.hasEarlierEvents
       },
       recentActivity: card.recentActivity.map((activity) => ({ ...activity })),

@@ -32,7 +32,7 @@ import {
 } from "./task-tree-accounting.js";
 import { spendingBudgetSummary } from "../providers/provider-spend-projection.js";
 import { FixedTaskService } from "./fixed-task-service.js";
-import type { InitialTaskHostLeaseInput, TaskStore } from "./task-store.js";
+import type { InitialTaskHostLeaseInput, TaskEventTraceSummary, TaskStore } from "./task-store.js";
 import { taskToolCategory } from "./task-safe-activity.js";
 import type { TaskTraceCategory } from "./task-step-executor.js";
 import { orderTaskResults, taskPrimaryResult } from "./task-primary-result.js";
@@ -136,8 +136,12 @@ export type TaskActivityProjection = {
 
 export type TaskTraceEventProjection = TaskActivityProjection;
 
+export type TaskTraceCategoryCounts = Readonly<Record<TaskTraceCategory, number>>;
+
 export type TaskTraceProjection = {
   events: readonly TaskTraceEventProjection[];
+  totalEvents: number;
+  categoryCounts: TaskTraceCategoryCounts;
   hasEarlierEvents: boolean;
 };
 
@@ -172,6 +176,7 @@ export type TaskSubagentProjection = {
   latestAttempt?: TaskAttemptProjection;
   activeAttempt?: TaskAttemptProjection;
   trace: readonly TaskTraceEventProjection[];
+  traceSummary: Omit<TaskTraceProjection, "events">;
   results: readonly TaskResultProjection[];
 };
 
@@ -395,7 +400,8 @@ export class TaskOperatorService {
     const results = orderTaskResults(this.#store.listResults(task.id), primaryResult)
       .slice(0, MAX_PROJECTED_RESULTS)
       .map((result) => projectResult(result, result.id === primaryResult?.id));
-    const trace = this.#trace(task, steps);
+    const eventTraceSummary = this.#store.summarizeEventTrace(task.id);
+    const trace = this.#trace(task, steps, eventTraceSummary);
     const recentActivity = trace.events.slice(-MAX_RECENT_ACTIVITY).reverse();
     const projectedSteps = steps.slice(0, MAX_PROJECTED_STEPS).map((step) => {
       const stepAttempts = listStepTreeAttempts(this.#store, task.id, step.id);
@@ -424,7 +430,7 @@ export class TaskOperatorService {
     });
     const subagents = projectedSteps.flatMap((step) =>
       step.executorRole === "worker" || step.executorRole === "orchestrator"
-        ? [projectSubagent(task.id, step, trace.events, results)]
+        ? [projectSubagent(task.id, step, trace.events, eventTraceSummary, results)]
         : []
     );
     return {
@@ -492,7 +498,11 @@ export class TaskOperatorService {
     };
   }
 
-  #trace(task: Task, steps: readonly TaskStep[]): TaskTraceProjection {
+  #trace(
+    task: Task,
+    steps: readonly TaskStep[],
+    summary: TaskEventTraceSummary
+  ): TaskTraceProjection {
     const titles = new Map(steps.map((step) => [step.id, safeText(step.title, 80)]));
     const subagentIndices = new Map(steps
       .filter((step) => step.executor.role === "worker" || step.executor.role === "orchestrator")
@@ -514,7 +524,9 @@ export class TaskOperatorService {
           ? {}
           : { subagentIndex: subagentIndices.get(event.stepId) })
       })).reverse(),
-      hasEarlierEvents: events.length > MAX_PROJECTED_TRACE_EVENTS
+      totalEvents: summary.totalEvents,
+      categoryCounts: traceCategoryCounts(summary.counts),
+      hasEarlierEvents: summary.totalEvents > MAX_PROJECTED_TRACE_EVENTS
     };
   }
 
@@ -836,6 +848,7 @@ function projectSubagent(
   taskId: string,
   step: TaskStepProjection,
   trace: readonly TaskTraceEventProjection[],
+  traceSummary: TaskEventTraceSummary,
   results: readonly TaskResultProjection[]
 ): TaskSubagentProjection {
   if (step.executorRole === "synthesis") {
@@ -846,6 +859,9 @@ function projectSubagent(
   );
   const latestAttempt = step.latestAttempt;
   const currentAttempt = step.activeAttempt ?? latestAttempt;
+  const subagentTrace = trace.filter((event) => event.stepId === step.stepId);
+  const subagentTraceCounts = traceSummary.counts.filter((count) => count.stepId === step.stepId);
+  const subagentTraceTotal = subagentTraceCounts.reduce((total, count) => total + count.count, 0);
   return {
     stepId: step.stepId,
     position: step.position,
@@ -873,9 +889,32 @@ function projectSubagent(
     attempts,
     ...(latestAttempt === undefined ? {} : { latestAttempt }),
     ...(step.activeAttempt === undefined ? {} : { activeAttempt: step.activeAttempt }),
-    trace: trace.filter((event) => event.stepId === step.stepId),
+    trace: subagentTrace,
+    traceSummary: {
+      totalEvents: subagentTraceTotal,
+      categoryCounts: traceCategoryCounts(subagentTraceCounts),
+      hasEarlierEvents: subagentTraceTotal > subagentTrace.length
+    },
     results: results.filter((result) => result.stepId === step.stepId)
   };
+}
+
+function traceCategoryCounts(
+  counts: TaskEventTraceSummary["counts"]
+): TaskTraceCategoryCounts {
+  const result: Record<TaskTraceCategory, number> = {
+    terminal: 0,
+    search: 0,
+    plan: 0,
+    read: 0,
+    edit: 0,
+    answer: 0,
+    wait: 0,
+    finish: 0,
+    failed: 0
+  };
+  for (const count of counts) result[count.category] += count.count;
+  return result;
 }
 
 function elapsedMs(startedAt: string, endedAt: string | undefined, now: Date): number {

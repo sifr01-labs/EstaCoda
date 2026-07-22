@@ -19,6 +19,7 @@ import type {
   TaskStep
 } from "../contracts/task.js";
 import type { ProviderUsageEntry, ProviderUsageQuery } from "../contracts/provider-usage.js";
+import type { TaskTraceCategory } from "./task-step-executor.js";
 
 export type CreateTaskGraphInput = {
   task: Task;
@@ -41,6 +42,18 @@ export type ListTaskEventsOptions = {
   attemptId?: string;
   limit?: number;
   order?: "asc" | "desc";
+};
+
+export type TaskEventTraceCount = {
+  stepId?: string;
+  category: TaskTraceCategory;
+  count: number;
+};
+
+/** Bounded aggregate metadata only; no historical Event payloads leave the store. */
+export type TaskEventTraceSummary = {
+  totalEvents: number;
+  counts: readonly TaskEventTraceCount[];
 };
 
 export type AcquireTaskAttemptLeaseInput = {
@@ -170,6 +183,7 @@ export interface TaskStore {
 
   appendEvent(event: TaskEvent): void;
   listEvents(taskId: string, options?: ListTaskEventsOptions): TaskEvent[];
+  summarizeEventTrace(taskId: string): TaskEventTraceSummary;
 
   linkSession(link: TaskSessionLink): void;
   listSessionLinks(taskId: string): TaskSessionLink[];

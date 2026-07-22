@@ -316,28 +316,46 @@ describe("TaskOperatorService", () => {
   it("retains a bounded chronological safe Task trace and reports earlier history", () => {
     const created = service.begin({ objective: "Project a bounded trace.", workspace: workspace(), creatorSessionId: "owner" });
     const task = store.getTask(created.taskId)!;
+    const step = store.listSteps(task.id, task.activePlanRevisionId!)[0]!;
     store.atomicWrite((tx) => {
       for (let index = 0; index < 520; index += 1) {
         tx.appendEvent({
           id: `trace-event-${String(index).padStart(3, "0")}`,
           profileId: "alpha",
           taskId: task.id,
+          stepId: step.id,
           kind: "task-steered",
           timestamp: new Date(Date.parse(now()) + index + 1).toISOString(),
-          data: { guidance: "must-not-project" }
+          data: {
+            guidance: "must-not-project",
+            activity: {
+              kind: "tool",
+              label: `Safe trace event ${index}`,
+              traceCategory: index % 2 === 0 ? "search" : "read"
+            }
+          }
         });
       }
     });
 
-    const trace = service.status(task.id, "owner").trace;
+    const projection = service.status(task.id, "owner");
+    const trace = projection.trace;
 
     expect(trace.events).toHaveLength(512);
+    expect(trace.totalEvents).toBe(store.listEvents(task.id, { limit: 1_000 }).length);
+    expect(Object.values(trace.categoryCounts).reduce((total, count) => total + count, 0)).toBe(trace.totalEvents);
+    expect(trace.categoryCounts).toMatchObject({ search: 260, read: 260 });
     expect(trace.hasEarlierEvents).toBe(true);
     expect(trace.events[0]?.eventId).toBe("trace-event-008");
     expect(trace.events.at(-1)?.eventId).toBe("trace-event-519");
     expect(trace.events.every((event, index, events) =>
       index === 0 || event.timestamp >= events[index - 1]!.timestamp
     )).toBe(true);
+    expect(projection.subagents[0]?.traceSummary).toMatchObject({
+      totalEvents: expect.any(Number),
+      hasEarlierEvents: true,
+      categoryCounts: { search: 260, read: 260 }
+    });
     expect(JSON.stringify(trace)).not.toContain("must-not-project");
   });
 

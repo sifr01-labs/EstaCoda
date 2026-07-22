@@ -84,6 +84,57 @@ describe("durable Task surfaces", () => {
     expect(narrowText).toContain("+1 more Subagents");
   });
 
+  it("focuses and opens main-session Subagents directly with the keyboard", () => {
+    const style = createOperatorConsoleStyle({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const card = makeCard({ subagents: Array.from({ length: 4 }, (_, index) => makeSubagent(index + 1)) });
+    let state = createInitialOperatorConsoleState({
+      terminal: { width: 100, height: 30, isTty: true },
+      tasks: { cards: [card], selectedTaskId: card.taskId, scrollOffset: 0 },
+    });
+
+    state = routeTaskSurfaceKey(state, { type: "key", key: "tab" }, 24).state;
+    state = routeTaskSurfaceKey(state, { type: "key", key: "right" }, 24).state;
+    expect(state.focus.target).toEqual({ kind: "taskSubagent", taskId: card.taskId, stepId: "step-1" });
+    const focused = renderTaskCardSurface(state.tasks, {
+      width: 100,
+      height: 24,
+      style,
+      focusedSubagentStepId: "step-1",
+    });
+    expect(stripAnsi(focused[1] ?? "")).toContain("▌");
+    expect(focused[1]).toContain("\x1b[38;2;64;224;208m");
+
+    state = routeTaskSurfaceKey(state, { type: "key", key: "down" }, 24).state;
+    expect(state.focus.target).toEqual({ kind: "taskSubagent", taskId: card.taskId, stepId: "step-2" });
+    state = routeTaskSurfaceKey(state, { type: "key", key: "enter" }, 24).state;
+    expect(state.tasks.inspectedTaskId).toBe(card.taskId);
+    expect(state.tasks.inspection).toMatchObject({
+      selectedSubagentStepId: "step-2",
+      inspectedSubagentStepId: "step-2",
+    });
+  });
+
+  it("scrolls the whole-Task overview to keep keyboard-selected Subagents visible", () => {
+    const card = makeCard({ subagents: Array.from({ length: 8 }, (_, index) => makeSubagent(index + 1)) });
+    let state = createInitialOperatorConsoleState({
+      terminal: { width: 72, height: 10, isTty: true },
+      tasks: { cards: [card], selectedTaskId: card.taskId, scrollOffset: 0 },
+    });
+    state = routeTaskSurfaceKey(state, { type: "key", key: "tab" }, 10).state;
+    state = routeTaskSurfaceKey(state, { type: "key", key: "enter" }, 10).state;
+    for (let index = 1; index < 8; index += 1) {
+      state = routeTaskSurfaceKey(state, { type: "key", key: "down" }, 10).state;
+    }
+
+    expect(state.tasks.inspection?.selectedSubagentStepId).toBe("step-8");
+    expect(state.tasks.scrollOffset).toBeGreaterThan(0);
+    expect(renderTaskInspectionSurface(state.tasks, { width: 72, height: 10 }).join("\n"))
+      .toContain("Subagent 8");
+  });
+
   it("adds a third column only when seven Subagents remain readable", () => {
     const card = makeCard({ subagents: Array.from({ length: 7 }, (_, index) => makeSubagent(index + 1)) });
     const threeColumns = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 140, isTty: true });
@@ -313,6 +364,8 @@ describe("durable Task surfaces", () => {
     expect(text).toContain("Main session / Task ⁨T-104⁩ / Subagent 2");
     expect(text).toContain("Validate comparison criteria");
     expect(text).toContain("Subagent total · running · 03:18 · 100 tokens · $0.01");
+    expect(text).toContain("Results and artifacts");
+    expect(text).not.toContain("Relevant files");
     expect(text).toContain("Attempt 2 · running · 01:30 · 100 tokens · $0.0080");
     expect(text).toContain("Current activity");
     expect(text).toContain("Reading the comparison table");

@@ -178,6 +178,7 @@ export function renderTaskCardSurface(
     readonly locale?: OperatorConsoleLocale;
     readonly isTty?: boolean;
     readonly focusedTaskId?: string;
+    readonly focusedSubagentStepId?: string;
     readonly style?: OperatorConsoleStyle;
     readonly motionElapsedMs?: number;
   }
@@ -211,7 +212,13 @@ export function renderTaskCardSurface(
       const subagent = visibleSubagents[columnIndex * fitted.rows + rowIndex];
       return subagent === undefined
         ? Array.from({ length: SUBAGENT_CARD_HEIGHT }, () => "".padEnd(columnWidth))
-        : renderSubagentCard(subagent, columnWidth, copy, options);
+        : renderSubagentCard(
+            subagent,
+            columnWidth,
+            copy,
+            options,
+            options.focusedSubagentStepId === subagent.stepId
+          );
     });
     for (let lineIndex = 0; lineIndex < SUBAGENT_CARD_HEIGHT; lineIndex += 1) {
       const joined = cards.map((lines) => lines[lineIndex] ?? "".padEnd(columnWidth))
@@ -353,8 +360,8 @@ export function routeTaskSurfaceKey(
     switch (keypress.key) {
       case "escape": return { state: closeInspection(state), handled: true };
       case "tab": return { state: closeInspection(state, true), handled: true };
-      case "up": return { state: selectRelativeSubagent(state, card, -1), handled: true };
-      case "down": return { state: selectRelativeSubagent(state, card, 1), handled: true };
+      case "up": return { state: selectRelativeSubagent(state, card, -1, viewportHeight), handled: true };
+      case "down": return { state: selectRelativeSubagent(state, card, 1, viewportHeight), handled: true };
       case "pageup": return { state: setTaskScroll(state, state.tasks.scrollOffset - contentHeight, maxOffset), handled: true };
       case "pagedown": return { state: setTaskScroll(state, state.tasks.scrollOffset + contentHeight, maxOffset), handled: true };
       case "left": return { state: setTaskTraceSelection(state, card, "left"), handled: true };
@@ -366,8 +373,9 @@ export function routeTaskSurfaceKey(
     }
   }
 
-  const focused = state.focus.target.kind === "taskCard";
-  if (!focused) {
+  const mainSubagentFocus = state.focus.target.kind === "taskSubagent";
+  const taskFocus = state.focus.target.kind === "taskCard";
+  if (!taskFocus && !mainSubagentFocus) {
     const shortcut = keypress.ctrl === true && keypress.key === "t";
     if (!shortcut && keypress.key !== "tab") return { state, handled: false };
     const taskId = selectedTask(state.tasks)?.taskId;
@@ -382,9 +390,72 @@ export function routeTaskSurfaceKey(
     };
   }
 
+  if (mainSubagentFocus) {
+    const focusTarget = state.focus.target;
+    const card = state.tasks.cards.find((candidate) => candidate.taskId === focusTarget.taskId)
+      ?? selectedTask(state.tasks);
+    if (card === undefined) return { state, handled: false };
+    const visible = visibleSubagents(card, state.terminal.width, viewportHeight);
+    const currentIndex = visible.findIndex((subagent) => subagent.stepId === focusTarget.stepId);
+    if (currentIndex < 0) {
+      return {
+        state: {
+          ...state,
+          focus: setFocus(state.focus, { kind: "taskCard", taskId: card.taskId }),
+        },
+        handled: true,
+      };
+    }
+    const grid = visibleSubagentGrid(card, state.terminal.width, viewportHeight);
+    switch (keypress.key) {
+      case "up": {
+        const next = currentIndex - 1;
+        return next < 0 || Math.floor(next / grid.rows) !== Math.floor(currentIndex / grid.rows)
+          ? { state: focusTaskHeader(state, card), handled: true }
+          : { state: focusMainSubagent(state, card, visible[next]!), handled: true };
+      }
+      case "down": {
+        const next = currentIndex + 1;
+        return next >= visible.length || Math.floor(next / grid.rows) !== Math.floor(currentIndex / grid.rows)
+          ? { state, handled: true }
+          : { state: focusMainSubagent(state, card, visible[next]!), handled: true };
+      }
+      case "left": {
+        const next = currentIndex - grid.rows;
+        return next < 0
+          ? { state: focusTaskHeader(state, card), handled: true }
+          : { state: focusMainSubagent(state, card, visible[next]!), handled: true };
+      }
+      case "right": {
+        const next = currentIndex + grid.rows;
+        return next >= visible.length
+          ? { state, handled: true }
+          : { state: focusMainSubagent(state, card, visible[next]!), handled: true };
+      }
+      case "home": return { state: focusMainSubagent(state, card, visible[0]!), handled: true };
+      case "end": return { state: focusMainSubagent(state, card, visible.at(-1)!), handled: true };
+      case "enter": return { state: openMainSubagent(state, card, visible[currentIndex]!), handled: true };
+      case "escape":
+      case "tab": return {
+        state: { ...state, focus: setFocus(state.focus, { kind: "prompt" }) },
+        handled: true,
+      };
+      default: return { state, handled: true };
+    }
+  }
+
   switch (keypress.key) {
     case "up": return { state: selectRelativeTask(state, -1), handled: true };
     case "down": return { state: selectRelativeTask(state, 1), handled: true };
+    case "right": {
+      const task = selectedTask(state.tasks);
+      const subagent = task === undefined
+        ? undefined
+        : visibleSubagents(task, state.terminal.width, viewportHeight)[0];
+      return task === undefined || subagent === undefined
+        ? { state, handled: true }
+        : { state: focusMainSubagent(state, task, subagent), handled: true };
+    }
     case "home": return { state: selectTaskAt(state, 0), handled: true };
     case "end": return { state: selectTaskAt(state, state.tasks.cards.length - 1), handled: true };
     case "enter": {
@@ -609,14 +680,15 @@ function setSubagentTraceSelection(
 function selectRelativeSubagent(
   state: OperatorConsoleState,
   card: TaskCardState,
-  delta: number
+  delta: number,
+  viewportHeight: number
 ): OperatorConsoleState {
   if (card.subagents.length === 0) return state;
   const selectedStepId = state.tasks.inspection?.selectedSubagentStepId;
   const currentIndex = Math.max(0, card.subagents.findIndex((subagent) => subagent.stepId === selectedStepId));
   const index = Math.max(0, Math.min(card.subagents.length - 1, currentIndex + delta));
   const subagent = card.subagents[index]!;
-  return {
+  const next = {
     ...state,
     tasks: {
       ...state.tasks,
@@ -627,6 +699,7 @@ function selectRelativeSubagent(
     },
     focus: setFocus(state.focus, { kind: "taskSubagent", taskId: card.taskId, stepId: subagent.stepId }),
   };
+  return ensureOverviewSubagentVisible(next, card, subagent, viewportHeight);
 }
 
 function openSelectedSubagent(state: OperatorConsoleState, card: TaskCardState): OperatorConsoleState {
@@ -680,6 +753,90 @@ function selectTaskAt(state: OperatorConsoleState, index: number): OperatorConso
   };
 }
 
+function visibleSubagentGrid(card: TaskCardState, width: number, height: number): SubagentGrid {
+  const grid = resolveSubagentGrid(card.subagents.length, dimension(width));
+  const fitted = fitSubagentGridToHeight(grid, card.subagents.length, dimension(height));
+  if (fitted.rows > 0) return fitted;
+  const visibleCount = Math.min(card.subagents.length, Math.max(0, dimension(height) - 1));
+  return { columns: 1, rows: Math.max(1, visibleCount), hiddenCount: card.subagents.length - visibleCount };
+}
+
+function visibleSubagents(card: TaskCardState, width: number, height: number): readonly TaskCardSubagentState[] {
+  const normalizedHeight = dimension(height);
+  const grid = resolveSubagentGrid(card.subagents.length, dimension(width));
+  const fitted = fitSubagentGridToHeight(grid, card.subagents.length, normalizedHeight);
+  const visibleCount = fitted.rows > 0
+    ? Math.min(card.subagents.length, fitted.columns * fitted.rows)
+    : Math.min(card.subagents.length, Math.max(0, normalizedHeight - 1));
+  return card.subagents.slice(0, visibleCount);
+}
+
+function focusTaskHeader(state: OperatorConsoleState, card: TaskCardState): OperatorConsoleState {
+  return {
+    ...state,
+    tasks: { ...state.tasks, selectedTaskId: card.taskId },
+    focus: setFocus(state.focus, { kind: "taskCard", taskId: card.taskId }),
+  };
+}
+
+function focusMainSubagent(
+  state: OperatorConsoleState,
+  card: TaskCardState,
+  subagent: TaskCardSubagentState
+): OperatorConsoleState {
+  return {
+    ...state,
+    tasks: { ...state.tasks, selectedTaskId: card.taskId },
+    focus: setFocus(state.focus, { kind: "taskSubagent", taskId: card.taskId, stepId: subagent.stepId }),
+  };
+}
+
+function openMainSubagent(
+  state: OperatorConsoleState,
+  card: TaskCardState,
+  subagent: TaskCardSubagentState
+): OperatorConsoleState {
+  return {
+    ...focusMainSubagent(state, card, subagent),
+    tasks: {
+      ...state.tasks,
+      selectedTaskId: card.taskId,
+      inspectedTaskId: card.taskId,
+      inspection: {
+        followLive: true,
+        selectedSubagentStepId: subagent.stepId,
+        inspectedSubagentStepId: subagent.stepId,
+        subagentTrace: { followLive: true },
+      },
+      scrollOffset: 0,
+    },
+  };
+}
+
+function ensureOverviewSubagentVisible(
+  state: OperatorConsoleState,
+  card: TaskCardState,
+  subagent: TaskCardSubagentState,
+  viewportHeight: number
+): OperatorConsoleState {
+  const contentHeight = Math.max(1, dimension(viewportHeight) - 2);
+  const lines = taskOverviewContentLines(card, state.terminal.width, {
+    locale: state.locale,
+    style: state.style,
+    inspection: state.tasks.inspection,
+  });
+  const selectedRow = lines.findIndex((line) => line.includes(subagent.displayLabel));
+  if (selectedRow < 0) return state;
+  const maxOffset = Math.max(0, lines.length - contentHeight);
+  const currentOffset = Math.max(0, Math.min(maxOffset, state.tasks.scrollOffset));
+  const nextOffset = selectedRow < currentOffset
+    ? selectedRow
+    : selectedRow >= currentOffset + contentHeight
+      ? selectedRow - contentHeight + 1
+      : currentOffset;
+  return setTaskScroll(state, nextOffset, maxOffset);
+}
+
 type SubagentGrid = {
   readonly columns: number;
   readonly rows: number;
@@ -695,6 +852,7 @@ type SubagentActivityRow = {
 type TaskCardRenderOptions = {
   readonly locale?: OperatorConsoleLocale;
   readonly isTty?: boolean;
+  readonly focusedSubagentStepId?: string;
   readonly style?: OperatorConsoleStyle;
   readonly motionElapsedMs?: number;
 };
@@ -761,11 +919,12 @@ function renderSubagentCard(
   subagent: TaskCardSubagentState,
   width: number,
   copy: TaskCopy,
-  options: TaskCardRenderOptions
+  options: TaskCardRenderOptions,
+  focused: boolean
 ): readonly string[] {
   const activity = subagentActivityRows(subagent);
   const visibleActivity = activity.rows.slice(0, SUBAGENT_ACTIVITY_ROWS);
-  const title = formatSubagentTitle(subagent, options);
+  const title = formatSubagentTitle(subagent, options, focused);
   const history = formatSubagentHistoryCount(activity.hiddenCount, copy, options.style);
   const activityRows = Array.from({ length: SUBAGENT_ACTIVITY_ROWS }, (_, index) => {
     const row = visibleActivity[index];
@@ -792,7 +951,17 @@ function renderCompactSubagentFallback(
   const visible = card.subagents.slice(0, Math.max(0, height - 1));
   for (const subagent of visible) {
     const usage = subagent.usage.currentAttempt ?? subagent.usage.total;
-    const summary = `${subagent.displayLabel} · ${formatSubagentStatus(subagent.status)} · ${formatDuration(subagent.elapsedMs)} · ${formatCompactTokenCount(usage.totalTokens)} ${copy.tokens} · ${formatCardUsage(usage, options.locale ?? "en")}`;
+    const focused = options.focusedSubagentStepId === subagent.stepId;
+    const tokens = options.style?.tokens.contract;
+    const rail = focused ? tokens?.glyph.progress.thumb ?? ">" : " ";
+    const styledRail = focused && tokens !== undefined
+      ? styleColor(options.style, rail, tokens.palette.action)
+      : rail;
+    const titleColor = focused ? tokens?.palette.action : tokens?.palette.accent;
+    const title = titleColor === undefined
+      ? subagent.displayLabel
+      : styleColor(options.style, styleBold(options.style, subagent.displayLabel), titleColor);
+    const summary = `${styledRail} ${title} · ${formatSubagentStatus(subagent.status)} · ${formatDuration(subagent.elapsedMs)} · ${formatCompactTokenCount(usage.totalTokens)} ${copy.tokens} · ${formatCardUsage(usage, options.locale ?? "en")}`;
     rows.push(summary);
   }
   const hiddenCount = Math.max(0, card.subagents.length - visible.length);
@@ -802,16 +971,22 @@ function renderCompactSubagentFallback(
 
 function formatSubagentTitle(
   subagent: TaskCardSubagentState,
-  options: TaskCardRenderOptions
+  options: TaskCardRenderOptions,
+  focused: boolean
 ): string {
   const style = options.style;
   const tokens = style?.tokens.contract;
   const symbol = subagentStatusSymbol(subagent, style, options.motionElapsedMs);
   const title = `${subagent.displayLabel} · ${subagent.objective}`;
-  const styledTitle = tokens === undefined
+  const titleColor = focused ? tokens?.palette.action : tokens?.palette.accent;
+  const styledTitle = titleColor === undefined
     ? title
-    : styleColor(style, styleBold(style, title), tokens.palette.accent);
-  return `${symbol} ${styledTitle}`;
+    : styleColor(style, styleBold(style, title), titleColor);
+  const rail = focused ? tokens?.glyph.progress.thumb ?? ">" : " ";
+  const styledRail = focused && tokens !== undefined
+    ? styleColor(style, rail, tokens.palette.action)
+    : rail;
+  return `${styledRail} ${symbol} ${styledTitle}`;
 }
 
 function subagentStatusSymbol(

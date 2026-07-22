@@ -90,6 +90,7 @@ function renderRegionLines(
       locale: state.locale,
       isTty: state.terminal.isTty,
       focusedTaskId: state.focus.target.kind === "taskCard" ? state.focus.target.taskId : undefined,
+      focusedSubagentStepId: state.focus.target.kind === "taskSubagent" ? state.focus.target.stepId : undefined,
       style: state.style,
       motionElapsedMs: state.motionElapsedMs,
     }).map((text) => ({ region: region.kind, text }));

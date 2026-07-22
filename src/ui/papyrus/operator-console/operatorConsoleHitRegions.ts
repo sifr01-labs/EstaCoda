@@ -132,7 +132,20 @@ function addTraceRegions(
   const scope = subagent === undefined ? "task" as const : "subagent" as const;
   const traceCard: TaskCardState = subagent === undefined
     ? card
-    : { ...card, subagents: [subagent], trace: { events: subagent.trace, hasEarlierEvents: false } };
+    : {
+        ...card,
+        subagents: [subagent],
+        trace: {
+          events: subagent.trace,
+          ...(subagent.traceSummary?.totalEvents === undefined
+            ? {}
+            : { totalEvents: subagent.traceSummary.totalEvents }),
+          ...(subagent.traceSummary?.categoryCounts === undefined
+            ? {}
+            : { categoryCounts: subagent.traceSummary.categoryCounts }),
+          hasEarlierEvents: subagent.traceSummary?.hasEarlierEvents ?? false,
+        }
+      };
   const traceInspection = subagent === undefined
     ? state.tasks.inspection
     : state.tasks.inspection?.subagentTrace;

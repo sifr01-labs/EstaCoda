@@ -71,15 +71,22 @@ describe("Task activity trace surface", () => {
     ]);
   });
 
-  it("labels counters as retained when older projected history was omitted", () => {
+  it("keeps counters all-time when older projected history was omitted", () => {
     const card = {
       ...makeCard(makeEvents(3)),
-      trace: { events: makeEvents(3), hasEarlierEvents: true },
+      trace: {
+        events: makeEvents(3),
+        totalEvents: 12,
+        categoryCounts: { ...emptyCounts(), terminal: 8, search: 3, plan: 1 },
+        hasEarlierEvents: true,
+      },
     };
     const text = renderActivityTraceSurface(card, { followLive: true }, { width: 72 }).join("\n");
 
+    expect(text).toContain("Activity trace · 12 events");
     expect(text).toContain("< earlier history omitted");
-    expect(text).toMatch(/retained · .*Terminal ×1/u);
+    expect(text).toContain("Terminal ×8");
+    expect(text).not.toContain("retained ·");
   });
 });
 
@@ -135,7 +142,7 @@ function makeCard(events: readonly TaskCardActivityState[]): TaskCardState {
       trace: events,
       results: [],
     }],
-    trace: { events, hasEarlierEvents: false },
+    trace: { events, totalEvents: events.length, categoryCounts: countEvents(events), hasEarlierEvents: false },
     childTasks: [],
     recentActivity: events.slice(-3),
     elapsedMs: 1_000,
@@ -144,6 +151,19 @@ function makeCard(events: readonly TaskCardActivityState[]): TaskCardState {
     createdAt: "2026-07-20T10:00:00.000Z",
     updatedAt: "2026-07-20T10:00:01.000Z",
   };
+}
+
+function emptyCounts(): Record<TaskCardActivityState["category"], number> {
+  return Object.fromEntries(CATEGORIES.map((category) => [category, 0])) as Record<
+    TaskCardActivityState["category"],
+    number
+  >;
+}
+
+function countEvents(events: readonly TaskCardActivityState[]): Record<TaskCardActivityState["category"], number> {
+  const counts = emptyCounts();
+  for (const event of events) counts[event.category] += 1;
+  return counts;
 }
 
 function usage(): TaskCardState["usage"] {

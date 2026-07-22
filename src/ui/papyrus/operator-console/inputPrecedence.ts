@@ -93,14 +93,18 @@ export function routeOperatorConsoleInput(input: {
   }
   if (inspectionOpen) {
     if (input.event.type !== "key") return { state: input.state, surface: "taskInspection", handled: true };
-    const routed = routeTaskSurfaceKey(input.state, input.event);
+    const layout = input.layout ?? createOperatorConsoleLayout(input.state);
+    const viewportHeight = layout.regions.find((region) => region.kind === "taskInspection")?.height;
+    const routed = routeTaskSurfaceKey(input.state, input.event, viewportHeight ?? input.state.terminal.height);
     return { state: routed.state, surface: "taskInspection", handled: routed.handled };
   }
   if (surface === "approval" || surface === "typeahead" || surface === "attachment") {
     return { state: input.state, surface, handled: false };
   }
   if (input.state.tasks.cards.length > 0) {
-    const routed = routeTaskSurfaceKey(input.state, input.event);
+    const layout = input.layout ?? createOperatorConsoleLayout(input.state);
+    const viewportHeight = layout.regions.find((region) => region.kind === "taskCards")?.height;
+    const routed = routeTaskSurfaceKey(input.state, input.event, viewportHeight ?? input.state.terminal.height);
     if (routed.handled) return { state: routed.state, surface: "liveFocus", handled: true };
   }
   return { state: input.state, surface, handled: false };
