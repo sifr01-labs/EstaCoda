@@ -113,6 +113,49 @@ describe("terminal lifecycle", () => {
     expect(stdout.writes).toEqual([ENABLE_MOUSE_TRACKING, DISABLE_MOUSE_TRACKING]);
   });
 
+  it("keeps native terminal mouse behavior until tracking is explicitly toggled", () => {
+    const stdin = fakeStdin();
+    const stdout = fakeStdout();
+    const lifecycle = createTerminalLifecycle({ stdin: stdin.stream, stdout: stdout.stream });
+
+    lifecycle.start();
+    expect(stdout.writes).not.toContain(ENABLE_MOUSE_TRACKING);
+    expect(lifecycle.isMouseTrackingEnabled()).toBe(false);
+
+    expect(lifecycle.setMouseTracking(true)).toBe(true);
+    expect(lifecycle.isMouseTrackingEnabled()).toBe(true);
+    expect(lifecycle.setMouseTracking(false)).toBe(false);
+    expect(lifecycle.isMouseTrackingEnabled()).toBe(false);
+    expect(stdout.writes).toEqual([
+      HIDE_CURSOR,
+      EBP,
+      ENABLE_MOUSE_TRACKING,
+      DISABLE_MOUSE_TRACKING,
+    ]);
+  });
+
+  it("defensively resets stale tracking and releases an active toggle during cleanup", () => {
+    const stdin = fakeStdin();
+    const stdout = fakeStdout();
+    const lifecycle = createTerminalLifecycle({ stdin: stdin.stream, stdout: stdout.stream });
+
+    lifecycle.resetMouseTracking();
+    lifecycle.start();
+    lifecycle.setMouseTracking(true);
+    lifecycle.stop();
+
+    expect(stdout.writes).toEqual([
+      DISABLE_MOUSE_TRACKING,
+      HIDE_CURSOR,
+      EBP,
+      ENABLE_MOUSE_TRACKING,
+      DISABLE_MOUSE_TRACKING,
+      DBP,
+      SHOW_CURSOR,
+    ]);
+    expect(lifecycle.isMouseTrackingEnabled()).toBe(false);
+  });
+
   it("disables mouse tracking when a later lifecycle setup step fails", () => {
     const stdin = fakeStdin();
     const stdout = fakeStdout({

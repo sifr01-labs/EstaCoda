@@ -94,6 +94,7 @@ function fakeOutput(): RawPromptOutput & { writes: string[] } {
 function fakeLifecycle(overrides: Partial<TerminalLifecycle> = {}) {
   const calls: string[] = [];
   let started = false;
+  let mouseTracking = false;
   const lifecycle: TerminalLifecycle = {
     start: vi.fn(() => {
       calls.push("start");
@@ -102,9 +103,13 @@ function fakeLifecycle(overrides: Partial<TerminalLifecycle> = {}) {
     stop: vi.fn(() => {
       calls.push("stop");
       started = false;
+      mouseTracking = false;
       return { errors: [] };
     }),
     isStarted: vi.fn(() => started),
+    setMouseTracking: vi.fn((enabled: boolean) => (mouseTracking = enabled)),
+    resetMouseTracking: vi.fn(() => { mouseTracking = false; }),
+    isMouseTrackingEnabled: vi.fn(() => mouseTracking),
     ...overrides,
   };
   return { lifecycle, calls };
@@ -240,6 +245,9 @@ describe("raw prompt controller", () => {
       },
     });
 
+    read.input.send("\u0007");
+    await Promise.resolve();
+    expect(read.output.writes.join("")).toContain("Mouse Mode");
     read.input.send("\x1b[<0;2;2M\x1b[<0;2;2m");
     await Promise.resolve();
     expect(read.output.writes.join("")).toContain("Retained safe activity");
@@ -252,6 +260,60 @@ describe("raw prompt controller", () => {
     read.input.send("\t");
     read.input.send("ok\r");
     await expect(read.pending).resolves.toEqual({ type: "submit", text: "ok" });
+  });
+
+  it("keeps native mouse behavior until Ctrl-G and releases capture before typing", async () => {
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 18, isTty: true },
+        getTasks: () => [promptTaskCard()],
+      },
+    });
+
+    expect(read.lifecycle.lifecycle.resetMouseTracking).toHaveBeenCalledOnce();
+    expect(read.lifecycle.lifecycle.setMouseTracking).not.toHaveBeenCalled();
+
+    read.input.send("\u0007");
+    expect(read.lifecycle.lifecycle.setMouseTracking).toHaveBeenLastCalledWith(true);
+    expect(read.output.writes.join("")).toContain("[Mouse Mode]");
+
+    read.input.send("\u001b");
+    await flushKeypressTimers();
+    expect(read.lifecycle.lifecycle.setMouseTracking).toHaveBeenLastCalledWith(false);
+    expect(read.isResolved()).toBe(false);
+
+    read.input.send("\u0007");
+    read.input.send("x");
+    expect(read.lifecycle.lifecycle.setMouseTracking).toHaveBeenLastCalledWith(false);
+    read.input.send("\r");
+
+    await expect(read.pending).resolves.toEqual({ type: "submit", text: "x" });
+  });
+
+  it("releases an active Mouse Mode when the raw prompt is closed", async () => {
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const controller = new RawPromptController({
+      input,
+      output,
+      lifecycle: lifecycle.lifecycle,
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 18, isTty: true },
+        getTasks: () => [promptTaskCard()],
+      },
+    });
+    const pending = controller.read("> ");
+
+    input.send("\u0007");
+    expect(lifecycle.lifecycle.isMouseTrackingEnabled()).toBe(true);
+    controller.close();
+
+    await expect(pending).resolves.toEqual({ type: "cancel" });
+    expect(lifecycle.lifecycle.stop).toHaveBeenCalledOnce();
+    expect(lifecycle.lifecycle.isMouseTrackingEnabled()).toBe(false);
   });
 
   it("preserves historical Task trace selection while live Task projections refresh", async () => {

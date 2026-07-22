@@ -73,7 +73,7 @@ import {
 } from "../ui/papyrus/operator-console/index.js";
 import type { ParsedKeypress } from "../ui/input/parseKeypress.js";
 import { createKeypressStreamDispatcher } from "../ui/input/keyPressStreamDispatcher.js";
-import { createTerminalLifecycle } from "../ui/input/terminalLifecycle.js";
+import { createTerminalLifecycle, type TerminalLifecycle } from "../ui/input/terminalLifecycle.js";
 import { centerVisibleBlock, measureVisibleWidth, truncateVisible } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { resolveShellHistoryMode } from "./shell-history-mode.js";
@@ -752,6 +752,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         let operatorConsoleSteerState: SteerState | undefined;
         let operatorConsoleSteerSequence = 0;
         let disposeOperatorConsoleSteerInput: (() => void) | undefined;
+        let operatorConsoleInputLifecycle: TerminalLifecycle | undefined;
         const operatorConsoleLiveFrame = operatorConsoleRuntimeHost === undefined
           ? undefined
           : new LiveOperatorConsoleController({
@@ -767,6 +768,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             },
             getStatus: getOperatorConsoleStatus,
             getTasks: getOperatorConsoleTasks,
+            onMouseModeChange: (active) => {
+              operatorConsoleInputLifecycle?.setMouseTracking(active);
+            },
             turnStartedAtMs,
           });
         let turnWasCancelled = false;
@@ -918,8 +922,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             stdin: cliInput,
             stdout: output as NodeJS.WriteStream,
             hideCursor: false,
-            enableMouseTracking: true,
           });
+          operatorConsoleInputLifecycle = lifecycle;
           const keypressDispatcher = createKeypressStreamDispatcher({
             onEvents: (events: readonly ParsedKeypress[]) => {
               for (const event of events) {
@@ -933,12 +937,15 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             keypressDispatcher.handle(chunk);
           };
           lifecycle.start();
+          lifecycle.resetMouseTracking();
           cliInput.on("data", onData);
           cliInput.resume();
           return () => {
+            operatorConsoleLiveFrame?.setMouseModeActive(false);
             keypressDispatcher.dispose();
             cliInput.off("data", onData);
             lifecycle.stop();
+            operatorConsoleInputLifecycle = undefined;
           };
         }
 

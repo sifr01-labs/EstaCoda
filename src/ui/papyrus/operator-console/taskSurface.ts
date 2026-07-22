@@ -39,6 +39,8 @@ type TaskCopy = {
   tasks: string;
   task: string;
   inspectHint: string;
+  mouseToggleHint: string;
+  mouseActiveHint: string;
   stepsSettled: string;
   earlierActivities: string;
   noEarlierActivity: string;
@@ -52,6 +54,8 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     tasks: "Tasks",
     task: "Task",
     inspectHint: "Ctrl+T or Tab focus · Enter inspect",
+    mouseToggleHint: "Ctrl+G mouse",
+    mouseActiveHint: "[Mouse Mode] Esc release",
     stepsSettled: "Steps settled",
     earlierActivities: "earlier activities",
     noEarlierActivity: "no earlier activity",
@@ -63,6 +67,8 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     tasks: "المهام",
     task: "المهمة",
     inspectHint: "Ctrl+T أو Tab للتركيز · Enter للفحص",
+    mouseToggleHint: "Ctrl+G للماوس",
+    mouseActiveHint: "[وضع الماوس] Esc للتحرير",
     stepsSettled: "خطوات مستقرة",
     earlierActivities: "أنشطة سابقة",
     noEarlierActivity: "لا يوجد نشاط سابق",
@@ -155,6 +161,7 @@ export function reconcileTaskSurfaceState(
     ...(selectedTaskId === undefined ? {} : { selectedTaskId }),
     ...(inspectedTaskId === undefined ? {} : { inspectedTaskId }),
     inspection,
+    ...(cards.length > 0 && current.mouseModeActive === true ? { mouseModeActive: true } : {}),
     scrollOffset: inspectedTaskId === undefined ? 0 : current.scrollOffset,
   };
 }
@@ -876,7 +883,11 @@ function formatTaskHeader(
     ? styleColor(style, rail, tokens.palette.action)
     : rail;
   const settled = card.progress.completed + card.progress.skipped;
-  return `${styledRail} ${styledTitle} · ${isolate(card.taskId)} · ${card.objective} · ${settled} of ${card.progress.total} ${copy.stepsSettled}`;
+  const mouseHint = state.mouseModeActive === true ? copy.mouseActiveHint : copy.mouseToggleHint;
+  const styledMouseHint = state.mouseModeActive === true && tokens !== undefined
+    ? styleColor(style, styleBold(style, mouseHint), tokens.palette.action)
+    : mouseHint;
+  return `${styledRail} ${styledTitle} · ${isolate(card.taskId)} · ${styledMouseHint} · ${card.objective} · ${settled} of ${card.progress.total} ${copy.stepsSettled}`;
 }
 
 function resolveSubagentGrid(count: number, width: number): SubagentGrid {

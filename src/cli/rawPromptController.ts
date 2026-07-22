@@ -36,11 +36,13 @@ import {
   createPastedTextAttachment,
   formatSubmittedPromptWithAttachmentContent,
   formatSubmittedPromptWithAttachmentPreview,
+  isMouseModeToggle,
   removeAttachmentAndRepairFocus,
   reconcileTaskSurfaceState,
   routeApprovalKey,
   routeAttachmentKey,
   routeOperatorConsoleInput,
+  setOperatorConsoleMouseMode,
   type AttachmentCardState,
   type ApprovalCardState,
   type FocusState,
@@ -115,6 +117,7 @@ export class RawPromptController {
   readonly #keymap: RawPromptKeymapOptions | undefined;
   readonly #operatorConsole: RawPromptOperatorConsoleOptions | undefined;
   readonly #escapeCancels: boolean;
+  #closeActiveRead: (() => void) | undefined;
 
   constructor(options: RawPromptControllerOptions) {
     this.#input = options.input;
@@ -128,8 +131,11 @@ export class RawPromptController {
     this.#lifecycle = options.lifecycle ?? createTerminalLifecycle({
       stdin: options.input,
       stdout: options.output,
-      enableMouseTracking: options.operatorConsole?.enabled === true,
     });
+  }
+
+  close(): void {
+    this.#closeActiveRead?.();
   }
 
   async read(question: string, options?: PromptOptions): Promise<RawPromptResult> {
@@ -183,6 +189,10 @@ export class RawPromptController {
       }
       const cards = this.#operatorConsole?.getTasks?.() ?? this.#operatorConsole?.tasks?.cards ?? taskSurface.cards;
       taskSurface = reconcileTaskSurfaceState(taskSurface, cards);
+      if (taskSurface.cards.length === 0 && taskSurface.mouseModeActive === true) {
+        this.#lifecycle.setMouseTracking(false);
+        taskSurface = setOperatorConsoleMouseMode(createInitialOperatorConsoleState({ tasks: taskSurface }), false).tasks;
+      }
       const inspectedCard = taskSurface.cards.find((card) => card.taskId === taskSurface.inspectedTaskId);
       const selectedSubagent = inspectedCard?.subagents.find((subagent) =>
         subagent.stepId === taskSurface.inspection?.selectedSubagentStepId
@@ -225,6 +235,7 @@ export class RawPromptController {
 
     try {
       this.#lifecycle.start();
+      if (this.#operatorConsole?.enabled === true) this.#lifecycle.resetMouseTracking();
     } catch (error) {
       stopStatusTicker();
       renderLoop.clear();
@@ -352,6 +363,7 @@ export class RawPromptController {
       let keypressDispatcher: KeypressStreamDispatcher | undefined;
 
       const cleanup = () => {
+        this.#closeActiveRead = undefined;
         keypressDispatcher?.dispose();
         stopStatusTicker();
         detachDataListener(this.#input, onData);
@@ -374,6 +386,21 @@ export class RawPromptController {
           this.#output.write("\n");
           resolve(result);
         }
+      };
+
+      this.#closeActiveRead = () => finish({ type: "cancel" });
+
+      const setMouseMode = (active: boolean, shouldRender = true) => {
+        const consoleState = setOperatorConsoleMouseMode(createInitialOperatorConsoleState({
+          locale: this.#operatorConsole?.locale,
+          terminal: currentTerminal(),
+          tasks: taskSurface,
+          focus: attachmentFocus,
+        }), active);
+        const enabled = consoleState.tasks.mouseModeActive === true && this.#lifecycle.setMouseTracking(true);
+        if (!enabled) this.#lifecycle.setMouseTracking(false);
+        taskSurface = setOperatorConsoleMouseMode(consoleState, enabled).tasks;
+        if (shouldRender) render();
       };
 
       const updateState = (nextState: LineEditorState) => {
@@ -530,7 +557,15 @@ export class RawPromptController {
           steer: false,
         });
         if (!routed.handled) return routed;
-        taskSurface = routed.state.tasks;
+        const inspectionClosed = taskSurface.inspectedTaskId !== undefined &&
+          routed.state.tasks.inspectedTaskId === undefined;
+        if (routed.releaseMouseMode === true || inspectionClosed) {
+          this.#lifecycle.setMouseTracking(false);
+        }
+        taskSurface = setOperatorConsoleMouseMode(
+          routed.state,
+          routed.releaseMouseMode !== true && !inspectionClosed && routed.state.tasks.mouseModeActive === true
+        ).tasks;
         attachmentFocus = routed.state.focus;
         render();
         return routed;
@@ -550,6 +585,17 @@ export class RawPromptController {
       const dispatchParsedEvents = (events: readonly ParsedKeypress[]) => {
         if (settled) return;
         for (const event of events) {
+          if (this.#operatorConsole?.enabled === true && isMouseModeToggle(event)) {
+            setMouseMode(taskSurface.mouseModeActive !== true);
+            continue;
+          }
+          if (taskSurface.mouseModeActive === true && event.type === "key" && event.key === "escape") {
+            setMouseMode(false);
+            continue;
+          }
+          if (taskSurface.mouseModeActive === true && (event.type === "text" || event.type === "paste")) {
+            setMouseMode(false);
+          }
           if (handleApprovalFocusEntry(event)) continue;
           const sharedRoute = routeSharedOperatorConsoleInput(event);
           if (sharedRoute?.handled === true) continue;
@@ -626,7 +672,7 @@ export function createRawPrompt(options: RawPromptControllerOptions & { uiContex
     {
       uiContext,
       submit,
-      close: () => undefined,
+      close: () => controller.close(),
     }
   );
 }

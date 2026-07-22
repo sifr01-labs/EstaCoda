@@ -252,6 +252,29 @@ describe("LiveOperatorConsoleController", () => {
     expect(runtimeHost.getState().tasks.inspectedTaskId).toBeUndefined();
   });
 
+  it("captures the mouse only for explicit Task interaction and releases before steering text", () => {
+    const output = createOutput();
+    const mouseChanges: boolean[] = [];
+    const { controller, runtimeHost } = createControllerFixture(output, {
+      getTasks: () => [makeLiveTask()],
+      onMouseModeChange: (active) => mouseChanges.push(active),
+    });
+    controller.setTurnActivity({ phase: "provider" });
+
+    expect(controller.routeInput({ type: "key", key: "g", ctrl: true })).toBe(true);
+    expect(mouseChanges).toEqual([true]);
+    expect(runtimeHost.getState().tasks.mouseModeActive).toBe(true);
+    expect(stripAnsi(output.text())).toContain("[Mouse Mode]");
+
+    expect(controller.routeInput({ type: "text", text: "x" })).toBe(false);
+    expect(mouseChanges).toEqual([true, false]);
+    expect(runtimeHost.getState().tasks.mouseModeActive).toBeUndefined();
+
+    expect(controller.routeInput({ type: "key", key: "g", ctrl: true })).toBe(true);
+    expect(controller.routeInput({ type: "key", key: "escape" })).toBe(true);
+    expect(mouseChanges).toEqual([true, false, true, false]);
+  });
+
   it("batches streaming text into the live frame", () => {
     vi.useFakeTimers();
     const output = createOutput();
@@ -622,7 +645,7 @@ function createController(
   options: Pick<
     ConstructorParameters<typeof LiveOperatorConsoleController>[0],
     "animationIntervalMs" | "now" | "streamingRefreshIntervalMs" | "turnStartedAtMs"
-      | "getTasks"
+      | "getTasks" | "onMouseModeChange"
   > = {}
 ): LiveOperatorConsoleController {
   return createControllerFixture(output, options).controller;
@@ -633,7 +656,7 @@ function createControllerFixture(
   options: Pick<
     ConstructorParameters<typeof LiveOperatorConsoleController>[0],
     "animationIntervalMs" | "now" | "streamingRefreshIntervalMs" | "turnStartedAtMs"
-      | "getTasks"
+      | "getTasks" | "onMouseModeChange"
   > = {}
 ): {
   readonly controller: LiveOperatorConsoleController;

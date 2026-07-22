@@ -46,6 +46,8 @@ type OverviewCopy = {
   readonly none: string;
   readonly noSubagents: string;
   readonly closeHint: string;
+  readonly mouseActiveHint: string;
+  readonly mouseToggleHint: string;
 };
 
 const COPY: Readonly<Record<OperatorConsoleLocale, OverviewCopy>> = {
@@ -76,6 +78,8 @@ const COPY: Readonly<Record<OperatorConsoleLocale, OverviewCopy>> = {
     none: "none",
     noSubagents: "No delegated Subagents",
     closeHint: "Esc return · ↑/↓ select Subagent · Enter inspect · ←/→ events · PgUp/PgDn scroll",
+    mouseActiveHint: "[Mouse Mode] Click or wheel here · Esc release",
+    mouseToggleHint: "Ctrl+G mouse",
   },
   ar: {
     mainSession: "الجلسة الرئيسية",
@@ -104,6 +108,8 @@ const COPY: Readonly<Record<OperatorConsoleLocale, OverviewCopy>> = {
     none: "لا يوجد",
     noSubagents: "لا يوجد وكلاء فرعيون مفوضون",
     closeHint: "Esc للعودة · ↑/↓ لاختيار وكيل فرعي · Enter للفحص · ←/→ للأحداث · PgUp/PgDn للتمرير",
+    mouseActiveHint: "[وضع الماوس] انقر أو مرّر هنا · Esc للتحرير",
+    mouseToggleHint: "Ctrl+G للماوس",
   },
 };
 
@@ -124,7 +130,9 @@ export function renderTaskOverviewSurface(
   const copy = COPY[locale];
   const header = `${copy.mainSession} / ${copy.task} / ${isolate(card.taskId)}`;
   if (height === 1) return [padVisibleEnd(truncateVisible(header, width, "…"), width)];
-  const footer = copy.closeHint;
+  const footer = state.mouseModeActive === true
+    ? copy.mouseActiveHint
+    : `${copy.closeHint} · ${copy.mouseToggleHint}`;
   const contentHeight = Math.max(0, height - 2);
   const content = taskOverviewContentLines(card, width, {
     locale,

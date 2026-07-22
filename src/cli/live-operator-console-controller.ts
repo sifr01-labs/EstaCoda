@@ -7,6 +7,7 @@ import {
   createActiveWorkRuntimeState,
   getActiveWorkSurfaceDesiredHeight,
   hasRunningDelegationWork,
+  isMouseModeToggle,
   normalizeActiveWorkRuntimeEventId,
   type ActiveWorkItem,
   type ActiveWorkRuntimeEvent,
@@ -25,6 +26,7 @@ import {
   type TurnActivityState,
   routeOperatorConsoleInput,
   reconcileTaskSurfaceState,
+  setOperatorConsoleMouseMode,
 } from "../ui/papyrus/operator-console/index.js";
 import { RawPromptRenderLoop } from "./rawPromptRenderLoop.js";
 import { semanticMotionForPhase, semanticMotionFrameIndex } from "../ui/semantic-motion.js";
@@ -44,6 +46,7 @@ export type LiveOperatorConsoleControllerOptions = {
   readonly getTasks?: () => readonly TaskCardState[];
   readonly turnStartedAtMs?: number;
   readonly promptPlaceholder?: string;
+  readonly onMouseModeChange?: (active: boolean) => void;
   readonly now?: () => number;
 };
 
@@ -68,6 +71,7 @@ export class LiveOperatorConsoleController {
   readonly #getTasks: (() => readonly TaskCardState[]) | undefined;
   readonly #turnStartedAtMs: number | undefined;
   readonly #promptPlaceholder: string | undefined;
+  readonly #onMouseModeChange: ((active: boolean) => void) | undefined;
   readonly #now: () => number;
   readonly #animationStartedAtMs: number;
   #activeWork: ToolActivityState = createActiveWorkRuntimeState();
@@ -103,10 +107,12 @@ export class LiveOperatorConsoleController {
     this.#getTasks = options.getTasks;
     this.#turnStartedAtMs = options.turnStartedAtMs;
     this.#promptPlaceholder = options.promptPlaceholder;
+    this.#onMouseModeChange = options.onMouseModeChange;
     this.#now = options.now ?? Date.now;
     this.#animationStartedAtMs = this.#now();
     this.#transcript = [...options.runtimeHost.getState().transcript];
-    this.#tasks = options.runtimeHost.getState().tasks;
+    this.#tasks = setOperatorConsoleMouseMode(options.runtimeHost.getState(), false).tasks;
+    this.#runtimeHost.setTasks(this.#tasks);
     this.#renderLoop = new RawPromptRenderLoop(options.output, {
       operatorConsoleHostFactory: () => options.runtimeHost,
     });
@@ -121,6 +127,18 @@ export class LiveOperatorConsoleController {
   }
 
   routeInput(event: ParsedKeypress): boolean {
+    if (isMouseModeToggle(event)) {
+      this.setMouseModeActive(this.#tasks.mouseModeActive !== true);
+      return true;
+    }
+    if (this.#tasks.mouseModeActive === true && event.type === "key" && event.key === "escape") {
+      this.setMouseModeActive(false);
+      return true;
+    }
+    if (this.#tasks.mouseModeActive === true && (event.type === "text" || event.type === "paste")) {
+      this.setMouseModeActive(false);
+      return false;
+    }
     const state = this.#runtimeHost.getState();
     const routed = routeOperatorConsoleInput({
       state,
@@ -131,11 +149,29 @@ export class LiveOperatorConsoleController {
       steer: true,
     });
     if (!routed.handled) return false;
-    this.#tasks = routed.state.tasks;
-    this.#runtimeHost.setTasks(routed.state.tasks);
+    const inspectionClosed = this.#tasks.inspectedTaskId !== undefined &&
+      routed.state.tasks.inspectedTaskId === undefined;
+    const releaseMouseMode = routed.releaseMouseMode === true || inspectionClosed;
+    this.#tasks = setOperatorConsoleMouseMode(
+      routed.state,
+      !releaseMouseMode && routed.state.tasks.mouseModeActive === true
+    ).tasks;
+    if (releaseMouseMode) this.#onMouseModeChange?.(false);
+    this.#runtimeHost.setTasks(this.#tasks);
     this.#runtimeHost.setFocus(routed.state.focus);
     this.refresh();
     return true;
+  }
+
+  setMouseModeActive(active: boolean): boolean {
+    const state = setOperatorConsoleMouseMode(this.#runtimeHost.getState(), active);
+    const enabled = state.tasks.mouseModeActive === true;
+    if (enabled === (this.#tasks.mouseModeActive === true)) return enabled;
+    this.#tasks = state.tasks;
+    this.#runtimeHost.setTasks(this.#tasks);
+    this.#onMouseModeChange?.(enabled);
+    this.refresh();
+    return enabled;
   }
 
   applyActiveWorkEvent(event: ActiveWorkRuntimeEvent): ToolActivityState {
@@ -278,7 +314,10 @@ export class LiveOperatorConsoleController {
     const steerVisible = this.#steer?.mode === "drafting" || this.#steer?.mode === "queued";
     const activeWork = this.#activeWorkSnapshotForRender();
     const motionElapsedMs = this.#motionElapsedMs();
+    const wasMouseModeActive = this.#tasks.mouseModeActive === true;
     this.#tasks = reconcileTaskSurfaceState(this.#tasks, this.#getTasks?.() ?? []);
+    if (wasMouseModeActive && this.#tasks.mouseModeActive !== true) this.#onMouseModeChange?.(false);
+    this.#runtimeHost.setTasks(this.#tasks);
     const focus = this.#runtimeHost.getState().focus;
     this.#renderLoop.render({
       prompt: "",

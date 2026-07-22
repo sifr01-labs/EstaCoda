@@ -35,6 +35,8 @@ type SubagentCopy = {
   readonly waitingForApproval: string;
   readonly waitingForInput: string;
   readonly closeHint: string;
+  readonly mouseActiveHint: string;
+  readonly mouseToggleHint: string;
 };
 
 const COPY: Readonly<Record<OperatorConsoleLocale, SubagentCopy>> = {
@@ -59,6 +61,8 @@ const COPY: Readonly<Record<OperatorConsoleLocale, SubagentCopy>> = {
     waitingForApproval: "waiting for approval",
     waitingForInput: "waiting for input",
     closeHint: "Esc return to Task · ←/→ inspect events · Home oldest visible · End live · ↑/↓ scroll",
+    mouseActiveHint: "[Mouse Mode] Click or wheel here · Esc release",
+    mouseToggleHint: "Ctrl+G mouse",
   },
   ar: {
     mainSession: "الجلسة الرئيسية",
@@ -81,6 +85,8 @@ const COPY: Readonly<Record<OperatorConsoleLocale, SubagentCopy>> = {
     waitingForApproval: "بانتظار الموافقة",
     waitingForInput: "بانتظار إدخال",
     closeHint: "Esc للعودة إلى المهمة · ←/→ لفحص الأحداث · Home للأقدم · End للمباشر · ↑/↓ للتمرير",
+    mouseActiveHint: "[وضع الماوس] انقر أو مرّر هنا · Esc للتحرير",
+    mouseToggleHint: "Ctrl+G للماوس",
   },
 };
 
@@ -117,7 +123,9 @@ export function renderSubagentInspectionSurface(
     header,
     ...visible,
     ...Array.from({ length: Math.max(0, contentHeight - visible.length) }, () => ""),
-    copy.closeHint,
+    state.mouseModeActive === true
+      ? copy.mouseActiveHint
+      : `${copy.closeHint} · ${copy.mouseToggleHint}`,
   ].slice(0, height).map((line) => padVisibleEnd(truncateVisible(line, width, "…"), width));
 }
 

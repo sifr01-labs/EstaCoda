@@ -431,6 +431,7 @@ function cloneTaskSurfaceState(tasks: TaskSurfaceState): TaskSurfaceState {
     })),
     ...(tasks.selectedTaskId === undefined ? {} : { selectedTaskId: tasks.selectedTaskId }),
     ...(tasks.inspectedTaskId === undefined ? {} : { inspectedTaskId: tasks.inspectedTaskId }),
+    ...(tasks.mouseModeActive === true ? { mouseModeActive: true } : {}),
     ...(tasks.inspection === undefined
       ? {}
       : {

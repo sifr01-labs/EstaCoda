@@ -394,13 +394,19 @@ handles and summaries; it does not claim a separate file-access history.
 `Ctrl+T` focuses the Task header. `Up`/`Down` change Tasks, `Right` enters the
 visible Subagent grid, and the arrow keys then move among complete visible
 Subagent cards. `Enter` opens the focused Task header or opens a focused
-Subagent directly. Trace events and `Return to live` are selectable with
-the same keyboard and SGR mouse routes. `Up`/`Down`, `Page Up`/`Page Down`,
+Subagent directly. Native terminal selection, copy/paste, and scroll behavior
+remains available by default. `Ctrl+G` explicitly enables temporary Mouse Mode
+for the Task region; while active, Task/Subagent cards, breadcrumbs, trace
+events, and `Return to live` use the same actions as their keyboard routes.
+`Up`/`Down`, `Page Up`/`Page Down`,
 `Home`, and `End` navigate or scroll according to the active inspection target;
-`Escape` unwinds Subagent to Task to main session without losing the underlying
-session state. Whole-Task selection adjusts scroll to keep the selected
-Subagent visible. Wheel input scrolls inspection, and terminal cleanup disables
-mouse tracking on normal exit, failure, and suspend.
+`Escape` first releases an active Mouse Mode, then unwinds Subagent to Task to
+main session without losing the underlying session state. Typing/pasting,
+clicking outside an interactive Task region, closing inspection, or losing the
+Task region also releases Mouse Mode. Whole-Task selection adjusts scroll to
+keep the selected Subagent visible. Wheel input scrolls only inside inspection
+while Mouse Mode is active. Terminal startup defensively resets stale tracking,
+and cleanup disables it on normal exit, failure, and suspend.
 
 The existing Task refresh updates projections and newly settled provider usage
 in place. Established cards retain their order, selected Task/Subagent/event

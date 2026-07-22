@@ -35,7 +35,21 @@ export type OperatorConsoleInputRouteResult = {
   readonly state: OperatorConsoleState;
   readonly surface: OperatorConsoleInputSurface;
   readonly handled: boolean;
+  /** The pointer event ended the explicit capture mode and the terminal must be released. */
+  readonly releaseMouseMode?: boolean;
 };
+
+export function isMouseModeToggle(event: ParsedKeypress): boolean {
+  return event.type === "key" && event.ctrl === true && event.key === "g";
+}
+
+export function setOperatorConsoleMouseMode(
+  state: OperatorConsoleState,
+  active: boolean
+): OperatorConsoleState {
+  if (!active || state.tasks.cards.length === 0) return withoutMouseMode(state);
+  return { ...state, tasks: { ...state.tasks, mouseModeActive: true } };
+}
 
 /** Shared Task-aware input router used by idle prompts and active-turn steering. */
 export function routeOperatorConsoleInput(input: {
@@ -58,8 +72,11 @@ export function routeOperatorConsoleInput(input: {
     steer: input.steer,
   });
   if (input.event.type === "mouse") {
+    if (input.state.tasks.mouseModeActive !== true) {
+      return { state: input.state, surface, handled: false };
+    }
     if (surface === "approval" || surface === "typeahead" || surface === "attachment") {
-      return { state: input.state, surface, handled: true };
+      return releaseMouseMode(input.state, surface);
     }
     const layout = input.layout ?? createOperatorConsoleLayout(input.state);
     if (input.event.action === "scroll") {
@@ -76,19 +93,26 @@ export function routeOperatorConsoleInput(input: {
       }
       return { state: input.state, surface, handled: true };
     }
-    if (input.event.action !== "press" || input.event.button !== "primary") {
+    if (input.event.action === "release") {
       return { state: input.state, surface, handled: true };
+    }
+    if (input.event.action !== "press" || input.event.button !== "primary") {
+      return releaseMouseMode(input.state, surface);
     }
     const hit = findOperatorConsoleHitRegion(
       createOperatorConsoleHitRegions(input.state, layout),
       input.event.x,
       input.event.y
     );
-    if (hit === undefined) return { state: input.state, surface, handled: true };
+    if (hit === undefined) return releaseMouseMode(input.state, surface);
+    const nextState = routeTaskSurfacePointer(input.state, hit.action, layout.height);
+    const inspectionClosed = input.state.tasks.inspectedTaskId !== undefined &&
+      nextState.tasks.inspectedTaskId === undefined;
     return {
-      state: routeTaskSurfacePointer(input.state, hit.action, layout.height),
+      state: inspectionClosed ? withoutMouseMode(nextState) : nextState,
       surface: inspectionOpen ? "taskInspection" : "liveFocus",
       handled: true,
+      ...(inspectionClosed ? { releaseMouseMode: true } : {}),
     };
   }
   if (inspectionOpen) {
@@ -108,6 +132,23 @@ export function routeOperatorConsoleInput(input: {
     if (routed.handled) return { state: routed.state, surface: "liveFocus", handled: true };
   }
   return { state: input.state, surface, handled: false };
+}
+
+function releaseMouseMode(
+  state: OperatorConsoleState,
+  surface: OperatorConsoleInputSurface
+): OperatorConsoleInputRouteResult {
+  return {
+    state: withoutMouseMode(state),
+    surface,
+    handled: true,
+    releaseMouseMode: true,
+  };
+}
+
+function withoutMouseMode(state: OperatorConsoleState): OperatorConsoleState {
+  const { mouseModeActive: _mouseModeActive, ...tasks } = state.tasks;
+  return { ...state, tasks };
 }
 
 function pointInside(

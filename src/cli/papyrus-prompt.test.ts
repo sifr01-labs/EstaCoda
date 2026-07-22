@@ -42,6 +42,7 @@ function fakeOutput(): RawPromptOutput & { writes: string[] } {
 function fakeLifecycle(overrides: Partial<TerminalLifecycle> = {}) {
   const calls: string[] = [];
   let started = false;
+  let mouseTracking = false;
   const lifecycle: TerminalLifecycle = {
     start: vi.fn(() => {
       calls.push("start");
@@ -53,6 +54,9 @@ function fakeLifecycle(overrides: Partial<TerminalLifecycle> = {}) {
       return { errors: [] };
     }),
     isStarted: vi.fn(() => started),
+    setMouseTracking: vi.fn((enabled: boolean) => (mouseTracking = enabled)),
+    resetMouseTracking: vi.fn(() => { mouseTracking = false; }),
+    isMouseTrackingEnabled: vi.fn(() => mouseTracking),
     ...overrides,
   };
   return { lifecycle, calls };

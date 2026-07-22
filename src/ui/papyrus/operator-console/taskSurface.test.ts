@@ -660,7 +660,7 @@ describe("durable Task surfaces", () => {
     const card = makeCard({ subagents: [makeSubagent(1), makeSubagent(2)] });
     const initial = createInitialOperatorConsoleState({
       terminal: { width: 90, height: 30, isTty: true },
-      tasks: { cards: [card], selectedTaskId: card.taskId, scrollOffset: 0 },
+      tasks: { cards: [card], selectedTaskId: card.taskId, mouseModeActive: true, scrollOffset: 0 },
     });
     const layout = createOperatorConsoleLayout(initial);
     const regions = createOperatorConsoleHitRegions(initial, layout);
@@ -734,7 +734,22 @@ describe("durable Task surfaces", () => {
       layout,
     });
     expect(release.handled).toBe(true);
+    expect(release.releaseMouseMode).toBeUndefined();
+    expect(release.state.tasks.mouseModeActive).toBe(true);
     expect(release.state.tasks.inspectedTaskId).toBeUndefined();
+
+    const outside = routeOperatorConsoleInput({
+      state: initial,
+      event: { type: "mouse", action: "press", button: "primary", x: 89, y: 29 },
+      approval: false,
+      typeahead: false,
+      attachment: false,
+      steer: false,
+      layout,
+    });
+    expect(outside.handled).toBe(true);
+    expect(outside.releaseMouseMode).toBe(true);
+    expect(outside.state.tasks.mouseModeActive).toBeUndefined();
   });
 
   it("routes trace squares, live-tail controls, breadcrumbs, and wheel scrolling", () => {
@@ -758,6 +773,7 @@ describe("durable Task surfaces", () => {
         selectedTaskId: card.taskId,
         inspectedTaskId: card.taskId,
         inspection: { followLive: true, selectedSubagentStepId: "step-1" },
+        mouseModeActive: true,
         scrollOffset: 0,
       },
     });
@@ -826,6 +842,7 @@ describe("durable Task surfaces", () => {
       steer: false,
     });
     expect(closed.state.tasks.inspectedTaskId).toBeUndefined();
+    expect(closed.releaseMouseMode).toBe(true);
   });
 });
 

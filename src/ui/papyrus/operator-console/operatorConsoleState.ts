@@ -275,6 +275,8 @@ export type TaskSurfaceState = {
   readonly selectedTaskId?: string;
   readonly inspectedTaskId?: string;
   readonly inspection?: TaskInspectionState;
+  /** Explicit temporary terminal mouse capture. Native terminal mouse behavior is the default. */
+  readonly mouseModeActive?: boolean;
   readonly scrollOffset: number;
 };
 
