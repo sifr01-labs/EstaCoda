@@ -226,9 +226,9 @@ describe("Papyrus operator console prompt surface", () => {
       placeholder: "/help · /tools",
     }), { width: 72, height: 1, style }).join("\n");
 
-    expect(emptyLines[0]).toContain(`${ansiFg(tokens.contract.surface.bgElevated)}${"▄".repeat(72)}`);
+    expect(emptyLines[0]).toContain(`\x1b[7m${ansiFg(tokens.contract.surface.bgElevated)}${"▀".repeat(72)}`);
     expect(emptyLines[1]).toContain(ansiBg(tokens.contract.surface.bgElevated));
-    expect(emptyLines[2]).toContain(`${ansiFg(tokens.contract.surface.bgElevated)}${"▀".repeat(72)}`);
+    expect(emptyLines[2]).toContain(`\x1b[7m${ansiFg(tokens.contract.surface.bgElevated)}${"▄".repeat(72)}`);
     expect(empty).toContain(`${ansiFg(tokens.contract.palette.action)}› `);
     expect(empty).toContain(`${ansiFg(tokens.contract.text.placeholder)}/help`);
     expect(typed).not.toContain("/tools");

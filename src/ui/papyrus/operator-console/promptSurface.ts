@@ -70,11 +70,11 @@ export function renderPromptSurface(
   ));
   const topBand = chrome.topRows === 0
     ? []
-    : [renderHalfCellBand(options.style, width, "▄")];
+    : [renderHalfCellBand(options.style, width, "▀")];
   const bottomBand = chrome.bottomRows === 0
     ? []
     : [chrome.halfCellBands
-        ? renderHalfCellBand(options.style, width, "▀")
+        ? renderHalfCellBand(options.style, width, "▄")
         : renderFullPaddingRow(options.style, width)];
   return [...topBand, ...content, ...bottomBand];
 }
@@ -119,7 +119,10 @@ function renderHalfCellBand(
   glyph: "▄" | "▀"
 ): string {
   if (style === undefined || !style.supportsColor) return "".padEnd(width);
-  return styleColor(style, glyph.repeat(width), style.tokens.contract.surface.bgElevated);
+  // Inverse mode uses the terminal's real default background for the outer
+  // half while making the half adjacent to the content a continuous elevated
+  // background. This avoids foreground block-glyph seams at the inner edges.
+  return `\x1b[7m${styleColor(style, glyph.repeat(width), style.tokens.contract.surface.bgElevated)}`;
 }
 
 function renderFullPaddingRow(style: OperatorConsoleStyle | undefined, width: number): string {
