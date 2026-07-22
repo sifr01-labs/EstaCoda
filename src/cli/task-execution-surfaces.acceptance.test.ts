@@ -11,11 +11,11 @@ import { createTaskTools } from "../tools/task-tools.js";
 import {
   createInitialOperatorConsoleState,
   createOperatorConsoleLayout,
-  renderOperatorConsoleTextLines,
-  type TaskCardState
+  renderOperatorConsoleTextLines
 } from "../ui/papyrus/operator-console/index.js";
 import { SQLiteTaskStore } from "../workflow/sqlite-task-store.js";
-import { TaskOperatorService, type TaskStatusProjection } from "../workflow/task-operator-service.js";
+import { TaskOperatorService } from "../workflow/task-operator-service.js";
+import { taskProjectionToCard } from "./session-loop.js";
 import { executeTaskCommand } from "./task-commands.js";
 
 const NOW = new Date("2030-01-01T00:00:00.000Z");
@@ -142,7 +142,11 @@ describe("Task execution ownership surface acceptance", () => {
     expect(backgroundDelegation.content).toContain("no active background continuation");
 
     const projection = operator.status(automatic.taskId, "interactive");
-    const card = projectionToCard(projection);
+    const card = taskProjectionToCard(projection);
+    expect(card.subagents).toEqual([
+      expect.objectContaining({ displayLabel: "Subagent 1", position: 0, role: "worker" })
+    ]);
+    expect(card.trace.events.length).toBeGreaterThan(0);
     const state = createInitialOperatorConsoleState({
       locale: "ar",
       terminal: { width: 30, height: 12, isTty: false },
@@ -167,42 +171,6 @@ const RESULT_READER: ToolDefinition = {
   progressLabel: "reading task result",
   maxResultSizeChars: 1_000
 };
-
-function projectionToCard(task: TaskStatusProjection): TaskCardState {
-  return {
-    taskId: task.taskId,
-    objective: task.objective,
-    status: task.status,
-    executionPreference: task.executionPreference,
-    execution: task.execution,
-    foregroundOwnerActive: task.foregroundOwnerActive,
-    backgroundContinuation: task.backgroundContinuation,
-    ...(task.executionWaitingReason === undefined ? {} : { executionWaitingReason: task.executionWaitingReason }),
-    progress: { completed: task.progress.completed, skipped: task.progress.skipped, total: task.progress.total },
-    ...(task.planRevision === undefined ? {} : { planRevision: task.planRevision }),
-    steps: task.steps.map((step) => ({
-      stepId: step.stepId,
-      title: step.title,
-      status: step.status,
-      dependsOn: step.dependsOn,
-      childTaskPolicy: step.childTaskPolicy,
-      usage: step.usage,
-      attempts: step.attempts,
-      ...(step.activeAttempt === undefined ? {} : { activeAttempt: step.activeAttempt })
-    })),
-    childTasks: task.childTasks,
-    recentActivity: task.recentActivity,
-    ...(task.currentToolCategory === undefined ? {} : { currentToolCategory: task.currentToolCategory }),
-    elapsedMs: task.elapsedMs,
-    usage: task.usage,
-    ...(task.spending === undefined ? {} : { spending: task.spending }),
-    results: task.results,
-    ...(task.waitReason === undefined ? {} : { waitReason: task.waitReason }),
-    ...(task.failure === undefined ? {} : { failure: task.failure }),
-    createdAt: task.createdAt,
-    updatedAt: task.updatedAt
-  };
-}
 
 function visibleWidth(value: string): number {
   return [...value.replace(/[\u2066-\u2069]/gu, "")].length;

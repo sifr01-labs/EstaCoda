@@ -60,6 +60,7 @@ describe("durable Task surfaces", () => {
     const lines = taskInspectionContentLines(makeCard({
       results: [
         {
+          id: "result-accepted",
           handle: "task-result:accepted",
           kind: "text",
           disposition: "accepted",
@@ -68,6 +69,7 @@ describe("durable Task surfaces", () => {
           primary: true
         },
         {
+          id: "result-diagnostic",
           handle: "task-result:diagnostic",
           kind: "text",
           disposition: "diagnostic",
@@ -193,7 +195,10 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
     steps: [
       {
         stepId: "step-a",
+        position: 0,
         title: "Research Company A",
+        objective: "Research Company A",
+        executorRole: "worker",
         status: "running",
         dependsOn: [],
         childTaskPolicy: "forbid",
@@ -201,8 +206,13 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
         attempts: [{
           attemptId: "attempt-a-1",
           taskId: "T-104",
+          stepId: "step-a",
           attemptNumber: 1,
           status: "running",
+          workerSessionId: "worker-a",
+          createdAt: "2026-07-20T10:00:00.000Z",
+          updatedAt: "2026-07-20T10:03:18.000Z",
+          startedAt: "2026-07-20T10:00:00.000Z",
           elapsedMs: 198_000,
           currentActivity: "Browsing",
           currentToolCategory: "browser",
@@ -211,20 +221,55 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
         activeAttempt: {
           attemptId: "attempt-a-1",
           taskId: "T-104",
+          stepId: "step-a",
           attemptNumber: 1,
           status: "running",
+          workerSessionId: "worker-a",
+          createdAt: "2026-07-20T10:00:00.000Z",
+          updatedAt: "2026-07-20T10:03:18.000Z",
+          startedAt: "2026-07-20T10:00:00.000Z",
           elapsedMs: 198_000,
           currentActivity: "Browsing",
           currentToolCategory: "browser",
           usage: cardUsage(0.006)
         },
       },
-      { stepId: "step-b", title: "Define comparison criteria", status: "completed", dependsOn: [], childTaskPolicy: "forbid", usage: cardUsage(0.0063), attempts: [] },
-      { stepId: "step-c", title: "Compare findings", status: "pending", dependsOn: ["step-a", "step-b"], childTaskPolicy: "forbid", usage: cardUsage(0), attempts: [] },
+      { stepId: "step-b", position: 1, title: "Define comparison criteria", objective: "Define comparison criteria", executorRole: "worker", status: "completed", dependsOn: [], childTaskPolicy: "forbid", usage: cardUsage(0.0063), attempts: [] },
+      { stepId: "step-c", position: 2, title: "Compare findings", objective: "Compare findings", executorRole: "synthesis", status: "pending", dependsOn: ["step-a", "step-b"], childTaskPolicy: "forbid", usage: cardUsage(0), attempts: [] },
     ],
+    subagents: [{
+      stepId: "step-a",
+      position: 0,
+      displayIndex: 1,
+      displayLabel: "Subagent 1",
+      title: "Research Company A",
+      objective: "Research Company A",
+      role: "worker",
+      status: "running",
+      dependsOn: [],
+      elapsedMs: 198_000,
+      currentActivity: "Browsing",
+      currentToolCategory: "browser",
+      usage: { total: cardUsage(0.006), currentAttempt: cardUsage(0.006) },
+      attempts: [],
+      trace: [],
+      results: []
+    }],
+    trace: {
+      events: [{
+        eventId: "event-attempt-started",
+        kind: "attempt-started",
+        label: "Attempt started · Research Company A",
+        timestamp: "2026-07-20T10:00:00.000Z",
+        stepId: "step-a",
+        attemptId: "attempt-a-1",
+        subagentIndex: 1
+      }],
+      hasEarlierEvents: false
+    },
     childTasks: [],
     recentActivity: [
-      { kind: "attempt-started", label: "Attempt started · Research Company A", timestamp: "2026-07-20T10:00:00.000Z" },
+      { eventId: "event-attempt-started", kind: "attempt-started", label: "Attempt started · Research Company A", timestamp: "2026-07-20T10:00:00.000Z" },
     ],
     currentToolCategory: "browser",
     elapsedMs: 198_000,
@@ -244,6 +289,7 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
       state: "available"
     },
     results: [{
+      id: "result-safe-1",
       handle: "result://safe-1",
       kind: "artifact",
       disposition: "accepted",

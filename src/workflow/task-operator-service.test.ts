@@ -2,8 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { TaskAttempt, TaskUsageTotals } from "../contracts/task.js";
+import type { TaskAttempt, TaskStep, TaskUsageTotals } from "../contracts/task.js";
+import type { ProviderUsageEntry } from "../contracts/provider-usage.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
+import { FixedTaskService, type FixedTaskStepInput } from "./fixed-task-service.js";
 import { SQLiteTaskStore } from "./sqlite-task-store.js";
 import { TaskOperatorService } from "./task-operator-service.js";
 
@@ -131,6 +133,185 @@ describe("TaskOperatorService", () => {
         usage: expect.objectContaining({ providerCalls: 1, estimatedCostUsd: 0.25 })
       })
     ]);
+  });
+
+  it("projects stable Subagents, direct retry Attempts, trace attribution, Results, and usage without N+1 reads", async () => {
+    await db.createSession({ id: "worker-one", profileId: "alpha", parentSessionId: "owner" });
+    await db.createSession({ id: "worker-two", profileId: "alpha", parentSessionId: "owner" });
+    const seed = service.begin({ objective: "Seed projection policy.", workspace: workspace(), creatorSessionId: "owner" });
+    const seedTask = store.getTask(seed.taskId)!;
+    const seedStep = store.listSteps(seedTask.id, seedTask.activePlanRevisionId!)[0]!;
+    let idSequence = 0;
+    const graph = new FixedTaskService({
+      store,
+      now: () => new Date(now()),
+      id: (kind) => `projection-${kind}-${++idSequence}`
+    }).create({
+      creatorSessionId: "owner",
+      source: "delegation",
+      objective: "Research two paths and synthesize the result.",
+      workspace: workspace(),
+      authorityPolicy: seedTask.authorityPolicy,
+      executionLimits: seedTask.executionLimits,
+      steps: [
+        projectionStep(seedStep, "research", "Research authentication", "worker"),
+        projectionStep(seedStep, "review", "Review API boundaries", "orchestrator"),
+        {
+          ...projectionStep(seedStep, "synthesis", "Synthesize the findings", "synthesis"),
+          dependsOn: ["research", "review"]
+        }
+      ]
+    });
+    const [researchStep] = graph.steps;
+    const firstAttempt = projectionAttempt({
+      id: "attempt-research-1",
+      taskId: graph.task.id,
+      stepId: researchStep!.id,
+      planRevisionId: graph.revision.id,
+      attemptNumber: 1,
+      status: "failed",
+      workerSessionId: "worker-one",
+      createdAt: "2026-01-01T00:00:01.000Z",
+      updatedAt: "2026-01-01T00:00:02.000Z",
+      completedAt: "2026-01-01T00:00:02.000Z"
+    });
+    const retryAttempt = projectionAttempt({
+      id: "attempt-research-2",
+      taskId: graph.task.id,
+      stepId: researchStep!.id,
+      planRevisionId: graph.revision.id,
+      attemptNumber: 2,
+      status: "running",
+      workerSessionId: "worker-two",
+      createdAt: "2026-01-01T00:00:03.000Z",
+      updatedAt: "2026-01-01T00:00:04.000Z",
+      startedAt: "2026-01-01T00:00:03.000Z"
+    });
+    store.atomicWrite((tx) => {
+      tx.updateTask({
+        ...graph.task,
+        status: "running",
+        startedAt: "2026-01-01T00:00:01.000Z",
+        updatedAt: "2026-01-01T00:00:04.000Z"
+      });
+      tx.updateStep({ ...researchStep!, status: "ready", updatedAt: "2026-01-01T00:00:01.000Z" });
+      tx.updateStep({ ...researchStep!, status: "running", updatedAt: "2026-01-01T00:00:04.000Z" });
+      tx.createAttempt(firstAttempt);
+      tx.createAttempt(retryAttempt);
+      tx.appendEvent({
+        id: "event-retry-activity",
+        profileId: "alpha",
+        taskId: graph.task.id,
+        planRevisionId: graph.revision.id,
+        stepId: researchStep!.id,
+        attemptId: retryAttempt.id,
+        kind: "attempt-progressed",
+        timestamp: "2026-01-01T00:00:04.000Z",
+        data: {
+          rawToolInput: "must-not-project",
+          activity: { kind: "tool", label: "Reading session guards", toolCategory: "files" }
+        }
+      });
+      tx.recordResult({
+        id: "result-research",
+        profileId: "alpha",
+        taskId: graph.task.id,
+        stepId: researchStep!.id,
+        attemptId: retryAttempt.id,
+        kind: "summary",
+        disposition: "accepted",
+        status: "available",
+        handle: "task-result://research",
+        byteLength: 24,
+        contentHash: "b".repeat(64),
+        summary: "Safe research summary",
+        createdAt: "2026-01-01T00:00:04.000Z"
+      });
+    });
+    await db.recordProviderUsageEntries([
+      providerUsageEntry(graph.task.id, graph.revision.id, researchStep!.id, firstAttempt.id, "usage-research-1", 100, 0.01),
+      providerUsageEntry(graph.task.id, graph.revision.id, researchStep!.id, retryAttempt.id, "usage-research-2", 200, 0.02)
+    ]);
+    const usageReads = vi.spyOn(store, "listProviderUsageEntries");
+
+    const projection = service.status(graph.task.id, "owner");
+
+    expect(usageReads).toHaveBeenCalledTimes(1);
+    expect(projection.steps.map((step) => ({ position: step.position, role: step.executorRole }))).toEqual([
+      { position: 0, role: "worker" },
+      { position: 1, role: "orchestrator" },
+      { position: 2, role: "synthesis" }
+    ]);
+    expect(projection.subagents.map((subagent) => subagent.displayLabel)).toEqual(["Subagent 1", "Subagent 2"]);
+    expect(projection.subagents).toHaveLength(2);
+    expect(projection.subagents[0]).toMatchObject({
+      stepId: researchStep!.id,
+      position: 0,
+      displayIndex: 1,
+      role: "worker",
+      objective: "Research authentication",
+      currentActivity: "Reading session guards",
+      currentToolCategory: "files",
+      latestAttempt: {
+        attemptId: retryAttempt.id,
+        attemptNumber: 2,
+        workerSessionId: "worker-two"
+      },
+      activeAttempt: { attemptId: retryAttempt.id },
+      usage: {
+        total: { providerCalls: 2, totalTokens: 300, estimatedCostUsd: 0.03 },
+        currentAttempt: { providerCalls: 1, totalTokens: 200, estimatedCostUsd: 0.02 }
+      }
+    });
+    expect(projection.subagents[0]?.attempts.map((attempt) => attempt.attemptId)).toEqual([
+      firstAttempt.id,
+      retryAttempt.id
+    ]);
+    expect(projection.subagents[0]?.trace).toEqual([
+      expect.objectContaining({
+        eventId: "event-retry-activity",
+        attemptId: retryAttempt.id,
+        subagentIndex: 1,
+        label: "Reading session guards · Research authentication"
+      })
+    ]);
+    expect(projection.subagents[0]?.results).toEqual([
+      expect.objectContaining({
+        id: "result-research",
+        handle: "task-result://research",
+        stepId: researchStep!.id,
+        attemptId: retryAttempt.id
+      })
+    ]);
+    expect(JSON.stringify(projection)).not.toContain("must-not-project");
+  });
+
+  it("retains a bounded chronological safe Task trace and reports earlier history", () => {
+    const created = service.begin({ objective: "Project a bounded trace.", workspace: workspace(), creatorSessionId: "owner" });
+    const task = store.getTask(created.taskId)!;
+    store.atomicWrite((tx) => {
+      for (let index = 0; index < 520; index += 1) {
+        tx.appendEvent({
+          id: `trace-event-${String(index).padStart(3, "0")}`,
+          profileId: "alpha",
+          taskId: task.id,
+          kind: "task-steered",
+          timestamp: new Date(Date.parse(now()) + index + 1).toISOString(),
+          data: { guidance: "must-not-project" }
+        });
+      }
+    });
+
+    const trace = service.status(task.id, "owner").trace;
+
+    expect(trace.events).toHaveLength(512);
+    expect(trace.hasEarlierEvents).toBe(true);
+    expect(trace.events[0]?.eventId).toBe("trace-event-008");
+    expect(trace.events.at(-1)?.eventId).toBe("trace-event-519");
+    expect(trace.events.every((event, index, events) =>
+      index === 0 || event.timestamp >= events[index - 1]!.timestamp
+    )).toBe(true);
+    expect(JSON.stringify(trace)).not.toContain("must-not-project");
   });
 
   it("projects durable Task budget balances without inventing a second ledger", () => {
@@ -341,6 +522,8 @@ describe("TaskOperatorService", () => {
     expect(projection.steps).toEqual([
       expect.objectContaining({ stepId: step.id, title: "Complete Task", dependsOn: [] })
     ]);
+    expect(projection.steps[0]?.objective).toContain("[REDACTED]");
+    expect(projection.subagents[0]?.objective).toContain("[REDACTED]");
     expect(projection.recentActivity[0]).toMatchObject({
       kind: "attempt-progressed",
       label: "Using browser.navigate · Complete Task"
@@ -375,6 +558,109 @@ function failedAttempt(taskId: string, stepId: string, planRevisionId: string): 
     createdAt: now(),
     updatedAt: now(),
     completedAt: now()
+  };
+}
+
+function projectionStep(
+  seed: TaskStep,
+  key: string,
+  objective: string,
+  role: TaskStep["executor"]["role"]
+): FixedTaskStepInput {
+  return {
+    key,
+    title: objective,
+    objective,
+    dependsOn: [],
+    executor: { kind: "agent", role },
+    childTaskPolicy: "forbid",
+    authorityPolicy: seed.authorityPolicy,
+    executionLimits: seed.executionLimits,
+    retryPolicy: seed.retryPolicy,
+    failurePolicy: seed.failurePolicy,
+    idempotency: seed.idempotency,
+    resultPolicy: seed.resultPolicy
+  };
+}
+
+function projectionAttempt(input: {
+  id: string;
+  taskId: string;
+  stepId: string;
+  planRevisionId: string;
+  attemptNumber: number;
+  status: TaskAttempt["status"];
+  workerSessionId: string;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  completedAt?: string;
+}): TaskAttempt {
+  return {
+    id: input.id,
+    profileId: "alpha",
+    taskId: input.taskId,
+    planRevisionId: input.planRevisionId,
+    stepId: input.stepId,
+    attemptNumber: input.attemptNumber,
+    status: input.status,
+    dispatchKey: `dispatch-${input.id}`,
+    workerSessionId: input.workerSessionId,
+    usage: emptyUsage(),
+    ...(input.status === "failed"
+      ? { failure: { class: "provider", message: "redacted", retryable: true, uncertainSideEffects: false } }
+      : {}),
+    resultIds: [],
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+    ...(input.startedAt === undefined ? {} : { startedAt: input.startedAt }),
+    ...(input.completedAt === undefined ? {} : { completedAt: input.completedAt })
+  };
+}
+
+function providerUsageEntry(
+  taskId: string,
+  planRevisionId: string,
+  stepId: string,
+  attemptId: string,
+  id: string,
+  totalTokens: number,
+  estimatedCostUsd: number
+): ProviderUsageEntry {
+  return {
+    id,
+    profileId: "alpha",
+    sessionId: "owner",
+    requestKey: `request-${id}`,
+    provider: "priced",
+    model: "model",
+    routeRole: "primary",
+    routeIndex: 0,
+    providerAttemptIndex: 1,
+    sourceKind: "task",
+    pricing: {
+      currency: "USD",
+      inputPerMillionTokens: 1,
+      outputPerMillionTokens: 1,
+      fingerprint: "pricing-v1"
+    },
+    pricingFingerprint: "pricing-v1",
+    inputTokens: totalTokens,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    totalTokens,
+    estimatedCostUsd,
+    usageComplete: true,
+    pricingComplete: true,
+    incompleteReasons: [],
+    taskId,
+    rootTaskId: taskId,
+    planRevisionId,
+    stepId,
+    attemptId,
+    dispatchedAt: now()
   };
 }
 

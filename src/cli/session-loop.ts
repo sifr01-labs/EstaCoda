@@ -3080,7 +3080,7 @@ function taskApprovalToCard(
   };
 }
 
-function taskProjectionToCard(task: TaskStatusProjection): TaskCardState {
+export function taskProjectionToCard(task: TaskStatusProjection): TaskCardState {
   return {
     taskId: task.taskId,
     objective: task.objective,
@@ -3098,53 +3098,97 @@ function taskProjectionToCard(task: TaskStatusProjection): TaskCardState {
     ...(task.planRevision === undefined ? {} : { planRevision: { ...task.planRevision } }),
     steps: task.steps.map((step) => ({
       stepId: step.stepId,
+      position: step.position,
       title: step.title,
+      objective: step.objective,
+      executorRole: step.executorRole,
       status: step.status,
       dependsOn: [...step.dependsOn],
       childTaskPolicy: step.childTaskPolicy,
       usage: taskUsageToCard(step.usage),
-      attempts: step.attempts.map((attempt) => ({
-        attemptId: attempt.attemptId,
-        taskId: attempt.taskId,
-        attemptNumber: attempt.attemptNumber,
-        status: attempt.status,
-        elapsedMs: attempt.elapsedMs,
-        ...(attempt.currentActivity === undefined ? {} : { currentActivity: attempt.currentActivity }),
-        ...(attempt.currentToolCategory === undefined ? {} : { currentToolCategory: attempt.currentToolCategory }),
-        usage: taskUsageToCard(attempt.usage)
-      })),
-      ...(step.activeAttempt === undefined ? {} : {
-        activeAttempt: {
-          attemptId: step.activeAttempt.attemptId,
-          taskId: step.activeAttempt.taskId,
-          attemptNumber: step.activeAttempt.attemptNumber,
-          status: step.activeAttempt.status,
-          elapsedMs: step.activeAttempt.elapsedMs,
-          ...(step.activeAttempt.currentActivity === undefined ? {} : { currentActivity: step.activeAttempt.currentActivity }),
-          ...(step.activeAttempt.currentToolCategory === undefined ? {} : { currentToolCategory: step.activeAttempt.currentToolCategory }),
-          usage: taskUsageToCard(step.activeAttempt.usage)
-        },
-      }),
+      attempts: step.attempts.map(taskAttemptToCard),
+      ...(step.latestAttempt === undefined ? {} : { latestAttempt: taskAttemptToCard(step.latestAttempt) }),
+      ...(step.activeAttempt === undefined ? {} : { activeAttempt: taskAttemptToCard(step.activeAttempt) }),
     })),
+    subagents: task.subagents.map((subagent) => ({
+      stepId: subagent.stepId,
+      position: subagent.position,
+      displayIndex: subagent.displayIndex,
+      displayLabel: subagent.displayLabel,
+      title: subagent.title,
+      objective: subagent.objective,
+      role: subagent.role,
+      status: subagent.status,
+      dependsOn: [...subagent.dependsOn],
+      elapsedMs: subagent.elapsedMs,
+      ...(subagent.currentActivity === undefined ? {} : { currentActivity: subagent.currentActivity }),
+      ...(subagent.currentToolCategory === undefined ? {} : { currentToolCategory: subagent.currentToolCategory }),
+      usage: {
+        total: taskUsageToCard(subagent.usage.total),
+        ...(subagent.usage.currentAttempt === undefined
+          ? {}
+          : { currentAttempt: taskUsageToCard(subagent.usage.currentAttempt) })
+      },
+      attempts: subagent.attempts.map(taskAttemptToCard),
+      ...(subagent.latestAttempt === undefined ? {} : { latestAttempt: taskAttemptToCard(subagent.latestAttempt) }),
+      ...(subagent.activeAttempt === undefined ? {} : { activeAttempt: taskAttemptToCard(subagent.activeAttempt) }),
+      trace: subagent.trace.map((event) => ({ ...event })),
+      results: subagent.results.map(taskResultToCard)
+    })),
+    trace: {
+      events: task.trace.events.map((event) => ({ ...event })),
+      hasEarlierEvents: task.trace.hasEarlierEvents
+    },
     childTasks: task.childTasks.map((child) => ({ ...child })),
     recentActivity: task.recentActivity.map((activity) => ({ ...activity })),
     ...(task.currentToolCategory === undefined ? {} : { currentToolCategory: task.currentToolCategory }),
     elapsedMs: task.elapsedMs,
     usage: taskUsageToCard(task.usage),
     ...(task.spending === undefined ? {} : { spending: { ...task.spending } }),
-    results: task.results.map((result) => ({
-      handle: result.handle,
-      kind: result.kind,
-      disposition: result.disposition,
-      status: result.status,
-      byteLength: result.byteLength,
-      primary: result.primary,
-      ...(result.summary === undefined ? {} : { summary: result.summary }),
-    })),
+    results: task.results.map(taskResultToCard),
     ...(task.waitReason === undefined ? {} : { waitReason: task.waitReason }),
     ...(task.failure === undefined ? {} : { failure: { ...task.failure } }),
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
+  };
+}
+
+function taskAttemptToCard(
+  attempt: TaskStatusProjection["steps"][number]["attempts"][number]
+): TaskCardState["steps"][number]["attempts"][number] {
+  return {
+    attemptId: attempt.attemptId,
+    taskId: attempt.taskId,
+    stepId: attempt.stepId,
+    attemptNumber: attempt.attemptNumber,
+    status: attempt.status,
+    ...(attempt.workerSessionId === undefined ? {} : { workerSessionId: attempt.workerSessionId }),
+    createdAt: attempt.createdAt,
+    updatedAt: attempt.updatedAt,
+    ...(attempt.startedAt === undefined ? {} : { startedAt: attempt.startedAt }),
+    ...(attempt.completedAt === undefined ? {} : { completedAt: attempt.completedAt }),
+    elapsedMs: attempt.elapsedMs,
+    ...(attempt.currentActivity === undefined ? {} : { currentActivity: attempt.currentActivity }),
+    ...(attempt.currentToolCategory === undefined ? {} : { currentToolCategory: attempt.currentToolCategory }),
+    usage: taskUsageToCard(attempt.usage)
+  };
+}
+
+function taskResultToCard(
+  result: TaskStatusProjection["results"][number]
+): TaskCardState["results"][number] {
+  return {
+    id: result.id,
+    handle: result.handle,
+    kind: result.kind,
+    disposition: result.disposition,
+    status: result.status,
+    byteLength: result.byteLength,
+    primary: result.primary,
+    ...(result.stepId === undefined ? {} : { stepId: result.stepId }),
+    ...(result.attemptId === undefined ? {} : { attemptId: result.attemptId }),
+    ...(result.mimeType === undefined ? {} : { mimeType: result.mimeType }),
+    ...(result.summary === undefined ? {} : { summary: result.summary })
   };
 }
 

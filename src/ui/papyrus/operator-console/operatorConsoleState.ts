@@ -111,22 +111,17 @@ export type AttachmentCardState = {
 
 export type TaskCardStepState = {
   readonly stepId: string;
+  readonly position: number;
   readonly title: string;
+  readonly objective: string;
+  readonly executorRole: "worker" | "orchestrator" | "synthesis";
   readonly status: "pending" | "ready" | "running" | "waiting_for_input" | "waiting_for_approval" | "completed" | "failed" | "skipped" | "cancelled";
   readonly dependsOn: readonly string[];
   readonly childTaskPolicy: "forbid" | "fire_and_forget";
   readonly usage: TaskCardUsageState;
   readonly attempts: readonly TaskCardAttemptState[];
-  readonly activeAttempt?: {
-    readonly attemptId: string;
-    readonly taskId: string;
-    readonly attemptNumber: number;
-    readonly status: "queued" | "leased" | "running" | "waiting_for_input" | "waiting_for_approval" | "completed" | "failed" | "cancelled" | "interrupted" | "expired";
-    readonly elapsedMs: number;
-    readonly currentActivity?: string;
-    readonly currentToolCategory?: string;
-    readonly usage: TaskCardUsageState;
-  };
+  readonly latestAttempt?: TaskCardAttemptState;
+  readonly activeAttempt?: TaskCardAttemptState;
 };
 
 export type TaskCardUsageState = {
@@ -140,8 +135,14 @@ export type TaskCardUsageState = {
 export type TaskCardAttemptState = {
   readonly attemptId: string;
   readonly taskId: string;
+  readonly stepId: string;
   readonly attemptNumber: number;
   readonly status: "queued" | "leased" | "running" | "waiting_for_input" | "waiting_for_approval" | "completed" | "failed" | "cancelled" | "interrupted" | "expired";
+  readonly workerSessionId?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly startedAt?: string;
+  readonly completedAt?: string;
   readonly elapsedMs: number;
   readonly currentActivity?: string;
   readonly currentToolCategory?: string;
@@ -149,10 +150,56 @@ export type TaskCardAttemptState = {
 };
 
 export type TaskCardActivityState = {
+  readonly eventId: string;
   readonly kind: string;
   readonly label: string;
   readonly timestamp: string;
   readonly stepId?: string;
+  readonly attemptId?: string;
+  readonly subagentIndex?: number;
+};
+
+export type TaskCardTraceState = {
+  readonly events: readonly TaskCardActivityState[];
+  readonly hasEarlierEvents: boolean;
+};
+
+export type TaskCardResultState = {
+  readonly id: string;
+  readonly handle: string;
+  readonly kind: string;
+  readonly disposition: "accepted" | "diagnostic";
+  readonly status: string;
+  readonly byteLength: number;
+  readonly primary: boolean;
+  readonly stepId?: string;
+  readonly attemptId?: string;
+  readonly mimeType?: string;
+  readonly summary?: string;
+};
+
+export type TaskCardSubagentState = {
+  readonly stepId: string;
+  readonly position: number;
+  readonly displayIndex: number;
+  readonly displayLabel: string;
+  readonly title: string;
+  readonly objective: string;
+  readonly role: "worker" | "orchestrator";
+  readonly status: TaskCardStepState["status"];
+  readonly dependsOn: readonly string[];
+  readonly elapsedMs: number;
+  readonly currentActivity?: string;
+  readonly currentToolCategory?: string;
+  readonly usage: {
+    readonly total: TaskCardUsageState;
+    readonly currentAttempt?: TaskCardUsageState;
+  };
+  readonly attempts: readonly TaskCardAttemptState[];
+  readonly latestAttempt?: TaskCardAttemptState;
+  readonly activeAttempt?: TaskCardAttemptState;
+  readonly trace: readonly TaskCardActivityState[];
+  readonly results: readonly TaskCardResultState[];
 };
 
 export type TaskCardState = {
@@ -171,6 +218,8 @@ export type TaskCardState = {
   };
   readonly planRevision?: { readonly revision: number; readonly status: string };
   readonly steps: readonly TaskCardStepState[];
+  readonly subagents: readonly TaskCardSubagentState[];
+  readonly trace: TaskCardTraceState;
   readonly childTasks: readonly {
     readonly taskId: string;
     readonly status: TaskCardState["status"];
@@ -181,15 +230,7 @@ export type TaskCardState = {
   readonly elapsedMs: number;
   readonly usage: TaskCardUsageState;
   readonly spending?: SpendingBudgetSummary;
-  readonly results: readonly {
-    readonly handle: string;
-    readonly kind: string;
-    readonly disposition: "accepted" | "diagnostic";
-    readonly status: string;
-    readonly byteLength: number;
-    readonly primary: boolean;
-    readonly summary?: string;
-  }[];
+  readonly results: readonly TaskCardResultState[];
   readonly waitReason?: string;
   readonly failure?: {
     readonly class: string;

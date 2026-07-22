@@ -354,11 +354,42 @@ function cloneTaskSurfaceState(tasks: TaskSurfaceState): TaskSurfaceState {
       steps: card.steps.map((step) => ({
         ...step,
         dependsOn: [...step.dependsOn],
-        ...(step.activeAttempt === undefined ? {} : { activeAttempt: { ...step.activeAttempt } }),
+        usage: { ...step.usage },
+        attempts: step.attempts.map((attempt) => ({ ...attempt, usage: { ...attempt.usage } })),
+        ...(step.latestAttempt === undefined
+          ? {}
+          : { latestAttempt: { ...step.latestAttempt, usage: { ...step.latestAttempt.usage } } }),
+        ...(step.activeAttempt === undefined
+          ? {}
+          : { activeAttempt: { ...step.activeAttempt, usage: { ...step.activeAttempt.usage } } }),
       })),
+      subagents: card.subagents.map((subagent) => ({
+        ...subagent,
+        dependsOn: [...subagent.dependsOn],
+        usage: {
+          total: { ...subagent.usage.total },
+          ...(subagent.usage.currentAttempt === undefined
+            ? {}
+            : { currentAttempt: { ...subagent.usage.currentAttempt } })
+        },
+        attempts: subagent.attempts.map((attempt) => ({ ...attempt, usage: { ...attempt.usage } })),
+        ...(subagent.latestAttempt === undefined
+          ? {}
+          : { latestAttempt: { ...subagent.latestAttempt, usage: { ...subagent.latestAttempt.usage } } }),
+        ...(subagent.activeAttempt === undefined
+          ? {}
+          : { activeAttempt: { ...subagent.activeAttempt, usage: { ...subagent.activeAttempt.usage } } }),
+        trace: subagent.trace.map((event) => ({ ...event })),
+        results: subagent.results.map((result) => ({ ...result }))
+      })),
+      trace: {
+        events: card.trace.events.map((event) => ({ ...event })),
+        hasEarlierEvents: card.trace.hasEarlierEvents
+      },
       recentActivity: card.recentActivity.map((activity) => ({ ...activity })),
       usage: { ...card.usage },
       results: card.results.map((result) => ({ ...result })),
+      ...(card.spending === undefined ? {} : { spending: { ...card.spending } }),
       ...(card.failure === undefined ? {} : { failure: { ...card.failure } }),
     })),
     ...(tasks.selectedTaskId === undefined ? {} : { selectedTaskId: tasks.selectedTaskId }),
