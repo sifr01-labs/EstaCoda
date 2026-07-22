@@ -259,6 +259,41 @@ describe("raw prompt controller", () => {
     await expect(read.pending).resolves.toEqual({ type: "submit", text: "ok" });
   });
 
+  it("keeps Subagent inspection anchored by Step ID while its safe activity refreshes", async () => {
+    let card = promptTaskCardWithSubagentTrace(["Read first file", "Summarized first file"]);
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 18, isTty: true },
+        getTasks: () => [card],
+      },
+    });
+
+    read.input.send("\t");
+    read.input.send("\r");
+    read.input.send("\r");
+    read.input.send("\u001b[D");
+    await flushKeypressTimers();
+    card = promptTaskCardWithSubagentTrace([
+      "Read first file",
+      "Summarized first file",
+      "New live Subagent event",
+    ], "Reading the newly discovered file");
+    const refreshStart = read.output.writes.length;
+    read.input.send("\u001b[A");
+    await flushKeypressTimers();
+    const refreshedOutput = read.output.writes.slice(refreshStart).join("");
+
+    expect(refreshedOutput).toContain("Main session / Task");
+    expect(refreshedOutput).toContain("Subagent 1");
+    expect(refreshedOutput).toContain("Reading the newly discovered file");
+    expect(refreshedOutput).toContain("Return to live");
+    read.input.send("\u001b");
+    read.input.send("\t");
+    read.input.send("ok\r");
+    await expect(read.pending).resolves.toEqual({ type: "submit", text: "ok" });
+  });
+
   it("submits ASCII text", async () => {
     const { result, output, lifecycle } = await readWithFakeInput("hello\r");
 
@@ -2027,6 +2062,44 @@ function promptTaskCardWithTrace(labels: readonly string[]): TaskCardState {
       })),
       hasEarlierEvents: false,
     },
+  };
+}
+
+function promptTaskCardWithSubagentTrace(
+  labels: readonly string[],
+  currentActivity = "Reading the first file"
+): TaskCardState {
+  const card = promptTaskCardWithTrace(labels);
+  const trace = labels.map((label, index) => ({
+    eventId: `subagent-event-${index}`,
+    kind: "attempt-progressed",
+    label,
+    category: index % 2 === 0 ? "read" as const : "answer" as const,
+    timestamp: `2026-07-20T10:00:0${index}.000Z`,
+    stepId: "step-1",
+    attemptId: "attempt-1",
+    subagentIndex: 1,
+  }));
+  return {
+    ...card,
+    subagents: [{
+      stepId: "step-1",
+      position: 0,
+      displayIndex: 1,
+      displayLabel: "Subagent 1",
+      title: "Finish work",
+      objective: "Finish work",
+      role: "worker",
+      status: "running",
+      dependsOn: [],
+      elapsedMs: 2_000,
+      currentActivity,
+      currentToolCategory: "read",
+      usage: { total: card.usage, currentAttempt: card.usage },
+      attempts: [],
+      trace,
+      results: [],
+    }],
   };
 }
 

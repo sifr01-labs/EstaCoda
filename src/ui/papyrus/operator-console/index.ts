@@ -26,6 +26,7 @@ export * from "./steerSurface.js";
 export * from "./startupDashboardSurface.js";
 export * from "./startupRuntimeMapper.js";
 export * from "./statusRailSurface.js";
+export * from "./subagentInspectionSurface.js";
 export * from "./taskSurface.js";
 export * from "./taskOverviewSurface.js";
 export * from "./streamingSurface.js";

@@ -21,6 +21,10 @@ import {
   type OperatorConsoleStyle,
 } from "./operatorConsoleStyle.js";
 import { renderTaskOverviewSurface, taskOverviewContentLines } from "./taskOverviewSurface.js";
+import {
+  renderSubagentInspectionSurface,
+  subagentInspectionContentLines,
+} from "./subagentInspectionSurface.js";
 
 const SUBAGENT_CARD_HEIGHT = 7;
 const SUBAGENT_ACTIVITY_ROWS = 3;
@@ -155,7 +159,13 @@ export function renderTaskInspectionSurface(
     readonly style?: OperatorConsoleStyle;
   }
 ): readonly string[] {
-  return renderTaskOverviewSurface(state, options);
+  const inspectedCard = state.cards.find((card) => card.taskId === state.inspectedTaskId);
+  const inspectedSubagent = inspectedCard?.subagents.find((subagent) =>
+    subagent.stepId === state.inspection?.inspectedSubagentStepId
+  );
+  return inspectedSubagent === undefined
+    ? renderTaskOverviewSurface(state, options)
+    : renderSubagentInspectionSurface(state, options);
 }
 
 export function taskInspectionContentLines(
@@ -175,23 +185,49 @@ export function routeTaskSurfaceKey(
   if (state.tasks.inspectedTaskId !== undefined) {
     const card = inspectedTask(state.tasks);
     if (card === undefined) return { state: closeInspection(state), handled: true };
+    const inspectedSubagent = card.subagents.find((candidate) =>
+      candidate.stepId === state.tasks.inspection?.inspectedSubagentStepId
+    );
     const contentHeight = Math.max(1, dimension(viewportHeight) - 2);
-    const maxOffset = Math.max(0, taskOverviewContentLines(card, state.terminal.width, {
-      locale: state.locale,
-      style: state.style,
-      inspection: state.tasks.inspection,
-    }).length - contentHeight);
+    const contentLines = inspectedSubagent === undefined
+      ? taskOverviewContentLines(card, state.terminal.width, {
+          locale: state.locale,
+          style: state.style,
+          inspection: state.tasks.inspection,
+        })
+      : subagentInspectionContentLines(card, inspectedSubagent, state.terminal.width, {
+          locale: state.locale,
+          style: state.style,
+          inspection: state.tasks.inspection,
+        });
+    const maxOffset = Math.max(0, contentLines.length - contentHeight);
+    if (inspectedSubagent !== undefined) {
+      switch (keypress.key) {
+        case "escape":
+        case "tab": return { state: closeSubagentInspection(state, card), handled: true };
+        case "up": return { state: setTaskScroll(state, state.tasks.scrollOffset - 1, maxOffset), handled: true };
+        case "down": return { state: setTaskScroll(state, state.tasks.scrollOffset + 1, maxOffset), handled: true };
+        case "pageup": return { state: setTaskScroll(state, state.tasks.scrollOffset - contentHeight, maxOffset), handled: true };
+        case "pagedown": return { state: setTaskScroll(state, state.tasks.scrollOffset + contentHeight, maxOffset), handled: true };
+        case "left": return { state: setSubagentTraceSelection(state, inspectedSubagent, "left"), handled: true };
+        case "right": return { state: setSubagentTraceSelection(state, inspectedSubagent, "right"), handled: true };
+        case "home": return { state: setSubagentTraceSelection(state, inspectedSubagent, "home"), handled: true };
+        case "end": return { state: setSubagentTraceSelection(state, inspectedSubagent, "end"), handled: true };
+        default: return { state, handled: true };
+      }
+    }
     switch (keypress.key) {
       case "escape": return { state: closeInspection(state), handled: true };
       case "tab": return { state: closeInspection(state, true), handled: true };
-      case "up": return { state: setTaskScroll(state, state.tasks.scrollOffset - 1, maxOffset), handled: true };
-      case "down": return { state: setTaskScroll(state, state.tasks.scrollOffset + 1, maxOffset), handled: true };
+      case "up": return { state: selectRelativeSubagent(state, card, -1), handled: true };
+      case "down": return { state: selectRelativeSubagent(state, card, 1), handled: true };
       case "pageup": return { state: setTaskScroll(state, state.tasks.scrollOffset - contentHeight, maxOffset), handled: true };
       case "pagedown": return { state: setTaskScroll(state, state.tasks.scrollOffset + contentHeight, maxOffset), handled: true };
       case "left": return { state: setTaskTraceSelection(state, card, "left"), handled: true };
       case "right": return { state: setTaskTraceSelection(state, card, "right"), handled: true };
       case "home": return { state: setTaskTraceSelection(state, card, "home"), handled: true };
       case "end": return { state: setTaskTraceSelection(state, card, "end"), handled: true };
+      case "enter": return { state: openSelectedSubagent(state, card), handled: true };
       default: return { state, handled: true };
     }
   }
@@ -218,18 +254,30 @@ export function routeTaskSurfaceKey(
     case "home": return { state: selectTaskAt(state, 0), handled: true };
     case "end": return { state: selectTaskAt(state, state.tasks.cards.length - 1), handled: true };
     case "enter": {
-      const taskId = selectedTask(state.tasks)?.taskId;
-      return taskId === undefined
+      const task = selectedTask(state.tasks);
+      return task === undefined
         ? { state, handled: true }
         : {
             state: {
               ...state,
               tasks: {
                 ...state.tasks,
-                inspectedTaskId: taskId,
-                inspection: { followLive: true },
+                inspectedTaskId: task.taskId,
+                inspection: {
+                  followLive: true,
+                  ...(task.subagents[0] === undefined
+                    ? {}
+                    : { selectedSubagentStepId: task.subagents[0].stepId }),
+                },
                 scrollOffset: 0,
-              }
+              },
+              ...(task.subagents[0] === undefined
+                ? {}
+                : { focus: setFocus(state.focus, {
+                    kind: "taskSubagent",
+                    taskId: task.taskId,
+                    stepId: task.subagents[0].stepId,
+                  }) }),
             },
             handled: true
           };
@@ -276,13 +324,99 @@ function setTaskTraceSelection(
   card: TaskCardState,
   action: TraceNavigationAction
 ): OperatorConsoleState {
+  const { selectedTraceEventId: _selectedTraceEventId, ...inspection } = state.tasks.inspection ?? { followLive: true };
   return {
     ...state,
     tasks: {
       ...state.tasks,
-      inspection: navigateActivityTrace(card.trace.events, state.tasks.inspection, action, state.terminal.width),
+      inspection: {
+        ...inspection,
+        ...navigateActivityTrace(card.trace.events, state.tasks.inspection, action, state.terminal.width),
+      },
       scrollOffset: 0,
     }
+  };
+}
+
+function setSubagentTraceSelection(
+  state: OperatorConsoleState,
+  subagent: TaskCardSubagentState,
+  action: TraceNavigationAction
+): OperatorConsoleState {
+  const trace = navigateActivityTrace(
+    subagent.trace,
+    state.tasks.inspection?.subagentTrace,
+    action,
+    state.terminal.width
+  );
+  return {
+    ...state,
+    tasks: {
+      ...state.tasks,
+      inspection: {
+        ...(state.tasks.inspection ?? { followLive: true }),
+        subagentTrace: trace,
+      },
+      scrollOffset: 0,
+    },
+  };
+}
+
+function selectRelativeSubagent(
+  state: OperatorConsoleState,
+  card: TaskCardState,
+  delta: number
+): OperatorConsoleState {
+  if (card.subagents.length === 0) return state;
+  const selectedStepId = state.tasks.inspection?.selectedSubagentStepId;
+  const currentIndex = Math.max(0, card.subagents.findIndex((subagent) => subagent.stepId === selectedStepId));
+  const index = Math.max(0, Math.min(card.subagents.length - 1, currentIndex + delta));
+  const subagent = card.subagents[index]!;
+  return {
+    ...state,
+    tasks: {
+      ...state.tasks,
+      inspection: {
+        ...(state.tasks.inspection ?? { followLive: true }),
+        selectedSubagentStepId: subagent.stepId,
+      },
+    },
+    focus: setFocus(state.focus, { kind: "taskSubagent", taskId: card.taskId, stepId: subagent.stepId }),
+  };
+}
+
+function openSelectedSubagent(state: OperatorConsoleState, card: TaskCardState): OperatorConsoleState {
+  const selectedStepId = state.tasks.inspection?.selectedSubagentStepId ?? card.subagents[0]?.stepId;
+  const subagent = card.subagents.find((candidate) => candidate.stepId === selectedStepId);
+  if (subagent === undefined) return state;
+  return {
+    ...state,
+    tasks: {
+      ...state.tasks,
+      inspection: {
+        ...(state.tasks.inspection ?? { followLive: true }),
+        selectedSubagentStepId: subagent.stepId,
+        inspectedSubagentStepId: subagent.stepId,
+        subagentTrace: { followLive: true },
+      },
+      scrollOffset: 0,
+    },
+    focus: setFocus(state.focus, { kind: "taskSubagent", taskId: card.taskId, stepId: subagent.stepId }),
+  };
+}
+
+function closeSubagentInspection(state: OperatorConsoleState, card: TaskCardState): OperatorConsoleState {
+  const stepId = state.tasks.inspection?.inspectedSubagentStepId;
+  if (stepId === undefined) return state;
+  const {
+    inspectedSubagentStepId: _inspectedSubagentStepId,
+    subagentTrace: _subagentTrace,
+    ...inspection
+  } = state.tasks.inspection ?? { followLive: true };
+  return {
+    ...state,
+    tasks: { ...state.tasks, inspection, scrollOffset: 0 },
+    focus: setFocus(state.focus, { kind: "taskSubagent", taskId: card.taskId, stepId }),
   };
 }
 

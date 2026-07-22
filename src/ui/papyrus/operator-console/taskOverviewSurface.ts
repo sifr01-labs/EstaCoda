@@ -75,7 +75,7 @@ const COPY: Readonly<Record<OperatorConsoleLocale, OverviewCopy>> = {
     limit: "Limit",
     none: "none",
     noSubagents: "No delegated Subagents",
-    closeHint: "Esc return · ←/→ inspect events · Home oldest visible · End live · ↑/↓ scroll",
+    closeHint: "Esc return · ↑/↓ select Subagent · Enter inspect · ←/→ events · PgUp/PgDn scroll",
   },
   ar: {
     mainSession: "الجلسة الرئيسية",
@@ -103,7 +103,7 @@ const COPY: Readonly<Record<OperatorConsoleLocale, OverviewCopy>> = {
     limit: "الحد",
     none: "لا يوجد",
     noSubagents: "لا يوجد وكلاء فرعيون مفوضون",
-    closeHint: "Esc للعودة · ←/→ لفحص الأحداث · Home للأقدم · End للمباشر · ↑/↓ للتمرير",
+    closeHint: "Esc للعودة · ↑/↓ لاختيار وكيل فرعي · Enter للفحص · ←/→ للأحداث · PgUp/PgDn للتمرير",
   },
 };
 
@@ -175,7 +175,11 @@ export function taskOverviewContentLines(
     "",
   ];
 
-  const subagentSection = sectionLines(copy.subagents, subagentLines(card, locale, copy, style), style);
+  const subagentSection = sectionLines(
+    copy.subagents,
+    subagentLines(card, locale, copy, style, options.inspection?.selectedSubagentStepId),
+    style
+  );
   const planSection = sectionLines(copy.plan, planLines(card, copy, style), style);
   if (width >= WIDE_OVERVIEW_WIDTH) {
     lines.push(...renderColumns(subagentSection, planSection, contentWidth));
@@ -221,7 +225,8 @@ function subagentLines(
   card: TaskCardState,
   locale: OperatorConsoleLocale,
   copy: OverviewCopy,
-  style: OperatorConsoleStyle | undefined
+  style: OperatorConsoleStyle | undefined,
+  selectedStepId: string | undefined
 ): readonly string[] {
   if (card.subagents.length === 0) return [copy.noSubagents];
   return card.subagents.map((subagent) => {
@@ -230,11 +235,20 @@ function subagentLines(
       estimatedCostUsd: usage.estimatedCostUsd,
       costComplete: usage.pricingComplete,
     }, { locale, compact: true });
-    const label = locale === "ar" ? isolate(subagent.displayLabel) : subagent.displayLabel;
+    const selected = subagent.stepId === selectedStepId;
+    const rawLabel = locale === "ar" ? isolate(subagent.displayLabel) : subagent.displayLabel;
+    const label = selected && style !== undefined
+      ? styleColor(style, styleBold(style, rawLabel), style.tokens.contract.palette.action)
+      : rawLabel;
     const duration = locale === "ar" ? isolate(formatDuration(subagent.elapsedMs)) : formatDuration(subagent.elapsedMs);
-    const value = `${label} · ${formatStatus(subagent.status)} · ${duration} · ${cost}`;
+    const rail = selected ? style?.tokens.contract.glyph.progress.thumb ?? ">" : " ";
+    const styledRail = selected && style !== undefined
+      ? styleColor(style, rail, style.tokens.contract.palette.action)
+      : rail;
+    const details = `${formatStatus(subagent.status)} · ${duration} · ${cost}`;
     const color = subagentStatusColor(subagent.status, style);
-    return color === undefined ? value : styleColor(style, value, color);
+    const styledDetails = color === undefined ? details : styleColor(style, details, color);
+    return `${styledRail} ${label} · ${styledDetails}`;
   });
 }
 

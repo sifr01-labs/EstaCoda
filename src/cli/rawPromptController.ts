@@ -179,15 +179,48 @@ export class RawPromptController {
       const inspectedTaskId = cards.some((card) => card.taskId === taskSurface.inspectedTaskId)
         ? taskSurface.inspectedTaskId
         : undefined;
+      const inspectedCard = cards.find((card) => card.taskId === inspectedTaskId);
+      const retainedInspection = taskSurface.inspection ?? { followLive: true };
+      const selectedSubagent = inspectedCard?.subagents.find((subagent) =>
+        subagent.stepId === retainedInspection.selectedSubagentStepId
+      ) ?? inspectedCard?.subagents[0];
+      const inspectedSubagent = inspectedCard?.subagents.find((subagent) =>
+        subagent.stepId === retainedInspection.inspectedSubagentStepId
+      );
+      const {
+        selectedSubagentStepId: _selectedSubagentStepId,
+        inspectedSubagentStepId: _inspectedSubagentStepId,
+        subagentTrace: _subagentTrace,
+        ...baseInspection
+      } = retainedInspection;
+      const inspection = inspectedTaskId === undefined
+        ? { followLive: true }
+        : {
+            ...baseInspection,
+            ...(selectedSubagent === undefined ? {} : { selectedSubagentStepId: selectedSubagent.stepId }),
+            ...(inspectedSubagent === undefined
+              ? {}
+              : {
+                  inspectedSubagentStepId: inspectedSubagent.stepId,
+                  subagentTrace: retainedInspection.subagentTrace ?? { followLive: true },
+                }),
+          };
       taskSurface = {
         cards,
         ...(selectedTaskId === undefined ? {} : { selectedTaskId }),
         ...(inspectedTaskId === undefined ? {} : { inspectedTaskId }),
-        ...(inspectedTaskId === undefined
-          ? { inspection: { followLive: true } }
-          : { inspection: taskSurface.inspection ?? { followLive: true } }),
+        inspection,
         scrollOffset: inspectedTaskId === undefined ? 0 : taskSurface.scrollOffset,
       };
+      if (inspectedCard !== undefined && attachmentFocus.target.kind === "taskSubagent") {
+        attachmentFocus = selectedSubagent === undefined
+          ? createInitialFocusState({ kind: "taskCard", taskId: inspectedCard.taskId })
+          : createInitialFocusState({
+              kind: "taskSubagent",
+              taskId: inspectedCard.taskId,
+              stepId: selectedSubagent.stepId,
+            });
+      }
       const slashMenu = this.#operatorConsole?.enabled === true
         ? typeaheadStateToSlashMenu(typeaheadState)
         : undefined;

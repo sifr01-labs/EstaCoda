@@ -1,9 +1,9 @@
 import { truncateVisible } from "../../renderers/layout.js";
 import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
 import type {
+  ActivityTraceInspectionState,
   TaskCardActivityState,
   TaskCardState,
-  TaskInspectionState,
 } from "./operatorConsoleState.js";
 import {
   styleBold,
@@ -78,7 +78,7 @@ export type TraceNavigationAction = "left" | "right" | "home" | "end";
 
 export function renderActivityTraceSurface(
   card: TaskCardState,
-  inspection: TaskInspectionState | undefined,
+  inspection: ActivityTraceInspectionState | undefined,
   options: {
     readonly width: number;
     readonly locale?: OperatorConsoleLocale;
@@ -139,7 +139,7 @@ export function renderActivityTraceSurface(
 
 export function getActivityTraceWindow(
   events: readonly TaskCardActivityState[],
-  inspection: TaskInspectionState | undefined,
+  inspection: ActivityTraceInspectionState | undefined,
   width: number
 ): ActivityTraceWindow {
   if (events.length === 0) {
@@ -167,10 +167,10 @@ export function getActivityTraceWindow(
 
 export function navigateActivityTrace(
   events: readonly TaskCardActivityState[],
-  inspection: TaskInspectionState | undefined,
+  inspection: ActivityTraceInspectionState | undefined,
   action: TraceNavigationAction,
   width: number
-): TaskInspectionState {
+): ActivityTraceInspectionState {
   if (action === "end" || events.length === 0) return { followLive: true };
   const followLive = inspection?.followLive ?? true;
   const selectedIndex = events.findIndex((event) => event.eventId === inspection?.selectedTraceEventId);

@@ -244,10 +244,19 @@ export type TaskCardState = {
   readonly updatedAt: string;
 };
 
-export type TaskInspectionState = {
+export type ActivityTraceInspectionState = {
   /** Stable event identity selected for inspection. Omitted while following the live tail. */
   readonly selectedTraceEventId?: string;
   readonly followLive: boolean;
+};
+
+export type TaskInspectionState = ActivityTraceInspectionState & {
+  /** Stable Step identity focused in the Task's Subagent list. */
+  readonly selectedSubagentStepId?: string;
+  /** Stable Step identity whose Subagent detail is open. */
+  readonly inspectedSubagentStepId?: string;
+  /** Independent trace selection retained while inspecting one Subagent. */
+  readonly subagentTrace?: ActivityTraceInspectionState;
 };
 
 export type TaskSurfaceState = {

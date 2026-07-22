@@ -8,6 +8,7 @@ import {
   renderOperatorConsoleTextLines,
   renderTaskCardSurface,
   renderTaskInspectionSurface,
+  subagentInspectionContentLines,
   taskInspectionContentLines,
   resolveOperatorConsoleInputSurface,
   routeTaskSurfaceKey,
@@ -170,6 +171,99 @@ describe("durable Task surfaces", () => {
     expect(text).not.toContain("worker-session-secret");
   });
 
+  it("renders one Subagent's filtered safe trace, results, dependencies, and retry Attempts", () => {
+    const firstAttempt = {
+      attemptId: "attempt-b-1",
+      taskId: "T-104",
+      stepId: "step-b",
+      attemptNumber: 1,
+      status: "failed" as const,
+      createdAt: "2026-07-20T09:58:00.000Z",
+      updatedAt: "2026-07-20T09:59:00.000Z",
+      startedAt: "2026-07-20T09:58:00.000Z",
+      completedAt: "2026-07-20T09:59:00.000Z",
+      elapsedMs: 60_000,
+      assistantPreview: "Recovered a partial comparison.",
+      usage: cardUsage(0.004),
+    };
+    const secondAttempt = {
+      ...firstAttempt,
+      attemptId: "attempt-b-2",
+      attemptNumber: 2,
+      status: "running" as const,
+      completedAt: undefined,
+      elapsedMs: 90_000,
+      currentActivity: "Reading the comparison table",
+      assistantPreview: "The retry has validated both sources.",
+      usage: cardUsage(0.008),
+    };
+    const inspected = makeSubagent(2, {
+      stepId: "step-b",
+      displayLabel: "Subagent 2",
+      objective: "Validate comparison criteria",
+      dependsOn: ["step-a"],
+      currentActivity: "Reading the comparison table",
+      assistantPreview: "The retry has validated both sources.",
+      attempts: [firstAttempt, secondAttempt],
+      activeAttempt: secondAttempt,
+      latestAttempt: secondAttempt,
+      trace: [
+        { eventId: "b-read", kind: "tool", label: "Read comparison.md", category: "read", timestamp: "2026-07-20T10:01:00.000Z", stepId: "step-b", attemptId: "attempt-b-2", subagentIndex: 2 },
+        { eventId: "b-answer", kind: "assistant", label: "Summarized validated criteria", category: "answer", timestamp: "2026-07-20T10:02:00.000Z", stepId: "step-b", attemptId: "attempt-b-2", subagentIndex: 2 },
+      ],
+      results: [{
+        id: "result-b",
+        handle: "result://comparison-b",
+        kind: "file",
+        disposition: "accepted",
+        status: "available",
+        byteLength: 512,
+        primary: true,
+        stepId: "step-b",
+        attemptId: "attempt-b-2",
+        summary: "Validated comparison table",
+      }],
+    });
+    const card = makeCard({
+      subagents: [makeSubagent(1, {
+        trace: [{ eventId: "a-secret", kind: "tool", label: "Other Subagent activity", category: "search", timestamp: "2026-07-20T10:00:00.000Z", stepId: "step-a", subagentIndex: 1 }],
+      }), inspected],
+    });
+    const state = {
+      cards: [card],
+      inspectedTaskId: card.taskId,
+      inspection: {
+        followLive: false,
+        selectedTraceEventId: "event-attempt-started",
+        selectedSubagentStepId: "step-b",
+        inspectedSubagentStepId: "step-b",
+        subagentTrace: { followLive: false, selectedTraceEventId: "b-read" },
+      },
+      scrollOffset: 0,
+    } as const;
+    const text = renderTaskInspectionSurface(state, { width: 100, height: 44 }).join("\n");
+
+    expect(text).toContain("Main session / Task ⁨T-104⁩ / Subagent 2");
+    expect(text).toContain("Validate comparison criteria");
+    expect(text).toContain("Subagent total · running · 03:18 · 100 tokens · $0.01");
+    expect(text).toContain("Attempt 2 · running · 01:30 · 100 tokens · $0.0080");
+    expect(text).toContain("Current activity");
+    expect(text).toContain("Reading the comparison table");
+    expect(text).toContain("Read comparison.md");
+    expect(text).toContain("Summarized validated criteria");
+    expect(text).not.toContain("Other Subagent activity");
+    expect(text).toContain("The retry has validated both sources.");
+    expect(text).toContain("result://comparison-b");
+    expect(text).toContain("Attempt 1 · failed");
+    expect(text).toContain("Attempt 2 · running · current");
+    expect(text).toContain("Research Company A");
+    expect(text).not.toContain("worker-session-secret");
+
+    expect(subagentInspectionContentLines(card, inspected, 48, { locale: "en" })).toContain("Retained safe activity");
+    const narrow = renderTaskInspectionSurface(state, { width: 48, height: 44 });
+    expect(narrow.every((line) => visibleWidth(line) <= 48)).toBe(true);
+  });
+
   it("places Subagents and Plan side by side when wide and stacks them when narrow", () => {
     const card = makeCard();
     const wide = taskInspectionContentLines(card, 120, "en");
@@ -305,15 +399,107 @@ describe("durable Task surfaces", () => {
     expect(createOperatorConsoleLayout(state).regions.map((region) => region.kind)).toEqual(["taskInspection"]);
 
     state = routeTaskSurfaceKey(state, { type: "key", key: "left" }).state;
-    expect(state.tasks.inspection).toEqual({ followLive: false, selectedTraceEventId: "event-attempt-started" });
+    expect(state.tasks.inspection).toMatchObject({ followLive: false, selectedTraceEventId: "event-attempt-started" });
     state = routeTaskSurfaceKey(state, { type: "key", key: "end" }).state;
-    expect(state.tasks.inspection).toEqual({ followLive: true });
+    expect(state.tasks.inspection).toMatchObject({ followLive: true });
     state = routeTaskSurfaceKey(state, { type: "key", key: "pagedown" }).state;
     expect(state.tasks.scrollOffset).toBeGreaterThan(0);
     state = routeTaskSurfaceKey(state, { type: "key", key: "pageup" }).state;
     state = routeTaskSurfaceKey(state, { type: "key", key: "escape" }).state;
     expect(state.tasks.inspectedTaskId).toBeUndefined();
     expect(state.focus.target).toEqual({ kind: "taskCard", taskId: "T-104" });
+  });
+
+  it("opens the selected Subagent by stable Step ID and unwinds Subagent to Task to main session", () => {
+    const first = makeSubagent(1, {
+      trace: [
+        { eventId: "first-1", kind: "read", label: "Read one", category: "read", timestamp: "2026-07-20T10:00:00.000Z", stepId: "step-1", subagentIndex: 1 },
+        { eventId: "first-2", kind: "answer", label: "Answered one", category: "answer", timestamp: "2026-07-20T10:01:00.000Z", stepId: "step-1", subagentIndex: 1 },
+      ],
+    });
+    const second = makeSubagent(2, {
+      trace: [
+        { eventId: "second-1", kind: "read", label: "Read two", category: "read", timestamp: "2026-07-20T10:00:00.000Z", stepId: "step-2", subagentIndex: 2 },
+        { eventId: "second-2", kind: "answer", label: "Answered two", category: "answer", timestamp: "2026-07-20T10:01:00.000Z", stepId: "step-2", subagentIndex: 2 },
+      ],
+    });
+    const card = makeCard({ subagents: [first, second] });
+    let state = createInitialOperatorConsoleState({
+      terminal: { width: 80, height: 20, isTty: true },
+      tasks: { cards: [card], selectedTaskId: card.taskId, scrollOffset: 0 },
+    });
+
+    state = routeTaskSurfaceKey(state, { type: "key", key: "tab" }).state;
+    state = routeTaskSurfaceKey(state, { type: "key", key: "enter" }).state;
+    state = routeTaskSurfaceKey(state, { type: "key", key: "left" }).state;
+    const taskTraceSelection = state.tasks.inspection?.selectedTraceEventId;
+    state = routeTaskSurfaceKey(state, { type: "key", key: "down" }).state;
+    expect(state.tasks.inspection?.selectedSubagentStepId).toBe("step-2");
+    expect(state.focus.target).toEqual({ kind: "taskSubagent", taskId: "T-104", stepId: "step-2" });
+
+    state = routeTaskSurfaceKey(state, { type: "key", key: "enter" }).state;
+    expect(state.tasks.inspection?.inspectedSubagentStepId).toBe("step-2");
+    expect(renderTaskInspectionSurface(state.tasks, { width: 80, height: 20 }).join("\n"))
+      .toContain("Main session / Task ⁨T-104⁩ / Subagent 2");
+    state = routeTaskSurfaceKey(state, { type: "key", key: "left" }).state;
+    expect(state.tasks.inspection?.subagentTrace).toEqual({ followLive: false, selectedTraceEventId: "second-1" });
+
+    const refreshedCard = { ...card, subagents: [second, first] };
+    state = { ...state, tasks: { ...state.tasks, cards: [refreshedCard] } };
+    expect(renderTaskInspectionSurface(state.tasks, { width: 80, height: 20 }).join("\n"))
+      .toContain("Subagent 2");
+
+    state = routeTaskSurfaceKey(state, { type: "key", key: "escape" }).state;
+    expect(state.tasks.inspection?.inspectedSubagentStepId).toBeUndefined();
+    expect(state.tasks.inspection?.selectedTraceEventId).toBe(taskTraceSelection);
+    expect(state.tasks.inspectedTaskId).toBe("T-104");
+    state = routeTaskSurfaceKey(state, { type: "key", key: "escape" }).state;
+    expect(state.tasks.inspectedTaskId).toBeUndefined();
+    expect(state.focus.target).toEqual({ kind: "taskCard", taskId: "T-104" });
+  });
+
+  it("keeps Subagent accounting truthful and its Arabic plain view width-bounded", () => {
+    const partial = makeSubagent(1, {
+      objective: "مراجعة النتائج",
+      usage: { total: partialCardUsage(0.84, 2_400) },
+      currentActivity: "قراءة التقرير",
+    });
+    const unavailable = makeSubagent(2, {
+      usage: { total: unavailableCardUsage() },
+    });
+    const partialCard = makeCard({ subagents: [partial] });
+    const unavailableCard = makeCard({ subagents: [unavailable] });
+    const detailState = (card: TaskCardState) => ({
+      cards: [card],
+      inspectedTaskId: card.taskId,
+      inspection: {
+        followLive: true,
+        selectedSubagentStepId: card.subagents[0]!.stepId,
+        inspectedSubagentStepId: card.subagents[0]!.stepId,
+        subagentTrace: { followLive: true },
+      },
+      scrollOffset: 0,
+    });
+
+    const partialText = renderTaskInspectionSurface(detailState(partialCard), {
+      width: 52,
+      height: 28,
+      locale: "ar",
+    });
+    const unavailableText = renderTaskInspectionSurface(detailState(unavailableCard), {
+      width: 72,
+      height: 20,
+    }).join("\n");
+
+    expect(partialText.join("\n")).toContain("إجمالي الوكيل الفرعي");
+    expect(subagentInspectionContentLines(partialCard, partial, 80, { locale: "ar" }).join("\n"))
+      .toContain("≥ $0.84");
+    expect(partialText.join("\n")).toContain("قراءة التقرير");
+    expect(partialText.join("\n")).toContain("\u2068Subagent 1\u2069");
+    expect(partialText.every((line) => visibleWidth(line) <= 52)).toBe(true);
+    expect(partialText.join("\n")).not.toMatch(/\u001B\[/u);
+    expect(unavailableText).toContain("unavailable");
+    expect(unavailableText).not.toContain("$0.0000");
   });
 
   it("keeps Arabic, bidi identifiers, narrow terminals, and plain output deterministic", () => {

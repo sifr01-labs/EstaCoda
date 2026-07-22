@@ -401,7 +401,16 @@ function cloneTaskSurfaceState(tasks: TaskSurfaceState): TaskSurfaceState {
             followLive: tasks.inspection.followLive,
             ...(tasks.inspection.selectedTraceEventId === undefined
               ? {}
-              : { selectedTraceEventId: tasks.inspection.selectedTraceEventId })
+              : { selectedTraceEventId: tasks.inspection.selectedTraceEventId }),
+            ...(tasks.inspection.selectedSubagentStepId === undefined
+              ? {}
+              : { selectedSubagentStepId: tasks.inspection.selectedSubagentStepId }),
+            ...(tasks.inspection.inspectedSubagentStepId === undefined
+              ? {}
+              : { inspectedSubagentStepId: tasks.inspection.inspectedSubagentStepId }),
+            ...(tasks.inspection.subagentTrace === undefined
+              ? {}
+              : { subagentTrace: { ...tasks.inspection.subagentTrace } })
           }
         }),
     scrollOffset: normalizeNonNegativeInteger(tasks.scrollOffset),
