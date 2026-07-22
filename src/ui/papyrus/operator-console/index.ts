@@ -13,6 +13,7 @@ export * from "./inlineToolTrailSurface.js";
 export * from "./inputPrecedence.js";
 export * from "./operatorConsoleEvents.js";
 export * from "./operatorConsoleHost.js";
+export * from "./operatorConsoleHitRegions.js";
 export * from "./operatorConsoleLayout.js";
 export * from "./operatorConsoleRenderer.js";
 export * from "./operatorConsoleRuntimeHost.js";

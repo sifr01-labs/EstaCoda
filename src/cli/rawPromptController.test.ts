@@ -231,6 +231,29 @@ describe("raw prompt controller", () => {
     expect(read.output.writes.join("")).toContain("Activity trace");
   });
 
+  it("opens Subagent cards and breadcrumbs from SGR mouse input while idle", async () => {
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 18, isTty: true },
+        getTasks: () => [promptTaskCardWithSubagentTrace(["Read first file"])],
+      },
+    });
+
+    read.input.send("\x1b[<0;2;2M\x1b[<0;2;2m");
+    await Promise.resolve();
+    expect(read.output.writes.join("")).toContain("Retained safe activity");
+
+    read.input.send("\x1b[<0;2;1M\x1b[<0;2;1m");
+    await Promise.resolve();
+    expect(read.output.writes.join("")).toContain("Plan Steps");
+
+    read.input.send("\x1b[<0;2;1M\x1b[<0;2;1m");
+    read.input.send("\t");
+    read.input.send("ok\r");
+    await expect(read.pending).resolves.toEqual({ type: "submit", text: "ok" });
+  });
+
   it("preserves historical Task trace selection while live Task projections refresh", async () => {
     let card = promptTaskCardWithTrace(["First event", "Second event"]);
     const read = startPendingOperatorConsoleRead({

@@ -4,6 +4,8 @@ import {
   createOperatorConsoleStyle,
   createInitialOperatorConsoleState,
   createOperatorConsoleLayout,
+  createOperatorConsoleHitRegions,
+  findOperatorConsoleHitRegion,
   getTaskCardSurfaceDesiredHeight,
   renderOperatorConsoleTextLines,
   renderTaskCardSurface,
@@ -11,6 +13,7 @@ import {
   subagentInspectionContentLines,
   taskInspectionContentLines,
   resolveOperatorConsoleInputSurface,
+  routeOperatorConsoleInput,
   routeTaskSurfaceKey,
   type TaskCardState,
   type TaskCardSubagentState,
@@ -531,7 +534,181 @@ describe("durable Task surfaces", () => {
     expect(resolve({ approval: true, typeahead: true, attachment: true })).toBe("approval");
     expect(resolve({ typeahead: true, attachment: true })).toBe("typeahead");
     expect(resolve({ attachment: true })).toBe("attachment");
+    expect(resolve({ liveFocus: true, steer: true })).toBe("liveFocus");
+    expect(resolve({ steer: true })).toBe("steer");
     expect(resolve()).toBe("prompt");
+  });
+
+  it("routes Task and Subagent hit regions with equivalent keyboard paths", () => {
+    const card = makeCard({ subagents: [makeSubagent(1), makeSubagent(2)] });
+    const initial = createInitialOperatorConsoleState({
+      terminal: { width: 90, height: 30, isTty: true },
+      tasks: { cards: [card], selectedTaskId: card.taskId, scrollOffset: 0 },
+    });
+    const layout = createOperatorConsoleLayout(initial);
+    const regions = createOperatorConsoleHitRegions(initial, layout);
+    const taskHit = regions.find((region) => region.id === `task:${card.taskId}`)!;
+    const subagentHit = regions.find((region) => region.id === `task:${card.taskId}:subagent:step-2`)!;
+
+    expect(findOperatorConsoleHitRegion(regions, taskHit.x, taskHit.y)?.id).toBe(taskHit.id);
+    const clickedTask = routeOperatorConsoleInput({
+      state: initial,
+      event: { type: "mouse", action: "press", button: "primary", x: taskHit.x, y: taskHit.y },
+      approval: false,
+      typeahead: false,
+      attachment: false,
+      steer: false,
+      layout,
+    });
+    const keyboardFocused = routeOperatorConsoleInput({
+      state: initial,
+      event: { type: "key", key: "tab" },
+      approval: false,
+      typeahead: false,
+      attachment: false,
+      steer: false,
+    });
+    const keyboardTask = routeOperatorConsoleInput({
+      state: keyboardFocused.state,
+      event: { type: "key", key: "enter" },
+      approval: false,
+      typeahead: false,
+      attachment: false,
+      steer: false,
+    });
+    expect(clickedTask.state.tasks.inspectedTaskId).toBe(keyboardTask.state.tasks.inspectedTaskId);
+
+    const clickedSubagent = routeOperatorConsoleInput({
+      state: initial,
+      event: { type: "mouse", action: "press", button: "primary", x: subagentHit.x, y: subagentHit.y },
+      approval: false,
+      typeahead: false,
+      attachment: false,
+      steer: false,
+      layout,
+    });
+    const keyboardSelected = routeOperatorConsoleInput({
+      state: clickedTask.state,
+      event: { type: "key", key: "down" },
+      approval: false,
+      typeahead: false,
+      attachment: false,
+      steer: false,
+    });
+    const keyboardSubagent = routeOperatorConsoleInput({
+      state: keyboardSelected.state,
+      event: { type: "key", key: "enter" },
+      approval: false,
+      typeahead: false,
+      attachment: false,
+      steer: false,
+    });
+    expect(clickedSubagent.state.tasks.inspection?.inspectedSubagentStepId).toBe("step-2");
+    expect(clickedSubagent.state.tasks.inspection?.inspectedSubagentStepId)
+      .toBe(keyboardSubagent.state.tasks.inspection?.inspectedSubagentStepId);
+
+    const release = routeOperatorConsoleInput({
+      state: initial,
+      event: { type: "mouse", action: "release", button: "primary", x: subagentHit.x, y: subagentHit.y },
+      approval: false,
+      typeahead: false,
+      attachment: false,
+      steer: false,
+      layout,
+    });
+    expect(release.handled).toBe(true);
+    expect(release.state.tasks.inspectedTaskId).toBeUndefined();
+  });
+
+  it("routes trace squares, live-tail controls, breadcrumbs, and wheel scrolling", () => {
+    const trace = Array.from({ length: 8 }, (_, index) => ({
+      eventId: `trace-${index + 1}`,
+      kind: "tool-result",
+      label: `Safe event ${index + 1}`,
+      category: index % 2 === 0 ? "read" as const : "search" as const,
+      timestamp: `2026-07-20T10:00:0${index}.000Z`,
+      stepId: "step-1",
+      subagentIndex: 1,
+    }));
+    const card = makeCard({
+      subagents: [makeSubagent(1, { trace })],
+      trace: { events: trace, hasEarlierEvents: false },
+    });
+    const initial = createInitialOperatorConsoleState({
+      terminal: { width: 60, height: 10, isTty: true },
+      tasks: {
+        cards: [card],
+        selectedTaskId: card.taskId,
+        inspectedTaskId: card.taskId,
+        inspection: { followLive: true, selectedSubagentStepId: "step-1" },
+        scrollOffset: 0,
+      },
+    });
+    const layout = createOperatorConsoleLayout(initial);
+    const eventHit = createOperatorConsoleHitRegions(initial, layout)
+      .find((region) => region.id === `task:${card.taskId}:task:event:trace-1`)!;
+    expect(eventHit).toBeDefined();
+    const selected = routeOperatorConsoleInput({
+      state: initial,
+      event: { type: "mouse", action: "press", button: "primary", x: eventHit.x, y: eventHit.y },
+      approval: false,
+      typeahead: false,
+      attachment: false,
+      steer: false,
+      layout,
+    });
+    expect(selected.state.tasks.inspection).toMatchObject({
+      followLive: false,
+      selectedTraceEventId: "trace-1",
+    });
+
+    const selectedState = {
+      ...selected.state,
+      terminal: { ...selected.state.terminal, height: 30 },
+    };
+    const selectedLayout = createOperatorConsoleLayout(selectedState);
+    const selectedRegions = createOperatorConsoleHitRegions(selectedState, selectedLayout);
+    expect(selectedRegions.some((region) => region.id === `task:${card.taskId}:task:live`)).toBe(true);
+    const liveHit = selectedRegions
+      .find((region) => region.id === `task:${card.taskId}:task:return-live`)!;
+    expect(liveHit).toBeDefined();
+    const live = routeOperatorConsoleInput({
+      state: selectedState,
+      event: { type: "mouse", action: "press", button: "primary", x: liveHit.x, y: liveHit.y },
+      approval: false,
+      typeahead: false,
+      attachment: false,
+      steer: false,
+      layout: selectedLayout,
+    });
+    expect(live.state.tasks.inspection?.followLive).toBe(true);
+
+    const smallLiveState = {
+      ...live.state,
+      terminal: { ...live.state.terminal, height: 10 },
+    };
+    const scrolled = routeOperatorConsoleInput({
+      state: smallLiveState,
+      event: { type: "mouse", action: "scroll", button: "wheelDown", x: 1, y: 2 },
+      approval: false,
+      typeahead: false,
+      attachment: false,
+      steer: false,
+      layout: createOperatorConsoleLayout(smallLiveState),
+    });
+    expect(scrolled.state.tasks.scrollOffset).toBeGreaterThan(0);
+
+    const backHit = createOperatorConsoleHitRegions(scrolled.state, createOperatorConsoleLayout(scrolled.state))
+      .find((region) => region.id === `task:${card.taskId}:back`)!;
+    const closed = routeOperatorConsoleInput({
+      state: scrolled.state,
+      event: { type: "mouse", action: "press", button: "primary", x: backHit.x, y: backHit.y },
+      approval: false,
+      typeahead: false,
+      attachment: false,
+      steer: false,
+    });
+    expect(closed.state.tasks.inspectedTaskId).toBeUndefined();
   });
 });
 

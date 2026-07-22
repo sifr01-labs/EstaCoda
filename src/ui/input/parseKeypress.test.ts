@@ -83,6 +83,32 @@ describe("parseKeypress", () => {
     ]);
   });
 
+  it("parses SGR primary press/release and wheel events with zero-based coordinates", () => {
+    expect(parseKeypress("\x1b[<0;12;7M\x1b[<0;12;7m\x1b[<64;3;4M\x1b[<65;3;4M")).toEqual([
+      { type: "mouse", action: "press", button: "primary", x: 11, y: 6 },
+      { type: "mouse", action: "release", button: "primary", x: 11, y: 6 },
+      { type: "mouse", action: "scroll", button: "wheelUp", x: 2, y: 3 },
+      { type: "mouse", action: "scroll", button: "wheelDown", x: 2, y: 3 },
+    ]);
+  });
+
+  it("parses SGR mouse modifiers and rejects motion or malformed coordinates", () => {
+    expect(parseKeypress("\x1b[<28;2;9M")).toEqual([{
+      type: "mouse",
+      action: "press",
+      button: "primary",
+      x: 1,
+      y: 8,
+      shift: true,
+      alt: true,
+      ctrl: true,
+    }]);
+    expect(parseKeypress("\x1b[<32;2;9M\x1b[<0;0;9M")).toEqual([
+      { type: "unknown", sequence: "\x1b[<32;2;9M" },
+      { type: "unknown", sequence: "\x1b[<0;0;9M" },
+    ]);
+  });
+
   it("parses bracketed paste as paste data without submitting it", () => {
     expect(parseKeypress("\x1b[200~hello world\x1b[201~")).toEqual([
       { type: "paste", text: "hello world" },
@@ -114,6 +140,16 @@ describe("parseKeypress", () => {
 });
 
 describe("parseKeypressStream", () => {
+  it("preserves an SGR mouse event split across input chunks", () => {
+    let state = createInitialKeypressParseState();
+    let parsed = parseKeypressStream(state, "\x1b[<0;12");
+    expect(parsed.events).toEqual([]);
+    state = parsed.state;
+
+    parsed = parseKeypressStream(state, ";7M");
+    expect(parsed.events).toEqual([{ type: "mouse", action: "press", button: "primary", x: 11, y: 6 }]);
+  });
+
   it("preserves multiline bracketed paste across data chunks", () => {
     let state = createInitialKeypressParseState();
 

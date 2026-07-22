@@ -1,4 +1,4 @@
-import { truncateVisible } from "../../renderers/layout.js";
+import { measureVisibleWidth, truncateVisible } from "../../renderers/layout.js";
 import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
 import type {
   ActivityTraceInspectionState,
@@ -76,6 +76,11 @@ export type ActivityTraceWindow = {
 
 export type TraceNavigationAction = "left" | "right" | "home" | "end";
 
+export type ActivityTraceHitLayout = {
+  readonly events: readonly { readonly eventId: string; readonly column: number }[];
+  readonly liveColumn: number;
+};
+
 export function renderActivityTraceSurface(
   card: TaskCardState,
   inspection: ActivityTraceInspectionState | undefined,
@@ -120,7 +125,8 @@ export function renderActivityTraceSurface(
   const styledLiveGlyph = tokens === undefined
     ? liveGlyph
     : styleColor(style, liveGlyph, tokens.severity.ok);
-  const traceLine = `  ${omitted}${earlier}${glyphs}${later}${styledLiveGlyph} ${copy.live}`;
+  const tracePrefix = `  ${omitted}${earlier}`;
+  const traceLine = `${tracePrefix}${glyphs}${later}${styledLiveGlyph} ${copy.live}`;
   const origin = traceEventOrigin(card, window.selectedEvent, copy.task, locale);
   const category = formatCategory(window.selectedEvent.category, locale);
   const categoryColor = tokens?.trace[window.selectedEvent.category];
@@ -135,6 +141,26 @@ export function renderActivityTraceSurface(
     formatTraceCounters(card.trace.events, locale, style, card.trace.hasEarlierEvents),
     ...(followLive ? [] : [`  ${copy.returnToLive}`]),
   ];
+}
+
+export function getActivityTraceHitLayout(
+  card: TaskCardState,
+  inspection: ActivityTraceInspectionState | undefined,
+  options: { readonly width: number; readonly locale?: OperatorConsoleLocale }
+): ActivityTraceHitLayout | undefined {
+  const width = Math.max(1, Math.floor(options.width));
+  const locale = options.locale ?? "en";
+  const copy = COPY[locale];
+  const window = getActivityTraceWindow(card.trace.events, inspection, width);
+  if (window.selectedEvent === undefined) return undefined;
+  const omitted = card.trace.hasEarlierEvents ? `< ${copy.earlierOmitted} · ` : "";
+  const earlier = window.earlierCount > 0 ? `< ${window.earlierCount} ${copy.earlier} ` : "";
+  const startColumn = measureVisibleWidth(`  ${omitted}${earlier}`);
+  const later = window.laterCount > 0 ? ` ${window.laterCount} ${copy.later} ` : " ";
+  return {
+    events: window.events.map((event, index) => ({ eventId: event.eventId, column: startColumn + index })),
+    liveColumn: startColumn + window.events.length + measureVisibleWidth(later),
+  };
 }
 
 export function getActivityTraceWindow(

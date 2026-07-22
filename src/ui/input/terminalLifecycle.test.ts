@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { DBP, EBP, HIDE_CURSOR, SHOW_CURSOR } from "../papyrus/termio/dec.js";
+import {
+  DBP,
+  DISABLE_MOUSE_TRACKING,
+  EBP,
+  ENABLE_MOUSE_TRACKING,
+  HIDE_CURSOR,
+  SHOW_CURSOR,
+} from "../papyrus/termio/dec.js";
 import { createTerminalLifecycle, TerminalLifecycleError, type TerminalLifecycleStdin, type TerminalLifecycleStdout } from "./terminalLifecycle.js";
 
 function fakeStdin(overrides: Partial<TerminalLifecycleStdin> = {}) {
@@ -86,6 +93,52 @@ describe("terminal lifecycle", () => {
     expect(stdout.writes).toEqual([]);
   });
 
+  it("enables click/wheel SGR tracking and always disables every mouse mode on cleanup", () => {
+    const stdin = fakeStdin();
+    const stdout = fakeStdout();
+    const lifecycle = createTerminalLifecycle({
+      stdin: stdin.stream,
+      stdout: stdout.stream,
+      hideCursor: false,
+      enableBracketedPaste: false,
+      enableMouseTracking: true,
+    });
+
+    lifecycle.start();
+    lifecycle.stop();
+
+    expect(ENABLE_MOUSE_TRACKING).toBe("\x1b[?1000h\x1b[?1006h");
+    expect(ENABLE_MOUSE_TRACKING).not.toContain("?1002h");
+    expect(ENABLE_MOUSE_TRACKING).not.toContain("?1003h");
+    expect(stdout.writes).toEqual([ENABLE_MOUSE_TRACKING, DISABLE_MOUSE_TRACKING]);
+  });
+
+  it("disables mouse tracking when a later lifecycle setup step fails", () => {
+    const stdin = fakeStdin();
+    const stdout = fakeStdout({
+      write: vi.fn((chunk: string) => {
+        stdout.writes.push(chunk);
+        if (chunk === ENABLE_MOUSE_TRACKING) throw new Error("mouse enable failed");
+      }),
+    });
+    const lifecycle = createTerminalLifecycle({
+      stdin: stdin.stream,
+      stdout: stdout.stream,
+      enableMouseTracking: true,
+    });
+
+    expect(() => lifecycle.start()).toThrow(TerminalLifecycleError);
+    expect(stdout.writes).toEqual([
+      HIDE_CURSOR,
+      EBP,
+      ENABLE_MOUSE_TRACKING,
+      DISABLE_MOUSE_TRACKING,
+      DBP,
+      SHOW_CURSOR,
+    ]);
+    expect(lifecycle.isStarted()).toBe(false);
+  });
+
   it("failed start cleans up partially applied terminal state", () => {
     const stdin = fakeStdin();
     const stdout = fakeStdout({
@@ -98,7 +151,7 @@ describe("terminal lifecycle", () => {
 
     expect(() => lifecycle.start()).toThrow(TerminalLifecycleError);
     expect(stdin.calls).toEqual([true, false]);
-    expect(stdout.writes).toEqual([HIDE_CURSOR, EBP, SHOW_CURSOR]);
+    expect(stdout.writes).toEqual([HIDE_CURSOR, EBP, DBP, SHOW_CURSOR]);
     expect(lifecycle.isStarted()).toBe(false);
   });
 

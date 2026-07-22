@@ -77,6 +77,24 @@ export type TaskSurfaceKeyResult = {
   readonly handled: boolean;
 };
 
+export type TaskCardHitTarget = {
+  readonly kind: "taskHeader" | "subagentCard";
+  readonly taskId: string;
+  readonly stepId?: string;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+};
+
+export type TaskSurfacePointerAction =
+  | { readonly type: "openTask"; readonly taskId: string }
+  | { readonly type: "openSubagent"; readonly taskId: string; readonly stepId: string }
+  | { readonly type: "selectTraceEvent"; readonly scope: "task" | "subagent"; readonly eventId: string }
+  | { readonly type: "returnToLive"; readonly scope: "task" | "subagent" }
+  | { readonly type: "back" }
+  | { readonly type: "scroll"; readonly delta: number };
+
 export function hasTaskCards(state: TaskSurfaceState): boolean {
   return state.cards.length > 0;
 }
@@ -143,6 +161,62 @@ export function renderTaskCardSurface(
   }
   if (hiddenCount > 0) rows.push(`+${hiddenCount} ${copy.moreSubagents}`);
   return padSurfaceRows(rows, height, width);
+}
+
+export function getTaskCardHitTargets(
+  state: TaskSurfaceState,
+  width: number,
+  height = getTaskCardSurfaceDesiredHeight(state, width)
+): readonly TaskCardHitTarget[] {
+  const card = selectedTask(state);
+  const normalizedWidth = dimension(width);
+  const normalizedHeight = dimension(height);
+  if (card === undefined || normalizedWidth === 0 || normalizedHeight === 0) return [];
+  const targets: TaskCardHitTarget[] = [{
+    kind: "taskHeader",
+    taskId: card.taskId,
+    x: 0,
+    y: 0,
+    width: normalizedWidth,
+    height: 1,
+  }];
+  if (card.subagents.length === 0) return targets;
+  const grid = resolveSubagentGrid(card.subagents.length, normalizedWidth);
+  const fitted = fitSubagentGridToHeight(grid, card.subagents.length, normalizedHeight);
+  if (fitted.rows === 0) {
+    const visible = card.subagents.slice(0, Math.max(0, normalizedHeight - 1));
+    return [
+      ...targets,
+      ...visible.map((subagent, index) => ({
+        kind: "subagentCard" as const,
+        taskId: card.taskId,
+        stepId: subagent.stepId,
+        x: 0,
+        y: index + 1,
+        width: normalizedWidth,
+        height: 1,
+      })),
+    ];
+  }
+  const visibleCount = Math.min(card.subagents.length, fitted.rows * grid.columns);
+  const columnWidth = resolveEqualColumnWidth(normalizedWidth, grid.columns);
+  for (let columnIndex = 0; columnIndex < grid.columns; columnIndex += 1) {
+    for (let rowIndex = 0; rowIndex < fitted.rows; rowIndex += 1) {
+      const subagentIndex = columnIndex * fitted.rows + rowIndex;
+      const subagent = card.subagents[subagentIndex];
+      if (subagent === undefined || subagentIndex >= visibleCount) continue;
+      targets.push({
+        kind: "subagentCard",
+        taskId: card.taskId,
+        stepId: subagent.stepId,
+        x: columnIndex * (columnWidth + SUBAGENT_COLUMN_GAP),
+        y: 1 + rowIndex * (SUBAGENT_CARD_HEIGHT + SUBAGENT_ROW_GAP),
+        width: columnWidth,
+        height: SUBAGENT_CARD_HEIGHT,
+      });
+    }
+  }
+  return targets;
 }
 
 export function getTaskInspectionSurfaceDesiredHeight(terminalHeight: number): number {
@@ -289,6 +363,116 @@ export function routeTaskSurfaceKey(
     };
     default: return { state, handled: true };
   }
+}
+
+export function routeTaskSurfacePointer(
+  state: OperatorConsoleState,
+  action: TaskSurfacePointerAction,
+  viewportHeight: number = state.terminal.height
+): OperatorConsoleState {
+  if (action.type === "back") {
+    const card = inspectedTask(state.tasks);
+    return state.tasks.inspection?.inspectedSubagentStepId !== undefined && card !== undefined
+      ? closeSubagentInspection(state, card)
+      : closeInspection(state);
+  }
+  if (action.type === "openTask") {
+    const card = state.tasks.cards.find((candidate) => candidate.taskId === action.taskId);
+    if (card === undefined) return state;
+    return {
+      ...state,
+      tasks: {
+        ...state.tasks,
+        selectedTaskId: card.taskId,
+        inspectedTaskId: card.taskId,
+        inspection: {
+          followLive: true,
+          ...(card.subagents[0] === undefined ? {} : { selectedSubagentStepId: card.subagents[0].stepId }),
+        },
+        scrollOffset: 0,
+      },
+      focus: card.subagents[0] === undefined
+        ? setFocus(state.focus, { kind: "taskCard", taskId: card.taskId })
+        : setFocus(state.focus, { kind: "taskSubagent", taskId: card.taskId, stepId: card.subagents[0].stepId }),
+    };
+  }
+  if (action.type === "openSubagent") {
+    const card = state.tasks.cards.find((candidate) => candidate.taskId === action.taskId);
+    const subagent = card?.subagents.find((candidate) => candidate.stepId === action.stepId);
+    if (card === undefined || subagent === undefined) return state;
+    return {
+      ...state,
+      tasks: {
+        ...state.tasks,
+        selectedTaskId: card.taskId,
+        inspectedTaskId: card.taskId,
+        inspection: {
+          followLive: true,
+          selectedSubagentStepId: subagent.stepId,
+          inspectedSubagentStepId: subagent.stepId,
+          subagentTrace: { followLive: true },
+        },
+        scrollOffset: 0,
+      },
+      focus: setFocus(state.focus, { kind: "taskSubagent", taskId: card.taskId, stepId: subagent.stepId }),
+    };
+  }
+  const card = inspectedTask(state.tasks);
+  if (card === undefined) return state;
+  if (action.type === "scroll") {
+    const contentHeight = Math.max(1, dimension(viewportHeight) - 2);
+    const subagent = card.subagents.find((candidate) =>
+      candidate.stepId === state.tasks.inspection?.inspectedSubagentStepId
+    );
+    const content = subagent === undefined
+      ? taskOverviewContentLines(card, state.terminal.width, {
+          locale: state.locale,
+          style: state.style,
+          inspection: state.tasks.inspection,
+        })
+      : subagentInspectionContentLines(card, subagent, state.terminal.width, {
+          locale: state.locale,
+          style: state.style,
+          inspection: state.tasks.inspection,
+        });
+    return setTaskScroll(
+      state,
+      state.tasks.scrollOffset + action.delta,
+      Math.max(0, content.length - contentHeight)
+    );
+  }
+  if (action.type === "returnToLive") {
+    if (action.scope === "task") return setTaskTraceSelection(state, card, "end");
+    const subagent = card.subagents.find((candidate) =>
+      candidate.stepId === state.tasks.inspection?.inspectedSubagentStepId
+    );
+    return subagent === undefined ? state : setSubagentTraceSelection(state, subagent, "end");
+  }
+  if (action.scope === "task") {
+    if (!card.trace.events.some((event) => event.eventId === action.eventId)) return state;
+    const { selectedTraceEventId: _selectedTraceEventId, ...inspection } = state.tasks.inspection ?? { followLive: true };
+    return {
+      ...state,
+      tasks: {
+        ...state.tasks,
+        inspection: { ...inspection, followLive: false, selectedTraceEventId: action.eventId },
+      },
+    };
+  }
+  const subagent = card.subagents.find((candidate) =>
+    candidate.stepId === state.tasks.inspection?.inspectedSubagentStepId
+  );
+  if (subagent === undefined || !subagent.trace.some((event) => event.eventId === action.eventId)) return state;
+  return {
+    ...state,
+    tasks: {
+      ...state.tasks,
+      inspection: {
+        ...(state.tasks.inspection ?? { followLive: true }),
+        subagentTrace: { followLive: false, selectedTraceEventId: action.eventId },
+      },
+    },
+  };
 }
 
 function selectedTask(state: TaskSurfaceState): TaskCardState | undefined {

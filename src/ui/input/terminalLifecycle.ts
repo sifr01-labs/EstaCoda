@@ -1,4 +1,11 @@
-import { DBP, EBP, HIDE_CURSOR, SHOW_CURSOR } from "../papyrus/termio/dec.js";
+import {
+  DBP,
+  DISABLE_MOUSE_TRACKING,
+  EBP,
+  ENABLE_MOUSE_TRACKING,
+  HIDE_CURSOR,
+  SHOW_CURSOR,
+} from "../papyrus/termio/dec.js";
 
 export type TerminalLifecycleStdin = {
   isTTY?: boolean;
@@ -15,6 +22,7 @@ export type TerminalLifecycleOptions = {
   stdin?: TerminalLifecycleStdin;
   stdout?: TerminalLifecycleStdout;
   enableBracketedPaste?: boolean;
+  enableMouseTracking?: boolean;
   hideCursor?: boolean;
 };
 
@@ -51,6 +59,7 @@ class InjectedTerminalLifecycle implements TerminalLifecycle {
   readonly #stdout?: TerminalLifecycleStdout;
   readonly #enableBracketedPaste: boolean;
   readonly #hideCursor: boolean;
+  readonly #enableMouseTracking: boolean;
   readonly #cleanup: Cleanup[] = [];
   #started = false;
 
@@ -59,6 +68,7 @@ class InjectedTerminalLifecycle implements TerminalLifecycle {
     this.#stdout = options.stdout;
     this.#enableBracketedPaste = options.enableBracketedPaste ?? true;
     this.#hideCursor = options.hideCursor ?? true;
+    this.#enableMouseTracking = options.enableMouseTracking ?? false;
   }
 
   start(): void {
@@ -68,6 +78,7 @@ class InjectedTerminalLifecycle implements TerminalLifecycle {
       this.#enableRawMode();
       this.#writeWithCleanup(HIDE_CURSOR, SHOW_CURSOR, this.#hideCursor);
       this.#writeWithCleanup(EBP, DBP, this.#enableBracketedPaste);
+      this.#writeWithCleanup(ENABLE_MOUSE_TRACKING, DISABLE_MOUSE_TRACKING, this.#enableMouseTracking);
       this.#started = true;
     } catch (error) {
       const cleanup = this.#runCleanup();
@@ -100,10 +111,10 @@ class InjectedTerminalLifecycle implements TerminalLifecycle {
 
   #writeWithCleanup(enable: string, disable: string, shouldEnable: boolean): void {
     if (!shouldEnable || this.#stdout?.isTTY !== true || typeof this.#stdout.write !== "function") return;
-    this.#stdout.write(enable);
     this.#cleanup.push(() => {
       this.#stdout?.write?.(disable);
     });
+    this.#stdout.write(enable);
   }
 
   #runCleanup(): TerminalLifecycleStopResult {

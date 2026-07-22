@@ -39,8 +39,7 @@ import {
   removeAttachmentAndRepairFocus,
   routeApprovalKey,
   routeAttachmentKey,
-  resolveOperatorConsoleInputSurface,
-  routeTaskSurfaceKey,
+  routeOperatorConsoleInput,
   type AttachmentCardState,
   type ApprovalCardState,
   type FocusState,
@@ -128,6 +127,7 @@ export class RawPromptController {
     this.#lifecycle = options.lifecycle ?? createTerminalLifecycle({
       stdin: options.input,
       stdout: options.output,
+      enableMouseTracking: options.operatorConsole?.enabled === true,
     });
   }
 
@@ -541,12 +541,10 @@ export class RawPromptController {
         return true;
       };
 
-      const handleTaskKeypress = (event: ParsedKeypress, modalOnly = false) => {
-        if (this.#operatorConsole?.enabled !== true || taskSurface.cards.length === 0) return false;
-        const inspectionOpen = taskSurface.inspectedTaskId !== undefined;
-        if (modalOnly && !inspectionOpen) return false;
-        if (inspectionOpen && event.type !== "key") return true;
-        const routed = routeTaskSurfaceKey(createInitialOperatorConsoleState({
+      const routeSharedOperatorConsoleInput = (event: ParsedKeypress) => {
+        if (this.#operatorConsole?.enabled !== true) return undefined;
+        const routed = routeOperatorConsoleInput({
+          state: createInitialOperatorConsoleState({
           locale: this.#operatorConsole.locale,
           terminal: {
             width: this.#operatorConsole.terminal?.width ?? this.#output.columns ?? 80,
@@ -556,12 +554,19 @@ export class RawPromptController {
           attachments,
           tasks: taskSurface,
           focus: attachmentFocus,
-        }), event);
-        if (!routed.handled) return false;
+          }),
+          event,
+          approval: attachmentFocus.target.kind === "approval",
+          typeahead: isTypeaheadActive(),
+          attachment: attachmentFocus.target.kind === "attachment" ||
+            (attachments.length > 0 && event.type === "key" && event.key === "tab"),
+          steer: false,
+        });
+        if (!routed.handled) return routed;
         taskSurface = routed.state.tasks;
         attachmentFocus = routed.state.focus;
         render();
-        return true;
+        return routed;
       };
 
       const formatSubmittedText = (text: string): RawPromptResult => {
@@ -578,24 +583,19 @@ export class RawPromptController {
       const dispatchParsedEvents = (events: readonly ParsedKeypress[]) => {
         if (settled) return;
         for (const event of events) {
-          if (handleTaskKeypress(event, true)) continue;
+          if (handleApprovalFocusEntry(event)) continue;
+          const sharedRoute = routeSharedOperatorConsoleInput(event);
+          if (sharedRoute?.handled === true) continue;
+          const inputSurface = sharedRoute?.surface ?? (isTypeaheadActive() ? "typeahead" : "prompt");
+          if (inputSurface === "approval" && handleApprovalKeypress(event)) continue;
+          if (inputSurface === "typeahead" && handleTypeaheadKeypress(event)) continue;
+          if (inputSurface === "attachment" && handleEmptyPromptAttachmentClear(event)) continue;
+          if (inputSurface === "attachment" && handleAttachmentKeypress(event)) continue;
           if (this.#operatorConsole?.enabled === true && event.type === "paste") {
             addPasteAttachment(event.text);
             continue;
           }
           if (handleEmptyPromptAttachmentClear(event)) continue;
-          if (handleApprovalFocusEntry(event)) continue;
-          const inputSurface = resolveOperatorConsoleInputSurface({
-            taskInspection: false,
-            approval: attachmentFocus.target.kind === "approval",
-            typeahead: isTypeaheadActive(),
-            attachment: attachmentFocus.target.kind === "attachment" ||
-              (attachments.length > 0 && event.type === "key" && event.key === "tab"),
-          });
-          if (inputSurface === "approval" && handleApprovalKeypress(event)) continue;
-          if (inputSurface === "typeahead" && handleTypeaheadKeypress(event)) continue;
-          if (inputSurface === "attachment" && handleAttachmentKeypress(event)) continue;
-          if (handleTaskKeypress(event)) continue;
           if (vimKeymapState !== undefined) {
             const vimResult = applyPapyrusVimKeymap(vimKeymapState, state, event);
             vimKeymapState = vimResult.state;

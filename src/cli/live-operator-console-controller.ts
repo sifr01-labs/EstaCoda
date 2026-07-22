@@ -1,6 +1,7 @@
 import type { Writable } from "node:stream";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import { createLineEditorState } from "../ui/input/lineEditor.js";
+import type { ParsedKeypress } from "../ui/input/parseKeypress.js";
 import {
   applyActiveWorkRuntimeEvent,
   createActiveWorkRuntimeState,
@@ -18,9 +19,11 @@ import {
   type StreamingState,
   type TerminalMetrics,
   type TaskCardState,
+  type TaskSurfaceState,
   type ToolActivityState,
   type TranscriptBlock,
   type TurnActivityState,
+  routeOperatorConsoleInput,
 } from "../ui/papyrus/operator-console/index.js";
 import { RawPromptRenderLoop } from "./rawPromptRenderLoop.js";
 import { semanticMotionForPhase, semanticMotionFrameIndex } from "../ui/semantic-motion.js";
@@ -80,6 +83,7 @@ export class LiveOperatorConsoleController {
   #lastVisibleMotionSignature: string | undefined;
   #streamingRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   #lastTimerRefreshAtMs = Number.NEGATIVE_INFINITY;
+  #tasks: TaskSurfaceState;
 
   constructor(options: LiveOperatorConsoleControllerOptions) {
     this.#output = options.output;
@@ -101,6 +105,7 @@ export class LiveOperatorConsoleController {
     this.#now = options.now ?? Date.now;
     this.#animationStartedAtMs = this.#now();
     this.#transcript = [...options.runtimeHost.getState().transcript];
+    this.#tasks = options.runtimeHost.getState().tasks;
     this.#renderLoop = new RawPromptRenderLoop(options.output, {
       operatorConsoleHostFactory: () => options.runtimeHost,
     });
@@ -112,6 +117,24 @@ export class LiveOperatorConsoleController {
 
   get steer(): SteerState | undefined {
     return this.#steer;
+  }
+
+  routeInput(event: ParsedKeypress): boolean {
+    const state = this.#runtimeHost.getState();
+    const routed = routeOperatorConsoleInput({
+      state,
+      event,
+      approval: state.focus.target.kind === "approval",
+      typeahead: state.slash !== undefined,
+      attachment: state.focus.target.kind === "attachment",
+      steer: true,
+    });
+    if (!routed.handled) return false;
+    this.#tasks = routed.state.tasks;
+    this.#runtimeHost.setTasks(routed.state.tasks);
+    this.#runtimeHost.setFocus(routed.state.focus);
+    this.refresh();
+    return true;
   }
 
   applyActiveWorkEvent(event: ActiveWorkRuntimeEvent): ToolActivityState {
@@ -254,6 +277,8 @@ export class LiveOperatorConsoleController {
     const steerVisible = this.#steer?.mode === "drafting" || this.#steer?.mode === "queued";
     const activeWork = this.#activeWorkSnapshotForRender();
     const motionElapsedMs = this.#motionElapsedMs();
+    this.#tasks = reconcileLiveTaskSurface(this.#tasks, this.#getTasks?.() ?? []);
+    const focus = this.#runtimeHost.getState().focus;
     this.#renderLoop.render({
       prompt: "",
       state: createLineEditorState(this.#steer?.mode === "drafting" ? this.#steer.draft : ""),
@@ -262,10 +287,8 @@ export class LiveOperatorConsoleController {
         terminal: this.#terminalSnapshotForRender(activeWork),
         status: this.#getStatus(),
         motionElapsedMs,
-        tasks: {
-          cards: this.#getTasks?.() ?? [],
-          scrollOffset: 0,
-        },
+        tasks: this.#tasks,
+        focus,
         transcript: this.#transcript,
         turnActivity: this.#turnActivity,
         activeWork,
@@ -524,6 +547,50 @@ export class LiveOperatorConsoleController {
       (options.includeUnanchored && entry.afterSegmentId === undefined)
     );
   }
+}
+
+function reconcileLiveTaskSurface(
+  current: TaskSurfaceState,
+  cards: readonly TaskCardState[]
+): TaskSurfaceState {
+  const selectedTaskId = cards.some((card) => card.taskId === current.selectedTaskId)
+    ? current.selectedTaskId
+    : cards[0]?.taskId;
+  const inspectedTaskId = cards.some((card) => card.taskId === current.inspectedTaskId)
+    ? current.inspectedTaskId
+    : undefined;
+  const inspectedCard = cards.find((card) => card.taskId === inspectedTaskId);
+  const selectedSubagent = inspectedCard?.subagents.find((subagent) =>
+    subagent.stepId === current.inspection?.selectedSubagentStepId
+  ) ?? inspectedCard?.subagents[0];
+  const inspectedSubagent = inspectedCard?.subagents.find((subagent) =>
+    subagent.stepId === current.inspection?.inspectedSubagentStepId
+  );
+  const {
+    selectedSubagentStepId: _selectedSubagentStepId,
+    inspectedSubagentStepId: _inspectedSubagentStepId,
+    subagentTrace: _subagentTrace,
+    ...baseInspection
+  } = current.inspection ?? { followLive: true };
+  const inspection = inspectedTaskId === undefined
+    ? { followLive: true }
+    : {
+        ...baseInspection,
+        ...(selectedSubagent === undefined ? {} : { selectedSubagentStepId: selectedSubagent.stepId }),
+        ...(inspectedSubagent === undefined
+          ? {}
+          : {
+              inspectedSubagentStepId: inspectedSubagent.stepId,
+              subagentTrace: current.inspection?.subagentTrace ?? { followLive: true },
+            }),
+      };
+  return {
+    cards,
+    ...(selectedTaskId === undefined ? {} : { selectedTaskId }),
+    ...(inspectedTaskId === undefined ? {} : { inspectedTaskId }),
+    inspection,
+    scrollOffset: inspectedTaskId === undefined ? 0 : current.scrollOffset,
+  };
 }
 
 function isSettledDelegationEvent(event: ActiveWorkRuntimeEvent): boolean {

@@ -61,6 +61,17 @@ export type ParsedKeypress =
       text: string;
     }
   | {
+      type: "mouse";
+      action: "press" | "release" | "scroll";
+      button: "primary" | "middle" | "secondary" | "wheelUp" | "wheelDown" | "unknown";
+      /** Zero-based terminal cell coordinates. */
+      x: number;
+      y: number;
+      ctrl?: boolean;
+      alt?: boolean;
+      shift?: boolean;
+    }
+  | {
       type: "unknown";
       sequence: string;
     };
@@ -344,6 +355,9 @@ function parseApplicationCursorEvent(sequence: string): ParsedKeypress | undefin
 function parseCsiEvent(sequence: string): ParsedKeypress | undefined {
   const final = sequence[sequence.length - 1]!;
   const body = sequence.slice(2, -1);
+  if ((final === "M" || final === "m") && body.startsWith("<")) {
+    return parseSgrMouseEvent(body.slice(1), final);
+  }
   const params = body.length > 0 ? body.split(";") : [];
   const modifiers = modifiersFromParams(params);
 
@@ -361,6 +375,46 @@ function parseCsiEvent(sequence: string): ParsedKeypress | undefined {
   const key = tildeKeyName(keyCode);
   if (key === undefined) return undefined;
   return { type: "key", key, ...modifiers };
+}
+
+function parseSgrMouseEvent(body: string, final: "M" | "m"): ParsedKeypress | undefined {
+  const values = body.split(";").map(Number);
+  if (values.length !== 3 || values.some((value) => !Number.isSafeInteger(value) || value < 0)) return undefined;
+  const [encodedButton, column, row] = values as [number, number, number];
+  if (encodedButton > 255 || column < 1 || row < 1 || (encodedButton & 32) !== 0) return undefined;
+  const modifiers = {
+    ...(encodedButton & 4 ? { shift: true } : {}),
+    ...(encodedButton & 8 ? { alt: true } : {}),
+    ...(encodedButton & 16 ? { ctrl: true } : {}),
+  };
+  if ((encodedButton & 64) !== 0) {
+    const wheel = encodedButton & 3;
+    if (wheel !== 0 && wheel !== 1) return undefined;
+    return {
+      type: "mouse",
+      action: "scroll",
+      button: wheel === 0 ? "wheelUp" : "wheelDown",
+      x: column - 1,
+      y: row - 1,
+      ...modifiers,
+    };
+  }
+  const buttonCode = encodedButton & 3;
+  const button = buttonCode === 0
+    ? "primary"
+    : buttonCode === 1
+      ? "middle"
+      : buttonCode === 2
+        ? "secondary"
+        : "unknown";
+  return {
+    type: "mouse",
+    action: final === "m" ? "release" : "press",
+    button,
+    x: column - 1,
+    y: row - 1,
+    ...modifiers,
+  };
 }
 
 function modifiersFromParams(params: string[]): Pick<Extract<ParsedKeypress, { type: "key" }>, "alt" | "ctrl" | "shift"> {

@@ -43,7 +43,7 @@ export function applyPapyrusVimKeymap(
     };
   }
 
-  if (event.type === "paste" || event.type === "unknown") {
+  if (event.type === "paste" || event.type === "unknown" || event.type === "mouse") {
     if (keymapState.vim.mode === "insert") {
       const result = applyKeypress(line, event);
       return {

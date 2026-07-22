@@ -47,7 +47,7 @@ export function applyKeypress(state: LineEditorState, event: ParsedKeypress): Li
     return { state: insertText(normalized, event.text) };
   }
 
-  if (event.type === "unknown") {
+  if (event.type === "unknown" || event.type === "mouse") {
     return { state: normalized };
   }
 

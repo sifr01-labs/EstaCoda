@@ -50,7 +50,7 @@ export class SecretPromptController {
       return { renderState: this.renderState };
     }
 
-    if (event.type === "unknown") {
+    if (event.type === "unknown" || event.type === "mouse") {
       return { renderState: this.renderState };
     }
 

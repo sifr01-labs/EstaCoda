@@ -33,8 +33,6 @@ export const ENTER_ALT_SCREEN = decset(DEC.ALT_SCREEN_CLEAR);
 export const EXIT_ALT_SCREEN = decreset(DEC.ALT_SCREEN_CLEAR);
 export const ENABLE_MOUSE_TRACKING =
   decset(DEC.MOUSE_NORMAL) +
-  decset(DEC.MOUSE_BUTTON) +
-  decset(DEC.MOUSE_ANY) +
   decset(DEC.MOUSE_SGR);
 export const DISABLE_MOUSE_TRACKING =
   decreset(DEC.MOUSE_SGR) +

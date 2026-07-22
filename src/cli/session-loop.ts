@@ -887,10 +887,12 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             stdin: cliInput,
             stdout: output as NodeJS.WriteStream,
             hideCursor: false,
+            enableMouseTracking: true,
           });
           const keypressDispatcher = createKeypressStreamDispatcher({
             onEvents: (events: readonly ParsedKeypress[]) => {
               for (const event of events) {
+                if (operatorConsoleLiveFrame?.routeInput(event) === true) continue;
                 handleOperatorConsoleSteerKey(event);
               }
             },

@@ -166,9 +166,16 @@ describe("raw input line editor", () => {
     });
   });
 
-  it("ignores unknown events safely", () => {
+  it("ignores unknown and mouse events safely", () => {
     const state = createLineEditorState("abc", 1);
     expect(applyKeypress(state, { type: "unknown", sequence: "\x1b[999~" }).state).toEqual(state);
+    expect(applyKeypress(state, {
+      type: "mouse",
+      action: "press",
+      button: "primary",
+      x: 1,
+      y: 2,
+    }).state).toEqual(state);
   });
 
   it("normalizes cursors that start inside a grapheme cluster", () => {

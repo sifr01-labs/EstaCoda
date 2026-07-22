@@ -4,6 +4,7 @@ import {
   createDefaultStatusRailState,
   createOperatorConsoleRuntimeHost,
   createOperatorConsoleStyle,
+  type TaskCardState,
 } from "../ui/papyrus/operator-console/index.js";
 import { LiveOperatorConsoleController } from "./live-operator-console-controller.js";
 
@@ -164,62 +165,29 @@ describe("LiveOperatorConsoleController", () => {
   it("renders retained durable Task cards while the foreground turn is active", () => {
     const output = createOutput();
     const { controller, runtimeHost } = createControllerFixture(output, {
-      getTasks: () => [{
-        taskId: "T-live-1",
-        objective: "Research competitor",
-        status: "running",
-        executionPreference: "auto",
-        execution: "foreground",
-        foregroundOwnerActive: true,
-        backgroundContinuation: "available",
-        progress: { completed: 0, skipped: 0, total: 1 },
-        steps: [{
-          stepId: "step-1",
-          position: 0,
-          title: "Research Company A",
-          objective: "Research Company A",
-          executorRole: "worker",
-          status: "running",
-          dependsOn: [],
-          childTaskPolicy: "forbid",
-          usage: { providerCalls: 1, totalTokens: 100, estimatedCostUsd: 0.001, usageComplete: true, pricingComplete: true },
-          attempts: [],
-          activeAttempt: {
-            attemptId: "attempt-1",
-            taskId: "T-live-1",
-            stepId: "step-1",
-            attemptNumber: 1,
-            status: "running",
-            createdAt: "2026-07-20T10:00:00.000Z",
-            updatedAt: "2026-07-20T10:00:03.000Z",
-            startedAt: "2026-07-20T10:00:00.000Z",
-            elapsedMs: 3_000,
-            usage: { providerCalls: 1, totalTokens: 100, estimatedCostUsd: 0.001, usageComplete: true, pricingComplete: true }
-          },
-        }],
-        subagents: [],
-        trace: { events: [], hasEarlierEvents: false },
-        childTasks: [],
-        recentActivity: [],
-        currentToolCategory: "browser",
-        elapsedMs: 3_000,
-        usage: {
-          providerCalls: 1,
-          totalTokens: 100,
-          estimatedCostUsd: 0.001,
-          usageComplete: true,
-          pricingComplete: true,
-        },
-        results: [],
-        createdAt: "2026-07-20T10:00:00.000Z",
-        updatedAt: "2026-07-20T10:00:03.000Z",
-      }],
+      getTasks: () => [makeLiveTask()],
     });
 
     controller.setTurnActivity({ phase: "provider" });
 
     expect(runtimeHost.getState().tasks.cards[0]?.taskId).toBe("T-live-1");
     expect(stripAnsi(output.text())).toContain("Research competitor");
+  });
+
+  it("uses the shared Task router during active steering without swallowing prompt text", () => {
+    const output = createOutput();
+    const { controller, runtimeHost } = createControllerFixture(output, {
+      getTasks: () => [makeLiveTask()],
+    });
+    controller.setTurnActivity({ phase: "provider" });
+
+    expect(controller.routeInput({ type: "text", text: "a" })).toBe(false);
+    expect(controller.routeInput({ type: "key", key: "tab" })).toBe(true);
+    expect(runtimeHost.getState().focus.target.kind).toBe("taskCard");
+    expect(controller.routeInput({ type: "key", key: "enter" })).toBe(true);
+    expect(runtimeHost.getState().tasks.inspectedTaskId).toBe("T-live-1");
+    expect(controller.routeInput({ type: "key", key: "escape" })).toBe(true);
+    expect(runtimeHost.getState().tasks.inspectedTaskId).toBeUndefined();
   });
 
   it("batches streaming text into the live frame", () => {
@@ -652,6 +620,60 @@ function createOutput(): {
     clear: () => {
       writes.length = 0;
     },
+  };
+}
+
+function makeLiveTask(): TaskCardState {
+  const usage = {
+    providerCalls: 1,
+    totalTokens: 100,
+    estimatedCostUsd: 0.001,
+    usageComplete: true,
+    pricingComplete: true,
+  } as const;
+  return {
+    taskId: "T-live-1",
+    objective: "Research competitor",
+    status: "running",
+    executionPreference: "auto",
+    execution: "foreground",
+    foregroundOwnerActive: true,
+    backgroundContinuation: "available",
+    progress: { completed: 0, skipped: 0, total: 1 },
+    steps: [{
+      stepId: "step-1",
+      position: 0,
+      title: "Research Company A",
+      objective: "Research Company A",
+      executorRole: "worker",
+      status: "running",
+      dependsOn: [],
+      childTaskPolicy: "forbid",
+      usage,
+      attempts: [],
+      activeAttempt: {
+        attemptId: "attempt-1",
+        taskId: "T-live-1",
+        stepId: "step-1",
+        attemptNumber: 1,
+        status: "running",
+        createdAt: "2026-07-20T10:00:00.000Z",
+        updatedAt: "2026-07-20T10:00:03.000Z",
+        startedAt: "2026-07-20T10:00:00.000Z",
+        elapsedMs: 3_000,
+        usage,
+      },
+    }],
+    subagents: [],
+    trace: { events: [], hasEarlierEvents: false },
+    childTasks: [],
+    recentActivity: [],
+    currentToolCategory: "browser",
+    elapsedMs: 3_000,
+    usage,
+    results: [],
+    createdAt: "2026-07-20T10:00:00.000Z",
+    updatedAt: "2026-07-20T10:00:03.000Z",
   };
 }
 
