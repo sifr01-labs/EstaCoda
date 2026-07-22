@@ -7,6 +7,7 @@ import {
   createOperatorConsoleHitRegions,
   findOperatorConsoleHitRegion,
   getTaskCardSurfaceDesiredHeight,
+  reconcileTaskSurfaceState,
   renderOperatorConsoleTextLines,
   renderTaskCardSurface,
   renderTaskInspectionSurface,
@@ -121,6 +122,69 @@ describe("durable Task surfaces", () => {
     expect(before).toContain("Reading package.json");
     expect(after).toContain("Editing dashboard route");
     expect(after).not.toContain("Reading package.json");
+  });
+
+  it("refreshes projections by stable ID without reordering cards or resetting inspection", () => {
+    const first = makeCard({ taskId: "T-first", objective: "First Task" });
+    const second = makeCard({
+      taskId: "T-second",
+      objective: "Second Task",
+      trace: {
+        events: [
+          { eventId: "second-1", kind: "read", label: "Read first file", category: "read", timestamp: "2026-07-20T10:00:00.000Z" },
+          { eventId: "second-2", kind: "answer", label: "Summarized file", category: "answer", timestamp: "2026-07-20T10:01:00.000Z" },
+        ],
+        hasEarlierEvents: false,
+      },
+    });
+    const current = {
+      cards: [first, second],
+      selectedTaskId: second.taskId,
+      inspectedTaskId: second.taskId,
+      inspection: {
+        followLive: false,
+        selectedTraceEventId: "second-1",
+        selectedSubagentStepId: "step-a",
+        inspectedSubagentStepId: "step-a",
+        subagentTrace: { followLive: false, selectedTraceEventId: "subagent-old" },
+      },
+      scrollOffset: 7,
+    } as const;
+    const refreshedSecond = {
+      ...second,
+      status: "completed" as const,
+      usage: cardUsage(0.42),
+      trace: {
+        events: [
+          ...second.trace.events,
+          { eventId: "second-3", kind: "finish" as const, label: "Finished Task", category: "finish" as const, timestamp: "2026-07-20T10:02:00.000Z" },
+        ],
+        hasEarlierEvents: false,
+      },
+    };
+    const third = makeCard({ taskId: "T-third", objective: "New Task" });
+
+    const refreshed = reconcileTaskSurfaceState(current, [refreshedSecond, first, third]);
+
+    expect(refreshed.cards.map((card) => card.taskId)).toEqual(["T-first", "T-second", "T-third"]);
+    expect(refreshed.cards[1]).toMatchObject({ status: "completed", usage: { estimatedCostUsd: 0.42 } });
+    expect(refreshed.selectedTaskId).toBe("T-second");
+    expect(refreshed.inspectedTaskId).toBe("T-second");
+    expect(refreshed.inspection).toMatchObject({
+      followLive: false,
+      selectedTraceEventId: "second-1",
+      selectedSubagentStepId: "step-a",
+      inspectedSubagentStepId: "step-a",
+      subagentTrace: { followLive: false, selectedTraceEventId: "subagent-old" },
+    });
+    expect(refreshed.scrollOffset).toBe(7);
+
+    const removed = reconcileTaskSurfaceState(refreshed, [first, third]);
+    expect(removed.cards.map((card) => card.taskId)).toEqual(["T-first", "T-third"]);
+    expect(removed.inspectedTaskId).toBeUndefined();
+    expect(removed.selectedTaskId).toBe("T-first");
+    expect(removed.inspection).toEqual({ followLive: true });
+    expect(removed.scrollOffset).toBe(0);
   });
 
   it("uses light surface tokens and degrades to deterministic ASCII in plain mode", () => {

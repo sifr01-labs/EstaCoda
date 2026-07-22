@@ -353,12 +353,54 @@ foreground/background/waiting ownership, show the immutable preference and
 background-continuation readiness, and include only a bounded safe wait reason.
 Expired leases and Task status alone are never presented as active ownership.
 Cards remain available after completion, failure, partial settlement, or
-cancellation; they are not transient worker rows. `Tab` (when no higher-priority
-typeahead or attachment surface owns it) or `Ctrl+T` focuses the Task cards,
-arrow keys change the selected Task, and `Enter` opens the modal inspection
-surface. In inspection, `Up`/`Down`, `Page Up`/`Page Down`, `Home`, and `End`
-scroll, while `Escape` returns to the selected card and `Tab` returns to the
-prompt.
+cancellation; they are not transient worker rows. The main-session Task region
+shows stable `Subagent N` identities beneath the live assistant stream. Each
+full Subagent card occupies exactly seven rows, including its title and truthful
+status/elapsed/tokens/cost footer. The interior continually refreshes with the
+latest retained safe activity. Cards use the elevated grey surface token,
+whitespace gutters instead of permanent perimeter borders, and the existing
+worker motion token while running. Focus adds the action-color leading rail and
+title treatment.
+
+One to three Subagents stack vertically. Four to six use two equal-width,
+column-major columns when both remain readable. A third column is added only at
+a readable width; otherwise the surface keeps complete seven-row cards and
+shows `+N more Subagents`. Narrow and height-constrained terminals use the
+single-column or compact deterministic fallback instead of clipping a card.
+The Task header opens the whole-Task view; a Subagent card opens that Subagent.
+
+The whole-Task inspection workspace shows the objective, lifecycle, elapsed
+time, aggregate usage/cost, factual Step state, Subagent summaries, approvals,
+blockers, dependencies, results, child Tasks, and safe artifacts. Its activity
+trace is an event sequence, not a completion meter: one semantic-color square
+per retained `Terminal`, `Search`, `Plan`, `Read`, `Edit`, `Answer`, `Wait`,
+`Finish`, or `Failed` event, plus all-time category counters. The outlined
+square is the inspected event; the separate live-tail marker is the newest
+event. Selecting history disables follow-live and exposes `Return to live`.
+Overflow uses a bounded readable window with an earlier-event count. The view
+may state `N of M Steps settled`, but never derives or renders a Task completion
+percentage.
+
+Subagent inspection reuses the workspace filtered by stable Step ID. It shows
+the Subagent objective, current safe activity, usage/cost, complete retained
+safe trace, assistant preview/final result, retry Attempts, dependencies,
+blockers, results, and artifacts. `Complete retained safe trace` does not mean
+raw reasoning, raw prompts, credentials, tool arguments/results, or unbounded
+provider text.
+
+`Tab` (when no higher-priority typeahead or attachment surface owns it) or
+`Ctrl+T` focuses Task cards, arrow keys change selection, and `Enter` opens the
+focused Task or Subagent. Trace events and `Return to live` are selectable with
+the same keyboard and SGR mouse routes. `Up`/`Down`, `Page Up`/`Page Down`,
+`Home`, and `End` navigate or scroll according to the active inspection target;
+`Escape` unwinds Subagent to Task to main session without losing the underlying
+session state. Wheel input scrolls inspection, and terminal cleanup disables
+mouse tracking on normal exit, failure, and suspend.
+
+The existing Task refresh updates projections and newly settled provider usage
+in place. Established cards retain their order, selected Task/Subagent/event
+IDs remain selected while present, history remains frozen when follow-live is
+off, and terminal resize recomputes the layout without closing inspection.
 
 The inspection view reads only the session-authorized Task projection: bounded
 objective and Step labels, status, plan revision, dependencies, active Attempt
@@ -388,7 +430,9 @@ Interactive input precedence is centralized as: modal Task inspection,
 approval prompt, autocomplete/typeahead, attachment selection, then ordinary
 prompt or steering input. Plain, CI, dumb-terminal, and non-TTY Task inspection
 continues through deterministic `task` and `/task` text commands without
-animation or cursor-managed UI.
+animation, background paint, mouse dependence, or cursor-managed UI. Arabic
+inspection isolates technical tokens such as Task IDs, Subagent labels, result
+handles, costs, and counts so mixed-direction output remains readable.
 
 ### Phase E2: Live Assistant Streaming
 

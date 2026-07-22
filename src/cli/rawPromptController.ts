@@ -37,6 +37,7 @@ import {
   formatSubmittedPromptWithAttachmentContent,
   formatSubmittedPromptWithAttachmentPreview,
   removeAttachmentAndRepairFocus,
+  reconcileTaskSurfaceState,
   routeApprovalKey,
   routeAttachmentKey,
   routeOperatorConsoleInput,
@@ -150,6 +151,14 @@ export class RawPromptController {
       clearInterval(statusTicker);
       statusTicker = undefined;
     };
+    const currentTerminal = () => {
+      const terminal = this.#operatorConsole?.getTerminal?.() ?? this.#operatorConsole?.terminal;
+      return {
+        width: terminal?.width ?? this.#output.columns ?? 80,
+        height: terminal?.height ?? this.#output.rows ?? 24,
+        isTty: terminal?.isTty ?? this.#output.isTTY ?? true,
+      };
+    };
     const render = () => {
       const refreshedApprovals = this.#operatorConsole?.getApprovals?.() ?? approvals;
       const refreshedIds = new Set(refreshedApprovals.map((approval) => approval.id));
@@ -173,45 +182,11 @@ export class RawPromptController {
         attachmentFocus = createInitialFocusState();
       }
       const cards = this.#operatorConsole?.getTasks?.() ?? this.#operatorConsole?.tasks?.cards ?? taskSurface.cards;
-      const selectedTaskId = cards.some((card) => card.taskId === taskSurface.selectedTaskId)
-        ? taskSurface.selectedTaskId
-        : cards[0]?.taskId;
-      const inspectedTaskId = cards.some((card) => card.taskId === taskSurface.inspectedTaskId)
-        ? taskSurface.inspectedTaskId
-        : undefined;
-      const inspectedCard = cards.find((card) => card.taskId === inspectedTaskId);
-      const retainedInspection = taskSurface.inspection ?? { followLive: true };
+      taskSurface = reconcileTaskSurfaceState(taskSurface, cards);
+      const inspectedCard = taskSurface.cards.find((card) => card.taskId === taskSurface.inspectedTaskId);
       const selectedSubagent = inspectedCard?.subagents.find((subagent) =>
-        subagent.stepId === retainedInspection.selectedSubagentStepId
+        subagent.stepId === taskSurface.inspection?.selectedSubagentStepId
       ) ?? inspectedCard?.subagents[0];
-      const inspectedSubagent = inspectedCard?.subagents.find((subagent) =>
-        subagent.stepId === retainedInspection.inspectedSubagentStepId
-      );
-      const {
-        selectedSubagentStepId: _selectedSubagentStepId,
-        inspectedSubagentStepId: _inspectedSubagentStepId,
-        subagentTrace: _subagentTrace,
-        ...baseInspection
-      } = retainedInspection;
-      const inspection = inspectedTaskId === undefined
-        ? { followLive: true }
-        : {
-            ...baseInspection,
-            ...(selectedSubagent === undefined ? {} : { selectedSubagentStepId: selectedSubagent.stepId }),
-            ...(inspectedSubagent === undefined
-              ? {}
-              : {
-                  inspectedSubagentStepId: inspectedSubagent.stepId,
-                  subagentTrace: retainedInspection.subagentTrace ?? { followLive: true },
-                }),
-          };
-      taskSurface = {
-        cards,
-        ...(selectedTaskId === undefined ? {} : { selectedTaskId }),
-        ...(inspectedTaskId === undefined ? {} : { inspectedTaskId }),
-        inspection,
-        scrollOffset: inspectedTaskId === undefined ? 0 : taskSurface.scrollOffset,
-      };
       if (inspectedCard !== undefined && attachmentFocus.target.kind === "taskSubagent") {
         attachmentFocus = selectedSubagent === undefined
           ? createInitialFocusState({ kind: "taskCard", taskId: inspectedCard.taskId })
@@ -233,11 +208,7 @@ export class RawPromptController {
         operatorConsole: this.#operatorConsole?.enabled === true
           ? {
             ...this.#operatorConsole,
-            terminal: {
-              width: this.#operatorConsole.terminal?.width ?? this.#output.columns ?? 80,
-              height: this.#operatorConsole.terminal?.height ?? this.#output.rows ?? 24,
-              isTty: this.#operatorConsole.terminal?.isTty ?? this.#output.isTTY ?? true,
-            },
+            terminal: currentTerminal(),
             attachments,
             approvals,
             tasks: taskSurface,
@@ -546,11 +517,7 @@ export class RawPromptController {
         const routed = routeOperatorConsoleInput({
           state: createInitialOperatorConsoleState({
           locale: this.#operatorConsole.locale,
-          terminal: {
-            width: this.#operatorConsole.terminal?.width ?? this.#output.columns ?? 80,
-            height: this.#operatorConsole.terminal?.height ?? this.#output.rows ?? 24,
-            isTty: this.#operatorConsole.terminal?.isTty ?? this.#output.isTTY ?? true,
-          },
+          terminal: currentTerminal(),
           attachments,
           tasks: taskSurface,
           focus: attachmentFocus,

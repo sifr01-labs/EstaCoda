@@ -24,6 +24,7 @@ import {
   type TranscriptBlock,
   type TurnActivityState,
   routeOperatorConsoleInput,
+  reconcileTaskSurfaceState,
 } from "../ui/papyrus/operator-console/index.js";
 import { RawPromptRenderLoop } from "./rawPromptRenderLoop.js";
 import { semanticMotionForPhase, semanticMotionFrameIndex } from "../ui/semantic-motion.js";
@@ -277,7 +278,7 @@ export class LiveOperatorConsoleController {
     const steerVisible = this.#steer?.mode === "drafting" || this.#steer?.mode === "queued";
     const activeWork = this.#activeWorkSnapshotForRender();
     const motionElapsedMs = this.#motionElapsedMs();
-    this.#tasks = reconcileLiveTaskSurface(this.#tasks, this.#getTasks?.() ?? []);
+    this.#tasks = reconcileTaskSurfaceState(this.#tasks, this.#getTasks?.() ?? []);
     const focus = this.#runtimeHost.getState().focus;
     this.#renderLoop.render({
       prompt: "",
@@ -323,15 +324,21 @@ export class LiveOperatorConsoleController {
   }
 
   #terminalSnapshotForRender(activeWork: ToolActivityState): Partial<TerminalMetrics> {
-    if (activeWork.completedAtMs === undefined) return this.#terminal;
-    const requestedHeight = getActiveWorkSurfaceDesiredHeight(activeWork);
-    if (requestedHeight <= 0) return this.#terminal;
-    const surroundingChromeRows = 32;
-    const currentHeight = this.#terminal.height ?? 0;
-    const expandedHeight = Math.max(currentHeight, requestedHeight + surroundingChromeRows);
     const viewportHeight = normalizeOptionalPositiveInteger(this.#output.rows);
-    return {
+    const terminal = {
       ...this.#terminal,
+      width: normalizeOptionalPositiveInteger(this.#output.columns) ?? this.#terminal.width,
+      height: viewportHeight ?? this.#terminal.height,
+      isTty: this.#output.isTTY ?? this.#terminal.isTty,
+    };
+    if (activeWork.completedAtMs === undefined) return terminal;
+    const requestedHeight = getActiveWorkSurfaceDesiredHeight(activeWork);
+    if (requestedHeight <= 0) return terminal;
+    const surroundingChromeRows = 32;
+    const currentHeight = terminal.height ?? 0;
+    const expandedHeight = Math.max(currentHeight, requestedHeight + surroundingChromeRows);
+    return {
+      ...terminal,
       height: viewportHeight === undefined
         ? expandedHeight
         : Math.min(viewportHeight, expandedHeight),
@@ -547,50 +554,6 @@ export class LiveOperatorConsoleController {
       (options.includeUnanchored && entry.afterSegmentId === undefined)
     );
   }
-}
-
-function reconcileLiveTaskSurface(
-  current: TaskSurfaceState,
-  cards: readonly TaskCardState[]
-): TaskSurfaceState {
-  const selectedTaskId = cards.some((card) => card.taskId === current.selectedTaskId)
-    ? current.selectedTaskId
-    : cards[0]?.taskId;
-  const inspectedTaskId = cards.some((card) => card.taskId === current.inspectedTaskId)
-    ? current.inspectedTaskId
-    : undefined;
-  const inspectedCard = cards.find((card) => card.taskId === inspectedTaskId);
-  const selectedSubagent = inspectedCard?.subagents.find((subagent) =>
-    subagent.stepId === current.inspection?.selectedSubagentStepId
-  ) ?? inspectedCard?.subagents[0];
-  const inspectedSubagent = inspectedCard?.subagents.find((subagent) =>
-    subagent.stepId === current.inspection?.inspectedSubagentStepId
-  );
-  const {
-    selectedSubagentStepId: _selectedSubagentStepId,
-    inspectedSubagentStepId: _inspectedSubagentStepId,
-    subagentTrace: _subagentTrace,
-    ...baseInspection
-  } = current.inspection ?? { followLive: true };
-  const inspection = inspectedTaskId === undefined
-    ? { followLive: true }
-    : {
-        ...baseInspection,
-        ...(selectedSubagent === undefined ? {} : { selectedSubagentStepId: selectedSubagent.stepId }),
-        ...(inspectedSubagent === undefined
-          ? {}
-          : {
-              inspectedSubagentStepId: inspectedSubagent.stepId,
-              subagentTrace: current.inspection?.subagentTrace ?? { followLive: true },
-            }),
-      };
-  return {
-    cards,
-    ...(selectedTaskId === undefined ? {} : { selectedTaskId }),
-    ...(inspectedTaskId === undefined ? {} : { inspectedTaskId }),
-    inspection,
-    scrollOffset: inspectedTaskId === undefined ? 0 : current.scrollOffset,
-  };
 }
 
 function isSettledDelegationEvent(event: ActiveWorkRuntimeEvent): boolean {

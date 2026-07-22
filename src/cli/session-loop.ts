@@ -451,6 +451,11 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             height: operatorConsoleTerminalHeight(output),
             isTty: renderer.capabilities.isTTY,
           },
+          getTerminal: () => ({
+            width: (output as { readonly columns?: number }).columns ?? renderer.capabilities.terminalWidth,
+            height: operatorConsoleTerminalHeight(output),
+            isTty: (output as { readonly isTTY?: boolean }).isTTY ?? renderer.capabilities.isTTY,
+          }),
           getStatus: getOperatorConsoleStatus,
           getTasks: getOperatorConsoleTasks,
           getApprovals: getOperatorConsoleApprovals,

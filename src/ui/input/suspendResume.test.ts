@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { DISABLE_MOUSE_TRACKING, ENABLE_MOUSE_TRACKING } from "../papyrus/termio/dec.js";
+import { createTerminalLifecycle } from "./terminalLifecycle.js";
 import { createSuspendResumeManager, type SuspendResumeLifecycle } from "./suspendResume.js";
 
 function fakeLifecycle(overrides: Partial<SuspendResumeLifecycle> = {}) {
@@ -60,6 +62,42 @@ describe("suspend/resume manager", () => {
     });
     expect(fake.calls).toEqual(["stop", "start"]);
     expect(manager.isSuspended()).toBe(false);
+  });
+
+  it("disables and restores SGR mouse tracking across a real suspend/resume cycle", () => {
+    const writes: string[] = [];
+    const stdin = {
+      isTTY: true,
+      isRaw: false,
+      setRawMode(mode: boolean) {
+        this.isRaw = mode;
+      },
+    };
+    const lifecycle = createTerminalLifecycle({
+      stdin,
+      stdout: {
+        isTTY: true,
+        write(chunk: string) {
+          writes.push(chunk);
+        },
+      },
+      hideCursor: false,
+      enableBracketedPaste: false,
+      enableMouseTracking: true,
+    });
+    const manager = createSuspendResumeManager({ lifecycle });
+
+    lifecycle.start();
+    manager.suspend();
+    manager.resume();
+    lifecycle.stop();
+
+    expect(writes).toEqual([
+      ENABLE_MOUSE_TRACKING,
+      DISABLE_MOUSE_TRACKING,
+      ENABLE_MOUSE_TRACKING,
+      DISABLE_MOUSE_TRACKING,
+    ]);
   });
 
   it("repeated suspend and resume calls are idempotent", () => {

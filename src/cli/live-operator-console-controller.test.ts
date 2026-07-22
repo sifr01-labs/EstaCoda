@@ -174,6 +174,68 @@ describe("LiveOperatorConsoleController", () => {
     expect(stripAnsi(output.text())).toContain("Research competitor");
   });
 
+  it("preserves Task inspection across live usage refresh and terminal resize", () => {
+    const output = createOutput();
+    let task = makeLiveTask({
+      trace: {
+        events: [
+          { eventId: "event-1", kind: "read", label: "Read first file", category: "read", timestamp: "2026-07-20T10:00:00.000Z" },
+          { eventId: "event-2", kind: "answer", label: "Summarized first file", category: "answer", timestamp: "2026-07-20T10:01:00.000Z" },
+        ],
+        hasEarlierEvents: false,
+      },
+    });
+    const { controller, runtimeHost } = createControllerFixture(output, {
+      getTasks: () => [task],
+    });
+
+    controller.refresh();
+    controller.routeInput({ type: "key", key: "tab" });
+    controller.routeInput({ type: "key", key: "enter" });
+    controller.routeInput({ type: "key", key: "left" });
+    expect(runtimeHost.getState().tasks.inspection).toMatchObject({
+      followLive: false,
+      selectedTraceEventId: "event-1",
+    });
+
+    output.resize(48, 16);
+    task = {
+      ...task,
+      status: "completed",
+      usage: {
+        providerCalls: 2,
+        totalTokens: 900,
+        estimatedCostUsd: 0.042,
+        usageComplete: true,
+        pricingComplete: true,
+      },
+      trace: {
+        events: [
+          ...task.trace.events,
+          { eventId: "event-3", kind: "finish", label: "Finished Task", category: "finish", timestamp: "2026-07-20T10:02:00.000Z" },
+        ],
+        hasEarlierEvents: false,
+      },
+    };
+    controller.refresh();
+
+    const state = runtimeHost.getState();
+    expect(state.terminal).toMatchObject({ width: 48, height: 16, isTty: true });
+    expect(state.tasks.inspectedTaskId).toBe("T-live-1");
+    expect(state.tasks.inspection).toMatchObject({
+      followLive: false,
+      selectedTraceEventId: "event-1",
+    });
+    expect(state.tasks.cards[0]).toMatchObject({
+      status: "completed",
+      usage: { totalTokens: 900, estimatedCostUsd: 0.042 },
+    });
+    const text = stripAnsi(output.text());
+    expect(text).toContain("Read first file");
+    expect(text).toContain("Return to live");
+    expect(text).not.toContain("Finished Task");
+  });
+
   it("uses the shared Task router during active steering without swallowing prompt text", () => {
     const output = createOutput();
     const { controller, runtimeHost } = createControllerFixture(output, {
@@ -544,8 +606,8 @@ describe("LiveOperatorConsoleController", () => {
     const lines = runtimeHost.render().lines;
     const text = stripAnsi(lines.join("\n"));
 
-    expect(runtimeHost.getState().terminal.height).toBe(12);
-    expect(lines.length).toBeLessThanOrEqual(12);
+    expect(runtimeHost.getState().terminal.height).toBe(24);
+    expect(lines.length).toBeLessThanOrEqual(24);
     expect(text).not.toContain("Running tools");
     expect(text).toContain("read_file");
     expect(text).toContain("src/file-19.ts");
@@ -606,11 +668,18 @@ function createOutput(): {
   write: (chunk: string | Uint8Array) => boolean;
   text: () => string;
   clear: () => void;
+  resize: (columns: number, rows: number) => void;
 } {
   const writes: string[] = [];
+  let columns = 80;
+  let rows = 24;
   return {
-    columns: 80,
-    rows: 24,
+    get columns() {
+      return columns;
+    },
+    get rows() {
+      return rows;
+    },
     isTTY: true,
     write: (chunk: string | Uint8Array) => {
       writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
@@ -620,10 +689,14 @@ function createOutput(): {
     clear: () => {
       writes.length = 0;
     },
+    resize: (nextColumns: number, nextRows: number) => {
+      columns = nextColumns;
+      rows = nextRows;
+    },
   };
 }
 
-function makeLiveTask(): TaskCardState {
+function makeLiveTask(overrides: Partial<TaskCardState> = {}): TaskCardState {
   const usage = {
     providerCalls: 1,
     totalTokens: 100,
@@ -674,6 +747,7 @@ function makeLiveTask(): TaskCardState {
     results: [],
     createdAt: "2026-07-20T10:00:00.000Z",
     updatedAt: "2026-07-20T10:00:03.000Z",
+    ...overrides,
   };
 }
 

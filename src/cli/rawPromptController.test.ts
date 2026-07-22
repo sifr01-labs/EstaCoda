@@ -282,6 +282,35 @@ describe("raw prompt controller", () => {
     await expect(read.pending).resolves.toEqual({ type: "submit", text: "ok" });
   });
 
+  it("uses current terminal dimensions without losing historical Task selection", async () => {
+    let terminal = { width: 72, height: 16, isTty: true };
+    const card = promptTaskCardWithTrace(["First event", "Second event"]);
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal,
+        getTerminal: () => terminal,
+        getTasks: () => [card],
+      },
+    });
+
+    read.input.send("\t");
+    read.input.send("\r");
+    read.input.send("\u001b[D");
+    await flushKeypressTimers();
+    terminal = { width: 44, height: 12, isTty: true };
+    const resizeStart = read.output.writes.length;
+    read.input.send("\u001b[A");
+    await flushKeypressTimers();
+    const resizedOutput = read.output.writes.slice(resizeStart).join("");
+
+    expect(resizedOutput).toContain("First event");
+    expect(resizedOutput).toContain("Return to live");
+    read.input.send("\t");
+    read.input.send("ok\r");
+    await expect(read.pending).resolves.toEqual({ type: "submit", text: "ok" });
+  });
+
   it("keeps Subagent inspection anchored by Step ID while its safe activity refreshes", async () => {
     let card = promptTaskCardWithSubagentTrace(["Read first file", "Summarized first file"]);
     const read = startPendingOperatorConsoleRead({

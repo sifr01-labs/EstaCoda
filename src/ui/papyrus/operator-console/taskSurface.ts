@@ -99,6 +99,66 @@ export function hasTaskCards(state: TaskSurfaceState): boolean {
   return state.cards.length > 0;
 }
 
+/** Refresh Task projections without moving established cards or resetting inspection state. */
+export function reconcileTaskSurfaceState(
+  current: TaskSurfaceState,
+  incomingCards: readonly TaskCardState[]
+): TaskSurfaceState {
+  const incomingById = new Map(incomingCards.map((card) => [card.taskId, card]));
+  const retainedIds = new Set<string>();
+  const cards = current.cards.flatMap((card) => {
+    const refreshed = incomingById.get(card.taskId);
+    if (refreshed === undefined) return [];
+    retainedIds.add(card.taskId);
+    return [refreshed];
+  });
+  for (const card of incomingCards) {
+    if (retainedIds.has(card.taskId)) continue;
+    retainedIds.add(card.taskId);
+    cards.push(card);
+  }
+
+  const selectedTaskId = cards.some((card) => card.taskId === current.selectedTaskId)
+    ? current.selectedTaskId
+    : cards[0]?.taskId;
+  const inspectedTaskId = cards.some((card) => card.taskId === current.inspectedTaskId)
+    ? current.inspectedTaskId
+    : undefined;
+  const inspectedCard = cards.find((card) => card.taskId === inspectedTaskId);
+  const retainedInspection = current.inspection ?? { followLive: true };
+  const selectedSubagent = inspectedCard?.subagents.find((subagent) =>
+    subagent.stepId === retainedInspection.selectedSubagentStepId
+  ) ?? inspectedCard?.subagents[0];
+  const inspectedSubagent = inspectedCard?.subagents.find((subagent) =>
+    subagent.stepId === retainedInspection.inspectedSubagentStepId
+  );
+  const {
+    selectedSubagentStepId: _selectedSubagentStepId,
+    inspectedSubagentStepId: _inspectedSubagentStepId,
+    subagentTrace: _subagentTrace,
+    ...baseInspection
+  } = retainedInspection;
+  const inspection = inspectedTaskId === undefined
+    ? { followLive: true }
+    : {
+        ...baseInspection,
+        ...(selectedSubagent === undefined ? {} : { selectedSubagentStepId: selectedSubagent.stepId }),
+        ...(inspectedSubagent === undefined
+          ? {}
+          : {
+              inspectedSubagentStepId: inspectedSubagent.stepId,
+              subagentTrace: retainedInspection.subagentTrace ?? { followLive: true },
+            }),
+      };
+  return {
+    cards,
+    ...(selectedTaskId === undefined ? {} : { selectedTaskId }),
+    ...(inspectedTaskId === undefined ? {} : { inspectedTaskId }),
+    inspection,
+    scrollOffset: inspectedTaskId === undefined ? 0 : current.scrollOffset,
+  };
+}
+
 export function getTaskCardSurfaceDesiredHeight(state: TaskSurfaceState, width = 80): number {
   const card = selectedTask(state);
   if (card === undefined) return 0;
