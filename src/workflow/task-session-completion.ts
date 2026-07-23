@@ -103,7 +103,7 @@ export class TaskSessionCompletionService {
         const task = this.#store.getTask(claimed.taskId);
         if (task === null) throw new Error("Task is unavailable.");
         const result = sessionCompletionResult(this.#store, task);
-        if (result === undefined) throw new Error("Task has no accepted terminal answer.");
+        if (result === undefined) throw new TaskSessionCompletionUnavailableError();
         const text = await this.#readResult(task.id, result, sessionId);
         const message = await this.#appendMessage({
           id: messageId,
@@ -124,6 +124,10 @@ export class TaskSessionCompletionService {
         const recovered = await this.#completionMessage(claimed);
         if (recovered !== undefined) {
           delivered.push(recovered);
+          continue;
+        }
+        if (error instanceof TaskSessionCompletionUnavailableError) {
+          this.#settleUnavailable(claimed);
           continue;
         }
         this.#requeuePreparationFailure(claimed, error);
@@ -225,6 +229,16 @@ export class TaskSessionCompletionService {
     });
   }
 
+  #settleUnavailable(binding: TaskDeliveryBinding): void {
+    this.#store.settleDeliveryBinding({
+      id: binding.id,
+      status: "failed",
+      settledAt: this.#now().toISOString(),
+      failureClass: "terminal-answer-unavailable",
+      failureMessage: "The Task settled without an accepted terminal answer.",
+    });
+  }
+
   #requeuePreparationFailure(binding: TaskDeliveryBinding, error: unknown): void {
     const timestamp = this.#now().toISOString();
     this.#store.settleDeliveryBinding({
@@ -235,6 +249,13 @@ export class TaskSessionCompletionService {
       failureMessage: boundedFailure(error),
     });
     this.#store.retryDeliveryBinding(binding.id, timestamp);
+  }
+}
+
+class TaskSessionCompletionUnavailableError extends Error {
+  constructor() {
+    super("Task has no accepted terminal answer.");
+    this.name = "TaskSessionCompletionUnavailableError";
   }
 }
 

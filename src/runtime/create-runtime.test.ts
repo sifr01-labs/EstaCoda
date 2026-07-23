@@ -2940,7 +2940,7 @@ describe("createRuntime MCP trust gating", () => {
     }
   });
 
-  it("binds default batch synthesis to the CLI outbox and honors the inspection-only opt-out", async () => {
+  it("binds single and synthesized batch answers to the CLI outbox and honors the inspection-only opt-out", async () => {
     const options = await minimalRuntimeOptions();
     const sessionDb = await createSQLiteSessionDB({ path: join(options.workspaceRoot, "cli-completion-sessions.sqlite") });
     await sessionDb.createSession({ id: options.sessionId, profileId: "default" });
@@ -2984,6 +2984,38 @@ describe("createRuntime MCP trust gating", () => {
       expect(runtime.drainTaskSessionCompletions).toBeTypeOf("function");
       expect(runtime.acknowledgeTaskSessionCompletion).toBeTypeOf("function");
       await expect(runtime.drainTaskSessionCompletions?.()).resolves.toEqual([]);
+      expect(store.getDeliveryBinding(store.listDeliveryBindings({ taskId })[0]!.id)?.status).toBe("pending");
+
+      const single = await runtime.executeTool?.({
+        tool: "delegate_task",
+        toolInput: { tasks: [{ task: "Return one delegated answer." }] },
+        toolCallId: "cli-single-completion-1",
+      });
+      const singleReplay = await runtime.executeTool?.({
+        tool: "delegate_task",
+        toolInput: { tasks: [{ task: "Return one delegated answer." }] },
+        toolCallId: "cli-single-completion-1",
+      });
+      const singleHandle = single?.result?.metadata as {
+        taskId?: string;
+        stepCount?: number;
+        synthesisStepId?: string;
+      } | undefined;
+      const singleReplayHandle = singleReplay?.result?.metadata as {
+        taskId?: string;
+        idempotentReplay?: boolean;
+      } | undefined;
+      expect(singleHandle).toMatchObject({ stepCount: 1 });
+      expect(singleHandle?.synthesisStepId).toBeUndefined();
+      expect(singleReplayHandle).toMatchObject({ taskId: singleHandle?.taskId, idempotentReplay: true });
+      expect(store.listDeliveryBindings({ taskId: singleHandle!.taskId! })).toEqual([
+        expect.objectContaining({
+          authorizedSessionId: runtime.sessionId,
+          deliveryKey: "origin-completion",
+          destination: { platform: "cli" },
+          status: "pending",
+        }),
+      ]);
 
       const inspectionOnly = await runtime.executeTool?.({
         tool: "delegate_task",
@@ -3001,6 +3033,23 @@ describe("createRuntime MCP trust gating", () => {
       expect(inspectionHandle).toMatchObject({ stepCount: 2 });
       expect(inspectionHandle?.synthesisStepId).toBeUndefined();
       expect(store.listDeliveryBindings({ taskId: inspectionHandle!.taskId! })).toEqual([]);
+
+      const singleInspectionOnly = await runtime.executeTool?.({
+        tool: "delegate_task",
+        toolInput: {
+          tasks: [{ task: "Inspect one source without returning it to the transcript." }],
+          synthesis: false,
+        },
+        toolCallId: "cli-single-inspection-only-1",
+      });
+      const singleInspectionHandle = singleInspectionOnly?.result?.metadata as {
+        taskId?: string;
+        stepCount?: number;
+        synthesisStepId?: string;
+      } | undefined;
+      expect(singleInspectionHandle).toMatchObject({ stepCount: 1 });
+      expect(singleInspectionHandle?.synthesisStepId).toBeUndefined();
+      expect(store.listDeliveryBindings({ taskId: singleInspectionHandle!.taskId! })).toEqual([]);
     } finally {
       await runtime.dispose();
     }

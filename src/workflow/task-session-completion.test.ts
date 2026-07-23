@@ -110,6 +110,59 @@ describe("TaskSessionCompletionService", () => {
     expect(store.getDeliveryBinding("delivery-cli")?.status).toBe("delivered");
   });
 
+  it("appends a single accepted worker answer through the same transcript outbox", async () => {
+    const graph = makeSingleWorkerGraph();
+    store.createTaskGraph(graph);
+    createCliBinding({ id: "delivery-single", taskId: graph.task.id });
+    const answer = results.record({
+      taskId: graph.task.id,
+      stepId: graph.steps[0]!.id,
+      kind: "text",
+      content: "The single delegated answer.",
+    });
+    completeTask(graph.task.id);
+
+    const delivered = await service.deliverPending("creator-alpha");
+    expect(delivered).toEqual([
+      expect.objectContaining({
+        bindingId: "delivery-single",
+        taskId: graph.task.id,
+        resultId: answer.id,
+        text: "The single delegated answer.",
+      }),
+    ]);
+    await acknowledge(delivered[0]!);
+
+    expect(await sessionDb.listMessages("creator-alpha")).toEqual([
+      expect.objectContaining({
+        role: "agent",
+        channel: "cli",
+        content: "The single delegated answer.",
+      }),
+    ]);
+    expect(store.getDeliveryBinding("delivery-single")?.status).toBe("delivered");
+  });
+
+  it("settles terminal no-answer delivery once instead of retrying forever", async () => {
+    results.record({
+      taskId: "task-synthesis",
+      stepId: "step-worker",
+      kind: "text",
+      disposition: "diagnostic",
+      content: "Incomplete diagnostic output must not become a session answer.",
+    });
+    completeTask();
+
+    await expect(service.deliverPending("creator-alpha")).resolves.toEqual([]);
+    expect(store.getDeliveryBinding("delivery-cli")).toMatchObject({
+      status: "failed",
+      failureClass: "terminal-answer-unavailable",
+      failureMessage: "The Task settled without an accepted terminal answer.",
+    });
+    await expect(service.deliverPending("creator-alpha")).resolves.toEqual([]);
+    expect(await sessionDb.listMessages("creator-alpha")).toEqual([]);
+  });
+
   it("delivers after transcript-preserving compaction into the active descendant session", async () => {
     results.record({
       taskId: "task-synthesis",
@@ -247,11 +300,11 @@ describe("TaskSessionCompletionService", () => {
     expect(store.getDeliveryBinding("delivery-cli")?.status).toBe("delivered");
   });
 
-  function createCliBinding(): void {
+  function createCliBinding(options: { id?: string; taskId?: string } = {}): void {
     const binding: TaskDeliveryBinding = {
-      id: "delivery-cli",
+      id: options.id ?? "delivery-cli",
       profileId: "alpha",
-      taskId: "task-synthesis",
+      taskId: options.taskId ?? "task-synthesis",
       authorizedSessionId: "creator-alpha",
       deliveryKey: "origin-completion",
       destination: { platform: "cli" },
@@ -270,13 +323,40 @@ describe("TaskSessionCompletionService", () => {
     });
   }
 
-  function completeTask(): void {
-    const task = store.getTask("task-synthesis")!;
+  function completeTask(taskId = "task-synthesis"): void {
+    const task = store.getTask(taskId)!;
     const running = { ...task, status: "running" as const, startedAt: NOW, updatedAt: NOW };
     store.updateTask(running);
     store.updateTask({ ...running, status: "completed", completedAt: NOW, updatedAt: NOW });
   }
 });
+
+function makeSingleWorkerGraph(): { task: Task; revision: TaskPlanRevision; steps: TaskStep[] } {
+  const source = makeSynthesisGraph();
+  const task: Task = {
+    ...source.task,
+    id: "task-single",
+    rootTaskId: "task-single",
+    creationKey: "create-single",
+    objective: "Return one delegated answer.",
+    activePlanRevisionId: "revision-single",
+  };
+  const revision: TaskPlanRevision = {
+    ...source.revision,
+    id: "revision-single",
+    taskId: task.id,
+  };
+  const worker: TaskStep = {
+    ...source.steps[0]!,
+    id: "step-single",
+    taskId: task.id,
+    planRevisionId: revision.id,
+    key: "single",
+    title: "Delegated work",
+    objective: task.objective,
+  };
+  return { task, revision, steps: [worker] };
+}
 
 function makeSynthesisGraph(): { task: Task; revision: TaskPlanRevision; steps: TaskStep[] } {
   const authority = authorityPolicy();

@@ -406,13 +406,16 @@ accepted result summaries remain available in inspection. The parent panel
 opens whole-Task inspection. Before synthesis becomes active, and after it
 settles, the ordinary seven-row Subagent presentation remains in effect.
 
-An interactive CLI batch delegation receives a synthesis Step by default and a
-durable local completion binding. Once the Task has settled and its accepted
-synthesis Result is available, the authorized creator session appends that
-Result once as an ordinary assistant transcript message. Intermediate worker
-Results remain in Task inspection and are never concatenated into the session
-reply. `synthesis: false` explicitly creates inspection-only work without that
-local final-answer binding. Delivery follows verified transcript-compression lineage, preserves an
+An interactive CLI delegation with one worker receives a durable local
+completion binding, as does a batch with its default synthesis Step. Once the
+Task has settled and its accepted single-worker or synthesis Result is
+available, the authorized creator session appends that Result once as an
+ordinary assistant transcript message. Intermediate batch worker Results remain
+in Task inspection and are never concatenated into the session reply.
+`synthesis: false` explicitly creates inspection-only work without that local
+final-answer binding. A terminal Task without an accepted answer settles its
+binding once as unavailable rather than retrying forever. Delivery follows
+verified transcript-compression lineage, preserves an
 in-progress prompt draft, and uses a deterministic message identity so a crash
 between append and outbox settlement cannot duplicate the transcript message.
 The outbox is acknowledged only after display; if that display was interrupted,

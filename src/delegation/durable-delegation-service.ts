@@ -145,6 +145,9 @@ export class DurableDelegationService {
     const creationKey = delegationCreationKey(this.#store.profileId, sessionId, request.toolCallId);
     const existing = this.#store.getTaskByCreationKey(creationKey);
     const synthesis = resolveDelegationSynthesis(this.#store, request, existing);
+    const localCompletionEligible = parent === undefined && (
+      synthesis !== undefined || (request.tasks.length === 1 && request.synthesis !== false)
+    );
     const initialHostLease = existing === null && executionPreference === "auto"
       ? this.#taskHostAdmission?.()
       : undefined;
@@ -245,7 +248,7 @@ export class DurableDelegationService {
       ...(initialHostLease === undefined ? {} : { initialHostLease }),
       ...(parent === undefined && request.originTurnId !== undefined ? { originTurnId: request.originTurnId } : {}),
       ...(completionDestination === undefined ||
-          (completionDestination.platform === "cli" && (parent !== undefined || synthesis === undefined)) ? {} : {
+          (completionDestination.platform === "cli" && !localCompletionEligible) ? {} : {
         completionDelivery: {
           deliveryKey: TASK_ORIGIN_COMPLETION_DELIVERY_KEY,
           destination: completionDestination
