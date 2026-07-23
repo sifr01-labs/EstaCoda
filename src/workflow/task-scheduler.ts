@@ -687,13 +687,25 @@ export class TaskScheduler {
           const dependencies = step.dependsOn.map((id) => byId.get(id)).filter((value): value is TaskStep => value !== undefined);
           const allCompleted = dependencies.every((dependency) => dependency.status === "completed");
           const blocked = dependencies.some((dependency) => isTerminalTaskStepStatus(dependency.status) && dependency.status !== "completed");
-          const status = allCompleted ? "ready" : blocked ? "skipped" : undefined;
+          const allSettled = dependencies.every((dependency) => isTerminalTaskStepStatus(dependency.status));
+          const partialSynthesisReady = !allCompleted && allSettled && isSynthesisStep(step) &&
+            hasAcceptedDependencyResult(store, task.id, dependencies);
+          const status = allCompleted || partialSynthesisReady
+            ? "ready"
+            : blocked && (!isSynthesisStep(step) || allSettled)
+              ? "skipped"
+              : undefined;
           if (status === undefined) continue;
+          const reasonCode = partialSynthesisReady
+            ? "partial-dependencies-settled"
+            : status === "ready"
+              ? "dependencies-completed"
+              : "dependency-not-completed";
           store.updateStep({ ...step, status, updatedAt: now });
           store.appendEvent(this.#event(task, "step-state-changed", now, {
             stepId: step.id,
             planRevisionId: step.planRevisionId,
-            data: { from: "pending", to: status, reasonCode: blocked ? "dependency-not-completed" : "dependencies-completed" }
+            data: { from: "pending", to: status, reasonCode }
           }));
           changed = true;
         }
@@ -1869,6 +1881,27 @@ export class TaskScheduler {
       data: options.data
     };
   }
+}
+
+function isSynthesisStep(step: TaskStep): boolean {
+  return step.executor.kind === "agent" && step.executor.role === "synthesis";
+}
+
+function hasAcceptedDependencyResult(
+  store: TaskStore,
+  taskId: string,
+  dependencies: readonly TaskStep[]
+): boolean {
+  const completedDependencyIds = new Set(
+    dependencies.filter((dependency) => dependency.status === "completed").map((dependency) => dependency.id)
+  );
+  if (completedDependencyIds.size === 0) return false;
+  return store.listResults(taskId).some((result) =>
+    result.status === "available" &&
+    result.disposition === "accepted" &&
+    result.stepId !== undefined &&
+    completedDependencyIds.has(result.stepId)
+  );
 }
 
 export function taskDispatchKey(

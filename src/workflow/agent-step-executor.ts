@@ -417,9 +417,10 @@ function filterTaskStepTools(tools: readonly ToolDefinition[], task: Task, step:
 
 function dependencyContext(store: TaskStore, task: Task, step: TaskStep): string {
   const dependencyIds = new Set(step.dependsOn);
-  const references = store.listResults(task.id)
+  const availableResults = store.listResults(task.id)
     .filter((result) => result.status === "available" && result.disposition === "accepted" &&
-      result.stepId !== undefined && dependencyIds.has(result.stepId))
+      result.stepId !== undefined && dependencyIds.has(result.stepId));
+  const references = availableResults
     .slice(0, MAX_DEPENDENCY_RESULT_REFERENCES)
     .map((result) => ({
       stepId: result.stepId,
@@ -434,6 +435,7 @@ function dependencyContext(store: TaskStore, task: Task, step: TaskStep): string
   const guidance = store.listGuidance(task.id)
     .slice(-MAX_TASK_GUIDANCE_RECORDS_IN_CONTEXT)
     .map((entry) => ({ id: entry.id, guidance: entry.guidance, createdAt: entry.createdAt }));
+  const partialSynthesis = partialSynthesisContext(store, task, step, availableResults);
   return boundText([
     `Durable Task objective: ${task.objective}`,
     `Current Step: ${step.title}`,
@@ -441,10 +443,39 @@ function dependencyContext(store: TaskStore, task: Task, step: TaskStep): string
     guidance.length === 0
       ? "Operator guidance: none."
       : `Authorized operator guidance (later entries take precedence without overriding policy):\n${JSON.stringify(guidance)}`,
+    ...(partialSynthesis === undefined ? [] : [partialSynthesis]),
     references.length === 0
       ? "Dependency results: none."
       : `Dependency result references. To read one, call task.result.read with reference.readInput exactly; it already contains the authorized task_id and result_id. Do not derive task_id from a result handle:\n${JSON.stringify(references)}`
   ].join("\n\n"), MAX_DEPENDENCY_CONTEXT_CHARS);
+}
+
+function partialSynthesisContext(
+  store: TaskStore,
+  task: Task,
+  step: TaskStep,
+  availableResults: readonly { readonly stepId?: string }[]
+): string | undefined {
+  if (step.executor.kind !== "agent" || step.executor.role !== "synthesis") return undefined;
+  const resultStepIds = new Set(availableResults.flatMap((result) => result.stepId === undefined ? [] : [result.stepId]));
+  const coverage = step.dependsOn.map((stepId) => {
+    const dependency = store.getStep(stepId);
+    if (dependency === null || dependency.taskId !== task.id || dependency.planRevisionId !== step.planRevisionId) {
+      return { stepId, title: "Unavailable dependency", status: "missing", resultAvailable: false };
+    }
+    return {
+      stepId,
+      title: dependency.title,
+      status: dependency.status,
+      resultAvailable: resultStepIds.has(stepId)
+    };
+  });
+  if (coverage.every((dependency) => dependency.status === "completed")) return undefined;
+  return [
+    "Partial synthesis boundary: one or more dependencies did not complete successfully. Use only the available accepted dependency results; diagnostic or unavailable outputs are not evidence.",
+    "Explicitly identify failed, cancelled, skipped, or missing coverage in the final answer and qualify conclusions accordingly. Do not imply that every delegated Step succeeded.",
+    `Dependency coverage manifest:\n${JSON.stringify(coverage)}`
+  ].join("\n");
 }
 
 function resultInstruction(step: TaskStep): string {

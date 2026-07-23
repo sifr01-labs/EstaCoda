@@ -278,6 +278,98 @@ describe("AgentStepExecutor", () => {
     });
   });
 
+  it("gives partial synthesis an explicit bounded coverage manifest without diagnostic output", async () => {
+    const base = makeDependencyGraph();
+    const successful: TaskStep = {
+      ...base.steps[0]!,
+      id: "step-successful",
+      key: "successful",
+      title: "Research successful source",
+      position: 0
+    };
+    const failed: TaskStep = {
+      ...base.steps[0]!,
+      id: "step-failed",
+      key: "failed",
+      title: "Research unavailable source",
+      position: 1
+    };
+    const synthesis: TaskStep = {
+      ...base.steps[1]!,
+      position: 2,
+      dependsOn: [successful.id, failed.id],
+      executor: { kind: "agent", role: "synthesis" }
+    };
+    const graph = { ...base, steps: [successful, failed, synthesis] };
+    store.createTaskGraph(graph);
+    for (const dependency of [successful, failed]) {
+      store.updateStep({ ...dependency, status: "ready" });
+      store.updateStep({ ...dependency, status: "running" });
+    }
+    store.updateStep({ ...successful, status: "completed" });
+    store.updateStep({ ...failed, status: "failed" });
+    resultService.record({
+      id: "accepted-partial-result",
+      taskId: graph.task.id,
+      stepId: successful.id,
+      kind: "text",
+      content: "Verified partial evidence.",
+      summary: "Verified partial evidence summary."
+    });
+    resultService.record({
+      id: "diagnostic-partial-result",
+      taskId: graph.task.id,
+      stepId: failed.id,
+      kind: "text",
+      disposition: "diagnostic",
+      content: "Untrusted incomplete output must stay out of synthesis context."
+    });
+    let childInput: CreateChildAgentLoopInput | undefined;
+    const executor = new AgentStepExecutor({
+      childFactory: {
+        createChild: vi.fn(async (input) => {
+          childInput = input;
+          await sessionDb.createSession({
+            id: "worker-partial-synthesis",
+            profileId: input.profileId,
+            parentSessionId: input.parentSessionId,
+            metadata: { kind: "task-step-worker", ...(input.taskExecution ?? {}) }
+          });
+          return childRuntime(async () => response(), vi.fn(async () => undefined), {
+            sessionId: "worker-partial-synthesis",
+            trajectoryId: "trajectory-partial-synthesis"
+          });
+        })
+      },
+      sessionDb,
+      taskStore: store,
+      hostWorkspace: graph.task.workspace,
+      isWorkspaceTrusted: () => true,
+      parentVisibleTools: () => tools(),
+      approvalService: new TaskApprovalService({ store }),
+      securityPolicy: capabilityFirstDefaults
+    });
+
+    await expect(executor.execute({
+      task: graph.task,
+      step: synthesis,
+      attempt: attempt(graph, synthesis),
+      signal: new AbortController().signal,
+      heartbeat: vi.fn(),
+      checkpoint: vi.fn()
+    })).resolves.toMatchObject({ outcome: "succeeded" });
+
+    const context = childInput?.context ?? "";
+    expect(context).toContain("Partial synthesis boundary");
+    expect(context).toContain("Explicitly identify failed, cancelled, skipped, or missing coverage");
+    expect(context).toContain(`\"stepId\":\"${successful.id}\",\"title\":\"${successful.title}\",\"status\":\"completed\",\"resultAvailable\":true`);
+    expect(context).toContain(`\"stepId\":\"${failed.id}\",\"title\":\"${failed.title}\",\"status\":\"failed\",\"resultAvailable\":false`);
+    expect(context).toContain("accepted-partial-result");
+    expect(context).not.toContain("diagnostic-partial-result");
+    expect(context).not.toContain("Untrusted incomplete output");
+    expect(context.length).toBeLessThanOrEqual(16_000);
+  });
+
   it("returns safe read-only failure output as diagnostic content", async () => {
     const graph = makeGraph();
     const childFactory: ChildAgentLoopFactory = {

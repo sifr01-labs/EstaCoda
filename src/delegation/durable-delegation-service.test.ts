@@ -307,12 +307,12 @@ describe("DurableDelegationService", () => {
     expect(store.getStep(handle.synthesisStepId!)?.status).toBe("completed");
   });
 
-  it("marks the graph partial and durably blocks synthesis after a worker failure", async () => {
+  it("synthesizes accepted worker evidence with explicit partial Task state after another worker fails", async () => {
     const handle = rootService(store).create({
       toolCallId: "call-partial-synthesis",
       trustedWorkspace: true,
       tasks: [{ task: "Research A" }, { task: "Research B" }],
-      synthesis: { objective: "Synthesize only after every worker succeeds." }
+      synthesis: { objective: "Synthesize the available worker evidence and disclose missing coverage." }
     });
     const executor = new FakeTaskStepExecutor(({ step }) => step.key === "delegated-1"
       ? {
@@ -323,10 +323,46 @@ describe("DurableDelegationService", () => {
     const taskScheduler = scheduler(store, sessionDb, executor, "partial", join(root, "task-results"));
 
     expect(await taskScheduler.runOnce()).toMatchObject({ dispatched: 2, completed: 1, failed: 1 });
+    expect(store.getTask(handle.taskId)?.status).toBe("running");
+    expect(store.getStep(handle.synthesisStepId!)?.status).toBe("pending");
+    expect(await taskScheduler.runOnce()).toMatchObject({ dispatched: 1, completed: 1 });
+    expect(store.getTask(handle.taskId)?.status).toBe("partial");
+    expect(store.getStep(handle.synthesisStepId!)?.status).toBe("completed");
+    expect(executor.executions.map(({ step }) => step.executor.role)).toEqual(["worker", "worker", "synthesis"]);
+    expect(new TaskOperatorService({ store }).status(handle.taskId, "parent").results[0]).toMatchObject({ primary: true });
+    expect(store.listEvents(handle.taskId, { kinds: ["step-state-changed"] })).toContainEqual(
+      expect.objectContaining({
+        stepId: handle.synthesisStepId,
+        data: expect.objectContaining({ reasonCode: "partial-dependencies-settled" })
+      })
+    );
+  });
+
+  it("fails closed without synthesis when no worker publishes accepted evidence", async () => {
+    const handle = rootService(store).create({
+      toolCallId: "call-no-synthesis-evidence",
+      trustedWorkspace: true,
+      tasks: [{ task: "Research A" }, { task: "Research B" }],
+      synthesis: { objective: "Synthesize only supported worker evidence." }
+    });
+    const executor = new FakeTaskStepExecutor(({ step }) => step.executor.role === "synthesis"
+      ? { outcome: "succeeded", results: [{ kind: "text", content: "unsupported synthesis" }] }
+      : {
+          outcome: "failed",
+          failure: { class: "worker-failed", message: "Worker failed.", retryable: false, uncertainSideEffects: false },
+          diagnosticResults: [{ kind: "text", content: "Incomplete output preserved only for inspection." }]
+        });
+    const taskScheduler = scheduler(store, sessionDb, executor, "no-evidence", join(root, "task-results"));
+
+    expect(await taskScheduler.runOnce()).toMatchObject({ dispatched: 2, completed: 0, failed: 2 });
     expect(await taskScheduler.runOnce()).toMatchObject({ dispatched: 0 });
+
     expect(store.getTask(handle.taskId)?.status).toBe("partial");
     expect(store.getStep(handle.synthesisStepId!)?.status).toBe("skipped");
     expect(executor.executions.every(({ step }) => step.executor.role === "worker")).toBe(true);
+    expect(store.listResults(handle.taskId)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ disposition: "diagnostic" })
+    ]));
     expect(new TaskOperatorService({ store }).status(handle.taskId, "parent").results.every((result) => !result.primary)).toBe(true);
   });
 
