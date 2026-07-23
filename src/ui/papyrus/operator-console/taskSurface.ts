@@ -56,6 +56,7 @@ export function hasVisibleTaskMotion(state: TaskSurfaceState): boolean {
   if (state.inspectedTaskId !== undefined) return false;
   const card = state.cards.find((candidate) => candidate.taskId === state.selectedTaskId) ?? state.cards[0];
   if (card === undefined) return false;
+  if (card.presentation === "receipt") return false;
   if (card.subagents.some((subagent) => subagent.status === "running")) return true;
   return card.steps.some((step) =>
     step.executorRole === "synthesis" && (step.status === "ready" || step.status === "running")
@@ -178,6 +179,7 @@ export function reconcileTaskSurfaceState(
   incomingCards: readonly TaskCardState[]
 ): TaskSurfaceState {
   const incomingById = new Map(incomingCards.map((card) => [card.taskId, card]));
+  const currentIds = new Set(current.cards.map((card) => card.taskId));
   const retainedIds = new Set<string>();
   const cards = current.cards.flatMap((card) => {
     const refreshed = incomingById.get(card.taskId);
@@ -191,9 +193,13 @@ export function reconcileTaskSurfaceState(
     cards.push(card);
   }
 
-  const selectedTaskId = cards.some((card) => card.taskId === current.selectedTaskId)
+  const refreshedSelection = cards.find((card) => card.taskId === current.selectedTaskId);
+  const newlyExpanded = current.inspectedTaskId === undefined && refreshedSelection?.presentation === "receipt"
+    ? incomingCards.find((card) => !currentIds.has(card.taskId) && card.presentation !== "receipt")
+    : undefined;
+  const selectedTaskId = newlyExpanded?.taskId ?? (cards.some((card) => card.taskId === current.selectedTaskId)
     ? current.selectedTaskId
-    : cards[0]?.taskId;
+    : cards[0]?.taskId);
   const inspectedTaskId = cards.some((card) => card.taskId === current.inspectedTaskId)
     ? current.inspectedTaskId
     : undefined;
@@ -236,6 +242,7 @@ export function reconcileTaskSurfaceState(
 export function getTaskCardSurfaceDesiredHeight(state: TaskSurfaceState, width = 80): number {
   const card = selectedTask(state);
   if (card === undefined) return 0;
+  if (card.presentation === "receipt") return 1;
   const synthesis = activeParentSynthesisStep(card);
   if (synthesis !== undefined) {
     const grid = resolveSubagentGrid(card.subagents.length, dimension(width));
@@ -272,6 +279,9 @@ export function renderTaskCardSurface(
   const copy = COPY[options.locale ?? "en"];
   const isFocused = options.focusedTaskId === card.taskId;
   const header = formatTaskHeader(card, state, copy, isFocused, options.style);
+  if (card.presentation === "receipt") {
+    return [renderTaskReceipt(card, state, copy, options, width, isFocused)];
+  }
   const synthesis = activeParentSynthesisStep(card);
   if (synthesis !== undefined) {
     return renderParentSynthesisTaskSurface(card, synthesis, header, copy, options, width, height);
@@ -325,6 +335,16 @@ export function getTaskCardHitTargets(
   const normalizedWidth = dimension(width);
   const normalizedHeight = dimension(height);
   if (card === undefined || normalizedWidth === 0 || normalizedHeight === 0) return [];
+  if (card.presentation === "receipt") {
+    return [{
+      kind: "taskHeader",
+      taskId: card.taskId,
+      x: 0,
+      y: 0,
+      width: normalizedWidth,
+      height: 1,
+    }];
+  }
   const synthesis = activeParentSynthesisStep(card);
   const taskTargetHeight = synthesis === undefined
     ? 1
@@ -509,6 +529,9 @@ export function routeTaskSurfaceKey(
     const visible = visibleSubagents(card, state.terminal.width, viewportHeight);
     const currentIndex = visible.findIndex((subagent) => subagent.stepId === focusTarget.stepId);
     if (currentIndex < 0) {
+      if (card.presentation === "receipt") {
+        return routeTaskSurfaceKey(focusTaskHeader(state, card), keypress, viewportHeight);
+      }
       return {
         state: {
           ...state,
@@ -872,6 +895,9 @@ function selectTaskAt(state: OperatorConsoleState, index: number): OperatorConso
 }
 
 function visibleSubagentGrid(card: TaskCardState, width: number, height: number): SubagentGrid {
+  if (card.presentation === "receipt") {
+    return { columns: 1, rows: 0, hiddenCount: card.subagents.length };
+  }
   if (activeParentSynthesisStep(card) !== undefined) {
     return resolveCollapsedSynthesisLayout(card, dimension(width), dimension(height)).grid;
   }
@@ -883,6 +909,7 @@ function visibleSubagentGrid(card: TaskCardState, width: number, height: number)
 }
 
 function visibleSubagents(card: TaskCardState, width: number, height: number): readonly TaskCardSubagentState[] {
+  if (card.presentation === "receipt") return [];
   const normalizedHeight = dimension(height);
   if (activeParentSynthesisStep(card) !== undefined) {
     const layout = resolveCollapsedSynthesisLayout(card, dimension(width), normalizedHeight);
@@ -1201,6 +1228,72 @@ function formatTaskHeader(
     return `${styledRail} ${styledTitle} ${separator} ${taskId} ${separator} ${styledMouseHint} ${separator} ${card.objective} ${separator} ${progress}`;
   }
   return `${styledRail} ${styledTitle} ${separator} ${taskId} ${separator} ${phase} ${separator} ${progress} ${separator} ${styledMouseHint} ${separator} ${card.objective}`;
+}
+
+function renderTaskReceipt(
+  card: TaskCardState,
+  state: TaskSurfaceState,
+  copy: TaskCopy,
+  options: TaskCardRenderOptions,
+  width: number,
+  focused: boolean
+): string {
+  const style = options.style;
+  const tokens = style?.tokens.contract;
+  const taskPosition = `${state.cards.indexOf(card) + 1}/${state.cards.length}`;
+  const workerProgress = card.phase.workerProgress;
+  const label = `${workerProgress === undefined ? copy.task : copy.delegatedTask} ${taskPosition}`;
+  const titleColor = focused ? tokens?.palette.action : tokens?.palette.brand;
+  const title = titleColor === undefined
+    ? label
+    : styleColor(style, styleBold(style, label), titleColor);
+  const rail = focused ? tokens?.glyph.progress.thumb ?? ">" : " ";
+  const styledRail = focused && tokens !== undefined
+    ? styleColor(style, rail, tokens.palette.action)
+    : rail;
+  const symbol = taskReceiptStatusSymbol(card, style);
+  const separator = styleMuted(style, "·");
+  const taskId = styleMuted(style, isolate(formatTaskDisplayId(card.taskId)));
+  const phase = styleTaskReceiptStatus(copy.phaseLabel(card.phase.name), card.status, style);
+  const progress = workerProgress === undefined
+    ? `${card.progress.completed + card.progress.skipped}/${card.progress.total} ${copy.stepsSettled}`
+    : copy.delegatedProgressCompact(workerProgress.completed, workerProgress.settled, workerProgress.total);
+  const metrics = styleMuted(
+    style,
+    `${formatDuration(card.elapsedMs)} · ${formatCompactTokenCount(card.usage.totalTokens)} ${copy.tokens} · ${formatCardUsage(card.usage, options.locale ?? "en")}`
+  );
+  const objective = styleSecondary(style, card.objective);
+  const row = `${styledRail} ${symbol} ${title} ${separator} ${taskId} ${separator} ${phase} ${separator} ${progress} ${separator} ${metrics} ${separator} ${objective}`;
+  return styleBackgroundRow(style, row, width, tokens?.surface.bgElevated ?? "");
+}
+
+function taskReceiptStatusSymbol(card: TaskCardState, style: OperatorConsoleStyle | undefined): string {
+  const tokens = style?.tokens.contract;
+  if (card.status === "completed") {
+    return tokens === undefined ? "[x]" : styleColor(style, tokens.glyph.check, tokens.severity.ok);
+  }
+  if (card.status === "partial" || card.status === "waiting_for_input" || card.status === "waiting_for_approval") {
+    return tokens === undefined ? "!" : styleColor(style, "!", tokens.palette.caution);
+  }
+  if (card.status === "failed" || card.status === "cancelled") {
+    return tokens === undefined ? "[!]" : styleColor(style, tokens.glyph.cross, tokens.severity.error);
+  }
+  return tokens === undefined ? "." : styleColor(style, tokens.glyph.bullet, tokens.palette.action);
+}
+
+function styleTaskReceiptStatus(
+  value: string,
+  status: TaskCardState["status"],
+  style: OperatorConsoleStyle | undefined
+): string {
+  const tokens = style?.tokens.contract;
+  if (tokens === undefined) return value;
+  if (status === "completed") return styleColor(style, value, tokens.severity.ok);
+  if (status === "partial" || status === "waiting_for_input" || status === "waiting_for_approval") {
+    return styleColor(style, value, tokens.palette.caution);
+  }
+  if (status === "failed" || status === "cancelled") return styleColor(style, value, tokens.severity.error);
+  return styleColor(style, value, tokens.palette.action);
 }
 
 function localizedArabicTaskPhase(phase: TaskCardState["phase"]["name"]): string {

@@ -219,6 +219,10 @@ export type TaskCardSubagentState = {
 
 export type TaskCardState = {
   readonly taskId: string;
+  /** Immutable user turn that created the Task, when the creation surface supplied one. */
+  readonly originTurnId?: string;
+  /** Compact receipts remain inspectable while keeping settled and superseded turns out of the live work area. */
+  readonly presentation?: "expanded" | "receipt";
   readonly objective: string;
   readonly status: "planning" | "queued" | "running" | "waiting_for_host" | "waiting_for_input" | "waiting_for_approval" | "paused" | "completed" | "partial" | "failed" | "cancelled";
   readonly executionPreference: "auto" | "background";

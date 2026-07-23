@@ -130,7 +130,8 @@ describe("Task execution ownership surface acceptance", () => {
     });
     const delegateTool = createDelegationTools({ service: delegation, trustedWorkspace: () => true })[0]!;
     const foregroundDelegation = await delegateTool.run({ task: "Research now", executionPreference: "auto" }, {
-      toolCallId: "delegate-foreground"
+      toolCallId: "delegate-foreground",
+      visibleTurnId: "turn-current"
     });
     expect(foregroundDelegation.content).toContain("Execution: foreground");
     expect(foregroundDelegation.content).toContain("Task is running in this session");
@@ -140,6 +141,19 @@ describe("Task execution ownership surface acceptance", () => {
     expect(backgroundDelegation.content).toContain("Execution: waiting");
     expect(backgroundDelegation.content).toContain("Execution preference: background");
     expect(backgroundDelegation.content).toContain("no active background continuation");
+
+    const delegatedProjection = operator.list({ authorizedSessionId: "interactive", limit: 100 })
+      .find((candidate) => candidate.originTurnId === "turn-current")!;
+    expect(delegatedProjection.originTurnId).toBe("turn-current");
+    expect(taskProjectionToCard(delegatedProjection).presentation).toBe("expanded");
+    expect(taskProjectionToCard(delegatedProjection, {
+      supersededTurnIds: new Set(["turn-current"]),
+    }).presentation).toBe("receipt");
+    expect(taskProjectionToCard({
+      ...delegatedProjection,
+      status: "completed",
+      phase: { name: "completed", workerProgress: { completed: 1, settled: 1, total: 1 } },
+    }).presentation).toBe("receipt");
 
     const projection = operator.status(automatic.taskId, "interactive");
     const card = taskProjectionToCard(projection);

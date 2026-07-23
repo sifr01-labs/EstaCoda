@@ -32,6 +32,7 @@ import { resolveProfileStateHome } from "../config/profile-home.js";
 import { writeCliVoiceMode } from "./voice-mode.js";
 import { CronStore } from "../cron/cron-store.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
+import type { TaskStatusProjection } from "../workflow/task-operator-service.js";
 import {
   createOperatorConsoleRuntimeHost,
   formatActiveWorkSummary,
@@ -567,6 +568,87 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     const rendered = stripAnsi(outputChunks.join(""));
     expect(rendered).toContain("› /exit");
     expect(rendered).toContain("mock-model");
+  });
+
+  it("rolls a Task from the previous user turn into a compact receipt", async () => {
+    const host = createOperatorConsoleRuntimeHost();
+    const setTasks = vi.spyOn(host, "setTasks");
+    const runtime = createMockRuntime();
+    await runtime.sessionDb.createSession({ id: runtime.sessionId, profileId: "default" });
+    await runtime.sessionDb.appendMessage({
+      id: "turn-prior",
+      sessionId: runtime.sessionId,
+      role: "user",
+      content: "Run delegated research",
+      channel: "cli",
+    });
+    const projection = {
+      taskId: "task-turn-prior",
+      originTurnId: "turn-prior",
+      objective: "Research and compare the implementation options",
+      status: "running",
+      source: "delegation",
+      executionPreference: "auto",
+      execution: "background",
+      foregroundOwnerActive: false,
+      backgroundContinuation: "available",
+      childTasks: [],
+      phase: { name: "delegating" },
+      progress: { completed: 0, skipped: 0, total: 1 },
+      activeAttempts: 1,
+      steps: [],
+      subagents: [],
+      trace: { events: [], totalEvents: 0, categoryCounts: {}, hasEarlierEvents: false },
+      recentActivity: [],
+      elapsedMs: 1_000,
+      usage: usageSummary(0.01),
+      results: [],
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:01.000Z",
+    } as unknown as TaskStatusProjection;
+    let handleCount = 0;
+    const scopedRuntime = {
+      ...runtime,
+      taskOperator: {
+        list: () => [projection],
+      } as unknown as NonNullable<Runtime["taskOperator"]>,
+      handle: async () => {
+        handleCount += 1;
+        const usage = usageSummary(0.01);
+        return mockResponse({
+          turnUsage: {
+            turnId: `turn-current-${handleCount}`,
+            mainAgent: usage,
+            auxiliaryModels: usageSummary(0),
+            delegatedWork: usageSummary(0),
+            total: usage,
+            provisional: false,
+          },
+        });
+      },
+    } as Runtime;
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime: scopedRuntime,
+      output: {
+        write: () => true,
+        isTTY: true,
+        columns: 120,
+        rows: 30,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => ["Start the next turn", "/exit"][promptIndex++] ?? "/exit",
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    expect(setTasks.mock.calls.some(([state]) =>
+      state.cards.some((card) => card.taskId === projection.taskId && card.presentation === "receipt")
+    )).toBe(true);
   });
 
   it("enables Operator Console for the production interactive launch", async () => {

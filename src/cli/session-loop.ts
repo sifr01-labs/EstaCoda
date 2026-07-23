@@ -433,6 +433,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   let cachedTaskRuntime: Runtime | undefined;
   let cachedTaskCards: readonly TaskCardState[] = [];
   let cachedTaskCardsAtMs = Number.NEGATIVE_INFINITY;
+  let taskTurnScope = await initialTaskTurnScope(runtime);
   const refreshOperatorConsoleTasks = (): boolean => {
     void refreshSessionCost();
     const timestamp = Date.now();
@@ -442,7 +443,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     }
     cachedTaskRuntime = runtime;
     cachedTaskCardsAtMs = timestamp;
-    cachedTaskCards = operatorConsoleTaskCards(runtime);
+    cachedTaskCards = operatorConsoleTaskCards(runtime, taskTurnScope.supersededTurnIds);
     return true;
   };
   const getOperatorConsoleTasks = () => cachedTaskRuntime === runtime ? cachedTaskCards : [];
@@ -753,6 +754,10 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           lastProviderExecutionSummary = undefined;
           providerServingState = undefined;
           resetTurnRailState();
+          taskTurnScope = await initialTaskTurnScope(runtime);
+          cachedTaskRuntime = undefined;
+          cachedTaskCards = [];
+          cachedTaskCardsAtMs = Number.NEGATIVE_INFINITY;
           activityBuilder = new ToolActivityViewModelBuilder({
             tools: runtime.tools()
           });
@@ -771,6 +776,11 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       }
 
       // Render submitted non-slash user prompts as lightweight transcript rails
+      for (const turnId of taskTurnScope.currentTurnIds) {
+        taskTurnScope.supersededTurnIds.add(turnId);
+      }
+      taskTurnScope.currentTurnIds.clear();
+      cachedTaskCardsAtMs = Number.NEGATIVE_INFINITY;
       const userPromptRail = buildUserPromptRailViewModel({ text: submittedInput.displayText ?? text });
       const userPromptRailText = renderer.render(userPromptRail);
       output.write(`${userPromptRailText}\n`);
@@ -1095,6 +1105,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	            clearActiveTurnChrome = () => undefined;
 	          });
         const response = await responsePromise;
+        if (response.turnUsage?.turnId !== undefined) {
+          taskTurnScope.currentTurnIds.add(response.turnUsage.turnId);
+        }
         if (response.turnUsage !== undefined) {
           mainAgentUsageParts.push(response.turnUsage.mainAgent);
           auxiliaryUsageParts.push(response.turnUsage.auxiliaryModels);
@@ -3147,10 +3160,43 @@ function operatorConsoleTerminalHeight(output: NodeJS.WritableStream): number {
   return Math.max(1, Math.floor(rows));
 }
 
-function operatorConsoleTaskCards(runtime: Runtime): readonly TaskCardState[] {
+type TaskTurnScope = {
+  readonly currentTurnIds: Set<string>;
+  readonly supersededTurnIds: Set<string>;
+};
+
+async function initialTaskTurnScope(runtime: Runtime): Promise<TaskTurnScope> {
+  let userTurnIds: string[] = [];
+  try {
+    userTurnIds = (await runtime.sessionDb.listMessages(runtime.sessionId))
+      .filter((message) => message.role === "user")
+      .map((message) => message.id);
+  } catch {
+    // A missing transcript must not hide active Tasks. Terminal Tasks still become receipts.
+  }
+  const latestTurnId = userTurnIds.at(-1);
+  const currentTurnIds = new Set(latestTurnId === undefined ? [] : [latestTurnId]);
+  const supersededTurnIds = new Set(userTurnIds.slice(0, -1));
+  try {
+    for (const task of runtime.taskOperator?.list({ authorizedSessionId: runtime.sessionId, limit: 100 }) ?? []) {
+      if (task.originTurnId !== undefined && task.originTurnId !== latestTurnId) {
+        supersededTurnIds.add(task.originTurnId);
+      }
+    }
+  } catch {
+    // Projection refresh remains best effort; authorization and storage errors stay non-fatal in the CLI.
+  }
+  return { currentTurnIds, supersededTurnIds };
+}
+
+function operatorConsoleTaskCards(
+  runtime: Runtime,
+  supersededTurnIds: ReadonlySet<string>
+): readonly TaskCardState[] {
   if (runtime.taskOperator === undefined) return [];
   try {
-    return runtime.taskOperator.list({ authorizedSessionId: runtime.sessionId, limit: 12 }).map(taskProjectionToCard);
+    return runtime.taskOperator.list({ authorizedSessionId: runtime.sessionId, limit: 12 })
+      .map((task) => taskProjectionToCard(task, { supersededTurnIds }));
   } catch {
     return [];
   }
@@ -3173,9 +3219,18 @@ function taskApprovalToCard(
   };
 }
 
-export function taskProjectionToCard(task: TaskStatusProjection): TaskCardState {
+export function taskProjectionToCard(
+  task: TaskStatusProjection,
+  options: { readonly supersededTurnIds?: ReadonlySet<string> } = {}
+): TaskCardState {
+  const presentation = isTerminalTaskStatus(task.status) ||
+    (task.originTurnId !== undefined && options.supersededTurnIds?.has(task.originTurnId) === true)
+    ? "receipt"
+    : "expanded";
   return {
     taskId: task.taskId,
+    ...(task.originTurnId === undefined ? {} : { originTurnId: task.originTurnId }),
+    presentation,
     objective: task.objective,
     status: task.status,
     executionPreference: task.executionPreference,
@@ -3258,6 +3313,10 @@ export function taskProjectionToCard(task: TaskStatusProjection): TaskCardState 
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
   };
+}
+
+function isTerminalTaskStatus(status: TaskStatusProjection["status"]): boolean {
+  return status === "completed" || status === "partial" || status === "failed" || status === "cancelled";
 }
 
 function taskAttemptToCard(

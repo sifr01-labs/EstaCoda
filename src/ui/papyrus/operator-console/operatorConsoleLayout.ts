@@ -215,11 +215,13 @@ function createRegionDescriptors(
   }
 
   if (hasTaskCards(state.tasks)) {
+    const selectedTask = state.tasks.cards.find((card) => card.taskId === state.tasks.selectedTaskId)
+      ?? state.tasks.cards[0];
     descriptors.push({
       kind: "promptGap",
       priority: PROMPT_GAP_PRIORITY,
       minHeight: 1,
-      desiredHeight: 2,
+      desiredHeight: selectedTask?.presentation === "receipt" ? 1 : 2,
     });
   }
 

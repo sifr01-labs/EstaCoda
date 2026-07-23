@@ -525,6 +525,94 @@ describe("durable Task surfaces", () => {
     expect(removed.scrollOffset).toBe(0);
   });
 
+  it("rolls settled and superseded Tasks into one-row receipts that remain inspectable", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const style = createOperatorConsoleStyle({
+      tokens,
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const receipt = makeCard({
+      presentation: "receipt",
+      status: "completed",
+      phase: { name: "completed", workerProgress: { completed: 3, settled: 3, total: 3 } },
+      progress: { completed: 3, skipped: 0, total: 3 },
+    });
+    const taskState = { cards: [receipt], selectedTaskId: receipt.taskId, scrollOffset: 0 };
+    const lines = renderTaskCardSurface(taskState, {
+      width: 100,
+      focusedTaskId: receipt.taskId,
+      style,
+    });
+    const text = stripAnsi(lines.join("\n"));
+
+    expect(getTaskCardSurfaceDesiredHeight(taskState, 100)).toBe(1);
+    expect(lines).toHaveLength(1);
+    expect(text).toContain("Delegated Task 1/1");
+    expect(text).toContain("completed");
+    expect(text).toContain("3/3 completed");
+    expect(text).toContain("2.4k tokens");
+    expect(text).toContain("Competit");
+    expect(text).not.toContain("Subagent 1");
+    expect(lines[0]).toContain("\x1b[48;2;37;37;37m");
+    expect(getTaskCardHitTargets(taskState, 100)).toEqual([
+      expect.objectContaining({ kind: "taskHeader", taskId: receipt.taskId, height: 1 }),
+    ]);
+
+    let consoleState = createInitialOperatorConsoleState({
+      terminal: { width: 100, height: 20, isTty: true },
+      tasks: taskState,
+    });
+    consoleState = routeTaskSurfaceKey(consoleState, { type: "key", key: "tab" }).state;
+    consoleState = routeTaskSurfaceKey(consoleState, { type: "key", key: "enter" }).state;
+    expect(consoleState.tasks.inspectedTaskId).toBe(receipt.taskId);
+    const receiptLayout = createOperatorConsoleLayout(createInitialOperatorConsoleState({
+      terminal: { width: 100, height: 20, isTty: true },
+      tasks: taskState,
+    }));
+    expect(receiptLayout.regions.find((region) => region.kind === "promptGap")?.height).toBe(1);
+
+    let settlingState = createInitialOperatorConsoleState({
+      terminal: { width: 100, height: 20, isTty: true },
+      tasks: { cards: [makeCard()], selectedTaskId: receipt.taskId, scrollOffset: 0 },
+    });
+    settlingState = routeTaskSurfaceKey(settlingState, { type: "key", key: "tab" }).state;
+    settlingState = routeTaskSurfaceKey(settlingState, { type: "key", key: "right" }).state;
+    expect(settlingState.focus.target.kind).toBe("taskSubagent");
+    settlingState = {
+      ...settlingState,
+      tasks: reconcileTaskSurfaceState(settlingState.tasks, [receipt]),
+    };
+    settlingState = routeTaskSurfaceKey(settlingState, { type: "key", key: "enter" }).state;
+    expect(settlingState.tasks.inspectedTaskId).toBe(receipt.taskId);
+
+    const plainStyle = createOperatorConsoleStyle({
+      tokens: resolveTokens("plain", "dark", "kemetBlue"),
+      capabilities: { supportsColor: false, supportsTrueColor: false },
+    });
+    const arabicReceipt = { ...receipt, objective: "قارن النتائج واكتب الملخص" };
+    const arabic = renderTaskCardSurface({
+      cards: [arabicReceipt],
+      selectedTaskId: arabicReceipt.taskId,
+      scrollOffset: 0,
+    }, { width: 48, locale: "ar", style: plainStyle });
+    expect(arabic).toHaveLength(1);
+    expect(arabic[0]).toContain("مكتملة");
+    expect(arabic[0]).not.toMatch(/\u001B\[/u);
+    expect(visibleWidth(arabic[0]!)).toBe(48);
+  });
+
+  it("selects a newly arriving expanded Task instead of leaving an older receipt active", () => {
+    const prior = makeCard({ taskId: "T-prior", presentation: "receipt", status: "completed" });
+    const current = makeCard({ taskId: "T-current", objective: "Current turn Task" });
+    const refreshed = reconcileTaskSurfaceState({
+      cards: [prior],
+      selectedTaskId: prior.taskId,
+      scrollOffset: 0,
+    }, [prior, current]);
+
+    expect(refreshed.selectedTaskId).toBe(current.taskId);
+  });
+
   it("uses light surface tokens and degrades to deterministic ASCII in plain mode", () => {
     const lightStyle = createOperatorConsoleStyle({
       tokens: resolveTokens("standard", "light", "kemetBlue"),

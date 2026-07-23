@@ -87,12 +87,20 @@ function renderRegionLines(
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "taskCards") {
+    const focusTarget = state.focus.target;
+    const focusedTaskId = focusTarget.kind === "taskCard"
+      ? focusTarget.taskId
+      : focusTarget.kind === "taskSubagent" && state.tasks.cards.some((card) =>
+          card.taskId === focusTarget.taskId && card.presentation === "receipt"
+        )
+        ? focusTarget.taskId
+        : undefined;
     return renderTaskCardSurface(state.tasks, {
       width: region.width,
       height: region.height,
       locale: state.locale,
       isTty: state.terminal.isTty,
-      focusedTaskId: state.focus.target.kind === "taskCard" ? state.focus.target.taskId : undefined,
+      focusedTaskId,
       focusedSubagentStepId: state.focus.target.kind === "taskSubagent" ? state.focus.target.stepId : undefined,
       style: state.style,
       motionElapsedMs: state.motionElapsedMs,

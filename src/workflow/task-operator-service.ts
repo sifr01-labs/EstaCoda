@@ -67,6 +67,7 @@ export type TaskPhaseProjection = {
 
 export type TaskStatusProjection = {
   taskId: string;
+  originTurnId?: string;
   objective: string;
   status: TaskStatus;
   source: Task["source"];
@@ -448,6 +449,7 @@ export class TaskOperatorService {
     );
     return {
       taskId: task.id,
+      ...(task.originTurnId === undefined ? {} : { originTurnId: task.originTurnId }),
       objective: safeText(task.objective, 240),
       status: task.status,
       source: task.source,
