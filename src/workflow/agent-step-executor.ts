@@ -430,7 +430,9 @@ function dependencyContext(store: TaskStore, task: Task, step: TaskStep): string
       },
       kind: result.kind,
       bytes: result.byteLength,
-      summary: result.summary === undefined ? undefined : boundText(result.summary, 240)
+      summary: result.displaySummary === undefined
+        ? result.summary === undefined ? undefined : boundText(result.summary, 240)
+        : boundText(result.displaySummary, 240)
     }));
   const guidance = store.listGuidance(task.id)
     .slice(-MAX_TASK_GUIDANCE_RECORDS_IN_CONTEXT)
@@ -481,7 +483,7 @@ function partialSynthesisContext(
 function resultInstruction(step: TaskStep): string {
   switch (step.resultPolicy.kind) {
     case "none": return "Complete the Step without producing a durable result body.";
-    case "text": return "Return the complete durable Step result as final response text. Begin with a concise plain-language summary paragraph without Markdown, then provide supporting detail.";
+    case "text": return "Return the complete durable Step result as final response text. Begin with a concise plain-language summary paragraph of at most 200 characters without Markdown, then provide supporting detail.";
     case "json": return "Return only one valid JSON value as the final response.";
     case "artifact": return "Create the declared artifact result; the final response may briefly summarize it.";
   }
@@ -503,7 +505,7 @@ async function captureResults(
             kind: "text",
             content: text,
             mimeType: "text/plain; charset=utf-8",
-            summary: deriveTaskResultSummary(text)
+            displaySummary: deriveTaskResultSummary(text)
           }]
         };
   }

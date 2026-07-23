@@ -28,6 +28,7 @@ import {
   migrateTaskHostOwnershipSchemaV19,
   migrateTaskExecutionPreferenceSchemaV20,
   migrateTaskDiagnosticResultsSchemaV24,
+  migrateTaskResultDisplaySummarySchemaV25,
   migrateTaskVerticalSliceSchemaV15,
   TASK_SCHEMA_VERSION
 } from "./task-schema.js";
@@ -221,6 +222,14 @@ describe("SQLiteTaskStore", () => {
 
     expect(store.getAttempt(attempt.id)).toEqual({ ...attempt, resultIds: [result.id] });
     expect(store.getResult(result.id)).toEqual(result);
+    expect(() => store.updateResult({ ...result, displaySummary: "Changed after publication." }))
+      .toThrow("Result identity");
+    expect(() => store.recordResult({
+      ...result,
+      id: "result-display-summary-too-large",
+      handle: "task-result:display-summary-too-large",
+      displaySummary: "x".repeat(481)
+    })).toThrow("Result display summary");
     expect(store.listEvents(graph.task.id, { attemptId: attempt.id })).toEqual([
       expect.objectContaining({ id: "event-result", data: { resultId: result.id } })
     ]);
@@ -563,6 +572,32 @@ describe("Task diagnostic Results schema v24 migration", () => {
       expect(database.query<{ name: string }>(
         "select name from sqlite_master where type = 'index' and name = 'idx_task_results_disposition'"
       ).get()).toEqual({ name: "idx_task_results_disposition" });
+    } finally {
+      database.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("Task Result display summary schema v25 migration", () => {
+  it("adds nullable display metadata without rewriting legacy summaries and is idempotent", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-task-result-v25-"));
+    const database = openDefaultSQLiteDatabase({ path: join(tempDir, "result-v25.sqlite") });
+    try {
+      database.exec(`
+        create table task_results (
+          id text primary key,
+          summary text
+        );
+        insert into task_results(id, summary) values ('legacy-result', 'Legacy summary');
+      `);
+
+      migrateTaskResultDisplaySummarySchemaV25(database);
+      migrateTaskResultDisplaySummarySchemaV25(database);
+
+      expect(database.query<{ summary: string; display_summary: string | null }>(
+        "select summary, display_summary from task_results where id = 'legacy-result'"
+      ).get()).toEqual({ summary: "Legacy summary", display_summary: null });
     } finally {
       database.close();
       rmSync(tempDir, { recursive: true, force: true });
@@ -1330,6 +1365,7 @@ function makeResult(): TaskResult {
     byteLength: 128,
     contentHash: "sha256:result",
     mimeType: "text/plain",
+    displaySummary: "Research completed with verified findings.",
     summary: "Research complete.",
     createdAt: NOW
   };

@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 
-export const TASK_SCHEMA_VERSION = 24;
+export const TASK_SCHEMA_VERSION = 25;
 
 const OBSOLETE_EXECUTION_TABLES = [
   "workflow_event_summaries",
@@ -245,6 +245,7 @@ export function migrateTaskSchemaV10(db: SQLiteDatabase): void {
       byte_length integer not null check(byte_length >= 0),
       content_hash text not null check(length(content_hash) > 0),
       mime_type text,
+      display_summary text,
       summary text,
       created_at text not null,
       expires_at text,
@@ -970,6 +971,14 @@ export function migrateTaskDiagnosticResultsSchemaV24(db: SQLiteDatabase): void 
     create index if not exists idx_task_results_disposition
       on task_results(profile_id, task_id, disposition, created_at);
   `);
+}
+
+/** Adds optional presentation-ready Result summaries without rewriting legacy metadata. */
+export function migrateTaskResultDisplaySummarySchemaV25(db: SQLiteDatabase): void {
+  const columns = db.query<{ name: string }>("pragma table_info(task_results)").all();
+  if (!columns.some((column) => column.name === "display_summary")) {
+    db.exec("alter table task_results add column display_summary text");
+  }
 }
 
 /** Adds complete source, scope, and immutable pricing identity to provider usage facts. */

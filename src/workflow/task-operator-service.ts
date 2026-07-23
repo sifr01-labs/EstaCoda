@@ -21,6 +21,7 @@ import type { SpendingBudgetSummary } from "../contracts/usage-cost.js";
 import {
   TASK_GRAPH_LIMITS,
   TASK_ORIGIN_COMPLETION_DELIVERY_KEY,
+  TASK_RESULT_DISPLAY_SUMMARY_MAX_CHARS,
   TASK_TOOL_RISK_CLASSES,
   isTerminalTaskStatus
 } from "../contracts/task.js";
@@ -164,7 +165,7 @@ export type SubagentUsageProjection = {
 
 export type TaskResultProjection = Pick<
   TaskResult,
-  "id" | "handle" | "kind" | "disposition" | "status" | "byteLength" | "mimeType" | "summary" | "stepId" | "attemptId"
+  "id" | "handle" | "kind" | "disposition" | "status" | "byteLength" | "mimeType" | "displaySummary" | "summary" | "stepId" | "attemptId"
 > & {
   primary: boolean;
 };
@@ -890,6 +891,9 @@ function projectResult(result: TaskResult, primary: boolean): TaskResultProjecti
     ...(result.stepId === undefined ? {} : { stepId: result.stepId }),
     ...(result.attemptId === undefined ? {} : { attemptId: result.attemptId }),
     ...(result.mimeType === undefined ? {} : { mimeType: result.mimeType }),
+    ...(result.displaySummary === undefined ? {} : {
+      displaySummary: safeText(result.displaySummary, TASK_RESULT_DISPLAY_SUMMARY_MAX_CHARS)
+    }),
     ...(result.summary === undefined ? {} : { summary: safeText(result.summary, 240) })
   };
 }

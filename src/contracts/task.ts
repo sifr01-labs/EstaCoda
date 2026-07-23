@@ -351,6 +351,7 @@ export type TaskAttempt = {
 export type TaskResultKind = "text" | "json" | "artifact" | "summary";
 export type TaskResultStatus = "available" | "pruned";
 export type TaskResultDisposition = "accepted" | "diagnostic";
+export const TASK_RESULT_DISPLAY_SUMMARY_MAX_CHARS = 480;
 
 export type TaskResult = {
   id: TaskResultId;
@@ -367,6 +368,9 @@ export type TaskResult = {
   byteLength: number;
   contentHash: string;
   mimeType?: string;
+  /** Bounded, presentation-ready plain text supplied by the Result producer. */
+  displaySummary?: string;
+  /** General Result metadata retained for compatibility and non-card consumers. */
   summary?: string;
   createdAt: string;
   expiresAt?: string;

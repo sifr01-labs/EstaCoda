@@ -10,6 +10,7 @@ import type {
   TaskSurfaceState,
 } from "./operatorConsoleState.js";
 import { styleBold, styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
+import { deriveTaskResultSummary } from "../../../utils/task-result-summary.js";
 
 const LTR_START = "\u2068";
 const LTR_END = "\u2069";
@@ -224,8 +225,9 @@ function resultSummaryLines(subagent: TaskCardSubagentState): readonly string[] 
   );
   if (preview !== undefined) values.push(preview);
   for (const result of subagent.results) {
-    if (result.disposition === "accepted" && normalizeText(result.summary) !== undefined) {
-      values.push(result.summary!.trim());
+    const summary = deriveTaskResultSummary(result.displaySummary ?? result.summary, 480);
+    if (result.disposition === "accepted" && summary !== undefined) {
+      values.push(summary);
     }
   }
   return [...new Set(values)];
@@ -258,7 +260,7 @@ function formatAttempt(
 
 function formatResult(result: TaskCardResultState, copy: SubagentCopy): string {
   const diagnostic = result.disposition === "diagnostic" ? ` · ${copy.diagnostic}` : "";
-  const summary = normalizeText(result.summary);
+  const summary = deriveTaskResultSummary(result.displaySummary ?? result.summary, 240);
   return `${result.primary ? "primary · " : ""}${isolate(result.handle)} · ${result.kind}${diagnostic}` +
     `${summary === undefined ? "" : ` · ${summary}`}`;
 }

@@ -3296,6 +3296,7 @@ function taskResultToCard(
     ...(result.stepId === undefined ? {} : { stepId: result.stepId }),
     ...(result.attemptId === undefined ? {} : { attemptId: result.attemptId }),
     ...(result.mimeType === undefined ? {} : { mimeType: result.mimeType }),
+    ...(result.displaySummary === undefined ? {} : { displaySummary: result.displaySummary }),
     ...(result.summary === undefined ? {} : { summary: result.summary })
   };
 }

@@ -187,6 +187,7 @@ export type TaskCardResultState = {
   readonly stepId?: string;
   readonly attemptId?: string;
   readonly mimeType?: string;
+  readonly displaySummary?: string;
   readonly summary?: string;
 };
 

@@ -74,6 +74,7 @@ describe("TaskResultService", () => {
       stepId: "step-alpha",
       kind: "text",
       content: "A😀BC",
+      displaySummary: "A deliberate display summary.",
       summary: "A durable result."
     });
 
@@ -82,6 +83,7 @@ describe("TaskResultService", () => {
       profileId: "alpha",
       handle: "task-result:handle-1",
       byteLength: 7,
+      displaySummary: "A deliberate display summary.",
       contentHash: `sha256:${createHash("sha256").update("A😀BC").digest("hex")}`
     });
     expect(sessionDb.db.query<{ name: string }>("pragma table_info(task_results)").all()
@@ -100,7 +102,14 @@ describe("TaskResultService", () => {
       sessionId: "creator-alpha",
       maxChars: 2
     });
-    expect(first).toMatchObject({ content: "A😀", offset: 0, nextOffset: 2, totalChars: 4, hasMore: true });
+    expect(first).toMatchObject({
+      result: { displaySummary: "A deliberate display summary.", summary: "A durable result." },
+      content: "A😀",
+      offset: 0,
+      nextOffset: 2,
+      totalChars: 4,
+      hasMore: true
+    });
     expect(await restarted.readPage({
       taskId: "task-alpha",
       resultId: result.id,
@@ -108,6 +117,17 @@ describe("TaskResultService", () => {
       offset: first.nextOffset,
       maxChars: 2
     })).toMatchObject({ content: "BC", offset: 2, totalChars: 4, hasMore: false });
+  });
+
+  it("rejects display summaries that are empty, multiline, or exceed the bounded contract", () => {
+    const base = { taskId: "task-alpha", kind: "text" as const, content: "complete" };
+
+    expect(() => service.record({ ...base, displaySummary: "   " }))
+      .toThrowError(expect.objectContaining({ code: "invalid-display-summary" }));
+    expect(() => service.record({ ...base, displaySummary: "First line\nSecond line" }))
+      .toThrowError(expect.objectContaining({ code: "invalid-display-summary" }));
+    expect(() => service.record({ ...base, displaySummary: "x".repeat(481) }))
+      .toThrowError(expect.objectContaining({ code: "invalid-display-summary" }));
   });
 
   it("authorizes only sessions linked to the same profile-owned Task", async () => {

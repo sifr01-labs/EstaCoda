@@ -13,6 +13,7 @@ import {
   styleColor,
   type OperatorConsoleStyle,
 } from "./operatorConsoleStyle.js";
+import { deriveTaskResultSummary } from "../../../utils/task-result-summary.js";
 
 const LTR_START = "\u2068";
 const LTR_END = "\u2069";
@@ -310,8 +311,9 @@ function resultLines(results: readonly TaskCardResultState[], copy: OverviewCopy
 }
 
 function formatResult(result: TaskCardResultState): string {
+  const summary = deriveTaskResultSummary(result.displaySummary ?? result.summary, 240);
   return `${result.primary ? "primary · " : ""}${isolate(result.handle)} · ${result.kind} · ${formatBytes(result.byteLength)}` +
-    `${result.summary === undefined ? "" : ` · ${result.summary}`}`;
+    `${summary === undefined ? "" : ` · ${summary}`}`;
 }
 
 function sectionLines(

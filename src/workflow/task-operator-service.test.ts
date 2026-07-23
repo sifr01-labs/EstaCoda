@@ -247,6 +247,7 @@ describe("TaskOperatorService", () => {
         handle: "task-result://research",
         byteLength: 24,
         contentHash: "b".repeat(64),
+        displaySummary: "Deliberate research summary",
         summary: "Safe research summary",
         createdAt: "2026-01-01T00:00:04.000Z"
       });
@@ -316,7 +317,9 @@ describe("TaskOperatorService", () => {
         id: "result-research",
         handle: "task-result://research",
         stepId: researchStep!.id,
-        attemptId: retryAttempt.id
+        attemptId: retryAttempt.id,
+        displaySummary: "Deliberate research summary",
+        summary: "Safe research summary"
       })
     ]);
     expect(JSON.stringify(projection)).not.toContain("must-not-project");
@@ -586,6 +589,7 @@ describe("TaskOperatorService", () => {
         handle: "task-result://safe",
         byteLength: 42,
         contentHash: "a".repeat(64),
+        displaySummary: "Bearer abcdefghijklmnopqrstuvwxyz123456",
         summary: "Bearer abcdefghijklmnopqrstuvwxyz123456",
         createdAt: now()
       });
@@ -604,6 +608,7 @@ describe("TaskOperatorService", () => {
       label: "Using browser.navigate · Complete Task"
     });
     expect(JSON.stringify(projection)).not.toContain("must-not-project");
+    expect(projection.results[0]?.displaySummary).toBe("Bearer [REDACTED]");
     expect(projection.results[0]?.summary).toBe("Bearer [REDACTED]");
     expect(projection.results[0]).not.toHaveProperty("contentHash");
   });

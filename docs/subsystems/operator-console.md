@@ -423,6 +423,14 @@ recovery may safely show the same durable answer again after the claim becomes
 stale. A settled Result is displayed normally; the CLI does not replay
 completed text as fake token streaming.
 
+Completed Subagent cards prefer the Result's dedicated `displaySummary` over
+generic Result metadata or streaming previews. The field is immutable,
+single-line plain text bounded to 480 Unicode characters; Agent Steps populate
+it from the deliberately requested opening summary paragraph. Results created
+before this contract remain compatible: Papyrus safely extracts the first
+complete usable paragraph from their generic `summary` metadata. It never uses
+an arbitrary assistant-stream tail as the settled summary.
+
 One to three Subagents stack vertically. Four to six use two equal-width,
 column-major columns when both remain readable. A third column is added only at
 a readable width; otherwise the surface keeps complete seven-row cards and

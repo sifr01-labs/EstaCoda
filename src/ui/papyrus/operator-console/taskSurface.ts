@@ -1587,11 +1587,14 @@ function formatSettledSubagentSummary(
   width: number,
   style: OperatorConsoleStyle | undefined
 ): readonly string[] {
-  const rawResultSummary =
-    subagent.results.find((result) => result.primary && result.disposition === "accepted")?.summary ??
-    subagent.results.find((result) => result.disposition === "accepted")?.summary ??
-    subagent.results.find((result) => result.primary)?.summary ??
-    subagent.results.find((result) => result.summary !== undefined)?.summary;
+  const preferredResults = [
+    ...subagent.results.filter((result) => result.primary && result.disposition === "accepted"),
+    ...subagent.results.filter((result) => !result.primary && result.disposition === "accepted"),
+    ...subagent.results.filter((result) => result.disposition !== "accepted"),
+  ];
+  const rawResultSummary = preferredResults
+    .map((result) => result.displaySummary ?? result.summary)
+    .find((summary) => summary !== undefined);
   const summary = deriveTaskResultSummary(
     rawResultSummary,
     Math.max(24, width * SUBAGENT_ACTIVITY_ROWS - 6)

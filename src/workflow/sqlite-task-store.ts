@@ -18,6 +18,7 @@ import type {
 import type { ProviderUsageEntry, ProviderUsageQuery } from "../contracts/provider-usage.js";
 import {
   TASK_GRAPH_LIMITS,
+  TASK_RESULT_DISPLAY_SUMMARY_MAX_CHARS,
   assertTaskAttemptTransition,
   assertTaskPlanRevisionTransition,
   assertTaskStepTransition,
@@ -910,11 +911,14 @@ export class SQLiteTaskStore implements TaskStore {
         `Result ${result.id} exceeds the ${TASK_GRAPH_LIMITS.maxResultBytesPerStep}-byte persistence limit.`
       );
     }
+    if (result.displaySummary !== undefined) {
+      requireTaskResultDisplaySummary(result.displaySummary);
+    }
     this.#db.query(
       `insert into task_results (
         id, profile_id, task_id, step_id, attempt_id, kind, disposition, status, handle,
-        byte_length, content_hash, mime_type, summary, created_at, expires_at, pruned_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        byte_length, content_hash, mime_type, display_summary, summary, created_at, expires_at, pruned_at
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       result.id,
       this.#profileId,
@@ -928,6 +932,7 @@ export class SQLiteTaskStore implements TaskStore {
       result.byteLength,
       result.contentHash,
       result.mimeType ?? null,
+      result.displaySummary ?? null,
       result.summary ?? null,
       result.createdAt,
       result.expiresAt ?? null,
@@ -953,6 +958,7 @@ export class SQLiteTaskStore implements TaskStore {
       byteLength: existing.byteLength,
       contentHash: existing.contentHash,
       mimeType: existing.mimeType,
+      displaySummary: existing.displaySummary,
       summary: existing.summary,
       createdAt: existing.createdAt,
       expiresAt: existing.expiresAt
@@ -966,6 +972,7 @@ export class SQLiteTaskStore implements TaskStore {
       byteLength: result.byteLength,
       contentHash: result.contentHash,
       mimeType: result.mimeType,
+      displaySummary: result.displaySummary,
       summary: result.summary,
       createdAt: result.createdAt,
       expiresAt: result.expiresAt
@@ -1918,6 +1925,7 @@ function rowToResult(row: ResultRow): TaskResult {
     byteLength: row.byte_length,
     contentHash: row.content_hash,
     ...(row.mime_type === null ? {} : { mimeType: row.mime_type }),
+    ...(row.display_summary === null ? {} : { displaySummary: row.display_summary }),
     ...(row.summary === null ? {} : { summary: row.summary }),
     createdAt: row.created_at,
     ...(row.expires_at === null ? {} : { expiresAt: row.expires_at }),
@@ -2021,6 +2029,16 @@ function requireBoundedText(value: string, label: string, maxChars: number): str
     throw new TaskStoreIntegrityError(`${label} is invalid or exceeds ${maxChars} characters.`);
   }
   return normalized;
+}
+
+function requireTaskResultDisplaySummary(value: string): void {
+  if (value.trim() !== value || value.length === 0 ||
+      [...value].length > TASK_RESULT_DISPLAY_SUMMARY_MAX_CHARS ||
+      /[\u0000-\u001F\u007F]/u.test(value)) {
+    throw new TaskStoreIntegrityError(
+      `Result display summary is invalid or exceeds ${TASK_RESULT_DISPLAY_SUMMARY_MAX_CHARS} characters.`
+    );
+  }
 }
 
 function requirePersistedLineage(value: string | null, label: string): string {
@@ -2299,6 +2317,7 @@ type ResultRow = {
   byte_length: number;
   content_hash: string;
   mime_type: string | null;
+  display_summary: string | null;
   summary: string | null;
   created_at: string;
   expires_at: string | null;

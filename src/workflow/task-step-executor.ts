@@ -17,6 +17,7 @@ export type TaskExecutorResultContent = {
   kind: TaskResultKind;
   content: string | Uint8Array;
   mimeType?: string;
+  displaySummary?: string;
   summary?: string;
   expiresAt?: string;
 };

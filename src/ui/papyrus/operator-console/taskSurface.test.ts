@@ -283,12 +283,15 @@ describe("durable Task surfaces", () => {
         status: "available",
         byteLength: 240,
         primary: true,
-        summary: "Found that EstaCoda already has strong file and profile boundaries, but memory writes need explicit provenance and review semantics. Produced 7 recommendations.",
+        displaySummary: "Found that EstaCoda already has strong file and profile boundaries, but memory writes need explicit provenance and review semantics. Produced 7 recommendations.",
+        summary: "…bitrary legacy slice with **Markdown** that must not win.",
       }],
     });
     const card = makeCard({ subagents: [subagent] });
     const lines = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 72 });
     const text = stripAnsi(lines.join("\n"));
+    const inspection = stripAnsi(subagentInspectionContentLines(card, subagent, 72).join("\n"));
+    const overview = stripAnsi(taskInspectionContentLines({ ...card, results: subagent.results }, 100).join("\n"));
     const compactText = text.replace(/\s+/gu, " ");
 
     expect(lines).toHaveLength(8);
@@ -298,6 +301,11 @@ describe("durable Task surfaces", () => {
     expect(compactText).toContain("memory writes need explicit provenance and review semantics");
     expect(compactText).toContain("Produced 7 recommendations.");
     expect(text).not.toContain("A shorter provider preview.");
+    expect(text).not.toContain("arbitrary legacy slice");
+    expect(inspection).toContain("Found that EstaCoda already has strong file and profile boundaries");
+    expect(inspection).not.toContain("arbitrary legacy slice");
+    expect(overview).toContain("Found that EstaCoda already has strong file and profile boundaries");
+    expect(overview).not.toContain("arbitrary legacy slice");
     expect(text).not.toContain("Worker finished");
     expect(text).not.toContain("Usage recorded");
     expect(text).toContain("completed · 03:18");

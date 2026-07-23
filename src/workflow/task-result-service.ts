@@ -16,7 +16,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { TaskAttemptLease, TaskResult, TaskResultDisposition, TaskResultKind } from "../contracts/task.js";
-import { TASK_GRAPH_LIMITS } from "../contracts/task.js";
+import { TASK_GRAPH_LIMITS, TASK_RESULT_DISPLAY_SUMMARY_MAX_CHARS } from "../contracts/task.js";
 import type { SessionDB } from "../contracts/session.js";
 import { verifiedCompressionLineage } from "../session/session-lineage.js";
 import type { TaskStore } from "./task-store.js";
@@ -34,6 +34,7 @@ export type RecordTaskResultInput = {
   disposition?: TaskResultDisposition;
   content: string | Uint8Array;
   mimeType?: string;
+  displaySummary?: string;
   summary?: string;
   expiresAt?: string;
   /** Scheduler-only settlement fence. Result writes fail when the Attempt lease is stale or cancelled. */
@@ -308,6 +309,16 @@ export class TaskResultService {
         `Task result summary exceeds ${TASK_RESULT_SUMMARY_MAX_CHARS} characters.`
       );
     }
+    if (input.displaySummary !== undefined && (
+      input.displaySummary.trim().length === 0 ||
+      codePointLength(input.displaySummary) > TASK_RESULT_DISPLAY_SUMMARY_MAX_CHARS ||
+      /[\u0000-\u001F\u007F]/u.test(input.displaySummary)
+    )) {
+      throw new TaskResultContentError(
+        "invalid-display-summary",
+        `Task result display summary must be non-empty plain text of at most ${TASK_RESULT_DISPLAY_SUMMARY_MAX_CHARS} characters.`
+      );
+    }
     if (input.mimeType !== undefined && codePointLength(input.mimeType) > 255) {
       throw new TaskResultContentError("mime-type-too-large", "Task result MIME type exceeds 255 characters.");
     }
@@ -355,6 +366,7 @@ export class TaskResultService {
       byteLength: bytes.byteLength,
       contentHash: hashContent(bytes),
       mimeType: input.mimeType ?? defaultMimeType(input.kind),
+      ...(input.displaySummary === undefined ? {} : { displaySummary: input.displaySummary.trim() }),
       ...(input.summary === undefined ? {} : { summary: input.summary }),
       createdAt: now,
       ...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt })

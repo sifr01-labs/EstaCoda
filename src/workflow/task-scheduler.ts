@@ -1150,6 +1150,7 @@ export class TaskScheduler {
             kind: result.kind,
             content: result.content,
             mimeType: result.mimeType,
+            displaySummary: result.displaySummary,
             summary: result.summary,
             expiresAt: result.expiresAt,
             expectedLease: { ownerId: lease.ownerId, fencingToken: lease.fencingToken }
@@ -1450,6 +1451,7 @@ export class TaskScheduler {
             disposition: "diagnostic",
             content: result.content,
             mimeType: result.mimeType,
+            displaySummary: result.displaySummary,
             summary: result.summary,
             expiresAt: result.expiresAt,
             expectedLease: { ownerId: lease.ownerId, fencingToken: lease.fencingToken }

@@ -17,6 +17,7 @@ import { isolateLtr } from "../ui/bidi.js";
 import { formatUsageCost, formatUsageCostNotice, formatUsdAmount } from "../ui/usage-cost-format.js";
 import type { TaskExecutionPreference } from "../contracts/task.js";
 import type { CliCommandResult, CliOptions } from "./cli.js";
+import { deriveTaskResultSummary } from "../utils/task-result-summary.js";
 
 type TaskCommandLocale = "en" | "ar";
 
@@ -219,7 +220,7 @@ export async function executeTaskCommand(context: TaskCommandContext): Promise<{
           technical(locale, result.kind),
           `${result.byteLength} bytes`,
           technical(locale, result.handle),
-          result.summary === undefined ? undefined : oneLine(result.summary)
+          deriveTaskResultSummary(result.displaySummary ?? result.summary, 240)
         ].filter((field): field is string => field !== undefined).join("\t"));
         return ok([
           ...rows,

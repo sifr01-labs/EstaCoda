@@ -229,7 +229,8 @@ export class TaskCompletionDeliveryService {
       lines.push("", resultHeading(result, result.id === primaryResult?.id));
       if (result.kind === "artifact") {
         lines.push(`Artifact handle: ${result.handle}`);
-        if (result.summary !== undefined) lines.push(boundText(result.summary, 1_000));
+        const summary = result.displaySummary ?? result.summary;
+        if (summary !== undefined) lines.push(boundText(summary, 1_000));
         continue;
       }
       lines.push(await this.#readTextResult(task.id, result, binding.authorizedSessionId));
