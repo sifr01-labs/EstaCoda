@@ -43,7 +43,12 @@ describe("TaskOperatorService", () => {
     const task = store.getTask(created.taskId)!;
     const step = store.listSteps(task.id, task.activePlanRevisionId!)[0]!;
 
-    expect(created).toMatchObject({ status: "queued", progress: { total: 1, pending: 1 } });
+    expect(created).toMatchObject({
+      status: "queued",
+      phase: { name: "queued" },
+      progress: { total: 1, pending: 1 },
+    });
+    expect(created.phase.workerProgress).toBeUndefined();
     expect(task.spendingLimit).toBeUndefined();
     expect(task.executionLimits).not.toHaveProperty("maxEstimatedCostUsd");
     expect(created).toMatchObject({
@@ -260,6 +265,10 @@ describe("TaskOperatorService", () => {
       { position: 1, role: "orchestrator" },
       { position: 2, role: "synthesis" }
     ]);
+    expect(projection.phase).toEqual({
+      name: "delegating",
+      workerProgress: { completed: 0, settled: 0, total: 2 },
+    });
     expect(projection.subagents.map((subagent) => subagent.displayLabel)).toEqual(["Subagent 1", "Subagent 2"]);
     expect(projection.subagents).toHaveLength(2);
     expect(projection.subagents[0]).toMatchObject({
@@ -311,6 +320,27 @@ describe("TaskOperatorService", () => {
       })
     ]);
     expect(JSON.stringify(projection)).not.toContain("must-not-project");
+
+    store.atomicWrite((tx) => {
+      const currentResearch = tx.getStep(graph.steps[0]!.id)!;
+      tx.updateStep({ ...currentResearch, status: "completed", updatedAt: "2026-01-01T00:00:05.000Z" });
+      const currentReview = tx.getStep(graph.steps[1]!.id)!;
+      const readyReview = { ...currentReview, status: "ready" as const, updatedAt: "2026-01-01T00:00:05.000Z" };
+      tx.updateStep(readyReview);
+      const runningReview = { ...readyReview, status: "running" as const };
+      tx.updateStep(runningReview);
+      tx.updateStep({ ...runningReview, status: "completed", updatedAt: "2026-01-01T00:00:05.000Z" });
+      tx.updateStep({
+        ...graph.steps[2]!,
+        status: "ready",
+        updatedAt: "2026-01-01T00:00:05.000Z",
+      });
+    });
+
+    expect(service.status(graph.task.id, "owner").phase).toEqual({
+      name: "synthesizing",
+      workerProgress: { completed: 2, settled: 2, total: 2 },
+    });
   });
 
   it("retains a bounded chronological safe Task trace and reports earlier history", () => {

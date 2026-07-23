@@ -709,6 +709,15 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     const delegatedUsage = usageSummary(0.02);
     const totalUsage = usageSummary(0.07);
     const runtime = createMockRuntime({
+      taskOperator: {
+        status: () => ({
+          status: "running",
+          phase: {
+            name: "synthesizing",
+            workerProgress: { completed: 3, settled: 3, total: 3 },
+          },
+        }),
+      } as unknown as NonNullable<Runtime["taskOperator"]>,
       handle: async () => mockResponse({
         turnUsage: {
           turnId: "turn-1",
@@ -761,7 +770,8 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     expect(rendered).not.toContain("Delegated work so far:");
     expect(rendered).not.toContain("Turn total so far:");
     expect(rendered).not.toContain("Workers still running");
-    expect(rendered).toContain("Delegated Task T-104 · running");
+    expect(rendered).toContain("Delegated Task T-104 · synthesizing");
+    expect(rendered).toContain("3 of 3 delegated Steps completed");
   });
 
   it("renders a partial turn cost as a lower bound with one pricing notice", async () => {

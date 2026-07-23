@@ -385,9 +385,19 @@ When every delegated Subagent is settled and the durable synthesis Step is
 main-session Task region gives the parent stage visual priority. It shows a
 distinct `Parent synthesis` panel sourced from that Step's persisted status,
 current Attempt, safe activity, usage, and semantic trace. The panel reports
-the factual number of Subagent results being synthesized and never invents
-intermediate prose or a completion percentage. Audit-only lifecycle events do
-not become its selected activity callout.
+the factual number of Subagent results being synthesized and the worker-only
+settlement fact, such as `3 of 3 delegated Steps completed`. The live Task
+header and whole-Task view derive a read-only user phase from the persisted
+graph, so a durable lifecycle of `running` is presented as `delegating` or
+`synthesizing` when the Step state proves it. This projection does not mutate
+the Task, scheduler, or API lifecycle. It never invents intermediate prose or
+a completion percentage. Audit-only lifecycle events do not become its
+selected activity callout.
+
+The rich Papyrus session does not retain a one-time `running` transcript notice
+above a live Task card because that snapshot would become stale. The live card
+is authoritative. Plain and non-TTY sessions instead print the current derived
+phase and worker settlement as a bounded snapshot because no live card exists.
 
 While that parent stage is active, settled seven-row Subagent cards collapse to
 individually focusable one-row summaries beneath it. Their exact Step IDs and

@@ -23,6 +23,8 @@ type OverviewCopy = {
   readonly mainSession: string;
   readonly task: string;
   readonly stepsSettled: string;
+  readonly delegatedStepsCompleted: (completed: number, total: number) => string;
+  readonly delegatedStepsSettled: (settled: number, total: number) => string;
   readonly tokens: string;
   readonly subagents: string;
   readonly plan: string;
@@ -55,6 +57,8 @@ const COPY: Readonly<Record<OperatorConsoleLocale, OverviewCopy>> = {
     mainSession: "Main session",
     task: "Task",
     stepsSettled: "Steps settled",
+    delegatedStepsCompleted: (completed, total) => `${completed} of ${total} delegated Steps completed`,
+    delegatedStepsSettled: (settled, total) => `${settled} of ${total} delegated Steps settled`,
     tokens: "tokens",
     subagents: "Subagents",
     plan: "Plan Steps",
@@ -85,6 +89,8 @@ const COPY: Readonly<Record<OperatorConsoleLocale, OverviewCopy>> = {
     mainSession: "الجلسة الرئيسية",
     task: "المهمة",
     stepsSettled: "خطوات مستقرة",
+    delegatedStepsCompleted: (completed, total) => `اكتملت ${completed} من ${total} خطوات مفوضة`,
+    delegatedStepsSettled: (settled, total) => `استقرت ${settled} من ${total} خطوات مفوضة`,
     tokens: "رمز",
     subagents: "الوكلاء الفرعيون",
     plan: "خطوات الخطة",
@@ -168,12 +174,11 @@ export function taskOverviewContentLines(
   const objectiveLines = wrapText(card.objective, contentWidth).map((line) =>
     tokens === undefined ? line : styleColor(style, styleBold(style, line), tokens.palette.brand)
   );
-  const settled = card.progress.completed + card.progress.skipped;
   const cost = formatUsageCost({
     estimatedCostUsd: card.usage.estimatedCostUsd,
     costComplete: card.usage.pricingComplete,
   }, { locale, compact: true });
-  const lifecycle = `${formatStatus(card.status)} · ${formatDuration(card.elapsedMs)} · ${formatCompactNumber(card.usage.totalTokens)} ${copy.tokens} · ${cost} · ${settled} of ${card.progress.total} ${copy.stepsSettled}`;
+  const lifecycle = `${formatTaskPhase(card.phase.name, locale)} · ${formatDuration(card.elapsedMs)} · ${formatCompactNumber(card.usage.totalTokens)} ${copy.tokens} · ${cost} · ${formatLifecycleProgress(card, copy)}`;
   const lifecycleColor = taskStatusColor(card, style);
   const lines: string[] = [
     ...objectiveLines,
@@ -377,6 +382,38 @@ function planStepColor(step: TaskCardStepState, style: OperatorConsoleStyle | un
 
 function formatStatus(status: string): string {
   return status.replaceAll("_", " ");
+}
+
+function formatLifecycleProgress(card: TaskCardState, copy: OverviewCopy): string {
+  const workers = card.phase.workerProgress;
+  if (workers === undefined) {
+    return `${card.progress.completed + card.progress.skipped} of ${card.progress.total} ${copy.stepsSettled}`;
+  }
+  return workers.completed === workers.total
+    ? copy.delegatedStepsCompleted(workers.completed, workers.total)
+    : copy.delegatedStepsSettled(workers.settled, workers.total);
+}
+
+function formatTaskPhase(
+  phase: TaskCardState["phase"]["name"],
+  locale: OperatorConsoleLocale
+): string {
+  if (locale === "en") return formatStatus(phase);
+  switch (phase) {
+    case "planning": return "قيد التخطيط";
+    case "queued": return "في قائمة الانتظار";
+    case "running": return "قيد التنفيذ";
+    case "delegating": return "يتم تنفيذ العمل المفوض";
+    case "synthesizing": return "يتم تجميع النتائج";
+    case "waiting_for_host": return "بانتظار مضيف";
+    case "waiting_for_input": return "بانتظار إدخال";
+    case "waiting_for_approval": return "بانتظار الموافقة";
+    case "paused": return "متوقفة مؤقتاً";
+    case "completed": return "مكتملة";
+    case "partial": return "مكتملة جزئياً";
+    case "failed": return "فشلت";
+    case "cancelled": return "ملغاة";
+  }
 }
 
 function formatExecution(card: TaskCardState): string {

@@ -1167,7 +1167,12 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	          output.write(`${providerServingAlert}\n`);
 	        }
 	        output.write(renderer.render(assistantVm));
-        for (const notice of delegatedTaskNotices(response.toolExecutions, runtime, renderer.locale === "ar" ? "ar" : "en")) {
+        for (const notice of delegatedTaskNotices(
+          response.toolExecutions,
+          runtime,
+          renderer.locale === "ar" ? "ar" : "en",
+          operatorConsoleEnabled
+        )) {
           output.write(`${notice}\n`);
         }
         mainAgentUsageParts.length = 0;
@@ -2977,8 +2982,10 @@ function hasActiveDelegatedTask(
 function delegatedTaskNotices(
   executions: readonly ToolExecutionRecord[],
   runtime: Runtime,
-  locale: "en" | "ar"
+  locale: "en" | "ar",
+  liveTaskCardsVisible: boolean
 ): readonly string[] {
+  if (liveTaskCardsVisible) return [];
   const notices: string[] = [];
   const seen = new Set<string>();
   for (const execution of executions) {
@@ -2987,15 +2994,28 @@ function delegatedTaskNotices(
     if (typeof taskId !== "string" || taskId.length === 0 || seen.has(taskId)) continue;
     seen.add(taskId);
     const metadataStatus = execution.result.metadata?.status;
-    let status = typeof metadataStatus === "string" ? metadataStatus : "queued";
+    let phase = typeof metadataStatus === "string" ? metadataStatus : "queued";
+    let workerProgress: TaskStatusProjection["phase"]["workerProgress"];
     try {
-      status = runtime.taskOperator?.status(taskId, runtime.sessionId).status ?? status;
+      const projection = runtime.taskOperator?.status(taskId, runtime.sessionId);
+      phase = projection?.phase.name ?? projection?.status ?? phase;
+      workerProgress = projection?.phase.workerProgress;
     } catch {
       // The durable handle is still valid when its retained card has not refreshed yet.
     }
     notices.push(locale === "ar"
-      ? isolateRtl(`مهمة مفوضة ${isolateLtr(taskId)} · ${localizedTaskStatus(status, "ar")}`)
-      : `Delegated Task ${taskId} · ${status}`);
+      ? isolateRtl(`مهمة مفوضة ${isolateLtr(taskId)} · ${localizedTaskStatus(phase, "ar")}`)
+      : `Delegated Task ${taskId} · ${localizedTaskStatus(phase, "en")}`);
+    if (workerProgress !== undefined) {
+      const progress = workerProgress.completed === workerProgress.total
+        ? locale === "ar"
+          ? `اكتملت ${workerProgress.completed} من ${workerProgress.total} خطوات مفوضة`
+          : `${workerProgress.completed} of ${workerProgress.total} delegated Steps completed`
+        : locale === "ar"
+          ? `استقرت ${workerProgress.settled} من ${workerProgress.total} خطوات مفوضة`
+          : `${workerProgress.settled} of ${workerProgress.total} delegated Steps settled`;
+      notices.push(locale === "ar" ? isolateRtl(progress) : progress);
+    }
   }
   return notices;
 }
@@ -3005,6 +3025,8 @@ function localizedTaskStatus(status: string, locale: "en" | "ar"): string {
   switch (status) {
     case "queued": return "قيد الانتظار";
     case "running": return "قيد التنفيذ";
+    case "delegating": return "يتم تنفيذ العمل المفوض";
+    case "synthesizing": return "يتم تجميع النتائج";
     case "completed": return "مكتملة";
     case "partial": return "مكتملة جزئياً";
     case "failed": return "فشلت";
@@ -3214,6 +3236,12 @@ export function taskProjectionToCard(task: TaskStatusProjection): TaskCardState 
       hasEarlierEvents: task.trace.hasEarlierEvents
     },
     childTasks: task.childTasks.map((child) => ({ ...child })),
+    phase: {
+      name: task.phase.name,
+      ...(task.phase.workerProgress === undefined
+        ? {}
+        : { workerProgress: { ...task.phase.workerProgress } }),
+    },
     recentActivity: task.recentActivity.map((activity) => ({ ...activity })),
     ...(task.currentToolCategory === undefined ? {} : { currentToolCategory: task.currentToolCategory }),
     elapsedMs: task.elapsedMs,

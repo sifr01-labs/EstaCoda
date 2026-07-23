@@ -112,7 +112,7 @@ describe("durable Task surfaces", () => {
     expect(main[0]).toContain("\u2068task_37c8496f\u2069");
     expect(main[0]).not.toContain(taskId);
     expect(inspection[0]).toContain(`\u2068${taskId}\u2069`);
-    expect(main[0]).toContain("Ctrl+G mouse");
+    expect(main[0]).toContain("Ctrl+G");
     expect(main[0]).toContain("Competitor comparison");
     expect(main.every((line) => visibleWidth(line) <= 100)).toBe(true);
 
@@ -314,6 +314,8 @@ describe("durable Task surfaces", () => {
 
     expect(getTaskCardSurfaceDesiredHeight(state, 100)).toBe(14);
     expect(lines).toHaveLength(14);
+    expect(text).toContain("Delegated Task 1/1 · ⁨T-104⁩ · synthesizing");
+    expect(text).toContain("3 of 3 delegated Steps completed");
     expect(text).toContain("Parent synthesis · Synthesize delegated results");
     expect(text).toContain("Synthesizing 3 Subagent results");
     expect(text).toContain("Comparing overlapping recommendations");
@@ -323,6 +325,8 @@ describe("durable Task surfaces", () => {
     expect(text.match(/Subagent [123]/gu)).toHaveLength(3);
     expect(text).not.toContain("Result ready");
     expect(text).not.toContain("Accepted worker summary");
+    expect(inspection).toContain("synthesizing");
+    expect(inspection).toContain("3 of 3 delegated Steps completed");
     expect(inspection).toContain("Accepted worker summary 1");
     expect(lines.every((line) => visibleWidth(line) === 100)).toBe(true);
 
@@ -487,7 +491,7 @@ describe("durable Task surfaces", () => {
     expect(text).toContain("Task spending");
     expect(text).toContain("Reserved: $0.18");
     expect(text).toContain("result://safe-1");
-    expect(text).toContain("1 of 3 Steps settled");
+    expect(text).toContain("1 of 2 delegated Steps settled");
     expect(text).not.toMatch(/\d+%/u);
     expect(text).not.toContain("raw tool input");
     expect(text).not.toContain("worker-session-secret");
@@ -1231,6 +1235,10 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
     createdAt: "2026-07-20T09:59:00.000Z",
     updatedAt: "2026-07-20T10:03:18.000Z",
     ...overrides,
+    phase: overrides.phase ?? {
+      name: "delegating",
+      workerProgress: { completed: 1, settled: 1, total: 2 },
+    },
   };
 }
 
@@ -1299,6 +1307,20 @@ function makeSynthesisCard(
   const results = subagents.flatMap((subagent) => subagent.results);
   return makeCard({
     status: synthesisStatus === "completed" ? "completed" : "running",
+    phase: {
+      name: synthesisStatus === "completed"
+        ? "completed"
+        : synthesisStatus === "waiting_for_input" || synthesisStatus === "waiting_for_approval"
+          ? synthesisStatus
+          : synthesisStatus === "running" || synthesisStatus === "ready" || synthesisStatus === "pending"
+          ? "synthesizing"
+          : "running",
+      workerProgress: {
+        completed: subagentCount,
+        settled: subagentCount,
+        total: subagentCount,
+      },
+    },
     progress: {
       completed: subagentCount + (synthesisStatus === "completed" ? 1 : 0),
       skipped: 0,

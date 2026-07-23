@@ -144,6 +144,10 @@ function makeCard(events: readonly TaskCardActivityState[]): TaskCardState {
     }],
     trace: { events, totalEvents: events.length, categoryCounts: countEvents(events), hasEarlierEvents: false },
     childTasks: [],
+    phase: {
+      name: "delegating",
+      workerProgress: { completed: 0, settled: 0, total: 1 },
+    },
     recentActivity: events.slice(-3),
     elapsedMs: 1_000,
     usage: usage(),

@@ -49,10 +49,15 @@ const LTR_END = "\u2069";
 type TaskCopy = {
   tasks: string;
   task: string;
+  delegatedTask: string;
   inspectHint: string;
   mouseToggleHint: string;
   mouseActiveHint: string;
   stepsSettled: string;
+  delegatedStepsCompleted: (completed: number, total: number) => string;
+  delegatedStepsSettled: (settled: number, total: number) => string;
+  delegatedProgressCompact: (completed: number, settled: number, total: number) => string;
+  phaseLabel: (phase: TaskCardState["phase"]["name"]) => string;
   earlierActivities: string;
   noEarlierActivity: string;
   waitingForActivity: string;
@@ -72,10 +77,17 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
   en: {
     tasks: "Tasks",
     task: "Task",
+    delegatedTask: "Delegated Task",
     inspectHint: "Ctrl+T or Tab focus · Enter inspect",
     mouseToggleHint: "Ctrl+G mouse",
     mouseActiveHint: "[Mouse Mode] Esc release",
     stepsSettled: "Steps settled",
+    delegatedStepsCompleted: (completed, total) => `${completed} of ${total} delegated Steps completed`,
+    delegatedStepsSettled: (settled, total) => `${settled} of ${total} delegated Steps settled`,
+    delegatedProgressCompact: (completed, settled, total) => completed === total
+      ? `${completed}/${total} completed`
+      : `${settled}/${total} settled`,
+    phaseLabel: (phase) => phase.replaceAll("_", " "),
     earlierActivities: "earlier activities",
     noEarlierActivity: "no earlier activity",
     waitingForActivity: "Waiting for safe activity",
@@ -93,10 +105,17 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
   ar: {
     tasks: "المهام",
     task: "المهمة",
+    delegatedTask: "المهمة",
     inspectHint: "Ctrl+T أو Tab للتركيز · Enter للفحص",
     mouseToggleHint: "Ctrl+G للماوس",
     mouseActiveHint: "[وضع الماوس] Esc للتحرير",
     stepsSettled: "خطوات مستقرة",
+    delegatedStepsCompleted: (completed, total) => `اكتملت ${completed} من ${total} خطوات مفوضة`,
+    delegatedStepsSettled: (settled, total) => `استقرت ${settled} من ${total} خطوات مفوضة`,
+    delegatedProgressCompact: (completed, settled, total) => completed === total
+      ? `${completed}/${total} مكتملة`
+      : `${settled}/${total} مستقرة`,
+    phaseLabel: localizedArabicTaskPhase,
     earlierActivities: "أنشطة سابقة",
     noEarlierActivity: "لا يوجد نشاط سابق",
     waitingForActivity: "بانتظار نشاط آمن",
@@ -1079,7 +1098,15 @@ function renderParentSynthesisStage(
     ? copy.parentSynthesis
     : styleColor(style, styleBold(style, copy.parentSynthesis), tokens.palette.brand);
   const description = styleSecondary(style, conciseSubagentTitle(synthesis.title));
-  const titleRow = `${symbol} ${title} ${styleMuted(style, "·")} ${description}`;
+  const workerProgress = card.phase.workerProgress;
+  const progressText = workerProgress === undefined
+    ? undefined
+    : workerProgress.completed === workerProgress.total
+      ? copy.delegatedStepsCompleted(workerProgress.completed, workerProgress.total)
+      : copy.delegatedStepsSettled(workerProgress.settled, workerProgress.total);
+  const titleRow = [`${symbol} ${title}`, description, progressText]
+    .filter((value): value is string => value !== undefined)
+    .join(` ${styleMuted(style, "·")} `);
   const resultCount = card.subagents.filter((subagent) => subagent.status === "completed").length;
   const headlineText = parentSynthesisHeadline(synthesis, resultCount, copy);
   const currentActivity = semanticParentSynthesisActivityLabel(
@@ -1087,9 +1114,9 @@ function renderParentSynthesisStage(
     traceCategoryForTool(attempt?.currentToolCategory),
     synthesis
   );
-  const headline = currentActivity === undefined
-    ? headlineText
-    : `${headlineText} ${styleMuted(style, "·")} ${currentActivity}`;
+  const headline = [headlineText, currentActivity]
+    .filter((value): value is string => value !== undefined)
+    .join(` ${styleMuted(style, "·")} `);
   const headlineColor = synthesis.status === "waiting_for_input" || synthesis.status === "waiting_for_approval"
     ? tokens?.palette.caution
     : tokens?.palette.action;
@@ -1131,7 +1158,8 @@ function formatTaskHeader(
   style: OperatorConsoleStyle | undefined
 ): string {
   const taskPosition = `${state.cards.indexOf(card) + 1}/${state.cards.length}`;
-  const title = `${copy.task} ${taskPosition}`;
+  const workerProgress = card.phase.workerProgress;
+  const title = `${workerProgress === undefined ? copy.task : copy.delegatedTask} ${taskPosition}`;
   const tokens = style?.tokens.contract;
   const titleColor = focused ? tokens?.palette.action : tokens?.palette.brand;
   const styledTitle = titleColor === undefined
@@ -1141,15 +1169,43 @@ function formatTaskHeader(
   const styledRail = focused && tokens !== undefined
     ? styleColor(style, rail, tokens.palette.action)
     : rail;
-  const settled = card.progress.completed + card.progress.skipped;
-  const mouseHint = state.mouseModeActive === true ? copy.mouseActiveHint : copy.mouseToggleHint;
+  const mouseHint = state.mouseModeActive === true
+    ? copy.mouseActiveHint
+    : workerProgress === undefined
+      ? copy.mouseToggleHint
+      : "Ctrl+G";
   const styledMouseHint = state.mouseModeActive === true && tokens !== undefined
     ? styleColor(style, styleBold(style, mouseHint), tokens.palette.action)
     : styleMuted(style, mouseHint);
   const separator = styleMuted(style, "·");
   const taskId = styleMuted(style, isolate(formatTaskDisplayId(card.taskId)));
-  const progress = styleMuted(style, `${settled} of ${card.progress.total} ${copy.stepsSettled}`);
-  return `${styledRail} ${styledTitle} ${separator} ${taskId} ${separator} ${styledMouseHint} ${separator} ${card.objective} ${separator} ${progress}`;
+  const phase = styleMuted(style, copy.phaseLabel(card.phase.name));
+  const progressText = workerProgress === undefined
+    ? `${card.progress.completed + card.progress.skipped} of ${card.progress.total} ${copy.stepsSettled}`
+    : copy.delegatedProgressCompact(workerProgress.completed, workerProgress.settled, workerProgress.total);
+  const progress = styleMuted(style, progressText);
+  if (workerProgress === undefined) {
+    return `${styledRail} ${styledTitle} ${separator} ${taskId} ${separator} ${styledMouseHint} ${separator} ${card.objective} ${separator} ${progress}`;
+  }
+  return `${styledRail} ${styledTitle} ${separator} ${taskId} ${separator} ${phase} ${separator} ${progress} ${separator} ${styledMouseHint} ${separator} ${card.objective}`;
+}
+
+function localizedArabicTaskPhase(phase: TaskCardState["phase"]["name"]): string {
+  switch (phase) {
+    case "planning": return "قيد التخطيط";
+    case "queued": return "في قائمة الانتظار";
+    case "running": return "قيد التنفيذ";
+    case "delegating": return "يتم تنفيذ العمل المفوض";
+    case "synthesizing": return "يتم تجميع النتائج";
+    case "waiting_for_host": return "بانتظار مضيف";
+    case "waiting_for_input": return "بانتظار إدخال";
+    case "waiting_for_approval": return "بانتظار الموافقة";
+    case "paused": return "متوقفة مؤقتاً";
+    case "completed": return "مكتملة";
+    case "partial": return "مكتملة جزئياً";
+    case "failed": return "فشلت";
+    case "cancelled": return "ملغاة";
+  }
 }
 
 function formatTaskDisplayId(taskId: string): string {

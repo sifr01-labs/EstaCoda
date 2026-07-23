@@ -53,6 +53,17 @@ const MAX_PROJECTED_CHILD_TASKS = 32;
 
 export type TaskProgress = Record<TaskStep["status"], number> & { total: number };
 
+export type TaskPhaseName = TaskStatus | "delegating" | "synthesizing";
+
+export type TaskPhaseProjection = {
+  name: TaskPhaseName;
+  workerProgress?: {
+    completed: number;
+    settled: number;
+    total: number;
+  };
+};
+
 export type TaskStatusProjection = {
   taskId: string;
   objective: string;
@@ -69,6 +80,7 @@ export type TaskStatusProjection = {
     status: TaskStatus;
     parentAttemptId?: string;
   }[];
+  phase: TaskPhaseProjection;
   progress: TaskProgress;
   activeAttempts: number;
   planRevision?: {
@@ -449,6 +461,7 @@ export class TaskOperatorService {
         status: child.status,
         ...(child.parentAttemptId === undefined ? {} : { parentAttemptId: child.parentAttemptId })
       })),
+      phase: projectTaskPhase(task, projectedSteps),
       progress,
       activeAttempts: attempts.filter((attempt) => ACTIVE_ATTEMPT_STATUSES.includes(attempt.status)).length,
       ...(planRevision === null || planRevision === undefined ? {} : {
@@ -689,6 +702,43 @@ function emptyProgress(): TaskProgress {
     skipped: 0,
     cancelled: 0,
     total: 0
+  };
+}
+
+function projectTaskPhase(task: Task, steps: readonly TaskStepProjection[]): TaskPhaseProjection {
+  const workers = task.source === "delegation"
+    ? steps.filter((step) => step.executorRole === "worker" || step.executorRole === "orchestrator")
+    : [];
+  const completed = workers.filter((step) => step.status === "completed").length;
+  const settled = workers.filter((step) =>
+    step.status === "completed" ||
+    step.status === "failed" ||
+    step.status === "skipped" ||
+    step.status === "cancelled"
+  ).length;
+  const workerProgress = workers.length === 0
+    ? undefined
+    : { completed, settled, total: workers.length };
+  const synthesis = steps.find((step) => step.executorRole === "synthesis");
+  const synthesisActive = synthesis !== undefined &&
+    completed === workers.length &&
+    workers.length > 0 &&
+    (synthesis.status === "pending" || synthesis.status === "ready" || synthesis.status === "running");
+  const name: TaskPhaseName = isTerminalTaskStatus(task.status) ||
+    task.status === "planning" ||
+    task.status === "waiting_for_host" ||
+    task.status === "waiting_for_input" ||
+    task.status === "waiting_for_approval" ||
+    task.status === "paused"
+    ? task.status
+    : synthesisActive
+      ? "synthesizing"
+      : task.source === "delegation" && workers.length > 0
+        ? "delegating"
+        : task.status;
+  return {
+    name,
+    ...(workerProgress === undefined ? {} : { workerProgress }),
   };
 }
 

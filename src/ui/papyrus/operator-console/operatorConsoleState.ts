@@ -239,6 +239,14 @@ export type TaskCardState = {
     readonly status: TaskCardState["status"];
     readonly parentAttemptId?: string;
   }[];
+  readonly phase: {
+    readonly name: "planning" | "queued" | "running" | "waiting_for_host" | "waiting_for_input" | "waiting_for_approval" | "paused" | "completed" | "partial" | "failed" | "cancelled" | "delegating" | "synthesizing";
+    readonly workerProgress?: {
+      readonly completed: number;
+      readonly settled: number;
+      readonly total: number;
+    };
+  };
   readonly recentActivity: readonly TaskCardActivityState[];
   readonly currentToolCategory?: string;
   readonly elapsedMs: number;
