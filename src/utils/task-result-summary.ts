@@ -57,9 +57,12 @@ function cleanMarkdownLine(value: string): string {
 }
 
 function cleanSummaryText(value: string): string {
-  const normalized = value.replace(/\s+/gu, " ").trim();
+  let normalized = value.replace(/\s+/gu, " ").trim();
   if (/^(?:…|\.\.\.)/u.test(normalized)) return "";
-  return normalized.replace(/^[•·|:;,\-–—\s]+/u, "").trim();
+  normalized = normalized.replace(/^[•·|:;,\-–—\s]+/u, "").trim();
+  const redundantLabel = /^(?:(?:plain[- ]language\s+)?summary|executive summary|result summary|الملخص)\s*(?:[:：]|[-–—])\s*/iu;
+  while (redundantLabel.test(normalized)) normalized = normalized.replace(redundantLabel, "").trimStart();
+  return normalized;
 }
 
 function boundSummary(value: string, maxChars: number): string {

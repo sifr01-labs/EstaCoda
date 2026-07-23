@@ -29,4 +29,16 @@ describe("deriveTaskResultSummary", () => {
 
     expect(deriveTaskResultSummary(result, 60)).toBeUndefined();
   });
+
+  it("removes redundant English and Arabic summary labels", () => {
+    expect(deriveTaskResultSummary("Summary: Compared the worker reports and resolved their overlap.")).toBe(
+      "Compared the worker reports and resolved their overlap."
+    );
+    expect(deriveTaskResultSummary("Plain-language summary — Produced seven reviewable recommendations.")).toBe(
+      "Produced seven reviewable recommendations."
+    );
+    expect(deriveTaskResultSummary("الملخص: قارنت الأدلة وقدمت توصيات قابلة للمراجعة.")).toBe(
+      "قارنت الأدلة وقدمت توصيات قابلة للمراجعة."
+    );
+  });
 });

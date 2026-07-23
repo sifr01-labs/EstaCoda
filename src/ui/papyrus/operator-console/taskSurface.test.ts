@@ -266,7 +266,7 @@ describe("durable Task surfaces", () => {
     expect(inspection).toContain("Usage recorded");
   });
 
-  it("uses three completed-card rows for a wrapped result summary", () => {
+  it("uses the recovered fourth completed-card row for a clean wrapped result summary", () => {
     const subagent = makeSubagent(1, {
       status: "completed",
       currentActivity: "Worker finished",
@@ -283,7 +283,7 @@ describe("durable Task surfaces", () => {
         status: "available",
         byteLength: 240,
         primary: true,
-        displaySummary: "Found that EstaCoda already has strong file and profile boundaries, but memory writes need explicit provenance and review semantics. Produced 7 recommendations.",
+        displaySummary: "Summary: Found that EstaCoda already has strong file and profile boundaries, but memory writes need explicit provenance and review semantics. Produced 7 recommendations. Recommended explicit review gates for every durable memory write before broad rollout.",
         summary: "…bitrary legacy slice with **Markdown** that must not win.",
       }],
     });
@@ -293,13 +293,25 @@ describe("durable Task surfaces", () => {
     const inspection = stripAnsi(subagentInspectionContentLines(card, subagent, 72).join("\n"));
     const overview = stripAnsi(taskInspectionContentLines({ ...card, results: subagent.results }, 100).join("\n"));
     const compactText = text.replace(/\s+/gu, " ");
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const style = createOperatorConsoleStyle({
+      tokens,
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const styled = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 72, style });
 
     expect(lines).toHaveLength(8);
     expect(lines.slice(1)).toHaveLength(7);
     expect(text).toContain("Summary");
+    expect(stripAnsi(lines[2]!)).toContain("> Summary");
+    expect(lines.slice(3, 7).every((line) => stripAnsi(line).trim().length > 0)).toBe(true);
+    expect(styled[2]).toContain("◆");
+    expect(styled[2]).toContain(ansiFg(tokens.contract.palette.action));
     expect(compactText).toContain("Found that EstaCoda already has strong file and profile boundaries");
     expect(compactText).toContain("memory writes need explicit provenance and review semantics");
     expect(compactText).toContain("Produced 7 recommendations.");
+    expect(compactText).toContain("every durable memory write before broad rollout.");
+    expect(compactText).not.toContain("Summary: Found");
     expect(text).not.toContain("A shorter provider preview.");
     expect(text).not.toContain("arbitrary legacy slice");
     expect(inspection).toContain("Found that EstaCoda already has strong file and profile boundaries");
@@ -309,6 +321,73 @@ describe("durable Task surfaces", () => {
     expect(text).not.toContain("Worker finished");
     expect(text).not.toContain("Usage recorded");
     expect(text).toContain("completed · 03:18");
+  });
+
+  it("retains a real history row and uses three summary rows when completed activity was truncated", () => {
+    const subagent = makeSubagent(1, {
+      status: "completed",
+      currentActivity: undefined,
+      trace: Array.from({ length: 5 }, (_, index) => ({
+        eventId: `completed-history-${index}`,
+        kind: "attempt-progressed",
+        label: `Reviewed evidence source ${index + 1}`,
+        category: "read",
+        timestamp: `2026-07-20T10:00:0${index}.000Z`,
+      })),
+      results: [{
+        id: "result-history",
+        handle: "result://history",
+        kind: "summary",
+        disposition: "accepted",
+        status: "available",
+        byteLength: 240,
+        primary: true,
+        displaySummary: "Compared the retained evidence and produced a bounded recommendation for the parent Task.",
+      }],
+    });
+    const lines = renderTaskCardSurface(
+      { cards: [makeCard({ subagents: [subagent] })], scrollOffset: 0 },
+      { width: 72 }
+    );
+
+    expect(lines).toHaveLength(8);
+    expect(stripAnsi(lines[2]!)).toContain("+2 earlier activities");
+    expect(stripAnsi(lines[3]!)).toContain("> Summary");
+    expect(stripAnsi(lines[7]!)).toContain("completed");
+  });
+
+  it("keeps the completed summary marker and compact spacing deterministic in plain narrow Arabic", () => {
+    const style = createOperatorConsoleStyle({
+      tokens: resolveTokens("plain", "dark", "kemetBlue"),
+      capabilities: { supportsColor: false, supportsTrueColor: false },
+    });
+    const subagent = makeSubagent(1, {
+      status: "completed",
+      currentActivity: undefined,
+      trace: [],
+      results: [{
+        id: "result-arabic",
+        handle: "result://arabic",
+        kind: "summary",
+        disposition: "accepted",
+        status: "available",
+        byteLength: 160,
+        primary: true,
+        displaySummary: "الملخص: قارنت الأدلة وحددت حدود الثقة وقدمت توصيات قابلة للمراجعة.",
+      }],
+    });
+    const lines = renderTaskCardSurface(
+      { cards: [makeCard({ subagents: [subagent] })], scrollOffset: 0 },
+      { width: 38, locale: "ar", style }
+    );
+    const text = lines.join("\n");
+
+    expect(lines).toHaveLength(8);
+    expect(lines[2]).toContain("> الملخص");
+    expect(text.match(/الملخص/gu)).toHaveLength(1);
+    expect(text).toContain("قارنت الأدلة");
+    expect(text).not.toMatch(/\u001B\[/u);
+    expect(lines.every((line) => visibleWidth(line) === 38)).toBe(true);
   });
 
   it("cleans legacy result summaries instead of exposing raw Markdown fragments", () => {

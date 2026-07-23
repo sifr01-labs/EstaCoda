@@ -1368,16 +1368,32 @@ function renderSubagentCard(
   const history = formatSubagentHistoryCount(activity.hiddenCount, copy, options.style);
   const footer = formatSubagentFooter(subagent, copy, options);
   const background = options.style?.tokens.contract.surface.bgElevated ?? "";
-  const contentRows = isSettledSubagent(subagent.status)
-    ? [
-        formatSettledSubagentState(subagent, copy, options.style),
-        ...formatSettledSubagentSummary(subagent, copy, Math.max(1, width - 3), options.style),
-      ]
+  const rows = isSettledSubagent(subagent.status)
+    ? (() => {
+        const historyRows = history.length === 0 ? [] : [history];
+        const summaryRowCount = SUBAGENT_CARD_HEIGHT - 3 - historyRows.length;
+        return [
+          title,
+          ...historyRows,
+          formatSettledSubagentState(subagent, copy, options.style),
+          ...formatSettledSubagentSummary(
+            subagent,
+            copy,
+            Math.max(1, width - 3),
+            summaryRowCount,
+            options.style
+          ),
+          footer,
+        ];
+      })()
     : [
+        title,
+        history,
         ...formatRunningSubagentActivity(activity.rows, copy, options.style),
         formatSubagentPreview(subagent, options.style),
+        footer,
       ];
-  return [title, history, ...contentRows, footer]
+  return rows
     .map((row) => styleBackgroundRow(options.style, ` ${row}`, width, background));
 }
 
@@ -1668,9 +1684,9 @@ function formatSettledSubagentState(
     : subagent.status === "skipped" ? formatSubagentStatus(subagent.status) : copy.resultUnavailable;
   const tokens = style?.tokens.contract;
   const glyph = successful
-    ? tokens?.glyph.trace.event ?? ">"
+    ? tokens?.glyph.trace.live ?? ">"
     : tokens?.glyph.cross ?? "!";
-  const color = successful ? tokens?.severity.ok : tokens?.severity.error;
+  const color = successful ? tokens?.palette.action : tokens?.severity.error;
   return `${color === undefined ? glyph : styleColor(style, glyph, color)} ${label}`;
 }
 
@@ -1678,6 +1694,7 @@ function formatSettledSubagentSummary(
   subagent: TaskCardSubagentState,
   copy: TaskCopy,
   width: number,
+  rowCount: number,
   style: OperatorConsoleStyle | undefined
 ): readonly string[] {
   const preferredResults = [
@@ -1690,11 +1707,11 @@ function formatSettledSubagentSummary(
     .find((summary) => summary !== undefined);
   const summary = deriveTaskResultSummary(
     rawResultSummary,
-    Math.max(24, width * SUBAGENT_ACTIVITY_ROWS - 6)
+    Math.max(24, width * rowCount - 6)
   ) ?? copy.noResultSummary;
   const wrapped = wrapText(summary, width);
-  const visible = wrapped.slice(0, SUBAGENT_ACTIVITY_ROWS);
-  return Array.from({ length: SUBAGENT_ACTIVITY_ROWS }, (_, index) => {
+  const visible = wrapped.slice(0, rowCount);
+  return Array.from({ length: rowCount }, (_, index) => {
     const line = visible[index];
     return line === undefined ? "" : `  ${styleSecondary(style, line)}`;
   });
