@@ -433,17 +433,19 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   let cachedTaskRuntime: Runtime | undefined;
   let cachedTaskCards: readonly TaskCardState[] = [];
   let cachedTaskCardsAtMs = Number.NEGATIVE_INFINITY;
-  const getOperatorConsoleTasks = () => {
+  const refreshOperatorConsoleTasks = (): boolean => {
     void refreshSessionCost();
     const timestamp = Date.now();
-    if (cachedTaskRuntime === runtime && timestamp - cachedTaskCardsAtMs < OPERATOR_CONSOLE_TASK_REFRESH_INTERVAL_MS) {
-      return cachedTaskCards;
+    if (cachedTaskRuntime === runtime &&
+        timestamp - cachedTaskCardsAtMs < OPERATOR_CONSOLE_TASK_REFRESH_INTERVAL_MS) {
+      return false;
     }
     cachedTaskRuntime = runtime;
     cachedTaskCardsAtMs = timestamp;
     cachedTaskCards = operatorConsoleTaskCards(runtime);
-    return cachedTaskCards;
+    return true;
   };
+  const getOperatorConsoleTasks = () => cachedTaskRuntime === runtime ? cachedTaskCards : [];
   const getOperatorConsoleApprovals = (): readonly ApprovalCardState[] => {
     try {
       return (options.taskApprovals?.listPending(runtime.sessionId) ?? [])
@@ -485,6 +487,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             isTty: (output as { readonly isTTY?: boolean }).isTTY ?? renderer.capabilities.isTTY,
           }),
           getStatus: getOperatorConsoleStatus,
+          refreshTasks: refreshOperatorConsoleTasks,
           getTasks: getOperatorConsoleTasks,
           getApprovals: getOperatorConsoleApprovals,
           onApprovalIntent: onOperatorConsoleApprovalIntent,
@@ -674,6 +677,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
               supportsAnimation: renderer.capabilities.supportsAnimation,
             },
             getStatus: getOperatorConsoleStatus,
+            refreshTasks: refreshOperatorConsoleTasks,
             getTasks: getOperatorConsoleTasks,
             turnStartedAtMs: now(),
             promptPlaceholder: COMPACTION_PROMPT_PLACEHOLDER,
@@ -807,6 +811,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
               supportsAnimation: renderer.capabilities.supportsAnimation,
             },
             getStatus: getOperatorConsoleStatus,
+            refreshTasks: refreshOperatorConsoleTasks,
             getTasks: getOperatorConsoleTasks,
             onMouseModeChange: (active) => {
               operatorConsoleInputLifecycle?.setMouseTracking(active);

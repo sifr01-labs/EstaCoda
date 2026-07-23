@@ -8,6 +8,7 @@ import {
   findOperatorConsoleHitRegion,
   getTaskCardHitTargets,
   getTaskCardSurfaceDesiredHeight,
+  hasVisibleTaskMotion,
   reconcileTaskSurfaceState,
   renderOperatorConsoleTextLines,
   renderTaskCardSurface,
@@ -405,6 +406,22 @@ describe("durable Task surfaces", () => {
     expect(sixLines[9]).toContain("Subagent 1");
     expect(sixLines[9]).toContain("Subagent 4");
     expect(sixLines.join("\n")).toContain("Synthesizing 6 Subagent results");
+  });
+
+  it("keeps semantic motion scoped to the visible running worker or synthesis card", () => {
+    const worker = makeCard();
+    const synthesis = makeSynthesisCard("ready");
+    const settled = makeSynthesisCard("completed");
+
+    expect(hasVisibleTaskMotion({ cards: [worker], selectedTaskId: worker.taskId, scrollOffset: 0 })).toBe(true);
+    expect(hasVisibleTaskMotion({ cards: [synthesis], selectedTaskId: synthesis.taskId, scrollOffset: 0 })).toBe(true);
+    expect(hasVisibleTaskMotion({ cards: [settled], selectedTaskId: settled.taskId, scrollOffset: 0 })).toBe(false);
+    expect(hasVisibleTaskMotion({
+      cards: [worker],
+      selectedTaskId: worker.taskId,
+      inspectedTaskId: worker.taskId,
+      scrollOffset: 0,
+    })).toBe(false);
   });
 
   it("collapses workers only while synthesis is active and keeps constrained output truthful", () => {

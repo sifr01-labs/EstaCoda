@@ -39,6 +39,7 @@ import {
   isHardInterruptInput,
   isMouseModeToggle,
   isPromptEditingInput,
+  hasVisibleTaskMotion,
   removeAttachmentAndRepairFocus,
   reconcileTaskSurfaceState,
   routeApprovalKey,
@@ -48,6 +49,7 @@ import {
   type AttachmentCardState,
   type ApprovalCardState,
   type FocusState,
+  type OperatorConsoleRegionKind,
   type SlashMenuState,
   type TaskSurfaceState,
 } from "../ui/papyrus/operator-console/index.js";
@@ -160,10 +162,12 @@ export class RawPromptController {
     let vimKeymapState: PapyrusVimKeymapState | undefined =
       this.#keymap?.mode === "vim" ? createPapyrusVimKeymapState() : undefined;
     let typeaheadState: TypeaheadState<SlashCommandSuggestionMetadata> = createTypeaheadControllerState();
-    let statusTicker: ReturnType<typeof setInterval> | undefined;
+    let settled = false;
+    const motionStartedAtMs = Date.now();
+    let statusTicker: ReturnType<typeof setTimeout> | undefined;
     const stopStatusTicker = () => {
       if (statusTicker === undefined) return;
-      clearInterval(statusTicker);
+      clearTimeout(statusTicker);
       statusTicker = undefined;
     };
     const currentTerminal = () => {
@@ -174,7 +178,7 @@ export class RawPromptController {
         isTty: terminal?.isTty ?? this.#output.isTTY ?? true,
       };
     };
-    const render = () => {
+    const render = (dirtyRegions?: readonly OperatorConsoleRegionKind[]) => {
       const refreshedApprovals = this.#operatorConsole?.getApprovals?.() ?? approvals;
       const refreshedIds = new Set(refreshedApprovals.map((approval) => approval.id));
       for (const approvalId of resolvingApprovalIds) {
@@ -228,6 +232,7 @@ export class RawPromptController {
           ? {
             ...this.#operatorConsole,
             terminal: currentTerminal(),
+            motionElapsedMs: Math.max(0, Date.now() - motionStartedAtMs),
             attachments,
             approvals,
             tasks: taskSurface,
@@ -236,7 +241,7 @@ export class RawPromptController {
             focus: attachmentFocus,
           }
           : undefined,
-      });
+      }, { dirtyRegions });
       options?.onRowsChange?.(rows);
     };
 
@@ -246,6 +251,7 @@ export class RawPromptController {
       render();
     };
 
+    this.#operatorConsole?.refreshTasks?.();
     render();
 
     try {
@@ -261,12 +267,24 @@ export class RawPromptController {
     if (this.#operatorConsole?.enabled === true &&
         (this.#operatorConsole.getStatus !== undefined || this.#operatorConsole.getTasks !== undefined ||
           this.#operatorConsole.getApprovals !== undefined)) {
-      statusTicker = setInterval(render, 1000);
+      const scheduleStatusTick = () => {
+        const workerCadenceMs = this.#operatorConsole?.style?.tokens.contract.motion.worker.cadenceMs ?? 105;
+        const animationAllowed = currentTerminal().isTty &&
+          this.#operatorConsole?.style?.tokens.contract.behavior.allowAnimation === true;
+        const delayMs = animationAllowed && hasVisibleTaskMotion(taskSurface) ? workerCadenceMs : 1_000;
+        statusTicker = setTimeout(() => {
+          statusTicker = undefined;
+          this.#operatorConsole?.refreshTasks?.();
+          render(["approvals", "taskCards", "taskInspection", "statusRail"]);
+          if (!settled) scheduleStatusTick();
+        }, delayMs);
+        const timer = statusTicker as { unref?: () => void };
+        timer.unref?.();
+      };
+      scheduleStatusTick();
     }
 
     return await new Promise<RawPromptResult>((resolve, reject) => {
-      let settled = false;
-
       const notifyTypeahead = () => {
         if (this.#operatorConsole?.enabled === true) {
           this.#overlayHost.clear();

@@ -7,6 +7,7 @@ import {
   createActiveWorkRuntimeState,
   getActiveWorkSurfaceDesiredHeight,
   hasRunningDelegationWork,
+  hasVisibleTaskMotion,
   isHardInterruptInput,
   isMouseModeToggle,
   isPromptEditingInput,
@@ -45,7 +46,9 @@ export type LiveOperatorConsoleControllerOptions = {
   readonly animationIntervalMs?: number;
   readonly streamingRefreshIntervalMs?: number;
   readonly getStatus: () => StatusRailState;
+  readonly refreshTasks?: () => boolean;
   readonly getTasks?: () => readonly TaskCardState[];
+  readonly taskRefreshIntervalMs?: number;
   readonly turnStartedAtMs?: number;
   readonly promptPlaceholder?: string;
   readonly onMouseModeChange?: (active: boolean) => void;
@@ -54,6 +57,7 @@ export type LiveOperatorConsoleControllerOptions = {
 
 const DEFAULT_OPERATOR_CONSOLE_ANIMATION_INTERVAL_MS = 16;
 const DEFAULT_STREAMING_REFRESH_INTERVAL_MS = 75;
+const DEFAULT_TASK_REFRESH_INTERVAL_MS = 750;
 const MIN_TIMER_REFRESH_INTERVAL_MS = 16;
 const MAX_STREAMING_TAIL_CHARS = 4_000;
 
@@ -70,7 +74,9 @@ export class LiveOperatorConsoleController {
   readonly #animationIntervalMs: number;
   readonly #streamingRefreshIntervalMs: number;
   readonly #getStatus: () => StatusRailState;
+  readonly #refreshTasks: (() => boolean) | undefined;
   readonly #getTasks: (() => readonly TaskCardState[]) | undefined;
+  readonly #taskRefreshIntervalMs: number;
   readonly #turnStartedAtMs: number | undefined;
   readonly #promptPlaceholder: string | undefined;
   readonly #onMouseModeChange: ((active: boolean) => void) | undefined;
@@ -89,6 +95,7 @@ export class LiveOperatorConsoleController {
   #animationTimer: ReturnType<typeof setInterval> | undefined;
   #lastVisibleMotionSignature: string | undefined;
   #streamingRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+  #taskRefreshTimer: ReturnType<typeof setInterval> | undefined;
   #lastTimerRefreshAtMs = Number.NEGATIVE_INFINITY;
   #tasks: TaskSurfaceState;
 
@@ -106,18 +113,29 @@ export class LiveOperatorConsoleController {
       DEFAULT_STREAMING_REFRESH_INTERVAL_MS
     );
     this.#getStatus = options.getStatus;
+    this.#refreshTasks = options.refreshTasks;
     this.#getTasks = options.getTasks;
+    this.#taskRefreshIntervalMs = normalizePositiveInteger(
+      options.taskRefreshIntervalMs ?? DEFAULT_TASK_REFRESH_INTERVAL_MS,
+      DEFAULT_TASK_REFRESH_INTERVAL_MS
+    );
     this.#turnStartedAtMs = options.turnStartedAtMs;
     this.#promptPlaceholder = options.promptPlaceholder;
     this.#onMouseModeChange = options.onMouseModeChange;
     this.#now = options.now ?? Date.now;
     this.#animationStartedAtMs = this.#now();
     this.#transcript = [...options.runtimeHost.getState().transcript];
-    this.#tasks = setOperatorConsoleMouseMode(options.runtimeHost.getState(), false).tasks;
+    this.#refreshTasks?.();
+    this.#tasks = reconcileTaskSurfaceState(
+      setOperatorConsoleMouseMode(options.runtimeHost.getState(), false).tasks,
+      this.#getTasks?.() ?? []
+    );
     this.#runtimeHost.setTasks(this.#tasks);
     this.#renderLoop = new RawPromptRenderLoop(options.output, {
       operatorConsoleHostFactory: () => options.runtimeHost,
     });
+    this.#startTaskRefreshTimer();
+    this.#syncAnimationTimer();
   }
 
   get activeWork(): ToolActivityState {
@@ -312,6 +330,7 @@ export class LiveOperatorConsoleController {
   clear(): void {
     this.#stopAnimationTimer();
     this.#stopStreamingRefreshTimer();
+    this.#stopTaskRefreshTimer();
     this.#renderLoop.clear();
   }
 
@@ -346,6 +365,7 @@ export class LiveOperatorConsoleController {
       dirtyRegions: options.dirtyRegions,
     });
     this.#lastTimerRefreshAtMs = Date.now();
+    this.#startTaskRefreshTimer();
     this.#syncAnimationTimer();
   }
 
@@ -393,7 +413,9 @@ export class LiveOperatorConsoleController {
     const elapsedMs = this.#motionElapsedMs();
     const signature = this.#visibleMotionSignature(elapsedMs);
     if (signature === this.#lastVisibleMotionSignature) return;
-    this.#refreshFromTimer({ dirtyRegions: ["turnActivity", "activeWork", "streaming", "statusRail"] });
+    this.#refreshFromTimer({
+      dirtyRegions: ["turnActivity", "activeWork", "streaming", "taskCards", "taskInspection", "statusRail"],
+    });
   }
 
   #syncAnimationTimer(): void {
@@ -433,6 +455,24 @@ export class LiveOperatorConsoleController {
     this.#streamingRefreshTimer = undefined;
   }
 
+  #startTaskRefreshTimer(): void {
+    if (this.#refreshTasks === undefined || this.#taskRefreshTimer !== undefined) return;
+    this.#taskRefreshTimer = setInterval(() => {
+      if (this.#refreshTasks?.() !== true) return;
+      // A refreshed durable snapshot must be reconciled even when an animation
+      // frame happened in the same clock tick.
+      this.refresh({ dirtyRegions: ["taskCards", "taskInspection", "statusRail"] });
+    }, this.#taskRefreshIntervalMs);
+    const timer = this.#taskRefreshTimer as { unref?: () => void };
+    timer.unref?.();
+  }
+
+  #stopTaskRefreshTimer(): void {
+    if (this.#taskRefreshTimer === undefined) return;
+    clearInterval(this.#taskRefreshTimer);
+    this.#taskRefreshTimer = undefined;
+  }
+
   #refreshFromTimer(options: LiveConsoleRefreshOptions = {}): boolean {
     const now = Date.now();
     if (now - this.#lastTimerRefreshAtMs < MIN_TIMER_REFRESH_INTERVAL_MS) return false;
@@ -460,8 +500,9 @@ export class LiveOperatorConsoleController {
       this.#activeWork.items.some((item) => item.status === "running" && item.source === "subagent");
     const hasVisibleToolMotion = hasVisibleStreamingText &&
       this.#streamingToolTrail.some((entry) => entry.status === "running");
+    const hasVisibleDurableTaskMotion = hasVisibleTaskMotion(this.#tasks);
     if (motion === undefined) {
-      return this.#turnActivity !== undefined || hasVisibleWorkerMotion || hasVisibleToolMotion
+      return this.#turnActivity !== undefined || hasVisibleWorkerMotion || hasVisibleToolMotion || hasVisibleDurableTaskMotion
         ? String(Math.floor(elapsedMs / 90))
         : "";
     }
@@ -472,6 +513,9 @@ export class LiveOperatorConsoleController {
     }
     if (hasVisibleWorkerMotion) {
       parts.push(`worker:${semanticMotionFrameIndex(motion.worker, elapsedMs)}`);
+    }
+    if (hasVisibleDurableTaskMotion) {
+      parts.push(`task-worker:${semanticMotionFrameIndex(motion.worker, elapsedMs)}`);
     }
     if (hasVisibleToolMotion) {
       parts.push(`tool:${semanticMotionFrameIndex(motion.tool, elapsedMs)}`);

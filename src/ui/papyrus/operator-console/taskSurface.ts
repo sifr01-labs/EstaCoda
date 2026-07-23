@@ -47,6 +47,21 @@ const MAX_SUBAGENT_TITLE_WIDTH = 64;
 const LTR_START = "\u2068";
 const LTR_END = "\u2069";
 
+/**
+ * True when the Task card that is actually visible contains semantic worker
+ * motion. Inspection surfaces render their own static status and therefore do
+ * not keep the shared motion clock alive.
+ */
+export function hasVisibleTaskMotion(state: TaskSurfaceState): boolean {
+  if (state.inspectedTaskId !== undefined) return false;
+  const card = state.cards.find((candidate) => candidate.taskId === state.selectedTaskId) ?? state.cards[0];
+  if (card === undefined) return false;
+  if (card.subagents.some((subagent) => subagent.status === "running")) return true;
+  return card.steps.some((step) =>
+    step.executorRole === "synthesis" && (step.status === "ready" || step.status === "running")
+  );
+}
+
 type TaskCopy = {
   tasks: string;
   task: string;

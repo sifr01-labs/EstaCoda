@@ -20,7 +20,13 @@ import type {
   TypeaheadProviderRouter,
   TypeaheadProviderSelection,
 } from "../ui/papyrus/input/typeaheadProviderRouter.js";
-import type { ApprovalCardState, AttachmentCardState, TaskCardState } from "../ui/papyrus/operator-console/index.js";
+import {
+  createOperatorConsoleStyle,
+  type ApprovalCardState,
+  type AttachmentCardState,
+  type TaskCardState,
+} from "../ui/papyrus/operator-console/index.js";
+import { resolveTokens } from "../theme/token-resolver.js";
 
 const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
@@ -495,6 +501,42 @@ describe("raw prompt controller", () => {
       expect(rendered).toContain("live-model");
       expect(rendered).toContain("42/100");
       expect(rendered).toContain("01:01");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps Task projection refresh out of prompt editing and animates the prepared snapshot", async () => {
+    vi.useFakeTimers();
+    try {
+      const refreshTasks = vi.fn(() => true);
+      const tokens = resolveTokens("standard", "dark", "kemetBlue");
+      const { input, output, pending } = startPendingOperatorConsoleRead({
+        operatorConsole: {
+          enabled: true,
+          terminal: { width: 72, height: 16, isTty: true },
+          refreshTasks,
+          getTasks: () => [promptTaskCardWithSubagentTrace(["Inspecting the repository"])],
+          style: createOperatorConsoleStyle({
+            tokens,
+            capabilities: { supportsColor: true, supportsTrueColor: true },
+          }),
+        },
+      });
+
+      expect(refreshTasks).toHaveBeenCalledTimes(1);
+      expect(stripAnsi(output.writes.join(""))).toContain("• Subagent 1");
+      input.send("ab");
+      input.send("\u007f");
+      expect(refreshTasks).toHaveBeenCalledTimes(1);
+
+      output.writes.length = 0;
+      vi.advanceTimersByTime(tokens.contract.motion.worker.cadenceMs);
+      expect(refreshTasks).toHaveBeenCalledTimes(2);
+      expect(stripAnsi(output.writes.join(""))).toContain("● Subagent 1");
+
+      input.send("\r");
+      await expect(pending).resolves.toEqual({ type: "submit", text: "a" });
     } finally {
       vi.useRealTimers();
     }
@@ -2302,6 +2344,10 @@ function promptApprovalCard(): ApprovalCardState {
     risk: "workspace-write",
     summary: "Task task-raw-1 · approve once only"
   };
+}
+
+function stripAnsi(value: string): string {
+  return value.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/gu, "");
 }
 
 function providerFor(

@@ -174,6 +174,48 @@ describe("LiveOperatorConsoleController", () => {
     expect(stripAnsi(output.text())).toContain("Research competitor");
   });
 
+  it("keeps durable Subagent motion active without transient delegation work", () => {
+    vi.useFakeTimers();
+    const output = createOutput();
+    const task = makeLiveTaskWithSubagent();
+    const { controller, runtimeHost } = createControllerFixture(output, {
+      getTasks: () => [task],
+    });
+
+    controller.refresh();
+    expect(stripAnsi(output.text())).toContain("• Subagent 1");
+    controller.resetActiveWork();
+    output.clear();
+    vi.advanceTimersByTime(105);
+
+    expect(runtimeHost.getState().activeWork.items).toEqual([]);
+    expect(stripAnsi(output.text())).toContain("● Subagent 1");
+  });
+
+  it("refreshes durable Task snapshots on their own timer", () => {
+    vi.useFakeTimers();
+    const output = createOutput();
+    let task = makeLiveTaskWithSubagent();
+    const refreshTasks = vi.fn(() => {
+      if (refreshTasks.mock.calls.length > 1) {
+        task = makeLiveTask({ status: "completed", phase: { name: "completed" } });
+      }
+      return true;
+    });
+    const { controller, runtimeHost } = createControllerFixture(output, {
+      getTasks: () => [task],
+      refreshTasks,
+      taskRefreshIntervalMs: 750,
+    });
+
+    expect(refreshTasks).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(750);
+
+    expect(refreshTasks).toHaveBeenCalledTimes(2);
+    expect(runtimeHost.getState().tasks.cards[0]?.status).toBe("completed");
+    controller.clear();
+  });
+
   it("preserves Task inspection across live usage refresh and terminal resize", () => {
     const output = createOutput();
     let task = makeLiveTask({
@@ -669,7 +711,7 @@ function createController(
   options: Pick<
     ConstructorParameters<typeof LiveOperatorConsoleController>[0],
     "animationIntervalMs" | "now" | "streamingRefreshIntervalMs" | "turnStartedAtMs"
-      | "getTasks" | "onMouseModeChange"
+      | "getTasks" | "refreshTasks" | "taskRefreshIntervalMs" | "onMouseModeChange"
   > = {}
 ): LiveOperatorConsoleController {
   return createControllerFixture(output, options).controller;
@@ -680,7 +722,7 @@ function createControllerFixture(
   options: Pick<
     ConstructorParameters<typeof LiveOperatorConsoleController>[0],
     "animationIntervalMs" | "now" | "streamingRefreshIntervalMs" | "turnStartedAtMs"
-      | "getTasks" | "onMouseModeChange"
+      | "getTasks" | "refreshTasks" | "taskRefreshIntervalMs" | "onMouseModeChange"
   > = {}
 ): {
   readonly controller: LiveOperatorConsoleController;
@@ -796,6 +838,31 @@ function makeLiveTask(overrides: Partial<TaskCardState> = {}): TaskCardState {
     updatedAt: "2026-07-20T10:00:03.000Z",
     ...overrides,
     phase: overrides.phase ?? { name: "running" },
+  };
+}
+
+function makeLiveTaskWithSubagent(): TaskCardState {
+  const card = makeLiveTask();
+  return {
+    ...card,
+    subagents: [{
+      stepId: "step-1",
+      position: 0,
+      displayIndex: 1,
+      displayLabel: "Subagent 1",
+      title: "Research Company A",
+      objective: "Research Company A",
+      role: "worker",
+      status: "running",
+      dependsOn: [],
+      elapsedMs: 3_000,
+      currentActivity: "Inspecting the repository",
+      currentToolCategory: "read",
+      usage: { total: card.usage, currentAttempt: card.usage },
+      attempts: [],
+      trace: [],
+      results: [],
+    }],
   };
 }
 
