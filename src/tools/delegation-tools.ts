@@ -48,7 +48,8 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
         "Create durable Tasks for bounded subtasks with explicit context and tool access.",
         "Returns a Task handle immediately; use Task status and result surfaces to follow completion.",
         `Supports one task or up to ${delegationConfig.maxBatchTasks} batch tasks.`,
-        "An optional synthesis objective adds one fixed terminal Step after every worker.",
+        "Batches add one fixed terminal synthesis Step by default; pass synthesis: false only for inspection-only work.",
+        "A synthesis object can provide a custom final-answer objective and model.",
         `The durable scheduler runs at most ${delegationConfig.maxConcurrentChildren} Steps in parallel.`,
         `Child delegation depth is limited to ${delegationConfig.maxSpawnDepth}.`
       ].join(" "),
@@ -98,13 +99,19 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
           },
           modelOverride: modelOverrideSchema(),
           synthesis: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              objective: { type: "string", minLength: 1 },
-              modelOverride: modelOverrideSchema()
-            },
-            required: ["objective"]
+            description: "Batch default: synthesize all worker Results into one final answer. Use false only when no combined answer should be produced.",
+            oneOf: [
+              {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  objective: { type: "string", minLength: 1 },
+                  modelOverride: modelOverrideSchema()
+                },
+                required: ["objective"]
+              },
+              { type: "boolean", const: false }
+            ]
           },
           executionPreference: {
             type: "string",
@@ -213,8 +220,8 @@ function requireProviderDependency<T>(provider: string, dependency: string, valu
 type ParsedSpendingLimit = { maxEstimatedCostUsd: number };
 
 type ParsedDelegateTaskInput =
-  | { ok: true; mode: "single"; task: string; modelOverride?: DelegateModelOverride; synthesis?: DelegateSynthesis; spendingLimit?: ParsedSpendingLimit }
-  | { ok: true; mode: "batch"; tasks: DelegateTaskItem[]; synthesis?: DelegateSynthesis; spendingLimit?: ParsedSpendingLimit; recoveredTasksFromJsonString?: boolean }
+  | { ok: true; mode: "single"; task: string; modelOverride?: DelegateModelOverride; synthesis?: DelegateSynthesis | false; spendingLimit?: ParsedSpendingLimit }
+  | { ok: true; mode: "batch"; tasks: DelegateTaskItem[]; synthesis?: DelegateSynthesis | false; spendingLimit?: ParsedSpendingLimit; recoveredTasksFromJsonString?: boolean }
   | { ok: false; error: { ok: false; content: string; metadata: Record<string, unknown> } };
 
 function parseDelegateTaskInput(input: DelegateTaskInput, config: DelegationConfig): ParsedDelegateTaskInput {
@@ -322,10 +329,11 @@ function normalizeSpendingLimit(
 
 function normalizeSynthesis(
   value: unknown
-): { ok: true; value?: DelegateSynthesis } | { ok: false; code: string; message: string } {
+): { ok: true; value?: DelegateSynthesis | false } | { ok: false; code: string; message: string } {
   if (value === undefined) return { ok: true };
+  if (value === false) return { ok: true, value: false };
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return { ok: false, code: "invalid-synthesis", message: "delegate_task synthesis must be an object." };
+    return { ok: false, code: "invalid-synthesis", message: "delegate_task synthesis must be an object or false." };
   }
   const record = value as Record<string, unknown>;
   const unknownKeys = Object.keys(record).filter((key) => key !== "objective" && key !== "modelOverride");

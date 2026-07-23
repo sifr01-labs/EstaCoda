@@ -180,7 +180,7 @@ Output is bounded, redacted, source-labeled, and explicitly marked as untrusted 
 
 ## Delegation Tool
 
-`delegate_task` creates a fixed durable Task graph and returns its handle immediately. It does not run or await a child inside the provider turn. A single request creates one Step; a batch creates independent Steps under one Task. The immutable `executionPreference` is `auto` or `background`: interactive `auto` work is claimed by the process Task host, while `background` bypasses foreground admission. The durable scheduler owns execution, concurrency, cancellation, recovery, results, usage, and settlement.
+`delegate_task` creates a fixed durable Task graph and returns its handle immediately. It does not run or await a child inside the provider turn. A single request creates one Step; a batch creates independent worker Steps plus a terminal synthesis Step unless it explicitly sets `synthesis: false`. The immutable `executionPreference` is `auto` or `background`: interactive `auto` work is claimed by the process Task host, while `background` bypasses foreground admission. The durable scheduler owns execution, concurrency, cancellation, recovery, results, usage, and settlement.
 
 Single-task input:
 
@@ -219,7 +219,7 @@ Fixed fan-out with synthesis:
 }
 ```
 
-When `synthesis` is present, revision 1 contains every independent worker Step plus one `synthesis` agent Step that depends on all of them. The graph is fixed before execution; no running worker may insert a dependency. The synthesis Step receives only bounded dependency metadata and opaque result handles, reads bodies through `task.result.read`, cannot delegate, and becomes runnable only after every worker completes. A terminal worker failure skips synthesis and settles the Task `partial`. The synthesis Result is marked primary on status/UI surfaces and is the only body expanded by completion delivery; intermediate Results remain available by handle.
+A batch creates every independent worker Step plus one terminal `synthesis` agent Step by default. Supplying a synthesis object customizes its objective/model; `"synthesis": false` is the explicit inspection-only opt-out. The graph is fixed before execution, and no running worker may insert a dependency. The synthesis Step receives only bounded dependency metadata and opaque result handles, reads bodies through `task.result.read`, cannot delegate, and becomes runnable only after every worker completes. A terminal worker failure skips synthesis and settles the Task `partial`. The synthesis Result is marked primary on status/UI surfaces and is the only body expanded by completion delivery; intermediate Results remain available by handle.
 
 When `recoverJsonStringTasks` is enabled, `tasks` may be a JSON string containing an array of task objects. Recovery is strict: each object must contain only `task`, `context`, `allowedToolsets`, `allowedTools`, `role`, and `modelOverride`; `context` must be a string when present; tool lists must be arrays of strings; `role` must be `leaf` or `orchestrator`; model overrides must be bounded strings.
 
@@ -229,9 +229,9 @@ Roles, depth, and the Step's immutable child policy are enforced at Task creatio
 
 Worker runtimes use the Task approval policy. Hardline denies run first; an authorized ask is persisted against the Task, Step, and Attempt and releases the lease while waiting.
 
-Batch delegation is bounded by `maxBatchTasks` and `maxConcurrentChildren`. The configured batch size is hard-capped at 10 Steps. Step order is stable, while the Task scheduler runs eligible Steps concurrently and derives `completed`, `partial`, `failed`, or `cancelled` terminal state. A per-turn `maxDelegateCallsPerTurn` cap bounds separate creation calls.
+Batch delegation is bounded by `maxBatchTasks` and `maxConcurrentChildren`. The configured batch size is hard-capped at 10 worker task items; default synthesis adds one terminal Step. Step order is stable, while the Task scheduler runs eligible Steps concurrently and derives `completed`, `partial`, `failed`, or `cancelled` terminal state. A per-turn `maxDelegateCallsPerTurn` cap bounds separate creation calls.
 
-The model-facing result is a bounded handle containing Task ID, queued status, Step count, worker Step IDs, optional synthesis/primary-result Step ID, root/child relationship, and replay status. Full Step outputs are stored by the Task result plane rather than copied into the creating provider turn.
+The model-facing result is a bounded handle containing Task ID, queued status, Step count, worker Step IDs, synthesis/primary-result Step ID when present, root/child relationship, and replay status. Full Step outputs are stored by the Task result plane rather than copied into the creating provider turn.
 
 Attempt heartbeat, timeout, lease, and progress diagnostics are structured and bounded. They do not make the creating provider turn the owner of background execution.
 

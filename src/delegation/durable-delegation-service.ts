@@ -31,6 +31,8 @@ import {
 const STEP_PROVIDER_CALLS = 45;
 const STEP_TOTAL_TOKENS = 1_000_000;
 const STEP_RESULT_BYTES = 1_048_576;
+const DEFAULT_BATCH_SYNTHESIS_OBJECTIVE =
+  "Synthesize all delegated results into one coherent, supported final answer. Resolve overlaps and contradictions instead of concatenating the reports.";
 
 export type ActiveTaskExecution = {
   taskId: string;
@@ -43,7 +45,8 @@ export type DurableDelegationRequest = {
   toolCallId: string;
   originTurnId?: string;
   tasks: readonly DelegateTaskItem[];
-  synthesis?: DelegateSynthesis;
+  /** Multi-Step batches synthesize by default; `false` explicitly creates an inspection-only batch. */
+  synthesis?: DelegateSynthesis | false;
   trustedWorkspace: boolean;
   recoveredTasksFromJsonString?: boolean;
   executionPreference?: TaskExecutionPreference;
@@ -123,7 +126,7 @@ export class DurableDelegationService {
   create(request: DurableDelegationRequest): DurableDelegationHandle {
     if (!request.trustedWorkspace) throw new Error("Durable delegation requires a trusted workspace.");
     if (request.tasks.length === 0 || request.tasks.length > this.#config.maxBatchTasks) {
-      throw new Error(`Durable delegation requires 1-${this.#config.maxBatchTasks} Steps.`);
+      throw new Error(`Durable delegation requires 1-${this.#config.maxBatchTasks} task items.`);
     }
     boundedToken(request.toolCallId, "provider tool call ID");
     const sessionId = boundedToken(this.#creatorSessionId(), "creator session ID");
@@ -141,18 +144,19 @@ export class DurableDelegationService {
     }
     const creationKey = delegationCreationKey(this.#store.profileId, sessionId, request.toolCallId);
     const existing = this.#store.getTaskByCreationKey(creationKey);
+    const synthesis = resolveDelegationSynthesis(this.#store, request, existing);
     const initialHostLease = existing === null && executionPreference === "auto"
       ? this.#taskHostAdmission?.()
       : undefined;
     const stepAuthorities = request.tasks.map((item) => this.#authorityFor(item, parent?.authority));
-    const synthesisAuthority = request.synthesis === undefined
+    const synthesisAuthority = synthesis === undefined
       ? undefined
-      : this.#synthesisAuthority(request.synthesis, parent?.authority);
+      : this.#synthesisAuthority(synthesis, parent?.authority);
     const allAuthorities = synthesisAuthority === undefined
       ? stepAuthorities
       : [...stepAuthorities, synthesisAuthority];
     const taskAuthority = mergeAuthorities(allAuthorities);
-    const totalStepCount = request.tasks.length + (request.synthesis === undefined ? 0 : 1);
+    const totalStepCount = request.tasks.length + (synthesis === undefined ? 0 : 1);
     const executionLimits = delegationExecutionLimits(
       totalStepCount,
       this.#config.maxConcurrentChildren,
@@ -184,7 +188,7 @@ export class DurableDelegationService {
         executionLimits: executionLimits.step,
         retryPolicy: delegatedRetryPolicy(idempotency),
         failurePolicy: {
-          onAttemptsExhausted: request.tasks.length === 1 && request.synthesis === undefined ? "fail_task" : "mark_partial",
+          onAttemptsExhausted: request.tasks.length === 1 && synthesis === undefined ? "fail_task" : "mark_partial",
           optional: false
         },
         idempotency,
@@ -194,22 +198,22 @@ export class DurableDelegationService {
     const synthesisIdempotency = synthesisAuthority === undefined
       ? undefined
       : delegatedStepIdempotency(synthesisAuthority);
-    const steps: FixedTaskStepInput[] = request.synthesis === undefined ? workerSteps : [
+    const steps: FixedTaskStepInput[] = synthesis === undefined ? workerSteps : [
       ...workerSteps,
       {
         key: "synthesis",
         title: "Synthesize delegated results",
-        objective: synthesisObjective(request.synthesis),
+        objective: synthesisObjective(synthesis),
         dependsOn: workerSteps.map((step) => step.key),
         executor: {
           kind: "agent",
           role: "synthesis",
-          ...(request.synthesis.modelOverride === undefined ? {} : {
+          ...(synthesis.modelOverride === undefined ? {} : {
             model: {
-              ...(request.synthesis.modelOverride.provider === undefined
+              ...(synthesis.modelOverride.provider === undefined
                 ? {}
-                : { provider: request.synthesis.modelOverride.provider }),
-              id: request.synthesis.modelOverride.model
+                : { provider: synthesis.modelOverride.provider }),
+              id: synthesis.modelOverride.model
             }
           })
         },
@@ -227,8 +231,8 @@ export class DurableDelegationService {
       source: "delegation",
       executionPreference,
       creationKey,
-      objective: request.synthesis !== undefined
-        ? synthesisObjective(request.synthesis)
+      objective: synthesis !== undefined
+        ? synthesisObjective(synthesis)
         : request.tasks.length === 1
         ? delegatedObjective(request.tasks[0]!)
         : `Complete ${request.tasks.length} delegated Steps as one durable Task.`,
@@ -241,7 +245,7 @@ export class DurableDelegationService {
       ...(initialHostLease === undefined ? {} : { initialHostLease }),
       ...(parent === undefined && request.originTurnId !== undefined ? { originTurnId: request.originTurnId } : {}),
       ...(completionDestination === undefined ||
-          (completionDestination.platform === "cli" && (parent !== undefined || request.synthesis === undefined)) ? {} : {
+          (completionDestination.platform === "cli" && (parent !== undefined || synthesis === undefined)) ? {} : {
         completionDelivery: {
           deliveryKey: TASK_ORIGIN_COMPLETION_DELIVERY_KEY,
           destination: completionDestination
@@ -477,6 +481,22 @@ function synthesisObjective(synthesis: DelegateSynthesis): string {
     throw new Error(`A synthesis objective must be 1-${TASK_GRAPH_LIMITS.maxStepObjectiveChars} characters.`);
   }
   return objective;
+}
+
+function resolveDelegationSynthesis(
+  store: TaskStore,
+  request: DurableDelegationRequest,
+  existing: ReturnType<TaskStore["getTaskByCreationKey"]>
+): DelegateSynthesis | undefined {
+  if (request.synthesis === false) return undefined;
+  if (request.synthesis !== undefined) return request.synthesis;
+  if (request.tasks.length < 2) return undefined;
+  if (existing !== null && existing.activePlanRevisionId !== undefined) {
+    const existingHasSynthesis = store.listSteps(existing.id, existing.activePlanRevisionId)
+      .some((step) => step.executor.role === "synthesis");
+    if (!existingHasSynthesis) return undefined;
+  }
+  return { objective: DEFAULT_BATCH_SYNTHESIS_OBJECTIVE };
 }
 
 function handle(

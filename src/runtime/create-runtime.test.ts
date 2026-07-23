@@ -2901,14 +2901,25 @@ describe("createRuntime MCP trust gating", () => {
       };
       const first = await runtime.executeTool?.(request);
       const replay = await runtime.executeTool?.(request);
-      const firstHandle = first?.result?.metadata as { taskId?: string; status?: string; stepCount?: number } | undefined;
+      const firstHandle = first?.result?.metadata as {
+        taskId?: string;
+        status?: string;
+        stepCount?: number;
+        synthesisStepId?: string;
+        primaryResultStepId?: string;
+      } | undefined;
       const replayHandle = replay?.result?.metadata as { taskId?: string; idempotentReplay?: boolean } | undefined;
       const taskStore = new SQLiteTaskStore({ db: sessionDb.db, profileId: "default" });
       const task = taskStore.getTask(firstHandle?.taskId ?? "missing");
       const steps = task === null ? [] : taskStore.listSteps(task.id, task.activePlanRevisionId ?? "missing");
 
       expect(first?.result?.ok).toBe(true);
-      expect(firstHandle).toMatchObject({ status: "queued", stepCount: 2 });
+      expect(firstHandle).toMatchObject({
+        status: "queued",
+        stepCount: 3,
+        synthesisStepId: expect.any(String),
+        primaryResultStepId: expect.any(String),
+      });
       expect(replayHandle).toMatchObject({ taskId: firstHandle?.taskId, idempotentReplay: true });
       expect(task).toMatchObject({ source: "delegation", status: "queued", creatorSessionId: runtime.sessionId });
       expect(taskStore.getTaskHostLease(task!.id)).toMatchObject({
@@ -2916,8 +2927,9 @@ describe("createRuntime MCP trust gating", () => {
         kind: "foreground",
         fencingToken: 1
       });
-      expect(steps.map((step) => step.executor.role)).toEqual(["worker", "orchestrator"]);
+      expect(steps.map((step) => step.executor.role)).toEqual(["worker", "orchestrator", "synthesis"]);
       expect(steps[1]?.executor.model).toEqual({ id: "mock-model" });
+      expect(new Set(steps[2]?.dependsOn)).toEqual(new Set([steps[0]?.id, steps[1]?.id]));
       expect(onTaskCreated).toHaveBeenCalledTimes(2);
       expect(taskHostAdmission).toHaveBeenCalledTimes(1);
       expect(onTaskCreated).toHaveBeenNthCalledWith(1, firstHandle?.taskId);
@@ -2928,7 +2940,7 @@ describe("createRuntime MCP trust gating", () => {
     }
   });
 
-  it("binds synthesized local delegation to the interactive session completion outbox", async () => {
+  it("binds default batch synthesis to the CLI outbox and honors the inspection-only opt-out", async () => {
     const options = await minimalRuntimeOptions();
     const sessionDb = await createSQLiteSessionDB({ path: join(options.workspaceRoot, "cli-completion-sessions.sqlite") });
     await sessionDb.createSession({ id: options.sessionId, profileId: "default" });
@@ -2943,14 +2955,24 @@ describe("createRuntime MCP trust gating", () => {
         tool: "delegate_task",
         toolInput: {
           tasks: [{ task: "Research the first source." }, { task: "Research the second source." }],
-          synthesis: { objective: "Return one supported answer." },
         },
         toolCallId: "cli-synthesis-completion-1",
       });
-      const taskId = (delegated?.result?.metadata as { taskId?: string } | undefined)?.taskId;
+      const delegatedHandle = delegated?.result?.metadata as {
+        taskId?: string;
+        stepCount?: number;
+        synthesisStepId?: string;
+        primaryResultStepId?: string;
+      } | undefined;
+      const taskId = delegatedHandle?.taskId;
       if (taskId === undefined) throw new Error("Expected durable Task ID.");
       const store = new SQLiteTaskStore({ db: sessionDb.db, profileId: "default" });
 
+      expect(delegatedHandle).toMatchObject({
+        stepCount: 3,
+        synthesisStepId: expect.any(String),
+        primaryResultStepId: expect.any(String),
+      });
       expect(store.listDeliveryBindings({ taskId })).toEqual([
         expect.objectContaining({
           authorizedSessionId: runtime.sessionId,
@@ -2962,6 +2984,23 @@ describe("createRuntime MCP trust gating", () => {
       expect(runtime.drainTaskSessionCompletions).toBeTypeOf("function");
       expect(runtime.acknowledgeTaskSessionCompletion).toBeTypeOf("function");
       await expect(runtime.drainTaskSessionCompletions?.()).resolves.toEqual([]);
+
+      const inspectionOnly = await runtime.executeTool?.({
+        tool: "delegate_task",
+        toolInput: {
+          tasks: [{ task: "Inspect the first source." }, { task: "Inspect the second source." }],
+          synthesis: false,
+        },
+        toolCallId: "cli-inspection-only-1",
+      });
+      const inspectionHandle = inspectionOnly?.result?.metadata as {
+        taskId?: string;
+        stepCount?: number;
+        synthesisStepId?: string;
+      } | undefined;
+      expect(inspectionHandle).toMatchObject({ stepCount: 2 });
+      expect(inspectionHandle?.synthesisStepId).toBeUndefined();
+      expect(store.listDeliveryBindings({ taskId: inspectionHandle!.taskId! })).toEqual([]);
     } finally {
       await runtime.dispose();
     }

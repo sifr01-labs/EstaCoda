@@ -39,19 +39,20 @@ describe("DurableDelegationService", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("persists a batch as one queued Task and replays a provider call idempotently", () => {
+  it("persists an explicitly inspection-only batch and replays a provider call idempotently", () => {
     const service = rootService(store);
     const first = service.create({
       toolCallId: "call-1",
       originTurnId: "visible-turn-alpha",
       trustedWorkspace: true,
-      tasks: [{ task: "Read A" }, { task: "Read B", role: "orchestrator" }]
+      tasks: [{ task: "Read A" }, { task: "Read B", role: "orchestrator" }],
+      synthesis: false,
     });
     const replay = service.create({
       toolCallId: "call-1",
       originTurnId: "visible-turn-alpha",
       trustedWorkspace: true,
-      tasks: [{ task: "Read A" }, { task: "Read B", role: "orchestrator" }]
+      tasks: [{ task: "Read A" }, { task: "Read B", role: "orchestrator" }],
     });
     const task = store.getTask(first.taskId)!;
     const steps = store.listSteps(task.id, task.activePlanRevisionId!);
@@ -242,12 +243,39 @@ describe("DurableDelegationService", () => {
     expect(service.create(request)).toMatchObject({ taskId: handle.taskId, idempotentReplay: true });
   });
 
+  it("adds terminal synthesis to a multi-Step batch when the caller omits it", () => {
+    const service = rootService(store);
+    const request = {
+      toolCallId: "call-default-synthesis",
+      trustedWorkspace: true as const,
+      tasks: [{ task: "Research A" }, { task: "Research B" }, { task: "Research C" }],
+    };
+    const handle = service.create(request);
+    const task = store.getTask(handle.taskId)!;
+    const steps = store.listSteps(task.id, task.activePlanRevisionId!);
+    const workers = steps.filter((step) => step.executor.role === "worker");
+    const synthesis = steps.find((step) => step.executor.role === "synthesis");
+
+    expect(handle).toMatchObject({
+      stepCount: 4,
+      workerStepIds: workers.map((step) => step.id),
+      synthesisStepId: synthesis?.id,
+      primaryResultStepId: synthesis?.id,
+    });
+    expect(synthesis).toMatchObject({
+      title: "Synthesize delegated results",
+      executor: { kind: "agent", role: "synthesis" },
+    });
+    expect(new Set(synthesis?.dependsOn)).toEqual(new Set(workers.map((step) => step.id)));
+    expect(task.objective).toContain("one coherent, supported final answer");
+    expect(service.create(request)).toMatchObject({ taskId: handle.taskId, idempotentReplay: true });
+  });
+
   it("runs workers before synthesis and preserves the graph and primary Result across restart", async () => {
     const handle = rootService(store).create({
       toolCallId: "call-restart-synthesis",
       trustedWorkspace: true,
       tasks: [{ task: "Research A" }, { task: "Research B" }],
-      synthesis: { objective: "Return one answer grounded in both worker Results." }
     });
     const workerExecutor = new FakeTaskStepExecutor(({ step }) => ({
       outcome: "succeeded",

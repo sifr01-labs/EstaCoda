@@ -20,7 +20,12 @@ describe("createDelegationTools", () => {
         allowedTools: { type: "array" },
         role: { enum: ["leaf", "orchestrator"] },
         modelOverride: { required: ["model"] },
-        synthesis: { required: ["objective"] },
+        synthesis: {
+          oneOf: [
+            expect.objectContaining({ required: ["objective"] }),
+            { type: "boolean", const: false }
+          ]
+        },
         executionPreference: { enum: ["auto", "background"] },
         spendingLimit: { required: ["maxEstimatedCostUsd"] }
       }
@@ -82,6 +87,17 @@ describe("createDelegationTools", () => {
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
       synthesis: { objective: "Compare A and B.", modelOverride: { model: "synth-model" } }
     }));
+  });
+
+  it("forwards an explicit inspection-only opt-out for a batch", async () => {
+    const create = vi.fn(() => handle("task-inspection", 2));
+    const [tool] = tools(create);
+    await tool!.run({
+      tasks: [{ task: "Inspect A" }, { task: "Inspect B" }],
+      synthesis: false,
+    }, { toolCallId: "provider-call-inspection" });
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ synthesis: false }));
   });
 
   it("creates one durable Step and returns the Task handle without waiting", async () => {
@@ -151,6 +167,7 @@ describe("createDelegationTools", () => {
     [{ tasks: [{ task: "" }] }, "empty-task-string"],
     [{ tasks: [{ task: "A", role: "invalid" }] }, "invalid-task-object"],
     [{ task: "A", synthesis: {} }, "invalid-synthesis"],
+    [{ task: "A", synthesis: true }, "invalid-synthesis"],
     [{ task: "A", synthesis: { objective: "S", extra: true } }, "invalid-synthesis"],
     [{ task: "A", executionPreference: "later" }, "invalid-execution-preference"],
     [{ modelOverride: { model: "x".repeat(MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH + 1) }, task: "A" }, "invalid-model-override"],
