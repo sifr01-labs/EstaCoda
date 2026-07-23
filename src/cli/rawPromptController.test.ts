@@ -216,6 +216,25 @@ function startPendingOperatorConsoleRead(options: Partial<RawPromptControllerOpt
 }
 
 describe("raw prompt controller", () => {
+  it("writes durable asynchronous output and restores the active input draft", async () => {
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const controller = new RawPromptController({ input, output, lifecycle: lifecycle.lifecycle });
+    const pending = controller.read("> ");
+
+    input.send("unfinished draft");
+    expect(controller.writeDurable("Settled Task answer.")).toBe(true);
+    const rendered = output.writes.join("");
+    expect(rendered).toContain("Settled Task answer.\n");
+    expect(rendered.lastIndexOf("> unfinished draft")).toBeGreaterThan(rendered.indexOf("Settled Task answer.\n"));
+    input.send("\r");
+
+    await expect(pending).resolves.toEqual({ type: "submit", text: "unfinished draft" });
+    expect(controller.writeDurable("too late")).toBe(false);
+    expect(output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
   it("gives the modal Task inspector first input priority and returns safely to the prompt", async () => {
     const read = startPendingOperatorConsoleRead({
       operatorConsole: {

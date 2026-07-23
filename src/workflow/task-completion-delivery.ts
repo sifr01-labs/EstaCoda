@@ -105,6 +105,7 @@ export class TaskCompletionDeliveryService {
   recoverInterrupted(): number {
     let recovered = 0;
     for (const binding of this.#store.listDeliveryBindings({ statuses: ["delivering"], limit: 1_000 })) {
+      if (binding.destination.platform === "cli") continue;
       this.#store.settleDeliveryBinding({
         id: binding.id,
         status: "failed",
@@ -126,6 +127,7 @@ export class TaskCompletionDeliveryService {
     };
     const pending = this.#store.listDeliveryBindings({ statuses: ["pending"], limit: 1_000 });
     for (const candidate of pending) {
+      if (candidate.destination.platform === "cli") continue;
       const claimed = this.#store.claimDeliveryBinding(candidate.id, this.#now().toISOString());
       if (claimed === null) continue;
       result.claimed++;
@@ -300,6 +302,9 @@ function copy(locale: "en" | "ar", english: string, arabic: string): string {
 }
 
 function validateDestination(destination: TaskDeliveryDestination): TaskDeliveryDestination {
+  if (destination.platform === "cli") {
+    throw new Error("Local CLI Task delivery is handled by the authorized interactive session.");
+  }
   if (destination.platform === "email") {
     const address = boundedToken(destination.address, "email delivery address", 320);
     if (destination.chatId !== undefined || destination.threadId !== undefined) {
@@ -318,6 +323,9 @@ function validateDestination(destination: TaskDeliveryDestination): TaskDelivery
 }
 
 function toDeliveryTarget(destination: TaskDeliveryDestination): DeliveryTarget {
+  if (destination.platform === "cli") {
+    throw new Error("Local CLI Task delivery cannot be routed to an external channel.");
+  }
   return destination.platform === "email"
     ? { kind: "channel", platform: "email", address: destination.address }
     : {

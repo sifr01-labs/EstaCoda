@@ -90,6 +90,7 @@ export function createPapyrusPrompt(options: CreatePapyrusPromptOptions = {}): P
         });
         output.write(`${renderer.render(buildOnboardingPromptCardViewModel(contextualCard))}\n`);
       },
+      writeDurable: (text: string) => rawPrompt.writeDurable?.(text) ?? false,
       close: () => {
         rawPrompt.close?.();
         secretPrompt.close?.();

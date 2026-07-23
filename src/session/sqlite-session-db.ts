@@ -217,6 +217,11 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     return row === null ? undefined : rowToSession(row);
   }
 
+  async getMessage(id: string): Promise<SessionMessage | undefined> {
+    const row = this.#db.query<MessageRow>("select * from messages where id = ?").get(id);
+    return row === null ? undefined : rowToMessage(row);
+  }
+
   async listSessions(profileId?: string): Promise<SessionRecord[]> {
     const rows =
       profileId === undefined

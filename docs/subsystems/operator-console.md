@@ -396,6 +396,19 @@ accepted result summaries remain available in inspection. The parent panel
 opens whole-Task inspection. Before synthesis becomes active, and after it
 settles, the ordinary seven-row Subagent presentation remains in effect.
 
+An interactive CLI delegation with an explicit synthesis Step also receives a
+durable local completion binding. Once the Task has settled and its accepted
+synthesis Result is available, the authorized creator session appends that
+Result once as an ordinary assistant transcript message. Intermediate worker
+Results remain in Task inspection and are never concatenated into the session
+reply. Delivery follows verified transcript-compression lineage, preserves an
+in-progress prompt draft, and uses a deterministic message identity so a crash
+between append and outbox settlement cannot duplicate the transcript message.
+The outbox is acknowledged only after display; if that display was interrupted,
+recovery may safely show the same durable answer again after the claim becomes
+stale. A settled Result is displayed normally; the CLI does not replay
+completed text as fake token streaming.
+
 One to three Subagents stack vertically. Four to six use two equal-width,
 column-major columns when both remain readable. A third column is added only at
 a readable width; otherwise the surface keeps complete seven-row cards and

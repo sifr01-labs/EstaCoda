@@ -120,6 +120,7 @@ export class RawPromptController {
   readonly #operatorConsole: RawPromptOperatorConsoleOptions | undefined;
   readonly #escapeCancels: boolean;
   #closeActiveRead: (() => void) | undefined;
+  #writeActiveRead: ((text: string) => void) | undefined;
 
   constructor(options: RawPromptControllerOptions) {
     this.#input = options.input;
@@ -138,6 +139,12 @@ export class RawPromptController {
 
   close(): void {
     this.#closeActiveRead?.();
+  }
+
+  writeDurable(text: string): boolean {
+    if (this.#writeActiveRead === undefined) return false;
+    this.#writeActiveRead(text);
+    return true;
   }
 
   async read(question: string, options?: PromptOptions): Promise<RawPromptResult> {
@@ -233,6 +240,12 @@ export class RawPromptController {
       options?.onRowsChange?.(rows);
     };
 
+    this.#writeActiveRead = (text) => {
+      renderLoop.clear();
+      this.#output.write(text.endsWith("\n") ? text : `${text}\n`);
+      render();
+    };
+
     render();
 
     try {
@@ -240,6 +253,7 @@ export class RawPromptController {
       if (this.#operatorConsole?.enabled === true) this.#lifecycle.resetMouseTracking();
     } catch (error) {
       stopStatusTicker();
+      this.#writeActiveRead = undefined;
       renderLoop.clear();
       this.#lifecycle.stop();
       throw error;
@@ -366,6 +380,7 @@ export class RawPromptController {
 
       const cleanup = () => {
         this.#closeActiveRead = undefined;
+        this.#writeActiveRead = undefined;
         keypressDispatcher?.dispose();
         stopStatusTicker();
         detachDataListener(this.#input, onData);
@@ -681,6 +696,7 @@ export function createRawPrompt(options: RawPromptControllerOptions & { uiContex
     {
       uiContext,
       submit,
+      writeDurable: (text: string) => controller.writeDurable(text),
       close: () => controller.close(),
     }
   );

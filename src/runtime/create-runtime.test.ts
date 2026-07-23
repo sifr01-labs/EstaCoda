@@ -2928,6 +2928,45 @@ describe("createRuntime MCP trust gating", () => {
     }
   });
 
+  it("binds synthesized local delegation to the interactive session completion outbox", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = await createSQLiteSessionDB({ path: join(options.workspaceRoot, "cli-completion-sessions.sqlite") });
+    await sessionDb.createSession({ id: options.sessionId, profileId: "default" });
+    const runtime = await createRuntime({
+      ...options,
+      sessionDb,
+      enableTaskSessionCompletion: true,
+    });
+    try {
+      await runtime.trustWorkspace?.();
+      const delegated = await runtime.executeTool?.({
+        tool: "delegate_task",
+        toolInput: {
+          tasks: [{ task: "Research the first source." }, { task: "Research the second source." }],
+          synthesis: { objective: "Return one supported answer." },
+        },
+        toolCallId: "cli-synthesis-completion-1",
+      });
+      const taskId = (delegated?.result?.metadata as { taskId?: string } | undefined)?.taskId;
+      if (taskId === undefined) throw new Error("Expected durable Task ID.");
+      const store = new SQLiteTaskStore({ db: sessionDb.db, profileId: "default" });
+
+      expect(store.listDeliveryBindings({ taskId })).toEqual([
+        expect.objectContaining({
+          authorizedSessionId: runtime.sessionId,
+          deliveryKey: "origin-completion",
+          destination: { platform: "cli" },
+          status: "pending",
+        }),
+      ]);
+      expect(runtime.drainTaskSessionCompletions).toBeTypeOf("function");
+      expect(runtime.acknowledgeTaskSessionCompletion).toBeTypeOf("function");
+      await expect(runtime.drainTaskSessionCompletions?.()).resolves.toEqual([]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("activates operator-created Tasks through the process hook", async () => {
     const options = await minimalRuntimeOptions();
     const sessionDb = await createSQLiteSessionDB({ path: join(options.workspaceRoot, "operator-task-sessions.sqlite") });

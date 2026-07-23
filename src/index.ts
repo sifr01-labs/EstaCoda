@@ -267,6 +267,7 @@ async function main(): Promise<void> {
       approvalController: cliApprovalController,
       workspaceTrusted: nowTrusted,
       taskBackgroundContinuation: taskBackgroundHost === "active" ? "available" : "unavailable",
+      enableTaskSessionCompletion: argv.length === 0 && canRunInteractive(),
       taskHostAdmission: foregroundTaskAdmission,
       onTaskCreated: activateForegroundTask
     });

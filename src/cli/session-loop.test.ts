@@ -1562,6 +1562,78 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     expect(rendered).not.toContain("+----------------------------------------------------------+");
   });
 
+  it("renders a delivered Task synthesis as a normal assistant message before the next prompt", async () => {
+    const outputChunks: string[] = [];
+    const drainTaskSessionCompletions = vi.fn()
+      .mockResolvedValueOnce([{
+        bindingId: "delivery-1",
+        messageId: "task-completion-1",
+        taskId: "task-1",
+        resultId: "result-synthesis",
+        text: "The three reports agree on explicit provenance and review gates.",
+      }])
+      .mockResolvedValue([]);
+    const acknowledgeTaskSessionCompletion = vi.fn(async () => undefined);
+    const runtime = createMockRuntime({ drainTaskSessionCompletions, acknowledgeTaskSessionCompletion });
+    const prompt = Object.assign(async () => "/exit", {
+      writeDurable: vi.fn(() => false),
+      close: () => {},
+    });
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+      } as NodeJS.WritableStream,
+      prompt,
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("EstaCoda");
+    expect(rendered).toContain("The three reports agree on explicit provenance and review gates.");
+    expect(rendered).toContain("Ending EstaCoda session.");
+    expect(drainTaskSessionCompletions).toHaveBeenCalled();
+    expect(acknowledgeTaskSessionCompletion).toHaveBeenCalledWith({
+      bindingId: "delivery-1",
+      messageId: "task-completion-1",
+    });
+  });
+
+  it("does not acknowledge a Task synthesis when its terminal write fails", async () => {
+    const acknowledgeTaskSessionCompletion = vi.fn(async () => undefined);
+    const runtime = createMockRuntime({
+      drainTaskSessionCompletions: vi.fn()
+        .mockResolvedValueOnce([{
+          bindingId: "delivery-1",
+          messageId: "task-completion-1",
+          taskId: "task-1",
+          resultId: "result-synthesis",
+          text: "Durable answer awaiting display.",
+        }])
+        .mockResolvedValue([]),
+      acknowledgeTaskSessionCompletion,
+    });
+    const prompt = Object.assign(async () => "/exit", {
+      writeDurable: vi.fn(() => {
+        throw new Error("terminal unavailable");
+      }),
+      close: () => {},
+    });
+
+    await runSessionLoop({
+      runtime,
+      output: { write: () => true } as unknown as NodeJS.WritableStream,
+      prompt,
+      close: () => {},
+    });
+
+    expect(acknowledgeTaskSessionCompletion).not.toHaveBeenCalled();
+  });
+
   it("does not render a user prompt rail for slash commands", async () => {
     const outputChunks: string[] = [];
     const runtime = createMockRuntime();

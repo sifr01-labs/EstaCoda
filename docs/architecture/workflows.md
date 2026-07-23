@@ -84,6 +84,19 @@ Result creation first writes and verifies private prepared bodies without publis
 
 `task.result.read` requires both the Task and Result IDs. The active session must have a profile-owned `TaskSessionLink` to that Task. Access survives transcript-preserving compaction only when every lineage hop has the same profile, a matching `parentSessionId` and `compactedFromSessionId`, and a parent ended for compression; ordinary parent/child session relationships grant nothing. Missing, cross-profile, and unauthorized records share the same error. Text and JSON are returned in bounded Unicode-character pages; binary artifacts remain durable but are not transported through a text tool. Read metadata includes the Result disposition and an explicit warning for diagnostic output. Pruned and expired Results are unavailable.
 
+Interactive CLI Tasks that have one terminal answer use the same durable
+completion outbox as external delivery, with a local `cli` destination bound to
+the creator session. The CLI consumer accepts only that session or its verified
+compression descendants, reads the accepted synthesis Result (or the sole
+accepted Result for an operator-created single-Step Task), and appends one
+deterministically identified `agent` message to the active transcript. Local
+claims are safely retryable, and the CLI acknowledges the outbox only after it
+has written the ordinary assistant response. A crash cannot duplicate the
+transcript message; an unacknowledged terminal display may be replayed after
+the stale-claim window. External delivery workers ignore local bindings. This
+keeps the final answer in subsequent model context without exposing
+intermediate or diagnostic Results.
+
 ## Scheduler core
 
 `TaskScheduler.dispatchOnce()` performs one bounded reconciliation and dispatch pass. It derives ready Steps from completed dependencies, creates deterministic dispatch keys, acquires fenced Attempt leases, starts available executors within profile, Task-tree, Task, executor, and provider concurrency limits, and returns a durable dispatch confirmation without waiting for provider or tool execution to finish. Hosts may restrict the pass to the exact Task IDs for which they already hold scheduling ownership; reconciliation and dispatch leave every other Task untouched. The returned completion promise reports settlement for the independently running batch. `runOnce()` remains the completion-waiting compatibility surface used by the current gateway host. Every agent Attempt reserves at least one provider call for budget enforcement even if an executor reports incomplete usage.

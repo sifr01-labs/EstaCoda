@@ -41,6 +41,8 @@ export type Prompt = ((question: string, options?: PromptOptions) => Promise<str
   submit?: (question: string, options?: PromptOptions) => Promise<PromptSubmission>;
   select?: <T>(input: SelectPromptInput<T>) => Promise<T>;
   onboardingCard?: (input: BuildOnboardingPromptCardInput) => Promise<void> | void;
+  /** Writes settled asynchronous output without discarding an active input draft. */
+  writeDurable?: (text: string) => boolean;
   close?: () => void;
 };
 
@@ -58,6 +60,9 @@ export function withPromptUiContext(prompt: Prompt, uiContext: PromptUiContext):
       onboardingCard: prompt.onboardingCard === undefined
         ? undefined
         : (card: BuildOnboardingPromptCardInput) => prompt.onboardingCard!(applyPromptUiContext(card, uiContext)),
+      writeDurable: prompt.writeDurable === undefined
+        ? undefined
+        : (text: string) => prompt.writeDurable!(text),
       close: () => prompt.close?.(),
     }
   );

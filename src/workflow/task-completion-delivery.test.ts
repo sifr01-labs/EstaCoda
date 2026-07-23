@@ -119,6 +119,28 @@ describe("TaskCompletionDeliveryService", () => {
     expect(text).not.toContain("Intermediate worker evidence");
   });
 
+  it("leaves local CLI completion bindings for the interactive session", async () => {
+    resultService.record({ taskId: "task-alpha", kind: "text", content: "Local answer." });
+    completeTask();
+    store.atomicWrite((transaction) => transaction.createDeliveryBinding({
+      id: "delivery-cli",
+      profileId: "alpha",
+      taskId: "task-alpha",
+      authorizedSessionId: "creator-alpha",
+      deliveryKey: "local-completion",
+      destination: { platform: "cli" },
+      status: "pending",
+      createdAt: NOW,
+      updatedAt: NOW,
+    }));
+    const deliverText = vi.fn(async (_targets: DeliveryTarget[], _text: string) => new Map());
+    const service = createService(deliverText);
+
+    await expect(service.runOnce()).resolves.toEqual({ recovered: 0, claimed: 0, delivered: 0, failed: 0 });
+    expect(deliverText).not.toHaveBeenCalled();
+    expect(store.getDeliveryBinding("delivery-cli")?.status).toBe("pending");
+  });
+
   it("keeps delivery pending until its Task reaches a terminal state", async () => {
     const deliverText = vi.fn(async (_targets: DeliveryTarget[], _text: string) =>
       new Map([["telegram:chat-1", { success: true }]]));

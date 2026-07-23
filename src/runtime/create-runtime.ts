@@ -76,6 +76,10 @@ import { SkillLearningManager, type SkillAutonomy } from "../skills/skill-learni
 import { availableToolsetsFromTools } from "../cron/cron-runtime-validation.js";
 import { SQLiteTaskStore } from "../workflow/sqlite-task-store.js";
 import { TaskResultService } from "../workflow/task-result-service.js";
+import {
+  TaskSessionCompletionService,
+  type TaskSessionCompletionMessage,
+} from "../workflow/task-session-completion.js";
 import { TaskOperatorService, type TaskStatusProjection } from "../workflow/task-operator-service.js";
 import type { InitialTaskHostLeaseInput } from "../workflow/task-store.js";
 import { AgentStepExecutor } from "../workflow/agent-step-executor.js";
@@ -216,6 +220,8 @@ export type RuntimeOptions = {
   taskHostAdmission?: () => InitialTaskHostLeaseInput | undefined;
   /** Process-local view of whether a compatible gateway can continue durable Tasks. */
   taskBackgroundContinuation?: TaskStatusProjection["backgroundContinuation"];
+  /** Enables a durable local completion outbox for the interactive CLI session. */
+  enableTaskSessionCompletion?: boolean;
 };
 
 type RuntimeBranding = Pick<
@@ -322,6 +328,8 @@ export type Runtime = {
   taskAgentExecutor?: AgentStepExecutor;
   taskOperator?: TaskOperatorService;
   beginTask?(objective: string, options?: { executionPreference?: TaskExecutionPreference }): Promise<TaskStatusProjection>;
+  drainTaskSessionCompletions?(): Promise<readonly TaskSessionCompletionMessage[]>;
+  acknowledgeTaskSessionCompletion?(input: { bindingId: string; messageId: string }): Promise<void>;
   /** Scopes Task provenance to one authorized surface invocation, including cached runtimes. */
   withTaskCreationOrigin?<T>(origin: TaskCreationOrigin, work: () => Promise<T>): Promise<T>;
 };
@@ -340,6 +348,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const defaultTaskCreationOrigin = normalizeTaskCreationOrigin(options.taskCreationOrigin);
   const taskCreationOriginContext = new AsyncLocalStorage<TaskCreationOrigin>();
   const currentTaskCreationOrigin = () => taskCreationOriginContext.getStore() ?? defaultTaskCreationOrigin;
+  const currentTaskCompletionDestination = (): TaskDeliveryDestination | undefined => {
+    const origin = currentTaskCreationOrigin();
+    if (origin.completionDestination !== undefined) return origin.completionDestination;
+    return options.enableTaskSessionCompletion === true && origin.source === "cli"
+      ? { platform: "cli" }
+      : undefined;
+  };
   let observedRuntimeSessionId = sessionId;
   const sessionDb = options.sessionDb ?? new InMemorySessionDB();
   const taskStore = sessionDb instanceof SQLiteSessionDB
@@ -355,6 +370,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         profileId,
         contentRoot: profilePaths.taskResultsPath,
         sessionDb
+      });
+  const taskSessionCompletionService = !(sessionDb instanceof SQLiteSessionDB) || taskStore === undefined || taskResultService === undefined ||
+      options.enableTaskSessionCompletion !== true
+    ? undefined
+    : new TaskSessionCompletionService({
+        store: taskStore,
+        resultService: taskResultService,
+        sessionDb,
+        profileId,
       });
   const taskOperatorService = taskStore === undefined ? undefined : new TaskOperatorService({
     store: taskStore,
@@ -995,7 +1019,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           config: options.delegationConfig ?? DEFAULT_DELEGATION_CONFIG,
           defaultTaskSpendingLimit: options.budgets?.task,
           visibleTools: () => toolRegistry.list(),
-          completionDestination: () => currentTaskCreationOrigin().completionDestination,
+          completionDestination: currentTaskCompletionDestination,
           executionPreference: () => currentTaskCreationOrigin().source === "gateway" ? "background" : "auto",
           backgroundContinuation: () => options.taskBackgroundContinuation ?? "unknown",
           taskHostAdmission: options.taskHostAdmission,
@@ -1061,6 +1085,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     sessionDb,
     taskAgentExecutor,
     taskOperator: taskOperatorService,
+    drainTaskSessionCompletions: taskSessionCompletionService === undefined
+      ? undefined
+      : () => taskSessionCompletionService.deliverPending(sessionRuntimeContext.currentSessionId()),
+    acknowledgeTaskSessionCompletion: taskSessionCompletionService === undefined
+      ? undefined
+      : (input) => taskSessionCompletionService.acknowledge({
+          sessionId: sessionRuntimeContext.currentSessionId(),
+          ...input,
+        }),
     beginTask: taskOperatorService === undefined || taskWorkspace === undefined
       ? undefined
       : async (objective, beginOptions = {}) => {
@@ -1077,7 +1110,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             source: origin.source,
             executionPreference,
             ...(initialHostLease === undefined ? {} : { initialHostLease }),
-            completionDestination: origin.completionDestination
+            completionDestination: currentTaskCompletionDestination()
           });
           if (task.executionPreference === "auto") await options.onTaskCreated?.(task.taskId);
           return taskOperatorService.status(task.taskId, sessionRuntimeContext.currentSessionId());

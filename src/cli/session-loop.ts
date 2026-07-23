@@ -174,6 +174,7 @@ export type SessionLoopOptions = {
 
 const OPERATOR_CONSOLE_FALLBACK_TERMINAL_HEIGHT = 24;
 const OPERATOR_CONSOLE_TASK_REFRESH_INTERVAL_MS = 750;
+const TASK_SESSION_COMPLETION_REFRESH_INTERVAL_MS = 750;
 const SESSION_COST_REFRESH_INTERVAL_MS = 750;
 const WORKSPACE_STATUS_REFRESH_INTERVAL_MS = 5_000;
 const COMPACTION_PROMPT_PLACEHOLDER = "Compacting session history... Ctrl+C to cancel";
@@ -491,6 +492,35 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         },
       }),
   });
+  let taskSessionCompletionRefresh: Promise<void> | undefined;
+  const refreshTaskSessionCompletions = (): Promise<void> => {
+    if (taskSessionCompletionRefresh !== undefined) return taskSessionCompletionRefresh;
+    const targetRuntime = runtime;
+    if (targetRuntime.drainTaskSessionCompletions === undefined) return Promise.resolve();
+    taskSessionCompletionRefresh = targetRuntime.drainTaskSessionCompletions()
+      .then(async (messages) => {
+        if (runtime !== targetRuntime) return;
+        for (const message of messages) {
+          const rendered = renderer.render(buildAssistantResponseViewModel({
+            label: targetRuntime.getStartup().agentName,
+            text: message.text,
+          }));
+          if (prompt.writeDurable?.(rendered) !== true) {
+            output.write(rendered.endsWith("\n") ? rendered : `${rendered}\n`);
+          }
+          await targetRuntime.acknowledgeTaskSessionCompletion?.({
+            bindingId: message.bindingId,
+            messageId: message.messageId,
+          });
+        }
+        if (messages.length > 0) cachedTaskCardsAtMs = Number.NEGATIVE_INFINITY;
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (taskSessionCompletionRefresh !== undefined) taskSessionCompletionRefresh = undefined;
+      });
+    return taskSessionCompletionRefresh;
+  };
   const close = options.close ?? (() => prompt.close?.());
   const onSigint = () => {
     if (activeTurn !== undefined) {
@@ -582,19 +612,28 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         runtime,
         homeDir: options.homeDir
       });
-      submittedInput = await readNextCliInput({
-        voiceMode: turnVoiceMode,
-        prompt,
-        promptPrefix,
-        renderer,
-        useColor,
-        runtime,
-        output,
-        homeDir: options.homeDir,
-        workspaceRoot: options.workspaceRoot,
-        cliVoice: options.cliVoice,
-        inputPlaceholder,
-      });
+      await refreshTaskSessionCompletions();
+      const taskSessionCompletionTicker = prompt.writeDurable === undefined || runtime.drainTaskSessionCompletions === undefined
+        ? undefined
+        : setInterval(() => void refreshTaskSessionCompletions(), TASK_SESSION_COMPLETION_REFRESH_INTERVAL_MS);
+      try {
+        submittedInput = await readNextCliInput({
+          voiceMode: turnVoiceMode,
+          prompt,
+          promptPrefix,
+          renderer,
+          useColor,
+          runtime,
+          output,
+          homeDir: options.homeDir,
+          workspaceRoot: options.workspaceRoot,
+          cliVoice: options.cliVoice,
+          inputPlaceholder,
+        });
+      } finally {
+        if (taskSessionCompletionTicker !== undefined) clearInterval(taskSessionCompletionTicker);
+        await taskSessionCompletionRefresh;
+      }
       stopIdleStatusTicker();
 
       const text = submittedInput.text;

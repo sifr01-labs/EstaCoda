@@ -423,7 +423,8 @@ export type TaskDeliveryStatus = "pending" | "delivering" | "delivered" | "faile
 export const TASK_ORIGIN_COMPLETION_DELIVERY_KEY = "origin-completion";
 
 export type TaskDeliveryDestination = {
-  platform: "telegram" | "discord" | "whatsapp" | "email";
+  /** `cli` is a local, durable creator-session delivery; all other values are external channels. */
+  platform: "cli" | "telegram" | "discord" | "whatsapp" | "email";
   chatId?: string;
   threadId?: string;
   address?: string;
@@ -451,6 +452,9 @@ export type TaskDeliveryBinding = {
 export function isTaskDeliveryDestination(value: unknown): value is TaskDeliveryDestination {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Partial<TaskDeliveryDestination>;
+  if (candidate.platform === "cli") {
+    return candidate.chatId === undefined && candidate.threadId === undefined && candidate.address === undefined;
+  }
   if (candidate.platform === "email") {
     return isBoundedDeliveryToken(candidate.address, 320) &&
       candidate.chatId === undefined && candidate.threadId === undefined;

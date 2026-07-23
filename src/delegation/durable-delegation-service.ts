@@ -240,7 +240,8 @@ export class DurableDelegationService {
       planReason: "Created by delegate_task as durable delegated work.",
       ...(initialHostLease === undefined ? {} : { initialHostLease }),
       ...(parent === undefined && request.originTurnId !== undefined ? { originTurnId: request.originTurnId } : {}),
-      ...(completionDestination === undefined ? {} : {
+      ...(completionDestination === undefined ||
+          (completionDestination.platform === "cli" && (parent !== undefined || request.synthesis === undefined)) ? {} : {
         completionDelivery: {
           deliveryKey: TASK_ORIGIN_COMPLETION_DELIVERY_KEY,
           destination: completionDestination
