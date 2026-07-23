@@ -27,6 +27,7 @@ import {
   type TaskStepExecutor
 } from "./task-step-executor.js";
 import { taskActivityFromDelegationProgress } from "./task-safe-activity.js";
+import { deriveTaskResultSummary } from "../utils/task-result-summary.js";
 
 const MAX_DEPENDENCY_RESULT_REFERENCES = 64;
 const MAX_TASK_GUIDANCE_RECORDS_IN_CONTEXT = 16;
@@ -449,7 +450,7 @@ function dependencyContext(store: TaskStore, task: Task, step: TaskStep): string
 function resultInstruction(step: TaskStep): string {
   switch (step.resultPolicy.kind) {
     case "none": return "Complete the Step without producing a durable result body.";
-    case "text": return "Return the complete durable Step result as final response text.";
+    case "text": return "Return the complete durable Step result as final response text. Begin with a concise plain-language summary paragraph without Markdown, then provide supporting detail.";
     case "json": return "Return only one valid JSON value as the final response.";
     case "artifact": return "Create the declared artifact result; the final response may briefly summarize it.";
   }
@@ -466,7 +467,14 @@ async function captureResults(
   if (policy.kind === "text") {
     return text.length === 0
       ? { results: [] }
-      : { results: [{ kind: "text", content: text, mimeType: "text/plain; charset=utf-8" }] };
+      : {
+          results: [{
+            kind: "text",
+            content: text,
+            mimeType: "text/plain; charset=utf-8",
+            summary: deriveTaskResultSummary(text)
+          }]
+        };
   }
   if (policy.kind === "json") {
     if (text.length === 0) return { results: [] };

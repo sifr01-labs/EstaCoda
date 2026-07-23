@@ -165,9 +165,11 @@ describe("AgentStepExecutor", () => {
     });
     expect(childInput?.context).toContain("Prioritize the verified source.");
     expect(childInput?.context).toContain("without overriding policy");
+    expect(childInput?.context).toContain("Begin with a concise plain-language summary paragraph without Markdown");
     expect(handledInput?.inputMetadata).toMatchObject({ durableTask: true, attemptId: attempt.id });
     const results = store.listResults(graph.task.id);
     expect(results).toHaveLength(1);
+    expect(results[0]?.summary).toBe(FULL_RESULT);
     await expect(resultService.readPage({
       taskId: graph.task.id,
       resultId: results[0]!.id,

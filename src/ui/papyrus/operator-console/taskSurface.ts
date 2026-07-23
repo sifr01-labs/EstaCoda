@@ -30,6 +30,7 @@ import {
   renderSubagentInspectionSurface,
   subagentInspectionContentLines,
 } from "./subagentInspectionSurface.js";
+import { deriveTaskResultSummary } from "../../../utils/task-result-summary.js";
 
 const SUBAGENT_CARD_HEIGHT = 7;
 const SUBAGENT_ACTIVITY_ROWS = 3;
@@ -59,7 +60,6 @@ type TaskCopy = {
   delegatedProgressCompact: (completed: number, settled: number, total: number) => string;
   phaseLabel: (phase: TaskCardState["phase"]["name"]) => string;
   earlierActivities: string;
-  noEarlierActivity: string;
   waitingForActivity: string;
   resultReady: string;
   resultUnavailable: string;
@@ -89,11 +89,10 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
       : `${settled}/${total} settled`,
     phaseLabel: (phase) => phase.replaceAll("_", " "),
     earlierActivities: "earlier activities",
-    noEarlierActivity: "no earlier activity",
     waitingForActivity: "Waiting for safe activity",
-    resultReady: "Result ready",
+    resultReady: "Summary",
     resultUnavailable: "Result unavailable",
-    noResultSummary: "No result summary available",
+    noResultSummary: "Open to inspect the full result",
     parentSynthesis: "Parent synthesis",
     preparingSynthesis: (count) => `Preparing to synthesize ${count} Subagent ${count === 1 ? "result" : "results"}`,
     synthesizingResults: (count) => `Synthesizing ${count} Subagent ${count === 1 ? "result" : "results"}`,
@@ -117,11 +116,10 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
       : `${settled}/${total} مستقرة`,
     phaseLabel: localizedArabicTaskPhase,
     earlierActivities: "أنشطة سابقة",
-    noEarlierActivity: "لا يوجد نشاط سابق",
     waitingForActivity: "بانتظار نشاط آمن",
-    resultReady: "النتيجة جاهزة",
+    resultReady: "الملخص",
     resultUnavailable: "النتيجة غير متاحة",
-    noResultSummary: "لا يتوفر ملخص للنتيجة",
+    noResultSummary: "افتح لفحص النتيجة الكاملة",
     parentSynthesis: "تجميع الوكيل الرئيسي",
     preparingSynthesis: (count) => `يتم التحضير لتجميع ${count} من نتائج الوكلاء الفرعيين`,
     synthesizingResults: (count) => `يتم تجميع ${count} من نتائج الوكلاء الفرعيين`,
@@ -1514,11 +1512,9 @@ function formatSubagentHistoryCount(
   copy: TaskCopy,
   style: OperatorConsoleStyle | undefined
 ): string {
+  if (hiddenCount <= 0) return "";
   const glyph = style?.tokens.contract.glyph.continuation ?? "...";
-  const text = hiddenCount > 0
-    ? `${glyph} +${hiddenCount} ${copy.earlierActivities}`
-    : `${glyph} ${copy.noEarlierActivity}`;
-  return styleMuted(style, text);
+  return styleMuted(style, `${glyph} +${hiddenCount} ${copy.earlierActivities}`);
 }
 
 function formatSubagentActivity(
@@ -1576,22 +1572,17 @@ function formatSettledSubagentSummary(
   width: number,
   style: OperatorConsoleStyle | undefined
 ): readonly string[] {
-  const resultSummary = normalizeCardText(
+  const rawResultSummary =
     subagent.results.find((result) => result.primary && result.disposition === "accepted")?.summary ??
     subagent.results.find((result) => result.disposition === "accepted")?.summary ??
     subagent.results.find((result) => result.primary)?.summary ??
-    subagent.results.find((result) => result.summary !== undefined)?.summary
-  );
-  const preview = normalizeCardText(
-    subagent.assistantPreview ??
-    subagent.latestAttempt?.assistantPreview
-  );
-  const summary = resultSummary ?? preview ?? copy.noResultSummary;
+    subagent.results.find((result) => result.summary !== undefined)?.summary;
+  const summary = deriveTaskResultSummary(
+    rawResultSummary,
+    Math.max(24, width * SUBAGENT_ACTIVITY_ROWS - 6)
+  ) ?? copy.noResultSummary;
   const wrapped = wrapText(summary, width);
   const visible = wrapped.slice(0, SUBAGENT_ACTIVITY_ROWS);
-  if (wrapped.length > SUBAGENT_ACTIVITY_ROWS && visible.length > 0) {
-    visible[visible.length - 1] = truncateVisible(`${visible[visible.length - 1]}…`, width, "…");
-  }
   return Array.from({ length: SUBAGENT_ACTIVITY_ROWS }, (_, index) => {
     const line = visible[index];
     return line === undefined ? "" : `  ${styleSecondary(style, line)}`;

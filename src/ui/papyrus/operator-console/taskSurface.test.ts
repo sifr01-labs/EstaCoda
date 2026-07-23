@@ -232,6 +232,8 @@ describe("durable Task surfaces", () => {
 
     expect(before).toContain("Subagent 1");
     expect(after).toContain("Subagent 1");
+    expect(before).not.toContain("no earlier activity");
+    expect(after).not.toContain("no earlier activity");
     expect(before).toContain("Reading package.json");
     expect(after).toContain("Editing dashboard route");
     expect(after).not.toContain("Reading package.json");
@@ -290,7 +292,7 @@ describe("durable Task surfaces", () => {
 
     expect(lines).toHaveLength(8);
     expect(lines.slice(1)).toHaveLength(7);
-    expect(text).toContain("Result ready");
+    expect(text).toContain("Summary");
     expect(compactText).toContain("Found that EstaCoda already has strong file and profile boundaries");
     expect(compactText).toContain("memory writes need explicit provenance and review semantics");
     expect(compactText).toContain("Produced 7 recommendations.");
@@ -298,6 +300,58 @@ describe("durable Task surfaces", () => {
     expect(text).not.toContain("Worker finished");
     expect(text).not.toContain("Usage recorded");
     expect(text).toContain("completed · 03:18");
+  });
+
+  it("cleans legacy result summaries instead of exposing raw Markdown fragments", () => {
+    const subagent = makeSubagent(1, {
+      status: "completed",
+      assistantPreview: "…verything) | Progressive-disclosure skills...",
+      results: [{
+        id: "result-legacy",
+        handle: "result://legacy",
+        kind: "summary",
+        disposition: "accepted",
+        status: "available",
+        byteLength: 240,
+        primary: true,
+        summary: "## Summary\n\n**Compared [leading agent harnesses](https://example.com) across extension systems, persistent memory, lifecycle hooks, and trust boundaries.**",
+      }],
+    });
+    const text = stripAnsi(renderTaskCardSurface(
+      { cards: [makeCard({ subagents: [subagent] })], scrollOffset: 0 },
+      { width: 72 }
+    ).join("\n"));
+    const compactText = text.replace(/\s+/gu, " ");
+
+    expect(compactText).toContain("Compared leading agent harnesses across extension systems");
+    expect(compactText).toContain("lifecycle hooks, and trust boundaries.");
+    expect(text).not.toContain("##");
+    expect(text).not.toContain("**");
+    expect(text).not.toContain("https://");
+    expect(text).not.toContain("…verything");
+  });
+
+  it("does not reuse an arbitrary streaming tail when a legacy result lacks a summary", () => {
+    const subagent = makeSubagent(1, {
+      status: "completed",
+      assistantPreview: "…firmation gates are not optional.**",
+      results: [{
+        id: "result-without-summary",
+        handle: "result://without-summary",
+        kind: "summary",
+        disposition: "accepted",
+        status: "available",
+        byteLength: 240,
+        primary: true,
+      }],
+    });
+    const text = stripAnsi(renderTaskCardSurface(
+      { cards: [makeCard({ subagents: [subagent] })], scrollOffset: 0 },
+      { width: 72 }
+    ).join("\n"));
+
+    expect(text).toContain("Open to inspect the full result");
+    expect(text).not.toContain("…firmation gates");
   });
 
   it("surfaces active parent synthesis and collapses settled Subagent cards", () => {
@@ -323,7 +377,7 @@ describe("durable Task surfaces", () => {
     expect(text).toContain("Preparing final response");
     expect(text).not.toContain("Usage recorded");
     expect(text.match(/Subagent [123]/gu)).toHaveLength(3);
-    expect(text).not.toContain("Result ready");
+    expect(text).not.toContain("Summary");
     expect(text).not.toContain("Accepted worker summary");
     expect(inspection).toContain("synthesizing");
     expect(inspection).toContain("3 of 3 delegated Steps completed");
