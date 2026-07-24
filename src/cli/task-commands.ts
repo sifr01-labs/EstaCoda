@@ -163,6 +163,11 @@ export async function executeTaskCommand(context: TaskCommandContext): Promise<{
           `${copy(locale, "Execution preference", "تفضيل التنفيذ")}: ${technical(locale, task.executionPreference)}`,
           `${copy(locale, "Foreground owner", "مالك التنفيذ الأمامي")}: ${copy(locale, task.foregroundOwnerActive ? "active" : "inactive", task.foregroundOwnerActive ? "نشط" : "غير نشط")}`,
           `${copy(locale, "Background continuation", "الاستمرار في الخلفية")}: ${technical(locale, continuation)}`,
+          task.activationFailure === undefined
+            ? undefined
+            : copy(locale,
+                "Foreground activation failed after durable Task creation; use this Task handle to inspect or resume it.",
+                "فشل تفعيل التنفيذ الأمامي بعد إنشاء المهمة الدائمة؛ استخدم معرّف المهمة هذا لفحصها أو استئنافها."),
           `${copy(locale, "Steps", "الخطوات")}: ${task.progress.total}`,
           task.executionWaitingReason === undefined
             ? undefined

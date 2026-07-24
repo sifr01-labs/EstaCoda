@@ -3088,6 +3088,31 @@ describe("createRuntime MCP trust gating", () => {
     }
   });
 
+  it("returns an operator Task handle when post-commit foreground activation fails", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = await createSQLiteSessionDB({ path: join(options.workspaceRoot, "operator-task-activation-failure.sqlite") });
+    await sessionDb.createSession({ id: options.sessionId, profileId: "default" });
+    const onTaskCreated = vi.fn(async () => {
+      throw new Error("sensitive foreground activation detail");
+    });
+    const runtime = await createRuntime({ ...options, sessionDb, onTaskCreated });
+    try {
+      await runtime.trustWorkspace?.();
+      const task = await runtime.beginTask?.("Remain durable after activation failure.");
+      const taskStore = new SQLiteTaskStore({ db: sessionDb.db, profileId: "default" });
+
+      expect(task).toMatchObject({
+        status: "queued",
+        activationFailure: "post-commit-activation-failed"
+      });
+      expect(JSON.stringify(task)).not.toContain("sensitive foreground activation detail");
+      expect(taskStore.getTask(task!.taskId)).toMatchObject({ id: task!.taskId, status: "queued" });
+      expect(onTaskCreated).toHaveBeenCalledWith(task?.taskId);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("sends explicitly background operator Tasks directly to the gateway path", async () => {
     const options = await minimalRuntimeOptions();
     const sessionDb = await createSQLiteSessionDB({ path: join(options.workspaceRoot, "background-operator-task-sessions.sqlite") });

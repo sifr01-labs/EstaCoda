@@ -174,6 +174,9 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
             `Execution: ${settled ? "settled" : handle.execution}`,
             `Execution preference: ${handle.executionPreference}`,
             `Background continuation: ${handle.backgroundContinuation}`,
+            ...(handle.activationFailure === undefined ? [] : [
+              "Foreground activation failed after durable Task creation; use this Task handle to inspect or resume it."
+            ]),
             ...(handle.executionWaitingReason === undefined ? [] : [`Waiting reason: ${handle.executionWaitingReason}`]),
             `Steps: ${handle.stepCount}`,
             ...(handle.synthesisStepId === undefined ? [] : [

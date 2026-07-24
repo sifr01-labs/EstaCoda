@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,7 +40,7 @@ describe("DurableDelegationService", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("persists an explicitly inspection-only batch and replays a provider call idempotently", () => {
+  it("scopes provider-call idempotency to the visible turn", async () => {
     const service = rootService(store);
     const first = service.create({
       toolCallId: "call-1",
@@ -94,6 +95,51 @@ describe("DurableDelegationService", () => {
       trustedWorkspace: true,
       tasks: [{ task: "Read A" }, { task: "Read B", role: "orchestrator" }]
     })).toThrow(FixedTaskCreationConflictError);
+
+    await sessionDb.appendMessage({
+      id: "visible-turn-beta",
+      sessionId: "parent",
+      role: "user",
+      content: "Delegate the same provider call identity in a later turn"
+    });
+    const nextTurnRequest = {
+      toolCallId: "call-1",
+      originTurnId: "visible-turn-beta",
+      trustedWorkspace: true,
+      tasks: [{ task: "Read A" }, { task: "Read B", role: "orchestrator" }],
+      synthesis: false
+    } as const;
+    const nextTurn = service.create(nextTurnRequest);
+    expect(nextTurn).toMatchObject({ idempotentReplay: false });
+    expect(nextTurn.taskId).not.toBe(first.taskId);
+    expect(store.getTask(nextTurn.taskId)?.originTurnId).toBe("visible-turn-beta");
+    expect(service.create(nextTurnRequest)).toMatchObject({
+      taskId: nextTurn.taskId,
+      idempotentReplay: true
+    });
+    expect(store.listTasks()).toHaveLength(2);
+  });
+
+  it("preserves an exact same-turn replay created with the legacy creation key", () => {
+    const service = rootService(store);
+    const request = {
+      toolCallId: "legacy-call",
+      originTurnId: "visible-turn-alpha",
+      trustedWorkspace: true as const,
+      tasks: [{ task: "Recover the existing durable Task" }]
+    };
+    const first = service.create(request);
+    const legacyDigest = createHash("sha256")
+      .update("alpha\u0000parent\u0000legacy-call")
+      .digest("hex");
+    sessionDb.db.query("update tasks set creation_key = ? where id = ?")
+      .run(`delegate:${legacyDigest}`, first.taskId);
+
+    expect(service.create(request)).toMatchObject({
+      taskId: first.taskId,
+      idempotentReplay: true
+    });
+    expect(store.listTasks()).toHaveLength(1);
   });
 
   it("snapshots the configured root spending limit and only permits finite narrowing", () => {
@@ -178,6 +224,47 @@ describe("DurableDelegationService", () => {
 
     expect(activated).toHaveBeenCalledWith(handle.taskId);
     expect(taskHostAdmission).toHaveBeenCalledOnce();
+  });
+
+  it("returns the durable handle with a redacted marker when post-commit activation fails", async () => {
+    let shouldFail = true;
+    const activated = vi.fn(async () => {
+      if (shouldFail) {
+        shouldFail = false;
+        throw new Error("sensitive foreground activation detail");
+      }
+    });
+    const service = new DurableDelegationService({
+      store,
+      creatorSessionId: () => "parent",
+      workspace: workspace(),
+      config: DEFAULT_DELEGATION_CONFIG,
+      visibleTools,
+      backgroundContinuation: () => "available",
+      onTaskCreated: activated
+    });
+    const request = {
+      toolCallId: "call-activation-failure",
+      originTurnId: "visible-turn-alpha",
+      trustedWorkspace: true as const,
+      tasks: [{ task: "Remain durable when activation fails" }]
+    };
+
+    const first = await service.createAndActivate(request);
+    expect(first).toMatchObject({
+      status: "queued",
+      execution: "waiting",
+      activationFailure: "post-commit-activation-failed",
+      idempotentReplay: false
+    });
+    expect(JSON.stringify(first)).not.toContain("sensitive foreground activation detail");
+    expect(store.getTask(first.taskId)).toMatchObject({ id: first.taskId, status: "queued" });
+
+    const replay = await service.createAndActivate(request);
+    expect(replay).toMatchObject({ taskId: first.taskId, idempotentReplay: true });
+    expect(replay).not.toHaveProperty("activationFailure");
+    expect(activated).toHaveBeenCalledTimes(2);
+    expect(store.listTasks()).toHaveLength(1);
   });
 
   it("persists direct-background preference, skips foreground activation, and replay-checks it", async () => {

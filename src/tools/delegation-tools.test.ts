@@ -129,6 +129,23 @@ describe("createDelegationTools", () => {
     });
   });
 
+  it("reports post-commit activation failure while returning the durable Task handle", async () => {
+    const create = vi.fn(() => ({
+      ...handle("task-durable-after-activation-failure", 1),
+      activationFailure: "post-commit-activation-failed" as const
+    }));
+    const [tool] = tools(create);
+
+    const result = await tool!.run({ task: "Start durable work" }, {
+      toolCallId: "provider-call-activation-failure",
+      visibleTurnId: "visible-turn-activation-failure"
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("Created durable Task task-durable-after-activation-failure");
+    expect(result.content).toContain("Foreground activation failed after durable Task creation");
+  });
+
   it("normalizes a batch and forwards JSON recovery metadata", async () => {
     const create = vi.fn(() => handle("task-batch", 2));
     const [tool] = tools(create);

@@ -251,6 +251,34 @@ describe("Task commands", () => {
     db.close();
   });
 
+  it("reports a post-commit activation failure without losing the created Task handle", async () => {
+    const db = await createSQLiteSessionDB({ path: join(root, "activation-failure.sqlite") });
+    await db.createSession({ id: "owner", profileId: "alpha" });
+    const service = new TaskOperatorService({
+      store: new SQLiteTaskStore({ db: db.db, profileId: "alpha" })
+    });
+    const task = service.begin({
+      objective: "Remain durable after activation failure",
+      workspace: { canonicalPath: root, identityHash: "workspace-hash" },
+      creatorSessionId: "owner"
+    });
+
+    const result = await executeTaskCommand({
+      args: ["begin", "Remain", "durable"],
+      service,
+      authorizedSessionId: "owner",
+      begin: async () => ({
+        task: { ...task, activationFailure: "post-commit-activation-failed" },
+        creatorSessionId: "owner"
+      })
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain(`Created Task: ${task.taskId}`);
+    expect(result.output).toContain("Foreground activation failed after durable Task creation");
+    db.close();
+  });
+
   it("does not let an in-session command select a different creator session", async () => {
     const db = await createSQLiteSessionDB({ path: join(root, "sessions.sqlite") });
     const service = new TaskOperatorService({

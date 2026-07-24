@@ -1112,7 +1112,16 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             ...(initialHostLease === undefined ? {} : { initialHostLease }),
             completionDestination: currentTaskCompletionDestination()
           });
-          if (task.executionPreference === "auto") await options.onTaskCreated?.(task.taskId);
+          if (task.executionPreference === "auto" && options.onTaskCreated !== undefined) {
+            try {
+              await options.onTaskCreated(task.taskId);
+            } catch {
+              return {
+                ...task,
+                activationFailure: "post-commit-activation-failed"
+              };
+            }
+          }
           return taskOperatorService.status(task.taskId, sessionRuntimeContext.currentSessionId());
         },
     withTaskCreationOrigin(origin, work) {

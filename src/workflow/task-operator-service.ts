@@ -76,6 +76,8 @@ export type TaskStatusProjection = {
   foregroundOwnerActive: boolean;
   backgroundContinuation: "available" | "unavailable" | "unknown";
   executionWaitingReason?: string;
+  /** Present only on the immediate response when post-commit foreground activation fails. */
+  activationFailure?: "post-commit-activation-failed";
   parentTaskId?: string;
   childTasks: readonly {
     taskId: string;
