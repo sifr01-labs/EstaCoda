@@ -1,8 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import type { ModelProfile, ResolvedModelRoute } from "../contracts/provider.js";
+import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import { capabilityFirstDefaults } from "../contracts/security.js";
 import type {
   Task,
@@ -21,6 +23,7 @@ import type {
   CreateChildAgentLoopInput
 } from "../runtime/agent-loop-factory.js";
 import type { AgentLoopRouteInput } from "../runtime/agent-loop-builder.js";
+import { SubagentRegistry } from "../delegation/subagent-registry.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { createTaskResultTools } from "../tools/task-result-tools.js";
 import {
@@ -32,6 +35,8 @@ import { TaskResultService } from "./task-result-service.js";
 import { TaskApprovalService } from "./task-approval-service.js";
 import { TaskScheduler } from "./task-scheduler.js";
 import { TASK_STEP_HOST_HANDOFF_ABORT_REASON } from "./task-step-executor.js";
+import type { TaskStore } from "./task-store.js";
+import { taskDelegationDepth } from "./task-tree-accounting.js";
 
 describe("AgentStepExecutor", () => {
   let tempDir: string;
@@ -153,6 +158,7 @@ describe("AgentStepExecutor", () => {
       attemptId: attempt.id
     }));
     expect(childInput).toMatchObject({
+      depth: 1,
       modelOverride: { provider: "openai", model: "child-model" },
       parentVisibleTools: [{ name: "file.read" }],
       taskExecution: {
@@ -192,6 +198,164 @@ describe("AgentStepExecutor", () => {
     expect(assistantActivities).toHaveLength(MAX_PERSISTED_ASSISTANT_PREVIEWS_PER_ATTEMPT);
     expect(JSON.stringify(assistantActivities)).not.toContain("hunter2");
     expect(cleanup).toHaveBeenCalledOnce();
+  });
+
+  it("propagates the durable Task ancestry depth through construction, registry, and progress", async () => {
+    const lineage = makeNestedLineage(3);
+    const nestedStore = taskStoreWithLineage(store, lineage);
+    const graph = lineage[lineage.length - 1]!;
+    expect(lineage.map((candidate) => taskDelegationDepth(
+      nestedStore,
+      candidate.task,
+      candidate.steps[0]!
+    ))).toEqual([1, 2, 3]);
+    const registry = new SubagentRegistry();
+    const registerSubagent = vi.spyOn(registry, "registerSubagent");
+    const events: RuntimeEvent[] = [];
+    let childInput: CreateChildAgentLoopInput | undefined;
+    const childFactory: ChildAgentLoopFactory = {
+      createChild: vi.fn(async (input) => {
+        childInput = input;
+        await sessionDb.createSession({
+          id: "worker-depth-three",
+          profileId: input.profileId,
+          parentSessionId: input.parentSessionId,
+          metadata: { kind: "task-step-worker", ...(input.taskExecution ?? {}), depth: input.depth }
+        });
+        return childRuntime(async (agentInput) => {
+          await agentInput.onEvent?.({ kind: "tool-start", tool: "file.read" });
+          return response();
+        }, async () => undefined, {
+          sessionId: "worker-depth-three",
+          trajectoryId: "trajectory-depth-three"
+        });
+      })
+    };
+    const executor = new AgentStepExecutor({
+      childFactory,
+      sessionDb,
+      taskStore: nestedStore,
+      hostWorkspace: graph.task.workspace,
+      isWorkspaceTrusted: () => true,
+      parentVisibleTools: () => tools(),
+      subagentRegistry: registry,
+      onEvent: async (event) => { events.push(event); },
+      approvalService: new TaskApprovalService({ store: nestedStore }),
+      securityPolicy: capabilityFirstDefaults,
+      now
+    });
+
+    await expect(executor.execute({
+      task: graph.task,
+      step: graph.steps[0]!,
+      attempt: attempt(graph),
+      signal: new AbortController().signal,
+      heartbeat: vi.fn(),
+      checkpoint: vi.fn()
+    })).resolves.toMatchObject({ outcome: "succeeded", workerSessionId: "worker-depth-three" });
+
+    expect(childInput).toMatchObject({ depth: 3 });
+    expect(registerSubagent).toHaveBeenCalledWith(expect.objectContaining({ depth: 3 }));
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "delegation-progress",
+      depth: 3,
+      taskId: graph.task.id,
+      stepId: graph.steps[0]!.id
+    }));
+  });
+
+  it("fails closed instead of guessing a depth when durable Task ancestry is invalid", async () => {
+    const lineage = makeNestedLineage(2);
+    const nestedStore = taskStoreWithLineage(store, lineage);
+    const graph = lineage[1]!;
+    const task = { ...graph.task, parentTaskId: "missing-parent" };
+    const createChild = vi.fn();
+    const executor = new AgentStepExecutor({
+      childFactory: { createChild },
+      sessionDb,
+      taskStore: nestedStore,
+      hostWorkspace: graph.task.workspace,
+      isWorkspaceTrusted: () => true,
+      parentVisibleTools: () => tools(),
+      approvalService: new TaskApprovalService({ store: nestedStore }),
+      securityPolicy: capabilityFirstDefaults
+    });
+
+    await expect(executor.execute({
+      task,
+      step: graph.steps[0]!,
+      attempt: attempt({ ...graph, task }),
+      signal: new AbortController().signal,
+      heartbeat: vi.fn(),
+      checkpoint: vi.fn()
+    })).resolves.toMatchObject({
+      outcome: "failed",
+      failure: { class: "task-lineage-invalid", retryable: false }
+    });
+    expect(createChild).not.toHaveBeenCalled();
+  });
+
+  it("records the durable Task ancestry depth in timeout diagnostics", async () => {
+    vi.useFakeTimers();
+    try {
+      const lineage = makeNestedLineage(3);
+      const nestedStore = taskStoreWithLineage(store, lineage);
+      const graph = lineage[lineage.length - 1]!;
+      const childFactory: ChildAgentLoopFactory = {
+        createChild: vi.fn(async (input) => {
+          await sessionDb.createSession({
+            id: "worker-depth-timeout",
+            profileId: input.profileId,
+            parentSessionId: input.parentSessionId,
+            metadata: { kind: "task-step-worker", ...(input.taskExecution ?? {}), depth: input.depth }
+          });
+          return childRuntime(
+            async () => await new Promise<AgentLoopResponse>(() => undefined),
+            async () => undefined,
+            { sessionId: "worker-depth-timeout", trajectoryId: "trajectory-depth-timeout" }
+          );
+        })
+      };
+      const executor = new AgentStepExecutor({
+        childFactory,
+        sessionDb,
+        taskStore: nestedStore,
+        hostWorkspace: graph.task.workspace,
+        isWorkspaceTrusted: () => true,
+        parentVisibleTools: () => tools(),
+        delegationConfig: { ...DEFAULT_DELEGATION_CONFIG, childTimeoutSeconds: 1 },
+        diagnosticsRoot: tempDir,
+        approvalService: new TaskApprovalService({ store: nestedStore }),
+        securityPolicy: capabilityFirstDefaults,
+        now
+      });
+
+      const execution = executor.execute({
+        task: graph.task,
+        step: graph.steps[0]!,
+        attempt: attempt(graph),
+        signal: new AbortController().signal,
+        heartbeat: vi.fn(),
+        checkpoint: vi.fn()
+      });
+      await vi.advanceTimersByTimeAsync(1_001);
+
+      await expect(execution).resolves.toMatchObject({
+        outcome: "failed",
+        failure: { class: "timeout" },
+        workerSessionId: "worker-depth-timeout"
+      });
+      const diagnosticFiles = readdirSync(join(tempDir, "delegation"));
+      expect(diagnosticFiles).toHaveLength(1);
+      const diagnostic = JSON.parse(readFileSync(join(tempDir, "delegation", diagnosticFiles[0]!), "utf8")) as
+        Record<string, unknown>;
+      expect(diagnostic).toMatchObject({
+        reason: "timeout",
+        depth: 3
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("gives dependent Steps directly executable Task result read inputs without exposing opaque handles", async () => {
@@ -978,6 +1142,77 @@ function makeGraph(): { task: Task; revision: TaskPlanRevision; steps: TaskStep[
     updatedAt: NOW
   };
   return { task, revision, steps: [step] };
+}
+
+function makeNestedLineage(depth: number): ReturnType<typeof makeGraph>[] {
+  if (!Number.isSafeInteger(depth) || depth < 1) throw new Error("Nested test depth must be positive.");
+  const lineage: ReturnType<typeof makeGraph>[] = [];
+  for (let level = 1; level <= depth; level++) {
+    const base = makeGraph();
+    const parent = lineage[level - 2];
+    const taskId = `task-depth-${level}`;
+    const revisionId = `revision-depth-${level}`;
+    const stepId = `step-depth-${level}`;
+    const parentAttemptId = parent === undefined ? undefined : `lineage-attempt-${level - 1}`;
+    const task: Task = {
+      ...base.task,
+      id: taskId,
+      rootTaskId: parent?.task.rootTaskId ?? taskId,
+      ...(parent === undefined ? {} : { parentTaskId: parent.task.id, parentAttemptId }),
+      source: parent === undefined ? "cli" : "delegation",
+      creationKey: `create-depth-${level}`,
+      activePlanRevisionId: revisionId,
+      createdBy: parent === undefined
+        ? base.task.createdBy
+        : { kind: "agent", sessionId: "creator-alpha", taskId: parent.task.id, attemptId: parentAttemptId }
+    };
+    const revision: TaskPlanRevision = {
+      ...base.revision,
+      id: revisionId,
+      taskId,
+      createdBy: task.createdBy
+    };
+    const step: TaskStep = {
+      ...base.steps[0]!,
+      id: stepId,
+      taskId,
+      planRevisionId: revisionId
+    };
+    lineage.push({ task, revision, steps: [step] });
+  }
+  return lineage;
+}
+
+function taskStoreWithLineage(
+  base: SQLiteTaskStore,
+  lineage: readonly ReturnType<typeof makeGraph>[]
+): TaskStore {
+  const tasks = new Map(lineage.map((graph) => [graph.task.id, graph.task]));
+  const steps = new Map(lineage.map((graph) => [graph.steps[0]!.id, graph.steps[0]!]));
+  const attempts = new Map(lineage.slice(0, -1).map((graph, index) => {
+    const value = {
+      ...attempt(graph),
+      id: `lineage-attempt-${index + 1}`,
+      dispatchKey: `lineage-dispatch-${index + 1}`,
+      lease: undefined
+    } satisfies TaskAttempt;
+    return [value.id, value] as const;
+  }));
+  return new Proxy(base, {
+    get(target, property) {
+      if (property === "getTask") {
+        return (id: string) => tasks.get(id) ?? target.getTask(id);
+      }
+      if (property === "getStep") {
+        return (id: string) => steps.get(id) ?? target.getStep(id);
+      }
+      if (property === "getAttempt") {
+        return (id: string) => attempts.get(id) ?? target.getAttempt(id);
+      }
+      const value = Reflect.get(target, property, target) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    }
+  }) as TaskStore;
 }
 
 function makeDependencyGraph(): ReturnType<typeof makeGraph> {

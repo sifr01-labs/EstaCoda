@@ -81,3 +81,8 @@ export function listTaskExecutionScopes(
   if (current.id !== task.rootTaskId) throw new Error("Task budget lineage does not reach its declared root.");
   return scopes;
 }
+
+/** Root Task workers are depth one; each durable parent Task adds one nesting level. */
+export function taskDelegationDepth(store: TaskStore, task: Task, step: TaskStep): number {
+  return listTaskExecutionScopes(store, task, step).length;
+}

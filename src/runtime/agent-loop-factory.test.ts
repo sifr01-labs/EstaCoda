@@ -102,6 +102,7 @@ describe("DefaultChildAgentLoopFactory", () => {
       parentSessionId: "parent-1",
       profileId: "default",
       task: "Run the durable Step",
+      depth: 3,
       trustedWorkspace: true,
       parentVisibleTools: readOnlyParentTools(),
       taskExecution: {
@@ -121,7 +122,8 @@ describe("DefaultChildAgentLoopFactory", () => {
         taskId: "task-1",
         planRevisionId: "revision-1",
         stepId: "step-1",
-        attemptId: "attempt-1"
+        attemptId: "attempt-1",
+        depth: 3
       }
     });
   });

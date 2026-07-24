@@ -27,6 +27,7 @@ import {
   type TaskStepExecutor
 } from "./task-step-executor.js";
 import { taskActivityFromDelegationProgress } from "./task-safe-activity.js";
+import { taskDelegationDepth } from "./task-tree-accounting.js";
 import { deriveTaskResultSummary } from "../utils/task-result-summary.js";
 
 const MAX_DEPENDENCY_RESULT_REFERENCES = 64;
@@ -137,6 +138,13 @@ export class AgentStepExecutor implements TaskStepExecutor {
       return failed("parent-session-unavailable", false);
     }
 
+    let delegationDepth: number;
+    try {
+      delegationDepth = taskDelegationDepth(this.#taskStore, input.task, input.step);
+    } catch {
+      return failed("task-lineage-invalid", false);
+    }
+
     const parentVisibleTools = filterTaskStepTools(
       this.#parentVisibleTools(),
       input.task,
@@ -169,7 +177,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
           : [...input.step.authorityPolicy.allowedTools],
         role: toDelegateRole(input.step),
         modelOverride,
-        depth: 1,
+        depth: delegationDepth,
         channel: "cli",
         trustedWorkspace: true,
         parentVisibleTools,
@@ -223,7 +231,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
         subagentId: input.attempt.id,
         childSessionId: child.childSessionId,
         parentSessionId,
-        depth: 1,
+        depth: delegationDepth,
         role: toDelegateRole(input.step),
         goal: input.step.objective,
         model: childModel(child),
@@ -260,7 +268,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
         parentSessionId,
         childSessionId: child.childSessionId,
         role: toDelegateRole(input.step),
-        depth: 1,
+        depth: delegationDepth,
         task: input.step.objective,
         context: dependencyContext(this.#taskStore, input.task, input.step),
         ...(input.attempt.workerSessionId === undefined ? {} : {
@@ -288,13 +296,17 @@ export class AgentStepExecutor implements TaskStepExecutor {
       });
 
       const worker = { workerSessionId: child.childSessionId };
-      if (input.signal.aborted || childController.signal.aborted || runnerResult.kind === "cancelled") {
+      if (input.signal.aborted || runnerResult.kind === "cancelled") {
         endReason = "task-step-cancelled";
         return { outcome: "cancelled", usage: unavailableUsage("agent-cancelled"), ...worker };
       }
       if (runnerResult.kind === "timeout") {
         endReason = "task-step-timeout";
         return { outcome: "failed", failure: taskFailure("timeout", true), usage: unavailableUsage("agent-timeout"), ...worker };
+      }
+      if (childController.signal.aborted) {
+        endReason = "task-step-cancelled";
+        return { outcome: "cancelled", usage: unavailableUsage("agent-cancelled"), ...worker };
       }
 
       const response = runnerResult.response;
