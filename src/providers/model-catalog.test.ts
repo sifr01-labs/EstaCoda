@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildProfileResolutionContext,
@@ -6,7 +9,11 @@ import {
   inferModelProfile,
   inferProviderFromModel
 } from "./model-catalog.js";
-import type { ModelsDevSnapshot } from "../model-catalog/models-dev-registry.js";
+import {
+  resetModelsDevRegistryForTest,
+  resolveModelsDevSnapshot,
+  type ModelsDevSnapshot
+} from "../model-catalog/models-dev-registry.js";
 
 function makeSnapshot(models: Array<{ id: string; providerId: string; contextWindow: number; status?: string }>): ModelsDevSnapshot {
   return {
@@ -81,6 +88,29 @@ describe("fallbackKnownModelProfiles", () => {
 });
 
 describe("resolveModelProfile", () => {
+  it("resolves bundled direct Kimi K3 pricing", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-kimi-k3-catalog-"));
+
+    try {
+      resetModelsDevRegistryForTest();
+      const snapshot = await resolveModelsDevSnapshot({
+        allowNetwork: false,
+        cachePath: join(tempDir, "missing-cache.json")
+      });
+      const result = resolveModelProfile("kimi", "kimi-k3", buildProfileResolutionContext(snapshot));
+
+      expect(result.source).toBe("models-dev");
+      expect(result.profile.cost).toMatchObject({
+        inputPerMillionTokens: 3,
+        outputPerMillionTokens: 15,
+        cacheReadPerMillionTokens: 0.3
+      });
+    } finally {
+      resetModelsDevRegistryForTest();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("returns snapshot profile when model exists in snapshot", () => {
     const snapshot = makeSnapshot([
       { id: "gpt-4o", providerId: "openai", contextWindow: 128000 }
