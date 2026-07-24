@@ -1,4 +1,5 @@
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
+import { redactToolDisplayPreview } from "../tools/tool-target-summary.js";
 import { formatSpendingThresholdWarning } from "../ui/spending-warning-format.js";
 import { toolDisplayIcon, toolDisplayLabel } from "../ui/tool-display.js";
 
@@ -78,7 +79,7 @@ export function renderChannelProgressLabel(
     case "skill":
       return `${activityLabel(locale, "load_skill")}${event.name.length > 0 ? ` · ${event.name}` : ""}`;
     case "tool-start": {
-      const summary = event.targetSummary?.trim();
+      const summary = redactToolDisplayPreview(event.displayPreview ?? event.targetSummary);
       const label = toolDisplayLabel(event.tool, locale);
       const icon = toolDisplayIcon(event.tool, "channel");
       return summary === undefined || summary.length === 0

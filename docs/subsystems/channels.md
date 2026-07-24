@@ -112,7 +112,9 @@ The intended visible order is:
 streamed text -> tool progress -> streamed continuation -> final edit
 ```
 
-On a provider tool boundary, the gateway signals a segment break before delivering tool progress. The adapter seals the current streamed message, clears the progress message slot for that chat, and later provider tokens create a new streamed message below tool progress. Sealed streamed messages are not edited into the final answer. The final edit applies only to the current live streamed segment.
+On a provider tool boundary, the gateway signals a segment break before delivering tool progress. The adapter seals the current streamed message, clears the progress message slot for that supplied session/topic identity, and later provider tokens create a new streamed message below tool progress. Sealed streamed messages are not edited into the final answer. The final edit applies only to the current live streamed segment.
+
+Telegram outbound delivery preserves a validated numeric `message_thread_id` across text, typing indicators, streamed previews, progress, and artifacts. Progress labels use redacted display previews, isolate in-memory state by the supplied account/chat/topic/user identity, send the first visible update immediately, and coalesce later edits. The adapter honors Telegram `retry_after` responses, rolls over to a fresh progress message after non-retryable edit failures, and retains a bounded recent window of at most 12 entries within Telegram's text limit. This state is delivery UX only and is not an execution audit log.
 
 The stream worker uses partial-only sanitization and lightweight HTML escaping. It does not run final Telegram formatting on partial edits. Final delivery still uses `formatTelegramReply()` and adapter-owned chunking. Flood-control retry exhaustion, oversized escaped partial payloads, provider fallback/failure cleanup, missing live final segments, approval boundaries, artifact boundaries, and final edit failures all require normal final text fallback. Active-handle degradation does not disable streaming globally for future turns.
 

@@ -112,6 +112,8 @@ Telegram streaming is a delivery UX option. It does not change session truth, me
 
 Telegram streaming defaults to enabled for configured Telegram channels. When `channels.telegram.streaming.enabled` is true, provider tokens progressively edit Telegram messages. Tool boundaries seal the current streamed message. Later provider tokens start a new streamed Telegram message below tool progress. Sealed streamed messages are never edited into the final answer. Set `channels.telegram.streaming.enabled` to `false` to opt out.
 
+Replies, streamed previews, progress, typing indicators, and artifacts remain in the Telegram topic where the request originated. Progress uses redacted activity previews, sends its first visible update immediately, coalesces rapid later edits, and keeps a bounded window of the 12 most recent entries within Telegram's message limit. Progress is transient delivery UX rather than the authoritative session or execution record.
+
 The visible order is:
 
 ```text

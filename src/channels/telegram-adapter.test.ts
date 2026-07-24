@@ -412,6 +412,31 @@ describe("TelegramAdapter", () => {
     expect(bodies).toHaveLength(1);
     expect(sentText(bodies[0])).toBe("short reply");
     expect(bodies[0]?.parse_mode).toBe("HTML");
+    expect(bodies[0]).not.toHaveProperty("message_thread_id");
+  });
+
+  it("delivery.sendText routes messages to a validated Telegram topic", async () => {
+    const { adapter, bodies } = createTelegramTextHarness();
+
+    await adapter.delivery.sendText({ platform: "telegram", chatId: "123", threadId: "42" }, "topic reply");
+
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toMatchObject({
+      chat_id: "123",
+      message_thread_id: 42,
+      text: "topic reply"
+    });
+  });
+
+  it("delivery.sendText rejects invalid Telegram topic ids before network delivery", async () => {
+    for (const threadId of ["", "0", "-1", "1.5", "not-a-topic", "9007199254740992"]) {
+      const { adapter, bodies } = createTelegramTextHarness();
+      await expect(adapter.delivery.sendText(
+        { platform: "telegram", chatId: "123", threadId },
+        "topic reply"
+      )).rejects.toThrow("Telegram threadId must be a positive safe integer");
+      expect(bodies).toHaveLength(0);
+    }
   });
 
   it("delivery.sendText chunks long plain messages", async () => {
@@ -1318,7 +1343,7 @@ describe("TelegramAdapter", () => {
   it("delivery.sendProgress provider-attempt sends typing without visible progress", async () => {
     const { adapter, calls } = createTelegramStreamingHarness();
 
-    await adapter.delivery.sendProgress!({ platform: "telegram", chatId: "123" }, {
+    await adapter.delivery.sendProgress!({ platform: "telegram", chatId: "123", threadId: "42" }, {
       kind: "provider-attempt",
       provider: "openrouter",
       model: "kimi-k2.6",
@@ -1328,6 +1353,7 @@ describe("TelegramAdapter", () => {
     expect(callsFor(calls, "sendChatAction")).toHaveLength(1);
     expect(callsFor(calls, "sendChatAction")[0]?.body).toMatchObject({
       chat_id: "123",
+      message_thread_id: 42,
       action: "typing"
     });
     expect(callsFor(calls, "sendMessage")).toHaveLength(0);
@@ -1347,6 +1373,227 @@ describe("TelegramAdapter", () => {
     expect(callsFor(calls, "sendChatAction")).toHaveLength(0);
     expect(callsFor(calls, "sendMessage")).toHaveLength(1);
     expect(callsFor(calls, "sendMessage")[0]?.body.text).toBe("✦ Using fallback · deepseek-v4-pro");
+  });
+
+  it("delivery.sendProgress keeps topic and user progress bubbles isolated", async () => {
+    const { adapter, calls } = createTelegramStreamingHarness();
+
+    await adapter.delivery.sendProgress!({
+      platform: "telegram",
+      accountId: "primary",
+      chatId: "123",
+      threadId: "41",
+      userId: "user-a"
+    }, { kind: "tool-start", tool: "file.read", targetSummary: "a.ts" });
+    await adapter.delivery.sendProgress!({
+      platform: "telegram",
+      accountId: "primary",
+      chatId: "123",
+      threadId: "42",
+      userId: "user-a"
+    }, { kind: "tool-start", tool: "file.read", targetSummary: "b.ts" });
+    await adapter.delivery.sendProgress!({
+      platform: "telegram",
+      accountId: "primary",
+      chatId: "123",
+      threadId: "42",
+      userId: "user-b"
+    }, { kind: "tool-start", tool: "file.read", targetSummary: "c.ts" });
+
+    expect(callsFor(calls, "sendMessage").map((call) => call.body)).toEqual([
+      expect.objectContaining({ message_thread_id: 41, text: expect.stringContaining("a.ts") }),
+      expect.objectContaining({ message_thread_id: 42, text: expect.stringContaining("b.ts") }),
+      expect.objectContaining({ message_thread_id: 42, text: expect.stringContaining("c.ts") })
+    ]);
+    expect(callsFor(calls, "editMessageText")).toHaveLength(0);
+  });
+
+  it("delivery.sendProgress coalesces rapid edits on a fixed cadence", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const sessionKey = { platform: "telegram" as const, chatId: "123" };
+
+    await adapter.delivery.sendProgress!(sessionKey, { kind: "tool-start", tool: "file.read", targetSummary: "a.ts" });
+    await adapter.delivery.sendProgress!(sessionKey, { kind: "tool-start", tool: "file.read", targetSummary: "b.ts" });
+    await adapter.delivery.sendProgress!(sessionKey, { kind: "tool-start", tool: "file.read", targetSummary: "c.ts" });
+
+    expect(callsFor(calls, "sendMessage")).toHaveLength(1);
+    expect(callsFor(calls, "editMessageText")).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1_499);
+    expect(callsFor(calls, "editMessageText")).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(callsFor(calls, "editMessageText")).toHaveLength(1);
+    expect(callsFor(calls, "editMessageText")[0]?.body.text).toContain("a.ts");
+    expect(callsFor(calls, "editMessageText")[0]?.body.text).toContain("b.ts");
+    expect(callsFor(calls, "editMessageText")[0]?.body.text).toContain("c.ts");
+  });
+
+  it("delivery.sendProgress honors Telegram retry_after without sending a duplicate bubble", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness({
+      failResponses: {
+        editMessageText: {
+          1: { status: 429, errorCode: 429, retryAfterSeconds: 5 }
+        }
+      }
+    });
+    const sessionKey = { platform: "telegram" as const, chatId: "123" };
+
+    await adapter.delivery.sendProgress!(sessionKey, { kind: "tool-start", tool: "file.read", targetSummary: "a.ts" });
+    await adapter.delivery.sendProgress!(sessionKey, { kind: "tool-start", tool: "file.read", targetSummary: "b.ts" });
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(callsFor(calls, "editMessageText")).toHaveLength(1);
+    expect(callsFor(calls, "sendMessage")).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(callsFor(calls, "editMessageText")).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(callsFor(calls, "editMessageText")).toHaveLength(2);
+    expect(callsFor(calls, "sendMessage")).toHaveLength(1);
+  });
+
+  it("delivery.sendProgress retries an initial flood-controlled send with accumulated progress", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness({
+      failResponses: {
+        sendMessage: {
+          1: { status: 429, errorCode: 429, retryAfterSeconds: 2 }
+        }
+      }
+    });
+    const sessionKey = { platform: "telegram" as const, chatId: "123" };
+
+    await adapter.delivery.sendProgress!(sessionKey, { kind: "tool-start", tool: "file.read", targetSummary: "a.ts" });
+    await adapter.delivery.sendProgress!(sessionKey, { kind: "tool-start", tool: "file.read", targetSummary: "b.ts" });
+    expect(callsFor(calls, "sendMessage")).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(callsFor(calls, "sendMessage")).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(callsFor(calls, "sendMessage")).toHaveLength(2);
+    expect(callsFor(calls, "sendMessage")[1]?.body.text).toContain("a.ts");
+    expect(callsFor(calls, "sendMessage")[1]?.body.text).toContain("b.ts");
+  });
+
+  it("delivery.sendProgress rolls over once after a permanent edit failure", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness({ failMethods: { editMessageText: [1] } });
+    const sessionKey = { platform: "telegram" as const, chatId: "123", threadId: "42" };
+
+    await adapter.delivery.sendProgress!(sessionKey, { kind: "tool-start", tool: "file.read", targetSummary: "a.ts" });
+    await adapter.delivery.sendProgress!(sessionKey, { kind: "tool-start", tool: "file.read", targetSummary: "b.ts" });
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(callsFor(calls, "editMessageText")).toHaveLength(1);
+    expect(callsFor(calls, "sendMessage")).toHaveLength(2);
+    expect(callsFor(calls, "sendMessage")[1]?.body).toMatchObject({
+      message_thread_id: 42,
+      text: expect.stringContaining("b.ts")
+    });
+  });
+
+  it("delivery.sendText clears pending progress edits only for its session", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const sessionKey = { platform: "telegram" as const, chatId: "123", threadId: "42", userId: "user-a" };
+    const otherSessionKey = { platform: "telegram" as const, chatId: "123", threadId: "43", userId: "user-a" };
+
+    await adapter.delivery.sendProgress!(sessionKey, { kind: "tool-start", tool: "file.read", targetSummary: "a.ts" });
+    await adapter.delivery.sendProgress!(sessionKey, { kind: "tool-start", tool: "file.read", targetSummary: "b.ts" });
+    await adapter.delivery.sendProgress!(otherSessionKey, { kind: "tool-start", tool: "file.read", targetSummary: "other-a.ts" });
+    await adapter.delivery.sendProgress!(otherSessionKey, { kind: "tool-start", tool: "file.read", targetSummary: "other-b.ts" });
+    await adapter.delivery.sendText(sessionKey, "done");
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(callsFor(calls, "editMessageText")).toHaveLength(1);
+    expect(callsFor(calls, "editMessageText")[0]?.body.text).toContain("other-b.ts");
+    expect(callsFor(calls, "sendMessage")[2]?.body).toMatchObject({
+      message_thread_id: 42,
+      text: "done"
+    });
+  });
+
+  it("stop cancels pending progress edits", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const sessionKey = { platform: "telegram" as const, chatId: "123" };
+
+    await adapter.delivery.sendProgress!(sessionKey, { kind: "tool-start", tool: "file.read", targetSummary: "a.ts" });
+    await adapter.delivery.sendProgress!(sessionKey, { kind: "tool-start", tool: "file.read", targetSummary: "b.ts" });
+    await adapter.stop();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(callsFor(calls, "editMessageText")).toHaveLength(0);
+  });
+
+  it("delivery.sendProgress keeps its bounded summary within Telegram limits", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const sessionKey = { platform: "telegram" as const, chatId: "123" };
+
+    for (let index = 0; index < 20; index += 1) {
+      await adapter.delivery.sendProgress!(sessionKey, {
+        kind: "provider-serving-transition",
+        transition: "fallback-active",
+        provider: "provider",
+        model: `${index}-${"x".repeat(500)}`
+      });
+    }
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    const rendered = String(callsFor(calls, "editMessageText").at(-1)?.body.text ?? "");
+    expect(rendered.length).toBeLessThanOrEqual(4_096);
+    expect(rendered).toContain("19-");
+    expect(rendered).not.toContain("· 0-");
+  });
+
+  it("delivery.startStreamingText keeps streamed and rich final messages in their topic", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({
+      platform: "telegram",
+      chatId: "123",
+      chatType: "thread",
+      threadId: "42"
+    }, {
+      minInitialChars: 1,
+      transport: "edit"
+    });
+
+    handle.append("preview");
+    await flushTelegramStreamingTimers();
+    await handle.finish("final");
+
+    expect(callsFor(calls, "sendMessage")[0]?.body).toMatchObject({
+      chat_id: "123",
+      message_thread_id: 42
+    });
+    expect(callsFor(calls, "sendRichMessage").at(-1)?.body).toMatchObject({
+      chat_id: "123",
+      message_thread_id: 42
+    });
+  });
+
+  it("delivery.startStreamingText includes topic addressing in draft previews", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({
+      platform: "telegram",
+      chatId: "123",
+      chatType: "dm",
+      threadId: "42"
+    }, {
+      minInitialChars: 1,
+      transport: "draft"
+    });
+
+    handle.append("preview");
+    await flushTelegramStreamingTimers();
+
+    expect(callsFor(calls, "sendRichMessageDraft")[0]?.body).toMatchObject({
+      chat_id: "123",
+      message_thread_id: 42
+    });
   });
 
   it("delivery.startStreamingText segmentBreak rotates progress state for the chat", async () => {
@@ -2638,13 +2885,14 @@ describe("TelegramAdapter", () => {
         mimeType: "application/pdf"
       };
 
-      await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123" }, artifact);
+      await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123", threadId: "42" }, artifact);
 
       const form = formDataBody(callsForArtifactMethod(calls, "sendDocument")[0]);
       const document = form.get("document");
       expect(document).toBeInstanceOf(Blob);
       expect((document as Blob).type).toBe("application/pdf");
       expect((document as { name?: string }).name).toBe(basename(path));
+      expect(form.get("message_thread_id")).toBe("42");
       expect(form.get("caption")).toBe("Generated document\nArtifact: doc-1");
       expect(callsForArtifactMethod(calls, "sendMessage")).toHaveLength(0);
     } finally {

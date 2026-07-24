@@ -72,6 +72,8 @@ streamed text -> tool progress -> streamed continuation -> final edit
 
 Tool boundaries seal the current streamed Telegram message. Later provider tokens start a new streamed Telegram message below the tool-progress message. Sealed streamed messages are never edited into the final answer. If streaming fails, degrades, or becomes ambiguous, the gateway falls back to normal final text delivery.
 
+Telegram delivery preserves the originating topic for text, typing indicators, streamed previews, progress, and artifacts. Tool progress uses redacted display previews, keeps independent state per supplied account/chat/topic/user identity, sends the first visible update immediately, and coalesces later edits on a bounded cadence. The progress bubble retains at most the 12 most recent entries and always stays within Telegram's text limit. It is transient delivery UX; session state and execution records remain authoritative elsewhere.
+
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `channels.telegram.streaming.enabled` | `true` | Enables Telegram streaming for configured Telegram channels. Set to `false` to opt out. |

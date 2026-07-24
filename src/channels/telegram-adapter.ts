@@ -168,15 +168,28 @@ type TelegramSentMessage = {
   message_id: number;
 };
 
+type TelegramDeliveryAddress = {
+  chatId: string;
+  messageThreadId?: number;
+};
+
 type ProgressEntry = {
   text: string;
   count: number;
 };
 
 type TelegramProgressState = {
+  key: string;
+  address: TelegramDeliveryAddress;
   messageId?: number;
   entries: ProgressEntry[];
   lastRendered?: string;
+  lastMutationAtMs?: number;
+  timer?: ReturnType<typeof setTimeout>;
+  retryTimer?: ReturnType<typeof setTimeout>;
+  queue: Promise<void>;
+  initialSendScheduled: boolean;
+  disposed: boolean;
 };
 
 type TelegramMediaGroupBuffer = {
@@ -195,6 +208,9 @@ const DEFAULT_STREAM_MIN_INITIAL_CHARS = 24;
 const DEFAULT_STREAM_CURSOR = "▌";
 const DEFAULT_STREAM_MAX_FLOOD_STRIKES = 2;
 const DEFAULT_MEDIA_GROUP_BATCH_MS = 800;
+const DEFAULT_PROGRESS_EDIT_INTERVAL_MS = 1_500;
+const MAX_PROGRESS_ENTRIES = 12;
+const MAX_PROGRESS_LINE_UTF16 = 300;
 
 export function countUnicodeCodePoints(text: string): number {
   return Array.from(text).length;
@@ -297,19 +313,20 @@ export class TelegramAdapter implements ChannelAdapter {
   #handler: ((message: ChannelMessage) => Promise<void>) | undefined;
   #offset = 0;
   #running = false;
-  readonly #progressByChat = new Map<string, TelegramProgressState>();
+  readonly #progressBySession = new Map<string, TelegramProgressState>();
   readonly #mediaGroupBuffers = new Map<string, TelegramMediaGroupBuffer>();
 
   readonly delivery = {
     sendText: async (sessionKey: ChannelSessionKey, text: string, options?: ChannelTextOptions) => {
-      this.#progressByChat.delete(sessionKey.chatId);
+      const address = telegramDeliveryAddress(sessionKey);
+      this.#clearProgress(sessionKey);
       const formatted = formatTelegramReply(text, options);
       const chunks = chunkTelegramText(formatted.text, formatted.format);
       const editMessageId = parseTelegramEditMessageId(options?.editMessageId);
 
       if (chunks.length === 1 && editMessageId !== undefined) {
         try {
-          await this.#editMessageText(sessionKey.chatId, editMessageId, chunks[0] ?? "", {
+          await this.#editMessageText(address.chatId, editMessageId, chunks[0] ?? "", {
             ...options,
             format: formatted.format
           });
@@ -320,7 +337,7 @@ export class TelegramAdapter implements ChannelAdapter {
       }
 
       for (const [index, chunk] of chunks.entries()) {
-        await this.#sendMessage(sessionKey.chatId, chunk, {
+        await this.#sendMessage(address, chunk, {
           ...options,
           actions: index === chunks.length - 1 ? options?.actions : undefined,
           format: formatted.format
@@ -328,26 +345,28 @@ export class TelegramAdapter implements ChannelAdapter {
       }
     },
     sendProgress: async (sessionKey: ChannelSessionKey, event: RuntimeEvent) => {
+      const address = telegramDeliveryAddress(sessionKey);
       if (event.kind === "agent-start" || event.kind === "provider-attempt") {
-        await this.#sendChatAction(sessionKey.chatId, "typing");
+        await this.#sendChatAction(address, "typing");
       }
 
       const rendered = renderChannelProgressLabel(event, this.#activityLabelsLocale);
 
       if (rendered.length > 0) {
-        await this.#upsertProgressMessage(sessionKey.chatId, rendered);
+        await this.#upsertProgressMessage(sessionKey, address, rendered);
       }
     },
     sendArtifact: async (sessionKey: ChannelSessionKey, artifact: ArtifactRecord) => {
-      this.#progressByChat.delete(sessionKey.chatId);
+      const address = telegramDeliveryAddress(sessionKey);
+      this.#clearProgress(sessionKey);
       if (artifact.kind === "audio") {
-        const delivered = await this.#sendAudioArtifact(sessionKey.chatId, artifact);
+        const delivered = await this.#sendAudioArtifact(address, artifact);
         if (delivered) {
           return;
         }
       }
       if (artifact.kind === "image") {
-        const delivered = await this.#sendImageArtifact(sessionKey.chatId, artifact);
+        const delivered = await this.#sendImageArtifact(address, artifact);
         if (delivered) {
           return;
         }
@@ -365,19 +384,19 @@ export class TelegramAdapter implements ChannelAdapter {
       }
       if (!exceedsLimit) {
         if (artifact.kind === "video") {
-          const delivered = await this.#sendVideoArtifact(sessionKey.chatId, artifact);
+          const delivered = await this.#sendVideoArtifact(address, artifact);
           if (delivered) {
             return;
           }
         }
         if (artifact.kind === "document" || artifact.kind === "data" || artifact.kind === "other") {
-          const delivered = await this.#sendDocumentArtifact(sessionKey.chatId, artifact);
+          const delivered = await this.#sendDocumentArtifact(address, artifact);
           if (delivered) {
             return;
           }
         }
       }
-      await this.#sendMessage(sessionKey.chatId, renderArtifactNotice(artifact));
+      await this.#sendMessage(address, renderArtifactNotice(artifact));
     },
     startStreamingText: (sessionKey: ChannelSessionKey, options?: ChannelStreamingTextOptions) => {
       return this.#startStreamingText(sessionKey, options);
@@ -417,6 +436,7 @@ export class TelegramAdapter implements ChannelAdapter {
 
   async stop(): Promise<void> {
     this.#running = false;
+    this.#clearAllProgress();
     await this.#flushMediaGroupBuffers();
   }
 
@@ -527,19 +547,20 @@ export class TelegramAdapter implements ChannelAdapter {
   }
 
   #startStreamingText(sessionKey: ChannelSessionKey, options?: ChannelStreamingTextOptions): ChannelStreamingTextHandle {
+    const address = telegramDeliveryAddress(sessionKey);
     return new TelegramStreamingTextWorker({
-      chatId: sessionKey.chatId,
+      chatId: address.chatId,
       chatType: sessionKey.chatType,
       options,
-      sendMessage: async (text, textOptions) => this.#sendMessage(sessionKey.chatId, text, textOptions),
-      editMessageText: async (messageId, text, textOptions) => this.#editMessageText(sessionKey.chatId, messageId, text, textOptions),
-      deleteMessage: async (messageId) => this.#deleteMessage(sessionKey.chatId, messageId),
-      sendDraft: async (draftId, text) => this.#sendDraft(sessionKey.chatId, draftId, text),
-      trySendRich: async (text) => this.#trySendRichMessage(sessionKey.chatId, text),
-      trySendRichDraft: async (draftId, text) => this.#trySendRichDraft(sessionKey.chatId, draftId, text),
+      sendMessage: async (text, textOptions) => this.#sendMessage(address, text, textOptions),
+      editMessageText: async (messageId, text, textOptions) => this.#editMessageText(address.chatId, messageId, text, textOptions),
+      deleteMessage: async (messageId) => this.#deleteMessage(address.chatId, messageId),
+      sendDraft: async (draftId, text) => this.#sendDraft(address, draftId, text),
+      trySendRich: async (text) => this.#trySendRichMessage(address, text),
+      trySendRichDraft: async (draftId, text) => this.#trySendRichDraft(address, draftId, text),
       prefersFreshFinal: (text) => this.#prefersFreshFinal(text),
       clearProgress: () => {
-        this.#progressByChat.delete(sessionKey.chatId);
+        this.#clearProgress(sessionKey);
       },
       formatFinalText: (text) => {
         const formatted = formatTelegramReply(text);
@@ -553,7 +574,7 @@ export class TelegramAdapter implements ChannelAdapter {
   }
 
   async #trySendRichMessage(
-    chatId: string,
+    address: TelegramDeliveryAddress,
     content: string,
     options?: ChannelTextOptions
   ): Promise<TelegramSentMessage | undefined> {
@@ -563,7 +584,7 @@ export class TelegramAdapter implements ChannelAdapter {
 
     try {
       return await this.#call<TelegramSentMessage>("sendRichMessage", {
-        chat_id: chatId,
+        ...telegramAddressPayload(address),
         ...this.#richMessagePayload(content),
         link_preview_options: this.#richLinkPreviewOptions(),
         reply_markup: options?.actions === undefined
@@ -579,7 +600,7 @@ export class TelegramAdapter implements ChannelAdapter {
     }
   }
 
-  async #trySendRichDraft(chatId: string, draftId: number, content: string): Promise<boolean> {
+  async #trySendRichDraft(address: TelegramDeliveryAddress, draftId: number, content: string): Promise<boolean> {
     if (this.#richSendDisabled || this.#richDraftDisabled || !this.#botSupportsRich()) {
       return false;
     }
@@ -590,7 +611,7 @@ export class TelegramAdapter implements ChannelAdapter {
 
     try {
       await this.#call("sendRichMessageDraft", {
-        chat_id: chatId,
+        ...telegramAddressPayload(address),
         draft_id: draftId,
         ...this.#richMessagePayload(content)
       });
@@ -650,9 +671,9 @@ export class TelegramAdapter implements ChannelAdapter {
       || description.includes("not implemented");
   }
 
-  async #sendMessage(chatId: string, text: string, options?: ChannelTextOptions): Promise<TelegramSentMessage> {
+  async #sendMessage(address: TelegramDeliveryAddress, text: string, options?: ChannelTextOptions): Promise<TelegramSentMessage> {
     return this.#call<TelegramSentMessage>("sendMessage", {
-      chat_id: chatId,
+      ...telegramAddressPayload(address),
       text,
       disable_web_page_preview: true,
       parse_mode: options?.format === "html" ? "HTML" : undefined,
@@ -673,14 +694,14 @@ export class TelegramAdapter implements ChannelAdapter {
     };
   }
 
-  async #sendDraft(chatId: string, draftId: number, text: string): Promise<{ ok: boolean }> {
+  async #sendDraft(address: TelegramDeliveryAddress, draftId: number, text: string): Promise<{ ok: boolean }> {
     if (!this.#draftCapable) {
       return { ok: false };
     }
 
     try {
       await this.#call("sendMessageDraft", {
-        chat_id: chatId,
+        ...telegramAddressPayload(address),
         draft_id: draftId,
         text,
         parse_mode: "HTML"
@@ -705,9 +726,9 @@ export class TelegramAdapter implements ChannelAdapter {
     });
   }
 
-  async #sendChatAction(chatId: string, action: "typing" | "upload_document" | "upload_photo" | "upload_voice" | "upload_video"): Promise<void> {
+  async #sendChatAction(address: TelegramDeliveryAddress, action: "typing" | "upload_document" | "upload_photo" | "upload_voice" | "upload_video"): Promise<void> {
     await this.#call("sendChatAction", {
-      chat_id: chatId,
+      ...telegramAddressPayload(address),
       action
     });
   }
@@ -738,36 +759,184 @@ export class TelegramAdapter implements ChannelAdapter {
     });
   }
 
-  async #upsertProgressMessage(chatId: string, line: string): Promise<void> {
-    const state = this.#progressByChat.get(chatId) ?? {
-      entries: []
+  async #upsertProgressMessage(
+    sessionKey: ChannelSessionKey,
+    address: TelegramDeliveryAddress,
+    line: string
+  ): Promise<void> {
+    const key = telegramProgressKey(sessionKey);
+    const state = this.#progressBySession.get(key) ?? {
+      key,
+      address,
+      entries: [],
+      queue: Promise.resolve(),
+      initialSendScheduled: false,
+      disposed: false
     };
+    this.#progressBySession.set(key, state);
     appendProgressEntry(state.entries, line);
-    const rendered = renderProgressSummary(state.entries);
 
+    const rendered = renderProgressSummary(state.entries);
     if (rendered.length === 0 || rendered === state.lastRendered) {
-      this.#progressByChat.set(chatId, state);
+      return;
+    }
+
+    if (state.messageId !== undefined) {
+      this.#scheduleProgressFlush(state);
+      return;
+    }
+
+    if (state.retryTimer !== undefined) {
+      return;
+    }
+
+    if (!state.initialSendScheduled) {
+      state.initialSendScheduled = true;
+      await this.#enqueueProgressOperation(state, async () => {
+        try {
+          await this.#flushProgressState(state, true);
+        } finally {
+          state.initialSendScheduled = false;
+        }
+      });
+      return;
+    }
+
+    await state.queue;
+  }
+
+  #scheduleProgressFlush(state: TelegramProgressState, delayMs?: number): void {
+    if (!this.#isActiveProgressState(state) || state.timer !== undefined || state.retryTimer !== undefined) {
+      return;
+    }
+
+    const elapsed = state.lastMutationAtMs === undefined
+      ? DEFAULT_PROGRESS_EDIT_INTERVAL_MS
+      : Math.max(0, this.#streamingNowMs() - state.lastMutationAtMs);
+    const delay = delayMs ?? Math.max(0, DEFAULT_PROGRESS_EDIT_INTERVAL_MS - elapsed);
+    state.timer = setTimeout(() => {
+      state.timer = undefined;
+      void this.#enqueueProgressOperation(state, async () => {
+        await this.#flushProgressState(state, false);
+      }).catch(() => {});
+    }, delay);
+  }
+
+  #scheduleProgressRetry(state: TelegramProgressState, retryAfterSeconds: number): void {
+    if (!this.#isActiveProgressState(state) || state.retryTimer !== undefined) {
+      return;
+    }
+    if (state.timer !== undefined) {
+      clearTimeout(state.timer);
+      state.timer = undefined;
+    }
+    state.retryTimer = setTimeout(() => {
+      state.retryTimer = undefined;
+      void this.#enqueueProgressOperation(state, async () => {
+        await this.#flushProgressState(state, false);
+      }).catch(() => {});
+    }, Math.max(0, retryAfterSeconds * 1_000));
+  }
+
+  async #flushProgressState(state: TelegramProgressState, propagateInitialError: boolean): Promise<void> {
+    if (!this.#isActiveProgressState(state)) {
+      return;
+    }
+    const rendered = renderProgressSummary(state.entries);
+    if (rendered.length === 0 || rendered === state.lastRendered) {
       return;
     }
 
     if (state.messageId === undefined) {
-      const message = await this.#sendMessage(chatId, rendered);
-      state.messageId = message.message_id;
-      state.lastRendered = rendered;
-      this.#progressByChat.set(chatId, state);
+      try {
+        const message = await this.#sendMessage(state.address, rendered);
+        if (!this.#isActiveProgressState(state)) {
+          return;
+        }
+        state.messageId = message.message_id;
+        state.lastRendered = rendered;
+        state.lastMutationAtMs = this.#streamingNowMs();
+      } catch (error) {
+        const retryAfterSeconds = telegramRetryAfterSeconds(error);
+        if (retryAfterSeconds !== undefined) {
+          this.#scheduleProgressRetry(state, retryAfterSeconds);
+          return;
+        }
+        if (propagateInitialError) {
+          throw error;
+        }
+        return;
+      }
+      this.#schedulePendingProgressUpdate(state, rendered);
       return;
     }
 
     try {
-      await this.#editMessageText(chatId, state.messageId, rendered);
+      await this.#editMessageText(state.address.chatId, state.messageId, rendered);
+      if (!this.#isActiveProgressState(state)) {
+        return;
+      }
       state.lastRendered = rendered;
-      this.#progressByChat.set(chatId, state);
-    } catch {
-      const message = await this.#sendMessage(chatId, rendered);
-      state.messageId = message.message_id;
-      state.lastRendered = rendered;
-      this.#progressByChat.set(chatId, state);
+      state.lastMutationAtMs = this.#streamingNowMs();
+    } catch (error) {
+      const retryAfterSeconds = telegramRetryAfterSeconds(error);
+      if (retryAfterSeconds !== undefined) {
+        this.#scheduleProgressRetry(state, retryAfterSeconds);
+        return;
+      }
+      if (!this.#isActiveProgressState(state)) {
+        return;
+      }
+      try {
+        const message = await this.#sendMessage(state.address, rendered);
+        if (!this.#isActiveProgressState(state)) {
+          return;
+        }
+        state.messageId = message.message_id;
+        state.lastRendered = rendered;
+        state.lastMutationAtMs = this.#streamingNowMs();
+      } catch (sendError) {
+        const sendRetryAfterSeconds = telegramRetryAfterSeconds(sendError);
+        if (sendRetryAfterSeconds !== undefined) {
+          this.#scheduleProgressRetry(state, sendRetryAfterSeconds);
+        }
+        return;
+      }
     }
+    this.#schedulePendingProgressUpdate(state, rendered);
+  }
+
+  #schedulePendingProgressUpdate(state: TelegramProgressState, rendered: string): void {
+    if (this.#isActiveProgressState(state) && renderProgressSummary(state.entries) !== rendered) {
+      this.#scheduleProgressFlush(state);
+    }
+  }
+
+  #enqueueProgressOperation(state: TelegramProgressState, operation: () => Promise<void>): Promise<void> {
+    const run = state.queue.then(operation, operation);
+    state.queue = run.catch(() => {});
+    return run;
+  }
+
+  #isActiveProgressState(state: TelegramProgressState): boolean {
+    return !state.disposed && this.#progressBySession.get(state.key) === state;
+  }
+
+  #clearProgress(sessionKey: ChannelSessionKey): void {
+    const key = telegramProgressKey(sessionKey);
+    const state = this.#progressBySession.get(key);
+    if (state === undefined) {
+      return;
+    }
+    disposeProgressState(state);
+    this.#progressBySession.delete(key);
+  }
+
+  #clearAllProgress(): void {
+    for (const state of this.#progressBySession.values()) {
+      disposeProgressState(state);
+    }
+    this.#progressBySession.clear();
   }
 
   async #downloadAttachments(message: ChannelMessage): Promise<ChannelAttachment[]> {
@@ -904,7 +1073,7 @@ export class TelegramAdapter implements ChannelAdapter {
     return localPath;
   }
 
-  async #sendAudioArtifact(chatId: string, artifact: ArtifactRecord): Promise<boolean> {
+  async #sendAudioArtifact(address: TelegramDeliveryAddress, artifact: ArtifactRecord): Promise<boolean> {
     let cleanupPath: string | undefined;
     try {
       const localPath = artifact.localPath ?? artifact.path;
@@ -914,13 +1083,13 @@ export class TelegramAdapter implements ChannelAdapter {
       const bytes = await readFile(uploadPath);
       const form = new FormData();
       const voiceBubble = converted.voiceBubble;
-      form.set("chat_id", chatId);
+      appendTelegramAddress(form, address);
       form.set(voiceBubble ? "voice" : "audio", new Blob([bytes], { type: converted.mimeType }), basename(uploadPath));
       const caption = renderAudioArtifactCaption(artifact);
       if (caption.length > 0) {
         form.set("caption", caption);
       }
-      await this.#sendChatAction(chatId, "upload_voice");
+      await this.#sendChatAction(address, "upload_voice");
       await this.#callMultipart<TelegramSentMessage>(voiceBubble ? "sendVoice" : "sendAudio", form);
       return true;
     } catch {
@@ -1008,10 +1177,10 @@ export class TelegramAdapter implements ChannelAdapter {
     };
   }
 
-  async #sendImageArtifact(chatId: string, artifact: ArtifactRecord): Promise<boolean> {
+  async #sendImageArtifact(address: TelegramDeliveryAddress, artifact: ArtifactRecord): Promise<boolean> {
     try {
       const form = new FormData();
-      form.set("chat_id", chatId);
+      appendTelegramAddress(form, address);
       if (isHttpUrl(artifact.path)) {
         form.set("photo", artifact.path);
       } else {
@@ -1023,7 +1192,7 @@ export class TelegramAdapter implements ChannelAdapter {
       if (caption.length > 0) {
         form.set("caption", caption);
       }
-      await this.#sendChatAction(chatId, "upload_photo");
+      await this.#sendChatAction(address, "upload_photo");
       await this.#callMultipart<TelegramSentMessage>("sendPhoto", form);
       return true;
     } catch {
@@ -1031,10 +1200,10 @@ export class TelegramAdapter implements ChannelAdapter {
     }
   }
 
-  async #sendDocumentArtifact(chatId: string, artifact: ArtifactRecord): Promise<boolean> {
+  async #sendDocumentArtifact(address: TelegramDeliveryAddress, artifact: ArtifactRecord): Promise<boolean> {
     try {
       const form = new FormData();
-      form.set("chat_id", chatId);
+      appendTelegramAddress(form, address);
       if (isHttpUrl(artifact.path)) {
         form.set("document", artifact.path);
       } else {
@@ -1046,7 +1215,7 @@ export class TelegramAdapter implements ChannelAdapter {
       if (caption.length > 0) {
         form.set("caption", caption);
       }
-      await this.#sendChatAction(chatId, "upload_document");
+      await this.#sendChatAction(address, "upload_document");
       await this.#callMultipart<TelegramSentMessage>("sendDocument", form);
       return true;
     } catch {
@@ -1054,10 +1223,10 @@ export class TelegramAdapter implements ChannelAdapter {
     }
   }
 
-  async #sendVideoArtifact(chatId: string, artifact: ArtifactRecord): Promise<boolean> {
+  async #sendVideoArtifact(address: TelegramDeliveryAddress, artifact: ArtifactRecord): Promise<boolean> {
     try {
       const form = new FormData();
-      form.set("chat_id", chatId);
+      appendTelegramAddress(form, address);
       if (isHttpUrl(artifact.path)) {
         form.set("video", artifact.path);
       } else {
@@ -1069,7 +1238,7 @@ export class TelegramAdapter implements ChannelAdapter {
       if (caption.length > 0) {
         form.set("caption", caption);
       }
-      await this.#sendChatAction(chatId, "upload_video");
+      await this.#sendChatAction(address, "upload_video");
       await this.#callMultipart<TelegramSentMessage>("sendVideo", form);
       return true;
     } catch {
@@ -2220,27 +2389,109 @@ function appendFileAttachment(
 }
 
 function appendProgressEntry(entries: ProgressEntry[], text: string): void {
+  const boundedText = truncateProgressLine(text);
   const last = entries.at(-1);
 
-  if (last?.text === text) {
+  if (last?.text === boundedText) {
     last.count += 1;
     return;
   }
 
   entries.push({
-    text,
+    text: boundedText,
     count: 1
   });
 
-  if (entries.length > 12) {
-    entries.splice(0, entries.length - 12);
+  if (entries.length > MAX_PROGRESS_ENTRIES) {
+    entries.splice(0, entries.length - MAX_PROGRESS_ENTRIES);
   }
 }
 
 function renderProgressSummary(entries: ProgressEntry[]): string {
-  return entries
+  let rendered = entries
     .map((entry) => entry.count > 1 ? `${entry.text} (x${entry.count})` : entry.text)
     .join("\n");
+  while (rendered.length > TELEGRAM_MAX_TEXT_UTF16 && entries.length > 1) {
+    entries.shift();
+    rendered = entries
+      .map((entry) => entry.count > 1 ? `${entry.text} (x${entry.count})` : entry.text)
+      .join("\n");
+  }
+  return rendered.length <= TELEGRAM_MAX_TEXT_UTF16
+    ? rendered
+    : truncateUtf16WithEllipsis(rendered, TELEGRAM_MAX_TEXT_UTF16);
+}
+
+function truncateProgressLine(text: string): string {
+  const normalized = text.trim().replace(/\s+/gu, " ");
+  return truncateUtf16WithEllipsis(normalized, MAX_PROGRESS_LINE_UTF16);
+}
+
+function truncateUtf16WithEllipsis(text: string, maxLength: number): string {
+  if (text.length <= maxLength) {
+    return text;
+  }
+  const ellipsis = "...";
+  const end = avoidSplitSurrogatePair(text, Math.max(0, maxLength - ellipsis.length));
+  return `${text.slice(0, end)}${ellipsis}`;
+}
+
+function telegramDeliveryAddress(sessionKey: ChannelSessionKey): TelegramDeliveryAddress {
+  if (sessionKey.threadId === undefined) {
+    return { chatId: sessionKey.chatId };
+  }
+  if (!/^[1-9]\d*$/u.test(sessionKey.threadId)) {
+    throw new Error("Telegram threadId must be a positive safe integer");
+  }
+  const messageThreadId = Number(sessionKey.threadId);
+  if (!Number.isSafeInteger(messageThreadId)) {
+    throw new Error("Telegram threadId must be a positive safe integer");
+  }
+  return {
+    chatId: sessionKey.chatId,
+    messageThreadId
+  };
+}
+
+function telegramAddressPayload(address: TelegramDeliveryAddress): Record<string, unknown> {
+  return {
+    chat_id: address.chatId,
+    ...(address.messageThreadId === undefined ? {} : { message_thread_id: address.messageThreadId })
+  };
+}
+
+function appendTelegramAddress(form: FormData, address: TelegramDeliveryAddress): void {
+  form.set("chat_id", address.chatId);
+  if (address.messageThreadId !== undefined) {
+    form.set("message_thread_id", String(address.messageThreadId));
+  }
+}
+
+function telegramProgressKey(sessionKey: ChannelSessionKey): string {
+  return JSON.stringify([
+    sessionKey.accountId ?? "",
+    sessionKey.chatId,
+    sessionKey.threadId ?? "",
+    sessionKey.userId ?? ""
+  ]);
+}
+
+function telegramRetryAfterSeconds(error: unknown): number | undefined {
+  return error instanceof TelegramApiError && error.retryAfterSeconds !== undefined
+    ? Math.max(0, error.retryAfterSeconds)
+    : undefined;
+}
+
+function disposeProgressState(state: TelegramProgressState): void {
+  state.disposed = true;
+  if (state.timer !== undefined) {
+    clearTimeout(state.timer);
+    state.timer = undefined;
+  }
+  if (state.retryTimer !== undefined) {
+    clearTimeout(state.retryTimer);
+    state.retryTimer = undefined;
+  }
 }
 
 function renderArtifactNotice(artifact: ArtifactRecord): string {

@@ -29,7 +29,7 @@ describe("channel activity labels", () => {
     expect(renderChannelProgressLabel(warning, "ar")).toContain("تنبيه بشأن الإنفاق التقديري");
   });
 
-  it("renders tool starts with display label and target summary", () => {
+  it("renders tool starts with display label and a safe display preview", () => {
     expect(renderChannelProgressLabel({
       kind: "tool-start",
       tool: "file.search",
@@ -38,8 +38,32 @@ describe("channel activity labels", () => {
     expect(renderChannelProgressLabel({
       kind: "tool-start",
       tool: "terminal.run",
-      targetSummary: "pnpm test"
+      targetSummary: "raw command --token=sk-secret-value",
+      displayPreview: "pnpm test"
     })).toBe("🖥️ Run Command: \"pnpm test\"");
+  });
+
+  it("redacts and truncates unsafe progress preview fallbacks", () => {
+    expect(renderChannelProgressLabel({
+      kind: "tool-start",
+      tool: "terminal.run",
+      targetSummary: "curl https://example.test/run?access_token=secret-value"
+    })).toBe("🖥️ Run Command: \"curl https://example.test/run?access_token=[redacted]\"");
+    expect(renderChannelProgressLabel({
+      kind: "tool-start",
+      tool: "browser.type",
+      targetSummary: "Authorization: Bearer secret-value"
+    })).toBe("⌨️ Browser Type: \"Authorization: Bearer [redacted]\"");
+    expect(renderChannelProgressLabel({
+      kind: "tool-start",
+      tool: "web.extract",
+      targetSummary: "https://user:password@example.test/private"
+    })).toBe("🌐 Web Extract: \"[redacted]\"");
+    expect(renderChannelProgressLabel({
+      kind: "tool-start",
+      tool: "mcp.custom_tool",
+      targetSummary: "x".repeat(200)
+    })).toBe(`⚙️ Custom Tool: \"${"x".repeat(93)}...\"`);
   });
 
   it("renders tool starts without summaries and falls back for unknown tools", () => {
