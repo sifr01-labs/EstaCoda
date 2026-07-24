@@ -156,6 +156,226 @@ describe("SupervisorTaskBackgroundHost Task ownership", () => {
     sessionDb.close();
   });
 
+  it("admits new workspace runtimes only up to remaining scheduler capacity", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-supervisor-task-runtime-capacity-"));
+    tempDirs.push(tempDir);
+    const sessionDb = new SQLiteSessionDB({ path: join(tempDir, "sessions.sqlite") });
+    await sessionDb.createSession({ id: "creator-alpha", profileId: "alpha" });
+    const store = new SQLiteTaskStore({ db: sessionDb.db, profileId: "alpha" });
+    const operator = new TaskOperatorService({ store });
+    const workspaces = [
+      { canonicalPath: "/workspace/capacity-a", identityHash: "capacity-a" },
+      { canonicalPath: "/workspace/capacity-b", identityHash: "capacity-b" }
+    ];
+    const tasks = workspaces.map((workspace, index) => operator.begin({
+      objective: `Run capacity-limited Task ${index + 1}.`,
+      workspace,
+      creatorSessionId: "creator-alpha"
+    }));
+    const executions: string[] = [];
+    const createExecutorRuntime = vi.fn(async (workspace: typeof workspaces[number]) => ({
+      taskAgentExecutor: {
+        kind: "agent" as const,
+        canExecute: (task: { workspace: typeof workspace }) => task.workspace.identityHash === workspace.identityHash,
+        execute: async (input: { task: { id: string } }) => {
+          executions.push(input.task.id);
+          return { outcome: "succeeded" as const, results: [{ kind: "text" as const, content: "done" }] };
+        }
+      } as unknown as AgentStepExecutor,
+      dispose: async () => undefined
+    }));
+    const host = new SupervisorTaskBackgroundHost({
+      store,
+      resultService: new TaskResultService({
+        store,
+        profileId: "alpha",
+        contentRoot: join(tempDir, "results"),
+        sessionDb
+      }),
+      router: { deliverText: async () => new Map() },
+      ownerId: "capacity-background",
+      resolveWorkspace: async (canonicalPath) => workspaces.find((workspace) => workspace.canonicalPath === canonicalPath)!,
+      isWorkspaceTrusted: () => true,
+      createExecutorRuntime,
+      schedulerLimits: { maxProfileConcurrentAttempts: 1 }
+    });
+
+    await expect(host.runOnce()).resolves.toMatchObject({ scheduler: { dispatched: 1, completed: 1 } });
+    expect(createExecutorRuntime).toHaveBeenCalledTimes(1);
+    expect(executions).toHaveLength(1);
+    expect(tasks.filter((task) => store.getTask(task.taskId)?.status === "completed")).toHaveLength(1);
+
+    await expect(host.runOnce()).resolves.toMatchObject({ scheduler: { dispatched: 1, completed: 1 } });
+    expect(createExecutorRuntime).toHaveBeenCalledTimes(2);
+    expect(new Set(executions)).toEqual(new Set(tasks.map((task) => task.taskId)));
+    expect(tasks.every((task) => store.getTask(task.taskId)?.status === "completed")).toBe(true);
+
+    await host.dispose();
+    sessionDb.close();
+  });
+
+  it("does not accumulate waiting workspace runtimes beyond scheduler capacity", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-supervisor-task-runtime-residency-"));
+    tempDirs.push(tempDir);
+    const sessionDb = new SQLiteSessionDB({ path: join(tempDir, "sessions.sqlite") });
+    await sessionDb.createSession({ id: "creator-alpha", profileId: "alpha" });
+    const store = new SQLiteTaskStore({ db: sessionDb.db, profileId: "alpha" });
+    const operator = new TaskOperatorService({ store });
+    const workspaces = [
+      { canonicalPath: "/workspace/resident-a", identityHash: "resident-a" },
+      { canonicalPath: "/workspace/resident-b", identityHash: "resident-b" }
+    ];
+    for (const [index, workspace] of workspaces.entries()) {
+      operator.begin({
+        objective: `Wait in capacity-limited workspace ${index + 1}.`,
+        workspace,
+        creatorSessionId: "creator-alpha"
+      });
+    }
+    const createExecutorRuntime = vi.fn(async (workspace: typeof workspaces[number]) => ({
+      taskAgentExecutor: {
+        kind: "agent" as const,
+        canExecute: (task: { workspace: typeof workspace }) => task.workspace.identityHash === workspace.identityHash,
+        execute: async () => ({ outcome: "waiting_for_input" as const })
+      } as unknown as AgentStepExecutor,
+      dispose: async () => undefined
+    }));
+    const host = new SupervisorTaskBackgroundHost({
+      store,
+      resultService: new TaskResultService({
+        store,
+        profileId: "alpha",
+        contentRoot: join(tempDir, "results"),
+        sessionDb
+      }),
+      router: { deliverText: async () => new Map() },
+      ownerId: "resident-capacity-background",
+      resolveWorkspace: async (canonicalPath) => workspaces.find((workspace) => workspace.canonicalPath === canonicalPath)!,
+      isWorkspaceTrusted: () => true,
+      createExecutorRuntime,
+      schedulerLimits: { maxProfileConcurrentAttempts: 1 }
+    });
+
+    await expect(host.runOnce()).resolves.toMatchObject({ scheduler: { dispatched: 1 } });
+    await expect(host.runOnce()).resolves.toMatchObject({ scheduler: { dispatched: 0 } });
+    expect(createExecutorRuntime).toHaveBeenCalledTimes(1);
+
+    await host.dispose();
+    sessionDb.close();
+  });
+
+  it("retains, reports, and retries a failed unused workspace runtime disposal", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-supervisor-task-runtime-cleanup-"));
+    tempDirs.push(tempDir);
+    const sessionDb = new SQLiteSessionDB({ path: join(tempDir, "sessions.sqlite") });
+    await sessionDb.createSession({ id: "creator-alpha", profileId: "alpha" });
+    const store = new SQLiteTaskStore({ db: sessionDb.db, profileId: "alpha" });
+    const workspace = { canonicalPath: "/workspace/cleanup", identityHash: "cleanup-workspace" };
+    const task = new TaskOperatorService({ store }).begin({
+      objective: "Dispose the runtime after completion.",
+      workspace,
+      creatorSessionId: "creator-alpha"
+    });
+    let disposalFails = true;
+    const dispose = vi.fn(async () => {
+      if (disposalFails) throw new TypeError("private cleanup detail");
+    });
+    const warnings: string[] = [];
+    const host = new SupervisorTaskBackgroundHost({
+      store,
+      resultService: new TaskResultService({
+        store,
+        profileId: "alpha",
+        contentRoot: join(tempDir, "results"),
+        sessionDb
+      }),
+      router: { deliverText: async () => new Map() },
+      ownerId: "cleanup-background",
+      resolveWorkspace: async () => workspace,
+      isWorkspaceTrusted: () => true,
+      createExecutorRuntime: async () => ({
+        taskAgentExecutor: {
+          kind: "agent" as const,
+          canExecute: () => true,
+          execute: async () => ({
+            outcome: "succeeded" as const,
+            results: [{ kind: "text" as const, content: "done" }]
+          })
+        } as unknown as AgentStepExecutor,
+        dispose
+      }),
+      logWarning: (warning) => warnings.push(warning)
+    });
+
+    await expect(host.runOnce()).resolves.toMatchObject({ scheduler: { dispatched: 1, completed: 1 } });
+    expect(store.getTask(task.taskId)?.status).toBe("completed");
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(host.hasPendingWork()).toBe(true);
+    expect(warnings).toContain("Task executor runtime disposal failed (workspace-unused; TypeError).");
+    expect(warnings.join("\n")).not.toContain("private cleanup detail");
+
+    disposalFails = false;
+    await expect(host.runOnce()).resolves.toMatchObject({ scheduler: { dispatched: 0 } });
+    expect(dispose).toHaveBeenCalledTimes(2);
+    expect(host.hasPendingWork()).toBe(false);
+
+    await host.dispose();
+    expect(dispose).toHaveBeenCalledTimes(2);
+    sessionDb.close();
+  });
+
+  it("keeps failed shutdown cleanup retryable on the same host", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-supervisor-task-shutdown-cleanup-"));
+    tempDirs.push(tempDir);
+    const sessionDb = new SQLiteSessionDB({ path: join(tempDir, "sessions.sqlite") });
+    await sessionDb.createSession({ id: "creator-alpha", profileId: "alpha" });
+    const store = new SQLiteTaskStore({ db: sessionDb.db, profileId: "alpha" });
+    const workspace = { canonicalPath: "/workspace/shutdown-cleanup", identityHash: "shutdown-cleanup-workspace" };
+    new TaskOperatorService({ store }).begin({
+      objective: "Keep the runtime alive until host shutdown.",
+      workspace,
+      creatorSessionId: "creator-alpha"
+    });
+    let disposalFails = true;
+    const dispose = vi.fn(async () => {
+      if (disposalFails) throw new TypeError("private shutdown detail");
+    });
+    const warnings: string[] = [];
+    const host = new SupervisorTaskBackgroundHost({
+      store,
+      resultService: new TaskResultService({
+        store,
+        profileId: "alpha",
+        contentRoot: join(tempDir, "results"),
+        sessionDb
+      }),
+      router: { deliverText: async () => new Map() },
+      ownerId: "shutdown-cleanup-background",
+      resolveWorkspace: async () => workspace,
+      isWorkspaceTrusted: () => true,
+      createExecutorRuntime: async () => ({
+        taskAgentExecutor: {
+          kind: "agent" as const,
+          canExecute: () => true,
+          execute: async () => ({ outcome: "waiting_for_input" as const })
+        } as unknown as AgentStepExecutor,
+        dispose
+      }),
+      logWarning: (warning) => warnings.push(warning)
+    });
+
+    await expect(host.runOnce()).resolves.toMatchObject({ scheduler: { dispatched: 1 } });
+    await expect(host.dispose()).rejects.toThrow("1 Task executor workspace runtime(s) could not be disposed.");
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(warnings).toContain("Task executor runtime disposal failed (host-shutdown; TypeError).");
+    expect(warnings.join("\n")).not.toContain("private shutdown detail");
+
+    disposalFails = false;
+    await expect(host.dispose()).resolves.toBeUndefined();
+    expect(dispose).toHaveBeenCalledTimes(2);
+    sessionDb.close();
+  });
+
   it("refuses ownership before runtime creation when workspace identity or trust validation fails", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "estacoda-supervisor-task-workspace-deny-"));
     tempDirs.push(tempDir);

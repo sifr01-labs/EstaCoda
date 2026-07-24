@@ -363,6 +363,16 @@ export class TaskScheduler {
     return this.#activeDispatches.size > 0 || this.#activeBatches.size > 0;
   }
 
+  /** Remaining profile-wide Attempt slots available to the next dispatch pass. */
+  availableProfileDispatchCapacity(): number {
+    return Math.max(0, this.#limits.maxProfileConcurrentAttempts - this.#capacityState().profile);
+  }
+
+  /** Maximum profile-wide Attempt slots, used to bound executor-runtime admission too. */
+  profileDispatchCapacityLimit(): number {
+    return this.#limits.maxProfileConcurrentAttempts;
+  }
+
   /** Waits for work already owned by this scheduler without admitting new work. */
   async shutdown(): Promise<void> {
     this.stopDispatching();

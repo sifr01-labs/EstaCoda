@@ -373,6 +373,46 @@ describe("runGatewaySupervisor", () => {
     expect(host.dispose).toHaveBeenCalledTimes(1);
   });
 
+  it("reports and retries durable Task host disposal failure in once mode", async () => {
+    let firstDisposal = true;
+    const host = {
+      runOnce: vi.fn(async () => ({ skipped: false })),
+      hasPendingWork: vi.fn(() => false),
+      waitForIdle: vi.fn(async () => undefined),
+      status: vi.fn(() => ({ running: false, runs: 1 })),
+      dispose: vi.fn(async () => {
+        if (firstDisposal) {
+          firstDisposal = false;
+          throw new TypeError("private disposal detail");
+        }
+      })
+    };
+    const warnings: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation((message: unknown) => {
+      warnings.push(String(message));
+    });
+    try {
+      const result = await runGatewaySupervisor({
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        once: true,
+        factories: {
+          tickCron: fakeTickCron().tickCron,
+          createTaskBackgroundHost: () => host,
+          createChannelGateway: () => fakeChannelGateway() as any,
+          createDeliveryRouter: () => fakeDeliveryRouter() as any
+        }
+      });
+
+      expect(result.ok).toBe(true);
+      expect(host.dispose).toHaveBeenCalledTimes(2);
+      expect(warnings).toContain("Task background host disposal failed (TypeError); retrying once.");
+      expect(warnings.join("\n")).not.toContain("private disposal detail");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("cron runtime options preserve primary and fallback model routes", () => {
     const latestConfig = fakeLoadedRuntimeConfig();
     const sessionDb = {} as any;

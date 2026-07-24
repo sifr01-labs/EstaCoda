@@ -7,7 +7,7 @@ import {
   type TaskBackgroundHostStatus
 } from "./task-background-host.js";
 import { TaskCompletionDeliveryService, type TaskCompletionDeliveryRouter } from "./task-completion-delivery.js";
-import { TaskScheduler, taskHostDispatchGrant } from "./task-scheduler.js";
+import { TaskScheduler, taskHostDispatchGrant, type TaskSchedulerLimits } from "./task-scheduler.js";
 import type { TaskResultService } from "./task-result-service.js";
 import type { TaskStore } from "./task-store.js";
 import type { TaskApprovalService } from "./task-approval-service.js";
@@ -32,6 +32,7 @@ type WorkspaceExecutorState = {
   runtime?: TaskExecutorHostRuntime;
   executor?: AgentStepExecutor;
   creation?: Promise<void>;
+  cleanupPending?: boolean;
   nextCreationAt: number;
 };
 
@@ -55,6 +56,7 @@ export class SupervisorTaskBackgroundHost {
   readonly #workspaceWarnings = new Set<string>();
   #heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   #disposed = false;
+  #disposePromise: Promise<void> | undefined;
 
   constructor(options: {
     store: TaskStore;
@@ -64,6 +66,7 @@ export class SupervisorTaskBackgroundHost {
     resolveWorkspace: (canonicalPath: string) => Promise<TaskWorkspaceBinding>;
     isWorkspaceTrusted: (canonicalPath: string) => boolean | Promise<boolean>;
     createExecutorRuntime: (workspace: TaskWorkspaceBinding) => Promise<TaskExecutorHostRuntime>;
+    schedulerLimits?: TaskSchedulerLimits;
     approvalService?: TaskApprovalService;
     leaseMs?: number;
     heartbeatIntervalMs?: number;
@@ -98,6 +101,7 @@ export class SupervisorTaskBackgroundHost {
       resultService: options.resultService,
       ownerId: options.ownerId,
       approvalService: options.approvalService,
+      limits: options.schedulerLimits,
       now: this.#now,
       resolveExecutor: (task, step) => {
         const executor = this.#workspaces.get(task.workspace.identityHash)?.executor;
@@ -118,7 +122,10 @@ export class SupervisorTaskBackgroundHost {
           await this.#revalidateOwnedWorkspaces();
           this.#renewOwnedTasks();
           await this.#claimAvailableTasks();
-          await this.#ensureExecutorsForRunnableWork();
+          await this.#ensureExecutorsForRunnableWork(
+            scheduler.availableProfileDispatchCapacity(),
+            scheduler.profileDispatchCapacityLimit()
+          );
           const result = await scheduler.runOnce({ dispatchGrants: this.#dispatchGrants() });
           this.#renewOwnedTasks();
           await this.#disposeUnusedWorkspaceRuntimes();
@@ -144,7 +151,9 @@ export class SupervisorTaskBackgroundHost {
   }
 
   hasPendingWork(): boolean {
-    return this.#host.hasPendingWork() || [...this.#workspaces.values()].some((state) => state.creation !== undefined);
+    return this.#host.hasPendingWork() || [...this.#workspaces.values()].some(
+      (state) => state.creation !== undefined || state.cleanupPending === true
+    );
   }
 
   waitForIdle(): Promise<void> {
@@ -155,57 +164,89 @@ export class SupervisorTaskBackgroundHost {
     return this.#host.status();
   }
 
-  async dispose(): Promise<void> {
-    if (this.#disposed) return;
+  dispose(): Promise<void> {
+    if (this.#disposePromise !== undefined) return this.#disposePromise;
+    if (this.#disposed && this.#workspaces.size === 0) return Promise.resolve();
     this.#disposed = true;
     if (this.#heartbeatTimer !== undefined) {
       clearInterval(this.#heartbeatTimer);
       this.#heartbeatTimer = undefined;
     }
+    const disposal = this.#disposeRetainedResources();
+    this.#disposePromise = disposal;
+    void disposal.then(
+      () => { if (this.#disposePromise === disposal) this.#disposePromise = undefined; },
+      () => { if (this.#disposePromise === disposal) this.#disposePromise = undefined; }
+    );
+    return disposal;
+  }
+
+  async #disposeRetainedResources(): Promise<void> {
     await this.#host.waitForIdle().catch(() => undefined);
     await Promise.allSettled([...this.#workspaces.values()].map((state) => state.creation));
     this.#releaseOwnedTasks();
-    const runtimes = [...this.#workspaces.values()].map((state) => state.runtime);
-    this.#workspaces.clear();
-    await Promise.allSettled(runtimes.map((runtime) => runtime?.dispose()));
+    let failures = 0;
+    for (const [workspaceId, state] of [...this.#workspaces]) {
+      if (await this.#disposeWorkspaceRuntime(state, "host-shutdown")) this.#workspaces.delete(workspaceId);
+      else failures++;
+    }
+    if (failures > 0) {
+      throw new Error(`${failures} Task executor workspace runtime(s) could not be disposed.`);
+    }
   }
 
-  async #ensureExecutorsForRunnableWork(): Promise<void> {
+  async #ensureExecutorsForRunnableWork(availableDispatchCapacity: number, runtimeCapacityLimit: number): Promise<void> {
     const workspaceIds = new Set([...this.#owned.values()].map((lease) => lease.workspaceIdentityHash));
-    await Promise.all([...workspaceIds].map(async (workspaceId) => {
-      const state = this.#workspaces.get(workspaceId);
-      if (state !== undefined) await this.#ensureWorkspaceExecutor(state);
+    const states = [...workspaceIds]
+      .map((workspaceId) => this.#workspaces.get(workspaceId))
+      .filter((state): state is WorkspaceExecutorState => state !== undefined);
+    await Promise.all(states.filter((state) => state.cleanupPending === true).map(async (state) => {
+      await this.#disposeWorkspaceRuntime(state, "cleanup-retry");
     }));
+    const admittedRuntimes = [...this.#workspaces.values()].filter(
+      (state) => state.runtime !== undefined || state.creation !== undefined
+    ).length;
+    const availableCapacity = Math.min(
+      availableDispatchCapacity,
+      Math.max(0, runtimeCapacityLimit - admittedRuntimes)
+    );
+    if (availableCapacity <= 0) return;
+    const candidates = states.filter((state) =>
+      state.runtime === undefined && state.executor === undefined && state.creation === undefined &&
+      Date.now() >= state.nextCreationAt
+    ).slice(0, availableCapacity);
+    await Promise.all(candidates.map((state) => this.#ensureWorkspaceExecutor(state)));
   }
 
   async #ensureWorkspaceExecutor(state: WorkspaceExecutorState): Promise<void> {
-    if (this.#disposed || state.executor !== undefined || Date.now() < state.nextCreationAt) return;
+    if (this.#disposed || state.executor !== undefined || state.runtime !== undefined || Date.now() < state.nextCreationAt) return;
     if (state.creation !== undefined) return await state.creation;
 
     const creation = (async () => {
       let runtime: TaskExecutorHostRuntime | undefined;
       try {
         runtime = await this.#createExecutorRuntime(state.workspace);
+        state.runtime = runtime;
         if (runtime.taskAgentExecutor === undefined) {
-          await runtime.dispose().catch(() => undefined);
+          await this.#disposeWorkspaceRuntime(state, "executor-not-configured");
           state.nextCreationAt = Date.now() + EXECUTOR_CREATION_RETRY_MS;
           this.#logWarning("Task executor host unavailable (executor-not-configured).");
           return;
         }
         if (await this.#verifyWorkspace(state.workspace) === undefined) {
-          await runtime.dispose().catch(() => undefined);
+          const disposed = await this.#disposeWorkspaceRuntime(state, "workspace-ineligible");
           this.#releaseWorkspaceOwnership(state.workspace.identityHash);
-          this.#workspaces.delete(state.workspace.identityHash);
+          if (disposed) this.#workspaces.delete(state.workspace.identityHash);
           return;
         }
         if (this.#disposed) {
-          await runtime.dispose().catch(() => undefined);
+          await this.#disposeWorkspaceRuntime(state, "host-stopped-during-creation");
           return;
         }
-        state.runtime = runtime;
         state.executor = runtime.taskAgentExecutor;
       } catch (error) {
-        await runtime?.dispose().catch(() => undefined);
+        if (runtime !== undefined && state.runtime === undefined) state.runtime = runtime;
+        if (state.runtime !== undefined) await this.#disposeWorkspaceRuntime(state, "creation-failed");
         state.nextCreationAt = Date.now() + EXECUTOR_CREATION_RETRY_MS;
         this.#logWarning(`Task executor host unavailable (${errorClass(error)}).`);
       }
@@ -255,9 +296,10 @@ export class SupervisorTaskBackgroundHost {
     for (const [workspaceId, state] of [...this.#workspaces]) {
       if (await this.#verifyWorkspace(state.workspace) !== undefined) continue;
       this.#releaseWorkspaceOwnership(workspaceId);
-      this.#workspaces.delete(workspaceId);
       await state.creation?.catch(() => undefined);
-      await state.runtime?.dispose().catch(() => undefined);
+      if (await this.#disposeWorkspaceRuntime(state, "workspace-revalidation")) {
+        this.#workspaces.delete(workspaceId);
+      }
     }
   }
 
@@ -329,8 +371,28 @@ export class SupervisorTaskBackgroundHost {
     const used = new Set([...this.#owned.values()].map((lease) => lease.workspaceIdentityHash));
     for (const [workspaceId, state] of [...this.#workspaces]) {
       if (used.has(workspaceId) || state.creation !== undefined) continue;
-      this.#workspaces.delete(workspaceId);
-      await state.runtime?.dispose().catch(() => undefined);
+      if (await this.#disposeWorkspaceRuntime(state, "workspace-unused")) {
+        this.#workspaces.delete(workspaceId);
+      }
+    }
+  }
+
+  async #disposeWorkspaceRuntime(state: WorkspaceExecutorState, reason: string): Promise<boolean> {
+    const runtime = state.runtime;
+    state.executor = undefined;
+    if (runtime === undefined) {
+      state.cleanupPending = false;
+      return true;
+    }
+    try {
+      await runtime.dispose();
+      if (state.runtime === runtime) state.runtime = undefined;
+      state.cleanupPending = false;
+      return true;
+    } catch (error) {
+      state.cleanupPending = true;
+      this.#logWarning(`Task executor runtime disposal failed (${reason}; ${errorClass(error)}).`);
+      return false;
     }
   }
 
@@ -362,6 +424,7 @@ function positiveInteger(value: number, label: string): number {
 }
 
 function errorClass(error: unknown): string {
-  if (error instanceof Error && error.name.trim().length > 0) return error.name;
+  const name = error instanceof Error ? error.name.trim() : "";
+  if (/^[A-Za-z][A-Za-z0-9._:-]{0,63}$/u.test(name)) return name;
   return "task-executor-host-error";
 }

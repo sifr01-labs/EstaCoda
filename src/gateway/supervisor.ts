@@ -367,6 +367,24 @@ function logDebug(message: string): void {
   console.debug(message);
 }
 
+async function disposeTaskBackgroundHostWithRetry(taskBackgroundHost: SupervisorTaskHost): Promise<void> {
+  try {
+    await taskBackgroundHost.dispose();
+  } catch (error) {
+    logWarning(`Task background host disposal failed (${boundedErrorClass(error, "task-host-disposal-error")}); retrying once.`);
+    try {
+      await taskBackgroundHost.dispose();
+    } catch (retryError) {
+      logWarning(`Task background host disposal retry failed (${boundedErrorClass(retryError, "task-host-disposal-error")}).`);
+    }
+  }
+}
+
+function boundedErrorClass(error: unknown, fallback: string): string {
+  const name = error instanceof Error ? error.name.trim() : "";
+  return /^[A-Za-z][A-Za-z0-9._:-]{0,63}$/u.test(name) ? name : fallback;
+}
+
 function emitSupervisorHook<N extends GatewayHookEventName>(
   hookRegistry: HookRegistry | undefined,
   name: N,
@@ -529,7 +547,7 @@ async function cleanupSupervisorStartupResources(state: SupervisorInternalState)
     ]);
   }
   if (taskBackgroundHost !== undefined && taskHostSettled) {
-    try { await taskBackgroundHost.dispose(); } catch { /* ignore */ }
+    await disposeTaskBackgroundHostWithRetry(taskBackgroundHost);
   }
 
   // 2b. Stop claiming finalization work and give the active provider call a short abort grace.
@@ -576,8 +594,10 @@ async function cleanupSupervisorStartupResources(state: SupervisorInternalState)
         taskBackgroundHost === undefined || taskHostSettled
           ? undefined
           : taskBackgroundHost.waitForIdle()
-              .then(() => taskBackgroundHost.dispose(), () => taskBackgroundHost.dispose())
-              .catch(() => undefined)
+              .then(
+                () => disposeTaskBackgroundHostWithRetry(taskBackgroundHost),
+                () => disposeTaskBackgroundHostWithRetry(taskBackgroundHost)
+              )
       ].filter((value): value is Promise<void> => value !== undefined);
       void Promise.all(pending).then(() => {
         try { sessionDb.close(); } catch { /* ignore */ }
