@@ -401,7 +401,10 @@ Inside the Papyrus screen buffer, zero-width direction controls are packed into
 an adjacent visible cell's string when that content exists. They never receive
 a standalone narrow or spacer cell, so clipping, cursor advancement, and diff
 coordinates continue to reflect terminal columns while serialized visible text
-retains its controls. Zero-width-only writes remain inert.
+retains its controls. Zero-width-only writes remain inert. Papyrus also gathers
+ANSI parser text actions through each logical newline before applying its
+optional software bidi ordering, so style and hyperlink transitions do not split
+a directional run; the reordered clusters retain their original ownership.
 
 ---
 

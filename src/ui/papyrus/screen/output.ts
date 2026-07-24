@@ -23,8 +23,7 @@ export class Output {
     let cursorX = x;
     let cursorY = y;
     let activeHyperlink: string | undefined;
-    let pendingZeroWidth = "";
-    let lastVisibleCell: { readonly x: number; readonly y: number } | undefined;
+    let logicalLine: ClusteredChar[] = [];
 
     for (const action of actions) {
       if (action.type === "link") {
@@ -32,40 +31,20 @@ export class Output {
         continue;
       }
       if (action.type !== "text") continue;
-      const clusters = this.actionToClusters(action, activeHyperlink, options);
+      const clusters = this.actionToClusters(action, activeHyperlink);
       for (const cluster of clusters) {
         if (cluster.value === "\n") {
-          pendingZeroWidth = "";
-          lastVisibleCell = undefined;
+          cursorX = this.writeLogicalLine(cursorX, cursorY, logicalLine, options);
+          logicalLine = [];
           cursorX = x;
           cursorY += 1;
           continue;
         }
-
-        if (cluster.width === 0) {
-          if (lastVisibleCell === undefined) {
-            pendingZeroWidth += cluster.value;
-          } else {
-            this.appendZeroWidth(lastVisibleCell.x, lastVisibleCell.y, cluster.value);
-          }
-          continue;
-        }
-
-        if (cursorY >= this.screen.height) break;
-        if (cursorX >= this.screen.width) continue;
-
-        const width = cluster.width === 2 ? CellWidth.Wide : CellWidth.Narrow;
-        const value = `${pendingZeroWidth}${cluster.value}`;
-        pendingZeroWidth = "";
-        if (this.screen.setCell(cursorX, cursorY, value, width, cluster.styleId, this.screen.internHyperlink(cluster.hyperlink))) {
-          lastVisibleCell = { x: cursorX, y: cursorY };
-          cursorX += cluster.width;
-        } else {
-          cursorX += 1;
-        }
+        logicalLine.push(cluster);
       }
     }
 
+    cursorX = this.writeLogicalLine(cursorX, cursorY, logicalLine, options);
     return { x: cursorX, y: cursorY };
   }
 
@@ -79,7 +58,44 @@ export class Output {
     this.screen.setCell(x, y, `${cell.char}${value}`, cell.width, cell.styleId, cell.hyperlinkId);
   }
 
-  private actionToClusters(action: Extract<Action, { type: "text" }>, hyperlink: string | undefined, options?: WriteOptions): ClusteredChar[] {
+  private writeLogicalLine(
+    cursorX: number,
+    cursorY: number,
+    logicalLine: readonly ClusteredChar[],
+    options?: WriteOptions,
+  ): number {
+    const clusters = reorderBidi(logicalLine, { mode: options?.bidi });
+    let pendingZeroWidth = "";
+    let lastVisibleCell: { readonly x: number; readonly y: number } | undefined;
+
+    for (const cluster of clusters) {
+      if (cluster.width === 0) {
+        if (lastVisibleCell === undefined) {
+          pendingZeroWidth += cluster.value;
+        } else {
+          this.appendZeroWidth(lastVisibleCell.x, lastVisibleCell.y, cluster.value);
+        }
+        continue;
+      }
+
+      if (cursorY >= this.screen.height) break;
+      if (cursorX >= this.screen.width) continue;
+
+      const width = cluster.width === 2 ? CellWidth.Wide : CellWidth.Narrow;
+      const value = `${pendingZeroWidth}${cluster.value}`;
+      pendingZeroWidth = "";
+      if (this.screen.setCell(cursorX, cursorY, value, width, cluster.styleId, this.screen.internHyperlink(cluster.hyperlink))) {
+        lastVisibleCell = { x: cursorX, y: cursorY };
+        cursorX += cluster.width;
+      } else {
+        cursorX += 1;
+      }
+    }
+
+    return cursorX;
+  }
+
+  private actionToClusters(action: Extract<Action, { type: "text" }>, hyperlink: string | undefined): ClusteredChar[] {
     const styleId = this.screen.internStyle(action.style);
     const clusters: ClusteredChar[] = [];
 
@@ -95,7 +111,7 @@ export class Output {
       }
     }
 
-    return [...reorderBidi(clusters, { mode: options?.bidi })];
+    return clusters;
   }
 }
 

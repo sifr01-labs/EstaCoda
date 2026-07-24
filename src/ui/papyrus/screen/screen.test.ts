@@ -96,6 +96,59 @@ describe("Papyrus Screen", () => {
     expect(cursor).toEqual({ x: 1, y: 1 });
   });
 
+  it("reorders a complete mixed-direction line across ANSI style boundaries", () => {
+    const screen = createScreen(10, 1);
+    const cursor = writeToScreen(
+      screen,
+      0,
+      0,
+      `ID: \x1b[31mمر\x1b[32mحبا\x1b[0m`,
+      { bidi: "software" },
+    );
+
+    expect(screen.rowText(0)).toBe("ID: ابحرم ");
+    expect(screen.getStyle(screen.cellAt(4, 0)?.styleId ?? 0).fg).toEqual({ type: "named", name: "green" });
+    expect(screen.getStyle(screen.cellAt(6, 0)?.styleId ?? 0).fg).toEqual({ type: "named", name: "green" });
+    expect(screen.getStyle(screen.cellAt(7, 0)?.styleId ?? 0).fg).toEqual({ type: "named", name: "red" });
+    expect(screen.getStyle(screen.cellAt(8, 0)?.styleId ?? 0).fg).toEqual({ type: "named", name: "red" });
+    expect(cursor).toEqual({ x: 9, y: 0 });
+  });
+
+  it("preserves hyperlink ownership while reordering a complete logical line", () => {
+    const screen = createScreen(9, 1);
+    writeToScreen(
+      screen,
+      0,
+      0,
+      `go م\x1b]8;;https://example.com\x07رح\x1b]8;;\x07با`,
+      { bidi: "software" },
+    );
+
+    expect(screen.rowText(0)).toBe("go ابحرم ");
+    expect(screen.getHyperlink(screen.cellAt(3, 0)?.hyperlinkId ?? 0)).toBeUndefined();
+    expect(screen.getHyperlink(screen.cellAt(4, 0)?.hyperlinkId ?? 0)).toBeUndefined();
+    expect(screen.getHyperlink(screen.cellAt(5, 0)?.hyperlinkId ?? 0)).toBe("https://example.com");
+    expect(screen.getHyperlink(screen.cellAt(6, 0)?.hyperlinkId ?? 0)).toBe("https://example.com");
+    expect(screen.getHyperlink(screen.cellAt(7, 0)?.hyperlinkId ?? 0)).toBeUndefined();
+  });
+
+  it("flushes software bidi independently at newlines and at end of input", () => {
+    const screen = createScreen(6, 2);
+    const cursor = writeToScreen(
+      screen,
+      0,
+      0,
+      `\x1b[31mمر\x1b[0mحبا\n\x1b[32mسل\x1b[0mام`,
+      { bidi: "software" },
+    );
+
+    expect(screen.rowText(0)).toBe("ابحرم ");
+    expect(screen.rowText(1)).toBe("مالس  ");
+    expect(screen.getStyle(screen.cellAt(3, 0)?.styleId ?? 0).fg).toEqual({ type: "named", name: "red" });
+    expect(screen.getStyle(screen.cellAt(2, 1)?.styleId ?? 0).fg).toEqual({ type: "named", name: "green" });
+    expect(cursor).toEqual({ x: 4, y: 1 });
+  });
+
   it("writes wide text with spacer cells and clips at bounds", () => {
     const screen = createScreen(4, 1);
     writeToScreen(screen, 0, 0, "表a😀");
