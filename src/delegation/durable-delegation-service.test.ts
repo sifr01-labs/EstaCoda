@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -40,7 +39,7 @@ describe("DurableDelegationService", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("scopes provider-call idempotency to the visible turn", async () => {
+  it("scopes provider-call idempotency to the creator session and visible turn", async () => {
     const service = rootService(store);
     const first = service.create({
       toolCallId: "call-1",
@@ -61,6 +60,7 @@ describe("DurableDelegationService", () => {
 
     expect(replay).toMatchObject({ taskId: first.taskId, idempotentReplay: true });
     expect(task).toMatchObject({ status: "queued", source: "delegation" });
+    expect(task.creationKey).toMatch(/^delegate:v2:[0-9a-f]{64}$/u);
     expect(task).toMatchObject({
       rootTaskId: task.id,
       originSessionId: "parent",
@@ -113,33 +113,33 @@ describe("DurableDelegationService", () => {
     expect(nextTurn).toMatchObject({ idempotentReplay: false });
     expect(nextTurn.taskId).not.toBe(first.taskId);
     expect(store.getTask(nextTurn.taskId)?.originTurnId).toBe("visible-turn-beta");
+    expect(store.getTask(nextTurn.taskId)?.creationKey).not.toBe(task.creationKey);
     expect(service.create(nextTurnRequest)).toMatchObject({
       taskId: nextTurn.taskId,
       idempotentReplay: true
     });
-    expect(store.listTasks()).toHaveLength(2);
-  });
 
-  it("preserves an exact same-turn replay created with the legacy creation key", () => {
-    const service = rootService(store);
-    const request = {
-      toolCallId: "legacy-call",
+    await sessionDb.createSession({ id: "parent-other", profileId: "alpha" });
+    const otherSession = rootService(store, "parent-other");
+    const otherSessionRequest = {
+      toolCallId: "call-1",
       originTurnId: "visible-turn-alpha",
-      trustedWorkspace: true as const,
-      tasks: [{ task: "Recover the existing durable Task" }]
-    };
-    const first = service.create(request);
-    const legacyDigest = createHash("sha256")
-      .update("alpha\u0000parent\u0000legacy-call")
-      .digest("hex");
-    sessionDb.db.query("update tasks set creation_key = ? where id = ?")
-      .run(`delegate:${legacyDigest}`, first.taskId);
-
-    expect(service.create(request)).toMatchObject({
-      taskId: first.taskId,
+      trustedWorkspace: true,
+      tasks: [{ task: "Read A" }, { task: "Read B", role: "orchestrator" }],
+      synthesis: false
+    } as const;
+    const otherSessionTask = otherSession.create(otherSessionRequest);
+    expect(otherSessionTask).toMatchObject({ idempotentReplay: false });
+    expect(otherSessionTask.taskId).not.toBe(first.taskId);
+    expect(store.getTask(otherSessionTask.taskId)).toMatchObject({
+      originSessionId: "parent-other",
+      originTurnId: "visible-turn-alpha"
+    });
+    expect(otherSession.create(otherSessionRequest)).toMatchObject({
+      taskId: otherSessionTask.taskId,
       idempotentReplay: true
     });
-    expect(store.listTasks()).toHaveLength(1);
+    expect(store.listTasks()).toHaveLength(3);
   });
 
   it("snapshots the configured root spending limit and only permits finite narrowing", () => {
@@ -1075,10 +1075,10 @@ describe("DurableDelegationService", () => {
   });
 });
 
-function rootService(store: SQLiteTaskStore) {
+function rootService(store: SQLiteTaskStore, creatorSessionId = "parent") {
   return new DurableDelegationService({
     store,
-    creatorSessionId: () => "parent",
+    creatorSessionId: () => creatorSessionId,
     workspace: workspace(),
     config: { ...DEFAULT_DELEGATION_CONFIG, maxSpawnDepth: 2, maxConcurrentChildren: 2 },
     visibleTools

@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import type { DelegateSynthesis, DelegateTaskItem, DelegationConfig } from "../contracts/delegation.js";
 import type {
-  Task,
   TaskAuthorityDisposition,
   TaskAuthorityPolicy,
   TaskExecutionLimits,
@@ -160,17 +159,8 @@ export class DurableDelegationService {
     if (executionPreference !== "auto" && executionPreference !== "background") {
       throw new Error("Delegation execution preference is invalid.");
     }
-    const scopedCreationKey = delegationCreationKey(this.#store.profileId, sessionId, originTurnId, toolCallId);
-    let creationKey = scopedCreationKey;
-    let existing = this.#store.getTaskByCreationKey(scopedCreationKey);
-    if (existing === null) {
-      const legacyCreationKey = legacyDelegationCreationKey(this.#store.profileId, sessionId, toolCallId);
-      const legacyExisting = this.#store.getTaskByCreationKey(legacyCreationKey);
-      if (legacyExisting !== null && legacyTaskMatchesRequestScope(legacyExisting, parent, originTurnId)) {
-        creationKey = legacyCreationKey;
-        existing = legacyExisting;
-      }
-    }
+    const creationKey = delegationCreationKey(this.#store.profileId, sessionId, originTurnId, toolCallId);
+    const existing = this.#store.getTaskByCreationKey(creationKey);
     const synthesis = resolveDelegationSynthesis(request);
     const localCompletionEligible = parent === undefined && (
       synthesis !== undefined || (request.tasks.length === 1 && request.synthesis !== false)
@@ -597,21 +587,6 @@ function delegationCreationKey(
     .update(`${profileId}\u0000${sessionId}\u0000${originTurnId ?? ""}\u0000${toolCallId}`)
     .digest("hex");
   return `delegate:v2:${digest}`;
-}
-
-function legacyDelegationCreationKey(profileId: string, sessionId: string, toolCallId: string): string {
-  const digest = createHash("sha256").update(`${profileId}\u0000${sessionId}\u0000${toolCallId}`).digest("hex");
-  return `delegate:${digest}`;
-}
-
-function legacyTaskMatchesRequestScope(
-  task: Task,
-  parent: { taskId: string; attemptId: string } | undefined,
-  originTurnId: string | undefined
-): boolean {
-  return parent === undefined
-    ? task.parentTaskId === undefined && task.originTurnId === originTurnId
-    : task.parentTaskId === parent.taskId && task.parentAttemptId === parent.attemptId;
 }
 
 function boundedToken(value: string, label: string): string {
