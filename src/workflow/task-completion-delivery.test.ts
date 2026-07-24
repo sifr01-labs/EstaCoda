@@ -73,7 +73,9 @@ describe("TaskCompletionDeliveryService", () => {
       destination: { platform: "telegram", chatId: "chat-1", threadId: "thread-1" }
     });
 
-    await expect(service.runOnce()).resolves.toEqual({ recovered: 0, claimed: 1, delivered: 1, failed: 0 });
+    await expect(service.runOnce()).resolves.toEqual({
+      recovered: 0, recoveryFailed: 0, claimed: 1, delivered: 1, failed: 0
+    });
     expect(deliverText).toHaveBeenCalledTimes(1);
     const [targets, text] = deliverText.mock.calls[0]!;
     expect(targets).toEqual([{ kind: "channel", platform: "telegram", chatId: "chat-1", threadId: "thread-1" }]);
@@ -82,7 +84,9 @@ describe("TaskCompletionDeliveryService", () => {
     expect(text).toContain("Task total:");
     expect(text).toContain("Produce result: unavailable");
     expect(text).not.toContain(tempDir);
-    await expect(service.runOnce()).resolves.toEqual({ recovered: 0, claimed: 0, delivered: 0, failed: 0 });
+    await expect(service.runOnce()).resolves.toEqual({
+      recovered: 0, recoveryFailed: 0, claimed: 0, delivered: 0, failed: 0
+    });
     expect(deliverText).toHaveBeenCalledTimes(1);
   });
 
@@ -136,7 +140,9 @@ describe("TaskCompletionDeliveryService", () => {
     const deliverText = vi.fn(async (_targets: DeliveryTarget[], _text: string) => new Map());
     const service = createService(deliverText);
 
-    await expect(service.runOnce()).resolves.toEqual({ recovered: 0, claimed: 0, delivered: 0, failed: 0 });
+    await expect(service.runOnce()).resolves.toEqual({
+      recovered: 0, recoveryFailed: 0, claimed: 0, delivered: 0, failed: 0
+    });
     expect(deliverText).not.toHaveBeenCalled();
     expect(store.getDeliveryBinding("delivery-cli")?.status).toBe("pending");
   });
@@ -152,7 +158,9 @@ describe("TaskCompletionDeliveryService", () => {
       destination: { platform: "telegram", chatId: "chat-1" }
     });
 
-    await expect(service.runOnce()).resolves.toEqual({ recovered: 0, claimed: 0, delivered: 0, failed: 0 });
+    await expect(service.runOnce()).resolves.toEqual({
+      recovered: 0, recoveryFailed: 0, claimed: 0, delivered: 0, failed: 0
+    });
     expect(store.getDeliveryBinding(binding.id)?.status).toBe("pending");
     expect(deliverText).not.toHaveBeenCalled();
   });
@@ -195,13 +203,43 @@ describe("TaskCompletionDeliveryService", () => {
     });
     expect(store.claimDeliveryBinding(binding.id, "2030-01-01T00:00:02.000Z")?.status).toBe("delivering");
 
-    expect(service.recoverInterrupted()).toBe(1);
+    expect(service.recoverInterrupted()).toEqual({ recovered: 1, failed: 0 });
     expect(store.getDeliveryBinding(binding.id)).toMatchObject({
       status: "failed",
       failureClass: "delivery-outcome-unknown"
     });
     expect(() => service.retry(binding.id, "creator-alpha")).toThrow(/ambiguous external outcome/u);
     expect(deliverText).not.toHaveBeenCalled();
+  });
+
+  it("isolates a failed interrupted binding and continues recovering healthy bindings", () => {
+    completeTask();
+    for (const id of ["delivery-corrupt", "delivery-healthy"]) {
+      store.atomicWrite((transaction) => transaction.createDeliveryBinding({
+        id,
+        profileId: "alpha",
+        taskId: "task-alpha",
+        authorizedSessionId: "creator-alpha",
+        deliveryKey: id,
+        destination: { platform: "telegram", chatId: id },
+        status: "pending",
+        createdAt: NOW,
+        updatedAt: NOW
+      }));
+      expect(store.claimDeliveryBinding(id, NOW)?.status).toBe("delivering");
+    }
+    const settleDeliveryBinding = store.settleDeliveryBinding.bind(store);
+    vi.spyOn(store, "settleDeliveryBinding").mockImplementation((input) => {
+      if (input.id === "delivery-corrupt") throw new TypeError("corrupt binding row");
+      return settleDeliveryBinding(input);
+    });
+
+    expect(createService(vi.fn()).recoverInterrupted()).toEqual({ recovered: 1, failed: 1 });
+    expect(store.getDeliveryBinding("delivery-corrupt")?.status).toBe("delivering");
+    expect(store.getDeliveryBinding("delivery-healthy")).toMatchObject({
+      status: "failed",
+      failureClass: "delivery-outcome-unknown"
+    });
   });
 
   it("does not retry a transport exception with an unknown external outcome", async () => {

@@ -125,7 +125,8 @@ export class SupervisorTaskBackgroundHost {
           return result;
         }
       },
-      delivery
+      delivery,
+      logWarning: this.#logWarning
     });
     this.#heartbeatTimer = setInterval(() => {
       try {

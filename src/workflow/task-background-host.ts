@@ -23,6 +23,7 @@ export class TaskBackgroundHost {
   readonly #scheduler: Pick<TaskScheduler, "runOnce">;
   readonly #delivery: Pick<TaskCompletionDeliveryService, "recoverInterrupted" | "runOnce">;
   readonly #now: () => Date;
+  readonly #logWarning: (message: string) => void;
   #activeRun: Promise<TaskBackgroundHostRunResult> | undefined;
   #runs = 0;
   #lastStartedAt: string | undefined;
@@ -34,10 +35,12 @@ export class TaskBackgroundHost {
     scheduler: Pick<TaskScheduler, "runOnce">;
     delivery: Pick<TaskCompletionDeliveryService, "recoverInterrupted" | "runOnce">;
     now?: () => Date;
+    logWarning?: (message: string) => void;
   }) {
     this.#scheduler = options.scheduler;
     this.#delivery = options.delivery;
     this.#now = options.now ?? (() => new Date());
+    this.#logWarning = options.logWarning ?? (() => undefined);
   }
 
   runOnce(): Promise<TaskBackgroundHostRunResult> {
@@ -74,11 +77,21 @@ export class TaskBackgroundHost {
     this.#lastErrorClass = undefined;
     this.#runs++;
     try {
-      const recovered = this.#recovered ? 0 : this.#delivery.recoverInterrupted();
+      const recovery = this.#recovered
+        ? { recovered: 0, failed: 0 }
+        : this.#delivery.recoverInterrupted();
       this.#recovered = true;
+      if (recovery.failed > 0) {
+        try {
+          this.#logWarning(`${recovery.failed} interrupted Task completion delivery binding(s) could not be recovered.`);
+        } catch {
+          // Recovery counts still surface through the run result when warning output is unavailable.
+        }
+      }
       const scheduler = await this.#scheduler.runOnce();
       const delivery = await this.#delivery.runOnce();
-      delivery.recovered += recovered;
+      delivery.recovered += recovery.recovered;
+      delivery.recoveryFailed += recovery.failed;
       this.#lastCompletedAt = this.#now().toISOString();
       return { skipped: false, scheduler, delivery };
     } catch (error) {

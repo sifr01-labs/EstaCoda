@@ -3195,8 +3195,12 @@ describe("createRuntime MCP trust gating", () => {
       router: { deliverText }
     });
 
-    await expect(delivery.runOnce()).resolves.toEqual({ recovered: 0, claimed: 1, delivered: 1, failed: 0 });
-    await expect(delivery.runOnce()).resolves.toEqual({ recovered: 0, claimed: 0, delivered: 0, failed: 0 });
+    await expect(delivery.runOnce()).resolves.toEqual({
+      recovered: 0, recoveryFailed: 0, claimed: 1, delivered: 1, failed: 0
+    });
+    await expect(delivery.runOnce()).resolves.toEqual({
+      recovered: 0, recoveryFailed: 0, claimed: 0, delivered: 0, failed: 0
+    });
     expect(deliverText).toHaveBeenCalledOnce();
     expect(deliverText.mock.calls[0]?.[0]).toEqual([{
       kind: "channel",

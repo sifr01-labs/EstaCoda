@@ -33,8 +33,14 @@ export type BindTaskCompletionDeliveryInput = {
 
 export type TaskCompletionDeliveryRunResult = {
   recovered: number;
+  recoveryFailed: number;
   claimed: number;
   delivered: number;
+  failed: number;
+};
+
+export type TaskCompletionDeliveryRecoveryResult = {
+  recovered: number;
   failed: number;
 };
 
@@ -102,25 +108,30 @@ export class TaskCompletionDeliveryService {
    * A process may have sent an external message before crashing. Those outcomes are
    * deliberately marked ambiguous and are never retried automatically.
    */
-  recoverInterrupted(): number {
-    let recovered = 0;
+  recoverInterrupted(): TaskCompletionDeliveryRecoveryResult {
+    const result: TaskCompletionDeliveryRecoveryResult = { recovered: 0, failed: 0 };
     for (const binding of this.#store.listDeliveryBindings({ statuses: ["delivering"], limit: 1_000 })) {
       if (binding.destination.platform === "cli") continue;
-      this.#store.settleDeliveryBinding({
-        id: binding.id,
-        status: "failed",
-        settledAt: this.#now().toISOString(),
-        failureClass: "delivery-outcome-unknown",
-        failureMessage: "The previous delivery process stopped before confirming the external outcome."
-      });
-      recovered++;
+      try {
+        this.#store.settleDeliveryBinding({
+          id: binding.id,
+          status: "failed",
+          settledAt: this.#now().toISOString(),
+          failureClass: "delivery-outcome-unknown",
+          failureMessage: "The previous delivery process stopped before confirming the external outcome."
+        });
+        result.recovered++;
+      } catch {
+        result.failed++;
+      }
     }
-    return recovered;
+    return result;
   }
 
   async runOnce(): Promise<TaskCompletionDeliveryRunResult> {
     const result: TaskCompletionDeliveryRunResult = {
       recovered: 0,
+      recoveryFailed: 0,
       claimed: 0,
       delivered: 0,
       failed: 0
