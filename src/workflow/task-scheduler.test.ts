@@ -1082,6 +1082,137 @@ describe("TaskScheduler", () => {
     expect(store.getTask("task-alpha")?.status).toBe("completed");
   });
 
+  it("keeps a Task waiting until every parallel approval is resolved", async () => {
+    store.createTaskGraph(makeGraph([makeStep("approval-one", 0), makeStep("approval-two", 1)]));
+    const queue = new GatewayApprovalQueue({
+      db: sessionDb.db,
+      controller: new WorkspaceApprovalController(),
+      now,
+      idFactory: () => nextId("parallel-pending-approval")
+    });
+    const approvals = new TaskApprovalService({
+      store,
+      queue,
+      now,
+      id: () => nextId("parallel-task-approval")
+    });
+    const executionsByStep = new Map<string, number>();
+    const executor = new FakeTaskStepExecutor(({ step }) => {
+      const executionNumber = (executionsByStep.get(step.id) ?? 0) + 1;
+      executionsByStep.set(step.id, executionNumber);
+      return executionNumber === 1
+        ? {
+            outcome: "waiting_for_approval",
+            approval: {
+              toolName: `file.write.${step.key}`,
+              riskClass: "workspace-write",
+              targetFingerprint: `sha256:${(step.position === 0 ? "a" : "b").repeat(64)}`,
+              targetPreview: `write ${step.key}`
+            }
+          }
+        : { outcome: "succeeded", results: [{ kind: "text", content: `${step.key} approved` }] };
+    });
+    acquireDispatchGrants("scheduler-alpha");
+    const scheduler = new TaskScheduler({
+      store,
+      resultService,
+      ownerId: "scheduler-alpha",
+      resolveExecutor: () => executor,
+      approvalService: approvals,
+      now,
+      id: () => nextId("parallel-attempt"),
+      eventId: () => nextId("parallel-scheduler-event")
+    });
+
+    expect(await scheduler.runOnce()).toMatchObject({ dispatched: 2, completed: 0, failed: 0 });
+    expect(store.getTask("task-alpha")).toMatchObject({
+      status: "waiting_for_approval",
+      waitReason: { kind: "approval", summary: "2 Task approvals are pending." }
+    });
+    await scheduler.runOnce();
+    const links = store.listApprovalLinks({ taskId: "task-alpha" });
+    expect(links).toHaveLength(2);
+    expect(links.every((link) => link.status === "pending")).toBe(true);
+
+    await queue.resolveApproval(links[0]!.pendingApprovalId!, "approved", "operator", {
+      profileId: "alpha",
+      sessionId: "creator-alpha"
+    });
+    expect(await scheduler.runOnce()).toMatchObject({ reconciled: 1, dispatched: 0 });
+    expect(store.getStep(links[0]!.stepId)?.status).toBe("ready");
+    expect(store.getStep(links[1]!.stepId)?.status).toBe("waiting_for_approval");
+    expect(store.getTask("task-alpha")).toMatchObject({
+      status: "waiting_for_approval",
+      waitReason: { kind: "approval", approvalId: links[1]!.id }
+    });
+
+    await queue.resolveApproval(links[1]!.pendingApprovalId!, "approved", "operator", {
+      profileId: "alpha",
+      sessionId: "creator-alpha"
+    });
+    expect(await scheduler.runOnce()).toMatchObject({ reconciled: 1, dispatched: 2, completed: 2, failed: 0 });
+    expect(store.getTask("task-alpha")?.status).toBe("completed");
+    expect(store.listAttempts("task-alpha").map((attempt) => attempt.status)).toEqual(["completed", "completed"]);
+    expect(store.listEvents("task-alpha", { kinds: ["task-state-changed"] })
+      .filter((event) => event.data.to === "waiting_for_approval")).toHaveLength(1);
+  });
+
+  it("fails a parallel-approval Task without leaving sibling execution state live after denial", async () => {
+    store.createTaskGraph(makeGraph([makeStep("approval-one", 0), makeStep("approval-two", 1)]));
+    const queue = new GatewayApprovalQueue({
+      db: sessionDb.db,
+      controller: new WorkspaceApprovalController(),
+      now,
+      idFactory: () => nextId("denied-pending-approval")
+    });
+    const approvals = new TaskApprovalService({
+      store,
+      queue,
+      now,
+      id: () => nextId("denied-task-approval")
+    });
+    const executor = new FakeTaskStepExecutor(({ step }) => ({
+      outcome: "waiting_for_approval",
+      approval: {
+        toolName: `file.write.${step.key}`,
+        riskClass: "workspace-write",
+        targetFingerprint: `sha256:${(step.position === 0 ? "c" : "d").repeat(64)}`,
+        targetPreview: `write ${step.key}`
+      }
+    }));
+    acquireDispatchGrants("scheduler-alpha");
+    const scheduler = new TaskScheduler({
+      store,
+      resultService,
+      ownerId: "scheduler-alpha",
+      resolveExecutor: () => executor,
+      approvalService: approvals,
+      now,
+      id: () => nextId("denied-attempt"),
+      eventId: () => nextId("denied-scheduler-event")
+    });
+
+    await scheduler.runOnce();
+    await scheduler.runOnce();
+    const links = store.listApprovalLinks({ taskId: "task-alpha" });
+    await queue.resolveApproval(links[0]!.pendingApprovalId!, "denied", "operator", {
+      profileId: "alpha",
+      sessionId: "creator-alpha"
+    });
+
+    expect(await scheduler.runOnce()).toMatchObject({ reconciled: 1, failed: 1 });
+    expect(store.getTask("task-alpha")).toMatchObject({
+      status: "failed",
+      failure: { class: "approval-denied" }
+    });
+    expect(store.getStep(links[0]!.stepId)?.status).toBe("failed");
+    expect(store.getStep(links[1]!.stepId)?.status).toBe("cancelled");
+    expect(store.listAttempts("task-alpha").map((attempt) => attempt.status)).toEqual(["failed", "cancelled"]);
+    expect(approvals.listPendingForSession("creator-alpha")).toEqual([]);
+    await scheduler.runOnce();
+    expect(store.listApprovalLinks({ taskId: "task-alpha" }).map((link) => link.status)).toEqual(["denied", "denied"]);
+  });
+
   it("pauses on an exact spending denial while preserving completed Results", async () => {
     store.createTaskGraph(makeGraph([
       makeStep("research-before-limit", 0),

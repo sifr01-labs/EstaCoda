@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { SecurityAssessment, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import { assessSecurityPolicy } from "../contracts/security.js";
 import type { Task, TaskApprovalLink, TaskAttempt, TaskStep } from "../contracts/task.js";
+import { isTerminalTaskStatus } from "../contracts/task.js";
 import type { PendingApproval, PendingApprovalCreationOptions } from "../gateway/approval-queue.js";
 import type { TaskStore } from "./task-store.js";
 
@@ -126,7 +127,11 @@ export class TaskApprovalService {
     const sessionId = requireIdentifier(authorizedSessionId, "Task approval session ID");
     if (this.#queue === undefined) return [];
     return this.#store.listApprovalLinks({ statuses: ["pending"], limit: 1_000 })
-      .filter((link) => link.authorizedSessionId === sessionId && link.pendingApprovalId !== undefined)
+      .filter((link) => {
+        const task = this.#store.getTask(link.taskId);
+        return task !== null && !isTerminalTaskStatus(task.status) &&
+          link.authorizedSessionId === sessionId && link.pendingApprovalId !== undefined;
+      })
       .map((link) => ({
         approvalId: link.pendingApprovalId!,
         taskId: link.taskId,
@@ -152,7 +157,11 @@ export class TaskApprovalService {
     const approvalId = requireIdentifier(input.approvalId, "Task approval ID");
     const sessionId = requireIdentifier(input.authorizedSessionId, "Task approval session ID");
     const link = this.#store.listApprovalLinks({ statuses: ["pending"], limit: 1_000 })
-      .find((candidate) => candidate.pendingApprovalId === approvalId && candidate.authorizedSessionId === sessionId);
+      .find((candidate) => {
+        const task = this.#store.getTask(candidate.taskId);
+        return task !== null && !isTerminalTaskStatus(task.status) &&
+          candidate.pendingApprovalId === approvalId && candidate.authorizedSessionId === sessionId;
+      });
     if (link === undefined) throw new Error("Pending Task approval not found for this session.");
     await queue.resolveApproval(approvalId, input.decision, "cli-operator", {
       profileId: this.#store.profileId,
@@ -193,8 +202,10 @@ export class TaskApprovalService {
   async reconcile(options: { eligibleTaskIds?: ReadonlySet<string> } = {}): Promise<void> {
     const links = this.#store.listApprovalLinks({ statuses: ["requesting", "pending"], limit: 1_000 });
     for (const link of links) {
-      if (options.eligibleTaskIds !== undefined && !options.eligibleTaskIds.has(link.taskId)) continue;
-      if (link.status === "requesting") await this.#enqueue(link);
+      const task = this.#store.getTask(link.taskId);
+      if (task === null || isTerminalTaskStatus(task.status)) await this.#closeForTerminalTask(link);
+      else if (options.eligibleTaskIds !== undefined && !options.eligibleTaskIds.has(link.taskId)) continue;
+      else if (link.status === "requesting") await this.#enqueue(link);
       else await this.#refresh(link);
     }
   }
@@ -274,6 +285,33 @@ export class TaskApprovalService {
       updatedAt: now,
       resolvedAt: pending.resolvedAt?.toISOString() ?? now
     }));
+  }
+
+  async #closeForTerminalTask(link: TaskApprovalLink): Promise<void> {
+    const queue = this.#queue;
+    if (link.status === "pending" && link.pendingApprovalId !== undefined && queue !== undefined) {
+      try {
+        await queue.resolveApproval(link.pendingApprovalId, "denied", "task-terminal", {
+          profileId: link.profileId,
+          sessionId: link.authorizedSessionId
+        });
+      } catch {
+        // A concurrent operator decision wins. Refresh below records the durable queue truth.
+      }
+      await this.#refresh(link);
+      return;
+    }
+    const now = this.#now().toISOString();
+    this.#store.atomicWrite((store) => {
+      const current = store.getApprovalLink(link.id);
+      if (current === null || (current.status !== "requesting" && current.status !== "pending")) return;
+      store.updateApprovalLink({
+        ...current,
+        status: "expired",
+        updatedAt: now,
+        resolvedAt: now
+      });
+    });
   }
 }
 

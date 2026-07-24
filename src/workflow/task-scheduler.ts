@@ -480,15 +480,15 @@ export class TaskScheduler {
       const task = this.#store.getTask(link.taskId);
       const step = this.#store.getStep(link.stepId);
       const attempt = this.#store.getAttempt(link.attemptId);
-      if (task?.status !== "waiting_for_approval" || step?.status !== "waiting_for_approval" ||
+      if (task === null || isTerminalTaskStatus(task.status) || step?.status !== "waiting_for_approval" ||
           attempt?.status !== "waiting_for_approval") continue;
       const now = this.#now().toISOString();
-      this.#store.atomicWrite((store) => {
+      const reconciliation = this.#store.atomicWrite<"approved" | "failed" | undefined>((store) => {
         const currentTask = store.getTask(link.taskId);
         const currentStep = store.getStep(link.stepId);
         const currentAttempt = store.getAttempt(link.attemptId);
-        if (currentTask?.status !== "waiting_for_approval" || currentStep?.status !== "waiting_for_approval" ||
-            currentAttempt?.status !== "waiting_for_approval") return;
+        if (currentTask === null || isTerminalTaskStatus(currentTask.status) ||
+            currentStep?.status !== "waiting_for_approval" || currentAttempt?.status !== "waiting_for_approval") return undefined;
         if (link.status === "approved") {
           store.updateAttempt({
             ...currentAttempt,
@@ -498,17 +498,21 @@ export class TaskScheduler {
             updatedAt: now
           });
           store.updateStep({ ...currentStep, status: "ready", updatedAt: now });
-          store.updateTask({ ...currentTask, status: "queued", waitReason: undefined, updatedAt: now });
+          const waitReason = this.#approvalWaitReason(store, currentTask, now);
+          const nextStatus: Task["status"] = waitReason === undefined ? "queued" : "waiting_for_approval";
+          store.updateTask({ ...currentTask, status: nextStatus, waitReason, updatedAt: now });
           store.appendEvent(this.#event(currentTask, "approval-resolved", now, {
             attemptId: currentAttempt.id,
             stepId: currentStep.id,
             planRevisionId: currentStep.planRevisionId,
             data: { approvalId: link.id, resolution: "approved" }
           }));
-          store.appendEvent(this.#event(currentTask, "task-state-changed", now, {
-            data: { from: "waiting_for_approval", to: "queued", reasonCode: "approval-granted" }
-          }));
-          return;
+          if (currentTask.status !== nextStatus) {
+            store.appendEvent(this.#event(currentTask, "task-state-changed", now, {
+              data: { from: currentTask.status, to: nextStatus, reasonCode: "approval-granted" }
+            }));
+          }
+          return "approved";
         }
         const failureRecord = failure(
           link.status === "denied" ? "approval-denied" : "approval-expired",
@@ -544,11 +548,84 @@ export class TaskScheduler {
           data: { from: "waiting_for_approval", to: "failed", reasonCode: failureRecord.class }
         }));
         store.appendEvent(this.#event(currentTask, "task-state-changed", now, {
-          data: { from: "waiting_for_approval", to: "failed", reasonCode: failureRecord.class }
+          data: { from: currentTask.status, to: "failed", reasonCode: failureRecord.class }
         }));
+        this.#cancelRemainingAfterApprovalFailure(store, currentTask, currentStep.id, currentAttempt.id, now);
+        return "failed";
       });
+      if (reconciliation === undefined) continue;
       result.reconciled++;
-      if (link.status !== "approved") result.failed++;
+      if (reconciliation === "failed") {
+        result.failed++;
+        this.#abortTaskExecutions(link.taskId, link.attemptId);
+      }
+    }
+  }
+
+  #approvalWaitReason(store: TaskStore, task: Task, now: string): Task["waitReason"] | undefined {
+    if (task.activePlanRevisionId === undefined) return undefined;
+    const waitingSteps = store.listSteps(task.id, task.activePlanRevisionId)
+      .filter((step) => step.status === "waiting_for_approval");
+    if (waitingSteps.length === 0) return undefined;
+    const waitingAttemptIds = new Set(store.listAttempts(task.id)
+      .filter((attempt) => attempt.status === "waiting_for_approval")
+      .map((attempt) => attempt.id));
+    const approvalLinks = store.listApprovalLinks({ taskId: task.id, limit: 1_000 })
+      .filter((link) => waitingAttemptIds.has(link.attemptId));
+    const requestedAt = approvalLinks.reduce<string | undefined>((earliest, link) =>
+      earliest === undefined || link.requestedAt < earliest ? link.requestedAt : earliest, undefined) ?? now;
+    if (waitingSteps.length === 1 && approvalLinks.length === 1) {
+      return {
+        kind: "approval",
+        summary: `Approval required for ${approvalLinks[0]!.toolName}.`,
+        requestedAt,
+        approvalId: approvalLinks[0]!.id
+      };
+    }
+    return {
+      kind: "approval",
+      summary: `${waitingSteps.length} Task approvals are pending.`,
+      requestedAt
+    };
+  }
+
+  #cancelRemainingAfterApprovalFailure(
+    store: TaskStore,
+    task: Task,
+    failedStepId: string,
+    failedAttemptId: string,
+    now: string
+  ): void {
+    if (task.activePlanRevisionId !== undefined) {
+      for (const step of store.listSteps(task.id, task.activePlanRevisionId)) {
+        if (step.id === failedStepId || ![
+          "pending",
+          "ready",
+          "waiting_for_input",
+          "waiting_for_approval"
+        ].includes(step.status)) continue;
+        store.updateStep({ ...step, status: "cancelled", updatedAt: now });
+        store.appendEvent(this.#event(task, "step-state-changed", now, {
+          stepId: step.id,
+          planRevisionId: step.planRevisionId,
+          data: { from: step.status, to: "cancelled", reasonCode: "task-failed" }
+        }));
+      }
+    }
+    for (const attempt of store.listAttempts(task.id)) {
+      if (attempt.id === failedAttemptId || isTerminalTaskAttemptStatus(attempt.status)) continue;
+      if (attempt.status === "queued" ||
+          ((attempt.status === "waiting_for_input" || attempt.status === "waiting_for_approval") && attempt.lease === undefined)) {
+        store.updateAttempt({ ...attempt, status: "cancelled", updatedAt: now, completedAt: now });
+        store.appendEvent(this.#event(task, "attempt-cancelled", now, {
+          attemptId: attempt.id,
+          stepId: attempt.stepId,
+          planRevisionId: attempt.planRevisionId,
+          data: { reasonCode: "task-failed" }
+        }));
+      } else if (ACTIVE_ATTEMPT_STATUSES.includes(attempt.status)) {
+        store.requestAttemptCancellation(attempt.id, now);
+      }
     }
   }
 
@@ -1286,16 +1363,12 @@ export class TaskScheduler {
         updatedAt: now
       });
       store.updateStep({ ...step, status: "waiting_for_approval", updatedAt: now });
+      const waitReason = this.#approvalWaitReason(store, context.task, now)!;
       store.updateTask({
         ...context.task,
         status: "waiting_for_approval",
         updatedAt: now,
-        waitReason: {
-          kind: "approval",
-          summary: `Approval required for ${link.toolName}.`,
-          requestedAt: now,
-          approvalId: link.id
-        }
+        waitReason
       });
       if (!store.releaseAttemptLease(fenceInput(lease))) throw new TaskSchedulerLeaseLostError();
       store.appendEvent(this.#event(context.task, "usage-recorded", now, {
@@ -1321,9 +1394,11 @@ export class TaskScheduler {
         planRevisionId: step.planRevisionId,
         data: { from: "running", to: "waiting_for_approval", reasonCode: "approval-required" }
       }));
-      store.appendEvent(this.#event(context.task, "task-state-changed", now, {
-        data: { from: "running", to: "waiting_for_approval", reasonCode: "approval-required" }
-      }));
+      if (context.task.status !== "waiting_for_approval") {
+        store.appendEvent(this.#event(context.task, "task-state-changed", now, {
+          data: { from: context.task.status, to: "waiting_for_approval", reasonCode: "approval-required" }
+        }));
+      }
     });
   }
 
