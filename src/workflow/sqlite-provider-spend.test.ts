@@ -363,6 +363,251 @@ describe("SQLiteProviderSpendController", () => {
     expect(controller.getScope("session", "origin")?.reservedCostUsd).toBe(4.5);
   });
 
+  it("protects synthesis under a session-only limit across concurrent workers", async () => {
+    await createBudgetSession(sessionDb, "session-only");
+    const graph = sessionOnlySynthesisTaskGraph({
+      taskId: "task-session-only",
+      originSessionId: "session-only",
+      originTurnId: "session-only-turn",
+      workerCount: 2
+    });
+    const taskStore = new SQLiteTaskStore({ db: sessionDb.db, profileId: PROFILE_ID });
+    taskStore.createTaskGraph(graph);
+    const workerAttempts = graph.steps.slice(0, 2).map((step, index) =>
+      taskAttemptFor(graph.task.id, graph.revision.id, step!.id, `attempt-session-worker-${index + 1}`, "session-only-worker")
+    );
+    const synthesisAttempt = taskAttemptFor(
+      graph.task.id,
+      graph.revision.id,
+      graph.steps[2]!.id,
+      "attempt-session-synthesis",
+      "session-only-worker"
+    );
+    taskStore.atomicWrite((store) => {
+      for (const attempt of [...workerAttempts, synthesisAttempt]) store.createAttempt(attempt);
+    });
+
+    for (const [index, attempt] of workerAttempts.entries()) {
+      expect(controller.reserve(taskSpendRequest({
+        graph,
+        step: graph.steps[index]!,
+        attempt,
+        requestKey: `session-worker-${index + 1}`,
+        maximumEstimatedCostUsd: 4,
+        sessionId: "session-only-worker",
+        sessionScopeId: "session-only",
+        visibleTurnId: "session-only-turn",
+        providerAttemptIndex: index
+      }), CREATED_AT)).toMatchObject({ ok: true });
+    }
+
+    expect(controller.reserve(taskSpendRequest({
+      graph,
+      step: graph.steps[0]!,
+      attempt: workerAttempts[0]!,
+      requestKey: "session-worker-overflow",
+      maximumEstimatedCostUsd: 0.01,
+      sessionId: "session-only-worker",
+      sessionScopeId: "session-only",
+      visibleTurnId: "session-only-turn",
+      providerAttemptIndex: 2
+    }), CREATED_AT)).toMatchObject({
+      ok: false,
+      reason: "SESSION_CAPACITY_RESERVED",
+      availableCostUsd: 0
+    });
+
+    expect(controller.reserve(taskSpendRequest({
+      graph,
+      step: graph.steps[2]!,
+      attempt: synthesisAttempt,
+      requestKey: "session-synthesis",
+      maximumEstimatedCostUsd: 2,
+      sessionId: "session-only-worker",
+      sessionScopeId: "session-only",
+      visibleTurnId: "session-only-turn",
+      providerAttemptIndex: 3
+    }), CREATED_AT)).toMatchObject({ ok: true });
+    expect(controller.getScope("session", "session-only")?.reservedCostUsd).toBe(10);
+    expect(controller.getScope("root_task", graph.task.id)).toBeNull();
+  });
+
+  it("shares a session synthesis earmark across multiple root Tasks", async () => {
+    await createBudgetSession(sessionDb, "multi-root");
+    const graphA = sessionOnlySynthesisTaskGraph({
+      taskId: "task-multi-a",
+      originSessionId: "multi-root",
+      originTurnId: "multi-root-turn"
+    });
+    const graphB = sessionOnlySynthesisTaskGraph({
+      taskId: "task-multi-b",
+      originSessionId: "multi-root",
+      originTurnId: "multi-root-turn"
+    });
+    const taskStore = new SQLiteTaskStore({ db: sessionDb.db, profileId: PROFILE_ID });
+    taskStore.createTaskGraph(graphA);
+    taskStore.createTaskGraph(graphB);
+    const workerA = taskAttemptFor(
+      graphA.task.id, graphA.revision.id, graphA.steps[0]!.id, "attempt-multi-a-worker", "multi-root-worker"
+    );
+    const workerB = taskAttemptFor(
+      graphB.task.id, graphB.revision.id, graphB.steps[0]!.id, "attempt-multi-b-worker", "multi-root-worker"
+    );
+    const synthesisA = taskAttemptFor(
+      graphA.task.id, graphA.revision.id, graphA.steps[1]!.id, "attempt-multi-a-synthesis", "multi-root-worker"
+    );
+    taskStore.atomicWrite((store) => {
+      store.createAttempt(workerA);
+      store.createAttempt(workerB);
+      store.createAttempt(synthesisA);
+    });
+
+    expect(controller.reserve(taskSpendRequest({
+      graph: graphA,
+      step: graphA.steps[0]!,
+      attempt: workerA,
+      requestKey: "multi-a-worker",
+      maximumEstimatedCostUsd: 7.1,
+      sessionId: "multi-root-worker",
+      sessionScopeId: "multi-root",
+      visibleTurnId: "multi-root-turn"
+    }), CREATED_AT)).toMatchObject({ ok: true });
+    const denied = controller.reserve(taskSpendRequest({
+      graph: graphB,
+      step: graphB.steps[0]!,
+      attempt: workerB,
+      requestKey: "multi-b-worker",
+      maximumEstimatedCostUsd: 1,
+      sessionId: "multi-root-worker",
+      sessionScopeId: "multi-root",
+      visibleTurnId: "multi-root-turn",
+      providerAttemptIndex: 1
+    }), CREATED_AT);
+    expect(denied).toMatchObject({ ok: false, reason: "SESSION_CAPACITY_RESERVED" });
+    expect(denied.ok ? undefined : denied.availableCostUsd).toBeCloseTo(0.9);
+
+    expect(controller.reserve(taskSpendRequest({
+      graph: graphA,
+      step: graphA.steps[1]!,
+      attempt: synthesisA,
+      requestKey: "multi-a-synthesis",
+      maximumEstimatedCostUsd: 1.9,
+      sessionId: "multi-root-worker",
+      sessionScopeId: "multi-root",
+      visibleTurnId: "multi-root-turn",
+      providerAttemptIndex: 2
+    }), CREATED_AT)).toMatchObject({ ok: true });
+    expect(controller.getScope("session", "multi-root")?.reservedCostUsd).toBe(9);
+  });
+
+  it("does not earmark synthesis capacity already committed by another root", async () => {
+    await createBudgetSession(sessionDb, "committed-root");
+    const graphA = sessionOnlySynthesisTaskGraph({
+      taskId: "task-committed-a",
+      originSessionId: "committed-root",
+      originTurnId: "committed-root-turn"
+    });
+    const graphB = sessionOnlySynthesisTaskGraph({
+      taskId: "task-committed-b",
+      originSessionId: "committed-root",
+      originTurnId: "committed-root-turn"
+    });
+    const taskStore = new SQLiteTaskStore({ db: sessionDb.db, profileId: PROFILE_ID });
+    taskStore.createTaskGraph(graphA);
+    taskStore.createTaskGraph(graphB);
+    const synthesisA = taskAttemptFor(
+      graphA.task.id,
+      graphA.revision.id,
+      graphA.steps[1]!.id,
+      "attempt-committed-a-synthesis",
+      "committed-root-worker"
+    );
+    const workerB = taskAttemptFor(
+      graphB.task.id,
+      graphB.revision.id,
+      graphB.steps[0]!.id,
+      "attempt-committed-b-worker",
+      "committed-root-worker"
+    );
+    taskStore.atomicWrite((store) => {
+      store.createAttempt(synthesisA);
+      store.createAttempt(workerB);
+    });
+
+    expect(controller.reserve(taskSpendRequest({
+      graph: graphA,
+      step: graphA.steps[1]!,
+      attempt: synthesisA,
+      requestKey: "committed-a-synthesis",
+      maximumEstimatedCostUsd: 1,
+      sessionId: "committed-root-worker",
+      sessionScopeId: "committed-root",
+      visibleTurnId: "committed-root-turn"
+    }), CREATED_AT)).toMatchObject({ ok: true });
+    expect(controller.reserve(taskSpendRequest({
+      graph: graphB,
+      step: graphB.steps[0]!,
+      attempt: workerB,
+      requestKey: "committed-b-worker",
+      maximumEstimatedCostUsd: 7.5,
+      sessionId: "committed-root-worker",
+      sessionScopeId: "committed-root",
+      visibleTurnId: "committed-root-turn",
+      providerAttemptIndex: 1
+    }), CREATED_AT)).toMatchObject({ ok: true });
+    expect(controller.getScope("session", "committed-root")?.reservedCostUsd).toBe(8.5);
+  });
+
+  it("retains synthesis protection after partial worker failure and releases it when synthesis terminates", async () => {
+    await createBudgetSession(sessionDb, "partial-root");
+    const graph = sessionOnlySynthesisTaskGraph({
+      taskId: "task-partial",
+      originSessionId: "partial-root",
+      originTurnId: "partial-root-turn",
+      workerCount: 2
+    });
+    const taskStore = new SQLiteTaskStore({ db: sessionDb.db, profileId: PROFILE_ID });
+    taskStore.createTaskGraph(graph);
+    taskStore.atomicWrite((store) => {
+      for (const [index, worker] of graph.steps.slice(0, 2).entries()) {
+        store.updateStep({ ...worker!, status: "ready" });
+        store.updateStep({ ...worker!, status: "running" });
+        store.updateStep({ ...worker!, status: index === 0 ? "completed" : "failed" });
+      }
+    });
+
+    const mainRequest = spendRequest({
+      requestKey: "partial-main",
+      executionSessionId: "partial-root",
+      sessionBudgetScopeId: "partial-root",
+      visibleTurnId: "partial-root-turn",
+      taskId: undefined,
+      rootTaskId: undefined,
+      planRevisionId: undefined,
+      stepId: undefined,
+      attemptId: undefined,
+      sourceKind: "main",
+      maximumEstimatedCostUsd: 8.01
+    });
+    expect(controller.reserve(mainRequest, CREATED_AT)).toMatchObject({
+      ok: false,
+      reason: "SESSION_CAPACITY_RESERVED",
+      availableCostUsd: 8
+    });
+
+    const synthesis = graph.steps[2]!;
+    taskStore.atomicWrite((store) => {
+      store.updateStep({ ...synthesis, status: "ready" });
+      store.updateStep({ ...synthesis, status: "running" });
+      store.updateStep({ ...synthesis, status: "failed" });
+    });
+    expect(controller.reserve({
+      ...mainRequest,
+      requestKey: "partial-main-after-synthesis",
+      maximumEstimatedCostUsd: 10
+    }, CREATED_AT)).toMatchObject({ ok: true });
+  });
+
   it("fails closed when materialized balances or immutable scope policy are tampered with", () => {
     controller.reserve(spendRequest(), CREATED_AT);
     sessionDb.db.query(
@@ -586,7 +831,8 @@ function taskAttemptFor(
   taskId: string,
   planRevisionId: string,
   stepId: string,
-  id: string
+  id: string,
+  workerSessionId = "worker"
 ): TaskAttempt {
   return {
     ...taskAttempt(),
@@ -594,8 +840,103 @@ function taskAttemptFor(
     taskId,
     planRevisionId,
     stepId,
-    dispatchKey: `dispatch-${id}`
+    dispatchKey: `dispatch-${id}`,
+    workerSessionId
   };
+}
+
+async function createBudgetSession(sessionDb: SQLiteSessionDB, id: string): Promise<void> {
+  await sessionDb.createSession({ id, profileId: PROFILE_ID, spendingLimit: SESSION_LIMIT });
+  await sessionDb.appendMessage({
+    id: `${id}-turn`,
+    sessionId: id,
+    role: "user",
+    content: "Run the budgeted Task."
+  });
+  await sessionDb.createSession({
+    id: `${id}-worker`,
+    profileId: PROFILE_ID,
+    parentSessionId: id,
+    spendingScopeSessionId: id,
+    spendingLimit: SESSION_LIMIT
+  });
+}
+
+function sessionOnlySynthesisTaskGraph(input: {
+  taskId: string;
+  originSessionId: string;
+  originTurnId: string;
+  workerCount?: number;
+}): { task: Task; revision: TaskPlanRevision; steps: TaskStep[] } {
+  const base = synthesisTaskGraph();
+  const revisionId = `revision-${input.taskId}`;
+  const workerCount = input.workerCount ?? 1;
+  const workers = Array.from({ length: workerCount }, (_, index): TaskStep => ({
+    ...base.steps[0]!,
+    id: `step-${input.taskId}-worker-${index + 1}`,
+    taskId: input.taskId,
+    planRevisionId: revisionId,
+    key: `worker-${index + 1}`,
+    position: index,
+    executionLimits: {
+      ...base.steps[0]!.executionLimits,
+      maxTotalTokens: 8_000 / workerCount
+    }
+  }));
+  const synthesis: TaskStep = {
+    ...base.steps[1]!,
+    id: `step-${input.taskId}-synthesis`,
+    taskId: input.taskId,
+    planRevisionId: revisionId,
+    position: workerCount,
+    dependsOn: workers.map((worker) => worker.id)
+  };
+  return {
+    task: {
+      ...base.task,
+      id: input.taskId,
+      creatorSessionId: input.originSessionId,
+      rootTaskId: input.taskId,
+      originSessionId: input.originSessionId,
+      originTurnId: input.originTurnId,
+      creationKey: `create-${input.taskId}`,
+      spendingLimit: undefined,
+      activePlanRevisionId: revisionId
+    },
+    revision: {
+      ...base.revision,
+      id: revisionId,
+      taskId: input.taskId,
+      createdBy: { kind: "user", sessionId: input.originSessionId }
+    },
+    steps: [...workers, synthesis]
+  };
+}
+
+function taskSpendRequest(input: {
+  graph: { task: Task; revision: TaskPlanRevision };
+  step: TaskStep;
+  attempt: TaskAttempt;
+  requestKey: string;
+  maximumEstimatedCostUsd: number;
+  sessionId: string;
+  sessionScopeId: string;
+  visibleTurnId: string;
+  providerAttemptIndex?: number;
+}): ProviderSpendRequest {
+  return spendRequest({
+    requestKey: input.requestKey,
+    executionSessionId: input.sessionId,
+    sessionBudgetScopeId: input.sessionScopeId,
+    visibleTurnId: input.visibleTurnId,
+    taskId: input.graph.task.id,
+    rootTaskId: input.graph.task.rootTaskId,
+    planRevisionId: input.graph.revision.id,
+    stepId: input.step.id,
+    attemptId: input.attempt.id,
+    providerAttemptIndex: input.providerAttemptIndex ?? 0,
+    maximumEstimatedCostUsd: input.maximumEstimatedCostUsd
+  });
 }
 
 function authorityPolicy(): TaskAuthorityPolicy {

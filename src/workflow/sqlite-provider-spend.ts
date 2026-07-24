@@ -514,30 +514,25 @@ export class SQLiteProviderSpendController {
     }
   }
 
-  /**
-   * Protects fixed-plan synthesis using its proportional execution share. The earmark is
-   * inside the immutable root-Task limit and is waived only for the synthesis request
-   * that is consuming it. Session admission also honors earmarks from budgeted root Tasks.
-   */
+  /** Protects fixed-plan synthesis inside each applicable monetary scope. */
   #synthesisEarmarkUsd(scope: ProviderSpendingScope, request: ProviderSpendRequest): number {
     const roots = scope.kind === "root_task"
       ? this.#db.query<SynthesisRootRow>(
-          `select id, spending_limit_json from tasks
+          `select id from tasks
            where profile_id = ? and id = ? and root_task_id = id`
         ).all(this.#profileId, scope.ownerId)
       : this.#db.query<SynthesisRootRow>(
-          `select task.id, task.spending_limit_json from tasks task
+          `select task.id from tasks task
            join sessions origin on origin.profile_id = task.profile_id and origin.id = task.origin_session_id
            where task.profile_id = ? and task.root_task_id = task.id
              and (task.origin_session_id = ? or origin.spending_scope_session_id = ?)
-             and task.spending_limit_json is not null
              and task.status in ('planning', 'queued', 'running', 'waiting_for_host',
                'waiting_for_input', 'waiting_for_approval', 'paused')`
         ).all(this.#profileId, scope.ownerId, scope.ownerId);
-    let totalEarmark = 0;
+
+    const protectedSteps: Array<{ id: string; tokens: number; current: boolean }> = [];
+    let protectedGraphTokenCapacity = 0;
     for (const root of roots) {
-      if (root.spending_limit_json === null) continue;
-      const rootLimit = parseSpendingLimit(root.spending_limit_json).maxEstimatedCostUsd;
       const steps = this.#db.query<SynthesisStepRow>(
         `select step.id, step.status, step.executor_json, step.execution_limits_json
          from task_steps step
@@ -545,23 +540,51 @@ export class SQLiteProviderSpendController {
          where step.profile_id = ? and task.root_task_id = ?
            and step.plan_revision_id = task.active_plan_revision_id`
       ).all(this.#profileId, root.id);
-      let allTokenCapacity = 0;
-      let protectedSynthesisCapacity = 0;
+      let rootTokenCapacity = 0;
+      const rootSynthesis: Array<{ id: string; tokens: number; current: boolean }> = [];
       for (const step of steps) {
         const executionLimits = parseExecutionLimits(step.execution_limits_json);
-        allTokenCapacity += executionLimits.maxTotalTokens;
+        rootTokenCapacity += executionLimits.maxTotalTokens;
         const executor = parseTaskExecutor(step.executor_json);
-        const isCurrentRequest = request.rootTaskId === root.id && request.stepId === step.id;
         if (executor.kind === "agent" && executor.role === "synthesis" &&
-            !TERMINAL_SYNTHESIS_STEP_STATUSES.has(step.status) && !isCurrentRequest) {
-          protectedSynthesisCapacity += executionLimits.maxTotalTokens;
+            !TERMINAL_SYNTHESIS_STEP_STATUSES.has(step.status)) {
+          rootSynthesis.push({
+            id: step.id,
+            tokens: executionLimits.maxTotalTokens,
+            current: request.rootTaskId === root.id && request.stepId === step.id
+          });
         }
       }
-      if (allTokenCapacity > 0 && protectedSynthesisCapacity > 0) {
-        totalEarmark += rootLimit * Math.min(1, protectedSynthesisCapacity / allTokenCapacity);
+      if (rootTokenCapacity > 0 && rootSynthesis.length > 0) {
+        protectedGraphTokenCapacity += rootTokenCapacity;
+        protectedSteps.push(...rootSynthesis);
       }
     }
+    if (protectedGraphTokenCapacity === 0) return 0;
+
+    let totalEarmark = 0;
+    for (const step of protectedSteps) {
+      if (step.current) continue;
+      const proportionalEarmark = scope.maxEstimatedCostUsd *
+        Math.min(1, step.tokens / protectedGraphTokenCapacity);
+      totalEarmark += Math.max(0, proportionalEarmark - this.#synthesisCommittedUsd(scope, step.id));
+    }
     return Math.min(scope.maxEstimatedCostUsd, totalEarmark);
+  }
+
+  #synthesisCommittedUsd(scope: ProviderSpendingScope, stepId: string): number {
+    const row = this.#db.query<{ committed: number }>(
+      `select coalesce(sum(case
+         when attempt.state = 'settled' then attempt.actual_estimated_cost_usd
+         when attempt.state in ('reserved', 'dispatching', 'uncertain') then allocation.reserved_cost_usd
+         else 0 end), 0) as committed
+       from provider_spend_scope_allocations allocation
+       join provider_spend_attempts attempt
+         on attempt.profile_id = allocation.profile_id and attempt.request_key = allocation.request_key
+       where allocation.profile_id = ? and allocation.scope_kind = ? and allocation.scope_owner_id = ?
+         and json_extract(attempt.attribution_json, '$.stepId') = ?`
+    ).get(this.#profileId, scope.kind, scope.ownerId, stepId);
+    return row?.committed ?? 0;
   }
 
   #releaseReservedAttempt(attempt: ProviderSpendAttempt, releasedAt: string): void {
@@ -1109,10 +1132,7 @@ type TaskSpendRow = {
   created_at: string;
 };
 
-type SynthesisRootRow = {
-  id: string;
-  spending_limit_json: string | null;
-};
+type SynthesisRootRow = { id: string };
 
 type SynthesisStepRow = {
   id: string;
