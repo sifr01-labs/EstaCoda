@@ -206,6 +206,25 @@ describe("runDelegatedChild", () => {
     expect(onHeartbeat.mock.calls.length).toBeGreaterThan(2);
   });
 
+  it("falls back to a bounded heartbeat interval when configuration is not finite", async () => {
+    vi.useFakeTimers();
+    let resolveChild: ((response: AgentLoopResponse) => void) | undefined;
+    const onHeartbeat = vi.fn();
+    const harness = await createHarness({
+      configOverrides: { heartbeatSeconds: Number.NaN },
+      handle: async () => await new Promise<AgentLoopResponse>((resolve) => {
+        resolveChild = resolve;
+      })
+    });
+
+    const pending = runDelegatedChild({ ...harness.input(), onHeartbeat });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(onHeartbeat).toHaveBeenCalledTimes(1);
+
+    resolveChild?.(response());
+    await pending;
+  });
+
   it("stops heartbeat touches and writes diagnostics for stale idle children", async () => {
     const diagnosticsRoot = await makeTempDir();
     const harness = await createHarness({

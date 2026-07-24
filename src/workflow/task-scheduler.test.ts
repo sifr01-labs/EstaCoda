@@ -819,6 +819,70 @@ describe("TaskScheduler", () => {
     expect(renewedExpiry).toBe("2030-01-01T00:00:40.000Z");
   });
 
+  it("guards the Attempt lease while an executor is idle before its own heartbeat loop", async () => {
+    vi.useFakeTimers();
+    try {
+      store.createTaskGraph(makeGraph([makeStep("scheduler-heartbeat", 0)]));
+      let finish!: () => void;
+      const gate = new Promise<void>((resolve) => { finish = resolve; });
+      const executor = new FakeTaskStepExecutor(async () => {
+        await gate;
+        return { outcome: "succeeded", results: [{ kind: "text", content: "still owned" }] };
+      });
+      const scheduler = makeScheduler(executor, undefined, 30);
+
+      const dispatch = await scheduler.dispatchOnce({
+        dispatchGrants: dispatchGrantsFor("scheduler-alpha", ["task-alpha"])
+      });
+      const attemptId = store.listAttempts("task-alpha")[0]!.id;
+      nowMs += 20;
+      await vi.advanceTimersByTimeAsync(20);
+
+      expect(store.getAttempt(attemptId)?.lease).toMatchObject({
+        heartbeatAt: "2030-01-01T00:00:00.020Z",
+        expiresAt: "2030-01-01T00:00:00.050Z"
+      });
+      finish();
+      await expect(dispatch.completion).resolves.toMatchObject({ completed: 1, leaseLost: 0 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("records a scheduler heartbeat rejection before reconciling the expired Attempt", async () => {
+    vi.useFakeTimers();
+    try {
+      store.createTaskGraph(makeGraph([makeStep("heartbeat-rejected", 0)]));
+      const executor = new FakeTaskStepExecutor(({ signal }, executionNumber) => executionNumber === 1
+        ? new Promise((resolve) => {
+            signal.addEventListener("abort", () => resolve({ outcome: "cancelled" }), { once: true });
+          })
+        : { outcome: "succeeded", results: [{ kind: "text", content: "recovered" }] });
+      const scheduler = makeScheduler(executor, undefined, 30);
+      const dispatch = await scheduler.dispatchOnce({
+        dispatchGrants: dispatchGrantsFor("scheduler-alpha", ["task-alpha"])
+      });
+      const firstAttemptId = store.listAttempts("task-alpha")[0]!.id;
+
+      nowMs += 40;
+      await vi.advanceTimersByTimeAsync(20);
+      await expect(dispatch.completion).resolves.toMatchObject({ leaseLost: 1, completed: 0 });
+      expect(store.getAttempt(firstAttemptId)?.status).toBe("running");
+
+      expect(await scheduler.runOnce()).toMatchObject({ reconciled: 1, dispatched: 1, completed: 1 });
+      expect(store.listEvents("task-alpha", { kinds: ["attempt-expired"] })[0]?.data).toMatchObject({
+        lastSuccessfulHeartbeatAt: NOW,
+        leaseExpiresAt: "2030-01-01T00:00:00.030Z",
+        expiryDetectedAt: "2030-01-01T00:00:00.040Z",
+        heartbeatFailureReason: "lease-renewal-rejected",
+        heartbeatFailureDetectedAt: "2030-01-01T00:00:00.040Z"
+      });
+      expect(store.getTask("task-alpha")?.status).toBe("completed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("checkpoints and links durable worker progress under the Attempt fence", async () => {
     store.createTaskGraph(makeGraph([makeStep("checkpoint", 0)]));
     await sessionDb.createSession({
@@ -877,10 +941,26 @@ describe("TaskScheduler", () => {
       results: [{ kind: "text", content: "recovered after restart" }]
     })));
 
-    expect(await scheduler.runOnce()).toMatchObject({ reconciled: 1, dispatched: 1, completed: 1 });
+    const run = await scheduler.runOnce();
+    expect(run).toMatchObject({ reconciled: 1, dispatched: 1, completed: 1 });
     expect(store.listAttempts("task-alpha").map((attempt) => attempt.status)).toEqual(["expired", "completed"]);
     expect(store.getTask("task-alpha")?.status).toBe("completed");
-    expect(store.listEvents("task-alpha", { kinds: ["attempt-expired"] })).toHaveLength(1);
+    expect(store.listEvents("task-alpha", { kinds: ["attempt-expired"] })).toEqual([
+      expect.objectContaining({
+        timestamp: NOW,
+        data: expect.objectContaining({
+          lastSuccessfulHeartbeatAt: "2029-12-31T23:58:30.000Z",
+          leaseExpiresAt: "2029-12-31T23:59:00.000Z",
+          expiryDetectedAt: NOW,
+          heartbeatFailureReason: "heartbeat-not-renewed-before-expiry"
+        })
+      })
+    ]);
+    expect(run.warnings).toContain(
+      "Attempt attempt-before-restart was reconciled after lease expiry " +
+      "(last heartbeat 2029-12-31T23:58:30.000Z; lease expiry 2029-12-31T23:59:00.000Z; " +
+      "detected 2030-01-01T00:00:00.000Z; reason heartbeat-not-renewed-before-expiry)."
+    );
   });
 
   it.each(["unknown", "non_idempotent"] as const)(

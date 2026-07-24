@@ -281,7 +281,6 @@ export class AgentStepExecutor implements TaskStepExecutor {
           attemptId: input.attempt.id,
           parentSessionId
         },
-        onHeartbeat: input.heartbeat,
         now: this.#now
       });
 
@@ -686,15 +685,24 @@ function childRunnerConfig(
   maxHeartbeatSeconds: number,
   now: Date
 ): DelegationConfig {
-  const leaseRemainingMs = attempt.lease === undefined ? 1_000 : Math.max(1_000, Date.parse(attempt.lease.expiresAt) - now.getTime());
+  const leaseExpiresAtMs = attempt.lease === undefined ? Number.NaN : Date.parse(attempt.lease.expiresAt);
+  const leaseRemainingMs = Number.isFinite(leaseExpiresAtMs)
+    ? Math.max(1_000, leaseExpiresAtMs - now.getTime())
+    : 1_000;
   const safeHeartbeatSeconds = Math.max(1, Math.floor(leaseRemainingMs / 3_000));
+  const configuredHeartbeatSeconds = Number.isFinite(config.heartbeatSeconds) && config.heartbeatSeconds > 0
+    ? config.heartbeatSeconds
+    : 1;
+  const maximumHeartbeatSeconds = Number.isFinite(maxHeartbeatSeconds) && maxHeartbeatSeconds > 0
+    ? maxHeartbeatSeconds
+    : 1;
   return {
     ...config,
     childTimeoutSeconds: Math.max(1, Math.ceil(Math.min(
       config.childTimeoutSeconds * 1_000,
       step.executionLimits.maxWallClockMs
     ) / 1_000)),
-    heartbeatSeconds: Math.min(config.heartbeatSeconds, maxHeartbeatSeconds, safeHeartbeatSeconds)
+    heartbeatSeconds: Math.min(configuredHeartbeatSeconds, maximumHeartbeatSeconds, safeHeartbeatSeconds)
   };
 }
 

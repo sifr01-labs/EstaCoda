@@ -132,7 +132,7 @@ export async function runDelegatedChild(input: ChildRunnerInput): Promise<ChildR
     timeoutId = setTimeout(() => resolve("timeout"), timeoutMs);
   });
 
-  const heartbeatMs = Math.max(1, input.delegationConfig.heartbeatSeconds * 1_000);
+  const heartbeatMs = finitePositiveMilliseconds(input.delegationConfig.heartbeatSeconds, 1_000);
   heartbeatId = setInterval(() => {
     void emitHeartbeat({
       input,
@@ -209,6 +209,13 @@ export async function runDelegatedChild(input: ChildRunnerInput): Promise<ChildR
       input.subagentRegistry.unregisterSubagent(input.subagentId);
     }
   }
+}
+
+function finitePositiveMilliseconds(seconds: number, fallbackMs: number): number {
+  const milliseconds = seconds * 1_000;
+  return Number.isFinite(milliseconds) && milliseconds > 0
+    ? Math.max(1, milliseconds)
+    : fallbackMs;
 }
 
 type ActivityState = {

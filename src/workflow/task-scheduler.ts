@@ -168,6 +168,15 @@ type RunningExecution = {
   controller: AbortController;
 };
 
+type AttemptLeaseFailureDiagnostic = {
+  reason: "heartbeat-write-failed" | "lease-renewal-rejected";
+  detectedAt: string;
+};
+
+type AttemptLeaseGuard = {
+  stop(): void;
+};
+
 export class TaskScheduler {
   readonly #store: TaskStore;
   readonly #resultService: TaskResultService;
@@ -180,6 +189,7 @@ export class TaskScheduler {
   readonly #eventId: () => string;
   readonly #approvalService: TaskApprovalService | undefined;
   readonly #running = new Map<string, RunningExecution>();
+  readonly #leaseFailures = new Map<string, AttemptLeaseFailureDiagnostic>();
   readonly #handoffAttempts = new Set<string>();
   readonly #activeDispatches = new Set<Promise<TaskSchedulerDispatchResult>>();
   readonly #activeBatches = new Set<Promise<TaskSchedulerRunResult>>();
@@ -292,7 +302,16 @@ export class TaskScheduler {
         incrementCapacity(capacity, task, step);
         const controller = new AbortController();
         this.#running.set(started.id, { taskId: task.id, controller });
-        const launch = Promise.resolve().then(() => this.#execute(task, step, started, executor, controller, result));
+        const leaseGuard = this.#startAttemptLeaseGuard(started, controller);
+        const launch = Promise.resolve().then(() => this.#execute(
+          task,
+          step,
+          started,
+          executor,
+          controller,
+          leaseGuard,
+          result
+        ));
         launches.push(launch);
       }
       if (missingExecutor && !hasEligibleExecutor && (capacity.task.get(task.id) ?? 0) === 0) {
@@ -475,6 +494,52 @@ export class TaskScheduler {
     return renewed;
   }
 
+  #startAttemptLeaseGuard(attempt: TaskAttempt, controller: AbortController): AttemptLeaseGuard {
+    const lease = attempt.lease;
+    if (lease === undefined) return { stop: () => undefined };
+    const intervalMs = attemptLeaseHeartbeatIntervalMs(this.#leaseMs);
+    const initialDelayMs = staggeredHeartbeatDelayMs(intervalMs, attempt.id);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let stopped = false;
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      if (timer !== undefined) clearTimeout(timer);
+      controller.signal.removeEventListener("abort", stop);
+    };
+    const schedule = (delayMs: number) => {
+      timer = setTimeout(() => {
+        if (stopped) return;
+        try {
+          this.heartbeat(attempt.id, lease.fencingToken);
+          this.#leaseFailures.delete(attempt.id);
+        } catch (error) {
+          if (error instanceof TaskSchedulerCancellationError) {
+            stop();
+            return;
+          }
+          if (!this.#leaseFailures.has(attempt.id)) {
+            this.#leaseFailures.set(attempt.id, {
+              reason: error instanceof TaskSchedulerLeaseLostError
+                ? "lease-renewal-rejected"
+                : "heartbeat-write-failed",
+              detectedAt: this.#now().toISOString()
+            });
+          }
+          if (error instanceof TaskSchedulerLeaseLostError) {
+            if (!controller.signal.aborted) controller.abort("attempt-lease-lost");
+            stop();
+            return;
+          }
+        }
+        schedule(intervalMs);
+      }, delayMs);
+    };
+    controller.signal.addEventListener("abort", stop, { once: true });
+    schedule(initialDelayMs);
+    return { stop };
+  }
+
   #reconcileApprovals(result: MutableRunResult, eligibleTaskIds: ReadonlySet<string> | undefined): void {
     const links = this.#store.listApprovalLinks({ statuses: ["approved", "denied", "expired"], limit: 1_000 });
     for (const link of links) {
@@ -647,12 +712,12 @@ export class TaskScheduler {
 
         const recovered = this.#recoverAbandonedAttempt(task.id, attempt.id, now);
         if (!recovered) continue;
+        const heartbeatFailure = this.#leaseFailures.get(attempt.id);
+        this.#leaseFailures.delete(attempt.id);
         result.reconciled++;
         if (isTerminalTaskStatus(task.status)) result.cancelled++;
         else result.failed++;
-        result.warnings.push(
-          `Attempt ${attempt.id} was reconciled after ${lease === undefined ? "a missing lease" : "lease expiry"}.`
-        );
+        result.warnings.push(attemptLeaseReconciliationWarning(attempt.id, lease, now.toISOString(), heartbeatFailure));
       }
       this.#finalizeTaskIfSettled(task.id);
     }
@@ -712,7 +777,11 @@ export class TaskScheduler {
         attemptId: attempt.id,
         stepId: attempt.stepId,
         planRevisionId: attempt.planRevisionId,
-        data: { failureClass: failure.class, uncertainSideEffects: failure.uncertainSideEffects }
+        data: {
+          failureClass: failure.class,
+          uncertainSideEffects: failure.uncertainSideEffects,
+          ...attemptLeaseDiagnosticData(lease, timestamp, this.#leaseFailures.get(attempt.id))
+        }
       }));
       abortTask = this.#applyFailurePolicy(store, task, terminal, timestamp);
       return true;
@@ -951,6 +1020,7 @@ export class TaskScheduler {
     attempt: TaskAttempt,
     executor: TaskStepExecutor,
     controller: AbortController,
+    leaseGuard: AttemptLeaseGuard,
     result: MutableRunResult
   ): Promise<void> {
     const lease = attempt.lease;
@@ -1036,8 +1106,11 @@ export class TaskScheduler {
         }
       }
     } finally {
+      leaseGuard.stop();
       this.#running.delete(attempt.id);
       this.#handoffAttempts.delete(attempt.id);
+      const current = this.#store.getAttempt(attempt.id);
+      if (current === null || isTerminalTaskAttemptStatus(current.status)) this.#leaseFailures.delete(attempt.id);
     }
   }
 
@@ -2308,6 +2381,52 @@ function incrementMap(map: Map<string, number>, key: string): void {
 
 function compareTasks(left: Task, right: Task): number {
   return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
+}
+
+function attemptLeaseHeartbeatIntervalMs(leaseMs: number): number {
+  return Math.max(1, Math.min(5_000, Math.floor(leaseMs / 3)));
+}
+
+function staggeredHeartbeatDelayMs(intervalMs: number, attemptId: string): number {
+  const spreadMs = Math.min(1_000, Math.floor(intervalMs / 5));
+  if (spreadMs === 0) return intervalMs;
+  let hash = 0;
+  for (const character of attemptId) hash = ((hash * 31) + character.charCodeAt(0)) >>> 0;
+  return intervalMs - spreadMs + (hash % ((spreadMs * 2) + 1));
+}
+
+function attemptLeaseDiagnosticData(
+  lease: TaskAttemptLease | undefined,
+  detectedAt: string,
+  heartbeatFailure: AttemptLeaseFailureDiagnostic | undefined
+): Record<string, unknown> {
+  return {
+    ...(lease === undefined ? {} : {
+      lastSuccessfulHeartbeatAt: lease.heartbeatAt,
+      leaseExpiresAt: lease.expiresAt
+    }),
+    expiryDetectedAt: detectedAt,
+    heartbeatFailureReason: heartbeatFailure?.reason ?? (
+      lease === undefined ? "lease-record-missing" : "heartbeat-not-renewed-before-expiry"
+    ),
+    ...(heartbeatFailure === undefined ? {} : { heartbeatFailureDetectedAt: heartbeatFailure.detectedAt })
+  };
+}
+
+function attemptLeaseReconciliationWarning(
+  attemptId: string,
+  lease: TaskAttemptLease | undefined,
+  detectedAt: string,
+  heartbeatFailure: AttemptLeaseFailureDiagnostic | undefined
+): string {
+  const diagnostic = attemptLeaseDiagnosticData(lease, detectedAt, heartbeatFailure);
+  const heartbeat = typeof diagnostic.lastSuccessfulHeartbeatAt === "string"
+    ? diagnostic.lastSuccessfulHeartbeatAt
+    : "unknown";
+  const expiry = typeof diagnostic.leaseExpiresAt === "string" ? diagnostic.leaseExpiresAt : "missing";
+  return `Attempt ${attemptId} was reconciled after ${lease === undefined ? "a missing lease" : "lease expiry"} ` +
+    `(last heartbeat ${heartbeat}; lease expiry ${expiry}; detected ${detectedAt}; ` +
+    `reason ${String(diagnostic.heartbeatFailureReason)}).`;
 }
 
 function requireToken(value: string, label: string): string {
