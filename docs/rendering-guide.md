@@ -397,6 +397,12 @@ LTR runs before wrapping, and gives each wrapped Arabic row its own directional
 isolate. Stored transcript and streaming state remain in logical order. Editable
 prompt rows continue to use terminal-native bidi and are not software-reordered.
 
+Inside the Papyrus screen buffer, zero-width direction controls are packed into
+an adjacent visible cell's string when that content exists. They never receive
+a standalone narrow or spacer cell, so clipping, cursor advancement, and diff
+coordinates continue to reflect terminal columns while serialized visible text
+retains its controls. Zero-width-only writes remain inert.
+
 ---
 
 ## Papyrus Full Interactive Migration

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { LRI, PDI } from "../../bidi.js";
 import { createFrame, emptyFrame } from "./frame.js";
 import { diffFrames, renderDiff } from "./logUpdate.js";
 import { optimize } from "./optimizer.js";
@@ -21,6 +22,42 @@ describe("Papyrus logUpdate diff engine", () => {
     const diff = diffFrames(prev, createFrame(screen));
     expect(diff).toContainEqual(expect.objectContaining({ type: "cellRun", content: "hi" }));
     expect(renderDiff(diff)).toContain("hi");
+  });
+
+  it("serializes packed zero-width controls without extra cell advances", () => {
+    const prev = emptyFrame(3, 1);
+    const screen = createScreen(3, 1);
+    writeToScreen(screen, 0, 0, `${LRI}a${PDI}b`);
+
+    const diff = diffFrames(prev, createFrame(screen));
+
+    expect(diff).toContainEqual(expect.objectContaining({
+      type: "cellRun",
+      x: 0,
+      content: `${LRI}a${PDI}b`,
+    }));
+    expect(renderDiff(diff)).toContain(`${LRI}a${PDI}b`);
+  });
+
+  it("preserves style serialization and hyperlink patch metadata for packed controls", () => {
+    const prev = emptyFrame(2, 1);
+    const screen = createScreen(2, 1);
+    writeToScreen(
+      screen,
+      0,
+      0,
+      `\x1b]8;;https://example.com\x07\x1b[31m${LRI}a${PDI}\x1b[0m\x1b]8;;\x07`,
+    );
+
+    const diff = diffFrames(prev, createFrame(screen));
+
+    expect(diff).toContainEqual(expect.objectContaining({
+      type: "cellRun",
+      content: `${LRI}a${PDI}`,
+      hyperlink: "https://example.com",
+      style: expect.objectContaining({ fg: { type: "named", name: "red" } }),
+    }));
+    expect(renderDiff(diff)).toContain(`\x1b[31m${LRI}a${PDI}\x1b[0m`);
   });
 
   it("returns no patches for identical frames", () => {

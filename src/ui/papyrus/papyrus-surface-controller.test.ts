@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { LRI, PDI } from "../bidi.js";
 import {
   createPapyrusSurfaceController,
   createPapyrusSurfaceControllerForMode,
@@ -113,6 +114,18 @@ describe("Papyrus surface controller", () => {
     expect(result.frame.screen.rowText(0)).toBe("rx ");
     expect(result.frame.screen.cellAt(0, 0)?.styleId).not.toBe(result.frame.screen.cellAt(1, 0)?.styleId);
     expect(result.output).toContain("\x1b[31m");
+  });
+
+  it("keeps zero-width bidi controls in output without consuming frame columns", () => {
+    const controller = createPapyrusSurfaceController({ width: 3, height: 1 });
+    const result = controller.render({
+      surfaces: [{ x: 0, y: 0, text: `${LRI}a${PDI}b` }],
+    });
+
+    expect(result.frame.screen.cellAt(0, 0)?.char).toBe(`${LRI}a${PDI}`);
+    expect(result.frame.screen.cellAt(1, 0)?.char).toBe("b");
+    expect(result.frame.screen.cellAt(2, 0)?.char).toBe(" ");
+    expect(result.output).toContain(`${LRI}a${PDI}b`);
   });
 
   it("does not write patches to stdout or stderr", () => {
