@@ -72,6 +72,12 @@ export type ProviderSpendAttempt = {
   id: string;
   request: ProviderSpendRequest;
   state: ProviderSpendState;
+  /** Process-local runtime that reserved and dispatched this provider request. */
+  executionOwnerId: string;
+  /** Profile-wide monotonic fence presented by the owning runtime on every transition. */
+  executionFencingToken: number;
+  executionHeartbeatAt: string;
+  executionExpiresAt: string;
   reservedCostUsd: number;
   actualEstimatedCostUsd?: number;
   usageEntryId?: string;

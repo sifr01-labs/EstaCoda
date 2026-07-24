@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { SpendingLimit } from "../contracts/budget.js";
 import { assertSpendingLimit } from "../contracts/budget.js";
 import type { ProviderUsageEntry } from "../contracts/provider-usage.js";
@@ -20,6 +20,9 @@ import {
 
 const BALANCE_EPSILON_USD = 1e-9;
 const RECOVERY_UNCERTAINTY_REASON = "dispatch-outcome-unknown-after-recovery";
+const OWNER_DISPOSED_UNCERTAINTY_REASON = "dispatch-outcome-unknown-after-owner-dispose";
+const DEFAULT_EXECUTION_LEASE_MS = 60_000;
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 10_000;
 const TERMINAL_SYNTHESIS_STEP_STATUSES = new Set(["completed", "failed", "skipped", "cancelled"]);
 
 export class ProviderSpendIntegrityError extends Error {
@@ -60,28 +63,61 @@ type ScopeSource = {
 export class SQLiteProviderSpendController {
   readonly #db: SQLiteDatabase;
   readonly #profileId: string;
+  readonly #ownerId: string;
+  readonly #leaseMs: number;
+  readonly #heartbeatIntervalMs: number;
+  readonly #now: () => Date;
+  readonly #activeDispatches = new Map<string, number>();
+  #heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  #disposed = false;
 
-  constructor(input: { db: SQLiteDatabase; profileId: string }) {
+  constructor(input: {
+    db: SQLiteDatabase;
+    profileId: string;
+    ownerId?: string;
+    leaseMs?: number;
+    heartbeatIntervalMs?: number;
+    now?: () => Date;
+  }) {
     if (input.profileId.trim().length === 0 || input.profileId.length > 128) {
       throw new ProviderSpendIntegrityError("Provider spend controller profile ID is invalid.");
     }
     this.#db = input.db;
     this.#profileId = input.profileId;
+    this.#ownerId = input.ownerId ?? `provider-spend-${randomUUID()}`;
+    requireText(this.#ownerId, "Provider spend execution owner ID", 256);
+    this.#leaseMs = positiveInteger(input.leaseMs ?? DEFAULT_EXECUTION_LEASE_MS, "execution lease duration");
+    this.#heartbeatIntervalMs = positiveInteger(
+      input.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS,
+      "execution heartbeat interval"
+    );
+    if (this.#heartbeatIntervalMs >= this.#leaseMs) {
+      throw new ProviderSpendIntegrityError("Provider spend heartbeat interval must be shorter than its lease duration.");
+    }
+    this.#now = input.now ?? (() => new Date());
     this.#db.exec("pragma foreign_keys = on");
   }
 
   reserve(request: ProviderSpendRequest, reservedAt: string): ProviderSpendReservationResult {
+    this.#assertOpen();
     assertProviderSpendRequest(request);
     this.#assertProfile(request.profileId);
     assertTimestamp(reservedAt, "Provider spend reservation");
 
     return this.#write(() => {
+      this.#recoverExpired(reservedAt);
       const resolved = this.#resolveRequestAndScopes(request);
       const persisted = this.#selectAttempt(resolved.request.requestKey);
       if (persisted !== null) {
         if (stableJson(persisted.request) !== stableJson(resolved.request)) {
           throw new ProviderSpendIntegrityError(
             `Provider spend request key ${request.requestKey} conflicts with another request.`
+          );
+        }
+        if ((persisted.state === "reserved" || persisted.state === "dispatching") &&
+            persisted.executionOwnerId !== this.#ownerId) {
+          throw new ProviderSpendIntegrityError(
+            `Provider spend request ${request.requestKey} is owned by another live runtime.`
           );
         }
         return { ok: true, attempt: persisted };
@@ -99,12 +135,15 @@ export class SQLiteProviderSpendController {
       }
 
       const id = spendAttemptId(this.#profileId, resolved.request.requestKey);
+      const fencingToken = this.#nextFencingToken();
+      const expiresAt = addMilliseconds(reservedAt, this.#leaseMs);
       this.#db.query(
         `insert into provider_spend_attempts (
           id, profile_id, request_key, attribution_json, provider, model,
           pricing_snapshot_json, pricing_fingerprint, maximum_estimated_exposure_usd,
-          state, reserved_cost_usd, created_at, reserved_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?, ?)`
+          state, execution_owner_id, execution_fencing_token, execution_heartbeat_at,
+          execution_expires_at, reserved_cost_usd, created_at, reserved_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         this.#profileId,
@@ -115,6 +154,10 @@ export class SQLiteProviderSpendController {
         stableJson(resolved.request.pricing),
         resolved.request.pricing.fingerprint,
         resolved.request.maximumEstimatedCostUsd,
+        this.#ownerId,
+        fencingToken,
+        reservedAt,
+        expiresAt,
         resolved.request.maximumEstimatedCostUsd,
         reservedAt,
         reservedAt
@@ -146,10 +189,12 @@ export class SQLiteProviderSpendController {
   }
 
   markDispatching(requestKey: string, dispatchingAt: string): ProviderSpendAttempt {
+    this.#assertOpen();
     requireText(requestKey, "Provider spend request key", 512);
     assertTimestamp(dispatchingAt, "Provider spend dispatch");
-    return this.#write(() => {
+    const dispatched = this.#write(() => {
       const attempt = this.#requireAttempt(requestKey);
+      this.#assertOwned(attempt);
       if (attempt.state === "dispatching") return attempt;
       if (attempt.state !== "reserved") {
         throw new ProviderSpendIntegrityError(
@@ -157,19 +202,38 @@ export class SQLiteProviderSpendController {
         );
       }
       assertNotBefore(dispatchingAt, attempt.reservedAt, "Provider spend dispatch");
-      this.#db.query(
+      const transitioned = this.#db.query(
         `update provider_spend_attempts set state = 'dispatching', dispatching_at = ?
-         where profile_id = ? and request_key = ? and state = 'reserved'`
-      ).run(dispatchingAt, this.#profileId, requestKey);
+         where profile_id = ? and request_key = ? and state = 'reserved'
+           and execution_owner_id = ? and execution_fencing_token = ?
+           and julianday(execution_expires_at) > julianday(?)`
+      ).run(
+        dispatchingAt,
+        this.#profileId,
+        requestKey,
+        this.#ownerId,
+        attempt.executionFencingToken,
+        dispatchingAt
+      );
+      if (transitioned.changes !== 1) {
+        throw new ProviderSpendIntegrityError(
+          `Provider spend Attempt ${requestKey} lost its execution lease before dispatch.`
+        );
+      }
       return this.#requireAttempt(requestKey);
     });
+    this.#activeDispatches.set(requestKey, dispatched.executionFencingToken);
+    this.#ensureHeartbeatTimer();
+    return dispatched;
   }
 
   releaseBeforeDispatch(requestKey: string, releasedAt: string): ProviderSpendAttempt {
+    this.#assertOpen();
     requireText(requestKey, "Provider spend request key", 512);
     assertTimestamp(releasedAt, "Provider spend release");
     return this.#write(() => {
       const attempt = this.#requireAttempt(requestKey);
+      this.#assertOwned(attempt);
       if (attempt.state === "released") return attempt;
       if (attempt.state !== "reserved") {
         throw new ProviderSpendIntegrityError(
@@ -183,10 +247,12 @@ export class SQLiteProviderSpendController {
   }
 
   settle(requestKey: string, usage: ProviderUsageEntry, settledAt: string): ProviderSpendAttempt {
+    this.#assertOpen();
     requireText(requestKey, "Provider spend request key", 512);
     assertTimestamp(settledAt, "Provider spend settlement");
-    return this.#write(() => {
+    const settled = this.#write(() => {
       const attempt = this.#requireAttempt(requestKey);
+      this.#assertOwned(attempt);
       this.#assertUsageMatchesAttempt(attempt, usage);
       if (attempt.state === "settled") {
         if (attempt.usageEntryId !== usage.id ||
@@ -205,53 +271,88 @@ export class SQLiteProviderSpendController {
       assertNotBefore(settledAt, attempt.dispatchingAt!, "Provider spend settlement");
       this.#assertAllocationsBalanced(attempt);
       insertProviderUsageEntry(this.#db, usage);
-      this.#db.query(
+      const transitioned = this.#db.query(
         `update provider_spend_attempts
          set state = 'settled', actual_estimated_cost_usd = ?, usage_entry_id = ?, settled_at = ?
-         where profile_id = ? and request_key = ? and state = 'dispatching'`
-      ).run(usage.estimatedCostUsd, usage.id, settledAt, this.#profileId, requestKey);
+         where profile_id = ? and request_key = ? and state = 'dispatching'
+           and execution_owner_id = ? and execution_fencing_token = ?
+           and julianday(execution_expires_at) > julianday(?)`
+      ).run(
+        usage.estimatedCostUsd,
+        usage.id,
+        settledAt,
+        this.#profileId,
+        requestKey,
+        this.#ownerId,
+        attempt.executionFencingToken,
+        settledAt
+      );
+      if (transitioned.changes !== 1) {
+        throw new ProviderSpendIntegrityError(`Provider spend settlement ${requestKey} lost its execution fence.`);
+      }
 
       for (const allocation of attempt.allocations) {
         this.#moveReservedToSpent(allocation, usage.estimatedCostUsd, settledAt);
       }
       return this.#requireAttempt(requestKey);
     });
+    this.#deactivate(requestKey);
+    return settled;
   }
 
-  recoverStale(input: {
-    reservedBefore: string;
-    dispatchingBefore: string;
-    recoveredAt: string;
-  }): ProviderSpendRecoveryResult {
-    assertTimestamp(input.reservedBefore, "Stale reservation cutoff");
-    assertTimestamp(input.dispatchingBefore, "Stale dispatch cutoff");
-    assertTimestamp(input.recoveredAt, "Provider spend recovery");
-    assertNotBefore(input.recoveredAt, input.reservedBefore, "Provider spend recovery");
-    assertNotBefore(input.recoveredAt, input.dispatchingBefore, "Provider spend recovery");
-    return this.#write(() => {
-      const reserved = this.#db.query<{ request_key: string }>(
-        `select request_key from provider_spend_attempts
-         where profile_id = ? and state = 'reserved' and julianday(reserved_at) < julianday(?)
-         order by reserved_at, request_key`
-      ).all(this.#profileId, input.reservedBefore).map((row) => row.request_key);
-      const dispatching = this.#db.query<{ request_key: string }>(
-        `select request_key from provider_spend_attempts
-         where profile_id = ? and state = 'dispatching' and julianday(dispatching_at) < julianday(?)
-         order by dispatching_at, request_key`
-      ).all(this.#profileId, input.dispatchingBefore).map((row) => row.request_key);
+  recoverExpired(recoveredAt: string): ProviderSpendRecoveryResult {
+    assertTimestamp(recoveredAt, "Provider spend recovery");
+    return this.#write(() => this.#recoverExpired(recoveredAt));
+  }
 
-      for (const requestKey of reserved) {
-        this.#releaseReservedAttempt(this.#requireAttempt(requestKey), input.recoveredAt);
+  markUncertain(requestKey: string, uncertainAt: string, reason: string): ProviderSpendAttempt {
+    this.#assertOpen();
+    requireText(requestKey, "Provider spend request key", 512);
+    assertTimestamp(uncertainAt, "Provider spend uncertainty");
+    requireText(reason, "Provider spend uncertainty reason", 256);
+    const uncertain = this.#write(() => {
+      const attempt = this.#requireAttempt(requestKey);
+      this.#assertOwned(attempt);
+      if (attempt.state === "uncertain") return attempt;
+      if (attempt.state !== "dispatching") {
+        throw new ProviderSpendIntegrityError(
+          `Provider spend Attempt ${requestKey} cannot become uncertain from ${attempt.state}.`
+        );
       }
-      for (const requestKey of dispatching) {
-        this.#db.query(
-          `update provider_spend_attempts
-           set state = 'uncertain', uncertain_at = ?, uncertainty_reason = ?
-           where profile_id = ? and request_key = ? and state = 'dispatching'`
-        ).run(input.recoveredAt, RECOVERY_UNCERTAINTY_REASON, this.#profileId, requestKey);
-      }
-      return { releasedRequestKeys: reserved, uncertainRequestKeys: dispatching };
+      this.#markDispatchUncertain(attempt, uncertainAt, reason);
+      return this.#requireAttempt(requestKey);
     });
+    this.#deactivate(requestKey);
+    return uncertain;
+  }
+
+  dispose(disposedAt = this.#now().toISOString()): ProviderSpendRecoveryResult {
+    if (this.#disposed) return { releasedRequestKeys: [], uncertainRequestKeys: [] };
+    assertTimestamp(disposedAt, "Provider spend owner disposal");
+    this.#disposed = true;
+    this.#stopHeartbeatTimer();
+    const result = this.#write(() => {
+      const rows = this.#db.query<{ request_key: string; state: "reserved" | "dispatching" }>(
+        `select request_key, state from provider_spend_attempts
+         where profile_id = ? and execution_owner_id = ? and state in ('reserved', 'dispatching')
+         order by reserved_at, request_key`
+      ).all(this.#profileId, this.#ownerId);
+      const releasedRequestKeys: string[] = [];
+      const uncertainRequestKeys: string[] = [];
+      for (const row of rows) {
+        const attempt = this.#requireAttempt(row.request_key);
+        if (row.state === "reserved") {
+          this.#releaseReservedAttempt(attempt, disposedAt);
+          releasedRequestKeys.push(row.request_key);
+        } else {
+          this.#markDispatchUncertain(attempt, disposedAt, OWNER_DISPOSED_UNCERTAINTY_REASON);
+          uncertainRequestKeys.push(row.request_key);
+        }
+      }
+      return { releasedRequestKeys, uncertainRequestKeys };
+    });
+    this.#activeDispatches.clear();
+    return result;
   }
 
   getAttempt(requestKey: string): ProviderSpendAttempt | null {
@@ -465,10 +566,22 @@ export class SQLiteProviderSpendController {
 
   #releaseReservedAttempt(attempt: ProviderSpendAttempt, releasedAt: string): void {
     this.#assertAllocationsBalanced(attempt);
-    this.#db.query(
+    const transitioned = this.#db.query(
       `update provider_spend_attempts set state = 'released', released_at = ?
-       where profile_id = ? and request_key = ? and state = 'reserved'`
-    ).run(releasedAt, this.#profileId, attempt.request.requestKey);
+       where profile_id = ? and request_key = ? and state = 'reserved'
+         and execution_owner_id = ? and execution_fencing_token = ?`
+    ).run(
+      releasedAt,
+      this.#profileId,
+      attempt.request.requestKey,
+      attempt.executionOwnerId,
+      attempt.executionFencingToken
+    );
+    if (transitioned.changes !== 1) {
+      throw new ProviderSpendIntegrityError(
+        `Provider spend release ${attempt.request.requestKey} lost its execution fence.`
+      );
+    }
     for (const allocation of attempt.allocations) {
       this.#db.query(
         `update provider_spending_scopes
@@ -661,6 +774,134 @@ export class SQLiteProviderSpendController {
     }
   }
 
+  #assertOpen(): void {
+    if (this.#disposed) {
+      throw new ProviderSpendIntegrityError("Provider spend controller is disposed.");
+    }
+  }
+
+  #assertOwned(attempt: ProviderSpendAttempt): void {
+    if (attempt.executionOwnerId !== this.#ownerId) {
+      throw new ProviderSpendIntegrityError(
+        `Provider spend Attempt ${attempt.request.requestKey} is fenced by another runtime.`
+      );
+    }
+  }
+
+  #nextFencingToken(): number {
+    const row = this.#db.query<{ last_fencing_token: number }>(
+      `insert into provider_spend_fence_generations (profile_id, last_fencing_token)
+       values (?, 1)
+       on conflict(profile_id) do update
+         set last_fencing_token = provider_spend_fence_generations.last_fencing_token + 1
+       returning last_fencing_token`
+    ).get(this.#profileId);
+    if (row === null || !Number.isSafeInteger(row.last_fencing_token) || row.last_fencing_token < 1) {
+      throw new ProviderSpendIntegrityError("Provider spend fencing generation is exhausted or invalid.");
+    }
+    return row.last_fencing_token;
+  }
+
+  #ensureHeartbeatTimer(): void {
+    if (this.#heartbeatTimer !== undefined || this.#activeDispatches.size === 0 || this.#disposed) return;
+    this.#heartbeatTimer = setInterval(() => {
+      if (this.#disposed) return;
+      try {
+        this.#heartbeatActive(this.#now().toISOString());
+      } catch {
+        // A transient database lock must not revive or release an execution lease.
+        // The current reservation remains conservatively held until a later heartbeat
+        // or an owner-fenced recovery transaction succeeds.
+      }
+    }, this.#heartbeatIntervalMs);
+    this.#heartbeatTimer.unref?.();
+  }
+
+  #stopHeartbeatTimer(): void {
+    if (this.#heartbeatTimer === undefined) return;
+    clearInterval(this.#heartbeatTimer);
+    this.#heartbeatTimer = undefined;
+  }
+
+  #deactivate(requestKey: string): void {
+    this.#activeDispatches.delete(requestKey);
+    if (this.#activeDispatches.size === 0) this.#stopHeartbeatTimer();
+  }
+
+  #heartbeatActive(heartbeatAt: string): void {
+    assertTimestamp(heartbeatAt, "Provider spend heartbeat");
+    const expiresAt = addMilliseconds(heartbeatAt, this.#leaseMs);
+    const lost: string[] = [];
+    this.#write(() => {
+      for (const [requestKey, fencingToken] of this.#activeDispatches) {
+        const renewed = this.#db.query(
+          `update provider_spend_attempts
+           set execution_heartbeat_at = ?, execution_expires_at = ?
+           where profile_id = ? and request_key = ? and state = 'dispatching'
+             and execution_owner_id = ? and execution_fencing_token = ?
+             and julianday(execution_expires_at) > julianday(?)`
+        ).run(
+          heartbeatAt,
+          expiresAt,
+          this.#profileId,
+          requestKey,
+          this.#ownerId,
+          fencingToken,
+          heartbeatAt
+        );
+        if (renewed.changes !== 1) lost.push(requestKey);
+      }
+      this.#recoverExpired(heartbeatAt);
+    });
+    for (const requestKey of lost) this.#activeDispatches.delete(requestKey);
+    if (this.#activeDispatches.size === 0) this.#stopHeartbeatTimer();
+  }
+
+  #recoverExpired(recoveredAt: string): ProviderSpendRecoveryResult {
+    const rows = this.#db.query<{ request_key: string; state: "reserved" | "dispatching" }>(
+      `select request_key, state from provider_spend_attempts
+       where profile_id = ? and state in ('reserved', 'dispatching')
+         and julianday(execution_expires_at) <= julianday(?)
+       order by execution_expires_at, request_key`
+    ).all(this.#profileId, recoveredAt);
+    const releasedRequestKeys: string[] = [];
+    const uncertainRequestKeys: string[] = [];
+    for (const row of rows) {
+      const attempt = this.#requireAttempt(row.request_key);
+      if (row.state === "reserved") {
+        this.#releaseReservedAttempt(attempt, recoveredAt);
+        releasedRequestKeys.push(row.request_key);
+      } else {
+        this.#markDispatchUncertain(attempt, recoveredAt, RECOVERY_UNCERTAINTY_REASON);
+        uncertainRequestKeys.push(row.request_key);
+      }
+      this.#activeDispatches.delete(row.request_key);
+    }
+    if (this.#activeDispatches.size === 0) this.#stopHeartbeatTimer();
+    return { releasedRequestKeys, uncertainRequestKeys };
+  }
+
+  #markDispatchUncertain(attempt: ProviderSpendAttempt, uncertainAt: string, reason: string): void {
+    const transitioned = this.#db.query(
+      `update provider_spend_attempts
+       set state = 'uncertain', uncertain_at = ?, uncertainty_reason = ?
+       where profile_id = ? and request_key = ? and state = 'dispatching'
+         and execution_owner_id = ? and execution_fencing_token = ?`
+    ).run(
+      uncertainAt,
+      reason,
+      this.#profileId,
+      attempt.request.requestKey,
+      attempt.executionOwnerId,
+      attempt.executionFencingToken
+    );
+    if (transitioned.changes !== 1) {
+      throw new ProviderSpendIntegrityError(
+        `Provider spend uncertainty transition ${attempt.request.requestKey} lost its execution fence.`
+      );
+    }
+  }
+
   #write<T>(operation: () => T): T {
     this.#db.exec("begin immediate");
     try {
@@ -780,6 +1021,10 @@ function rowToAttempt(row: SpendAttemptRow, allocations: ProviderSpendAllocation
     id: row.id,
     request,
     state: row.state,
+    executionOwnerId: row.execution_owner_id,
+    executionFencingToken: row.execution_fencing_token,
+    executionHeartbeatAt: row.execution_heartbeat_at,
+    executionExpiresAt: row.execution_expires_at,
     reservedCostUsd: row.reserved_cost_usd,
     ...(row.actual_estimated_cost_usd === null ? {} : { actualEstimatedCostUsd: row.actual_estimated_cost_usd }),
     ...(row.usage_entry_id === null ? {} : { usageEntryId: row.usage_entry_id }),
@@ -827,6 +1072,17 @@ function assertNotBefore(value: string, lowerBound: string, label: string): void
   if (Date.parse(value) < Date.parse(lowerBound)) {
     throw new ProviderSpendIntegrityError(`${label} cannot precede the durable state it follows.`);
   }
+}
+
+function addMilliseconds(timestamp: string, milliseconds: number): string {
+  return new Date(Date.parse(timestamp) + milliseconds).toISOString();
+}
+
+function positiveInteger(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new ProviderSpendIntegrityError(`Provider spend ${label} is invalid.`);
+  }
+  return value;
 }
 
 function requireText(value: string, label: string, max: number): void {
@@ -891,6 +1147,10 @@ type SpendAttemptRow = {
   pricing_fingerprint: string;
   maximum_estimated_exposure_usd: number;
   state: ProviderSpendAttempt["state"];
+  execution_owner_id: string;
+  execution_fencing_token: number;
+  execution_heartbeat_at: string;
+  execution_expires_at: string;
   reserved_cost_usd: number;
   actual_estimated_cost_usd: number | null;
   usage_entry_id: string | null;

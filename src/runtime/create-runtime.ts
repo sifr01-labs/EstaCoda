@@ -1343,6 +1343,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       await localWhisper?.dispose?.();
       await Promise.all(loadedMcpServers.map((server) => server.stop().catch(() => undefined)));
       memoryIndexSync?.dispose();
+      await providerExecutor.dispose();
       const closeSessionDb = closeSessionDbOnDispose
         ? (sessionDb as { close?: () => void | Promise<void> }).close
         : undefined;

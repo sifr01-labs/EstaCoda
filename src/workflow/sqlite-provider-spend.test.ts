@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderSpendRequest } from "../contracts/provider-spend.js";
 import type { ProviderUsageEntry } from "../contracts/provider-usage.js";
 import type {
@@ -57,6 +57,8 @@ describe("SQLiteProviderSpendController", () => {
   });
 
   afterEach(() => {
+    try { controller.dispose("2030-01-01T01:00:00.000Z"); } catch { /* test may intentionally corrupt state */ }
+    vi.useRealTimers();
     sessionDb.close();
     rmSync(tempDir, { recursive: true, force: true });
   });
@@ -66,6 +68,12 @@ describe("SQLiteProviderSpendController", () => {
     expect(first.ok).toBe(true);
     if (!first.ok) return;
     expect(first.attempt.state).toBe("reserved");
+    expect(first.attempt).toMatchObject({
+      executionOwnerId: expect.stringMatching(/^provider-spend-/u),
+      executionFencingToken: 1,
+      executionHeartbeatAt: CREATED_AT,
+      executionExpiresAt: "2030-01-01T00:01:00.000Z"
+    });
     expect(first.attempt.allocations.map((allocation) => allocation.scopeKind))
       .toEqual(["root_task", "session"]);
     expect(controller.getScope("session", "origin")?.reservedCostUsd).toBe(4);
@@ -129,6 +137,14 @@ describe("SQLiteProviderSpendController", () => {
   });
 
   it("releases only pre-dispatch reservations and keeps uncertain dispatch capacity held", () => {
+    controller = new SQLiteProviderSpendController({
+      db: sessionDb.db,
+      profileId: PROFILE_ID,
+      ownerId: "recovering-runtime",
+      leaseMs: 1_500,
+      heartbeatIntervalMs: 500,
+      now: () => new Date(CREATED_AT)
+    });
     controller.reserve(spendRequest(), CREATED_AT);
     controller.reserve(spendRequest({
       requestKey: "request-dispatched",
@@ -137,11 +153,7 @@ describe("SQLiteProviderSpendController", () => {
     }), CREATED_AT);
     controller.markDispatching("request-dispatched", DISPATCHED_AT);
 
-    const recovery = controller.recoverStale({
-      reservedBefore: "2030-01-01T00:00:00.500Z",
-      dispatchingBefore: "2030-01-01T00:00:01.500Z",
-      recoveredAt: SETTLED_AT
-    });
+    const recovery = controller.recoverExpired(SETTLED_AT);
     expect(recovery).toEqual({
       releasedRequestKeys: ["request-1"],
       uncertainRequestKeys: ["request-dispatched"]
@@ -154,6 +166,124 @@ describe("SQLiteProviderSpendController", () => {
     expect(controller.getScope("root_task", "task-root")?.reservedCostUsd).toBe(1);
     expect(() => controller.releaseBeforeDispatch("request-dispatched", SETTLED_AT))
       .toThrow(/cannot be safely released/i);
+  });
+
+  it("fences a live reservation from another runtime and never revives it after recovery", () => {
+    const owner = new SQLiteProviderSpendController({
+      db: sessionDb.db,
+      profileId: PROFILE_ID,
+      ownerId: "foreground-runtime",
+      leaseMs: 1_000,
+      heartbeatIntervalMs: 500,
+      now: () => new Date(CREATED_AT)
+    });
+    const observer = new SQLiteProviderSpendController({
+      db: sessionDb.db,
+      profileId: PROFILE_ID,
+      ownerId: "gateway-runtime",
+      leaseMs: 1_000,
+      heartbeatIntervalMs: 500,
+      now: () => new Date(CREATED_AT)
+    });
+    owner.reserve(spendRequest(), CREATED_AT);
+
+    expect(observer.recoverExpired("2030-01-01T00:00:00.999Z"))
+      .toEqual({ releasedRequestKeys: [], uncertainRequestKeys: [] });
+    expect(() => observer.reserve(spendRequest(), "2030-01-01T00:00:00.999Z"))
+      .toThrow(/another live runtime/i);
+
+    expect(observer.recoverExpired("2030-01-01T00:00:01.000Z"))
+      .toEqual({ releasedRequestKeys: ["request-1"], uncertainRequestKeys: [] });
+    expect(() => owner.markDispatching("request-1", "2030-01-01T00:00:01.001Z"))
+      .toThrow(/cannot dispatch from released/i);
+    expect(controller.getScope("session", "origin")?.reservedCostUsd).toBe(0);
+    owner.dispose("2030-01-01T00:00:02.000Z");
+    observer.dispose("2030-01-01T00:00:02.000Z");
+  });
+
+  it("heartbeats an active dispatch so another runtime cannot recover it", async () => {
+    vi.useFakeTimers();
+    let now = Date.parse(CREATED_AT);
+    const owner = new SQLiteProviderSpendController({
+      db: sessionDb.db,
+      profileId: PROFILE_ID,
+      ownerId: "heartbeat-runtime",
+      leaseMs: 1_000,
+      heartbeatIntervalMs: 100,
+      now: () => new Date(now)
+    });
+    const observer = new SQLiteProviderSpendController({
+      db: sessionDb.db,
+      profileId: PROFILE_ID,
+      ownerId: "observer-runtime",
+      leaseMs: 1_000,
+      heartbeatIntervalMs: 100,
+      now: () => new Date(now)
+    });
+    owner.reserve(spendRequest(), CREATED_AT);
+    owner.markDispatching("request-1", CREATED_AT);
+
+    now += 500;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(owner.getAttempt("request-1")?.executionExpiresAt)
+      .toBe("2030-01-01T00:00:01.500Z");
+    expect(observer.recoverExpired("2030-01-01T00:00:01.100Z"))
+      .toEqual({ releasedRequestKeys: [], uncertainRequestKeys: [] });
+
+    owner.dispose("2030-01-01T00:00:01.200Z");
+    expect(owner.getAttempt("request-1")).toMatchObject({
+      state: "uncertain",
+      uncertaintyReason: "dispatch-outcome-unknown-after-owner-dispose"
+    });
+    observer.dispose("2030-01-01T00:00:01.200Z");
+  });
+
+  it("rejects settlement after the execution lease expires even before recovery runs", () => {
+    controller = new SQLiteProviderSpendController({
+      db: sessionDb.db,
+      profileId: PROFILE_ID,
+      ownerId: "expired-runtime",
+      leaseMs: 1_000,
+      heartbeatIntervalMs: 500,
+      now: () => new Date(CREATED_AT)
+    });
+    controller.reserve(spendRequest(), CREATED_AT);
+    controller.markDispatching("request-1", CREATED_AT);
+
+    expect(() => controller.settle(
+      "request-1",
+      usageEntry(3),
+      "2030-01-01T00:00:01.000Z"
+    )).toThrow(/lost its execution fence/i);
+    expect(controller.getAttempt("request-1")?.state).toBe("dispatching");
+    expect(sessionDb.db.query<{ id: string }>(
+      "select id from provider_usage_entries where profile_id = ? and request_key = ?"
+    ).get(PROFILE_ID, "request-1")).toBeNull();
+  });
+
+  it("allocates profile-wide monotonic fencing tokens across runtimes", () => {
+    const second = new SQLiteProviderSpendController({
+      db: sessionDb.db,
+      profileId: PROFILE_ID,
+      ownerId: "second-runtime"
+    });
+    const first = controller.reserve(spendRequest(), CREATED_AT);
+    const other = second.reserve(spendRequest({
+      requestKey: "request-2",
+      providerAttemptIndex: 1,
+      maximumEstimatedCostUsd: 1
+    }), CREATED_AT);
+    expect(first.ok && first.attempt.executionFencingToken).toBe(1);
+    expect(other.ok && other.attempt.executionFencingToken).toBe(2);
+    expect(() => sessionDb.db.query(
+      `update provider_spend_fence_generations
+       set last_fencing_token = last_fencing_token + 2 where profile_id = ?`
+    ).run(PROFILE_ID)).toThrow(/generation advance is invalid/i);
+    expect(() => sessionDb.db.query(
+      `update provider_spend_attempts set execution_owner_id = 'forged'
+       where profile_id = ? and request_key = 'request-1'`
+    ).run(PROFILE_ID)).toThrow(/identity is immutable/i);
+    second.dispose("2030-01-01T00:00:01.000Z");
   });
 
   it("verifies and rebuilds materialized balances from durable allocations and usage facts", () => {

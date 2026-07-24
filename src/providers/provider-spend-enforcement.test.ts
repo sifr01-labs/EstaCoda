@@ -180,6 +180,99 @@ describe("ProviderExecutor spending enforcement", () => {
     await expect(first).resolves.toMatchObject({ ok: true });
   });
 
+  it("keeps the full reservation uncertain when the adapter throws after dispatch", async () => {
+    await createUsageSession("throwing", 1);
+    registry.register(adapter(async () => {
+      throw new Error("provider transport failed after dispatch");
+    }));
+    const controller = new SQLiteProviderSpendController({
+      db: sessionDb.db,
+      profileId: PROFILE_ID,
+      ownerId: "throwing-runtime"
+    });
+    const providerExecutor = executor(controller);
+
+    await expect(providerExecutor.complete({ messages: [], maxTokens: 10 }, {}, {
+      primaryRoute: pricedRoute(),
+      usage: usage("throwing", "throwing-request")
+    })).rejects.toThrow(/provider transport failed/i);
+
+    const throwingRequestKey = sessionDb.db.query<{ request_key: string }>(
+      "select request_key from provider_spend_attempts where profile_id = ?"
+    ).get(PROFILE_ID)!.request_key;
+    const throwingAttempt = controller.getAttempt(throwingRequestKey);
+    expect(throwingAttempt).toMatchObject({
+      state: "uncertain",
+      uncertaintyReason: "provider-call-threw-after-dispatch"
+    });
+    expect(controller.getScope("session", "throwing")).toMatchObject({
+      spentCostUsd: 0,
+      reservedCostUsd: throwingAttempt!.reservedCostUsd
+    });
+    await providerExecutor.dispose();
+  });
+
+  it("does not strand a dispatch when the provider-start observer throws", async () => {
+    await createUsageSession("observer-throws", 1);
+    const complete = vi.fn(async (request: ProviderRequest) => response(request));
+    registry.register(adapter(complete));
+    const controller = new SQLiteProviderSpendController({
+      db: sessionDb.db,
+      profileId: PROFILE_ID,
+      ownerId: "observer-throws-runtime"
+    });
+    const providerExecutor = executor(controller);
+
+    await expect(providerExecutor.complete({ messages: [], maxTokens: 10 }, {}, {
+      primaryRoute: pricedRoute(),
+      usage: usage("observer-throws", "observer-throws-request"),
+      onEvent: (event) => {
+        if (event.kind === "provider-attempt-start") throw new Error("observer failed");
+      }
+    })).rejects.toThrow(/observer failed/i);
+
+    const requestKey = sessionDb.db.query<{ request_key: string }>(
+      "select request_key from provider_spend_attempts where profile_id = ?"
+    ).get(PROFILE_ID)!.request_key;
+    expect(controller.getAttempt(requestKey)).toMatchObject({
+      state: "uncertain",
+      uncertaintyReason: "provider-call-threw-after-dispatch"
+    });
+    expect(complete).not.toHaveBeenCalled();
+    await providerExecutor.dispose();
+  });
+
+  it("fences an in-flight provider call during graceful executor disposal", async () => {
+    await createUsageSession("disposing", 1);
+    let finish!: (response: ProviderResponse) => void;
+    const pendingResponse = new Promise<ProviderResponse>((resolve) => { finish = resolve; });
+    const complete = vi.fn(() => pendingResponse);
+    registry.register(adapter(complete));
+    const controller = new SQLiteProviderSpendController({
+      db: sessionDb.db,
+      profileId: PROFILE_ID,
+      ownerId: "disposing-runtime"
+    });
+    const providerExecutor = executor(controller);
+    const pending = providerExecutor.complete({ messages: [], maxTokens: 10 }, {}, {
+      primaryRoute: pricedRoute(),
+      usage: usage("disposing", "disposing-request")
+    });
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledOnce());
+
+    await providerExecutor.dispose();
+    const disposingRequestKey = sessionDb.db.query<{ request_key: string }>(
+      "select request_key from provider_spend_attempts where profile_id = ?"
+    ).get(PROFILE_ID)!.request_key;
+    expect(controller.getAttempt(disposingRequestKey)).toMatchObject({
+      state: "uncertain",
+      uncertaintyReason: "dispatch-outcome-unknown-after-owner-dispose"
+    });
+
+    finish(response({ model: "priced-model" }, { inputTokens: 1, outputTokens: 1 }));
+    await expect(pending).rejects.toThrow(/controller is disposed/i);
+  });
+
   it("fails closed when attributed execution has no spend controller", async () => {
     await createUsageSession("missing-controller");
     const complete = vi.fn(async (request: ProviderRequest) => response(request));

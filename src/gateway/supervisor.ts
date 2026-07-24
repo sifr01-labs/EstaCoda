@@ -353,6 +353,7 @@ export type SupervisorInternalState = {
   sessionFinalizationAbort?: AbortController;
   sessionFinalizationRun?: Promise<SessionFinalizationWorkerResult>;
   taskBackgroundHost?: SupervisorTaskHost;
+  providerExecutors: Set<ProviderExecutor>;
 };
 
 function logInfo(message: string): void {
@@ -497,6 +498,7 @@ function createInitialState(
     stuckAbortSent: new Set(),
     stuckEventRecorded: new Set(),
     stuckEventsBySession: new Map(),
+    providerExecutors: new Set(),
     cleanupDone: false,
     startupComplete: false,
     drainCancelled: false,
@@ -577,7 +579,13 @@ async function cleanupSupervisorStartupResources(state: SupervisorInternalState)
     state.runtimeCache = undefined;
   }
 
-  // 4a. Dispose gateway-owned voice preprocessing worker
+  // 4a. Fence any gateway-owned provider dispatch that did not settle during drain.
+  await Promise.all([...state.providerExecutors].map(async (executor) => {
+    try { await executor.dispose(); } catch { /* expired ownership remains conservatively recoverable */ }
+  }));
+  state.providerExecutors.clear();
+
+  // 4b. Dispose gateway-owned voice preprocessing worker
   if (state.gatewayLocalWhisper !== undefined) {
     try { await state.gatewayLocalWhisper.dispose(); } catch { /* ignore */ }
     state.gatewayLocalWhisper = undefined;
@@ -1023,6 +1031,19 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         providerModels
       });
     const hygieneContextWindowTokens = config.compression.summaryModelContextLength ?? config.model.contextWindowTokens ?? 128_000;
+    const sessionHygieneProviderExecutor = new ProviderExecutor({
+      registry: config.providerRegistry,
+      homeDir: config.homeDir,
+      profileId: config.profileId,
+      spendController: new SQLiteProviderSpendController({ db: sessionDb.db, profileId }),
+      usageRecorder: createProviderUsageRecorder({
+        profileId,
+        record: (entries) => sessionDb.recordProviderUsageEntries(entries),
+        resolveSessionBudgetScopeId: async (sessionId) =>
+          (await sessionDb.getSessionForProfile(sessionId, profileId))?.spendingScopeSessionId
+      })
+    });
+    state.providerExecutors.add(sessionHygieneProviderExecutor);
     const sessionHygieneService = new SessionHygieneService({
       sessionDb,
       profileId,
@@ -1037,18 +1058,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         },
         route: compressionRoute,
         mainRoute,
-        providerExecutor: new ProviderExecutor({
-          registry: config.providerRegistry,
-          homeDir: config.homeDir,
-          profileId: config.profileId,
-          spendController: new SQLiteProviderSpendController({ db: sessionDb.db, profileId }),
-          usageRecorder: createProviderUsageRecorder({
-            profileId,
-            record: (entries) => sessionDb.recordProviderUsageEntries(entries),
-            resolveSessionBudgetScopeId: async (sessionId) =>
-              (await sessionDb.getSessionForProfile(sessionId, profileId))?.spendingScopeSessionId
-          })
-        })
+        providerExecutor: sessionHygieneProviderExecutor
       }),
       logWarning
     });
@@ -1396,6 +1406,9 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     };
     const gatewaySecurityAssessor = await buildGatewaySecurityAssessorConfig(config, sessionDb);
+    if (gatewaySecurityAssessor.providerExecutor instanceof ProviderExecutor) {
+      state.providerExecutors.add(gatewaySecurityAssessor.providerExecutor);
+    }
     const voiceAudit = createVoiceTranscriptionAudit({ profilePaths, hookRegistry, logWarning });
     const gatewayLocalWhisperFor = async (stt: LoadedRuntimeConfig["stt"]) => {
       if (!isFasterWhisperConfig(stt)) {

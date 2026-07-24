@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 
-export const TASK_SCHEMA_VERSION = 26;
+export const TASK_SCHEMA_VERSION = 27;
 
 const OBSOLETE_EXECUTION_TABLES = [
   "workflow_event_summaries",
@@ -1376,6 +1376,116 @@ export function migrateProviderSpendReservationSchemaV23(db: SQLiteDatabase): vo
     before delete on provider_usage_entries
     begin
       select raise(abort, 'Provider usage facts are durable');
+    end;
+  `);
+}
+
+/** Fences provider spend transitions and makes abandoned reservations safely recoverable. */
+export function migrateProviderSpendExecutionLeaseSchemaV27(db: SQLiteDatabase): void {
+  db.exec(`
+    alter table provider_spend_attempts
+      add column execution_owner_id text not null default 'v27-cutover';
+    alter table provider_spend_attempts
+      add column execution_fencing_token integer not null default 1;
+    alter table provider_spend_attempts
+      add column execution_heartbeat_at text not null default '1970-01-01T00:00:00.000Z';
+    alter table provider_spend_attempts
+      add column execution_expires_at text not null default '1970-01-01T00:00:00.000Z';
+
+    update provider_spend_attempts set execution_fencing_token = rowid;
+
+    update provider_spending_scopes
+       set reserved_cost_usd = max(0, reserved_cost_usd - coalesce((
+         select sum(allocation.reserved_cost_usd)
+           from provider_spend_scope_allocations allocation
+           join provider_spend_attempts attempt
+             on attempt.profile_id = allocation.profile_id
+            and attempt.request_key = allocation.request_key
+          where allocation.profile_id = provider_spending_scopes.profile_id
+            and allocation.scope_kind = provider_spending_scopes.kind
+            and allocation.scope_owner_id = provider_spending_scopes.owner_id
+            and attempt.state = 'reserved'
+       ), 0));
+
+    update provider_spend_attempts
+       set state = 'released', released_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+     where state = 'reserved';
+    update provider_spend_attempts
+       set state = 'uncertain',
+           uncertain_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+           uncertainty_reason = 'dispatch-outcome-unknown-at-v27-cutover'
+     where state = 'dispatching';
+
+    update provider_spending_scopes
+       set state = case
+         when spent_cost_usd + reserved_cost_usd >= max_estimated_cost_usd then 'exhausted'
+         when spent_cost_usd + reserved_cost_usd >=
+           max_estimated_cost_usd * warning_threshold_percent / 100 then 'warning'
+         else 'available'
+       end;
+
+    create table provider_spend_fence_generations (
+      profile_id text primary key check(length(profile_id) between 1 and 128),
+      last_fencing_token integer not null check(last_fencing_token > 0)
+    );
+    insert into provider_spend_fence_generations (profile_id, last_fencing_token)
+      select profile_id, max(execution_fencing_token)
+      from provider_spend_attempts group by profile_id;
+
+    create index idx_provider_spend_attempts_lease_expiry
+      on provider_spend_attempts(profile_id, state, execution_expires_at);
+    create unique index uq_provider_spend_attempt_fencing_token
+      on provider_spend_attempts(profile_id, execution_fencing_token);
+
+    create trigger trg_provider_spend_fence_generation_advance
+    before update on provider_spend_fence_generations
+    when new.profile_id <> old.profile_id
+      or new.last_fencing_token <> old.last_fencing_token + 1
+    begin
+      select raise(abort, 'Provider spend fencing generation advance is invalid');
+    end;
+
+    create trigger trg_provider_spend_fence_generation_no_delete
+    before delete on provider_spend_fence_generations
+    begin
+      select raise(abort, 'Provider spend fencing generations are durable');
+    end;
+
+    drop trigger trg_provider_spend_attempt_identity_immutable;
+    create trigger trg_provider_spend_attempt_identity_immutable
+    before update of id, profile_id, request_key, attribution_json, provider, model,
+      pricing_snapshot_json, pricing_fingerprint, maximum_estimated_exposure_usd,
+      reserved_cost_usd, created_at, reserved_at, execution_owner_id, execution_fencing_token
+    on provider_spend_attempts
+    begin
+      select raise(abort, 'Provider spend Attempt identity is immutable');
+    end;
+
+    create trigger trg_provider_spend_attempt_execution_lease_insert_valid
+    before insert on provider_spend_attempts
+    when length(new.execution_owner_id) < 1 or length(new.execution_owner_id) > 256
+      or new.execution_fencing_token < 1
+      or not exists (
+        select 1 from provider_spend_fence_generations generation
+        where generation.profile_id = new.profile_id
+          and generation.last_fencing_token = new.execution_fencing_token
+      )
+      or julianday(new.execution_heartbeat_at) is null
+      or julianday(new.execution_expires_at) is null
+      or julianday(new.execution_expires_at) <= julianday(new.execution_heartbeat_at)
+    begin
+      select raise(abort, 'Provider spend execution lease is invalid');
+    end;
+
+    create trigger trg_provider_spend_attempt_execution_lease_renewal_valid
+    before update of execution_heartbeat_at, execution_expires_at on provider_spend_attempts
+    when old.state not in ('reserved', 'dispatching')
+      or julianday(new.execution_heartbeat_at) is null
+      or julianday(new.execution_expires_at) is null
+      or julianday(new.execution_heartbeat_at) < julianday(old.execution_heartbeat_at)
+      or julianday(new.execution_expires_at) <= julianday(new.execution_heartbeat_at)
+    begin
+      select raise(abort, 'Provider spend execution lease renewal is invalid');
     end;
   `);
 }

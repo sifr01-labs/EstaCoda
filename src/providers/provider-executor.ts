@@ -170,6 +170,12 @@ export type ProviderSpendController = {
     usage: ProviderUsageEntry,
     settledAt: string
   ): ProviderSpendAttempt | Promise<ProviderSpendAttempt>;
+  markUncertain(
+    requestKey: string,
+    uncertainAt: string,
+    reason: string
+  ): ProviderSpendAttempt | Promise<ProviderSpendAttempt>;
+  dispose?(disposedAt?: string): unknown | Promise<unknown>;
 };
 
 export class ProviderExecutor {
@@ -187,6 +193,10 @@ export class ProviderExecutor {
     this.#usageRecorder = options.usageRecorder;
     this.#spendController = options.spendController;
     this.#allowUnenforcedAttributedSpend = options.allowUnenforcedAttributedSpend === true;
+  }
+
+  async dispose(): Promise<void> {
+    await this.#spendController?.dispose?.(new Date().toISOString());
   }
 
   async complete(
@@ -442,14 +452,6 @@ export class ProviderExecutor {
           };
         }
 
-        await options.onEvent?.({
-          kind: "provider-attempt-start",
-          provider: route.provider,
-          model: route.id,
-          credentialId: credential?.id,
-          fallback: index > 0
-        });
-
         const completionOptions: ProviderCompletionOptions = {
           credential,
           signal: options.signal,
@@ -464,20 +466,33 @@ export class ProviderExecutor {
           };
         }
 
-        const callResult = options.stream === true && provider.stream !== undefined
-          ? await collectProviderStream({
-              provider: route.provider,
-              model: route.id,
-              stream: provider.stream(routeRequest, completionOptions),
-              onEvent: options.onEvent,
-              signal: options.signal,
-              now: options.now
-            })
-          : {
-              response: await provider.complete(routeRequest, completionOptions),
-              toolCalls: [],
-              streamDiagnostics: undefined
-            };
+        let callResult;
+        try {
+          await options.onEvent?.({
+            kind: "provider-attempt-start",
+            provider: route.provider,
+            model: route.id,
+            credentialId: credential?.id,
+            fallback: index > 0
+          });
+          callResult = options.stream === true && provider.stream !== undefined
+            ? await collectProviderStream({
+                provider: route.provider,
+                model: route.id,
+                stream: provider.stream(routeRequest, completionOptions),
+                onEvent: options.onEvent,
+                signal: options.signal,
+                now: options.now
+              })
+            : {
+                response: await provider.complete(routeRequest, completionOptions),
+                toolCalls: [],
+                streamDiagnostics: undefined
+              };
+        } catch (error) {
+          await this.#markDispatchedSpendUncertain(authorization.reservation, "provider-call-threw-after-dispatch");
+          throw error;
+        }
         const callResponse = callResult.response;
 
         const nextRoute = chain[index + 1];
@@ -500,26 +515,34 @@ export class ProviderExecutor {
         };
         attempts.push(dispatchedAttempt);
         if (authorization.reservation !== undefined && this.#spendController !== undefined) {
-          const { sessionBudgetScopeId: _unverifiedScopeId, ...usageWithoutScope } = options.usage!;
-          const normalizedUsageContext: ProviderUsageContext =
-            authorization.reservation.request.sessionBudgetScopeId === undefined
-              ? usageWithoutScope
-              : {
-                  ...usageWithoutScope,
-                  sessionBudgetScopeId: authorization.reservation.request.sessionBudgetScopeId
-                };
-          const usageEntry = providerUsageEntryFromAttempt({
-            attempt: dispatchedAttempt,
-            providerAttemptIndex,
-            profileId: authorization.reservation.request.profileId,
-            context: normalizedUsageContext,
-            routes: chain
-          });
-          await this.#spendController.settle(
-            authorization.reservation.request.requestKey,
-            usageEntry,
-            new Date().toISOString()
-          );
+          try {
+            const { sessionBudgetScopeId: _unverifiedScopeId, ...usageWithoutScope } = options.usage!;
+            const normalizedUsageContext: ProviderUsageContext =
+              authorization.reservation.request.sessionBudgetScopeId === undefined
+                ? usageWithoutScope
+                : {
+                    ...usageWithoutScope,
+                    sessionBudgetScopeId: authorization.reservation.request.sessionBudgetScopeId
+                  };
+            const usageEntry = providerUsageEntryFromAttempt({
+              attempt: dispatchedAttempt,
+              providerAttemptIndex,
+              profileId: authorization.reservation.request.profileId,
+              context: normalizedUsageContext,
+              routes: chain
+            });
+            await this.#spendController.settle(
+              authorization.reservation.request.requestKey,
+              usageEntry,
+              new Date().toISOString()
+            );
+          } catch (error) {
+            await this.#markDispatchedSpendUncertain(
+              authorization.reservation,
+              "provider-settlement-failed-after-dispatch"
+            );
+            throw error;
+          }
         }
 
         if (!callResponse.ok) {
@@ -761,6 +784,23 @@ export class ProviderExecutor {
       return { ok: true, reservation };
     } catch {
       return { ok: false, reason: "SPEND_CONTROLLER_UNAVAILABLE" };
+    }
+  }
+
+  async #markDispatchedSpendUncertain(
+    reservation: ProviderSpendAttempt | undefined,
+    reason: string
+  ): Promise<void> {
+    if (reservation === undefined || this.#spendController === undefined) return;
+    try {
+      await this.#spendController.markUncertain(
+        reservation.request.requestKey,
+        new Date().toISOString(),
+        reason
+      );
+    } catch {
+      // The durable lease remains reserved. An expired-owner recovery pass will
+      // conservatively mark it uncertain if this runtime can no longer fence it.
     }
   }
 

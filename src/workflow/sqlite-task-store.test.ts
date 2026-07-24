@@ -20,6 +20,7 @@ import { SQLiteTaskStore, TaskStoreIntegrityError, TaskStoreProfileError } from 
 import { taskListCursor } from "./task-store.js";
 import {
   migrateCanonicalProviderUsageSchemaV21,
+  migrateProviderSpendExecutionLeaseSchemaV27,
   migrateTaskAgentExecutorSchemaV12,
   migrateTaskBackgroundHostSchemaV13,
   migrateTaskChildGovernanceSchemaV16,
@@ -67,6 +68,9 @@ describe("SQLiteTaskStore", () => {
     const hostLeaseColumns = sessionDb.db.query<{ name: string }>("pragma table_info(task_host_leases)").all();
     const attemptColumns = sessionDb.db.query<{ name: string }>("pragma table_info(task_attempts)").all();
     const taskColumns = sessionDb.db.query<{ name: string }>("pragma table_info(tasks)").all();
+    const spendAttemptColumns = sessionDb.db.query<{ name: string }>(
+      "pragma table_info(provider_spend_attempts)"
+    ).all();
     const indexes = new Set(sessionDb.db.query<{ name: string }>(
       "select name from sqlite_master where type = 'index'"
     ).all().map((row) => row.name));
@@ -80,6 +84,12 @@ describe("SQLiteTaskStore", () => {
     expect(hostLeaseColumns.some((column) => column.name === "owner_kind")).toBe(true);
     expect(attemptColumns.some((column) => column.name === "lease_generation")).toBe(true);
     expect(taskColumns.some((column) => column.name === "host_lease_generation")).toBe(true);
+    expect([
+      "execution_owner_id",
+      "execution_fencing_token",
+      "execution_heartbeat_at",
+      "execution_expires_at"
+    ].every((name) => spendAttemptColumns.some((column) => column.name === name))).toBe(true);
     expect([
       "idx_tasks_profile_created",
       "idx_tasks_profile_status_created",
@@ -1291,6 +1301,114 @@ describe("Task execution preference schema v20 migration", () => {
   });
 });
 
+describe("Provider spend execution lease schema v27 migration", () => {
+  it("conservatively closes pre-lease active rows and installs durable fencing", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-provider-spend-v27-"));
+    const database = openDefaultSQLiteDatabase({ path: join(tempDir, "provider-spend.sqlite") });
+    try {
+      database.exec(`
+        create table provider_spend_attempts (
+          id text primary key,
+          profile_id text not null,
+          request_key text not null,
+          attribution_json text not null,
+          provider text not null,
+          model text not null,
+          pricing_snapshot_json text not null,
+          pricing_fingerprint text not null,
+          maximum_estimated_exposure_usd real not null,
+          state text not null,
+          reserved_cost_usd real not null,
+          actual_estimated_cost_usd real,
+          usage_entry_id text,
+          created_at text not null,
+          reserved_at text not null,
+          dispatching_at text,
+          settled_at text,
+          released_at text,
+          uncertain_at text,
+          uncertainty_reason text,
+          unique(profile_id, request_key)
+        );
+        create table provider_spending_scopes (
+          profile_id text not null,
+          kind text not null,
+          owner_id text not null,
+          max_estimated_cost_usd real not null,
+          warning_threshold_percent real not null,
+          spent_cost_usd real not null,
+          reserved_cost_usd real not null,
+          state text not null,
+          owner_created_at text not null,
+          created_at text not null,
+          warning_reached_at text,
+          exhausted_at text,
+          primary key(profile_id, kind, owner_id)
+        );
+        create table provider_spend_scope_allocations (
+          profile_id text not null,
+          request_key text not null,
+          scope_kind text not null,
+          scope_owner_id text not null,
+          reserved_cost_usd real not null,
+          created_at text not null,
+          primary key(profile_id, request_key, scope_kind, scope_owner_id)
+        );
+        create trigger trg_provider_spend_attempt_identity_immutable
+        before update of id, profile_id, request_key, attribution_json, provider, model,
+          pricing_snapshot_json, pricing_fingerprint, maximum_estimated_exposure_usd,
+          reserved_cost_usd, created_at, reserved_at on provider_spend_attempts
+        begin
+          select raise(abort, 'Provider spend Attempt identity is immutable');
+        end;
+        insert into provider_spend_attempts values
+          ('reserved', 'alpha', 'reserved', '{}', 'provider', 'model', '{}', 'price', 1,
+           'reserved', 1, null, null, '${NOW}', '${NOW}', null, null, null, null, null),
+          ('dispatching', 'alpha', 'dispatching', '{}', 'provider', 'model', '{}', 'price', 1,
+           'dispatching', 1, null, null, '${NOW}', '${NOW}', '${NOW}', null, null, null, null),
+          ('settled', 'alpha', 'settled', '{}', 'provider', 'model', '{}', 'price', 1,
+           'settled', 1, 0.5, 'usage', '${NOW}', '${NOW}', '${NOW}', '${NOW}', null, null, null);
+        insert into provider_spending_scopes values
+          ('alpha', 'session', 'session-alpha', 10, 80, 0.5, 2, 'available',
+           '${NOW}', '${NOW}', null, null);
+        insert into provider_spend_scope_allocations values
+          ('alpha', 'reserved', 'session', 'session-alpha', 1, '${NOW}'),
+          ('alpha', 'dispatching', 'session', 'session-alpha', 1, '${NOW}');
+      `);
+
+      migrateProviderSpendExecutionLeaseSchemaV27(database);
+
+      expect(database.query<{ request_key: string; state: string; reason: string | null }>(
+        `select request_key, state, uncertainty_reason as reason
+         from provider_spend_attempts order by request_key`
+      ).all()).toEqual([
+        { request_key: "dispatching", state: "uncertain", reason: "dispatch-outcome-unknown-at-v27-cutover" },
+        { request_key: "reserved", state: "released", reason: null },
+        { request_key: "settled", state: "settled", reason: null }
+      ]);
+      expect(database.query<{ last_fencing_token: number }>(
+        "select last_fencing_token from provider_spend_fence_generations where profile_id = 'alpha'"
+      ).get()).toEqual({ last_fencing_token: 3 });
+      expect(database.query<{ token: number }>(
+        `select execution_fencing_token as token from provider_spend_attempts
+         where profile_id = 'alpha' order by token`
+      ).all()).toEqual([{ token: 1 }, { token: 2 }, { token: 3 }]);
+      expect(database.query<{ reserved: number; state: string }>(
+        `select reserved_cost_usd as reserved, state
+         from provider_spending_scopes where profile_id = 'alpha'`
+      ).get()).toEqual({ reserved: 1, state: "available" });
+      expect(() => database.query(
+        `update provider_spend_attempts
+         set execution_heartbeat_at = '${NOW}', execution_expires_at = '2030-01-01T00:01:00.000Z'
+         where request_key = 'settled'`
+      ).run()).toThrow(/lease renewal is invalid/i);
+    } finally {
+      database.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
 const NOW = "2030-01-01T00:00:00.000Z";
 
 function makeGraph(profileId: "alpha" | "beta") {
@@ -1503,6 +1621,7 @@ const TASK_TABLES = [
   "provider_usage_entries",
   "provider_spending_scopes",
   "provider_spend_attempts",
+  "provider_spend_fence_generations",
   "provider_spend_scope_allocations",
   "task_approval_links",
   "task_delivery_bindings",
