@@ -69,6 +69,7 @@ import {
 import { isolateLtr } from "../../ui/bidi.js";
 import {
   createOpenAICompatibleEndpointFlowUi,
+  promptBudgetScope,
   promptConfigEditorAction,
   promptConfigEditorReviewApproval,
   promptAuxiliaryModelTask,
@@ -217,6 +218,7 @@ export async function runConfigEditor(
     }
     if (loopDecision.kind === "menu-back") {
       loopState = loopDecision.state;
+      initialDecision = result.initialDecision;
       continue;
     }
     return loopDecision.result;
@@ -553,6 +555,8 @@ async function handleAction(
       return handleSecurityModeAction(options, initialDecision, session, action);
     case "edit-workflow-learning":
       return handleWorkflowLearningAction(options, initialDecision, session, action);
+    case "edit-budgets":
+      return handleBudgetsAction(options, initialDecision, session, action);
     case "edit-spending-limit-for-task":
     case "edit-spending-limit-for-session":
       return handleSpendingLimitAction(options, initialDecision, session, action);
@@ -761,7 +765,7 @@ async function handleSpendingLimitAction(
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   action: ConfigEditorRenderedAction
-): Promise<ConfigEditorRunnerResult> {
+): Promise<RunOnceResult> {
   const editorAction = requireEditorAction(action);
   const scope = action.id === "edit-spending-limit-for-task" ? "task" : "session";
   const result = await promptSpendingLimit(options.prompt, {
@@ -785,6 +789,76 @@ async function handleSpendingLimitAction(
       warningThresholdPercent: result.spendingLimit?.warningThresholdPercent,
     },
   });
+}
+
+async function handleBudgetsAction(
+  options: LocalizedConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
+  action: ConfigEditorRenderedAction
+): Promise<RunOnceResult> {
+  let currentDecision = initialDecision;
+  let currentSession = session;
+
+  for (;;) {
+    const scopeResult = await promptBudgetScope(
+      options.prompt,
+      currentDecision.state.budgets,
+      options.locale
+    );
+    if (scopeResult.kind === "back") {
+      return menuBackResult(currentDecision, action.id);
+    }
+
+    const leafId = scopeResult.value === "task"
+      ? "edit-spending-limit-for-task"
+      : "edit-spending-limit-for-session";
+    const leafDraft = currentSession.plan.actions.find((candidate) => candidate.id === leafId);
+    if (leafDraft === undefined) {
+      const output = formatSetupCopy(options.locale, "setupEditor.result.unavailableAction", {
+        actionId: leafId,
+      });
+      write(options, `${output}\n`);
+      return {
+        completed: false,
+        exitCode: 1,
+        output,
+        initialDecision: currentDecision,
+        selectedActionId: leafId,
+      };
+    }
+
+    const leafResult = await handleSpendingLimitAction(options, currentDecision, currentSession, {
+      id: leafDraft.id,
+      label: setupCopyText(options.locale, leafDraft.copyKey),
+      description: setupCopyText(options.locale, leafDraft.copyKey),
+      readOnly: leafDraft.readOnly,
+      source: "editor",
+      editorAction: leafDraft,
+    });
+    if (leafResult.menuBackRequested === true) {
+      continue;
+    }
+    if (leafResult.applyPlanningResult?.kind !== "apply-plan-ready") {
+      continue;
+    }
+    if (leafResult.applyEndState === undefined) {
+      return leafResult;
+    }
+    if (leafResult.applyEndState.kind === "blocked") {
+      return leafResult;
+    }
+    if (leafResult.applyEndState.kind === "cancelled") {
+      continue;
+    }
+
+    currentDecision = leafResult.finalDecision ?? await collectSetupRoute(options);
+    const refreshedSession = currentDecision.setupEditorPlanSession;
+    if (refreshedSession === undefined) {
+      return leafResult;
+    }
+    currentSession = refreshedSession;
+  }
 }
 
 async function handleLanguageAction(

@@ -374,6 +374,14 @@ function budgetsSection(state: SetupEntryState): SetupEditorSection {
     blockers: [],
     actions: [
       setupEditorAction({
+        id: "edit-budgets",
+        copyKey: "setupEditor.actions.editBudgets",
+        sectionId: "budgets",
+        effect: "navigate",
+        readOnly: true,
+        requiresExplicitApply: false,
+      }),
+      setupEditorAction({
         id: "edit-spending-limit-for-task",
         copyKey: "setupEditor.actions.editTaskSpendingLimit",
         sectionId: "budgets",

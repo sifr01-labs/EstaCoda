@@ -10,6 +10,7 @@ import type { ModelFallbackConfig } from "../../config/runtime-config.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
 import {
   DEFAULT_SPENDING_WARNING_THRESHOLD_PERCENT,
+  type BudgetConfig,
   type SpendingLimit,
 } from "../../contracts/budget.js";
 import type { SetupReviewManifest } from "../setup-review-manifest.js";
@@ -163,6 +164,51 @@ export type SpendingLimitPromptResult =
   | { readonly kind: "back" }
   | { readonly kind: "selected"; readonly spendingLimit?: SpendingLimit };
 
+export type BudgetScopePromptResult = SetupChoiceResult<"task" | "session">;
+
+export async function promptBudgetScope(
+  prompt: Prompt,
+  budgets: BudgetConfig,
+  locale: SetupCopyLocale = "en"
+): Promise<BudgetScopePromptResult> {
+  const target = setupPromptContext(prompt, locale);
+  const status = (scope: "task" | "session"): string => {
+    const limit = budgets[scope];
+    return limit === undefined
+      ? setupCopyText(locale, "setupEditor.budgets.off")
+      : setupTechnicalToken(locale, formatCompactUsd(limit.maxEstimatedCostUsd));
+  };
+  const label = (scope: "task" | "session", titleKey: SetupCopyKey): string =>
+    `${setupCopyText(locale, titleKey)} — ${status(scope)}`;
+
+  return promptSetupChoiceResult(target, {
+    title: setupCopyText(locale, "setupEditor.budgets.title"),
+    message: `${setupCopyText(locale, "setupEditor.budgets.description")}\n`,
+    columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
+    tableWidth: setupChoiceTableWidth(locale),
+    tableMaxWidth: setupChoiceTableMaxWidth(locale),
+    tableAlign: setupChoiceTableAlign(locale),
+    showColumnHeaders: false,
+    allowBack: true,
+    choices: [
+      {
+        id: "budget-task",
+        label: label("task", "setupEditor.budgets.task.title"),
+        description: setupCopyText(locale, "setupEditor.budgets.task.applies"),
+        value: "task" as const,
+      },
+      {
+        id: "budget-session",
+        label: label("session", "setupEditor.budgets.session.title"),
+        description: setupCopyText(locale, "setupEditor.budgets.session.applies"),
+        value: "session" as const,
+      },
+    ],
+    defaultValue: "task" as const,
+  });
+}
+
 export async function promptSpendingLimit(
   prompt: Prompt,
   input: {
@@ -213,7 +259,7 @@ export async function promptSpendingLimit(
   if (mode.value === "off") return { kind: "selected" };
 
   const suggestedMaximum = input.current?.maxEstimatedCostUsd ?? (input.scope === "task" ? 5 : 20);
-  const maxEstimatedCostUsd = await promptBoundedNumber(prompt, {
+  const maximumResult = await promptBoundedNumber(prompt, {
     title: setupCopyText(locale, titleKey),
     question: setupCopyText(locale, "setupEditor.budgets.maximum.question"),
     description: setupCopyText(locale, "setupEditor.budgets.maximum.description"),
@@ -221,7 +267,8 @@ export async function promptSpendingLimit(
     defaultValue: suggestedMaximum,
     minimum: 0,
   }, locale);
-  const warningThresholdPercent = await promptBoundedNumber(prompt, {
+  if (maximumResult.kind === "back") return maximumResult;
+  const warningResult = await promptBoundedNumber(prompt, {
     title: setupCopyText(locale, titleKey),
     question: setupCopyText(locale, "setupEditor.budgets.warning.question"),
     description: setupCopyText(locale, "setupEditor.budgets.warning.description"),
@@ -230,12 +277,20 @@ export async function promptSpendingLimit(
     minimum: 0,
     maximum: 100,
   }, locale);
+  if (warningResult.kind === "back") return warningResult;
 
   return {
     kind: "selected",
-    spendingLimit: { maxEstimatedCostUsd, warningThresholdPercent },
+    spendingLimit: {
+      maxEstimatedCostUsd: maximumResult.value,
+      warningThresholdPercent: warningResult.value,
+    },
   };
 }
+
+type BoundedNumberPromptResult =
+  | { readonly kind: "back" }
+  | { readonly kind: "selected"; readonly value: number };
 
 async function promptBoundedNumber(
   prompt: Prompt,
@@ -249,7 +304,7 @@ async function promptBoundedNumber(
     readonly maximum?: number;
   },
   locale: SetupCopyLocale
-): Promise<number> {
+): Promise<BoundedNumberPromptResult> {
   const target = setupPromptContext(prompt, locale);
   for (;;) {
     const raw = await promptSetupStringWithDefault(
@@ -259,13 +314,14 @@ async function promptBoundedNumber(
       input.description,
       input.title
     );
+    if (isBackInput(raw, locale)) return { kind: "back" };
     const value = Number(raw);
     if (
       Number.isFinite(value) &&
       value >= input.minimum &&
       (input.maximum === undefined || value <= input.maximum)
     ) {
-      return value;
+      return { kind: "selected", value };
     }
     await showSetupCard(target, {
       title: input.title,
@@ -275,8 +331,17 @@ async function promptBoundedNumber(
   }
 }
 
+function isBackInput(raw: string, locale: SetupCopyLocale): boolean {
+  const normalized = raw.trim().toLocaleLowerCase(locale === "ar" ? "ar" : "en");
+  return normalized === "back" || normalized === "رجوع";
+}
+
 function formatUsd(value: number): string {
   return `$${value.toFixed(2)} USD`;
+}
+
+function formatCompactUsd(value: number): string {
+  return `$${value.toFixed(2)}`;
 }
 
 export async function promptConfigEditorAction(

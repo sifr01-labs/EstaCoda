@@ -13,6 +13,7 @@ import { __decideConfigEditorLoopForTest, __reviewAndApplyResolvedRouteForTest, 
 import {
   promptAuxiliaryModelTask,
   promptBrowserCapability,
+  promptBudgetScope,
   promptChannelCapability,
   promptConfigEditorAction,
   promptConfigEditorPostApplyAction,
@@ -124,8 +125,11 @@ describe("runConfigEditor", () => {
     expect(output.join("")).toContain("Models used for assessment, compression, recall, and memory.");
     expect(output.join("")).toContain("edit-security-mode");
     expect(output.join("")).toContain("edit-workflow-learning");
-    expect(output.join("")).toContain("edit-spending-limit-for-task - Default Task spending limit — Off");
-    expect(output.join("")).toContain("edit-spending-limit-for-session - Default session spending limit — Off");
+    expect(output.join("")).toContain("edit-budgets - Budgets");
+    expect(output.join("")).toContain("Set optional estimated provider-spending limits for new Tasks and sessions. Disabled by default.");
+    expect(output.join("").match(/edit-budgets - Budgets/gu)).toHaveLength(1);
+    expect(output.join("")).not.toContain("edit-spending-limit-for-task");
+    expect(output.join("")).not.toContain("edit-spending-limit-for-session");
     expect(output.join("")).toContain("edit-language - Language");
     expect(output.join("")).toContain("configure-channels");
     expect(output.join("")).toContain("configure-voice");
@@ -246,16 +250,15 @@ describe("runConfigEditor", () => {
       "edit-primary-model-route",
       "edit-fallback-model-route",
       "edit-auxiliary-model-route",
+      "edit-security-mode",
+      "edit-workflow-learning",
+      "edit-budgets",
+      "edit-language",
       "configure-channels",
       "configure-voice",
       "configure-image-generation",
       "configure-web-search",
       "configure-browser",
-      "edit-security-mode",
-      "edit-workflow-learning",
-      "edit-spending-limit-for-task",
-      "edit-spending-limit-for-session",
-      "edit-language",
       "run-doctor",
       "exit",
     ]);
@@ -1349,6 +1352,113 @@ describe("runConfigEditor", () => {
         warningThresholdPercent: 80,
       });
     }
+  });
+
+  it("returns to a refreshed Budgets submenu after applying a zero-dollar Task limit", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      budgets: {
+        session: { maxEstimatedCostUsd: 20, warningThresholdPercent: 70 },
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompt = fakePrompt({
+      values: ["task", "configure", "0", "80", true, "Back", "exit"],
+    });
+    const selectInputs = captureSelectInputs(prompt);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-budgets",
+      applyExecutor: createReviewedSetupApplyExecutor({ homeDir: tempDir, workspaceRoot }),
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      budgets?: Record<string, { maxEstimatedCostUsd: number; warningThresholdPercent: number }>;
+    };
+    const budgetMenus = selectInputs.filter((input) => input.title === "Budgets");
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(budgetMenus).toHaveLength(2);
+    expect(budgetMenus[0]?.options.map((option) => option.label)).toEqual([
+      "Default Task spending limit — Off",
+      "Default session spending limit — $20.00",
+      "Back",
+    ]);
+    expect(budgetMenus[1]?.options.map((option) => option.label)).toEqual([
+      "Default Task spending limit — $0.00",
+      "Default session spending limit — $20.00",
+      "Back",
+    ]);
+    expect(config.budgets).toEqual({
+      task: { maxEstimatedCostUsd: 0, warningThresholdPercent: 80 },
+      session: { maxEstimatedCostUsd: 20, warningThresholdPercent: 70 },
+    });
+  });
+
+  it("turns off a session limit from Budgets without changing the Task limit", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      budgets: {
+        task: { maxEstimatedCostUsd: 5, warningThresholdPercent: 80 },
+        session: { maxEstimatedCostUsd: 20, warningThresholdPercent: 75 },
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: ["session", "off", true, "Back", "exit"] }),
+      defaultActionId: "edit-budgets",
+      applyExecutor: createReviewedSetupApplyExecutor({ homeDir: tempDir, workspaceRoot }),
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      budgets?: Record<string, unknown>;
+    };
+
+    expect(result.completed).toBe(true);
+    expect(config.budgets).toEqual({
+      task: { maxEstimatedCostUsd: 5, warningThresholdPercent: 80 },
+    });
+  });
+
+  it("keeps configuration unchanged when backing out of the Budgets submenu and leaf editor", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const before = await readFile(profileConfigPath(tempDir), "utf8");
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: ["task", "Back", "Back", "exit"] }),
+      defaultActionId: "edit-budgets",
+      applyExecutor: createReviewedSetupApplyExecutor({ homeDir: tempDir, workspaceRoot }),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
+  });
+
+  it("keeps configuration unchanged when a Budgets review is cancelled", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const before = await readFile(profileConfigPath(tempDir), "utf8");
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: ["task", "off", false, "Back", "exit"] }),
+      defaultActionId: "edit-budgets",
+      applyExecutor: createReviewedSetupApplyExecutor({ homeDir: tempDir, workspaceRoot }),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
   });
 
   it("turns off only the selected spending limit", async () => {
@@ -5591,6 +5701,61 @@ describe("runConfigEditor", () => {
       kind: "selected",
       spendingLimit: { maxEstimatedCostUsd: 0, warningThresholdPercent: 80 },
     });
+  });
+
+  it("supports Back from monetary and warning value prompts", async () => {
+    await expect(promptSpendingLimit(
+      fakePrompt({ values: ["configure", "Back"] }),
+      { scope: "task" }
+    )).resolves.toEqual({ kind: "back" });
+    await expect(promptSpendingLimit(
+      fakePrompt({ values: ["configure", "5", "رجوع"] }),
+      { scope: "session" },
+      "ar"
+    )).resolves.toEqual({ kind: "back" });
+  });
+
+  it("renders Task and session states in the centralized Budgets selector", async () => {
+    const prompt = fakePrompt({ values: ["session"] });
+    const selectInputs = captureSelectInputs(prompt);
+
+    const result = await promptBudgetScope(prompt, {
+      task: { maxEstimatedCostUsd: 0, warningThresholdPercent: 80 },
+    });
+
+    expect(result).toEqual({ kind: "selected", value: "session" });
+    expect(selectInputs[0]?.title).toBe("Budgets");
+    expect(selectInputs[0]?.body).toBe("Set optional limits on estimated model-provider spending.");
+    expect(selectInputs[0]?.options.map((option) => option.label)).toEqual([
+      "Default Task spending limit — $0.00",
+      "Default session spending limit — Off",
+      "Back",
+    ]);
+    expect(selectInputs[0]?.options.map((option) => option.description)).toEqual([
+      resolveSetupCopy("en", "setupEditor.budgets.task.applies"),
+      resolveSetupCopy("en", "setupEditor.budgets.session.applies"),
+      resolveSetupCopy("en", "onboarding.providers.navigation.back.description"),
+    ]);
+    expect(selectInputs[0]?.tableWidth).toBe("full");
+    expect(selectInputs[0]?.tableMaxWidth).toBeUndefined();
+    expect(selectInputs[0]?.showColumnHeaders).toBe(false);
+    expect(selectInputs[0]?.hint).toBe("↑↓ navigate   ENTER select   CTRL+C exit");
+  });
+
+  it("renders the Arabic Budgets selector with isolated monetary values", async () => {
+    const prompt = fakePrompt({ values: ["رجوع"] });
+    const selectInputs = captureSelectInputs(prompt);
+
+    const result = await promptBudgetScope(prompt, {
+      session: { maxEstimatedCostUsd: 20, warningThresholdPercent: 80 },
+    }, "ar");
+
+    expect(result).toEqual({ kind: "back" });
+    expect(selectInputs[0]?.title).toBe("الميزانيات");
+    expect(selectInputs[0]?.tableDirection).toBe("rtl");
+    expect(selectInputs[0]?.tableAlign).toBe("right");
+    expect(selectInputs[0]?.options[1]?.label).toContain(isolateLtr("$20.00"));
+    expect(selectInputs[0]?.options.at(-1)?.label).toBe("رجوع");
   });
 
   it("isolates configured USD values in the Arabic spending-limit prompt", async () => {

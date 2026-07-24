@@ -43,6 +43,40 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(output.every((line) => stringWidth(line) <= 44)).toBe(true);
   });
 
+  it("keeps the Budgets submenu readable under narrow width", () => {
+    const output = renderSetupPanelSurface({
+      kind: "table",
+      layout: "choiceMenu",
+      title: "Budgets",
+      description: "Set optional limits on estimated model-provider spending.",
+      rows: [
+        {
+          id: "budget-task",
+          provider: "Default Task spending limit — $5.00",
+          model: "",
+          status: "Applies to workers, retries, fallbacks, synthesis, auxiliary models, and descendant Tasks.",
+          notes: "",
+        },
+        {
+          id: "budget-session",
+          provider: "Default session spending limit — Off",
+          model: "",
+          status: "Applies to conversation turns, auxiliary models, and Tasks originating from the session.",
+          notes: "",
+        },
+      ],
+      selectedRowId: "budget-task",
+    }, { width: 44 });
+    const text = output.join("\n");
+
+    expect(text).toContain("Budgets");
+    expect(text).toContain("Default Task spending limit");
+    expect(text).toContain("$5.00");
+    expect(text).toContain("Default session spending limit");
+    expect(text).toContain("Off");
+    expect(output.every((line) => stringWidth(line) <= 44)).toBe(true);
+  });
+
   it("renders current marker without a separator before it", () => {
     const output = renderSetupPanelSurface({
       kind: "table",

@@ -224,13 +224,20 @@ describe("buildSetupEditorPlan", () => {
       session: undefined,
     });
     expect(budgets.actions.map((action) => action.id)).toEqual([
+      "edit-budgets",
       "edit-spending-limit-for-task",
       "edit-spending-limit-for-session",
     ]);
     expect(budgets.actions.map((action) => action.patch?.fields)).toEqual([
+      undefined,
       ["budgets.task"],
       ["budgets.session"],
     ]);
+    expect(budgets.actions[0]).toEqual(expect.objectContaining({
+      effect: "navigate",
+      readOnly: true,
+      requiresExplicitApply: false,
+    }));
     expect(JSON.stringify(budgets)).not.toMatch(/token|provider.?call/iu);
   });
 
@@ -312,6 +319,7 @@ describe("buildSetupEditorPlan", () => {
       "edit-auxiliary-model-route",
       "edit-security-mode",
       "edit-workflow-learning",
+      "edit-budgets",
       "edit-spending-limit-for-task",
       "edit-spending-limit-for-session",
       "edit-language",

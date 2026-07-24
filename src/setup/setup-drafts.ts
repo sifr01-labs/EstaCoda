@@ -169,7 +169,9 @@ export function buildSetupEditorDraftBundle(
   session: SetupEditorPlanSession,
   options: SetupDraftBundleOptions = {}
 ): SetupDraftBundle {
-  const drafts = session.plan.actions.map((action) => draftFromEditorAction(action, options));
+  const drafts = session.plan.actions
+    .filter((action) => action.effect !== "navigate")
+    .map((action) => draftFromEditorAction(action, options));
   return buildSetupEditorDraftBundleFromActions(session, drafts);
 }
 
@@ -758,6 +760,8 @@ function editorDraftId(action: SetupEditorActionDraft): string {
 
 function kindForEditorAction(action: SetupEditorActionDraft): SetupDraftKind {
   switch (action.id) {
+    case "edit-budgets":
+      throw new Error("Budgets navigation cannot be converted into an apply draft.");
     case "edit-primary-model-route":
     case "add-custom-provider-route":
     case "repair-primary-provider":

@@ -9,6 +9,7 @@ export type SetupEditorActionId =
   | "repair-missing-credential"
   | "edit-security-mode"
   | "edit-workflow-learning"
+  | "edit-budgets"
   | "edit-spending-limit-for-task"
   | "edit-spending-limit-for-session"
   | "edit-language"
@@ -47,6 +48,7 @@ export type SetupEditorPatchField =
   | "browser";
 
 export type SetupEditorActionEffect =
+  | "navigate"
   | "draft-config-patch"
   | "draft-trust-repair"
   | "draft-state-repair"
