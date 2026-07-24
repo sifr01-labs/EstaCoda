@@ -2,7 +2,11 @@ import type { ProviderId } from "./provider.js";
 import type { ProviderUsageTotals } from "./provider-usage.js";
 import type { SpendingLimit } from "./budget.js";
 import type { ToolRiskClass, ToolsetName } from "./tool.js";
-import type { DelegationAccessAudit } from "./delegation.js";
+import {
+  MAX_DELEGATE_RESEARCH_SCOPE_LENGTH,
+  type DelegationAccessAudit,
+  type DelegationResearchContract
+} from "./delegation.js";
 
 // Durable Task identities are opaque storage keys. They are never authorization boundaries.
 export type TaskId = string;
@@ -184,6 +188,8 @@ export type TaskAgentExecutor = {
   };
   /** Present only for Steps admitted through delegate_task. */
   delegationAccess?: DelegationAccessAudit;
+  /** Present only when delegated research must satisfy durable evidence requirements. */
+  research?: DelegationResearchContract;
 };
 
 export type TaskStepResultPolicy = {
@@ -795,7 +801,8 @@ export function validateTaskPlan(
         step.executor.model.id.trim().length === 0 ||
         step.executor.model.id.length > limits.maxModelIdChars
       )) ||
-      !isDelegationAccessAuditValid(step.executor.delegationAccess, limits)
+      !isDelegationAccessAuditValid(step.executor.delegationAccess, limits) ||
+      !isDelegationResearchContractValid(step.executor.research)
     ) {
       issues.push(issue("step-executor-invalid", "Step executor is unsupported or contains an invalid model selection.", step.id));
     }
@@ -1120,6 +1127,22 @@ function isDelegationAccessAuditValid(
       uniqueNonEmptyStrings(diagnostic.toolsets)
     )) &&
     (diagnostic.riskClass === undefined || TASK_TOOL_RISK_CLASSES.includes(diagnostic.riskClass as ToolRiskClass))
+  );
+}
+
+function isDelegationResearchContractValid(
+  research: TaskAgentExecutor["research"]
+): boolean {
+  return research === undefined || (
+    typeof research === "object" &&
+    research !== null &&
+    !Array.isArray(research) &&
+    typeof research.scope === "string" &&
+    research.scope.trim().length > 0 &&
+    research.scope.length <= MAX_DELEGATE_RESEARCH_SCOPE_LENGTH &&
+    !/[\u0000-\u001F\u007F]/u.test(research.scope) &&
+    typeof research.requireLiveSources === "boolean" &&
+    typeof research.requireRepositoryEvidence === "boolean"
   );
 }
 

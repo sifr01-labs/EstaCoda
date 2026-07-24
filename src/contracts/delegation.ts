@@ -6,6 +6,7 @@ export const MAX_DELEGATION_BATCH_TASKS = 10;
 export const DELEGATE_TASK_MAX_RESULT_CHARS = 8_000;
 export const MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH = 200;
 export const MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH = 100;
+export const MAX_DELEGATE_RESEARCH_SCOPE_LENGTH = 120;
 
 export type DelegateModelOverride = {
   model: string;
@@ -55,6 +56,14 @@ export type DelegateTaskItem = {
   allowedTools?: string[];
   role?: DelegateRole;
   modelOverride?: DelegateModelOverride;
+  research?: DelegationResearchContract;
+};
+
+/** Immutable evidence requirements for one delegated research Step. */
+export type DelegationResearchContract = {
+  scope: string;
+  requireLiveSources: boolean;
+  requireRepositoryEvidence: boolean;
 };
 
 export type DelegationToolStripReason =

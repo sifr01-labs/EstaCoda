@@ -325,6 +325,24 @@ describe("validateTaskPlan", () => {
     ]));
   });
 
+  it("rejects malformed persisted research contracts", () => {
+    const plan = validPlan();
+    plan.steps = [{
+      ...plan.steps[0]!,
+      executor: {
+        kind: "agent",
+        role: "worker",
+        research: {
+          scope: " ",
+          requireLiveSources: true,
+          requireRepositoryEvidence: false
+        }
+      }
+    }];
+
+    expect(issueCodes(validateTaskPlan(plan))).toContain("step-executor-invalid");
+  });
+
   it("allows fire-and-forget children only for explicitly authorized orchestrator Steps", () => {
     const worker = validPlan();
     worker.steps = [{ ...worker.steps[0]!, childTaskPolicy: "fire_and_forget" }];

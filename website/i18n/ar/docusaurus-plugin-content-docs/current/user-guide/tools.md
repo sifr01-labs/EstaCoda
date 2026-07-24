@@ -225,6 +225,35 @@ sidebar_position: 5
 }
 ```
 
+للبحث المقيّد بالأدلة، امنح كل عامل `research.scope` مميزة وصرّح بنوع الدليل المطلوب:
+
+```json
+{
+  "tasks": [
+    {
+      "task": "Check the current upstream documentation.",
+      "allowedTools": ["web.search"],
+      "research": {
+        "scope": "Current upstream behavior",
+        "requireLiveSources": true,
+        "requireRepositoryEvidence": false
+      }
+    },
+    {
+      "task": "Trace the local implementation and tests.",
+      "allowedTools": ["file.read", "file.grep"],
+      "research": {
+        "scope": "Local implementation",
+        "requireLiveSources": false,
+        "requireRepositoryEvidence": true
+      }
+    }
+  ]
+}
+```
+
+يفشل إنشاء Task إذا كانت الأدوات الفعالة المفوضة لا تستطيع تنفيذ العقد. لا تُقبل Result العامل إلا عندما تكون روابط HTTP(S) ومسارات المستودع النسبية إلى workspace قد ظهرت في نتائج أدوات ناجحة. يؤدي غياب استخدام الأدوات أو الادعاءات المبنية على training knowledge فقط أو المراجع الملفقة إلى مخرج diagnostic فقط بالتصنيف `evidence-contract-unsatisfied`. لا تستطيع synthesis استخدام ذلك المخرج، وتذكر research scope غير المتاحة بدلًا منه.
+
 تحتوي الخطة الأولية غير القابلة للتغيير على جميع Steps الخاصة بالعاملين وStep تركيب نهائية واحدة. تنتظر Step التركيب اكتمال جميع العاملين، وتقرأ مقابض Results المحدودة عبر `task.result.read`، ولا يمكنها التفويض. إذا فشل عامل، تُتخطى Step التركيب وتصبح Task بالحالة `partial`. وعند النجاح تُعرض Result الخاصة بالتركيب بوصفها النتيجة الرئيسية، بينما تبقى Results الوسيطة قابلة للقراءة عبر مقابضها.
 
 صلاحية العمل المفوض أضيق عمدًا من صلاحية Runtime المنشئة. تتقاطع قائمة الأدوات النهائية المرئية للمزوّد مع الأدوات المطلوبة وسياسة المخاطر الافتراضية قبل حفظ Step. تعامل `allowedTools` و`allowedToolsets` كمتطلبات: إذا لم تتوفر إحداها، أو كانت مجموعة الأدوات الناتجة فارغة، يفشل إنشاء Task مع diagnostics منظمة ولا يُوضع عامل في الطابور. يحفظ الإنشاء الناجح سجل وصول محدودًا، ويرفض إنشاء العامل وصولًا فارغًا أو أوسع قبل الاتصال بالمزوّد. لا يمكن لـ Steps بدور `worker` التفويض. ويمكن لـ Steps بدور `orchestrator` إنشاء Tasks فرعية مرتبطة فقط ما دامت الصلاحية المحفوظة تتضمن عمقًا متبقيًا؛ ولا يجوز أن تتجاوز workspace أو الصلاحية أو الميزانية الخاصة بالطفل حدود Step الأصلية النشطة. تُحجز ميزانيات استدعاءات المزوّد وtokens والتكلفة المقدّرة ذريًا، لذلك تقسم الاستدعاءات المتكررة سقف الأصل الواحد بدل إنشاء ميزانية جديدة. ويُفرض التزامن الفعلي والوقت المنقضي والاستخدام الحقيقي على شجرة Task كاملة.

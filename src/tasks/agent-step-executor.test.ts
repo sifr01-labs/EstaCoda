@@ -367,6 +367,146 @@ describe("AgentStepExecutor", () => {
     });
   });
 
+  it("accepts only observed live citations and observed repository references for research Steps", async () => {
+    const cases = [
+      {
+        name: "missing-live-tool",
+        research: { scope: "live", requireLiveSources: true, requireRepositoryEvidence: false },
+        text: "Training-memory answer with https://unobserved.example/report",
+        executions: [],
+        outcome: "failed",
+        diagnostic: true
+      },
+      {
+        name: "fabricated-live-url",
+        research: { scope: "live", requireLiveSources: true, requireRepositoryEvidence: false },
+        text: "Claim cites https://fabricated.example/report",
+        executions: [successfulEvidenceExecution("web.search", "read-only-network", ["web", "research"], {
+          query: "current report"
+        }, "1. Observed\nhttps://observed.example/report", {
+          results: [{ title: "Observed", url: "https://observed.example/report" }]
+        })],
+        outcome: "failed",
+        diagnostic: true
+      },
+      {
+        name: "mixed-observed-and-fabricated-live-urls",
+        research: { scope: "live", requireLiveSources: true, requireRepositoryEvidence: false },
+        text: "Observed https://observed.example/report but also https://fabricated.example/report",
+        executions: [successfulEvidenceExecution("web.search", "read-only-network", ["web", "research"], {
+          query: "current report"
+        }, "1. Observed\nhttps://observed.example/report", {
+          results: [{ title: "Observed", url: "https://observed.example/report" }]
+        })],
+        outcome: "failed",
+        diagnostic: true
+      },
+      {
+        name: "accepted-live-url",
+        research: { scope: "live", requireLiveSources: true, requireRepositoryEvidence: false },
+        text: "Supported finding: [Observed](https://observed.example/report).",
+        executions: [successfulEvidenceExecution("web.search", "read-only-network", ["web", "research"], {
+          query: "current report"
+        }, "1. Observed\nhttps://observed.example/report", {
+          results: [{ title: "Observed", url: "https://observed.example/report" }]
+        })],
+        outcome: "succeeded",
+        diagnostic: false
+      },
+      {
+        name: "missing-repository-discovery",
+        research: { scope: "repository", requireLiveSources: false, requireRepositoryEvidence: true },
+        text: "Repository finding in src/runtime/agent.ts:12.",
+        executions: [successfulEvidenceExecution("file.read", "read-only-local", ["files", "research"], {
+          path: "src/runtime/agent.ts"
+        }, "# src/runtime/agent.ts\nexport class Agent {}", { path: "src/runtime/agent.ts" })],
+        outcome: "failed",
+        diagnostic: true
+      },
+      {
+        name: "accepted-repository-evidence",
+        research: { scope: "repository", requireLiveSources: false, requireRepositoryEvidence: true },
+        text: "Repository finding in src/runtime/agent.ts:12.",
+        executions: [
+          successfulEvidenceExecution("file.search", "read-only-local", ["files", "research"], {
+            query: "class Agent"
+          }, "src/runtime/agent.ts:12:export class Agent {}"),
+          successfulEvidenceExecution("file.read", "read-only-local", ["files", "research"], {
+            path: "src/runtime/agent.ts"
+          }, "# src/runtime/agent.ts\nexport class Agent {}", { path: "src/runtime/agent.ts" })
+        ],
+        outcome: "succeeded",
+        diagnostic: false
+      }
+    ] as const;
+
+    for (const candidate of cases) {
+      const graph = makeGraph();
+      const step: TaskStep = {
+        ...graph.steps[0]!,
+        id: `step-${candidate.name}`,
+        executor: {
+          ...graph.steps[0]!.executor,
+          research: candidate.research
+        }
+      };
+      const handle = vi.fn(async () => response({
+        text: candidate.text,
+        toolExecutions: [...candidate.executions]
+      }));
+      const childFactory: ChildAgentLoopFactory = {
+        createChild: vi.fn(async (input) => {
+          const sessionId = `worker-${candidate.name}`;
+          await sessionDb.createSession({
+            id: sessionId,
+            profileId: input.profileId,
+            parentSessionId: input.parentSessionId,
+            metadata: { kind: "task-step-worker", ...(input.taskExecution ?? {}) }
+          });
+          return childRuntime(handle, async () => undefined, {
+            sessionId,
+            trajectoryId: `trajectory-${candidate.name}`
+          }, {
+            tools: candidate.executions.map((execution) => execution.tool.name),
+            toolsets: [...new Set(candidate.executions.flatMap((execution) => execution.tool.toolsets))]
+          });
+        })
+      };
+      const executor = new AgentStepExecutor({
+        childFactory,
+        sessionDb,
+        taskStore: store,
+        hostWorkspace: graph.task.workspace,
+        isWorkspaceTrusted: () => true,
+        parentVisibleTools: () => tools(),
+        approvalService: new TaskApprovalService({ store }),
+        securityPolicy: capabilityFirstDefaults
+      });
+
+      const settlement = await executor.execute({
+        task: graph.task,
+        step,
+        attempt: attempt({ ...graph, steps: [step] }),
+        signal: new AbortController().signal,
+        heartbeat: vi.fn(),
+        checkpoint: vi.fn()
+      });
+
+      expect(settlement.outcome).toBe(candidate.outcome);
+      if (candidate.outcome === "failed") {
+        expect(settlement).toMatchObject({
+          failure: { class: "evidence-contract-unsatisfied", retryable: false }
+        });
+        expect(settlement).toHaveProperty("diagnosticResults");
+      } else {
+        expect(settlement).toMatchObject({
+          results: [expect.objectContaining({ kind: "text", content: candidate.text })]
+        });
+      }
+      expect(handle).toHaveBeenCalledOnce();
+    }
+  });
+
   it("records the durable Task ancestry depth in timeout diagnostics", async () => {
     vi.useFakeTimers();
     try {
@@ -431,7 +571,19 @@ describe("AgentStepExecutor", () => {
   });
 
   it("gives dependent Steps directly executable Task result read inputs without exposing opaque handles", async () => {
-    const graph = makeDependencyGraph();
+    const base = makeDependencyGraph();
+    const researchStep: TaskStep = {
+      ...base.steps[0]!,
+      executor: {
+        ...base.steps[0]!.executor,
+        research: {
+          scope: "accepted-live-evidence",
+          requireLiveSources: true,
+          requireRepositoryEvidence: false
+        }
+      }
+    };
+    const graph = { ...base, steps: [researchStep, base.steps[1]!] };
     store.createTaskGraph(graph);
     resultService.record({
       id: "failed-dependency-output",
@@ -492,6 +644,7 @@ describe("AgentStepExecutor", () => {
     const references = JSON.parse(context.slice(markerIndex + marker.length)) as Array<Record<string, unknown>>;
     expect(references).toEqual([{
       stepId: graph.steps[0]!.id,
+      researchScope: "accepted-live-evidence",
       readInput: {
         task_id: graph.task.id,
         result_id: dependencyResult.id
@@ -524,14 +677,22 @@ describe("AgentStepExecutor", () => {
       id: "step-successful",
       key: "successful",
       title: "Research successful source",
-      position: 0
+      position: 0,
+      executor: {
+        ...base.steps[0]!.executor,
+        research: { scope: "available-scope", requireLiveSources: true, requireRepositoryEvidence: false }
+      }
     };
     const failed: TaskStep = {
       ...base.steps[0]!,
       id: "step-failed",
       key: "failed",
       title: "Research unavailable source",
-      position: 1
+      position: 1,
+      executor: {
+        ...base.steps[0]!.executor,
+        research: { scope: "missing-scope", requireLiveSources: true, requireRepositoryEvidence: false }
+      }
     };
     const synthesis: TaskStep = {
       ...base.steps[1]!,
@@ -600,9 +761,11 @@ describe("AgentStepExecutor", () => {
 
     const context = childInput?.context ?? "";
     expect(context).toContain("Partial synthesis boundary");
+    expect(context).toContain("Keep each scope's evidence distinct");
     expect(context).toContain("Explicitly identify failed, cancelled, skipped, or missing coverage");
-    expect(context).toContain(`\"stepId\":\"${successful.id}\",\"title\":\"${successful.title}\",\"status\":\"completed\",\"resultAvailable\":true`);
-    expect(context).toContain(`\"stepId\":\"${failed.id}\",\"title\":\"${failed.title}\",\"status\":\"failed\",\"resultAvailable\":false`);
+    expect(context).toContain(`\"stepId\":\"${successful.id}\",\"title\":\"${successful.title}\",\"researchScope\":\"available-scope\",\"status\":\"completed\",\"resultAvailable\":true`);
+    expect(context).toContain(`\"stepId\":\"${failed.id}\",\"title\":\"${failed.title}\",\"researchScope\":\"missing-scope\",\"status\":\"failed\",\"resultAvailable\":false`);
+    expect(context).toContain("missing-scope");
     expect(context).toContain("accepted-partial-result");
     expect(context).not.toContain("diagnostic-partial-result");
     expect(context).not.toContain("Untrusted incomplete output");
@@ -1389,6 +1552,27 @@ function childRuntime(
     },
     handle,
     cleanup
+  };
+}
+
+function successfulEvidenceExecution(
+  name: string,
+  riskClass: ToolRiskClass,
+  toolsets: ToolsetName[],
+  input: Record<string, unknown>,
+  content: string,
+  metadata?: Record<string, unknown>
+): Awaited<ReturnType<ChildAgentLoopRuntime["handle"]>>["toolExecutions"][number] {
+  return {
+    tool: tool(name, riskClass, toolsets),
+    input,
+    decision: "allow",
+    riskClass,
+    result: {
+      ok: true,
+      content,
+      ...(metadata === undefined ? {} : { metadata })
+    }
   };
 }
 

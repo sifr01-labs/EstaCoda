@@ -249,6 +249,111 @@ describe("DurableDelegationService", () => {
     })).toThrow(FixedTaskCreationConflictError);
   });
 
+  it("admits only research contracts whose required evidence capabilities are effective", () => {
+    const withoutLiveSearch = new DurableDelegationService({
+      store,
+      creatorSessionId: () => "parent",
+      workspace: workspace(),
+      config: DEFAULT_DELEGATION_CONFIG,
+      visibleTools: () => [
+        tool("file.read", "read-only-local", ["files", "research"]),
+        tool("file.search", "read-only-local", ["files", "research"])
+      ]
+    });
+    expect(() => withoutLiveSearch.create({
+      toolCallId: "call-research-no-web",
+      trustedWorkspace: true,
+      tasks: [{
+        task: "Research current behavior",
+        research: { scope: "live-behavior", requireLiveSources: true, requireRepositoryEvidence: false }
+      }]
+    })).toThrow(expect.objectContaining({
+      name: "DelegationAccessError",
+      code: "requested-tool-unavailable",
+      taskIndex: 0
+    }));
+
+    const withoutDiscovery = new DurableDelegationService({
+      store,
+      creatorSessionId: () => "parent",
+      workspace: workspace(),
+      config: DEFAULT_DELEGATION_CONFIG,
+      visibleTools: () => [tool("file.read", "read-only-local", ["files", "research"])]
+    });
+    expect(() => withoutDiscovery.create({
+      toolCallId: "call-research-no-discovery",
+      trustedWorkspace: true,
+      tasks: [{
+        task: "Research repository behavior",
+        research: { scope: "repository", requireLiveSources: false, requireRepositoryEvidence: true }
+      }]
+    })).toThrow(expect.objectContaining({
+      name: "DelegationAccessError",
+      code: "requested-tool-unavailable",
+      taskIndex: 0
+    }));
+    expect(store.listTasks()).toEqual([]);
+  });
+
+  it("persists normalized distinct research scopes, instructions, and inspection projections", () => {
+    const service = new DurableDelegationService({
+      store,
+      creatorSessionId: () => "parent",
+      workspace: workspace(),
+      config: DEFAULT_DELEGATION_CONFIG,
+      visibleTools: () => [
+        tool("file.read", "read-only-local", ["files", "research"]),
+        tool("file.grep", "read-only-local", ["files", "research"]),
+        tool("web.search", "read-only-network", ["web", "research"])
+      ]
+    });
+    expect(() => service.create({
+      toolCallId: "call-duplicate-research-scopes",
+      trustedWorkspace: true,
+      synthesis: false,
+      tasks: [
+        { task: "Research A", research: { scope: "Lifecycle", requireLiveSources: true, requireRepositoryEvidence: false } },
+        { task: "Research B", research: { scope: " lifecycle ", requireLiveSources: false, requireRepositoryEvidence: true } }
+      ]
+    })).toThrow(expect.objectContaining({
+      name: "DelegationResearchContractError",
+      code: "duplicate-research-scope",
+      taskIndex: 1
+    }));
+
+    const request: DurableDelegationRequest = {
+      toolCallId: "call-distinct-research-scopes",
+      trustedWorkspace: true,
+      synthesis: false,
+      tasks: [
+        { task: "Research current sources", research: { scope: " Live-Sources ", requireLiveSources: true, requireRepositoryEvidence: false } },
+        { task: "Research repository", research: { scope: "Repository", requireLiveSources: false, requireRepositoryEvidence: true } }
+      ]
+    };
+    const created = service.create(request);
+    const task = store.getTask(created.taskId)!;
+    const steps = store.listSteps(task.id, task.activePlanRevisionId!);
+
+    expect(steps.map((step) => step.executor.research)).toEqual([
+      { scope: "live-sources", requireLiveSources: true, requireRepositoryEvidence: false },
+      { scope: "repository", requireLiveSources: false, requireRepositoryEvidence: true }
+    ]);
+    expect(steps[0]?.objective).toContain("Research evidence contract:");
+    expect(steps[0]?.objective).toContain("Assigned scope: live-sources");
+    expect(steps[0]?.objective).toContain("never substitute training knowledge or fabricate citations");
+    const projected = new TaskOperatorService({ store }).status(task.id, "parent");
+    expect(projected.subagents.map((subagent) => subagent.research?.scope)).toEqual(["live-sources", "repository"]);
+
+    const restarted = new DurableDelegationService({
+      store: new SQLiteTaskStore({ db: sessionDb.db, profileId: "alpha" }),
+      creatorSessionId: () => "parent",
+      workspace: workspace(),
+      config: DEFAULT_DELEGATION_CONFIG,
+      visibleTools: () => [],
+    });
+    expect(restarted.create(request)).toMatchObject({ taskId: created.taskId, idempotentReplay: true });
+  });
+
   it("snapshots the configured root spending limit and only permits finite narrowing", () => {
     const configured = new DurableDelegationService({
       store,

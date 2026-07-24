@@ -4,16 +4,19 @@ import type {
   DelegateRole,
   DelegateSynthesis,
   DelegateTaskItem,
-  DelegationConfig
+  DelegationConfig,
+  DelegationResearchContract
 } from "../contracts/delegation.js";
 import {
   DELEGATE_TASK_MAX_RESULT_CHARS,
   MAX_DELEGATION_BATCH_TASKS,
   MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH,
-  MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH
+  MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH,
+  MAX_DELEGATE_RESEARCH_SCOPE_LENGTH
 } from "../contracts/delegation.js";
 import {
   DelegationAccessError,
+  DelegationResearchContractError,
   type DurableDelegationHandle,
   type DurableDelegationService
 } from "../delegation/durable-delegation-service.js";
@@ -34,6 +37,7 @@ type DelegateTaskInput = {
   allowedTools?: string[];
   role?: DelegateRole;
   modelOverride?: DelegateModelOverride;
+  research?: unknown;
   synthesis?: unknown;
   executionPreference?: TaskExecutionPreference;
   spendingLimit?: unknown;
@@ -54,6 +58,7 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
         `Supports one task or up to ${delegationConfig.maxBatchTasks} batch tasks.`,
         "Batches add one fixed terminal synthesis Step by default; pass synthesis: false only for inspection-only work.",
         "A synthesis object can provide a custom final-answer objective and model.",
+        "Research items should use distinct non-overlapping scopes; live and repository evidence requirements are verified from observed tool results, not model claims.",
         `The durable scheduler runs at most ${delegationConfig.maxConcurrentChildren} Steps in parallel.`,
         `Child delegation depth is limited to ${delegationConfig.maxSpawnDepth}.`
       ].join(" "),
@@ -77,7 +82,8 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
                     allowedToolsets: { type: "array", items: { type: "string" } },
                     allowedTools: { type: "array", items: { type: "string" } },
                     role: { type: "string", enum: ["leaf", "orchestrator"] },
-                    modelOverride: modelOverrideSchema()
+                    modelOverride: modelOverrideSchema(),
+                    research: researchContractSchema()
                   },
                   required: ["task"]
                 }
@@ -102,6 +108,7 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
             enum: ["leaf", "orchestrator"]
           },
           modelOverride: modelOverrideSchema(),
+          research: researchContractSchema(),
           synthesis: {
             description: "Batch default: synthesize all worker Results into one final answer. Use false only when no combined answer should be produced.",
             oneOf: [
@@ -155,7 +162,8 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
           allowedToolsets: input.allowedToolsets,
           allowedTools: input.allowedTools,
           role: input.role ?? "leaf",
-          modelOverride: parsed.modelOverride
+          modelOverride: parsed.modelOverride,
+          ...(parsed.research === undefined ? {} : { research: parsed.research })
         }];
         let handle: DurableDelegationHandle;
         try {
@@ -172,6 +180,14 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
               : {})
           });
         } catch (error) {
+          if (error instanceof DelegationResearchContractError) {
+            return structuredValidationError(
+              error.taskIndex === undefined
+                ? error.message
+                : `delegate_task tasks[${error.taskIndex}]: ${error.message}`,
+              error.code
+            );
+          }
           if (error instanceof DelegationAccessError) {
             return {
               ok: false,
@@ -246,7 +262,7 @@ function requireProviderDependency<T>(provider: string, dependency: string, valu
 type ParsedSpendingLimit = { maxEstimatedCostUsd: number };
 
 type ParsedDelegateTaskInput =
-  | { ok: true; mode: "single"; task: string; modelOverride?: DelegateModelOverride; synthesis?: DelegateSynthesis | false; spendingLimit?: ParsedSpendingLimit }
+  | { ok: true; mode: "single"; task: string; modelOverride?: DelegateModelOverride; research?: DelegationResearchContract; synthesis?: DelegateSynthesis | false; spendingLimit?: ParsedSpendingLimit }
   | { ok: true; mode: "batch"; tasks: DelegateTaskItem[]; synthesis?: DelegateSynthesis | false; spendingLimit?: ParsedSpendingLimit; recoveredTasksFromJsonString?: boolean }
   | { ok: false; error: { ok: false; content: string; metadata: Record<string, unknown> } };
 
@@ -315,12 +331,20 @@ function parseDelegateTaskInput(input: DelegateTaskInput, config: DelegationConf
       error: structuredValidationError(modelOverride.message, modelOverride.code)
     };
   }
+  const research = normalizeResearchContract(input.research, "delegate_task research");
+  if (!research.ok) {
+    return {
+      ok: false,
+      error: structuredValidationError(research.message, research.code)
+    };
+  }
 
   return {
     ok: true,
     mode: "single",
     task,
     modelOverride: modelOverride.value,
+    research: research.value,
     synthesis: synthesis.value,
     spendingLimit: spendingLimit.value
   };
@@ -497,22 +521,48 @@ function normalizeTaskItems(
     if (!modelOverride.ok) {
       return { ok: false, code: modelOverride.code, message: modelOverride.message };
     }
+    const research = normalizeResearchContract(record.research, `delegate_task tasks[${index}].research`);
+    if (!research.ok) {
+      return { ok: false, code: research.code, message: research.message };
+    }
     tasks.push({
       task,
       context: record.context ?? batchDefaults.context,
       allowedToolsets: record.allowedToolsets ?? batchDefaults.allowedToolsets,
       allowedTools: record.allowedTools ?? batchDefaults.allowedTools,
       role: record.role ?? batchDefaults.role ?? "leaf",
-      modelOverride: modelOverride.value
+      modelOverride: modelOverride.value,
+      research: research.value
     });
+  }
+
+  const seenScopes = new Set<string>();
+  for (let index = 0; index < tasks.length; index += 1) {
+    const scope = tasks[index]?.research?.scope;
+    if (scope === undefined) continue;
+    if (seenScopes.has(scope)) {
+      return {
+        ok: false,
+        code: "duplicate-research-scope",
+        message: `delegate_task tasks[${index}].research.scope duplicates another normalized research scope.`
+      };
+    }
+    seenScopes.add(scope);
   }
 
   return { ok: true, tasks };
 }
 
-const TASK_ITEM_KEYS = new Set(["task", "context", "allowedToolsets", "allowedTools", "role", "modelOverride"]);
+const TASK_ITEM_KEYS = new Set(["task", "context", "allowedToolsets", "allowedTools", "role", "modelOverride", "research"]);
 
 function validateBatchDefaults(input: DelegateTaskInput): { ok: false; code: string; message: string } | undefined {
+  if (input.research !== undefined) {
+    return {
+      ok: false,
+      code: "invalid-research-contract",
+      message: "delegate_task research must be declared on each item when tasks is a batch."
+    };
+  }
   if (input.context !== undefined && typeof input.context !== "string") {
     return { ok: false, code: "invalid-batch-default", message: "delegate_task context must be a string." };
   }
@@ -530,6 +580,56 @@ function validateBatchDefaults(input: DelegateTaskInput): { ok: false; code: str
     return { ok: false, code: modelOverride.code, message: modelOverride.message };
   }
   return undefined;
+}
+
+function normalizeResearchContract(
+  value: unknown,
+  path: string
+): { ok: true; value?: DelegationResearchContract } | { ok: false; code: string; message: string } {
+  if (value === undefined) return { ok: true };
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { ok: false, code: "invalid-research-contract", message: `${path} must be an object.` };
+  }
+  const record = value as Record<string, unknown>;
+  const unknownKeys = Object.keys(record).filter((key) =>
+    key !== "scope" && key !== "requireLiveSources" && key !== "requireRepositoryEvidence"
+  );
+  if (unknownKeys.length > 0) {
+    return {
+      ok: false,
+      code: "invalid-research-contract",
+      message: `${path} contains unknown fields: ${unknownKeys.join(", ")}.`
+    };
+  }
+  if (typeof record.scope !== "string") {
+    return { ok: false, code: "invalid-research-contract", message: `${path}.scope must be a non-empty string.` };
+  }
+  const scope = normalizeResearchScope(record.scope);
+  if (scope.length === 0 || scope.length > MAX_DELEGATE_RESEARCH_SCOPE_LENGTH || /[\u0000-\u001F\u007F]/u.test(scope)) {
+    return {
+      ok: false,
+      code: "invalid-research-contract",
+      message: `${path}.scope must be 1-${MAX_DELEGATE_RESEARCH_SCOPE_LENGTH} bounded characters.`
+    };
+  }
+  if (record.requireLiveSources !== undefined && typeof record.requireLiveSources !== "boolean") {
+    return { ok: false, code: "invalid-research-contract", message: `${path}.requireLiveSources must be boolean.` };
+  }
+  if (record.requireRepositoryEvidence !== undefined && typeof record.requireRepositoryEvidence !== "boolean") {
+    return { ok: false, code: "invalid-research-contract", message: `${path}.requireRepositoryEvidence must be boolean.` };
+  }
+  return {
+    ok: true,
+    value: {
+      scope,
+      requireLiveSources: record.requireLiveSources === true,
+      requireRepositoryEvidence: record.requireRepositoryEvidence === true
+    }
+  };
+}
+
+function normalizeResearchScope(value: string): string {
+  return value.normalize("NFKC").trim().toLocaleLowerCase("en-US");
 }
 
 function normalizeModelOverride(
@@ -587,6 +687,20 @@ function modelOverrideSchema() {
       provider: { type: "string", maxLength: MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH }
     },
     required: ["model"],
+    additionalProperties: false
+  };
+}
+
+function researchContractSchema() {
+  return {
+    type: "object",
+    description: "Optional durable evidence contract. Batch scopes must be unique after normalization.",
+    properties: {
+      scope: { type: "string", minLength: 1, maxLength: MAX_DELEGATE_RESEARCH_SCOPE_LENGTH },
+      requireLiveSources: { type: "boolean" },
+      requireRepositoryEvidence: { type: "boolean" }
+    },
+    required: ["scope"],
     additionalProperties: false
   };
 }

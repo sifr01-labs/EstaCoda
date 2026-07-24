@@ -131,6 +131,7 @@ export type TaskStepProjection = {
   objective: string;
   executorRole: TaskStep["executor"]["role"];
   delegationAccess?: NonNullable<TaskStep["executor"]["delegationAccess"]>;
+  research?: NonNullable<TaskStep["executor"]["research"]>;
   status: TaskStep["status"];
   dependsOn: readonly string[];
   childTaskPolicy: TaskStep["childTaskPolicy"];
@@ -183,6 +184,7 @@ export type TaskSubagentProjection = {
   objective: string;
   role: "worker" | "orchestrator";
   delegationAccess?: NonNullable<TaskStep["executor"]["delegationAccess"]>;
+  research?: NonNullable<TaskStep["executor"]["research"]>;
   status: TaskStep["status"];
   dependsOn: readonly string[];
   elapsedMs: number;
@@ -434,6 +436,7 @@ export class TaskOperatorService {
         ...(step.executor.delegationAccess === undefined
           ? {}
           : { delegationAccess: step.executor.delegationAccess }),
+        ...(step.executor.research === undefined ? {} : { research: step.executor.research }),
         status: step.status,
         dependsOn: step.dependsOn.slice(0, TASK_GRAPH_LIMITS.maxDependenciesPerStep),
         childTaskPolicy: step.childTaskPolicy,
@@ -944,6 +947,7 @@ function projectSubagent(
     objective: step.objective,
     role: step.executorRole,
     ...(step.delegationAccess === undefined ? {} : { delegationAccess: step.delegationAccess }),
+    ...(step.research === undefined ? {} : { research: step.research }),
     status: step.status,
     dependsOn: step.dependsOn,
     elapsedMs: currentAttempt?.elapsedMs ?? 0,

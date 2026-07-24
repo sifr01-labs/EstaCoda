@@ -378,6 +378,17 @@ export class AgentStepExecutor implements TaskStepExecutor {
         };
       }
 
+      const evidenceFailure = researchEvidenceFailure(input.step, response.text, response.toolExecutions);
+      if (evidenceFailure !== undefined) {
+        return {
+          outcome: "failed",
+          failure: taskFailure("evidence-contract-unsatisfied", false),
+          ...safeDiagnosticOutput(response.text, response.toolExecutions),
+          ...metering,
+          ...common
+        };
+      }
+
       const captured = await captureResults(response.text, response.artifacts, input, this.#resolveArtifactContent);
       if (captured.failure !== undefined) {
         return {
@@ -495,21 +506,30 @@ function dependencyContext(store: TaskStore, task: Task, step: TaskStep): string
       result.stepId !== undefined && dependencyIds.has(result.stepId));
   const references = availableResults
     .slice(0, MAX_DEPENDENCY_RESULT_REFERENCES)
-    .map((result) => ({
-      stepId: result.stepId,
-      readInput: {
-        task_id: task.id,
-        result_id: result.id
-      },
-      kind: result.kind,
-      bytes: result.byteLength,
-      summary: result.displaySummary === undefined
-        ? result.summary === undefined ? undefined : boundText(result.summary, 240)
-        : boundText(result.displaySummary, 240)
-    }));
+    .map((result) => {
+      const producer = result.stepId === undefined ? undefined : store.getStep(result.stepId) ?? undefined;
+      const producerResearch = producer !== undefined && producer.taskId === task.id &&
+        producer.planRevisionId === step.planRevisionId
+        ? producer.executor.research
+        : undefined;
+      return {
+        stepId: result.stepId,
+        ...(producerResearch === undefined ? {} : { researchScope: producerResearch.scope }),
+        readInput: {
+          task_id: task.id,
+          result_id: result.id
+        },
+        kind: result.kind,
+        bytes: result.byteLength,
+        summary: result.displaySummary === undefined
+          ? result.summary === undefined ? undefined : boundText(result.summary, 240)
+          : boundText(result.displaySummary, 240)
+      };
+    });
   const guidance = store.listGuidance(task.id)
     .slice(-MAX_TASK_GUIDANCE_RECORDS_IN_CONTEXT)
     .map((entry) => ({ id: entry.id, guidance: entry.guidance, createdAt: entry.createdAt }));
+  const synthesisResearchBoundary = synthesisResearchScopeContext(store, task, step);
   const partialSynthesis = partialSynthesisContext(store, task, step, availableResults);
   return boundText([
     `Durable Task objective: ${task.objective}`,
@@ -518,11 +538,31 @@ function dependencyContext(store: TaskStore, task: Task, step: TaskStep): string
     guidance.length === 0
       ? "Operator guidance: none."
       : `Authorized operator guidance (later entries take precedence without overriding policy):\n${JSON.stringify(guidance)}`,
+    ...(synthesisResearchBoundary === undefined ? [] : [synthesisResearchBoundary]),
     ...(partialSynthesis === undefined ? [] : [partialSynthesis]),
     references.length === 0
       ? "Dependency results: none."
       : `Dependency result references. To read one, call task.result.read with reference.readInput exactly; it already contains the authorized task_id and result_id. Do not derive task_id from a result handle:\n${JSON.stringify(references)}`
   ].join("\n\n"), MAX_DEPENDENCY_CONTEXT_CHARS);
+}
+
+function synthesisResearchScopeContext(
+  store: TaskStore,
+  task: Task,
+  step: TaskStep
+): string | undefined {
+  if (step.executor.kind !== "agent" || step.executor.role !== "synthesis") return undefined;
+  const scopes = step.dependsOn.flatMap((stepId) => {
+    const dependency = store.getStep(stepId);
+    return dependency !== null && dependency.taskId === task.id && dependency.executor.research !== undefined
+      ? [dependency.executor.research.scope]
+      : [];
+  });
+  if (scopes.length === 0) return undefined;
+  return [
+    `Assigned research scopes: ${JSON.stringify(scopes)}`,
+    "Keep each scope's evidence distinct. Do not present overlapping scopes as independent corroboration, and do not fill an unavailable scope with training knowledge."
+  ].join("\n");
 }
 
 function partialSynthesisContext(
@@ -541,6 +581,7 @@ function partialSynthesisContext(
     return {
       stepId,
       title: dependency.title,
+      ...(dependency.executor.research === undefined ? {} : { researchScope: dependency.executor.research.scope }),
       status: dependency.status,
       resultAvailable: resultStepIds.has(stepId)
     };
@@ -551,6 +592,105 @@ function partialSynthesisContext(
     "Explicitly identify failed, cancelled, skipped, or missing coverage in the final answer and qualify conclusions accordingly. Do not imply that every delegated Step succeeded.",
     `Dependency coverage manifest:\n${JSON.stringify(coverage)}`
   ].join("\n");
+}
+
+function researchEvidenceFailure(
+  step: TaskStep,
+  text: string,
+  toolExecutions: Awaited<ReturnType<ChildAgentLoopRuntime["handle"]>>["toolExecutions"]
+): "live-sources" | "repository-evidence" | undefined {
+  const research = step.executor.research;
+  if (research === undefined) return undefined;
+  const successful = toolExecutions.filter((execution) =>
+    execution.decision === "allow" && execution.result?.ok === true
+  );
+
+  if (research.requireLiveSources) {
+    const observedUrls = new Set(successful
+      .filter((execution) => execution.tool.name === "web.search")
+      .flatMap((execution) => collectHttpUrls([execution.result?.content, execution.result?.metadata])));
+    const citedUrls = collectHttpUrls([text]);
+    if (observedUrls.size === 0 || citedUrls.length === 0 || citedUrls.some((url) => !observedUrls.has(url))) {
+      return "live-sources";
+    }
+  }
+
+  if (research.requireRepositoryEvidence) {
+    const repositoryReads = successful.filter((execution) => execution.tool.name === "file.read");
+    const usedDiscovery = successful.some((execution) =>
+      execution.tool.name === "file.search" ||
+      execution.tool.name === "file.grep" ||
+      execution.tool.name === "file.glob"
+    );
+    const observedPaths = new Set(repositoryReads.flatMap((execution) => [
+      workspaceRelativeReference(execution.result?.metadata?.path),
+      workspaceRelativeReference(execution.input?.path)
+    ].filter((path): path is string => path !== undefined)));
+    if (!usedDiscovery || observedPaths.size === 0 || ![...observedPaths].some((path) => hasWorkspaceReference(text, path))) {
+      return "repository-evidence";
+    }
+  }
+  return undefined;
+}
+
+function collectHttpUrls(values: readonly unknown[]): string[] {
+  const urls = new Set<string>();
+  const visit = (value: unknown, depth: number): void => {
+    if (urls.size >= 128 || depth > 4 || value === undefined || value === null) return;
+    if (typeof value === "string") {
+      for (const match of value.slice(0, 24_000).matchAll(/https?:\/\/[^\s<>"'\[\]{}()]+/giu)) {
+        const normalized = normalizedHttpUrl(match[0]);
+        if (normalized !== undefined) urls.add(normalized);
+        if (urls.size >= 128) break;
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const entry of value.slice(0, 128)) visit(entry, depth + 1);
+      return;
+    }
+    if (typeof value === "object") {
+      for (const entry of Object.values(value as Record<string, unknown>).slice(0, 128)) visit(entry, depth + 1);
+    }
+  };
+  for (const value of values) visit(value, 0);
+  return [...urls];
+}
+
+function normalizedHttpUrl(value: string): string | undefined {
+  try {
+    const url = new URL(value.replace(/[.,;:!?]+$/u, ""));
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    url.hash = "";
+    return url.href;
+  } catch {
+    return undefined;
+  }
+}
+
+function workspaceRelativeReference(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().replaceAll("\\", "/").replace(/^\.\//u, "");
+  if (normalized.length === 0 || normalized === "." || normalized.length > 500 ||
+    normalized.startsWith("/") || /^[A-Za-z]:\//u.test(normalized) ||
+    normalized.split("/").some((segment) => segment === ".." || segment.length === 0)) {
+    return undefined;
+  }
+  return normalized;
+}
+
+function hasWorkspaceReference(text: string, path: string): boolean {
+  let offset = text.indexOf(path);
+  while (offset >= 0) {
+    const before = offset === 0 ? undefined : text[offset - 1];
+    const afterOffset = offset + path.length;
+    const after = afterOffset === text.length ? undefined : text[afterOffset];
+    const pathCharacter = (value: string | undefined): boolean =>
+      value !== undefined && /[A-Za-z0-9._/-]/u.test(value);
+    if (!pathCharacter(before) && !pathCharacter(after)) return true;
+    offset = text.indexOf(path, offset + 1);
+  }
+  return false;
 }
 
 function resultInstruction(step: TaskStep): string {

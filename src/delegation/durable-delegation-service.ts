@@ -4,8 +4,10 @@ import type {
   DelegateTaskItem,
   DelegationAccessAudit,
   DelegationConfig,
+  DelegationResearchContract,
   DelegationToolDiagnostic
 } from "../contracts/delegation.js";
+import { MAX_DELEGATE_RESEARCH_SCOPE_LENGTH } from "../contracts/delegation.js";
 import type {
   TaskAuthorityDisposition,
   TaskAuthorityPolicy,
@@ -113,6 +115,27 @@ export class DelegationAccessError extends Error {
   }
 }
 
+export type DelegationResearchContractErrorCode =
+  | "invalid-research-contract"
+  | "duplicate-research-scope";
+
+/** Deterministic structural research-contract admission failure. */
+export class DelegationResearchContractError extends Error {
+  readonly code: DelegationResearchContractErrorCode;
+  readonly taskIndex: number | undefined;
+
+  constructor(input: {
+    code: DelegationResearchContractErrorCode;
+    message: string;
+    taskIndex?: number;
+  }) {
+    super(input.message);
+    this.name = "DelegationResearchContractError";
+    this.code = input.code;
+    this.taskIndex = input.taskIndex;
+  }
+}
+
 type ResolvedDelegationAuthority = {
   authority: TaskAuthorityPolicy;
   access: DelegationAccessAudit;
@@ -184,6 +207,7 @@ export class DurableDelegationService {
     if (request.tasks.length === 0 || request.tasks.length > this.#config.maxBatchTasks) {
       throw new Error(`Durable delegation requires 1-${this.#config.maxBatchTasks} task items.`);
     }
+    const tasks = normalizedResearchItems(request.tasks);
     const toolCallId = boundedToken(request.toolCallId, "provider tool call ID");
     const originTurnId = request.originTurnId === undefined
       ? undefined
@@ -205,7 +229,7 @@ export class DurableDelegationService {
     const existing = this.#store.getTaskByCreationKey(creationKey);
     const synthesis = resolveDelegationSynthesis(request);
     const localCompletionEligible = parent === undefined && (
-      synthesis !== undefined || (request.tasks.length === 1 && request.synthesis !== false)
+      synthesis !== undefined || (tasks.length === 1 && request.synthesis !== false)
     );
     const initialHostLease = existing === null && executionPreference === "auto"
       ? this.#taskHostAdmission?.()
@@ -215,7 +239,7 @@ export class DurableDelegationService {
       : this.#store.listSteps(existing.id, existing.activePlanRevisionId);
     const existingWorkerSteps = existingSteps.filter((step) => step.executor.role !== "synthesis");
     const existingSynthesisStep = existingSteps.find((step) => step.executor.role === "synthesis");
-    const resolvedStepAuthorities = request.tasks.map((item, index) => existing === null
+    const resolvedStepAuthorities = tasks.map((item, index) => existing === null
       ? this.#authorityFor(item, parent?.authority, index)
       : replayedAuthority(item, existingWorkerSteps[index]));
     const stepAuthorities = resolvedStepAuthorities.map((resolved) => resolved.authority);
@@ -228,7 +252,7 @@ export class DurableDelegationService {
       ? stepAuthorities
       : [...stepAuthorities, resolvedSynthesisAuthority.authority];
     const taskAuthority = mergeAuthorities(allAuthorities);
-    const workerCount = request.tasks.length;
+    const workerCount = tasks.length;
     const hasSynthesis = synthesis !== undefined;
     const executionLimits = delegationExecutionLimits(
       workerCount,
@@ -237,19 +261,20 @@ export class DurableDelegationService {
       this.#config.childTimeoutSeconds,
       parent?.executionLimits
     );
-    const workerSteps = request.tasks.map((item, index): FixedTaskStepInput => {
+    const workerSteps = tasks.map((item, index): FixedTaskStepInput => {
       const authority = stepAuthorities[index]!;
       const access = resolvedStepAuthorities[index]!.access;
       const idempotency = delegatedStepIdempotency(authority);
       return {
         key: `delegated-${index + 1}`,
-        title: request.tasks.length === 1 ? "Delegated work" : `Delegated work ${index + 1}`,
+        title: tasks.length === 1 ? "Delegated work" : `Delegated work ${index + 1}`,
         objective: delegatedObjective(item),
         dependsOn: [],
         executor: {
           kind: "agent",
           role: item.role === "orchestrator" ? "orchestrator" : "worker",
           delegationAccess: access,
+          ...(item.research === undefined ? {} : { research: item.research }),
           ...(item.modelOverride === undefined ? {} : {
             model: {
               ...(item.modelOverride.provider === undefined ? {} : { provider: item.modelOverride.provider }),
@@ -264,7 +289,7 @@ export class DurableDelegationService {
         executionLimits: executionLimits.step,
         retryPolicy: delegatedRetryPolicy(idempotency),
         failurePolicy: {
-          onAttemptsExhausted: request.tasks.length === 1 && synthesis === undefined ? "fail_task" : "mark_partial",
+          onAttemptsExhausted: tasks.length === 1 && synthesis === undefined ? "fail_task" : "mark_partial",
           optional: false
         },
         idempotency,
@@ -310,9 +335,9 @@ export class DurableDelegationService {
       creationKey,
       objective: synthesis !== undefined
         ? synthesisObjective(synthesis)
-        : request.tasks.length === 1
-        ? delegatedObjective(request.tasks[0]!)
-        : `Complete ${request.tasks.length} delegated Steps as one durable Task.`,
+        : tasks.length === 1
+        ? delegatedObjective(tasks[0]!)
+        : `Complete ${tasks.length} delegated Steps as one durable Task.`,
       workspace: this.#workspace,
       authorityPolicy: taskAuthority,
       ...(spendingLimit === undefined ? {} : { spendingLimit }),
@@ -538,6 +563,68 @@ function assertDelegationAccess(
       access: audit
     });
   }
+  const research = item.research;
+  if (research?.requireLiveSources === true && !effectiveTools.has("web.search")) {
+    throw new DelegationAccessError({
+      code: "requested-tool-unavailable",
+      taskIndex,
+      message: `Research scope '${research.scope}' requires unavailable tool web.search.`,
+      access: audit
+    });
+  }
+  if (research?.requireRepositoryEvidence === true) {
+    const discoveryTools = ["file.search", "file.grep", "file.glob"];
+    if (!effectiveTools.has("file.read") || !discoveryTools.some((name) => effectiveTools.has(name))) {
+      throw new DelegationAccessError({
+        code: "requested-tool-unavailable",
+        taskIndex,
+        message: `Research scope '${research.scope}' requires file.read and at least one repository discovery tool.`,
+        access: audit
+      });
+    }
+  }
+}
+
+function normalizedResearchItems(items: readonly DelegateTaskItem[]): DelegateTaskItem[] {
+  const seenScopes = new Set<string>();
+  return items.map((item, taskIndex) => {
+    const research = item.research;
+    if (research === undefined) return item;
+    if (typeof research !== "object" || research === null ||
+      typeof research.scope !== "string" ||
+      typeof research.requireLiveSources !== "boolean" ||
+      typeof research.requireRepositoryEvidence !== "boolean") {
+      throw new DelegationResearchContractError({
+        code: "invalid-research-contract",
+        taskIndex,
+        message: `Delegated research item ${taskIndex + 1} has an invalid evidence contract.`
+      });
+    }
+    const scope = normalizeResearchScope(research.scope);
+    if (scope.length === 0 || scope.length > MAX_DELEGATE_RESEARCH_SCOPE_LENGTH || /[\u0000-\u001F\u007F]/u.test(scope)) {
+      throw new DelegationResearchContractError({
+        code: "invalid-research-contract",
+        taskIndex,
+        message: `Delegated research item ${taskIndex + 1} requires a bounded non-empty scope.`
+      });
+    }
+    if (seenScopes.has(scope)) {
+      throw new DelegationResearchContractError({
+        code: "duplicate-research-scope",
+        taskIndex,
+        message: `Delegated research scope '${scope}' is duplicated in this batch.`
+      });
+    }
+    seenScopes.add(scope);
+    return {
+      ...item,
+      research: { ...research, scope }
+    };
+  });
+}
+
+function normalizeResearchScope(value: string): string {
+  return value.normalize("NFKC").trim().toLocaleLowerCase("en-US");
 }
 
 function replayedAuthority(
@@ -711,13 +798,28 @@ function mergeAuthorities(authorities: readonly TaskAuthorityPolicy[]): TaskAuth
 }
 
 function delegatedObjective(item: DelegateTaskItem): string {
-  const objective = item.context?.trim()
+  const baseObjective = item.context?.trim()
     ? `${item.task.trim()}\n\nContext:\n${item.context.trim()}`
     : item.task.trim();
+  const objective = item.research === undefined
+    ? baseObjective
+    : `${baseObjective}\n\n${researchContractBlock(item.research)}`;
   if (objective.length === 0 || objective.length > TASK_GRAPH_LIMITS.maxStepObjectiveChars || objective.includes("\u0000")) {
     throw new Error(`A delegated Step objective must be 1-${TASK_GRAPH_LIMITS.maxStepObjectiveChars} characters.`);
   }
   return objective;
+}
+
+function researchContractBlock(research: DelegationResearchContract): string {
+  return [
+    "Research evidence contract:",
+    `- Assigned scope: ${research.scope}`,
+    `- Live-source evidence: ${research.requireLiveSources ? "required" : "not required"}`,
+    `- Repository evidence: ${research.requireRepositoryEvidence ? "required" : "not required"}`,
+    "- Cite every supported live-source claim with an HTTP(S) source returned by web.search.",
+    "- Cite repository findings with workspace-relative file references observed through file tools.",
+    "- If required evidence cannot be obtained, report the gap explicitly; never substitute training knowledge or fabricate citations."
+  ].join("\n");
 }
 
 function synthesisObjective(synthesis: DelegateSynthesis): string {

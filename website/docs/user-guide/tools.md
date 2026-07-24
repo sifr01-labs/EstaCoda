@@ -215,6 +215,35 @@ Customize the fixed synthesis Step when the Task needs a specific combined-answe
 }
 ```
 
+For evidence-bound research, give every worker a distinct `research.scope` and declare the evidence it must collect:
+
+```json
+{
+  "tasks": [
+    {
+      "task": "Check the current upstream documentation.",
+      "allowedTools": ["web.search"],
+      "research": {
+        "scope": "Current upstream behavior",
+        "requireLiveSources": true,
+        "requireRepositoryEvidence": false
+      }
+    },
+    {
+      "task": "Trace the local implementation and tests.",
+      "allowedTools": ["file.read", "file.grep"],
+      "research": {
+        "scope": "Local implementation",
+        "requireLiveSources": false,
+        "requireRepositoryEvidence": true
+      }
+    }
+  ]
+}
+```
+
+Task creation fails if the effective delegated tools cannot satisfy the contract. A worker Result is accepted only when its cited HTTP(S) URLs and workspace-relative repository paths were observed in successful tool results. Missing tool use, training-only claims, or fabricated references produce diagnostic-only `evidence-contract-unsatisfied` output. Synthesis cannot use that output and reports the unavailable research scope instead.
+
 The initial immutable plan contains all workers and one terminal synthesis Step. Synthesis waits for every worker, reads their bounded Result handles with `task.result.read`, and cannot delegate. If a worker fails, synthesis is skipped and the Task becomes `partial`. If it succeeds, its Result is shown as the primary Result and completion delivery expands only that answer; intermediate worker Results remain readable by handle.
 
 Use `"synthesis": false` only when the batch is deliberately inspection-only and should not produce or deliver one combined answer.
