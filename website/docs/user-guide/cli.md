@@ -64,6 +64,8 @@ Workspace trust is required before EstaCoda can run in a workspace. If trust is 
 
 Existing users who run the Setup Editor get a different post-apply path. The final review prompt is titled `Finalize configuration`, shows `Confirm selected configuration`, and includes a dynamic selected area such as `Channels · Telegram` or `Security`. `Confirm` updates the selected profile configuration. `Cancel` keeps the existing configuration unchanged and writes no config or secret changes. The technical review manifest remains internal and is not printed as user-facing setup output.
 
+The Setup Editor has one `Budgets` entry for optional estimated provider-spending limits. Open it to choose the default Task or session limit; each setting shows `Off` or its configured USD amount and has its own review/apply step. Applying one returns to the refreshed Budgets submenu without changing the other. Limits are Off by default, while `$0.00` is an enabled zero-spend policy. See [Configuration](../reference/configuration.md#budgets) for scope and enforcement details.
+
 After an existing-user Setup Editor apply, EstaCoda reports the apply and verification result and exits the setup flow. It does not show `Setup next action`, does not output `Selected: Launch EstaCoda`, and does not hand off to `Launch EstaCoda`. First-run onboarding still owns the launch prompt after verified setup.
 
 The Setup Editor exposes `EstaCoda Doctor` as the read-only health action. Use it when you want setup health, required fixes, and provider route status without changing configuration. See [Doctor](./doctor.md) for the full command behavior and repair flags.

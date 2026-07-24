@@ -180,6 +180,70 @@ Specialized routes for non-primary tasks. Unsupported auxiliary names throw duri
 | `memory_compaction` | Memory file compaction |
 | `profile_context` | Profile context generation |
 
+### budgets
+
+Optional monetary limits on estimated model-provider spending. Budgets are disabled by default. You can configure them interactively with:
+
+```text
+estacoda setup
+→ Budgets
+→ Default Task spending limit or Default session spending limit
+```
+
+The `Budgets` entry is navigation only. Task and session limits are reviewed and applied independently. After an apply, the Setup Editor returns to the refreshed Budgets submenu; `Back` and review cancellation do not write configuration.
+
+Omitting `budgets`, or omitting both scopes, leaves both limits off:
+
+```json
+{
+  "budgets": {}
+}
+```
+
+Configure either scope or both:
+
+```json
+{
+  "budgets": {
+    "task": {
+      "maxEstimatedCostUsd": 5,
+      "warningThresholdPercent": 80
+    },
+    "session": {
+      "maxEstimatedCostUsd": 20,
+      "warningThresholdPercent": 80
+    }
+  }
+}
+```
+
+| Key | Default | Behavior |
+|-----|---------|----------|
+| `budgets.task` | omitted / Off | Default limit copied into each new root Task. It covers that complete Task tree. |
+| `budgets.session` | omitted / Off | Default limit copied into each new logical session. It covers provider activity attributed to that session scope. |
+| `maxEstimatedCostUsd` | required when the scope exists | Finite, non-negative USD ceiling. `0` is an enabled zero-spend limit; it is not Off. |
+| `warningThresholdPercent` | `80` | Warning point from `0` through `100`, calculated from spent plus currently reserved capacity. |
+
+These defaults apply prospectively. Changing profile config does not rewrite the immutable spending policy already persisted on existing Tasks or sessions.
+
+#### Scope and included activity
+
+The Task limit includes workers, charged failures, retries, fallback routes, synthesis, auxiliary models, and descendant Tasks in the root Task tree. A descendant cannot create a separate larger monetary scope.
+
+The session limit includes main conversation turns, auxiliary-model calls, and Tasks originating from the logical session. Worker sessions retain the originating session's spending scope. When both limits apply, a provider request must fit within both the Task and session capacity.
+
+Token counts and provider-call counts remain usage and engineering-governance details. They are not user-facing budget settings.
+
+#### Estimated cost and enforcement
+
+EstaCoda estimates exposure from its verified model-pricing snapshot, bounded input, maximum output and reasoning exposure, and applicable cache rates. Before a provider adapter is called, EstaCoda atomically reserves a conservative maximum against every applicable scope. After the call settles, it reconciles the reservation against recorded usage. This prevents concurrent workers or processes from independently spending the same remaining capacity.
+
+The value is an operational estimate, not a promise that it will exactly equal a provider invoice. Provider pricing changes, subscription allowances, credits, tiers, rounding, and incomplete usage data can differ from EstaCoda's estimate. Usage displays distinguish complete estimates, known lower bounds, and unavailable cost instead of treating missing pricing as free.
+
+When spent plus reserved capacity reaches `warningThresholdPercent`, EstaCoda records one durable warning for that scope and surfaces it through interactive or remote progress delivery. Reaching the ceiling prevents a new provider request from being sent. A request is also not sent when its conservative maximum cannot fit in the remaining unreserved capacity; in that case EstaCoda reports that active work already holds the capacity rather than claiming the limit has been spent. Work already in progress keeps its reservation until it settles or is safely recovered.
+
+If an applicable monetary limit is enabled and the selected model has no verifiable pricing, EstaCoda refuses the request before dispatch because it cannot enforce the ceiling. It also refuses a request that cannot be conservatively bounded. With no applicable limit, an unpriced route may still run, but monetary usage can be partial or unavailable.
+
 ### memory
 
 Memory config controls lexical retrieval, the derived local index, and proactive curation.
