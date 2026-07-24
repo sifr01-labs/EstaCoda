@@ -18,7 +18,7 @@ import { CronExecutionStore } from "../cron/cron-execution-store.js";
 import { createFileCronJobLock } from "../cron/cron-lock.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { createProviderUsageRecorder } from "../providers/provider-usage-ledger.js";
-import { SQLiteProviderSpendController } from "../workflow/sqlite-provider-spend.js";
+import { SQLiteProviderSpendController } from "../tasks/sqlite-provider-spend.js";
 import type { MemoryCurationCheckpointResult } from "../memory/memory-curation-service.js";
 import { curateSessionFinalizationJob } from "../memory/session-finalization-curator.js";
 import {
@@ -101,11 +101,11 @@ import {
   clearGatewayRestartPlannedMarker,
   readGatewayRestartPlannedMarker,
 } from "../runtime/gateway-restart-marker.js";
-import { SQLiteTaskStore } from "../workflow/sqlite-task-store.js";
-import { TaskResultService } from "../workflow/task-result-service.js";
-import { SupervisorTaskBackgroundHost } from "../workflow/supervisor-task-background-host.js";
-import { TaskApprovalService } from "../workflow/task-approval-service.js";
-import { resolveTaskWorkspaceBinding } from "../workflow/task-workspace.js";
+import { SQLiteTaskStore } from "../tasks/sqlite-task-store.js";
+import { TaskResultService } from "../tasks/task-result-service.js";
+import { SupervisorTaskBackgroundHost } from "../tasks/supervisor-task-background-host.js";
+import { TaskApprovalService } from "../tasks/task-approval-service.js";
+import { resolveTaskWorkspaceBinding } from "../tasks/task-workspace.js";
 
 export type { GatewayRunOptions, GatewayRunResult };
 

@@ -19,8 +19,8 @@ import {
 } from "../contracts/task.js";
 import type { ToolDefinition, ToolRiskClass } from "../contracts/tool.js";
 import { resolveChildToolAccess } from "./toolset-security.js";
-import { FixedTaskService, type FixedTaskGraph, type FixedTaskStepInput } from "../workflow/fixed-task-service.js";
-import type { InitialTaskHostLeaseInput, TaskStore } from "../workflow/task-store.js";
+import { FixedTaskService, type FixedTaskGraph, type FixedTaskStepInput } from "../tasks/fixed-task-service.js";
+import type { InitialTaskHostLeaseInput, TaskStore } from "../tasks/task-store.js";
 import {
   DEFAULT_SPENDING_WARNING_THRESHOLD_PERCENT,
   assertSpendingLimit,

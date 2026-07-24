@@ -12,7 +12,7 @@ import {
   SessionFinalizationQueue,
   type SessionFinalizationQueueSummary,
 } from "../session/session-finalization-queue.js";
-import { SQLiteTaskStore } from "../workflow/sqlite-task-store.js";
+import { SQLiteTaskStore } from "../tasks/sqlite-task-store.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 import { WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
 import { GatewayApprovalQueue } from "../gateway/approval-queue.js";

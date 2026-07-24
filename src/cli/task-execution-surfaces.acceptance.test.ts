@@ -13,8 +13,8 @@ import {
   createOperatorConsoleLayout,
   renderOperatorConsoleTextLines
 } from "../ui/papyrus/operator-console/index.js";
-import { SQLiteTaskStore } from "../workflow/sqlite-task-store.js";
-import { TaskOperatorService } from "../workflow/task-operator-service.js";
+import { SQLiteTaskStore } from "../tasks/sqlite-task-store.js";
+import { TaskOperatorService } from "../tasks/task-operator-service.js";
 import { taskProjectionToCard } from "./session-loop.js";
 import { executeTaskCommand } from "./task-commands.js";
 

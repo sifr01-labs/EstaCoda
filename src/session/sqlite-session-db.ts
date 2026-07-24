@@ -40,8 +40,8 @@ import {
   migrateTaskVerticalSliceSchemaV15,
   migrateTaskSchedulerSchemaV11,
   migrateTaskSchemaV10
-} from "../workflow/task-schema.js";
-import { insertProviderUsageEntry, selectProviderUsageEntries } from "../workflow/sqlite-provider-usage.js";
+} from "../tasks/task-schema.js";
+import { insertProviderUsageEntry, selectProviderUsageEntries } from "../tasks/sqlite-provider-usage.js";
 import { assertSpendingLimit, cloneSpendingLimit, type SpendingLimit } from "../contracts/budget.js";
 
 type SessionRow = {

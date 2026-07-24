@@ -27,24 +27,24 @@ This document describes the persistence, result, scheduler, agent-execution, bac
 ## Source of truth
 
 - `src/contracts/task.ts` defines the durable records, legal state transitions, authority and budget policies, and deterministic graph validation.
-- `src/workflow/task-schema.ts` owns SQLite schema version 20.
-- `src/workflow/task-store.ts` defines the profile-bound storage contract.
-- `src/workflow/sqlite-task-store.ts` implements transactional SQLite persistence.
-- `src/workflow/task-result-service.ts` stores bounded result bodies under the selected profile and verifies them before reads.
-- `src/workflow/fixed-task-service.ts` creates immutable initial graphs idempotently and records authorized Task steering.
-- `src/workflow/task-step-executor.ts` defines the narrow Attempt execution and settlement contract.
-- `src/workflow/agent-step-executor.ts` runs one agent Attempt in an isolated child session under narrowed authority.
+- `src/tasks/task-schema.ts` owns SQLite schema version 20.
+- `src/tasks/task-store.ts` defines the profile-bound storage contract.
+- `src/tasks/sqlite-task-store.ts` implements transactional SQLite persistence.
+- `src/tasks/task-result-service.ts` stores bounded result bodies under the selected profile and verifies them before reads.
+- `src/tasks/fixed-task-service.ts` creates immutable initial graphs idempotently and records authorized Task steering.
+- `src/tasks/task-step-executor.ts` defines the narrow Attempt execution and settlement contract.
+- `src/tasks/agent-step-executor.ts` runs one agent Attempt in an isolated child session under narrowed authority.
 - `src/providers/provider-usage-ledger.ts` builds and projects the canonical provider-request records used by ordinary turns and Task workers.
 - `src/providers/provider-usage-estimator.ts` applies full-precision, cache-aware pricing from the exact resolved route.
-- `src/workflow/task-agent-usage.ts` adapts canonical projections to Task budget totals and provides a bounded fallback for injected executors.
-- `src/workflow/task-approval-service.ts` narrows runtime policy with Task authority and bridges asks to the durable gateway approval queue.
-- `src/workflow/task-scheduler.ts` owns deterministic readiness, dispatch, fencing, retry, cancellation, acceptance, and restart reconciliation.
-- `src/workflow/task-background-host.ts` prevents overlapping scheduler/delivery ticks and performs one-time startup recovery.
-- `src/workflow/supervisor-task-background-host.ts` lazily creates the workspace-eligible agent runtime when runnable work exists.
-- `src/workflow/task-completion-delivery.ts` owns authorized, terminal-only completion delivery.
-- `src/workflow/task-workspace.ts` derives the canonical workspace identity shared by Task creation and hosts.
-- `src/workflow/task-artifact-content.ts` constrains artifact capture to reviewed workspace/profile roots.
-- `src/workflow/task-operator-service.ts` owns profile-bound status and lifecycle controls with explicit session authorization.
+- `src/tasks/task-agent-usage.ts` adapts canonical projections to Task budget totals and provides a bounded fallback for injected executors.
+- `src/tasks/task-approval-service.ts` narrows runtime policy with Task authority and bridges asks to the durable gateway approval queue.
+- `src/tasks/task-scheduler.ts` owns deterministic readiness, dispatch, fencing, retry, cancellation, acceptance, and restart reconciliation.
+- `src/tasks/task-background-host.ts` prevents overlapping scheduler/delivery ticks and performs one-time startup recovery.
+- `src/tasks/supervisor-task-background-host.ts` lazily creates the workspace-eligible agent runtime when runnable work exists.
+- `src/tasks/task-completion-delivery.ts` owns authorized, terminal-only completion delivery.
+- `src/tasks/task-workspace.ts` derives the canonical workspace identity shared by Task creation and hosts.
+- `src/tasks/task-artifact-content.ts` constrains artifact capture to reviewed workspace/profile roots.
+- `src/tasks/task-operator-service.ts` owns profile-bound status and lifecycle controls with explicit session authorization.
 - `src/ui/papyrus/operator-console/taskSurface.ts` renders retained cards and modal inspection exclusively from that bounded projection; it does not query raw session or tool records.
 - `src/cli/task-commands.ts` exposes deterministic local CLI and in-session Task controls.
 - `src/tools/task-tools.ts` exposes the bounded, read-only `task.status` tool.

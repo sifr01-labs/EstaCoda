@@ -24,7 +24,7 @@ import { executeAuxiliaryTask } from "../providers/auxiliary-executor.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { createProviderUsageRecorder } from "../providers/provider-usage-ledger.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
-import { SQLiteProviderSpendController } from "../workflow/sqlite-provider-spend.js";
+import { SQLiteProviderSpendController } from "../tasks/sqlite-provider-spend.js";
 
 export async function profileCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [subcommand, ...rest] = args;

@@ -10,7 +10,7 @@ import type {
   ResolvedModelRoute
 } from "../contracts/provider.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
-import { SQLiteProviderSpendController } from "../workflow/sqlite-provider-spend.js";
+import { SQLiteProviderSpendController } from "../tasks/sqlite-provider-spend.js";
 import { ProviderExecutor } from "./provider-executor.js";
 import { ProviderRegistry } from "./provider-registry.js";
 

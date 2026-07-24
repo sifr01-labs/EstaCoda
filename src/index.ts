@@ -25,11 +25,11 @@ import { scheduleStartupUpdatePrefetch, shouldScheduleStartupUpdatePrefetch } fr
 import { resolveSetupCopy } from "./setup/setup-copy.js";
 import { createSessionId, resolveStartupSessionId } from "./session/session-id.js";
 import { GatewayApprovalQueue } from "./gateway/approval-queue.js";
-import { ForegroundTaskHost } from "./workflow/foreground-task-host.js";
-import { SQLiteTaskStore } from "./workflow/sqlite-task-store.js";
-import { TaskApprovalService } from "./workflow/task-approval-service.js";
-import { TaskResultService } from "./workflow/task-result-service.js";
-import { resolveTaskWorkspaceBinding } from "./workflow/task-workspace.js";
+import { ForegroundTaskHost } from "./tasks/foreground-task-host.js";
+import { SQLiteTaskStore } from "./tasks/sqlite-task-store.js";
+import { TaskApprovalService } from "./tasks/task-approval-service.js";
+import { TaskResultService } from "./tasks/task-result-service.js";
+import { resolveTaskWorkspaceBinding } from "./tasks/task-workspace.js";
 
 async function main(): Promise<void> {
   const rawArgv = process.argv.slice(2);

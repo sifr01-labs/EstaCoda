@@ -10,8 +10,8 @@ import type { RegisteredTool, ToolDefinition, ToolProvider, ToolsetName } from "
 import type { RuntimeToolContext, SessionToolContext } from "../contracts/tool-context.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
-import type { TaskResultService } from "../workflow/task-result-service.js";
-import type { TaskOperatorService } from "../workflow/task-operator-service.js";
+import type { TaskResultService } from "../tasks/task-result-service.js";
+import type { TaskOperatorService } from "../tasks/task-operator-service.js";
 import type { ContextReferenceExpander } from "../context/context-reference-expander.js";
 import type { CronStore } from "../cron/cron-store.js";
 import { availableToolsetsFromTools } from "../cron/cron-runtime-validation.js";

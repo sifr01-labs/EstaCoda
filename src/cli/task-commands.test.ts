@@ -10,12 +10,12 @@ import { capabilityFirstDefaults } from "../contracts/security.js";
 import { readActiveProfile, resolveGlobalStateHome, writeActiveProfile } from "../config/profile-home.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
-import { AgentStepExecutor } from "../workflow/agent-step-executor.js";
-import { SQLiteTaskStore } from "../workflow/sqlite-task-store.js";
-import { TaskApprovalService } from "../workflow/task-approval-service.js";
-import { TaskOperatorService } from "../workflow/task-operator-service.js";
-import { TaskResultService } from "../workflow/task-result-service.js";
-import { TaskScheduler } from "../workflow/task-scheduler.js";
+import { AgentStepExecutor } from "../tasks/agent-step-executor.js";
+import { SQLiteTaskStore } from "../tasks/sqlite-task-store.js";
+import { TaskApprovalService } from "../tasks/task-approval-service.js";
+import { TaskOperatorService } from "../tasks/task-operator-service.js";
+import { TaskResultService } from "../tasks/task-result-service.js";
+import { TaskScheduler } from "../tasks/task-scheduler.js";
 import { executeTaskCommand, taskCommand } from "./task-commands.js";
 
 describe("Task commands", () => {

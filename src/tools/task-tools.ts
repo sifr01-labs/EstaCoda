@@ -1,6 +1,6 @@
 import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import { formatUsageCost, formatUsageCostNotice } from "../ui/usage-cost-format.js";
-import type { TaskOperatorService } from "../workflow/task-operator-service.js";
+import type { TaskOperatorService } from "../tasks/task-operator-service.js";
 
 export const TASK_STATUS_MAX_RESULT_CHARS = 12_000;
 

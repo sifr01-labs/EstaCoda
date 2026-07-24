@@ -4,14 +4,14 @@ import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { readGatewayState } from "../gateway/supervisor-state.js";
 import { isStalePid } from "../gateway/pid-file.js";
-import { SQLiteTaskStore } from "../workflow/sqlite-task-store.js";
-import { SQLiteProviderSpendController } from "../workflow/sqlite-provider-spend.js";
+import { SQLiteTaskStore } from "../tasks/sqlite-task-store.js";
+import { SQLiteProviderSpendController } from "../tasks/sqlite-provider-spend.js";
 import {
   normalizeTaskOperatorObjective,
   TaskOperatorService,
   type TaskStatusProjection
-} from "../workflow/task-operator-service.js";
-import { resolveTaskWorkspaceBinding } from "../workflow/task-workspace.js";
+} from "../tasks/task-operator-service.js";
+import { resolveTaskWorkspaceBinding } from "../tasks/task-workspace.js";
 import { normalizeBudgetConfig, readConfig } from "../config/runtime-config.js";
 import { isolateLtr } from "../ui/bidi.js";
 import { formatUsageCost, formatUsageCostNotice, formatUsdAmount } from "../ui/usage-cost-format.js";

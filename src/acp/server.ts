@@ -9,7 +9,7 @@ import { defaultProfileId, readActiveProfile } from "../config/profile-home.js";
 import { assessSecurityPolicy, type SecurityApprovalMode, type SecurityDecision, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { createProviderUsageRecorder } from "../providers/provider-usage-ledger.js";
-import { SQLiteProviderSpendController } from "../workflow/sqlite-provider-spend.js";
+import { SQLiteProviderSpendController } from "../tasks/sqlite-provider-spend.js";
 import type { SessionDB } from "../contracts/session.js";
 import type { SessionMessage } from "../contracts/session.js";
 import type { Runtime, RuntimeOptions } from "../runtime/create-runtime.js";

@@ -32,7 +32,7 @@ import { resolveProfileStateHome } from "../config/profile-home.js";
 import { writeCliVoiceMode } from "./voice-mode.js";
 import { CronStore } from "../cron/cron-store.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
-import type { TaskStatusProjection } from "../workflow/task-operator-service.js";
+import type { TaskStatusProjection } from "../tasks/task-operator-service.js";
 import {
   createOperatorConsoleRuntimeHost,
   formatActiveWorkSummary,

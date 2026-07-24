@@ -57,8 +57,8 @@ export type SessionToolContext = {
   skillConfig?: Record<string, Record<string, unknown>>;
   processManager?: import("../process/process-manager.js").ProcessManager;
   artifactStore?: import("../artifacts/artifact-store.js").ArtifactStore;
-  taskResultService?: import("../workflow/task-result-service.js").TaskResultService;
-  taskOperatorService?: import("../workflow/task-operator-service.js").TaskOperatorService;
+  taskResultService?: import("../tasks/task-result-service.js").TaskResultService;
+  taskOperatorService?: import("../tasks/task-operator-service.js").TaskOperatorService;
   memoryFileCompactionService?: import("../memory/memory-file-compaction-service.js").MemoryFileCompactionService;
   fileStateTracker?: import("../delegation/file-state-tracker.js").FileStateTracker;
   sessionCompressionService?: import("../prompt/session-compression-service.js").SessionCompressionService;

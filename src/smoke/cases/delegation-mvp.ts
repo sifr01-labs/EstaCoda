@@ -8,7 +8,7 @@ import { DEFAULT_DELEGATION_CONFIG } from "../../config/delegation-defaults.js";
 import { DurableDelegationService } from "../../delegation/durable-delegation-service.js";
 import { resolveChildToolAccess } from "../../delegation/toolset-security.js";
 import { SQLiteSessionDB } from "../../session/sqlite-session-db.js";
-import { SQLiteTaskStore } from "../../workflow/sqlite-task-store.js";
+import { SQLiteTaskStore } from "../../tasks/sqlite-task-store.js";
 import type { SmokeCase, SmokeContext } from "../smoke-case.js";
 
 export const delegation_mvp_case: SmokeCase = {

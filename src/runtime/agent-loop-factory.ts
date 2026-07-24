@@ -18,7 +18,7 @@ import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import { DurableDelegationService } from "../delegation/durable-delegation-service.js";
 import type { TaskWorkspaceBinding } from "../contracts/task.js";
-import type { InitialTaskHostLeaseInput, TaskStore } from "../workflow/task-store.js";
+import type { InitialTaskHostLeaseInput, TaskStore } from "../tasks/task-store.js";
 import type { SpendingLimit } from "../contracts/budget.js";
 import {
   applyChildToolAccessResult,

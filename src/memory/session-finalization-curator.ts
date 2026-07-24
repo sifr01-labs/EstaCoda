@@ -4,7 +4,7 @@ import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolver.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { createProviderUsageRecorder } from "../providers/provider-usage-ledger.js";
-import { SQLiteProviderSpendController } from "../workflow/sqlite-provider-spend.js";
+import { SQLiteProviderSpendController } from "../tasks/sqlite-provider-spend.js";
 import type { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import type { SessionFinalizationJob } from "../session/session-finalization-queue.js";
 import { MemoryCurationStore, memoryCurationStorePath } from "./memory-curation-store.js";

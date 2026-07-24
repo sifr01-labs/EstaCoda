@@ -63,7 +63,7 @@ import {
 import { SessionRecallService, type SessionRecallResult } from "../session/session-recall-service.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { createProviderUsageRecorder } from "../providers/provider-usage-ledger.js";
-import { SQLiteProviderSpendController } from "../workflow/sqlite-provider-spend.js";
+import { SQLiteProviderSpendController } from "../tasks/sqlite-provider-spend.js";
 import { SessionCompressionService, type CompactResult } from "../prompt/session-compression-service.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
@@ -74,18 +74,18 @@ import { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import { SkillLearningManager, type SkillAutonomy } from "../skills/skill-learning.js";
 import { availableToolsetsFromTools } from "../cron/cron-runtime-validation.js";
-import { SQLiteTaskStore } from "../workflow/sqlite-task-store.js";
-import { TaskResultService } from "../workflow/task-result-service.js";
+import { SQLiteTaskStore } from "../tasks/sqlite-task-store.js";
+import { TaskResultService } from "../tasks/task-result-service.js";
 import {
   TaskSessionCompletionService,
   type TaskSessionCompletionMessage,
-} from "../workflow/task-session-completion.js";
-import { TaskOperatorService, type TaskStatusProjection } from "../workflow/task-operator-service.js";
-import type { InitialTaskHostLeaseInput } from "../workflow/task-store.js";
-import { AgentStepExecutor } from "../workflow/agent-step-executor.js";
-import { TaskApprovalService } from "../workflow/task-approval-service.js";
-import { createTaskArtifactContentResolver } from "../workflow/task-artifact-content.js";
-import { resolveTaskWorkspaceBinding } from "../workflow/task-workspace.js";
+} from "../tasks/task-session-completion.js";
+import { TaskOperatorService, type TaskStatusProjection } from "../tasks/task-operator-service.js";
+import type { InitialTaskHostLeaseInput } from "../tasks/task-store.js";
+import { AgentStepExecutor } from "../tasks/agent-step-executor.js";
+import { TaskApprovalService } from "../tasks/task-approval-service.js";
+import { createTaskArtifactContentResolver } from "../tasks/task-artifact-content.js";
+import { resolveTaskWorkspaceBinding } from "../tasks/task-workspace.js";
 
 import type { ImageGenerationFetchLike } from "../tools/image-generation-tools.js";
 import { defaultImageGenerationConfig, verifyImageGeneration, type ImageGenerationVerification } from "../tools/image-generation-verify.js";

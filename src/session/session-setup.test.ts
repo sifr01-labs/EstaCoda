@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, statSync, existsSync, mkdirSync, openSync, closeSy
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { prepareSessionDbFile, createSQLiteSessionDB } from "./session-setup.js";
-import { TASK_SCHEMA_VERSION } from "../workflow/task-schema.js";
+import { TASK_SCHEMA_VERSION } from "../tasks/task-schema.js";
 
 type ChildRunResult = {
   exitCode: number | null;

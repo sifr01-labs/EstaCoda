@@ -4,7 +4,7 @@ import {
   TaskResultAccessError,
   TaskResultContentError,
   type TaskResultService
-} from "../workflow/task-result-service.js";
+} from "../tasks/task-result-service.js";
 
 export const TASK_RESULT_READ_MAX_RESULT_CHARS = TASK_RESULT_PAGE_MAX_CHARS + 2_000;
 

@@ -4,7 +4,7 @@ import {
   TaskResultAccessError,
   TaskResultContentError,
   type TaskResultService
-} from "../workflow/task-result-service.js";
+} from "../tasks/task-result-service.js";
 import { createTaskResultTools } from "./task-result-tools.js";
 
 describe("task.result.read", () => {

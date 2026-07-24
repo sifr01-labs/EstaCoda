@@ -166,6 +166,7 @@ estacoda/
 │   ├── skills/                # Skill loading, routing, playbooks, learning
 │   ├── smoke/                 # Smoke test support
 │   ├── storage/               # Storage utilities
+│   ├── tasks/                 # Durable Task state and orchestration
 │   ├── test/                  # Test helpers
 │   ├── theme/                 # UI theme definitions
 │   ├── tools/                 # Tool schemas, registry, executor, planners
@@ -173,8 +174,7 @@ estacoda/
 │   ├── types/                 # Additional TypeScript declarations
 │   ├── ui/                    # ViewModels, renderers, UI labels/settings
 │   ├── utils/                 # Shared runtime utilities
-│   ├── workers/               # Worker process integration
-│   └── workflow/              # Durable workflow state/orchestration
+│   └── workers/               # Worker process integration
 ├── skills/                    # Built-in official skills
 ├── registries/                # Source registries and generated/catalog inputs
 ├── website/                   # Docusaurus docs/marketing site
@@ -257,7 +257,7 @@ src/packs/
 src/search/
 src/prompt/
 src/session/
-src/workflow/
+src/tasks/
 skills/
 registries/
 scripts/install.sh

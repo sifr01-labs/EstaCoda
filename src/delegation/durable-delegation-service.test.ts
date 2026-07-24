@@ -7,12 +7,12 @@ import type { TaskAttempt, TaskAuthorityPolicy, TaskUsageTotals } from "../contr
 import { TASK_GRAPH_LIMITS, TASK_TOOL_RISK_CLASSES } from "../contracts/task.js";
 import type { ToolDefinition, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
-import { FixedTaskCreationConflictError, FixedTaskService } from "../workflow/fixed-task-service.js";
-import { FakeTaskStepExecutor } from "../workflow/fake-task-step-executor.js";
-import { SQLiteTaskStore } from "../workflow/sqlite-task-store.js";
-import { TaskOperatorService } from "../workflow/task-operator-service.js";
-import { TaskResultService } from "../workflow/task-result-service.js";
-import { TaskScheduler } from "../workflow/task-scheduler.js";
+import { FixedTaskCreationConflictError, FixedTaskService } from "../tasks/fixed-task-service.js";
+import { FakeTaskStepExecutor } from "../tasks/fake-task-step-executor.js";
+import { SQLiteTaskStore } from "../tasks/sqlite-task-store.js";
+import { TaskOperatorService } from "../tasks/task-operator-service.js";
+import { TaskResultService } from "../tasks/task-result-service.js";
+import { TaskScheduler } from "../tasks/task-scheduler.js";
 import { DurableDelegationService } from "./durable-delegation-service.js";
 
 describe("DurableDelegationService", () => {

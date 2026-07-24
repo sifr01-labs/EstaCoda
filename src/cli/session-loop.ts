@@ -123,8 +123,8 @@ import { buildProvidersStatusViewModel } from "./provider-status-view-models.js"
 import { selectProviderModelRoute } from "../setup/provider-model-route-prompt.js";
 import { isMemoryCurationModeMutation, runMemoryOperatorCommand } from "../memory/memory-operator-commands.js";
 import type { SessionFinalizationReason } from "../session/session-finalization-queue.js";
-import type { TaskStatusProjection } from "../workflow/task-operator-service.js";
-import type { PendingTaskApproval } from "../workflow/task-approval-service.js";
+import type { TaskStatusProjection } from "../tasks/task-operator-service.js";
+import type { PendingTaskApproval } from "../tasks/task-approval-service.js";
 import type { ApprovalIntent } from "../ui/papyrus/operator-console/approvalSurface.js";
 import type {
   ApprovalCardState,

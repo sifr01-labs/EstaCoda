@@ -11,7 +11,7 @@ import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolvePro
 import { collectSetupEntryState, type SetupEntryState } from "../setup/setup-entry-state.js";
 import { repairSQLiteSchema } from "../storage/repair.js";
 import { createProviderUsageRecorder } from "../providers/provider-usage-ledger.js";
-import { SQLiteProviderSpendController } from "../workflow/sqlite-provider-spend.js";
+import { SQLiteProviderSpendController } from "../tasks/sqlite-provider-spend.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import {
   diagnoseProviderConfig,

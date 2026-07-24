@@ -4,7 +4,7 @@ import type { ProviderSpendingScope } from "../contracts/provider-spend.js";
 import type { SessionDB } from "../contracts/session.js";
 import { usageCostSummaryFromEntries } from "../providers/provider-usage-projection.js";
 import { spendingBudgetSummary } from "../providers/provider-spend-projection.js";
-import { taskListCursor, type TaskStore } from "../workflow/task-store.js";
+import { taskListCursor, type TaskStore } from "../tasks/task-store.js";
 import { verifiedCompressionLineage } from "./session-lineage.js";
 
 const MAX_SESSION_TASKS = 1_000;

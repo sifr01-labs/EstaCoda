@@ -83,7 +83,7 @@ graph TB
 | Why did a channel accept/reject a message? | Adapter file, `src/channels/channel-gateway.ts`, `src/channels/adapter-capability.ts` |
 | Why did recall or memory appear? | `src/memory/memory-recall-orchestrator.ts`, `src/session/session-recall-service.ts`, prompt assembly tests |
 | Why did a skill load or route? | `src/skills/skill-loader.ts`, `src/skills/skill-registry.ts`, `src/runtime/runtime-router.ts` |
-| How is durable Task state persisted, executed, scheduled, hosted, delivered, and read? | `src/contracts/task.ts`, `src/workflow/task-schema.ts`, `src/workflow/sqlite-task-store.ts`, `src/workflow/task-scheduler.ts`, `src/workflow/agent-step-executor.ts`, `src/workflow/task-background-host.ts`, `src/workflow/supervisor-task-background-host.ts`, `src/workflow/task-completion-delivery.ts`, `src/workflow/task-result-service.ts`, `src/gateway/supervisor.ts` |
+| How is durable Task state persisted, executed, scheduled, hosted, delivered, and read? | `src/contracts/task.ts`, `src/tasks/task-schema.ts`, `src/tasks/sqlite-task-store.ts`, `src/tasks/task-scheduler.ts`, `src/tasks/agent-step-executor.ts`, `src/tasks/task-background-host.ts`, `src/tasks/supervisor-task-background-host.ts`, `src/tasks/task-completion-delivery.ts`, `src/tasks/task-result-service.ts`, `src/gateway/supervisor.ts` |
 | How are traces persisted? | `src/session/sqlite-session-db.ts`, `src/trajectory/trajectory-recorder.ts`, `src/cli/trace-commands.ts` |
 
 ## Current Limitations
