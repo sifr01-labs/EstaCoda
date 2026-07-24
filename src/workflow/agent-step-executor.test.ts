@@ -6,6 +6,7 @@ import type { ModelProfile, ResolvedModelRoute } from "../contracts/provider.js"
 import { capabilityFirstDefaults } from "../contracts/security.js";
 import type {
   Task,
+  TaskAttempt,
   TaskAuthorityDisposition,
   TaskAuthorityPolicy,
   TaskPlanRevision,
@@ -159,6 +160,7 @@ describe("AgentStepExecutor", () => {
         planRevisionId: graph.revision.id,
         stepId: graph.steps[0]!.id,
         attemptId: attempt.id,
+        attemptFencingToken: 1,
         originSessionId: "creator-alpha",
         originTurnId: "origin-turn-alpha"
       }
@@ -560,6 +562,36 @@ describe("AgentStepExecutor", () => {
     })).resolves.toMatchObject({
       outcome: "failed",
       failure: { class: "workspace-untrusted", retryable: false, uncertainSideEffects: false }
+    });
+    expect(createChild).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before child construction when the scheduler provides no Attempt lease", async () => {
+    const graph = makeGraph();
+    const createChild = vi.fn();
+    const executor = new AgentStepExecutor({
+      childFactory: { createChild },
+      sessionDb,
+      taskStore: store,
+      hostWorkspace: graph.task.workspace,
+      isWorkspaceTrusted: () => true,
+      parentVisibleTools: () => tools(),
+      approvalService: new TaskApprovalService({ store }),
+      securityPolicy: capabilityFirstDefaults
+    });
+    const unleasedAttempt: TaskAttempt = attempt(graph);
+    delete unleasedAttempt.lease;
+
+    await expect(executor.execute({
+      task: graph.task,
+      step: graph.steps[0]!,
+      attempt: unleasedAttempt,
+      signal: new AbortController().signal,
+      heartbeat: vi.fn(),
+      checkpoint: vi.fn()
+    })).resolves.toMatchObject({
+      outcome: "failed",
+      failure: { class: "lease-missing", retryable: true, uncertainSideEffects: false }
     });
     expect(createChild).not.toHaveBeenCalled();
   });
@@ -1001,6 +1033,16 @@ function attempt(graph: ReturnType<typeof makeGraph>, step: TaskStep = graph.ste
     attemptNumber: 1,
     status: "running" as const,
     dispatchKey: "dispatch-alpha",
+    lease: {
+      attemptId: "attempt-alpha",
+      profileId: "alpha",
+      taskId: graph.task.id,
+      ownerId: "scheduler-alpha",
+      fencingToken: 1,
+      acquiredAt: NOW,
+      heartbeatAt: NOW,
+      expiresAt: "2030-01-01T00:01:00.000Z"
+    },
     usage: emptyUsage(),
     resultIds: [],
     createdAt: NOW,

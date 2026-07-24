@@ -74,6 +74,7 @@ export type CreateChildAgentLoopInput = {
     planRevisionId: string;
     stepId: string;
     attemptId: string;
+    attemptFencingToken: number;
     originSessionId?: string;
     originTurnId?: string;
   };

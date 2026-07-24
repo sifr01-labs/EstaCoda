@@ -53,6 +53,7 @@ describe("DurableDelegationService", () => {
       originTurnId: "visible-turn-alpha",
       trustedWorkspace: true,
       tasks: [{ task: "Read A" }, { task: "Read B", role: "orchestrator" }],
+      synthesis: false,
     });
     const task = store.getTask(first.taskId)!;
     const steps = store.listSteps(task.id, task.activePlanRevisionId!);
@@ -87,6 +88,12 @@ describe("DurableDelegationService", () => {
     expect(store.listSessionLinks(task.id)).toEqual([
       expect.objectContaining({ taskId: task.id, sessionId: "parent", relationship: "creator" })
     ]);
+    expect(() => service.create({
+      toolCallId: "call-1",
+      originTurnId: "visible-turn-alpha",
+      trustedWorkspace: true,
+      tasks: [{ task: "Read A" }, { task: "Read B", role: "orchestrator" }]
+    })).toThrow(FixedTaskCreationConflictError);
   });
 
   it("snapshots the configured root spending limit and only permits finite narrowing", () => {
@@ -273,6 +280,7 @@ describe("DurableDelegationService", () => {
     expect(new Set(synthesis?.dependsOn)).toEqual(new Set(workers.map((step) => step.id)));
     expect(task.objective).toContain("one coherent, supported final answer");
     expect(service.create(request)).toMatchObject({ taskId: handle.taskId, idempotentReplay: true });
+    expect(() => service.create({ ...request, synthesis: false })).toThrow(FixedTaskCreationConflictError);
   });
 
   it("runs workers before synthesis and preserves the graph and primary Result across restart", async () => {
@@ -413,7 +421,8 @@ describe("DurableDelegationService", () => {
         taskId: parent.taskId,
         planRevisionId: parent.planRevisionId,
         stepId: parent.stepId,
-        attemptId: parent.attemptId
+        attemptId: parent.attemptId,
+        attemptFencingToken: 1
       }
     });
     const handle = service.create({
@@ -489,6 +498,84 @@ describe("DurableDelegationService", () => {
     })).toMatchObject({ taskId: handle.taskId, idempotentReplay: true });
   });
 
+  it("rejects child creation without a current parent Attempt lease", () => {
+    const parent = createParentAttempt(store, "fire_and_forget", false);
+
+    expect(() => nestedService(store, parent).create({
+      toolCallId: "nested-without-lease",
+      trustedWorkspace: true,
+      tasks: [{ task: "Must not be created" }]
+    })).toThrow(/active parent Task Attempt worker/i);
+    expect(store.listChildTasks(parent.taskId)).toEqual([]);
+  });
+
+  it("rejects cancelled parent lease ownership before child creation", () => {
+    const parent = createParentAttempt(store);
+    store.requestAttemptCancellation(parent.attemptId, new Date().toISOString());
+
+    expect(() => nestedService(store, parent).create({
+      toolCallId: "nested-after-cancellation",
+      trustedWorkspace: true,
+      tasks: [{ task: "Must not be created" }]
+    })).toThrow(/active parent Task Attempt worker/i);
+    expect(store.listChildTasks(parent.taskId)).toEqual([]);
+  });
+
+  it("rejects child creation after the parent Attempt lease expires", () => {
+    const parent = createParentAttempt(store);
+
+    expect(() => nestedService(store, parent, 1, () => new Date("2030-01-01T00:01:00.000Z")).create({
+      toolCallId: "nested-after-expiry",
+      trustedWorkspace: true,
+      tasks: [{ task: "Must not be created" }]
+    })).toThrow(/active parent Task Attempt worker/i);
+    expect(store.listChildTasks(parent.taskId)).toEqual([]);
+  });
+
+  it("rejects new stale child creation while preserving exact replay after the parent fence advances", () => {
+    const parent = createParentAttempt(store);
+    const staleService = nestedService(store, parent, 1);
+    const first = staleService.create({
+      toolCallId: "nested-before-refence",
+      trustedWorkspace: true,
+      tasks: [{ task: "Created by fence one" }]
+    });
+    const firstLease = store.getAttempt(parent.attemptId)!.lease!;
+    store.updateAttempt({ ...store.getAttempt(parent.attemptId)!, status: "queued" });
+    expect(store.releaseAttemptLease({
+      attemptId: parent.attemptId,
+      ownerId: firstLease.ownerId,
+      fencingToken: firstLease.fencingToken
+    })).toBe(true);
+    const acquiredAt = new Date().toISOString();
+    const secondLease = store.acquireAttemptLease({
+      attemptId: parent.attemptId,
+      ownerId: "replacement-parent-owner",
+      acquiredAt,
+      expiresAt: new Date(Date.parse(acquiredAt) + 60_000).toISOString()
+    });
+    expect(secondLease?.fencingToken).toBe(2);
+    const leasedAttempt = store.getAttempt(parent.attemptId)!;
+    store.updateAttempt({ ...leasedAttempt, status: "running", startedAt: leasedAttempt.startedAt ?? acquiredAt });
+
+    expect(staleService.create({
+      toolCallId: "nested-before-refence",
+      trustedWorkspace: true,
+      tasks: [{ task: "Created by fence one" }]
+    })).toMatchObject({ taskId: first.taskId, childTask: true, idempotentReplay: true });
+    expect(() => staleService.create({
+      toolCallId: "nested-stale-new-call",
+      trustedWorkspace: true,
+      tasks: [{ task: "Must not be created by fence one" }]
+    })).toThrow(/active parent Task Attempt worker/i);
+    expect(nestedService(store, parent, 2).create({
+      toolCallId: "nested-before-refence",
+      trustedWorkspace: true,
+      tasks: [{ task: "Created by fence one" }]
+    })).toMatchObject({ taskId: first.taskId, childTask: true, idempotentReplay: true });
+    expect(store.listChildTasks(parent.taskId).map((task) => task.id)).toEqual([first.taskId]);
+  });
+
   it("atomically refuses repeated child calls that would multiply the parent Step ceiling", () => {
     const parent = createParentAttempt(store);
     const service = nestedService(store, parent);
@@ -542,7 +629,7 @@ describe("DurableDelegationService", () => {
       workspace: workspace(),
       authorityPolicy: childAuthority,
       executionLimits: { maxConcurrentAttempts: 1, ...parentStep.executionLimits },
-      parent: { taskId: parent.taskId, attemptId: parent.attemptId },
+      parent: { taskId: parent.taskId, attemptId: parent.attemptId, attemptFencingToken: 1 },
       createdBy: {
         kind: "agent",
         sessionId: "worker",
@@ -832,7 +919,8 @@ describe("DurableDelegationService", () => {
         taskId: parent.taskId,
         planRevisionId: parent.planRevisionId,
         stepId: parent.stepId,
-        attemptId: parent.attemptId
+        attemptId: parent.attemptId,
+        attemptFencingToken: 1
       }
     });
 
@@ -885,10 +973,15 @@ function rootService(store: SQLiteTaskStore) {
 
 function nestedService(
   taskStore: SQLiteTaskStore,
-  parent: ReturnType<typeof createParentAttempt>
+  parent: ReturnType<typeof createParentAttempt>,
+  attemptFencingToken = 1,
+  validationNow?: () => Date
 ): DurableDelegationService {
   return new DurableDelegationService({
     store: taskStore,
+    ...(validationNow === undefined
+      ? {}
+      : { fixedTasks: new FixedTaskService({ store: taskStore, now: validationNow }) }),
     creatorSessionId: () => "worker",
     workspace: workspace(),
     config: { ...DEFAULT_DELEGATION_CONFIG, maxSpawnDepth: 3 },
@@ -897,7 +990,8 @@ function nestedService(
       taskId: parent.taskId,
       planRevisionId: parent.planRevisionId,
       stepId: parent.stepId,
-      attemptId: parent.attemptId
+      attemptId: parent.attemptId,
+      attemptFencingToken
     }
   });
 }
@@ -953,7 +1047,7 @@ function acquireTestHostLeases(store: SQLiteTaskStore, ownerId: string, now: () 
 function createParentAttempt(
   store: SQLiteTaskStore,
   childTaskPolicy: "forbid" | "fire_and_forget" = "fire_and_forget",
-  withLease = false
+  withLease = true
 ) {
   const authority = authorityPolicy(2);
   const stepExecutionLimits = {
@@ -1012,7 +1106,7 @@ function createParentAttempt(
         fencingToken: 1,
         acquiredAt: "2026-01-01T00:00:00.000Z",
         heartbeatAt: "2026-01-01T00:00:00.000Z",
-        expiresAt: "2026-01-01T00:01:00.000Z"
+        expiresAt: "2030-01-01T00:01:00.000Z"
       }
     } : {}),
     usage: emptyUsage(),

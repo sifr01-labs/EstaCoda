@@ -142,6 +142,8 @@ export class AgentStepExecutor implements TaskStepExecutor {
       input.task,
       input.step
     );
+    const attemptFencingToken = input.attempt.lease?.fencingToken;
+    if (attemptFencingToken === undefined) return failed("lease-missing", true);
     const modelOverride = toModelOverride(input.step);
     let endReason = "task-step-failed";
     const childController = new AbortController();
@@ -183,6 +185,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
           planRevisionId: input.step.planRevisionId,
           stepId: input.step.id,
           attemptId: input.attempt.id,
+          attemptFencingToken,
           originSessionId: input.task.originSessionId,
           ...(input.task.originTurnId === undefined ? {} : { originTurnId: input.task.originTurnId })
         },

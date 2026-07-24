@@ -70,6 +70,8 @@ export type CreateFixedTaskInput = {
   parent?: {
     taskId: string;
     attemptId: string;
+    /** Exact active lease generation authorizing this child creation. */
+    attemptFencingToken: number;
   };
 };
 
@@ -252,9 +254,14 @@ export class FixedTaskService {
     if (!isDeepStrictEqual(input.workspace, task.workspace)) {
       throw new Error("A child Task must retain its parent Task workspace binding.");
     }
+    const lease = attempt.lease;
+    const leaseExpiresAt = lease === undefined ? Number.NaN : Date.parse(lease.expiresAt);
     if (isTerminalTaskStatus(task.status) || attempt.status !== "running" ||
       task.activePlanRevisionId !== attempt.planRevisionId ||
-      input.createdBy?.sessionId !== attempt.workerSessionId) {
+      input.createdBy?.sessionId !== attempt.workerSessionId ||
+      lease === undefined || lease.fencingToken !== parent.attemptFencingToken ||
+      lease.cancellationRequestedAt !== undefined || !Number.isFinite(leaseExpiresAt) ||
+      leaseExpiresAt <= this.#now().getTime()) {
       throw new Error("A child Task must be created by its active parent Task Attempt worker.");
     }
     if (step.childTaskPolicy !== "fire_and_forget") {
@@ -427,8 +434,12 @@ function normalizeCreateInput(input: CreateFixedTaskInput): NormalizedCreateFixe
     }
     parent = {
       taskId: boundedToken(input.parent.taskId, "parent Task ID", 256),
-      attemptId: boundedToken(input.parent.attemptId, "parent Attempt ID", 256)
+      attemptId: boundedToken(input.parent.attemptId, "parent Attempt ID", 256),
+      attemptFencingToken: input.parent.attemptFencingToken
     };
+    if (!Number.isSafeInteger(parent.attemptFencingToken) || parent.attemptFencingToken <= 0) {
+      throw new Error("A child fixed Task requires a positive parent Attempt fencing token.");
+    }
     if (input.createdBy?.kind !== "agent" ||
       input.createdBy.sessionId !== creatorSessionId ||
       input.createdBy.taskId !== parent.taskId ||

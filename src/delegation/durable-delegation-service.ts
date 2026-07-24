@@ -41,6 +41,7 @@ export type ActiveTaskExecution = {
   planRevisionId: string;
   stepId: string;
   attemptId: string;
+  attemptFencingToken: number;
 };
 
 export type DurableDelegationRequest = {
@@ -146,7 +147,7 @@ export class DurableDelegationService {
     }
     const creationKey = delegationCreationKey(this.#store.profileId, sessionId, request.toolCallId);
     const existing = this.#store.getTaskByCreationKey(creationKey);
-    const synthesis = resolveDelegationSynthesis(this.#store, request, existing);
+    const synthesis = resolveDelegationSynthesis(request);
     const localCompletionEligible = parent === undefined && (
       synthesis !== undefined || (request.tasks.length === 1 && request.synthesis !== false)
     );
@@ -259,7 +260,11 @@ export class DurableDelegationService {
         }
       }),
       ...(parent === undefined ? {} : {
-        parent: { taskId: parent.taskId, attemptId: parent.attemptId },
+        parent: {
+          taskId: parent.taskId,
+          attemptId: parent.attemptId,
+          attemptFencingToken: parent.attemptFencingToken
+        },
         createdBy: {
           kind: "agent" as const,
           sessionId,
@@ -297,6 +302,7 @@ export class DurableDelegationService {
   #parentContext(): {
     taskId: string;
     attemptId: string;
+    attemptFencingToken: number;
     authority: TaskAuthorityPolicy;
     executionLimits: TaskExecutionLimits;
     executionPreference: TaskExecutionPreference;
@@ -317,6 +323,7 @@ export class DurableDelegationService {
     return {
       taskId: task.id,
       attemptId: attempt.id,
+      attemptFencingToken: execution.attemptFencingToken,
       authority: step.authorityPolicy,
       executionLimits: {
         maxConcurrentAttempts: task.executionLimits.maxConcurrentAttempts,
@@ -513,19 +520,10 @@ function synthesisObjective(synthesis: DelegateSynthesis): string {
   return objective;
 }
 
-function resolveDelegationSynthesis(
-  store: TaskStore,
-  request: DurableDelegationRequest,
-  existing: ReturnType<TaskStore["getTaskByCreationKey"]>
-): DelegateSynthesis | undefined {
+function resolveDelegationSynthesis(request: DurableDelegationRequest): DelegateSynthesis | undefined {
   if (request.synthesis === false) return undefined;
   if (request.synthesis !== undefined) return request.synthesis;
   if (request.tasks.length < 2) return undefined;
-  if (existing !== null && existing.activePlanRevisionId !== undefined) {
-    const existingHasSynthesis = store.listSteps(existing.id, existing.activePlanRevisionId)
-      .some((step) => step.executor.role === "synthesis");
-    if (!existingHasSynthesis) return undefined;
-  }
   return { objective: DEFAULT_BATCH_SYNTHESIS_OBJECTIVE };
 }
 

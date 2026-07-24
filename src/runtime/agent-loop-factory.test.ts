@@ -109,7 +109,8 @@ describe("DefaultChildAgentLoopFactory", () => {
         rootTaskId: "task-1",
         planRevisionId: "revision-1",
         stepId: "step-1",
-        attemptId: "attempt-1"
+        attemptId: "attempt-1",
+        attemptFencingToken: 1
       }
     });
 
@@ -141,7 +142,8 @@ describe("DefaultChildAgentLoopFactory", () => {
       rootTaskId: "task-1",
       planRevisionId: "revision-1",
       stepId: "step-1",
-      attemptId: "attempt-1"
+      attemptId: "attempt-1",
+      attemptFencingToken: 1
     };
     const first = await factory.createChild({
       parentSessionId: "parent-1",
