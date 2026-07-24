@@ -2,6 +2,7 @@ import type { ProviderId } from "./provider.js";
 import type { ProviderUsageTotals } from "./provider-usage.js";
 import type { SpendingLimit } from "./budget.js";
 import type { ToolRiskClass, ToolsetName } from "./tool.js";
+import type { DelegationAccessAudit } from "./delegation.js";
 
 // Durable Task identities are opaque storage keys. They are never authorization boundaries.
 export type TaskId = string;
@@ -181,6 +182,8 @@ export type TaskAgentExecutor = {
     provider?: ProviderId;
     id: string;
   };
+  /** Present only for Steps admitted through delegate_task. */
+  delegationAccess?: DelegationAccessAudit;
 };
 
 export type TaskStepResultPolicy = {
@@ -791,7 +794,8 @@ export function validateTaskPlan(
       (step.executor.model !== undefined && (
         step.executor.model.id.trim().length === 0 ||
         step.executor.model.id.length > limits.maxModelIdChars
-      ))
+      )) ||
+      !isDelegationAccessAuditValid(step.executor.delegationAccess, limits)
     ) {
       issues.push(issue("step-executor-invalid", "Step executor is unsupported or contains an invalid model selection.", step.id));
     }
@@ -1076,6 +1080,64 @@ function isAuthorityPolicyValid(authority: TaskAuthorityPolicy, limits: TaskGrap
     allowedTools.every((tool) => !blockedTools.has(tool)) &&
     isChildDepthConsistent(authority) &&
     TASK_TOOL_RISK_CLASSES.every((riskClass) => isAuthorityDisposition(authority.riskClassPolicy[riskClass]));
+}
+
+function isDelegationAccessAuditValid(
+  audit: TaskAgentExecutor["delegationAccess"],
+  limits: TaskGraphLimits
+): boolean {
+  if (audit === undefined) return true;
+  if (audit.version !== 1 ||
+      audit.requestedTools.length > limits.maxToolsPerStep ||
+      audit.requestedToolsets.length > limits.maxToolsetsPerStep ||
+      audit.parentVisibleTools.length > limits.maxToolsPerStep ||
+      audit.effectiveAllowedTools.length > limits.maxToolsPerStep ||
+      audit.effectiveAllowedToolsets.length > limits.maxToolsetsPerStep ||
+      audit.strippedTools.length > limits.maxToolsPerStep ||
+      audit.rejectedRequestedTools.length > limits.maxToolsPerStep ||
+      audit.rejectedRequestedToolsets.length > limits.maxToolsetsPerStep ||
+      !optionalNonNegativeSafeInteger(audit.omittedParentVisibleToolCount) ||
+      !optionalNonNegativeSafeInteger(audit.omittedStrippedToolCount) ||
+      !uniqueNonEmptyStrings(audit.requestedTools) ||
+      !uniqueNonEmptyStrings(audit.requestedToolsets) ||
+      !uniqueNonEmptyStrings(audit.parentVisibleTools) ||
+      !uniqueNonEmptyStrings(audit.effectiveAllowedTools) ||
+      !uniqueNonEmptyStrings(audit.effectiveAllowedToolsets)) {
+    return false;
+  }
+  return [
+    ...audit.strippedTools,
+    ...audit.rejectedRequestedTools,
+    ...audit.rejectedRequestedToolsets
+  ].every((diagnostic) =>
+    diagnostic.name.trim().length > 0 &&
+    diagnostic.name.length <= 160 &&
+    diagnostic.reasons.length > 0 &&
+    diagnostic.reasons.length <= 10 &&
+    diagnostic.reasons.every(isDelegationToolStripReason) &&
+    (diagnostic.toolsets === undefined || (
+      diagnostic.toolsets.length <= limits.maxToolsetsPerStep &&
+      uniqueNonEmptyStrings(diagnostic.toolsets)
+    )) &&
+    (diagnostic.riskClass === undefined || TASK_TOOL_RISK_CLASSES.includes(diagnostic.riskClass as ToolRiskClass))
+  );
+}
+
+function optionalNonNegativeSafeInteger(value: number | undefined): boolean {
+  return value === undefined || (Number.isSafeInteger(value) && value >= 0);
+}
+
+function isDelegationToolStripReason(value: unknown): boolean {
+  return value === "not-parent-visible" ||
+    value === "blocked-exact-name" ||
+    value === "blocked-prefix" ||
+    value === "disallowed-risk-class" ||
+    value === "excluded-toolset" ||
+    value === "outside-requested-allowed-tools" ||
+    value === "outside-requested-allowed-toolsets" ||
+    value === "unknown-unclassified-mcp-like-tool" ||
+    value === "leaf-delegation-disabled" ||
+    value === "spawn-depth-exceeded";
 }
 
 function isChildDepthConsistent(authority: TaskAuthorityPolicy): boolean {

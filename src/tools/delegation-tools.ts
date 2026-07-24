@@ -12,7 +12,11 @@ import {
   MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH,
   MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH
 } from "../contracts/delegation.js";
-import type { DurableDelegationService } from "../delegation/durable-delegation-service.js";
+import {
+  DelegationAccessError,
+  type DurableDelegationHandle,
+  type DurableDelegationService
+} from "../delegation/durable-delegation-service.js";
 import type { TaskExecutionPreference } from "../contracts/task.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 
@@ -153,18 +157,37 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
           role: input.role ?? "leaf",
           modelOverride: parsed.modelOverride
         }];
-        const handle = await options.service.createAndActivate({
-          toolCallId: context.toolCallId,
-          ...(context.visibleTurnId === undefined ? {} : { originTurnId: context.visibleTurnId }),
-          tasks,
-          ...(parsed.synthesis === undefined ? {} : { synthesis: parsed.synthesis }),
-          trustedWorkspace: await options.trustedWorkspace(),
-          executionPreference: input.executionPreference,
-          ...(parsed.spendingLimit === undefined ? {} : { spendingLimit: parsed.spendingLimit }),
-          ...(parsed.mode === "batch" && parsed.recoveredTasksFromJsonString === true
-            ? { recoveredTasksFromJsonString: true }
-            : {})
-        });
+        let handle: DurableDelegationHandle;
+        try {
+          handle = await options.service.createAndActivate({
+            toolCallId: context.toolCallId,
+            ...(context.visibleTurnId === undefined ? {} : { originTurnId: context.visibleTurnId }),
+            tasks,
+            ...(parsed.synthesis === undefined ? {} : { synthesis: parsed.synthesis }),
+            trustedWorkspace: await options.trustedWorkspace(),
+            executionPreference: input.executionPreference,
+            ...(parsed.spendingLimit === undefined ? {} : { spendingLimit: parsed.spendingLimit }),
+            ...(parsed.mode === "batch" && parsed.recoveredTasksFromJsonString === true
+              ? { recoveredTasksFromJsonString: true }
+              : {})
+          });
+        } catch (error) {
+          if (error instanceof DelegationAccessError) {
+            return {
+              ok: false,
+              content: error.taskIndex === undefined
+                ? error.message
+                : `delegate_task tasks[${error.taskIndex}]: ${error.message}`,
+              metadata: {
+                reason: "delegation-access-error",
+                code: error.code,
+                ...(error.taskIndex === undefined ? {} : { taskIndex: error.taskIndex }),
+                access: error.access
+              }
+            };
+          }
+          throw error;
+        }
         const settled = ["completed", "partial", "failed", "cancelled"].includes(handle.status);
         return {
           ok: true,

@@ -3,7 +3,10 @@ import {
   MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH,
   MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH
 } from "../contracts/delegation.js";
-import type { DurableDelegationService } from "../delegation/durable-delegation-service.js";
+import {
+  DelegationAccessError,
+  type DurableDelegationService
+} from "../delegation/durable-delegation-service.js";
 import { createDelegationTools, delegationToolProvider } from "./delegation-tools.js";
 
 describe("createDelegationTools", () => {
@@ -175,6 +178,55 @@ describe("createDelegationTools", () => {
       metadata: { reason: "validation-error", code: "missing-tool-call-id" }
     });
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it("returns structured access diagnostics when admission fails before Task creation", async () => {
+    const create = vi.fn(async () => {
+      throw new DelegationAccessError({
+        code: "requested-tool-unavailable",
+        taskIndex: 0,
+        message: "Delegated work requested unavailable tools: web.search.",
+        access: {
+          version: 1,
+          requestedTools: ["web.search"],
+          requestedToolsets: ["web"],
+          parentVisibleTools: ["file.read"],
+          effectiveAllowedTools: [],
+          effectiveAllowedToolsets: [],
+          strippedTools: [{
+            name: "file.read",
+            reasons: ["outside-requested-allowed-tools", "outside-requested-allowed-toolsets"],
+            toolsets: ["files"],
+            riskClass: "read-only-local"
+          }],
+          rejectedRequestedTools: [{ name: "web.search", reasons: ["not-parent-visible"] }],
+          rejectedRequestedToolsets: [{ name: "web", reasons: ["not-parent-visible"] }]
+        }
+      });
+    });
+    const [tool] = tools(create);
+
+    const result = await tool!.run({
+      task: "Search live sources",
+      allowedTools: ["web.search"],
+      allowedToolsets: ["web"]
+    }, { toolCallId: "provider-call-access-failure" });
+
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: {
+        reason: "delegation-access-error",
+        code: "requested-tool-unavailable",
+        taskIndex: 0,
+        access: {
+          requestedTools: ["web.search"],
+          parentVisibleTools: ["file.read"],
+          effectiveAllowedTools: []
+        }
+      }
+    });
+    expect(result.content).toContain("delegate_task tasks[0]");
+    expect(result.content).toContain("web.search");
   });
 
   it.each([

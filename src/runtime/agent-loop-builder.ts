@@ -218,6 +218,8 @@ export type AgentLoopSessionInput = {
   delegationServiceFactory?: (input: {
     toolRegistry: ToolRegistry;
     sessionRuntimeContext: SessionRuntimeContext;
+    /** Final provider-visible inventory after availability and configured toolset filters. */
+    visibleTools: () => readonly ToolDefinition[];
   }) => DurableDelegationService | undefined;
   trustedWorkspace: () => Promise<boolean>;
   disabledToolsets?: ToolsetName[];
@@ -426,9 +428,11 @@ export class AgentLoopBuilder {
       trajectoryRecorder: input.trajectoryRecorder,
       workspaceRoot: substrate.workspaceRoot
     });
+    let delegationVisibleTools: readonly ToolDefinition[] = [];
     const delegationService = input.delegationServiceFactory?.({
       toolRegistry,
-      sessionRuntimeContext
+      sessionRuntimeContext,
+      visibleTools: () => delegationVisibleTools
     });
 
     registerToolRegistrationPhase({
@@ -464,6 +468,7 @@ export class AgentLoopBuilder {
       providerToolAvailability = await toolRegistry.snapshot();
       substrate.setAvailableToolsets?.(availableToolsetsFromTools(providerToolAvailability.available));
     }
+    delegationVisibleTools = providerToolAvailability.available;
     const providerToolSchemaCatalog = buildProviderToolSchemaCatalog({
       tools: providerToolAvailability.available
     });

@@ -245,13 +245,13 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
       securityPolicy: input.securityPolicy ?? createChildFailClosedSecurityPolicy(),
       delegationServiceFactory: this.#taskStore === undefined || this.#taskWorkspace === undefined
         ? undefined
-        : ({ toolRegistry, sessionRuntimeContext }) => new DurableDelegationService({
+        : ({ sessionRuntimeContext, visibleTools }) => new DurableDelegationService({
             store: this.#taskStore!,
             creatorSessionId: () => sessionRuntimeContext.currentSessionId(),
             workspace: this.#taskWorkspace!,
             config: this.#delegationConfig,
             defaultTaskSpendingLimit: this.#defaultTaskSpendingLimit,
-            visibleTools: () => toolRegistry.list(),
+            visibleTools,
             activeTaskExecution: input.taskExecution,
             taskHostAdmission: this.#taskHostAdmission,
             onTaskCreated: this.#onTaskCreated

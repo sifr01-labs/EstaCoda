@@ -1,25 +1,14 @@
-import type { DelegationConfig, DelegateRole } from "../contracts/delegation.js";
+import type {
+  DelegationConfig,
+  DelegateRole,
+  DelegationToolDiagnostic,
+  DelegationToolStripReason
+} from "../contracts/delegation.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import type { ToolRegistry } from "../tools/tool-registry.js";
 
-export type ChildToolStripReason =
-  | "not-parent-visible"
-  | "blocked-exact-name"
-  | "blocked-prefix"
-  | "disallowed-risk-class"
-  | "excluded-toolset"
-  | "outside-requested-allowed-tools"
-  | "outside-requested-allowed-toolsets"
-  | "unknown-unclassified-mcp-like-tool"
-  | "leaf-delegation-disabled"
-  | "spawn-depth-exceeded";
-
-export type ChildToolDiagnostic = {
-  name: string;
-  reasons: ChildToolStripReason[];
-  toolsets?: ToolsetName[];
-  riskClass?: string;
-};
+export type ChildToolStripReason = DelegationToolStripReason;
+export type ChildToolDiagnostic = DelegationToolDiagnostic;
 
 export type ChildToolAccessRequest = {
   allowedToolsets?: ToolsetName[];

@@ -8,7 +8,7 @@ import type { MemoryProvider } from "../contracts/memory.js";
 import type { ModelProfile, ResolvedModelRoute } from "../contracts/provider.js";
 import type { SecurityPolicy } from "../contracts/security.js";
 import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
-import type { RegisteredTool } from "../contracts/tool.js";
+import type { RegisteredTool, ToolDefinition } from "../contracts/tool.js";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
 import { normalizeMemoryConfig } from "../config/memory-config.js";
 import { normalizeExternalMemoryConfig, normalizeSessionCompressionConfig } from "../config/runtime-config.js";
@@ -624,13 +624,27 @@ describe("AgentLoopBuilder", () => {
   it("removes disabled toolsets before provider schemas are built", async () => {
     const writeTool = registeredTool("mcp.write", ["shell-write"]);
     const readTool = registeredTool("mcp.read", ["research"]);
-    const harness = await createBuilderHarness({ mcpTools: [writeTool, readTool] });
+    const unavailableTool = {
+      ...registeredTool("mcp.unavailable", ["research"]),
+      isAvailable: async () => false
+    };
+    const harness = await createBuilderHarness({ mcpTools: [writeTool, readTool, unavailableTool] });
+    let delegationVisibleTools: (() => readonly ToolDefinition[]) | undefined;
 
-    const built = await harness.build("session-a", { disabledToolsets: ["shell-write"] });
+    const built = await harness.build("session-a", {
+      disabledToolsets: ["shell-write"],
+      delegationServiceFactory: ({ visibleTools }) => {
+        delegationVisibleTools = visibleTools;
+        return {} as never;
+      }
+    });
 
     expect(built.toolRegistry.get("mcp.write")).toBeUndefined();
     expect(built.toolRegistry.get("mcp.read")).toBe(readTool);
     expect(built.providerTools.map((tool) => tool.function.name)).not.toContain("mcp.write");
+    expect(delegationVisibleTools?.().map((tool) => tool.name)).not.toContain("mcp.write");
+    expect(delegationVisibleTools?.().map((tool) => tool.name)).not.toContain("mcp.unavailable");
+    expect(delegationVisibleTools?.().map((tool) => tool.name)).toContain("mcp.read");
   });
 
   it("exposes cron runtime toolsets after disabled toolsets are removed", async () => {

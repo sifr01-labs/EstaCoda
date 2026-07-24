@@ -1012,13 +1012,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     securityPolicy,
     delegationServiceFactory: taskStore === undefined || taskWorkspace === undefined
       ? undefined
-      : ({ toolRegistry, sessionRuntimeContext }) => new DurableDelegationService({
+      : ({ sessionRuntimeContext, visibleTools }) => new DurableDelegationService({
           store: taskStore,
           creatorSessionId: () => sessionRuntimeContext.currentSessionId(),
           workspace: taskWorkspace,
           config: options.delegationConfig ?? DEFAULT_DELEGATION_CONFIG,
           defaultTaskSpendingLimit: options.budgets?.task,
-          visibleTools: () => toolRegistry.list(),
+          visibleTools,
           completionDestination: currentTaskCompletionDestination,
           executionPreference: () => currentTaskCreationOrigin().source === "gateway" ? "background" : "auto",
           backgroundContinuation: () => options.taskBackgroundContinuation ?? "unknown",

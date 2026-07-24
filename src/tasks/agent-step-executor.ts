@@ -216,6 +216,15 @@ export class AgentStepExecutor implements TaskStepExecutor {
           workerSessionId: child.childSessionId
         };
       }
+      const accessFailure = delegatedChildAccessFailure(input.step, child);
+      if (accessFailure !== undefined) {
+        return {
+          outcome: "failed",
+          failure: taskFailure(accessFailure, false),
+          usage: unavailableUsage("delegated-tools-unavailable"),
+          workerSessionId: child.childSessionId
+        };
+      }
       input.checkpoint({
         workerSessionId: child.childSessionId
       });
@@ -414,6 +423,35 @@ export class AgentStepExecutor implements TaskStepExecutor {
       await this.#onEvent?.(event);
     };
   }
+}
+
+function delegatedChildAccessFailure(
+  step: TaskStep,
+  child: ChildAgentLoopRuntime
+): "delegated-tools-unavailable" | "delegated-authority-violation" | undefined {
+  const persistedAccess = step.executor.delegationAccess;
+  if (persistedAccess === undefined) return undefined;
+  const effectiveTools = child.toolAccess.effectiveAllowedTools;
+  if (effectiveTools.length === 0) return "delegated-tools-unavailable";
+  const persistedTools = new Set(persistedAccess.effectiveAllowedTools);
+  if (effectiveTools.some((name) => !persistedTools.has(name))) {
+    return "delegated-authority-violation";
+  }
+  const persistedToolsets = new Set(persistedAccess.effectiveAllowedToolsets);
+  if (child.toolAccess.effectiveAllowedToolsets.some((name) => !persistedToolsets.has(name))) {
+    return "delegated-authority-violation";
+  }
+  const allowedTools = step.authorityPolicy.allowedTools === undefined
+    ? undefined
+    : new Set(step.authorityPolicy.allowedTools);
+  if (allowedTools !== undefined && effectiveTools.some((name) => !allowedTools.has(name))) {
+    return "delegated-authority-violation";
+  }
+  const allowedToolsets = new Set(step.authorityPolicy.allowedToolsets);
+  if (child.toolAccess.effectiveAllowedToolsets.some((name) => !allowedToolsets.has(name))) {
+    return "delegated-authority-violation";
+  }
+  return undefined;
 }
 
 function validateExecutionContext(input: TaskStepExecutionInput, profileId: string): string | undefined {

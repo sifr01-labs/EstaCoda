@@ -57,6 +57,40 @@ export type DelegateTaskItem = {
   modelOverride?: DelegateModelOverride;
 };
 
+export type DelegationToolStripReason =
+  | "not-parent-visible"
+  | "blocked-exact-name"
+  | "blocked-prefix"
+  | "disallowed-risk-class"
+  | "excluded-toolset"
+  | "outside-requested-allowed-tools"
+  | "outside-requested-allowed-toolsets"
+  | "unknown-unclassified-mcp-like-tool"
+  | "leaf-delegation-disabled"
+  | "spawn-depth-exceeded";
+
+export type DelegationToolDiagnostic = {
+  name: string;
+  reasons: DelegationToolStripReason[];
+  toolsets?: ToolsetName[];
+  riskClass?: string;
+};
+
+/** Bounded, durable authority-resolution evidence for one delegated Step. */
+export type DelegationAccessAudit = {
+  version: 1;
+  requestedTools: readonly string[];
+  requestedToolsets: readonly ToolsetName[];
+  parentVisibleTools: readonly string[];
+  effectiveAllowedTools: readonly string[];
+  effectiveAllowedToolsets: readonly ToolsetName[];
+  strippedTools: readonly DelegationToolDiagnostic[];
+  rejectedRequestedTools: readonly DelegationToolDiagnostic[];
+  rejectedRequestedToolsets: readonly DelegationToolDiagnostic[];
+  omittedParentVisibleToolCount?: number;
+  omittedStrippedToolCount?: number;
+};
+
 /** One fixed terminal Step that combines the durable results of every delegated worker. */
 export type DelegateSynthesis = {
   objective: string;

@@ -295,6 +295,78 @@ describe("AgentStepExecutor", () => {
     expect(createChild).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { tools: [] as string[], toolsets: [] as ToolsetName[], failureClass: "delegated-tools-unavailable" },
+    { tools: ["web.search"], toolsets: ["web"] as ToolsetName[], failureClass: "delegated-authority-violation" }
+  ])("does not call the provider when delegated access revalidation fails: $failureClass", async ({
+    tools: effectiveTools,
+    toolsets: effectiveToolsets,
+    failureClass
+  }) => {
+    const graph = makeGraph();
+    const step: TaskStep = {
+      ...graph.steps[0]!,
+      executor: {
+        ...graph.steps[0]!.executor,
+        delegationAccess: {
+          version: 1,
+          requestedTools: ["file.read"],
+          requestedToolsets: ["files"],
+          parentVisibleTools: ["file.read"],
+          effectiveAllowedTools: ["file.read"],
+          effectiveAllowedToolsets: ["files"],
+          strippedTools: [],
+          rejectedRequestedTools: [],
+          rejectedRequestedToolsets: []
+        }
+      }
+    };
+    const handle = vi.fn(async () => response());
+    const cleanup = vi.fn(async () => undefined);
+    const childFactory: ChildAgentLoopFactory = {
+      createChild: vi.fn(async (input) => {
+        await sessionDb.createSession({
+          id: `worker-access-${failureClass}`,
+          profileId: input.profileId,
+          parentSessionId: input.parentSessionId,
+          metadata: { kind: "task-step-worker", ...(input.taskExecution ?? {}) }
+        });
+        return childRuntime(handle, cleanup, {
+          sessionId: `worker-access-${failureClass}`,
+          trajectoryId: `trajectory-access-${failureClass}`
+        }, { tools: effectiveTools, toolsets: effectiveToolsets });
+      })
+    };
+    const executor = new AgentStepExecutor({
+      childFactory,
+      sessionDb,
+      taskStore: store,
+      hostWorkspace: graph.task.workspace,
+      isWorkspaceTrusted: () => true,
+      parentVisibleTools: () => tools(),
+      approvalService: new TaskApprovalService({ store }),
+      securityPolicy: capabilityFirstDefaults
+    });
+
+    await expect(executor.execute({
+      task: graph.task,
+      step,
+      attempt: attempt({ ...graph, steps: [step] }),
+      signal: new AbortController().signal,
+      heartbeat: vi.fn(),
+      checkpoint: vi.fn()
+    })).resolves.toMatchObject({
+      outcome: "failed",
+      failure: { class: failureClass, retryable: false },
+      workerSessionId: `worker-access-${failureClass}`
+    });
+    expect(handle).not.toHaveBeenCalled();
+    expect(cleanup).toHaveBeenCalledOnce();
+    await expect(sessionDb.getSession(`worker-access-${failureClass}`)).resolves.toMatchObject({
+      endReason: "task-step-failed"
+    });
+  });
+
   it("records the durable Task ancestry depth in timeout diagnostics", async () => {
     vi.useFakeTimers();
     try {
@@ -390,7 +462,7 @@ describe("AgentStepExecutor", () => {
         return childRuntime(async () => response(), vi.fn(async () => undefined), {
           sessionId: "worker-synthesis",
           trajectoryId: "trajectory-synthesis"
-        });
+        }, { tools: ["task.result.read"], toolsets: ["core"] });
       })
     };
     const executor = new AgentStepExecutor({
@@ -505,7 +577,7 @@ describe("AgentStepExecutor", () => {
           return childRuntime(async () => response(), vi.fn(async () => undefined), {
             sessionId: "worker-partial-synthesis",
             trajectoryId: "trajectory-partial-synthesis"
-          });
+          }, { tools: ["task.result.read"], toolsets: ["core"] });
         })
       },
       sessionDb,
@@ -1292,6 +1364,10 @@ function childRuntime(
   identity: { sessionId: string; trajectoryId: string } = {
     sessionId: "worker-alpha",
     trajectoryId: "trajectory-alpha"
+  },
+  access: { tools: string[]; toolsets: ToolsetName[] } = {
+    tools: ["file.read"],
+    toolsets: ["files"]
   }
 ): ChildAgentLoopRuntime {
   return {
@@ -1304,8 +1380,8 @@ function childRuntime(
     enabledRuntimeFeatures: [],
     approvalMode: "non-interactive-fail-closed",
     toolAccess: {
-      effectiveAllowedToolsets: ["files"],
-      effectiveAllowedTools: ["file.read"],
+      effectiveAllowedToolsets: access.toolsets,
+      effectiveAllowedTools: access.tools,
       strippedTools: [],
       blockedTools: [],
       rejectedRequestedTools: [],
