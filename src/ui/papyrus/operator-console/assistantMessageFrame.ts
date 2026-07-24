@@ -2,6 +2,13 @@ import {
   truncateVisible,
   wrapText,
 } from "../../renderers/layout.js";
+import {
+  balanceBidiIsolatesAcrossSegments,
+  closeOpenBidiIsolates,
+  hasRtlText,
+  isolateAuto,
+  prepareBidiTextForWrapping,
+} from "../../bidi.js";
 import { stringWidth } from "../screen/stringWidth.js";
 import { formatInlineToolTrailRow } from "./inlineToolTrailSurface.js";
 import type { InlineToolTrailEntry } from "./operatorConsoleState.js";
@@ -67,7 +74,7 @@ export function renderAssistantMessageFrame(
 
   const title = normalizeTitle(input.title, options.style);
   const contentRows = renderWrappedContentRows(input, contentWidthFor(width), options.style, options.motionElapsedMs);
-  if (height < 3) return [truncateVisible(`${title}: ${summarizeContentRows(contentRows)}`, width)];
+  if (height < 3) return [truncateAssistantText(`${title}: ${summarizeContentRows(contentRows)}`, width)];
 
   const visibleContentRows = Math.max(1, height - 2);
   const selectedRows = selectLatestRows(contentRows, visibleContentRows);
@@ -115,7 +122,7 @@ function renderContentBlockRows(
 ): readonly string[] {
   if (block.kind === "text") {
     const lines = withOptionalCursor(normalizeFrameLines(block.lines), block.cursor);
-    return lines.flatMap((line) => wrapText(line, Math.max(1, width)));
+    return lines.flatMap((line) => renderWrappedAssistantTextLine(line, Math.max(1, width)));
   }
 
   const entries = [...block.entries].sort((left, right) => left.sequence - right.sequence);
@@ -231,8 +238,19 @@ function renderBottomBorder(width: number): string {
 
 function renderContentRow(row: string, width: number): string {
   if (row.length === 0) return "";
-  if (width <= 2) return truncateVisible(row, width);
-  return `  ${truncateVisible(row, Math.max(0, width - 4))}`;
+  if (width <= 2) return truncateAssistantText(row, width);
+  return `  ${truncateAssistantText(row, Math.max(0, width - 4))}`;
+}
+
+function renderWrappedAssistantTextLine(line: string, width: number): readonly string[] {
+  const prepared = prepareBidiTextForWrapping(line, { source: "untrusted" });
+  const wrapped = balanceBidiIsolatesAcrossSegments(wrapText(prepared, width));
+  if (!hasRtlText(prepared)) return wrapped;
+  return wrapped.map((segment) => isolateAuto(segment));
+}
+
+function truncateAssistantText(value: string, width: number): string {
+  return closeOpenBidiIsolates(truncateVisible(value, width));
 }
 
 function contentWidthFor(width: number): number {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveTokens } from "../../../theme/token-resolver.js";
+import { FSI, isolateAuto, isolateLtr, PDI } from "../../bidi.js";
 import { stringWidth } from "../screen/stringWidth.js";
 import {
   getAssistantMessageFrameDesiredHeight,
@@ -56,6 +57,54 @@ describe("Papyrus operator console assistant message frame", () => {
     expect(live).toContain("Still composing▍");
     expect(settled).toContain("Still composing");
     expect(settled).not.toContain("▍");
+  });
+
+  it("prepares mixed Arabic assistant text before wrapping", () => {
+    const prepared = `استخدم ${isolateLtr("KIMI_API_KEY")} مع ${isolateLtr("kimi-k2.6")}`;
+    const rows = renderAssistantMessageFrame({
+      lines: ["استخدم KIMI_API_KEY مع kimi-k2.6"],
+    }, { width: 72 });
+
+    expect(rows[1]).toBe(`  ${isolateAuto(prepared)}`);
+    expect(rows[0]).not.toContain(FSI);
+    expect(rows.every((line) => stringWidth(line) <= 72)).toBe(true);
+  });
+
+  it("contains every wrapped Arabic visual row in its own isolate", () => {
+    const rows = renderAssistantMessageFrame({
+      lines: ["مرحبا بكم في EstaCoda، هذه إجابة عربية طويلة تلتف عبر عدة أسطر طرفية."],
+    }, { width: 24 });
+    const contentRows = rows.slice(1, -1).filter((row) => row.length > 0);
+
+    expect(contentRows.length).toBeGreaterThan(1);
+    expect(contentRows.every((row) => row.startsWith(`  ${FSI}`) && row.endsWith(PDI))).toBe(true);
+    expect(rows.every((line) => stringWidth(line) <= 24)).toBe(true);
+  });
+
+  it("removes untrusted legacy overrides without changing assistant chrome", () => {
+    const rows = renderAssistantMessageFrame({
+      lines: ["قبل \u202eabc\u202c بعد"],
+    }, { width: 48 });
+    const rendered = rows.join("\n");
+
+    expect(rendered).toContain(isolateAuto(`قبل ${isolateLtr("abc")} بعد`));
+    expect(rendered).not.toContain("\u202e");
+    expect(rendered).not.toContain("\u202c");
+    expect(rows[0]).toContain("EstaCoda");
+    expect(rows[0]).not.toContain(FSI);
+  });
+
+  it("preserves ANSI styling while isolating visible mixed-direction content", () => {
+    const red = "\x1b[31m";
+    const reset = "\x1b[0m";
+    const rows = renderAssistantMessageFrame({
+      lines: [`استخدم ${red}GPT-5.5${reset} الآن`],
+    }, { width: 48 });
+
+    expect(rows[1]).toBe(`  ${isolateAuto(`استخدم ${red}${isolateLtr("GPT-5.5")}${reset} الآن`)}`);
+    expect(rows[1]).toContain(red);
+    expect(rows[1]).toContain(reset);
+    expect(stringWidth(rows[1] ?? "")).toBeLessThanOrEqual(48);
   });
 
   it("renders inline tool trail rows between assistant text blocks", () => {
@@ -126,6 +175,15 @@ describe("Papyrus operator console assistant message frame", () => {
     expect(rows.join("\n")).not.toContain("assistant:");
   });
 
+  it("closes isolates when a constrained summary truncates Arabic text", () => {
+    const rows = renderAssistantMessageFrame({
+      lines: ["هذه إجابة عربية طويلة تحتوي على KIMI_API_KEY ويجب اختصارها بأمان."],
+    }, { width: 28, height: 1 });
+
+    expect(count(rows[0] ?? "", FSI)).toBe(count(rows[0] ?? "", PDI));
+    expect(stringWidth(rows[0] ?? "")).toBeLessThanOrEqual(28);
+  });
+
   it("reports frame desired height from wrapped content", () => {
     expect(getAssistantMessageFrameDesiredHeight({
       lines: ["short"],
@@ -142,4 +200,8 @@ function ansiFg(hex: string): string {
   const g = Number.parseInt(clean.slice(2, 4), 16);
   const b = Number.parseInt(clean.slice(4, 6), 16);
   return `\x1b[38;2;${r};${g};${b}m`;
+}
+
+function count(value: string, token: string): number {
+  return [...value].filter((char) => char === token).length;
 }

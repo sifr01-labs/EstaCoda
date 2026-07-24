@@ -33,6 +33,7 @@ const COMMON_TECHNICAL_TOKEN_SOURCES = [
   "\\b(?:Ctrl|Alt|Shift|Cmd|Meta)\\+[A-Za-z0-9]+\\b",
   "\\bv?\\d+(?:\\.\\d+)+(?:[-+][A-Za-z0-9.-]+)?\\b",
   "\\b[A-Za-z][A-Za-z0-9]*(?:[-_.:/][A-Za-z0-9]+)+\\b",
+  "\\b[A-Za-z][A-Za-z0-9]*(?:[ \\t]+[A-Za-z][A-Za-z0-9]*)*\\b",
   "\\b\\d+(?:[.,:/]\\d+)*(?:[kKmMgG%])?\\b",
 ];
 
@@ -69,6 +70,10 @@ export function isolateRtl(value: string): string {
  */
 export function isolateAuto(value: string): string {
   return `${FSI}${value}${PDI}`;
+}
+
+export function hasRtlText(value: string): boolean {
+  return RTL_TEXT_PATTERN.test(value);
 }
 
 /**
@@ -142,6 +147,21 @@ export function prepareBidiTextForWrapping(
   return mapLogicalLines(sanitized, (line) => isolateTechnicalTokens(line, options));
 }
 
+/**
+ * Reopens isolates that span a visual wrap boundary and closes them at the end
+ * of each segment. The logical isolate stack is carried forward unchanged.
+ */
+export function balanceBidiIsolatesAcrossSegments(
+  segments: readonly string[]
+): readonly string[] {
+  const openIsolates: string[] = [];
+  return segments.map((segment) => {
+    const prefix = openIsolates.join("");
+    updateIsolateStack(segment, openIsolates);
+    return `${prefix}${segment}${PDI.repeat(openIsolates.length)}`;
+  });
+}
+
 export function closeOpenBidiIsolates(value: string): string {
   const openIsolates = isolationDepthAt(value, value.length, 0);
   return openIsolates === 0 ? value : `${value}${PDI.repeat(openIsolates)}`;
@@ -207,6 +227,24 @@ function isolationDepthAt(value: string, offset: number, initialDepth: number): 
     index += char.length;
   }
   return depth;
+}
+
+function updateIsolateStack(value: string, stack: string[]): void {
+  for (let index = 0; index < value.length;) {
+    const ansi = readAnsiSequence(value, index);
+    if (ansi !== undefined) {
+      index += ansi.length;
+      continue;
+    }
+
+    const char = value[index]!;
+    if (isIsolateOpener(char)) {
+      stack.push(char);
+    } else if (char === PDI && stack.length > 0) {
+      stack.pop();
+    }
+    index += char.length;
+  }
 }
 
 function isIsolateOpener(value: string): boolean {

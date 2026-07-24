@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  balanceBidiIsolatesAcrossSegments,
   closeOpenBidiIsolates,
   FSI,
   isolateAuto,
@@ -76,6 +77,13 @@ describe("isolateTechnicalTokens", () => {
     );
   });
 
+  it("isolates single and multi-word Latin runs in Arabic prose", () => {
+    const value = "استخدم OpenAI مع Agent Evolution الآن";
+    expect(isolateTechnicalTokens(value)).toBe(
+      `استخدم ${isolateLtr("OpenAI")} مع ${isolateLtr("Agent Evolution")} الآن`
+    );
+  });
+
   it("isolates explicit multi-word commands without translating them", () => {
     const command = "pnpm run smoke";
     expect(isolateTechnicalTokens(`شغّل ${command} الآن`, {
@@ -134,6 +142,20 @@ describe("prepareBidiTextForWrapping", () => {
   it("is idempotent for already prepared mixed-direction text", () => {
     const prepared = prepareBidiTextForWrapping("استخدم GPT-5.5 مع KIMI_API_KEY");
     expect(prepareBidiTextForWrapping(prepared)).toBe(prepared);
+  });
+});
+
+describe("balanceBidiIsolatesAcrossSegments", () => {
+  it("closes and reopens nested isolates split by visual wrapping", () => {
+    const segments = [
+      `${RLI}مرحبا ${LRI}GPT-`,
+      `5.5${PDI} الآن${PDI}`,
+    ];
+
+    expect(balanceBidiIsolatesAcrossSegments(segments)).toEqual([
+      `${RLI}مرحبا ${LRI}GPT-${PDI}${PDI}`,
+      `${RLI}${LRI}5.5${PDI} الآن${PDI}`,
+    ]);
   });
 });
 

@@ -391,6 +391,12 @@ above the status rail. Arabic console surfaces must measure visible width, keep
 technical tokens LTR-isolated, and preserve balanced bidi isolates after
 truncation or padding.
 
+Live and settled assistant text share one render-time bidi preparation path.
+It contains untrusted directional controls to each logical line, isolates mixed
+LTR runs before wrapping, and gives each wrapped Arabic row its own directional
+isolate. Stored transcript and streaming state remain in logical order. Editable
+prompt rows continue to use terminal-native bidi and are not software-reordered.
+
 ---
 
 ## Papyrus Full Interactive Migration

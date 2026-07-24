@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isolateAuto, isolateLtr } from "../../bidi.js";
 import { stringWidth } from "../screen/stringWidth.js";
 import {
   getTranscriptSurfaceDesiredHeight,
@@ -46,6 +47,18 @@ describe("Papyrus operator console transcript surface", () => {
     expect(rendered).toContain("1s");
     expect(rendered).not.toContain("Tool │");
     expect(rows.every((line) => stringWidth(line) <= 80)).toBe(true);
+  });
+
+  it("isolates technical tokens in settled Arabic assistant prose", () => {
+    const rows = renderTranscriptSurface([
+      { id: "assistant-1", role: "assistant", text: "شغّل /model ثم استخدم GPT-5.5" },
+    ], { width: 72 });
+    const rendered = rows.join("\n");
+
+    expect(rendered).toContain(isolateAuto(
+      `شغّل ${isolateLtr("/model")} ثم استخدم ${isolateLtr("GPT-5.5")}`
+    ));
+    expect(rows.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
   it("wraps and truncates to the visible height cap", () => {

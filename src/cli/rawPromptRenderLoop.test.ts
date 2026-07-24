@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import { createLineEditorState } from "../ui/input/lineEditor.js";
+import { isolateAuto, isolateLtr } from "../ui/bidi.js";
 import {
   RawPromptOverlayHost,
   RawPromptRenderLoop,
@@ -289,6 +290,30 @@ describe("raw prompt render loop", () => {
     expect(text).toContain("Streaming through raw prompt frame▍");
     expect(text).not.toContain("Assistant stream");
     expect(text).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("writes bidi-safe Arabic streaming rows through the live raw render loop", () => {
+    const output = fakeOutput();
+    const loop = new RawPromptRenderLoop(output);
+
+    loop.render({
+      prompt: "> ",
+      state: createLineEditorState("continue"),
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 96, height: 18, isTty: true },
+        status: status({ usedTokens: 18000, elapsedMs: 13000 }),
+        streaming: streamingState({
+          segments: [],
+          tail: "استخدم KIMI_API_KEY مع kimi-k2.6",
+        }),
+      },
+    });
+
+    expect(output.text()).toContain(isolateAuto(
+      `استخدم ${isolateLtr("KIMI_API_KEY")} مع ${isolateLtr("kimi-k2.6")}▍`
+    ));
+    expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
   });
 
   it("redraws only the Operator Console prompt region when steer text changes under a stable layout", () => {

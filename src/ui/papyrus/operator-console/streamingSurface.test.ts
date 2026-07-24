@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isolateAuto, isolateLtr } from "../../bidi.js";
 import {
   getStreamingSurfaceDesiredHeight,
   hasStreamingSurface,
@@ -100,6 +101,38 @@ describe("Papyrus operator console streaming surface", () => {
     expect(extractFrameContent(liveRows[1]?.replace("▍", "") ?? "")).toBe(
       extractFrameContent(settledRows[1] ?? "")
     );
+  });
+
+  it("renders mixed Arabic streaming and settled text identically", () => {
+    const text = "استخدم KIMI_API_KEY مع kimi-k2.6 داخل /workspace/src/main.ts";
+    const state: StreamingState = {
+      segments: [],
+      tail: text,
+      isStreaming: true,
+      showCursor: false,
+    };
+    const liveRows = renderStreamingSurface(state, { width: 52 });
+    const settledRows = renderTranscriptSurface([
+      { id: "assistant-1", role: "assistant", text },
+    ], { width: 52 });
+
+    expect(liveRows).toEqual(settledRows);
+    expect(liveRows.join("\n")).toContain(isolateLtr("KIMI_API_KEY"));
+    expect(liveRows.join("\n")).toContain(isolateLtr("kimi-k2.6"));
+    expect(liveRows.join("\n")).toContain(isolateLtr("/workspace/src/main.ts"));
+  });
+
+  it("rebuilds untrusted partial output without preserving legacy overrides", () => {
+    const state: StreamingState = {
+      segments: [],
+      tail: "قبل \u202eabc\u202c بعد",
+      isStreaming: true,
+    };
+    const rendered = renderStreamingSurface(state, { width: 48 }).join("\n");
+
+    expect(rendered).toContain(isolateAuto(`قبل ${isolateLtr("abc")} بعد▍`));
+    expect(rendered).not.toContain("\u202e");
+    expect(rendered).not.toContain("\u202c");
   });
 });
 

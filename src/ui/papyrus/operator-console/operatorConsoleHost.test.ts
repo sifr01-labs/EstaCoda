@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { resolveTokens } from "../../../theme/token-resolver.js";
+import { isolateAuto, isolateLtr } from "../../bidi.js";
 import { createLineEditorState } from "../../input/lineEditor.js";
 import { stringWidth } from "../screen/stringWidth.js";
 import {
@@ -227,6 +228,24 @@ describe("Papyrus operator console raw prompt host", () => {
     expect(text).toContain("Still composing the response");
     expect(text).toContain("Still composing the response▍");
     expect(text).not.toContain("Assistant stream");
+    expect(frame.rows.every((line) => stringWidth(line) <= 80)).toBe(true);
+  });
+
+  it("renders bidi-safe Arabic assistant text through the raw prompt host", () => {
+    const frame = buildOperatorConsoleRawPromptFrame({
+      prompt: "> ",
+      state: createLineEditorState("continue"),
+      terminal: { width: 80, height: 18, isTty: true },
+      streaming: streamingState({
+        segments: [],
+        tail: "استخدم KIMI_API_KEY مع kimi-k2.6",
+      }),
+    });
+
+    expect(frame.state.streaming?.tail).toBe("استخدم KIMI_API_KEY مع kimi-k2.6");
+    expect(frame.rows.join("\n")).toContain(isolateAuto(
+      `استخدم ${isolateLtr("KIMI_API_KEY")} مع ${isolateLtr("kimi-k2.6")}▍`
+    ));
     expect(frame.rows.every((line) => stringWidth(line) <= 80)).toBe(true);
   });
 
