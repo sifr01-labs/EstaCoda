@@ -162,11 +162,11 @@ export class DurableDelegationService {
       ? stepAuthorities
       : [...stepAuthorities, synthesisAuthority];
     const taskAuthority = mergeAuthorities(allAuthorities);
-    const totalStepCount = request.tasks.length + (synthesis === undefined ? 0 : 1);
-    const sequentialPhaseCount = synthesis === undefined ? 1 : 2;
+    const workerCount = request.tasks.length;
+    const hasSynthesis = synthesis !== undefined;
     const executionLimits = delegationExecutionLimits(
-      totalStepCount,
-      sequentialPhaseCount,
+      workerCount,
+      hasSynthesis,
       this.#config.maxConcurrentChildren,
       this.#config.childTimeoutSeconds,
       parent?.executionLimits
@@ -411,8 +411,8 @@ function delegatedRetryPolicy(idempotency: TaskIdempotency): TaskRetryPolicy {
 }
 
 function delegationExecutionLimits(
-  stepCount: number,
-  sequentialPhaseCount: number,
+  workerCount: number,
+  hasSynthesis: boolean,
   maxConcurrentChildren: number,
   timeoutSeconds: number,
   ceiling?: TaskExecutionLimits
@@ -420,17 +420,33 @@ function delegationExecutionLimits(
   task: TaskExecutionLimits;
   step: TaskStepExecutionLimits;
 } {
+  const stepCount = workerCount + (hasSynthesis ? 1 : 0);
+  const maxConcurrentAttempts = Math.min(
+    stepCount,
+    maxConcurrentChildren,
+    TASK_GRAPH_LIMITS.maxConcurrentAttempts,
+    ceiling?.maxConcurrentAttempts ?? Number.MAX_SAFE_INTEGER
+  );
+  const workerCapacity = Math.min(workerCount, maxConcurrentAttempts);
+  const workerWaveCount = Math.ceil(workerCount / workerCapacity);
+  const scheduledPhaseCount = workerWaveCount + (hasSynthesis ? 1 : 0);
   const wall = Math.max(1, Math.floor(timeoutSeconds * 1_000));
   const phaseWall = ceiling === undefined
     ? wall
-    : Math.max(1, Math.floor(ceiling.maxWallClockMs / sequentialPhaseCount));
+    : Math.max(1, Math.floor(ceiling.maxWallClockMs / scheduledPhaseCount));
   let rootTaskWall = ceiling?.maxWallClockMs;
   if (rootTaskWall === undefined) {
+    const workerWall = wall * workerWaveCount;
+    const synthesisWall = hasSynthesis ? wall : 0;
+    const scheduledWall = workerWall + synthesisWall;
+    if (!Number.isSafeInteger(scheduledWall)) {
+      throw new Error("Delegation wall-clock limit exceeds the safe integer range.");
+    }
     const schedulingAllowance = Math.min(
       MAX_TASK_SCHEDULING_ALLOWANCE_MS,
-      Math.max(1, Math.floor(wall * TASK_SCHEDULING_ALLOWANCE_RATIO))
+      Math.max(1, Math.floor(scheduledWall * TASK_SCHEDULING_ALLOWANCE_RATIO))
     );
-    rootTaskWall = wall * sequentialPhaseCount + schedulingAllowance;
+    rootTaskWall = scheduledWall + schedulingAllowance;
     if (!Number.isSafeInteger(rootTaskWall)) {
       throw new Error("Delegation wall-clock limit exceeds the safe integer range.");
     }
@@ -438,17 +454,12 @@ function delegationExecutionLimits(
   const totalCalls = STEP_PROVIDER_CALLS * stepCount;
   const totalTokens = STEP_TOTAL_TOKENS * stepCount;
   const task: TaskExecutionLimits = ceiling === undefined ? {
-    maxConcurrentAttempts: Math.min(stepCount, maxConcurrentChildren, TASK_GRAPH_LIMITS.maxConcurrentAttempts),
+    maxConcurrentAttempts,
     maxProviderCalls: totalCalls,
     maxTotalTokens: totalTokens,
     maxWallClockMs: rootTaskWall
   } : {
-    maxConcurrentAttempts: Math.min(
-      stepCount,
-      maxConcurrentChildren,
-      TASK_GRAPH_LIMITS.maxConcurrentAttempts,
-      ceiling.maxConcurrentAttempts
-    ),
+    maxConcurrentAttempts,
     maxProviderCalls: ceiling.maxProviderCalls,
     maxTotalTokens: ceiling.maxTotalTokens,
     maxWallClockMs: ceiling.maxWallClockMs

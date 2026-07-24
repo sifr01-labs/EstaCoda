@@ -234,7 +234,7 @@ describe("DurableDelegationService", () => {
     expect(revisions).toHaveLength(1);
     expect(revisions[0]?.status).toBe("active");
     expect(new Set(synthesis.dependsOn)).toEqual(new Set(workers.map((step) => step.id)));
-    expect(task.executionLimits.maxWallClockMs).toBe(1_230_000);
+    expect(task.executionLimits.maxWallClockMs).toBe(1_830_000);
     expect(steps.every((step) => step.executionLimits.maxWallClockMs === 600_000)).toBe(true);
     expect(synthesis.childTaskPolicy).toBe("forbid");
     expect(synthesis.idempotency).toBe("retry_safe");
@@ -605,7 +605,8 @@ describe("DurableDelegationService", () => {
     const steps = store.listSteps(task.id, task.activePlanRevisionId!);
 
     expect(task.executionLimits.maxWallClockMs).toBe(parent.stepExecutionLimits.maxWallClockMs);
-    expect(steps.map((step) => step.executionLimits.maxWallClockMs)).toEqual([30_000, 30_000, 30_000]);
+    // The inherited concurrency ceiling is one: two worker waves plus synthesis divide the 60-second ceiling.
+    expect(steps.map((step) => step.executionLimits.maxWallClockMs)).toEqual([20_000, 20_000, 20_000]);
   });
 
   it("prevents child Tasks from redefining the root monetary scope", () => {
@@ -747,6 +748,32 @@ describe("DurableDelegationService", () => {
       usageComplete: true,
       pricingComplete: true
     });
+  });
+
+  it("budgets two worker waves plus synthesis when six workers have concurrency three", () => {
+    const service = new DurableDelegationService({
+      store,
+      creatorSessionId: () => "parent",
+      workspace: workspace(),
+      config: { ...DEFAULT_DELEGATION_CONFIG, maxConcurrentChildren: 3 },
+      visibleTools
+    });
+    const handle = service.create({
+      toolCallId: "call-capacity-aware-deadline",
+      trustedWorkspace: true,
+      tasks: Array.from({ length: 6 }, (_, index) => ({ task: `Research ${index + 1}` })),
+      synthesis: { objective: "Synthesize all six worker Results." }
+    });
+    const task = store.getTask(handle.taskId)!;
+    const steps = store.listSteps(task.id, task.activePlanRevisionId!);
+
+    expect(task.executionLimits).toMatchObject({
+      maxConcurrentAttempts: 3,
+      // Two 10-minute worker waves + one 10-minute synthesis allowance + capped 30-second slack.
+      maxWallClockMs: 1_830_000
+    });
+    expect(steps).toHaveLength(7);
+    expect(steps.every((step) => step.executionLimits.maxWallClockMs === 600_000)).toBe(true);
   });
 
   it("does not let a child Task expand the root Task's live concurrency", async () => {
