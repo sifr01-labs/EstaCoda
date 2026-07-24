@@ -43,6 +43,7 @@ import {
 } from "./task-step-executor.js";
 
 const DEFAULT_LEASE_MS = 30_000;
+const DEFAULT_ATTEMPT_LEASE_ABORT_GRACE_MS = 2_000;
 const MAX_RESULT_RECORDS_PER_SETTLEMENT = 64;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const TASK_STEP_EXECUTION_DEADLINE_ABORT_REASON = "task-step-execution-deadline";
@@ -78,6 +79,8 @@ export type TaskSchedulerOptions = {
   ownerId: string;
   resolveExecutor: ResolveTaskStepExecutor;
   leaseMs?: number;
+  /** Maximum time lease renewal may continue after local execution abort. */
+  attemptLeaseAbortGraceMs?: number;
   limits?: TaskSchedulerLimits;
   now?: () => Date;
   id?: () => string;
@@ -191,6 +194,7 @@ export class TaskScheduler {
   readonly #ownerId: string;
   readonly #resolveExecutor: ResolveTaskStepExecutor;
   readonly #leaseMs: number;
+  readonly #attemptLeaseAbortGraceMs: number;
   readonly #limits: Required<Pick<TaskSchedulerLimits, "maxProfileConcurrentAttempts">> & TaskSchedulerLimits;
   readonly #now: () => Date;
   readonly #id: () => string;
@@ -209,6 +213,13 @@ export class TaskScheduler {
     this.#ownerId = requireToken(options.ownerId, "scheduler owner ID");
     this.#resolveExecutor = options.resolveExecutor;
     this.#leaseMs = positiveInteger(options.leaseMs ?? DEFAULT_LEASE_MS, "scheduler lease duration");
+    this.#attemptLeaseAbortGraceMs = nonNegativeInteger(
+      options.attemptLeaseAbortGraceMs ?? Math.min(
+        DEFAULT_ATTEMPT_LEASE_ABORT_GRACE_MS,
+        Math.max(1, Math.floor(this.#leaseMs / 3))
+      ),
+      "Attempt lease abort grace"
+    );
     this.#limits = {
       maxProfileConcurrentAttempts: positiveInteger(
         options.limits?.maxProfileConcurrentAttempts ?? TASK_GRAPH_LIMITS.maxConcurrentAttempts,
@@ -509,18 +520,53 @@ export class TaskScheduler {
     if (lease === undefined) return { stop: () => undefined };
     const intervalMs = attemptLeaseHeartbeatIntervalMs(this.#leaseMs);
     const initialDelayMs = staggeredHeartbeatDelayMs(intervalMs, attempt.id);
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let currentLease = lease;
+    let renewalTimer: ReturnType<typeof setTimeout> | undefined;
+    let abortGraceTimer: ReturnType<typeof setTimeout> | undefined;
+    let staleGraceTimer: ReturnType<typeof setTimeout> | undefined;
     let stopped = false;
     const stop = () => {
       if (stopped) return;
       stopped = true;
-      if (timer !== undefined) clearTimeout(timer);
+      if (renewalTimer !== undefined) clearTimeout(renewalTimer);
+      if (abortGraceTimer !== undefined) clearTimeout(abortGraceTimer);
+      if (staleGraceTimer !== undefined) clearTimeout(staleGraceTimer);
+      controller.signal.removeEventListener("abort", beginAbortGrace);
+    };
+    const stopAfterStaleGrace = () => {
+      if (!controller.signal.aborted) controller.abort("attempt-lease-stale");
+      stop();
+    };
+    const beginAbortGrace = () => {
+      if (stopped || abortGraceTimer !== undefined) return;
+      if (this.#attemptLeaseAbortGraceMs === 0) {
+        stop();
+        return;
+      }
+      abortGraceTimer = setTimeout(stop, this.#attemptLeaseAbortGraceMs);
+      abortGraceTimer.unref?.();
+    };
+    const beginStaleGrace = () => {
+      if (stopped || staleGraceTimer !== undefined) return;
+      const remainingMs = Date.parse(currentLease.expiresAt) - this.#now().getTime();
+      if (!Number.isFinite(remainingMs) || remainingMs <= 0) {
+        stopAfterStaleGrace();
+        return;
+      }
+      staleGraceTimer = setTimeout(stopAfterStaleGrace, remainingMs);
+      staleGraceTimer.unref?.();
+    };
+    const clearStaleGrace = () => {
+      if (staleGraceTimer !== undefined) clearTimeout(staleGraceTimer);
+      staleGraceTimer = undefined;
     };
     const schedule = (delayMs: number) => {
-      timer = setTimeout(() => {
+      if (stopped) return;
+      renewalTimer = setTimeout(() => {
         if (stopped) return;
         try {
-          this.heartbeat(attempt.id, lease.fencingToken);
+          currentLease = this.heartbeat(attempt.id, lease.fencingToken);
+          clearStaleGrace();
           this.#leaseFailures.delete(attempt.id);
         } catch (error) {
           if (error instanceof TaskSchedulerCancellationError) {
@@ -540,10 +586,14 @@ export class TaskScheduler {
             stop();
             return;
           }
+          beginStaleGrace();
         }
         schedule(intervalMs);
       }, delayMs);
+      renewalTimer.unref?.();
     };
+    controller.signal.addEventListener("abort", beginAbortGrace, { once: true });
+    if (controller.signal.aborted) beginAbortGrace();
     schedule(initialDelayMs);
     return { stop };
   }
@@ -2544,6 +2594,7 @@ function attemptLeaseDiagnosticData(
 ): Record<string, unknown> {
   return {
     ...(lease === undefined ? {} : {
+      fencingToken: lease.fencingToken,
       lastSuccessfulHeartbeatAt: lease.heartbeatAt,
       leaseExpiresAt: lease.expiresAt
     }),
@@ -2566,8 +2617,9 @@ function attemptLeaseReconciliationWarning(
     ? diagnostic.lastSuccessfulHeartbeatAt
     : "unknown";
   const expiry = typeof diagnostic.leaseExpiresAt === "string" ? diagnostic.leaseExpiresAt : "missing";
+  const fencingToken = typeof diagnostic.fencingToken === "number" ? diagnostic.fencingToken : "missing";
   return `Attempt ${attemptId} was reconciled after ${lease === undefined ? "a missing lease" : "lease expiry"} ` +
-    `(last heartbeat ${heartbeat}; lease expiry ${expiry}; detected ${detectedAt}; ` +
+    `(fence ${fencingToken}; last heartbeat ${heartbeat}; lease expiry ${expiry}; detected ${detectedAt}; ` +
     `reason ${String(diagnostic.heartbeatFailureReason)}).`;
 }
 

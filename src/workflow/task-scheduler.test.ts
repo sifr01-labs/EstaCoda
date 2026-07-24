@@ -819,7 +819,7 @@ describe("TaskScheduler", () => {
     expect(renewedExpiry).toBe("2030-01-01T00:00:40.000Z");
   });
 
-  it("guards the Attempt lease while an executor is idle before its own heartbeat loop", async () => {
+  it("renews within the bounded first interval while an executor is idle before its own heartbeat loop", async () => {
     vi.useFakeTimers();
     try {
       store.createTaskGraph(makeGraph([makeStep("scheduler-heartbeat", 0)]));
@@ -835,15 +835,53 @@ describe("TaskScheduler", () => {
         dispatchGrants: dispatchGrantsFor("scheduler-alpha", ["task-alpha"])
       });
       const attemptId = store.listAttempts("task-alpha")[0]!.id;
-      nowMs += 20;
-      await vi.advanceTimersByTimeAsync(20);
+      await advanceSchedulerTimers(7);
+      expect(store.getAttempt(attemptId)?.lease?.heartbeatAt).toBe(NOW);
 
-      expect(store.getAttempt(attemptId)?.lease).toMatchObject({
-        heartbeatAt: "2030-01-01T00:00:00.020Z",
-        expiresAt: "2030-01-01T00:00:00.050Z"
-      });
+      await advanceSchedulerTimers(5);
+
+      const renewedLease = store.getAttempt(attemptId)?.lease;
+      const firstHeartbeatDelayMs = Date.parse(renewedLease!.heartbeatAt) - Date.parse(NOW);
+      expect(firstHeartbeatDelayMs).toBeGreaterThanOrEqual(8);
+      expect(firstHeartbeatDelayMs).toBeLessThanOrEqual(12);
+      expect(Date.parse(renewedLease!.expiresAt) - Date.parse(renewedLease!.heartbeatAt)).toBe(30);
       finish();
       await expect(dispatch.completion).resolves.toMatchObject({ completed: 1, leaseLost: 0 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("renews only through a bounded grace after local execution abort", async () => {
+    vi.useFakeTimers();
+    try {
+      store.createTaskGraph(makeGraph([makeStep("abort-grace", 0, {
+        executionLimits: { maxProviderCalls: 5, maxTotalTokens: 50_000, maxWallClockMs: 5 }
+      })], { maxWallClockMs: 1_000 }));
+      let finish!: () => void;
+      const gate = new Promise<void>((resolve) => { finish = resolve; });
+      const executor = new FakeTaskStepExecutor(async () => {
+        await gate;
+        return { outcome: "succeeded", results: [{ kind: "text", content: "late but bounded" }] };
+      });
+      const scheduler = makeScheduler(executor, undefined, 60, "scheduler-alpha", 20);
+      const dispatch = await scheduler.dispatchOnce({
+        dispatchGrants: dispatchGrantsFor("scheduler-alpha", ["task-alpha"])
+      });
+      const attemptId = store.listAttempts("task-alpha")[0]!.id;
+
+      await advanceSchedulerTimers(5);
+      expect(executor.executions[0]?.signal.aborted).toBe(true);
+
+      await advanceSchedulerTimers(19);
+      const heartbeatWithinGrace = store.getAttempt(attemptId)?.lease?.heartbeatAt;
+      expect(heartbeatWithinGrace).not.toBe(NOW);
+
+      await advanceSchedulerTimers(31);
+      expect(store.getAttempt(attemptId)?.lease?.heartbeatAt).toBe(heartbeatWithinGrace);
+
+      finish();
+      await expect(dispatch.completion).resolves.toMatchObject({ failed: 1, leaseLost: 0 });
     } finally {
       vi.useRealTimers();
     }
@@ -906,6 +944,7 @@ describe("TaskScheduler", () => {
 
       expect(await scheduler.runOnce()).toMatchObject({ reconciled: 1, dispatched: 1, completed: 1 });
       expect(store.listEvents("task-alpha", { kinds: ["attempt-expired"] })[0]?.data).toMatchObject({
+        fencingToken: 1,
         lastSuccessfulHeartbeatAt: NOW,
         leaseExpiresAt: "2030-01-01T00:00:00.030Z",
         expiryDetectedAt: "2030-01-01T00:00:00.040Z",
@@ -914,6 +953,54 @@ describe("TaskScheduler", () => {
       });
       expect(store.getTask("task-alpha")?.status).toBe("completed");
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops renewal at the last successful lease expiry after heartbeat writes remain stale", async () => {
+    vi.useFakeTimers();
+    try {
+      store.createTaskGraph(makeGraph([makeStep("heartbeat-stale", 0)]));
+      const executor = new FakeTaskStepExecutor(({ signal }, executionNumber) => executionNumber === 1
+        ? new Promise((resolve) => {
+            signal.addEventListener("abort", () => resolve({ outcome: "cancelled" }), { once: true });
+          })
+        : { outcome: "succeeded", results: [{ kind: "text", content: "recovered" }] });
+      const scheduler = makeScheduler(executor, undefined, 30);
+      let firstFailureDetectedAt: string | undefined;
+      const renewAttemptLease = vi.spyOn(store, "renewAttemptLease").mockImplementation(() => {
+        firstFailureDetectedAt ??= now().toISOString();
+        throw new TypeError("heartbeat storage unavailable");
+      });
+      const dispatch = await scheduler.dispatchOnce({
+        dispatchGrants: dispatchGrantsFor("scheduler-alpha", ["task-alpha"])
+      });
+      const attemptId = store.listAttempts("task-alpha")[0]!.id;
+
+      await advanceSchedulerTimers(12);
+      expect(firstFailureDetectedAt).toBeDefined();
+      expect(executor.executions[0]?.signal.aborted).toBe(false);
+
+      await advanceSchedulerTimers(17);
+      expect(executor.executions[0]?.signal.aborted).toBe(false);
+
+      await advanceSchedulerTimers(1);
+      expect(executor.executions[0]?.signal.aborted).toBe(true);
+      await expect(dispatch.completion).resolves.toMatchObject({ leaseLost: 1, completed: 0 });
+      expect(store.getAttempt(attemptId)?.status).toBe("running");
+
+      renewAttemptLease.mockRestore();
+      expect(await scheduler.runOnce()).toMatchObject({ reconciled: 1, dispatched: 1, completed: 1 });
+      expect(store.listEvents("task-alpha", { kinds: ["attempt-expired"] })[0]?.data).toMatchObject({
+        fencingToken: 1,
+        lastSuccessfulHeartbeatAt: NOW,
+        leaseExpiresAt: "2030-01-01T00:00:00.030Z",
+        expiryDetectedAt: "2030-01-01T00:00:00.030Z",
+        heartbeatFailureReason: "heartbeat-write-failed",
+        heartbeatFailureDetectedAt: firstFailureDetectedAt
+      });
+    } finally {
+      vi.restoreAllMocks();
       vi.useRealTimers();
     }
   });
@@ -985,6 +1072,7 @@ describe("TaskScheduler", () => {
         timestamp: NOW,
         data: expect.objectContaining({
           lastSuccessfulHeartbeatAt: "2029-12-31T23:58:30.000Z",
+          fencingToken: 1,
           leaseExpiresAt: "2029-12-31T23:59:00.000Z",
           expiryDetectedAt: NOW,
           heartbeatFailureReason: "heartbeat-not-renewed-before-expiry"
@@ -993,7 +1081,7 @@ describe("TaskScheduler", () => {
     ]);
     expect(run.warnings).toContain(
       "Attempt attempt-before-restart was reconciled after lease expiry " +
-      "(last heartbeat 2029-12-31T23:58:30.000Z; lease expiry 2029-12-31T23:59:00.000Z; " +
+      "(fence 1; last heartbeat 2029-12-31T23:58:30.000Z; lease expiry 2029-12-31T23:59:00.000Z; " +
       "detected 2030-01-01T00:00:00.000Z; reason heartbeat-not-renewed-before-expiry)."
     );
   });
@@ -1537,7 +1625,8 @@ describe("TaskScheduler", () => {
     executor: FakeTaskStepExecutor,
     limits?: TaskSchedulerLimits,
     leaseMs?: number,
-    ownerId = "scheduler-alpha"
+    ownerId = "scheduler-alpha",
+    attemptLeaseAbortGraceMs?: number
   ): TaskScheduler {
     acquireDispatchGrants(ownerId);
     return new TaskScheduler({
@@ -1547,10 +1636,18 @@ describe("TaskScheduler", () => {
       resolveExecutor: () => executor,
       limits,
       leaseMs,
+      attemptLeaseAbortGraceMs,
       now,
       id: () => nextId("attempt"),
       eventId: () => nextId("scheduler-event")
     });
+  }
+
+  async function advanceSchedulerTimers(ms: number): Promise<void> {
+    for (let elapsed = 0; elapsed < ms; elapsed++) {
+      nowMs++;
+      await vi.advanceTimersByTimeAsync(1);
+    }
   }
 });
 
