@@ -772,6 +772,40 @@ describe("TaskScheduler", () => {
       .toBe(true);
   });
 
+  it("does not invoke an admitted Attempt after cancellation wins the launch microtask race", async () => {
+    store.createTaskGraph(makeGraph([makeStep("cancel-before-launch", 0)]));
+    const executor = new FakeTaskStepExecutor(() => ({
+      outcome: "succeeded",
+      results: [{ kind: "text", content: "must not run" }]
+    }));
+    acquireDispatchGrants("scheduler-alpha");
+    let cancellationScheduled = false;
+    let scheduler!: TaskScheduler;
+    scheduler = new TaskScheduler({
+      store,
+      resultService,
+      ownerId: "scheduler-alpha",
+      resolveExecutor: () => executor,
+      now: () => {
+        if (!cancellationScheduled && store.listAttempts("task-alpha").some((attempt) => attempt.status === "queued")) {
+          cancellationScheduled = true;
+          queueMicrotask(() => scheduler.cancelTask("task-alpha"));
+        }
+        return now();
+      },
+      id: () => nextId("attempt"),
+      eventId: () => nextId("scheduler-event")
+    });
+
+    expect(await scheduler.runOnce()).toMatchObject({ dispatched: 1, completed: 0, cancelled: 1 });
+    expect(executor.executions).toHaveLength(0);
+    expect(store.getTask("task-alpha")?.status).toBe("cancelled");
+    expect(store.getStep("step-cancel-before-launch")?.status).toBe("cancelled");
+    expect(store.listAttempts("task-alpha")[0]).toMatchObject({ status: "cancelled" });
+    expect(store.listAttempts("task-alpha")[0]?.lease).toBeUndefined();
+    expect(store.listResults("task-alpha")).toEqual([]);
+  });
+
   it("renews leases from executor heartbeat", async () => {
     store.createTaskGraph(makeGraph([makeStep("heartbeat", 0)]));
     let renewedExpiry: string | undefined;

@@ -290,7 +290,9 @@ export class TaskScheduler {
         result.dispatched++;
         touchedTaskIds.add(task.id);
         incrementCapacity(capacity, task, step);
-        const launch = Promise.resolve().then(() => this.#execute(task, step, started, executor, result));
+        const controller = new AbortController();
+        this.#running.set(started.id, { taskId: task.id, controller });
+        const launch = Promise.resolve().then(() => this.#execute(task, step, started, executor, controller, result));
         launches.push(launch);
       }
       if (missingExecutor && !hasEligibleExecutor && (capacity.task.get(task.id) ?? 0) === 0) {
@@ -948,26 +950,28 @@ export class TaskScheduler {
     step: TaskStep,
     attempt: TaskAttempt,
     executor: TaskStepExecutor,
+    controller: AbortController,
     result: MutableRunResult
   ): Promise<void> {
     const lease = attempt.lease;
     if (lease === undefined) {
+      this.#running.delete(attempt.id);
       result.leaseLost++;
       return;
     }
-    const controller = new AbortController();
-    this.#running.set(attempt.id, { taskId: task.id, controller });
     try {
       let settlement: TaskExecutorSettlement;
       try {
-        settlement = await executor.execute({
-          task,
-          step,
-          attempt,
-          signal: controller.signal,
-          heartbeat: () => this.heartbeat(attempt.id, lease.fencingToken),
-          checkpoint: (checkpoint) => this.checkpoint(attempt.id, lease.fencingToken, checkpoint)
-        });
+        settlement = controller.signal.aborted
+          ? { outcome: "cancelled" }
+          : await executor.execute({
+              task,
+              step,
+              attempt,
+              signal: controller.signal,
+              heartbeat: () => this.heartbeat(attempt.id, lease.fencingToken),
+              checkpoint: (checkpoint) => this.checkpoint(attempt.id, lease.fencingToken, checkpoint)
+            });
       } catch (error) {
         if (error instanceof TaskSchedulerLeaseLostError) throw error;
         if (this.#handoffAttempts.has(attempt.id)) throw new TaskSchedulerHandoffError();

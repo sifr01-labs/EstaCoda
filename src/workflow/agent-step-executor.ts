@@ -143,6 +143,17 @@ export class AgentStepExecutor implements TaskStepExecutor {
       input.step
     );
     const modelOverride = toModelOverride(input.step);
+    let endReason = "task-step-failed";
+    const childController = new AbortController();
+    const abortChild = () => {
+      endReason = "task-step-cancelled";
+      if (!childController.signal.aborted) childController.abort(input.signal.reason ?? "task-attempt-cancelled");
+    };
+    input.signal.addEventListener("abort", abortChild, { once: true });
+    if (input.signal.aborted) {
+      input.signal.removeEventListener("abort", abortChild);
+      return { outcome: "cancelled", usage: unavailableUsage("cancelled-before-construction") };
+    }
     let child: ChildAgentLoopRuntime;
     try {
       child = await this.#childFactory.createChild({
@@ -178,22 +189,32 @@ export class AgentStepExecutor implements TaskStepExecutor {
         ...(input.attempt.workerSessionId === undefined ? {} : { resumeSessionId: input.attempt.workerSessionId })
       });
     } catch (error) {
+      input.signal.removeEventListener("abort", abortChild);
+      if (input.signal.aborted) return { outcome: "cancelled", usage: unavailableUsage("cancelled-during-construction") };
       if (error instanceof ChildModelOverrideError) return failed("model-override-unsupported", false);
       return failed("agent-construction-error", true);
     }
 
-    let endReason = "task-step-failed";
     let registered = false;
-    const childController = new AbortController();
-    const abortChild = () => {
-      if (!childController.signal.aborted) childController.abort(input.signal.reason ?? "task-attempt-cancelled");
-    };
-    input.signal.addEventListener("abort", abortChild, { once: true });
 
     try {
+      if (input.signal.aborted && input.signal.reason !== TASK_STEP_HOST_HANDOFF_ABORT_REASON) {
+        return {
+          outcome: "cancelled",
+          usage: unavailableUsage("cancelled-during-construction"),
+          workerSessionId: child.childSessionId
+        };
+      }
       input.checkpoint({
         workerSessionId: child.childSessionId
       });
+      if (input.signal.aborted) {
+        return {
+          outcome: "cancelled",
+          usage: unavailableUsage("cancelled-during-construction"),
+          workerSessionId: child.childSessionId
+        };
+      }
 
       this.#subagentRegistry.registerSubagent({
         subagentId: input.attempt.id,

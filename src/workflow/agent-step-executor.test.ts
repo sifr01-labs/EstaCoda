@@ -564,6 +564,108 @@ describe("AgentStepExecutor", () => {
     expect(createChild).not.toHaveBeenCalled();
   });
 
+  it("cancels and cleans up a child resolved after construction-time cancellation", async () => {
+    const graph = makeGraph();
+    let resolveChild!: (child: ChildAgentLoopRuntime) => void;
+    const childReady = new Promise<ChildAgentLoopRuntime>((resolve) => { resolveChild = resolve; });
+    const handle = vi.fn(async () => response());
+    const cleanup = vi.fn(async () => undefined);
+    const createChild = vi.fn(() => childReady);
+    const executor = new AgentStepExecutor({
+      childFactory: { createChild },
+      sessionDb,
+      taskStore: store,
+      hostWorkspace: graph.task.workspace,
+      isWorkspaceTrusted: () => true,
+      parentVisibleTools: () => tools(),
+      approvalService: new TaskApprovalService({ store }),
+      securityPolicy: capabilityFirstDefaults
+    });
+    const controller = new AbortController();
+    const checkpoint = vi.fn();
+    const execution = executor.execute({
+      task: graph.task,
+      step: graph.steps[0]!,
+      attempt: attempt(graph),
+      signal: controller.signal,
+      heartbeat: vi.fn(),
+      checkpoint
+    });
+    await vi.waitFor(() => expect(createChild).toHaveBeenCalledOnce());
+
+    controller.abort("operator-request");
+    await sessionDb.createSession({
+      id: "worker-cancelled-construction",
+      profileId: "alpha",
+      parentSessionId: "creator-alpha"
+    });
+    resolveChild(childRuntime(handle, cleanup, {
+      sessionId: "worker-cancelled-construction",
+      trajectoryId: "trajectory-cancelled-construction"
+    }));
+
+    await expect(execution).resolves.toMatchObject({
+      outcome: "cancelled",
+      workerSessionId: "worker-cancelled-construction"
+    });
+    expect(handle).not.toHaveBeenCalled();
+    expect(checkpoint).not.toHaveBeenCalled();
+    expect(cleanup).toHaveBeenCalledOnce();
+    await expect(sessionDb.getSession("worker-cancelled-construction")).resolves.toMatchObject({
+      endedAt: expect.any(String),
+      endReason: "task-step-cancelled"
+    });
+  });
+
+  it("checkpoints and preserves a child resolved after construction-time host handoff", async () => {
+    const graph = makeGraph();
+    let resolveChild!: (child: ChildAgentLoopRuntime) => void;
+    const childReady = new Promise<ChildAgentLoopRuntime>((resolve) => { resolveChild = resolve; });
+    const handle = vi.fn(async () => response());
+    const cleanup = vi.fn(async () => undefined);
+    const createChild = vi.fn(() => childReady);
+    const executor = new AgentStepExecutor({
+      childFactory: { createChild },
+      sessionDb,
+      taskStore: store,
+      hostWorkspace: graph.task.workspace,
+      isWorkspaceTrusted: () => true,
+      parentVisibleTools: () => tools(),
+      approvalService: new TaskApprovalService({ store }),
+      securityPolicy: capabilityFirstDefaults
+    });
+    const controller = new AbortController();
+    const checkpoint = vi.fn();
+    const execution = executor.execute({
+      task: graph.task,
+      step: graph.steps[0]!,
+      attempt: attempt(graph),
+      signal: controller.signal,
+      heartbeat: vi.fn(),
+      checkpoint
+    });
+    await vi.waitFor(() => expect(createChild).toHaveBeenCalledOnce());
+    controller.abort(TASK_STEP_HOST_HANDOFF_ABORT_REASON);
+    await sessionDb.createSession({
+      id: "worker-handoff-construction",
+      profileId: "alpha",
+      parentSessionId: "creator-alpha"
+    });
+    resolveChild(childRuntime(handle, cleanup, {
+      sessionId: "worker-handoff-construction",
+      trajectoryId: "trajectory-handoff-construction"
+    }));
+
+    await expect(execution).resolves.toMatchObject({
+      outcome: "cancelled",
+      workerSessionId: "worker-handoff-construction"
+    });
+    expect(handle).not.toHaveBeenCalled();
+    expect(checkpoint).toHaveBeenCalledWith({ workerSessionId: "worker-handoff-construction" });
+    expect(cleanup).toHaveBeenCalledOnce();
+    await expect(sessionDb.getSession("worker-handoff-construction")).resolves.toMatchObject({ endedAt: undefined });
+  });
+
   it("propagates the exact provider spending denial to the Task scheduler", async () => {
     const graph = makeGraph();
     const childFactory: ChildAgentLoopFactory = {
