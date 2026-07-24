@@ -6856,6 +6856,50 @@ describe("runSessionLoop — active turn spinner", () => {
     const budgetIndex = rendered.indexOf("provider budget: token limit reached");
     expect(budgetIndex).toBeGreaterThan(-1);
   });
+
+  it("renders an explicit provider spending warning in managed TTY mode", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 48,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      {
+        kind: "provider-spending-warning",
+        warningId: "warning-1",
+        scopeKind: "session",
+        warningThresholdPercent: 80,
+        maxEstimatedCostUsd: 10,
+        committedCostUsd: 8
+      },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps(),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("Estimated spending warning");
+    expect(rendered).toContain("$8.00 of $10.00");
+  });
 });
 
 describe("runSessionLoop — animated spinner behavior", () => {

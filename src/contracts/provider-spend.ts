@@ -44,6 +44,30 @@ export type ProviderSpendState =
 
 export type ProviderSpendScopeKind = "session" | "root_task";
 
+export type ProviderSpendingWarning = {
+  id: string;
+  profileId: string;
+  scopeKind: ProviderSpendScopeKind;
+  scopeOwnerId: string;
+  sessionId?: string;
+  taskId?: string;
+  rootTaskId?: string;
+  warningThresholdPercent: number;
+  maxEstimatedCostUsd: number;
+  committedCostUsd: number;
+  occurredAt: string;
+};
+
+export type ProviderSpendingWarningDelivery = ProviderSpendingWarning & {
+  deliveryBindingId: string;
+  deliveryStatus: "pending" | "delivering" | "delivered" | "failed";
+  deliveryStartedAt?: string;
+  deliveredAt?: string;
+  failedAt?: string;
+  failureClass?: string;
+  failureMessage?: string;
+};
+
 export type ProviderSpendingScope = {
   profileId: string;
   kind: ProviderSpendScopeKind;
@@ -101,13 +125,14 @@ export type ProviderSpendDenialReason =
   | "SPEND_CONTROLLER_UNAVAILABLE";
 
 export type ProviderSpendReservationResult =
-  | { ok: true; attempt: ProviderSpendAttempt }
+  | { ok: true; attempt: ProviderSpendAttempt; warnings?: readonly ProviderSpendingWarning[] }
   | {
     ok: false;
     reason: ProviderSpendDenialReason;
     scope: ProviderSpendingScope;
     requestedCostUsd: number;
     availableCostUsd: number;
+    warnings?: readonly ProviderSpendingWarning[];
   };
 
 const ROUTE_ROLES = new Set<ProviderRouteRole>(["primary", "fallback", "alias", "override", "unknown"]);

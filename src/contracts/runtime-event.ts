@@ -104,6 +104,14 @@ export type RuntimeEvent =
       reason: string;
     }
   | {
+      kind: "provider-spending-warning";
+      warningId: string;
+      scopeKind: "session" | "root_task";
+      warningThresholdPercent: number;
+      maxEstimatedCostUsd: number;
+      committedCostUsd: number;
+    }
+  | {
       kind: "context-estimate";
       filled: number;
       total: number;
@@ -219,6 +227,7 @@ export type RuntimeEvent =
           | "provider-attempt"
           | "provider-result"
           | "provider-budget-exhausted"
+          | "provider-spending-warning"
           | "agent-final"
           | "agent-cancelled"
           | "assistant-preview"
@@ -244,6 +253,11 @@ export type RuntimeEvent =
         limit?: number;
         observed?: number;
         reason?: string;
+        warningId?: string;
+        scopeKind?: "session" | "root_task";
+        warningThresholdPercent?: number;
+        maxEstimatedCostUsd?: number;
+        committedCostUsd?: number;
         preview?: string;
         status?: "completed" | "blocked" | "failed" | "timeout" | "cancelled";
       };

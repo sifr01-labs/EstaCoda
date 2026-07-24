@@ -16,6 +16,7 @@ import type {
   TaskStep
 } from "../contracts/task.js";
 import type { ProviderUsageEntry, ProviderUsageQuery } from "../contracts/provider-usage.js";
+import type { ProviderSpendingWarningDelivery } from "../contracts/provider-spend.js";
 import {
   TASK_GRAPH_LIMITS,
   TASK_RESULT_DISPLAY_SUMMARY_MAX_CHARS,
@@ -42,11 +43,13 @@ import type {
   ListTaskDeliveryBindingsOptions,
   ListTasksOptions,
   ListTaskHostLeasesOptions,
+  ListProviderSpendingWarningDeliveriesOptions,
   ReleaseTaskAttemptLeaseInput,
   ReleaseTaskHostLeaseInput,
   RenewTaskAttemptLeaseInput,
   RenewTaskHostLeaseInput,
   SettleTaskDeliveryInput,
+  SettleProviderSpendingWarningDeliveryInput,
   TaskEventTraceSummary,
   TaskStore
 } from "./task-store.js";
@@ -88,7 +91,7 @@ const TASK_EVENT_TRACE_CATEGORY_SQL = `case
   when json_extract(data_json, '$.to') in ('completed', 'succeeded') then 'finish'
   when json_extract(data_json, '$.to') in ('waiting_for_input', 'waiting_for_approval', 'blocked') then 'wait'
   when json_extract(data_json, '$.to') in ('failed', 'cancelled') then 'failed'
-  when kind in ('attempt-waiting', 'approval-requested') then 'wait'
+  when kind in ('attempt-waiting', 'approval-requested', 'provider-spending-warning') then 'wait'
   when kind in ('attempt-completed', 'result-recorded') then 'finish'
   when kind in (
     'attempt-failed', 'attempt-cancelled', 'attempt-interrupted', 'attempt-expired', 'plan-revision-rejected'
@@ -1479,6 +1482,82 @@ export class SQLiteTaskStore implements TaskStore {
     });
   }
 
+  listProviderSpendingWarningDeliveries(
+    options: ListProviderSpendingWarningDeliveriesOptions = {}
+  ): ProviderSpendingWarningDelivery[] {
+    const statuses = [...(options.statuses ?? [])];
+    let sql = `select warning.* from provider_spending_warnings warning
+      where warning.profile_id = ? and warning.delivery_binding_id is not null`;
+    const params: SQLiteValue[] = [this.#profileId];
+    if (statuses.length > 0) {
+      sql += ` and warning.delivery_status in (${statuses.map(() => "?").join(", ")})`;
+      params.push(...statuses);
+    }
+    sql += " order by warning.occurred_at, warning.id limit ?";
+    params.push(boundedLimit(options.limit));
+    return this.#db.query<ProviderSpendingWarningRow>(sql).all(...params).map(rowToProviderSpendingWarning);
+  }
+
+  claimProviderSpendingWarningDelivery(
+    id: string,
+    startedAt: string
+  ): ProviderSpendingWarningDelivery | null {
+    requireBoundedText(id, "Provider spending warning ID", 256);
+    assertTimestamp(startedAt, "Provider spending warning delivery start");
+    return this.atomicWrite(() => {
+      const updated = this.#db.query(
+        `update provider_spending_warnings
+         set delivery_status = 'delivering', delivery_started_at = ?
+         where id = ? and profile_id = ? and delivery_status = 'pending'`
+      ).run(startedAt, id, this.#profileId);
+      return updated.changes === 1 ? this.#getProviderSpendingWarningDelivery(id) : null;
+    });
+  }
+
+  settleProviderSpendingWarningDelivery(
+    input: SettleProviderSpendingWarningDeliveryInput
+  ): ProviderSpendingWarningDelivery {
+    requireBoundedText(input.id, "Provider spending warning ID", 256);
+    assertTimestamp(input.settledAt, "Provider spending warning delivery settlement");
+    if (input.status === "delivered" && (input.failureClass !== undefined || input.failureMessage !== undefined)) {
+      throw new TaskStoreIntegrityError("A delivered spending warning cannot carry failure metadata.");
+    }
+    if (input.status === "failed" && input.failureClass === undefined) {
+      throw new TaskStoreIntegrityError("A failed spending warning delivery requires a failure class.");
+    }
+    if (input.failureClass !== undefined) {
+      requireBoundedText(input.failureClass, "Provider spending warning failure class", 128);
+    }
+    if (input.failureMessage !== undefined) {
+      requireBoundedText(input.failureMessage, "Provider spending warning failure message", 1_000);
+    }
+    return this.atomicWrite(() => {
+      const updated = this.#db.query(
+        `update provider_spending_warnings set
+          delivery_status = ?, delivered_at = ?, failed_at = ?, failure_class = ?, failure_message = ?
+         where id = ? and profile_id = ? and delivery_status = 'delivering'`
+      ).run(
+        input.status,
+        input.status === "delivered" ? input.settledAt : null,
+        input.status === "failed" ? input.settledAt : null,
+        input.failureClass ?? null,
+        input.failureMessage ?? null,
+        input.id,
+        this.#profileId
+      );
+      this.#assertChanged(updated.changes, "Provider spending warning", input.id);
+      return this.#getProviderSpendingWarningDelivery(input.id)!;
+    });
+  }
+
+  #getProviderSpendingWarningDelivery(id: string): ProviderSpendingWarningDelivery | null {
+    const row = this.#db.query<ProviderSpendingWarningRow>(
+      `select * from provider_spending_warnings
+       where id = ? and profile_id = ? and delivery_binding_id is not null`
+    ).get(id, this.#profileId);
+    return row === null ? null : rowToProviderSpendingWarning(row);
+  }
+
   atomicWrite<T>(work: (store: TaskStore) => T): T {
     this.#assertTransactionActive();
     if (this.#transactional) return work(this);
@@ -2097,6 +2176,31 @@ function rowToDeliveryBinding(row: DeliveryBindingRow): TaskDeliveryBinding {
   };
 }
 
+function rowToProviderSpendingWarning(row: ProviderSpendingWarningRow): ProviderSpendingWarningDelivery {
+  if (row.delivery_binding_id === null || row.delivery_status === null) {
+    throw new TaskStoreIntegrityError("Stored Provider spending warning delivery is incomplete.");
+  }
+  return {
+    id: row.id,
+    profileId: row.profile_id,
+    scopeKind: row.scope_kind as ProviderSpendingWarningDelivery["scopeKind"],
+    scopeOwnerId: row.scope_owner_id,
+    ...(row.session_id === null ? {} : { sessionId: row.session_id }),
+    ...(row.root_task_id === null ? {} : { rootTaskId: row.root_task_id }),
+    warningThresholdPercent: row.warning_threshold_percent,
+    maxEstimatedCostUsd: row.max_estimated_cost_usd,
+    committedCostUsd: row.committed_cost_usd,
+    occurredAt: row.occurred_at,
+    deliveryBindingId: row.delivery_binding_id,
+    deliveryStatus: row.delivery_status as ProviderSpendingWarningDelivery["deliveryStatus"],
+    ...(row.delivery_started_at === null ? {} : { deliveryStartedAt: row.delivery_started_at }),
+    ...(row.delivered_at === null ? {} : { deliveredAt: row.delivered_at }),
+    ...(row.failed_at === null ? {} : { failedAt: row.failed_at }),
+    ...(row.failure_class === null ? {} : { failureClass: row.failure_class }),
+    ...(row.failure_message === null ? {} : { failureMessage: row.failure_message })
+  };
+}
+
 function stringify(value: unknown): string {
   const result = JSON.stringify(value);
   if (result === undefined) throw new TaskStoreIntegrityError("Task persistence value is not JSON serializable.");
@@ -2490,4 +2594,24 @@ type DeliveryBindingRow = {
   started_at: string | null;
   delivered_at: string | null;
   failed_at: string | null;
+};
+
+type ProviderSpendingWarningRow = {
+  id: string;
+  profile_id: string;
+  scope_kind: string;
+  scope_owner_id: string;
+  session_id: string | null;
+  root_task_id: string | null;
+  warning_threshold_percent: number;
+  max_estimated_cost_usd: number;
+  committed_cost_usd: number;
+  occurred_at: string;
+  delivery_binding_id: string | null;
+  delivery_status: string | null;
+  delivery_started_at: string | null;
+  delivered_at: string | null;
+  failed_at: string | null;
+  failure_class: string | null;
+  failure_message: string | null;
 };

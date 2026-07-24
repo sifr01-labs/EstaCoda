@@ -1,4 +1,5 @@
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
+import { formatSpendingThresholdWarning } from "../ui/spending-warning-format.js";
 import { toolDisplayIcon, toolDisplayLabel } from "../ui/tool-display.js";
 
 export type ActivityLabelLocale = "en" | "ar";
@@ -88,6 +89,21 @@ export function renderChannelProgressLabel(
       return "";
     case "provider-serving-transition":
       return `${providerServingTransitionLabel(locale, event.transition)} · ${event.model}`;
+    case "provider-spending-warning":
+      return formatSpendingThresholdWarning(event, locale);
+    case "delegation-progress":
+      return event.childEvent.kind === "provider-spending-warning" &&
+        event.childEvent.scopeKind !== undefined &&
+        event.childEvent.warningThresholdPercent !== undefined &&
+        event.childEvent.maxEstimatedCostUsd !== undefined &&
+        event.childEvent.committedCostUsd !== undefined
+        ? formatSpendingThresholdWarning({
+            scopeKind: event.childEvent.scopeKind,
+            warningThresholdPercent: event.childEvent.warningThresholdPercent,
+            maxEstimatedCostUsd: event.childEvent.maxEstimatedCostUsd,
+            committedCostUsd: event.childEvent.committedCostUsd
+          }, locale)
+        : "";
     case "agent-final":
     case "provider-token":
       return "";

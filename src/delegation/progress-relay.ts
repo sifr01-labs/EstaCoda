@@ -51,6 +51,7 @@ const RELAYED_EVENT_KINDS = new Set<RuntimeEvent["kind"]>([
   "provider-attempt",
   "provider-result",
   "provider-budget-exhausted",
+  "provider-spending-warning",
   "agent-final",
   "agent-cancelled"
 ]);
@@ -190,6 +191,15 @@ function toChildEvent(event: RuntimeEvent): Extract<RuntimeEvent, { kind: "deleg
         limit: event.limit,
         observed: event.observed,
         reason: event.reason
+      };
+    case "provider-spending-warning":
+      return {
+        kind: "provider-spending-warning",
+        warningId: event.warningId,
+        scopeKind: event.scopeKind,
+        warningThresholdPercent: event.warningThresholdPercent,
+        maxEstimatedCostUsd: event.maxEstimatedCostUsd,
+        committedCostUsd: event.committedCostUsd
       };
     case "agent-final":
       return {

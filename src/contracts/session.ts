@@ -451,6 +451,14 @@ export type SessionEvent =
       reason: string;
     }
   | {
+      kind: "provider-spending-warning";
+      warningId: string;
+      scopeKind: "session" | "root_task";
+      warningThresholdPercent: number;
+      maxEstimatedCostUsd: number;
+      committedCostUsd: number;
+    }
+  | {
       kind: "skill-route-usage";
       timestamp: string;
       promptHash?: string;

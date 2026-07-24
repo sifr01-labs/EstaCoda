@@ -1019,6 +1019,7 @@ function taskActivityLabel(event: TaskEvent, stepTitles: ReadonlyMap<string, str
     case "approval-requested": return `Approval requested${suffix}`;
     case "approval-resolved": return `Approval resolved${suffix}`;
     case "task-steered": return "Operator guidance queued";
+    case "provider-spending-warning": return "Estimated spending warning reached";
     case "usage-recorded": return `Usage recorded${suffix}`;
     case "result-recorded": return `Result recorded${suffix}`;
   }
@@ -1080,6 +1081,7 @@ function taskTraceCategoryFromTaskEvent(event: TaskEvent): TaskTraceCategory {
   switch (event.kind) {
     case "attempt-waiting":
     case "approval-requested":
+    case "provider-spending-warning":
       return "wait";
     case "attempt-completed":
     case "result-recorded":

@@ -4,6 +4,7 @@ import { ToolActivityViewModelBuilder } from "./tool-activity-view-models.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import { toolDisplayIcon, toolDisplayLabel } from "../ui/tool-display.js";
 import { formatPlainDelegationProgressEvent } from "../ui/papyrus/operator-console/activeWorkRuntimeMapper.js";
+import { formatSpendingThresholdWarning } from "../ui/spending-warning-format.js";
 
 export type OneShotPromptResult = {
   handled: boolean;
@@ -125,6 +126,8 @@ function renderOneShotEvent(
         : `provider issue: ${event.provider}/${event.model}${event.willFallback ? " (trying fallback)" : ""}`);
     case "provider-budget-exhausted":
       return safeLine(`provider budget: ${event.reason}`);
+    case "provider-spending-warning":
+      return safeLine(formatSpendingThresholdWarning(event));
     case "context-estimate":
     case "context-window-usage":
       return undefined;

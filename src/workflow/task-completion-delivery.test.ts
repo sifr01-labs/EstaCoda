@@ -147,6 +147,54 @@ describe("TaskCompletionDeliveryService", () => {
     expect(store.getDeliveryBinding("delivery-cli")?.status).toBe("pending");
   });
 
+  it("delivers a threshold warning to the authorized remote origin before Task completion", async () => {
+    const deliverText = vi.fn(async (_targets: DeliveryTarget[], _text: string) =>
+      new Map([["telegram:chat-1", { success: true }]]));
+    const service = createService(deliverText);
+    const binding = service.bind({
+      taskId: "task-alpha",
+      authorizedSessionId: "creator-alpha",
+      deliveryKey: "origin-warning",
+      destination: { platform: "telegram", chatId: "chat-1" }
+    });
+    sessionDb.db.query(
+      `insert into provider_spending_scopes (
+        profile_id, kind, owner_id, max_estimated_cost_usd, warning_threshold_percent,
+        spent_cost_usd, reserved_cost_usd, state, owner_created_at, created_at, warning_reached_at
+      ) values (?, 'root_task', ?, 5, 80, 0, 4, 'warning', ?, ?, ?)`
+    ).run("alpha", "task-alpha", NOW, NOW, NOW);
+    sessionDb.db.query(
+      `insert into provider_spending_warnings (
+        id, profile_id, scope_kind, scope_owner_id, session_id, root_task_id,
+        warning_threshold_percent, max_estimated_cost_usd, committed_cost_usd, occurred_at,
+        delivery_binding_id, delivery_status
+      ) values (?, ?, 'root_task', ?, ?, ?, 80, 5, 4, ?, ?, 'pending')`
+    ).run(
+      "warning-1",
+      "alpha",
+      "task-alpha",
+      "creator-alpha",
+      "task-alpha",
+      NOW,
+      binding.id
+    );
+
+    await expect(service.runOnce()).resolves.toEqual({
+      recovered: 0, recoveryFailed: 0, claimed: 1, delivered: 1, failed: 0
+    });
+    expect(deliverText).toHaveBeenCalledOnce();
+    expect(deliverText.mock.calls[0]![1]).toContain("Estimated spending warning");
+    expect(deliverText.mock.calls[0]![1]).toContain("$4.00 of $5.00");
+    expect(store.getDeliveryBinding(binding.id)?.status).toBe("pending");
+    expect(store.listProviderSpendingWarningDeliveries()).toEqual([
+      expect.objectContaining({ id: "warning-1", deliveryStatus: "delivered" })
+    ]);
+    await expect(service.runOnce()).resolves.toEqual({
+      recovered: 0, recoveryFailed: 0, claimed: 0, delivered: 0, failed: 0
+    });
+    expect(deliverText).toHaveBeenCalledOnce();
+  });
+
   it("keeps delivery pending until its Task reaches a terminal state", async () => {
     const deliverText = vi.fn(async (_targets: DeliveryTarget[], _text: string) =>
       new Map([["telegram:chat-1", { success: true }]]));

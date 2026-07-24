@@ -1623,6 +1623,7 @@ const TASK_TABLES = [
   "provider_spend_attempts",
   "provider_spend_fence_generations",
   "provider_spend_scope_allocations",
+  "provider_spending_warnings",
   "task_approval_links",
   "task_delivery_bindings",
   "task_execution_reservations"

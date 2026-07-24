@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 
-export const TASK_SCHEMA_VERSION = 27;
+export const TASK_SCHEMA_VERSION = 28;
 
 const OBSOLETE_EXECUTION_TABLES = [
   "workflow_event_summaries",
@@ -1486,6 +1486,125 @@ export function migrateProviderSpendExecutionLeaseSchemaV27(db: SQLiteDatabase):
       or julianday(new.execution_expires_at) <= julianday(new.execution_heartbeat_at)
     begin
       select raise(abort, 'Provider spend execution lease renewal is invalid');
+    end;
+  `);
+}
+
+/** Adds exactly-once spending-warning facts, journals, and origin delivery state. */
+export function migrateProviderSpendingWarningSchemaV28(db: SQLiteDatabase): void {
+  db.exec(`
+    alter table task_events rename to task_events_v27;
+
+    create table task_events (
+      id text primary key,
+      profile_id text not null,
+      task_id text not null,
+      plan_revision_id text,
+      step_id text,
+      attempt_id text,
+      kind text not null check(kind in (
+        'task-created', 'task-state-changed', 'plan-revision-created',
+        'plan-revision-validated', 'plan-revision-activated', 'plan-revision-rejected',
+        'plan-revision-superseded', 'step-state-changed', 'attempt-created',
+        'attempt-leased', 'attempt-started', 'attempt-progressed', 'attempt-waiting',
+        'attempt-completed', 'attempt-failed', 'attempt-cancelled', 'attempt-interrupted',
+        'attempt-expired', 'approval-requested', 'approval-resolved', 'task-steered',
+        'provider-spending-warning', 'usage-recorded', 'result-recorded'
+      )),
+      timestamp text not null,
+      data_json text not null check(json_valid(data_json)),
+      unique(profile_id, id),
+      foreign key(profile_id, task_id)
+        references tasks(profile_id, id) on delete cascade,
+      foreign key(profile_id, task_id, plan_revision_id)
+        references task_plan_revisions(profile_id, task_id, id) on delete cascade,
+      foreign key(profile_id, task_id, step_id)
+        references task_steps(profile_id, task_id, id) on delete cascade,
+      foreign key(profile_id, task_id, attempt_id)
+        references task_attempts(profile_id, task_id, id) on delete cascade
+    );
+
+    insert into task_events (
+      id, profile_id, task_id, plan_revision_id, step_id, attempt_id, kind, timestamp, data_json
+    ) select
+      id, profile_id, task_id, plan_revision_id, step_id, attempt_id, kind, timestamp, data_json
+    from task_events_v27;
+
+    drop table task_events_v27;
+    create index idx_task_events_task on task_events(profile_id, task_id, timestamp, id);
+    create index idx_task_events_attempt on task_events(profile_id, attempt_id, timestamp);
+
+    create table provider_spending_warnings (
+      id text primary key check(length(id) between 1 and 256),
+      profile_id text not null check(length(profile_id) between 1 and 128),
+      scope_kind text not null check(scope_kind in ('session', 'root_task')),
+      scope_owner_id text not null check(length(scope_owner_id) between 1 and 256),
+      session_id text,
+      root_task_id text,
+      warning_threshold_percent real not null check(
+        warning_threshold_percent >= 0 and warning_threshold_percent <= 100
+      ),
+      max_estimated_cost_usd real not null check(max_estimated_cost_usd >= 0),
+      committed_cost_usd real not null check(committed_cost_usd >= 0),
+      occurred_at text not null,
+      delivery_binding_id text,
+      delivery_status text check(delivery_status in ('pending', 'delivering', 'delivered', 'failed')),
+      delivery_started_at text,
+      delivered_at text,
+      failed_at text,
+      failure_class text check(failure_class is null or length(failure_class) between 1 and 128),
+      failure_message text check(failure_message is null or length(failure_message) between 1 and 1000),
+      unique(profile_id, id),
+      unique(profile_id, scope_kind, scope_owner_id),
+      foreign key(profile_id, scope_kind, scope_owner_id)
+        references provider_spending_scopes(profile_id, kind, owner_id) on delete restrict,
+      foreign key(profile_id, session_id)
+        references sessions(profile_id, id) on delete restrict,
+      foreign key(profile_id, root_task_id)
+        references tasks(profile_id, id) on delete restrict,
+      foreign key(profile_id, delivery_binding_id)
+        references task_delivery_bindings(profile_id, id) on delete restrict,
+      check((delivery_binding_id is null) = (delivery_status is null)),
+      check(
+        (delivery_status is null and delivery_started_at is null and delivered_at is null and failed_at is null
+          and failure_class is null and failure_message is null)
+        or (delivery_status = 'pending' and delivery_started_at is null and delivered_at is null and failed_at is null
+          and failure_class is null and failure_message is null)
+        or (delivery_status = 'delivering' and delivery_started_at is not null and delivered_at is null and failed_at is null
+          and failure_class is null and failure_message is null)
+        or (delivery_status = 'delivered' and delivery_started_at is not null and delivered_at is not null and failed_at is null
+          and failure_class is null and failure_message is null)
+        or (delivery_status = 'failed' and delivery_started_at is not null and delivered_at is null and failed_at is not null
+          and failure_class is not null)
+      )
+    );
+
+    create index idx_provider_spending_warnings_delivery
+      on provider_spending_warnings(profile_id, delivery_status, occurred_at, id);
+
+    create trigger trg_provider_spending_warning_identity_immutable
+    before update of id, profile_id, scope_kind, scope_owner_id, session_id, root_task_id,
+      warning_threshold_percent, max_estimated_cost_usd, committed_cost_usd, occurred_at,
+      delivery_binding_id on provider_spending_warnings
+    begin
+      select raise(abort, 'Provider spending warning identity is immutable');
+    end;
+
+    create trigger trg_provider_spending_warning_transition_valid
+    before update of delivery_status, delivery_started_at, delivered_at, failed_at,
+      failure_class, failure_message on provider_spending_warnings
+    when not (
+      old.delivery_status = 'pending' and new.delivery_status = 'delivering'
+      or old.delivery_status = 'delivering' and new.delivery_status in ('delivered', 'failed')
+    )
+    begin
+      select raise(abort, 'Provider spending warning delivery transition is invalid');
+    end;
+
+    create trigger trg_provider_spending_warning_no_delete
+    before delete on provider_spending_warnings
+    begin
+      select raise(abort, 'Provider spending warnings are durable');
     end;
   `);
 }

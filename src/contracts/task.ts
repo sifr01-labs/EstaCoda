@@ -496,6 +496,7 @@ export type TaskEventKind =
   | "approval-requested"
   | "approval-resolved"
   | "task-steered"
+  | "provider-spending-warning"
   | "usage-recorded"
   | "result-recorded";
 

@@ -14,6 +14,21 @@ describe("channel activity labels", () => {
     expect(renderChannelProgressLabel({ kind: "provider-serving-transition", transition: "primary-recovered", provider: "openrouter", model: "k2" }, "ar")).toBe("✦ النموذج الأساسي متاح مجددًا · k2");
   });
 
+  it("renders explicit localized provider spending warnings", () => {
+    const warning = {
+      kind: "provider-spending-warning" as const,
+      warningId: "warning-1",
+      scopeKind: "session" as const,
+      warningThresholdPercent: 80,
+      maxEstimatedCostUsd: 10,
+      committedCostUsd: 8
+    };
+    expect(renderChannelProgressLabel(warning, "en")).toContain(
+      "Estimated spending warning: Session has used or reserved $8.00 of $10.00 in provider spending"
+    );
+    expect(renderChannelProgressLabel(warning, "ar")).toContain("تنبيه بشأن الإنفاق التقديري");
+  });
+
   it("renders tool starts with display label and target summary", () => {
     expect(renderChannelProgressLabel({
       kind: "tool-start",

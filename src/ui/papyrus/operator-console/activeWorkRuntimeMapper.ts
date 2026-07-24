@@ -1,5 +1,6 @@
 import type { RuntimeEvent } from "../../../contracts/runtime-event.js";
 import { toolDisplayLabel, type ToolDisplayLocale } from "../../tool-display.js";
+import { formatSpendingThresholdWarning } from "../../spending-warning-format.js";
 import type {
   ActiveWorkItem,
   ActiveWorkActivity,
@@ -354,6 +355,8 @@ function delegationActivityLabel(
       return locale === "ar" ? "يفكر" : "thinking";
     case "provider-budget-exhausted":
       return locale === "ar" ? "انتهت الميزانية" : "budget exhausted";
+    case "provider-spending-warning":
+      return locale === "ar" ? "تنبيه بشأن الإنفاق" : "spending warning";
     case "agent-final":
       return locale === "ar" ? "إنهاء العمل" : "finalizing";
     case "agent-cancelled":
@@ -417,6 +420,18 @@ export function formatPlainDelegationProgressEvent(
     return locale === "ar"
       ? `${childLabel}: ${delegationResultLabel(event.childEvent.status, locale)}`
       : `${childLabel}: ${delegationResultLabel(event.childEvent.status, locale)}`;
+  }
+  if (event.childEvent.kind === "provider-spending-warning" &&
+      event.childEvent.scopeKind !== undefined &&
+      event.childEvent.warningThresholdPercent !== undefined &&
+      event.childEvent.maxEstimatedCostUsd !== undefined &&
+      event.childEvent.committedCostUsd !== undefined) {
+    return `${childLabel}: ${formatSpendingThresholdWarning({
+      scopeKind: event.childEvent.scopeKind,
+      warningThresholdPercent: event.childEvent.warningThresholdPercent,
+      maxEstimatedCostUsd: event.childEvent.maxEstimatedCostUsd,
+      committedCostUsd: event.childEvent.committedCostUsd
+    }, locale)}`;
   }
   return undefined;
 }

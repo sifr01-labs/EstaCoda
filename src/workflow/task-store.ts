@@ -20,6 +20,7 @@ import type {
   TaskStep
 } from "../contracts/task.js";
 import type { ProviderUsageEntry, ProviderUsageQuery } from "../contracts/provider-usage.js";
+import type { ProviderSpendingWarningDelivery } from "../contracts/provider-spend.js";
 import type { TaskTraceCategory } from "./task-step-executor.js";
 
 export type CreateTaskGraphInput = {
@@ -154,6 +155,19 @@ export type SettleTaskDeliveryInput = {
   failureMessage?: string;
 };
 
+export type ListProviderSpendingWarningDeliveriesOptions = {
+  statuses?: readonly ProviderSpendingWarningDelivery["deliveryStatus"][];
+  limit?: number;
+};
+
+export type SettleProviderSpendingWarningDeliveryInput = {
+  id: string;
+  status: "delivered" | "failed";
+  settledAt: string;
+  failureClass?: string;
+  failureMessage?: string;
+};
+
 export type ListTaskApprovalLinksOptions = {
   taskId?: string;
   taskIds?: readonly string[];
@@ -232,6 +246,17 @@ export interface TaskStore {
   claimDeliveryBinding(id: string, startedAt: string): TaskDeliveryBinding | null;
   settleDeliveryBinding(input: SettleTaskDeliveryInput): TaskDeliveryBinding;
   retryDeliveryBinding(id: string, retriedAt: string): TaskDeliveryBinding;
+
+  listProviderSpendingWarningDeliveries(
+    options?: ListProviderSpendingWarningDeliveriesOptions
+  ): ProviderSpendingWarningDelivery[];
+  claimProviderSpendingWarningDelivery(
+    id: string,
+    startedAt: string
+  ): ProviderSpendingWarningDelivery | null;
+  settleProviderSpendingWarningDelivery(
+    input: SettleProviderSpendingWarningDeliveryInput
+  ): ProviderSpendingWarningDelivery;
 
   atomicWrite<T>(work: (store: TaskStore) => T): T;
 }

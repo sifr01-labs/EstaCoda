@@ -13,6 +13,8 @@ import { listStepTreeAttempts, listTaskTreeUsageEntries } from "./task-tree-acco
 import { taskUsageFromEntries } from "./task-agent-usage.js";
 import { formatUsageCost, formatUsageCostNotice, formatUsdAmount } from "../ui/usage-cost-format.js";
 import { spendingBudgetSummary } from "../providers/provider-spend-projection.js";
+import { formatSpendingThresholdWarning } from "../ui/spending-warning-format.js";
+import { isolateLtr, isolateRtl } from "../ui/bidi.js";
 
 const MAX_DELIVERY_TEXT_CHARS = 100_000;
 const MAX_DELIVERY_RESULTS = 64;
@@ -110,6 +112,23 @@ export class TaskCompletionDeliveryService {
    */
   recoverInterrupted(): TaskCompletionDeliveryRecoveryResult {
     const result: TaskCompletionDeliveryRecoveryResult = { recovered: 0, failed: 0 };
+    for (const warning of this.#store.listProviderSpendingWarningDeliveries({
+      statuses: ["delivering"],
+      limit: 1_000
+    })) {
+      try {
+        this.#store.settleProviderSpendingWarningDelivery({
+          id: warning.id,
+          status: "failed",
+          settledAt: this.#now().toISOString(),
+          failureClass: "delivery-outcome-unknown",
+          failureMessage: "The previous warning delivery process stopped before confirming the external outcome."
+        });
+        result.recovered++;
+      } catch {
+        result.failed++;
+      }
+    }
     for (const binding of this.#store.listDeliveryBindings({ statuses: ["delivering"], limit: 1_000 })) {
       if (binding.destination.platform === "cli") continue;
       try {
@@ -136,6 +155,63 @@ export class TaskCompletionDeliveryService {
       delivered: 0,
       failed: 0
     };
+    const warnings = this.#store.listProviderSpendingWarningDeliveries({ statuses: ["pending"], limit: 1_000 });
+    for (const candidate of warnings) {
+      const claimed = this.#store.claimProviderSpendingWarningDelivery(candidate.id, this.#now().toISOString());
+      if (claimed === null) continue;
+      result.claimed++;
+      const binding = this.#store.getDeliveryBinding(claimed.deliveryBindingId);
+      if (binding === null || binding.destination.platform === "cli") {
+        this.#store.settleProviderSpendingWarningDelivery({
+          id: claimed.id,
+          status: "failed",
+          settledAt: this.#now().toISOString(),
+          failureClass: "delivery-preparation-failed",
+          failureMessage: "The authorized external warning destination is unavailable."
+        });
+        result.failed++;
+        continue;
+      }
+      const taskPrefix = claimed.rootTaskId === undefined
+        ? ""
+        : this.#locale === "ar"
+          ? `${isolateRtl("المهمة")} ${isolateLtr(claimed.rootTaskId)}\n`
+          : `Task ${claimed.rootTaskId}\n`;
+      let delivery: Map<string, { success: boolean; error?: string }>;
+      try {
+        delivery = await this.#router.deliverText(
+          [toDeliveryTarget(binding.destination)],
+          `${taskPrefix}${formatSpendingThresholdWarning(claimed, this.#locale)}`
+        );
+      } catch {
+        this.#store.settleProviderSpendingWarningDelivery({
+          id: claimed.id,
+          status: "failed",
+          settledAt: this.#now().toISOString(),
+          failureClass: "delivery-outcome-unknown",
+          failureMessage: "Warning delivery ended without a confirmed external outcome."
+        });
+        result.failed++;
+        continue;
+      }
+      if (delivery.size !== 1 || [...delivery.values()].some((entry) => !entry.success)) {
+        this.#store.settleProviderSpendingWarningDelivery({
+          id: claimed.id,
+          status: "failed",
+          settledAt: this.#now().toISOString(),
+          failureClass: "delivery-failed",
+          failureMessage: "Provider spending warning delivery failed."
+        });
+        result.failed++;
+        continue;
+      }
+      this.#store.settleProviderSpendingWarningDelivery({
+        id: claimed.id,
+        status: "delivered",
+        settledAt: this.#now().toISOString()
+      });
+      result.delivered++;
+    }
     const pending = this.#store.listDeliveryBindings({ statuses: ["pending"], limit: 1_000 });
     for (const candidate of pending) {
       if (candidate.destination.platform === "cli") continue;

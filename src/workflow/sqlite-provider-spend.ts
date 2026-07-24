@@ -9,9 +9,11 @@ import type {
   ProviderSpendRequest,
   ProviderSpendReservationResult,
   ProviderSpendScopeKind,
-  ProviderSpendingScope
+  ProviderSpendingScope,
+  ProviderSpendingWarning
 } from "../contracts/provider-spend.js";
 import { assertProviderSpendRequest } from "../contracts/provider-spend.js";
+import { TASK_ORIGIN_COMPLETION_DELIVERY_KEY } from "../contracts/task.js";
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 import {
   insertProviderUsageEntry,
@@ -105,6 +107,7 @@ export class SQLiteProviderSpendController {
     assertTimestamp(reservedAt, "Provider spend reservation");
 
     return this.#write(() => {
+      const warnings: ProviderSpendingWarning[] = [];
       this.#recoverExpired(reservedAt);
       const resolved = this.#resolveRequestAndScopes(request);
       const persisted = this.#selectAttempt(resolved.request.requestKey);
@@ -123,7 +126,15 @@ export class SQLiteProviderSpendController {
         return { ok: true, attempt: persisted };
       }
 
-      const scopes = resolved.scopes.map((source) => this.#ensureScope(source, reservedAt));
+      const scopes = resolved.scopes.map((source) => {
+        const existed = this.getScope(source.kind, source.ownerId) !== null;
+        const scope = this.#ensureScope(source, reservedAt);
+        if (!existed && scope.warningReachedAt !== undefined) {
+          const warning = this.#recordWarning(scope, resolved.request, reservedAt);
+          if (warning !== undefined) warnings.push(warning);
+        }
+        return scope;
+      });
       for (const scope of scopes) {
         this.#assertScopeBalance(scope);
         const denial = reservationDenial(
@@ -131,7 +142,9 @@ export class SQLiteProviderSpendController {
           resolved.request.maximumEstimatedCostUsd,
           this.#synthesisEarmarkUsd(scope, resolved.request)
         );
-        if (denial !== undefined) return denial;
+        if (denial !== undefined) {
+          return warnings.length === 0 ? denial : { ...denial, warnings };
+        }
       }
 
       const id = spendAttemptId(this.#profileId, resolved.request.requestKey);
@@ -164,6 +177,7 @@ export class SQLiteProviderSpendController {
       );
 
       for (const scope of scopes) {
+        const warningWasReached = scope.warningReachedAt !== undefined;
         this.#db.query(
           `insert into provider_spend_scope_allocations (
             profile_id, request_key, scope_kind, scope_owner_id, reserved_cost_usd, created_at
@@ -182,9 +196,18 @@ export class SQLiteProviderSpendController {
            where profile_id = ? and kind = ? and owner_id = ?`
         ).run(resolved.request.maximumEstimatedCostUsd, this.#profileId, scope.kind, scope.ownerId);
         this.#refreshScopeState(scope.kind, scope.ownerId, reservedAt);
+        const refreshed = this.getScope(scope.kind, scope.ownerId);
+        if (!warningWasReached && refreshed?.warningReachedAt !== undefined) {
+          const warning = this.#recordWarning(refreshed, resolved.request, reservedAt);
+          if (warning !== undefined) warnings.push(warning);
+        }
       }
 
-      return { ok: true, attempt: this.#requireAttempt(resolved.request.requestKey) };
+      return {
+        ok: true,
+        attempt: this.#requireAttempt(resolved.request.requestKey),
+        ...(warnings.length === 0 ? {} : { warnings })
+      };
     });
   }
 
@@ -670,6 +693,93 @@ export class SQLiteProviderSpendController {
     ).run(state, state, occurredAt, state, occurredAt, this.#profileId, kind, ownerId);
   }
 
+  #recordWarning(
+    scope: ProviderSpendingScope,
+    request: ProviderSpendRequest,
+    occurredAt: string
+  ): ProviderSpendingWarning | undefined {
+    const warningId = providerSpendingWarningId(this.#profileId, scope.kind, scope.ownerId);
+    const rootTask = request.rootTaskId === undefined
+      ? null
+      : this.#db.query<{ id: string; origin_session_id: string | null }>(
+          `select id, origin_session_id from tasks
+           where profile_id = ? and id = ? and root_task_id = id`
+        ).get(this.#profileId, request.rootTaskId);
+    const sessionId = request.sessionBudgetScopeId ?? rootTask?.origin_session_id ?? request.executionSessionId;
+    const delivery = rootTask === null
+      ? null
+      : this.#db.query<{ id: string; platform: string }>(
+          `select id, json_extract(destination_json, '$.platform') as platform
+           from task_delivery_bindings
+           where profile_id = ? and task_id = ? and delivery_key = ?`
+        ).get(this.#profileId, rootTask.id, TASK_ORIGIN_COMPLETION_DELIVERY_KEY);
+    const externalDeliveryId = delivery !== null && delivery.platform !== "cli" ? delivery.id : undefined;
+    const warning: ProviderSpendingWarning = {
+      id: warningId,
+      profileId: this.#profileId,
+      scopeKind: scope.kind,
+      scopeOwnerId: scope.ownerId,
+      ...(sessionId === undefined ? {} : { sessionId }),
+      ...(request.taskId === undefined ? {} : { taskId: request.taskId }),
+      ...(rootTask === null ? {} : { rootTaskId: rootTask.id }),
+      warningThresholdPercent: scope.warningThresholdPercent,
+      maxEstimatedCostUsd: scope.maxEstimatedCostUsd,
+      committedCostUsd: scope.spentCostUsd + scope.reservedCostUsd,
+      occurredAt
+    };
+    const inserted = this.#db.query(
+      `insert into provider_spending_warnings (
+        id, profile_id, scope_kind, scope_owner_id, session_id, root_task_id,
+        warning_threshold_percent, max_estimated_cost_usd, committed_cost_usd, occurred_at,
+        delivery_binding_id, delivery_status
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      on conflict(profile_id, scope_kind, scope_owner_id) do nothing`
+    ).run(
+      warning.id,
+      warning.profileId,
+      warning.scopeKind,
+      warning.scopeOwnerId,
+      warning.sessionId ?? null,
+      warning.rootTaskId ?? null,
+      warning.warningThresholdPercent,
+      warning.maxEstimatedCostUsd,
+      warning.committedCostUsd,
+      warning.occurredAt,
+      externalDeliveryId ?? null,
+      externalDeliveryId === undefined ? null : "pending"
+    );
+    if (inserted.changes !== 1) return undefined;
+
+    const event = {
+      kind: "provider-spending-warning" as const,
+      warningId: warning.id,
+      scopeKind: warning.scopeKind,
+      warningThresholdPercent: warning.warningThresholdPercent,
+      maxEstimatedCostUsd: warning.maxEstimatedCostUsd,
+      committedCostUsd: warning.committedCostUsd
+    };
+    if (warning.sessionId !== undefined) {
+      this.#db.query(
+        `insert into session_events (id, session_id, created_at, event_json)
+         values (?, ?, ?, ?)`
+      ).run(warning.id, warning.sessionId, occurredAt, stableJson(event));
+      this.#db.query(
+        "update sessions set updated_at = ? where profile_id = ? and id = ?"
+      ).run(occurredAt, this.#profileId, warning.sessionId);
+    }
+    if (warning.rootTaskId !== undefined) {
+      this.#db.query(
+        `insert into task_events (
+          id, profile_id, task_id, plan_revision_id, step_id, attempt_id, kind, timestamp, data_json
+        ) values (?, ?, ?, null, null, null, 'provider-spending-warning', ?, ?)`
+      ).run(warning.id, this.#profileId, warning.rootTaskId, occurredAt, stableJson({
+        ...event,
+        ...(warning.taskId === undefined ? {} : { taskId: warning.taskId })
+      }));
+    }
+    return warning;
+  }
+
   #assertUsageMatchesAttempt(attempt: ProviderSpendAttempt, usage: ProviderUsageEntry): void {
     const request = attempt.request;
     const matches = usage.profileId === request.profileId && usage.requestKey === request.requestKey &&
@@ -1064,6 +1174,16 @@ function rowToAttempt(row: SpendAttemptRow, allocations: ProviderSpendAllocation
 
 function spendAttemptId(profileId: string, requestKey: string): string {
   return `spend_${createHash("sha256").update(`${profileId}\0${requestKey}`).digest("hex")}`;
+}
+
+function providerSpendingWarningId(
+  profileId: string,
+  scopeKind: ProviderSpendScopeKind,
+  scopeOwnerId: string
+): string {
+  return `spend_warning_${createHash("sha256")
+    .update(`${profileId}\0${scopeKind}\0${scopeOwnerId}`)
+    .digest("hex")}`;
 }
 
 function amountsEqual(left: number, right: number): boolean {

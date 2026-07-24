@@ -1978,6 +1978,15 @@ function normalizeProviderRequest(request: Omit<ProviderRequest, "model"> & { mo
 
 function mapProviderRuntimeEvent(event: ProviderRuntimeEvent): RuntimeEvent {
   switch (event.kind) {
+    case "provider-spending-warning":
+      return {
+        kind: "provider-spending-warning",
+        warningId: event.warning.id,
+        scopeKind: event.warning.scopeKind,
+        warningThresholdPercent: event.warning.warningThresholdPercent,
+        maxEstimatedCostUsd: event.warning.maxEstimatedCostUsd,
+        committedCostUsd: event.warning.committedCostUsd
+      };
     case "provider-attempt-start":
       return {
         kind: "provider-attempt",

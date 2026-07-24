@@ -13,6 +13,7 @@ import type {
   TaskStep
 } from "../contracts/task.js";
 import { TASK_TOOL_RISK_CLASSES } from "../contracts/task.js";
+import { TASK_ORIGIN_COMPLETION_DELIVERY_KEY } from "../contracts/task.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { SQLiteTaskStore } from "./sqlite-task-store.js";
@@ -94,14 +95,53 @@ describe("SQLiteProviderSpendController", () => {
     expect(controller.getScope("session", "origin")?.reservedCostUsd).toBe(4);
   });
 
-  it("deduplicates a canonical request and rejects conflicting reuse", () => {
+  it("deduplicates a canonical request without re-emitting its warning", () => {
     const first = controller.reserve(spendRequest(), CREATED_AT);
     const replay = controller.reserve(spendRequest(), CREATED_AT);
-    expect(replay).toEqual(first);
+    expect(first).toMatchObject({ ok: true, warnings: [{ scopeKind: "root_task" }] });
+    expect(replay).toMatchObject({ ok: true, attempt: first.ok ? first.attempt : undefined });
+    expect(replay).not.toHaveProperty("warnings");
     expect(controller.getScope("root_task", "task-root")?.reservedCostUsd).toBe(4);
+
+    expect(sessionDb.db.query<{ count: number }>(
+      "select count(*) as count from provider_spending_warnings where profile_id = ?"
+    ).get(PROFILE_ID)).toEqual({ count: 1 });
+    expect(sessionDb.db.query<{ count: number }>(
+      "select count(*) as count from task_events where profile_id = ? and kind = 'provider-spending-warning'"
+    ).get(PROFILE_ID)).toEqual({ count: 1 });
+    expect(sessionDb.db.query<{ count: number }>(
+      "select count(*) as count from session_events where session_id = ? and json_extract(event_json, '$.kind') = 'provider-spending-warning'"
+    ).get("origin")).toEqual({ count: 1 });
 
     expect(() => controller.reserve(spendRequest({ model: "different-model" }), CREATED_AT))
       .toThrow(/conflicts with another request/i);
+  });
+
+  it("queues a threshold warning for the Task's authorized external origin", () => {
+    const taskStore = new SQLiteTaskStore({ db: sessionDb.db, profileId: PROFILE_ID });
+    taskStore.atomicWrite((store) => store.createDeliveryBinding({
+      id: "origin-delivery",
+      profileId: PROFILE_ID,
+      taskId: "task-root",
+      authorizedSessionId: "origin",
+      deliveryKey: TASK_ORIGIN_COMPLETION_DELIVERY_KEY,
+      destination: { platform: "telegram", chatId: "chat-1" },
+      status: "pending",
+      createdAt: CREATED_AT,
+      updatedAt: CREATED_AT
+    }));
+
+    const result = controller.reserve(spendRequest(), CREATED_AT);
+
+    expect(result).toMatchObject({ ok: true, warnings: [{ scopeKind: "root_task" }] });
+    expect(taskStore.listProviderSpendingWarningDeliveries()).toEqual([
+      expect.objectContaining({
+        scopeKind: "root_task",
+        scopeOwnerId: "task-root",
+        deliveryBindingId: "origin-delivery",
+        deliveryStatus: "pending"
+      })
+    ]);
   });
 
   it("durably marks dispatch and atomically settles immutable usage into both scopes", () => {

@@ -33,6 +33,7 @@ import { buildToolsMenuViewModel, buildSkillsMenuViewModel } from "./slash-menu.
 import { renderSessionHelp, buildSessionHelpViewModel } from "./session-help.js";
 import { commandRegistry } from "./command-registry.js";
 import { toolDisplayIcon, toolDisplayLabel } from "../ui/tool-display.js";
+import { formatSpendingThresholdWarning } from "../ui/spending-warning-format.js";
 import {
   ToolActivityViewModelBuilder,
   buildSecurityAuditViewModel,
@@ -2866,6 +2867,10 @@ export function renderRuntimeEvent(
     case "provider-budget-exhausted":
       clearActiveSpinnerLine();
       safeWrite(`\nprovider budget: ${event.reason}\n`);
+      return undefined;
+    case "provider-spending-warning":
+      clearActiveSpinnerLine();
+      safeWrite(`\n${formatSpendingThresholdWarning(event, locale)}\n`);
       return undefined;
     case "context-estimate":
     case "context-window-usage":

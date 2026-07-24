@@ -21,7 +21,8 @@ import type {
   ProviderSpendAttempt,
   ProviderSpendDenialReason,
   ProviderSpendRequest,
-  ProviderSpendReservationResult
+  ProviderSpendReservationResult,
+  ProviderSpendingWarning
 } from "../contracts/provider-spend.js";
 import { stripThinkBlocks } from "./provider-reasoning.js";
 import { ProviderRegistry } from "./provider-registry.js";
@@ -89,6 +90,10 @@ export type ProviderExecutionResult = {
 };
 
 export type ProviderRuntimeEvent =
+  | {
+      kind: "provider-spending-warning";
+      warning: ProviderSpendingWarning;
+    }
   | {
       kind: "provider-attempt-start";
       provider: string;
@@ -422,6 +427,14 @@ export class ProviderExecutor {
           usage: options.usage,
           reservedAt: dispatchedAt
         });
+        for (const warning of authorization.warnings ?? []) {
+          try {
+            await options.onEvent?.({ kind: "provider-spending-warning", warning });
+          } catch {
+            // The warning is already durable. Presentation failure must not strand
+            // or cancel an otherwise valid provider reservation.
+          }
+        }
         if (authorization.ok === false) {
           const content = providerSpendDenialMessage(authorization.reason);
           attempts.push({
@@ -730,8 +743,8 @@ export class ProviderExecutor {
     usage?: ProviderUsageContext;
     reservedAt: string;
   }): Promise<
-    | { ok: true; reservation?: ProviderSpendAttempt }
-    | { ok: false; reason: ProviderSpendDenialReason }
+    | { ok: true; reservation?: ProviderSpendAttempt; warnings?: readonly ProviderSpendingWarning[] }
+    | { ok: false; reason: ProviderSpendDenialReason; warnings?: readonly ProviderSpendingWarning[] }
   > {
     if (input.usage === undefined) return { ok: true };
     if (this.#spendController === undefined || this.#profileId === undefined) {
@@ -755,7 +768,13 @@ export class ProviderExecutor {
     } catch {
       return { ok: false, reason: "SPEND_CONTROLLER_UNAVAILABLE" };
     }
-    if (!reserved.ok) return { ok: false, reason: reserved.reason };
+    if (!reserved.ok) {
+      return {
+        ok: false,
+        reason: reserved.reason,
+        ...(reserved.warnings === undefined ? {} : { warnings: reserved.warnings })
+      };
+    }
 
     const hasApplicableLimit = reserved.attempt.allocations.length > 0;
     const policyDenial = hasApplicableLimit && !prepared.pricingAvailable
@@ -768,22 +787,42 @@ export class ProviderExecutor {
         try {
           await this.#spendController.releaseBeforeDispatch(prepared.request.requestKey, input.reservedAt);
         } catch {
-          return { ok: false, reason: "SPEND_CONTROLLER_UNAVAILABLE" };
+          return {
+            ok: false,
+            reason: "SPEND_CONTROLLER_UNAVAILABLE",
+            ...(reserved.warnings === undefined ? {} : { warnings: reserved.warnings })
+          };
         }
       }
-      return { ok: false, reason: policyDenial };
+      return {
+        ok: false,
+        reason: policyDenial,
+        ...(reserved.warnings === undefined ? {} : { warnings: reserved.warnings })
+      };
     }
     if (reserved.attempt.state !== "reserved") {
-      return { ok: false, reason: "SPEND_CONTROLLER_UNAVAILABLE" };
+      return {
+        ok: false,
+        reason: "SPEND_CONTROLLER_UNAVAILABLE",
+        ...(reserved.warnings === undefined ? {} : { warnings: reserved.warnings })
+      };
     }
     try {
       const reservation = await this.#spendController.markDispatching(
         prepared.request.requestKey,
         input.reservedAt
       );
-      return { ok: true, reservation };
+      return {
+        ok: true,
+        reservation,
+        ...(reserved.warnings === undefined ? {} : { warnings: reserved.warnings })
+      };
     } catch {
-      return { ok: false, reason: "SPEND_CONTROLLER_UNAVAILABLE" };
+      return {
+        ok: false,
+        reason: "SPEND_CONTROLLER_UNAVAILABLE",
+        ...(reserved.warnings === undefined ? {} : { warnings: reserved.warnings })
+      };
     }
   }
 

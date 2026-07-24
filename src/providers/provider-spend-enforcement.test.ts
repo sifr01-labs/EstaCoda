@@ -61,6 +61,27 @@ describe("ProviderExecutor spending enforcement", () => {
     });
   });
 
+  it("emits the durable threshold warning before provider dispatch exactly once", async () => {
+    await createUsageSession("warning", 1, 0.01);
+    registry.register(adapter(async (request) => response(request)));
+    const events: string[] = [];
+    const providerExecutor = executor();
+
+    const execution = await providerExecutor.complete({ messages: [], maxTokens: 10 }, {}, {
+      primaryRoute: pricedRoute(),
+      usage: usage("warning", "warning-request"),
+      onEvent: (event) => { events.push(event.kind); }
+    });
+
+    expect(execution.ok).toBe(true);
+    expect(events.filter((kind) => kind === "provider-spending-warning")).toHaveLength(1);
+    expect(events.indexOf("provider-spending-warning")).toBeLessThan(events.indexOf("provider-attempt-start"));
+    expect(sessionDb.db.query<{ count: number }>(
+      "select count(*) as count from provider_spending_warnings where profile_id = ?"
+    ).get(PROFILE_ID)).toEqual({ count: 1 });
+    await providerExecutor.dispose();
+  });
+
   it("bounds reasoning exposure when pricing signals it despite incomplete capability metadata", async () => {
     await createUsageSession("reasoning-priced", 1);
     let reservedRequest: { boundedMaximumReasoningTokens?: number } | undefined;
@@ -299,13 +320,17 @@ describe("ProviderExecutor spending enforcement", () => {
     return new ProviderExecutor({ registry, profileId: PROFILE_ID, spendController: controller });
   }
 
-  async function createUsageSession(id: string, maxEstimatedCostUsd?: number): Promise<void> {
+  async function createUsageSession(
+    id: string,
+    maxEstimatedCostUsd?: number,
+    warningThresholdPercent = 80
+  ): Promise<void> {
     await sessionDb.createSession({
       id,
       profileId: PROFILE_ID,
       ...(maxEstimatedCostUsd === undefined
         ? {}
-        : { spendingLimit: { maxEstimatedCostUsd, warningThresholdPercent: 80 } })
+        : { spendingLimit: { maxEstimatedCostUsd, warningThresholdPercent } })
     });
     await sessionDb.appendMessage({
       id: `${id}-turn`,

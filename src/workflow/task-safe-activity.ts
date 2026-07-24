@@ -45,6 +45,8 @@ export function taskActivityFromDelegationProgress(event: DelegationProgressEven
           };
     case "provider-budget-exhausted":
       return { kind: "provider", label: "Provider budget exhausted", traceCategory: "failed" };
+    case "provider-spending-warning":
+      return { kind: "provider", label: "Spending warning reached", traceCategory: "wait" };
     case "assistant-preview":
       if (child.preview === undefined) return undefined;
       return {
