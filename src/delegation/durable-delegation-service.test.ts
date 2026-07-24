@@ -66,6 +66,8 @@ describe("DurableDelegationService", () => {
     });
     expect(task.parentTaskId).toBeUndefined();
     expect(task.executionLimits.maxConcurrentAttempts).toBe(2);
+    expect(task.executionLimits.maxWallClockMs).toBe(630_000);
+    expect(steps.every((step) => step.executionLimits.maxWallClockMs === 600_000)).toBe(true);
     expect(steps.map((step) => step.executor.role)).toEqual(["worker", "orchestrator"]);
     expect(steps.map((step) => step.childTaskPolicy)).toEqual(["forbid", "fire_and_forget"]);
     expect(steps.map((step) => step.idempotency)).toEqual(["retry_safe", "unknown"]);
@@ -225,6 +227,8 @@ describe("DurableDelegationService", () => {
     expect(revisions).toHaveLength(1);
     expect(revisions[0]?.status).toBe("active");
     expect(new Set(synthesis.dependsOn)).toEqual(new Set(workers.map((step) => step.id)));
+    expect(task.executionLimits.maxWallClockMs).toBe(1_230_000);
+    expect(steps.every((step) => step.executionLimits.maxWallClockMs === 600_000)).toBe(true);
     expect(synthesis.childTaskPolicy).toBe("forbid");
     expect(synthesis.idempotency).toBe("retry_safe");
     expect(synthesis.retryPolicy).toMatchObject({
@@ -503,6 +507,20 @@ describe("DurableDelegationService", () => {
     expect(store.listChildTaskExecutionReservations(parent.taskId)).toHaveLength(1);
   });
 
+  it("divides an inherited wall-clock ceiling between child execution phases", () => {
+    const parent = createParentAttempt(store);
+    const child = nestedService(store, parent).create({
+      toolCallId: "nested-phase-budget",
+      trustedWorkspace: true,
+      tasks: [{ task: "Research A" }, { task: "Research B" }]
+    });
+    const task = store.getTask(child.taskId)!;
+    const steps = store.listSteps(task.id, task.activePlanRevisionId!);
+
+    expect(task.executionLimits.maxWallClockMs).toBe(parent.stepExecutionLimits.maxWallClockMs);
+    expect(steps.map((step) => step.executionLimits.maxWallClockMs)).toEqual([30_000, 30_000, 30_000]);
+  });
+
   it("prevents child Tasks from redefining the root monetary scope", () => {
     const parent = createParentAttempt(store);
     expect(() => nestedService(store, parent).create({
@@ -726,6 +744,80 @@ describe("DurableDelegationService", () => {
     ]));
     expect(executor.executions).toEqual([]);
     expect(store.getTask(child.taskId)?.status).toBe("paused");
+  });
+
+  it("actively aborts descendant execution at the remaining ancestor deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const parent = createParentAttempt(store);
+      const child = nestedService(store, parent).create({
+        toolCallId: "nested-active-deadline",
+        trustedWorkspace: true,
+        tasks: [{ task: "Finish within the remaining ancestor time" }]
+      });
+      const parentTask = store.getTask(parent.taskId)!;
+      const parentStep = store.getStep(parent.stepId)!;
+      const parentAttempt = store.getAttempt(parent.attemptId)!;
+      let nowMs = Date.now();
+      const parentStartedAt = new Date(nowMs - 50_000).toISOString();
+      const parentCompletedAt = new Date(nowMs).toISOString();
+      store.updateTask({
+        ...parentTask,
+        status: "running",
+        startedAt: parentStartedAt,
+        updatedAt: parentStartedAt
+      });
+      store.updateStep({ ...parentStep, status: "ready", updatedAt: parentStartedAt });
+      store.updateStep({ ...parentStep, status: "running", updatedAt: parentStartedAt });
+      store.updateTask({
+        ...store.getTask(parent.taskId)!,
+        status: "completed",
+        completedAt: parentCompletedAt,
+        updatedAt: parentCompletedAt
+      });
+      store.updateStep({
+        ...store.getStep(parent.stepId)!,
+        status: "completed",
+        updatedAt: parentCompletedAt
+      });
+      store.updateAttempt({
+        ...parentAttempt,
+        status: "completed",
+        startedAt: parentStartedAt,
+        completedAt: parentCompletedAt,
+        updatedAt: parentCompletedAt
+      });
+      const executor = new FakeTaskStepExecutor(({ signal }) => new Promise((resolve) => {
+        signal.addEventListener("abort", () => resolve({
+          outcome: "succeeded",
+          results: [{ kind: "text", content: "descendant output at the ancestor deadline" }]
+        }), { once: true });
+      }));
+      const childScheduler = scheduler(
+        store,
+        sessionDb,
+        executor,
+        "ancestor-deadline",
+        join(root, "ancestor-deadline-results"),
+        () => new Date(nowMs)
+      );
+      const dispatch = await childScheduler.dispatchOnce();
+
+      nowMs += 10_000;
+      await vi.advanceTimersByTimeAsync(10_000);
+      const run = await dispatch.completion;
+      expect(executor.executions[0]?.signal.aborted).toBe(true);
+      expect(store.listAttempts(child.taskId)[0]).toMatchObject({
+        status: "failed",
+        failure: { class: "execution-limit-exceeded" }
+      });
+      expect(store.listResults(child.taskId)).toEqual([
+        expect.objectContaining({ disposition: "diagnostic" })
+      ]);
+      expect(run).toMatchObject({ dispatched: 1, failed: 1, completed: 0 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rejects runtime children when the active parent Step policy forbids them", () => {

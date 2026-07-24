@@ -849,6 +849,41 @@ describe("TaskScheduler", () => {
     }
   });
 
+  it("actively aborts an Attempt at its earliest wall-clock deadline and preserves late output as diagnostic", async () => {
+    vi.useFakeTimers();
+    try {
+      store.createTaskGraph(makeGraph([makeStep("deadline", 0, {
+        executionLimits: { maxProviderCalls: 5, maxTotalTokens: 50_000, maxWallClockMs: 50 }
+      })], { maxWallClockMs: 1_000 }));
+      const executor = new FakeTaskStepExecutor(({ signal }) => new Promise((resolve) => {
+        signal.addEventListener("abort", () => resolve({
+          outcome: "succeeded",
+          results: [{ kind: "text", content: "completed after the deadline" }]
+        }), { once: true });
+      }));
+      const scheduler = makeScheduler(executor, undefined, 300);
+      const dispatch = await scheduler.dispatchOnce({
+        dispatchGrants: dispatchGrantsFor("scheduler-alpha", ["task-alpha"])
+      });
+
+      nowMs += 50;
+      await vi.advanceTimersByTimeAsync(50);
+      await expect(dispatch.completion).resolves.toMatchObject({ dispatched: 1, failed: 1, completed: 0 });
+
+      expect(executor.executions[0]?.signal.aborted).toBe(true);
+      expect(store.listAttempts("task-alpha")[0]).toMatchObject({
+        status: "failed",
+        failure: { class: "execution-limit-exceeded" }
+      });
+      expect(store.getStep("step-deadline")?.status).toBe("failed");
+      expect(store.listResults("task-alpha")).toEqual([
+        expect.objectContaining({ disposition: "diagnostic", status: "available" })
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("records a scheduler heartbeat rejection before reconciling the expired Attempt", async () => {
     vi.useFakeTimers();
     try {
@@ -961,6 +996,83 @@ describe("TaskScheduler", () => {
       "(last heartbeat 2029-12-31T23:58:30.000Z; lease expiry 2029-12-31T23:59:00.000Z; " +
       "detected 2030-01-01T00:00:00.000Z; reason heartbeat-not-renewed-before-expiry)."
     );
+  });
+
+  it("allows lease recovery plus synthesis after one phase but within a two-phase Task deadline", async () => {
+    const phaseLimit = { maxProviderCalls: 5, maxTotalTokens: 50_000, maxWallClockMs: 600_000 };
+    const workers = ["worker-a", "worker-b", "worker-c"].map((key, position) => makeStep(key, position, {
+      executionLimits: phaseLimit
+    }));
+    const synthesis = makeStep("phase-synthesis", 3, {
+      dependsOn: workers.map((step) => step.id),
+      executor: { kind: "agent", role: "synthesis" },
+      executionLimits: phaseLimit
+    });
+    const graph = makeGraph([...workers, synthesis], {
+      maxConcurrentAttempts: 3,
+      maxProviderCalls: 20,
+      maxTotalTokens: 200_000,
+      maxWallClockMs: 1_230_000
+    });
+    graph.task.status = "running";
+    graph.task.startedAt = "2029-12-31T23:58:00.000Z";
+    graph.steps[0]!.status = "running";
+    store.createTaskGraph(graph);
+    store.createAttempt(makeRunningAttempt(
+      graph.steps[0]!,
+      "attempt-expired-worker-a",
+      "2030-01-01T00:01:00.000Z"
+    ));
+    nowMs = Date.parse(NOW) + 120_000;
+    const executor = new FakeTaskStepExecutor(({ step }) => ({
+      outcome: "succeeded",
+      results: [{ kind: "text", content: `${step.key} result` }]
+    }));
+    const scheduler = makeScheduler(executor);
+
+    expect(await scheduler.runOnce()).toMatchObject({ reconciled: 1, dispatched: 3, completed: 3 });
+    expect(store.getStep(synthesis.id)?.status).toBe("pending");
+
+    nowMs = Date.parse(NOW) + 660_000;
+    const synthesisScheduler = makeScheduler(executor, undefined, undefined, "scheduler-synthesis");
+    expect(await synthesisScheduler.runOnce()).toMatchObject({ dispatched: 1, completed: 1, failed: 0 });
+    expect(store.getTask("task-alpha")?.status).toBe("completed");
+    expect(store.listAttempts("task-alpha").map((attempt) => attempt.status)).toEqual([
+      "expired",
+      "completed",
+      "completed",
+      "completed",
+      "completed"
+    ]);
+  });
+
+  it("rejects settlement beyond the derived Task deadline without accepting its output", async () => {
+    const graph = makeGraph([makeStep("late-settlement", 0, {
+      executionLimits: { maxProviderCalls: 5, maxTotalTokens: 50_000, maxWallClockMs: 600_000 },
+      status: "ready"
+    })], { maxWallClockMs: 1_230_000 });
+    graph.task.status = "running";
+    graph.task.startedAt = NOW;
+    store.createTaskGraph(graph);
+    nowMs += 1_200_000;
+    const scheduler = makeScheduler(new FakeTaskStepExecutor(() => {
+      nowMs += 30_001;
+      return {
+        outcome: "succeeded",
+        results: [{ kind: "text", content: "valid but too late" }]
+      };
+    }), undefined, 1_300_000);
+
+    expect(await scheduler.runOnce()).toMatchObject({ dispatched: 1, failed: 1, completed: 0 });
+    expect(store.listAttempts("task-alpha")[0]).toMatchObject({
+      status: "failed",
+      failure: { class: "execution-limit-exceeded" }
+    });
+    expect(store.listResults("task-alpha")).toEqual([
+      expect.objectContaining({ disposition: "diagnostic", status: "available" })
+    ]);
+    expect(store.getStep("step-late-settlement")?.status).toBe("failed");
+    expect(store.getTask("task-alpha")?.status).toBe("failed");
   });
 
   it.each(["unknown", "non_idempotent"] as const)(

@@ -44,6 +44,8 @@ import {
 
 const DEFAULT_LEASE_MS = 30_000;
 const MAX_RESULT_RECORDS_PER_SETTLEMENT = 64;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+const TASK_STEP_EXECUTION_DEADLINE_ABORT_REASON = "task-step-execution-deadline";
 const ACTIVE_ATTEMPT_STATUSES: readonly TaskAttemptStatus[] = [
   "leased",
   "running",
@@ -177,6 +179,12 @@ type AttemptLeaseGuard = {
   stop(): void;
 };
 
+type AttemptDeadlineGuard = {
+  readonly reasonCode: string;
+  exceeded(): boolean;
+  stop(): void;
+};
+
 export class TaskScheduler {
   readonly #store: TaskStore;
   readonly #resultService: TaskResultService;
@@ -303,6 +311,7 @@ export class TaskScheduler {
         const controller = new AbortController();
         this.#running.set(started.id, { taskId: task.id, controller });
         const leaseGuard = this.#startAttemptLeaseGuard(started, controller);
+        const deadlineGuard = this.#startAttemptDeadlineGuard(task, step, started, controller);
         const launch = Promise.resolve().then(() => this.#execute(
           task,
           step,
@@ -310,6 +319,7 @@ export class TaskScheduler {
           executor,
           controller,
           leaseGuard,
+          deadlineGuard,
           result
         ));
         launches.push(launch);
@@ -505,7 +515,6 @@ export class TaskScheduler {
       if (stopped) return;
       stopped = true;
       if (timer !== undefined) clearTimeout(timer);
-      controller.signal.removeEventListener("abort", stop);
     };
     const schedule = (delayMs: number) => {
       timer = setTimeout(() => {
@@ -535,9 +544,44 @@ export class TaskScheduler {
         schedule(intervalMs);
       }, delayMs);
     };
-    controller.signal.addEventListener("abort", stop, { once: true });
     schedule(initialDelayMs);
     return { stop };
+  }
+
+  #startAttemptDeadlineGuard(
+    task: Task,
+    step: TaskStep,
+    attempt: TaskAttempt,
+    controller: AbortController
+  ): AttemptDeadlineGuard {
+    const deadline = this.#remainingWallClockDeadline(task, step, attempt);
+    let exceeded = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expiresAt = Date.now() + Math.max(0, deadline.remainingMs);
+    const expire = () => {
+      if (exceeded) return;
+      const remainingMs = expiresAt - Date.now();
+      if (remainingMs > 0) {
+        timer = setTimeout(expire, Math.min(remainingMs, MAX_TIMER_DELAY_MS));
+        timer.unref?.();
+        return;
+      }
+      exceeded = true;
+      if (!controller.signal.aborted) controller.abort(TASK_STEP_EXECUTION_DEADLINE_ABORT_REASON);
+    };
+    if (deadline.remainingMs <= 0) {
+      expire();
+    } else {
+      timer = setTimeout(expire, Math.min(deadline.remainingMs, MAX_TIMER_DELAY_MS));
+      timer.unref?.();
+    }
+    return {
+      reasonCode: deadline.reasonCode,
+      exceeded: () => exceeded,
+      stop: () => {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    };
   }
 
   #reconcileApprovals(result: MutableRunResult, eligibleTaskIds: ReadonlySet<string> | undefined): void {
@@ -1021,6 +1065,7 @@ export class TaskScheduler {
     executor: TaskStepExecutor,
     controller: AbortController,
     leaseGuard: AttemptLeaseGuard,
+    deadlineGuard: AttemptDeadlineGuard,
     result: MutableRunResult
   ): Promise<void> {
     const lease = attempt.lease;
@@ -1061,6 +1106,10 @@ export class TaskScheduler {
       }
 
       if (this.#handoffAttempts.has(attempt.id)) throw new TaskSchedulerHandoffError();
+
+      if (deadlineGuard.exceeded()) {
+        settlement = deadlineExceededSettlement(settlement, deadlineGuard.reasonCode);
+      }
 
       const outcome = await this.#settle(task.id, step.id, attempt.id, lease, settlement);
       if (outcome === "completed") result.completed++;
@@ -1106,6 +1155,7 @@ export class TaskScheduler {
         }
       }
     } finally {
+      deadlineGuard.stop();
       leaseGuard.stop();
       this.#running.delete(attempt.id);
       this.#handoffAttempts.delete(attempt.id);
@@ -1290,8 +1340,16 @@ export class TaskScheduler {
     if (step === null) throw new TaskSchedulerLeaseLostError();
     const results = [...(settlement.results ?? [])];
     let acceptanceFailure = validateResultAcceptance(step, results);
-    if (acceptanceFailure === undefined && !this.#usageWithinExecutionLimits(taskId, step, usage)) {
-      acceptanceFailure = failure("execution-limit-exceeded", "Attempt usage exceeded its Task or Step execution limits.", false, false);
+    const executionLimitReason = acceptanceFailure === undefined
+      ? this.#settlementExecutionLimitReason(taskId, step, usage)
+      : undefined;
+    if (executionLimitReason !== undefined) {
+      acceptanceFailure = failure(
+        "execution-limit-exceeded",
+        `Attempt exceeded its ${executionLimitReason}.`,
+        false,
+        false
+      );
     }
 
     let preparedResults: PreparedTaskResultBatch | undefined;
@@ -1322,7 +1380,15 @@ export class TaskScheduler {
       }
     }
     if (acceptanceFailure !== undefined) {
-      this.#settleFailure(taskId, attemptId, lease, acceptanceFailure, usage, settlement.usageEntries);
+      this.#settleFailure(
+        taskId,
+        attemptId,
+        lease,
+        acceptanceFailure,
+        usage,
+        settlement.usageEntries,
+        executionLimitReason?.includes("wall-clock") === true ? results : undefined
+      );
       return "failed";
     }
     if (preparedResults === undefined) throw new Error("Task result preparation did not complete.");
@@ -1842,6 +1908,47 @@ export class TaskScheduler {
     return !decision.retry || Date.parse(latest.completedAt) + decision.delayMs <= this.#now().getTime();
   }
 
+  #remainingWallClockDeadline(
+    task: Task,
+    step: TaskStep,
+    attempt: TaskAttempt,
+    store: TaskStore = this.#store
+  ): { remainingMs: number; reasonCode: string } {
+    const nowMs = this.#now().getTime();
+    let remainingMs = Number.MAX_SAFE_INTEGER;
+    let reasonCode = "task-wall-clock-limit-exhausted";
+    const consider = (candidate: number, candidateReason: string) => {
+      if (candidate < remainingMs) {
+        remainingMs = candidate;
+        reasonCode = candidateReason;
+      }
+    };
+    for (const [index, scope] of listTaskExecutionScopes(store, task, step).entries()) {
+      const prefix = index === 0 ? "" : "ancestor-";
+      if (scope.task.startedAt !== undefined) {
+        consider(
+          Date.parse(scope.task.startedAt) + scope.task.executionLimits.maxWallClockMs - nowMs,
+          `${prefix}task-wall-clock-limit-exhausted`
+        );
+      }
+      const stepStartedAt = listStepTreeAttempts(store, scope.task.id, scope.step.id)
+        .filter((candidate) => candidate.startedAt !== undefined)
+        .reduce<number | undefined>((earliest, candidate) => {
+          const started = Date.parse(candidate.startedAt!);
+          return earliest === undefined || started < earliest ? started : earliest;
+        }, scope.task.id === task.id && scope.step.id === step.id && attempt.startedAt !== undefined
+          ? Date.parse(attempt.startedAt)
+          : undefined);
+      if (stepStartedAt !== undefined) {
+        consider(
+          stepStartedAt + scope.step.executionLimits.maxWallClockMs - nowMs,
+          `${prefix}step-wall-clock-limit-exhausted`
+        );
+      }
+    }
+    return { remainingMs, reasonCode };
+  }
+
   #executionLimitBlockReason(
     task: Task,
     step: TaskStep,
@@ -1887,14 +1994,19 @@ export class TaskScheduler {
     return undefined;
   }
 
-  #usageWithinExecutionLimits(taskId: string, step: TaskStep, newUsage: TaskUsageTotals): boolean {
+  #settlementExecutionLimitReason(
+    taskId: string,
+    step: TaskStep,
+    newUsage: TaskUsageTotals
+  ): string | undefined {
     const task = this.#store.getTask(taskId);
-    if (task === null) return false;
+    if (task === null) return "task-missing";
     const attempts = this.#store.listAttempts(taskId);
     const currentAttemptId = this.#currentAttemptId(attempts, step.id);
     const effectiveNewUsage = { ...newUsage, providerCalls: Math.max(1, newUsage.providerCalls) };
     const nowMs = this.#now().getTime();
-    for (const scope of listTaskExecutionScopes(this.#store, task, step)) {
+    for (const [index, scope] of listTaskExecutionScopes(this.#store, task, step).entries()) {
+      const prefix = index === 0 ? "" : "ancestor-";
       const priorTask = sumUsage(listTaskTreeAttempts(this.#store, scope.task.id)
         .filter((attempt) => attempt.id !== currentAttemptId)
         .map(attemptExecutionUsage));
@@ -1912,11 +2024,24 @@ export class TaskScheduler {
         }, undefined);
       const stepWallClockOk = firstStepStart === undefined ||
         nowMs - firstStepStart <= scope.step.executionLimits.maxWallClockMs;
-      if (!taskWallClockOk || !stepWallClockOk ||
-          !usageFits(addUsage(priorTask, effectiveNewUsage), scope.task.executionLimits) ||
-          !usageFits(addUsage(priorStep, effectiveNewUsage), scope.step.executionLimits)) return false;
+      if (!taskWallClockOk) return `${prefix}task-wall-clock-limit-exhausted`;
+      if (!stepWallClockOk) return `${prefix}step-wall-clock-limit-exhausted`;
+      const taskUsage = addUsage(priorTask, effectiveNewUsage);
+      if (taskUsage.providerCalls > scope.task.executionLimits.maxProviderCalls) {
+        return `${prefix}task-provider-call-limit-exhausted`;
+      }
+      if (taskUsage.totalTokens > scope.task.executionLimits.maxTotalTokens) {
+        return `${prefix}task-token-limit-exhausted`;
+      }
+      const stepUsage = addUsage(priorStep, effectiveNewUsage);
+      if (stepUsage.providerCalls > scope.step.executionLimits.maxProviderCalls) {
+        return `${prefix}step-provider-call-limit-exhausted`;
+      }
+      if (stepUsage.totalTokens > scope.step.executionLimits.maxTotalTokens) {
+        return `${prefix}step-token-limit-exhausted`;
+      }
     }
-    return true;
+    return undefined;
   }
 
   #currentAttemptId(attempts: readonly TaskAttempt[], stepId: string): string | undefined {
@@ -2147,6 +2272,31 @@ function normalizeFailure(value: TaskFailure): TaskFailure {
   };
 }
 
+function deadlineExceededSettlement(
+  settlement: TaskExecutorSettlement,
+  reasonCode: string
+): TaskExecutorSettlement {
+  const diagnosticResults = settlement.outcome === "succeeded"
+    ? settlement.results
+    : settlement.outcome === "failed"
+      ? settlement.diagnosticResults
+      : undefined;
+  return {
+    outcome: "failed",
+    failure: failure(
+      "execution-limit-exceeded",
+      `Attempt exceeded its ${reasonCode}.`,
+      false,
+      false
+    ),
+    ...(diagnosticResults === undefined ? {} : { diagnosticResults }),
+    ...(settlement.usage === undefined ? {} : { usage: settlement.usage }),
+    ...(settlement.usageEntries === undefined ? {} : { usageEntries: settlement.usageEntries }),
+    ...(settlement.workerSessionId === undefined ? {} : { workerSessionId: settlement.workerSessionId }),
+    ...(settlement.trajectoryId === undefined ? {} : { trajectoryId: settlement.trajectoryId })
+  };
+}
+
 function mayPublishDiagnosticResults(failureRecord: TaskFailure): boolean {
   if (failureRecord.uncertainSideEffects) return false;
   return failureRecord.class !== "security-deny" &&
@@ -2242,14 +2392,6 @@ function addUsage(left: TaskUsageTotals, right: TaskUsageTotals): TaskUsageTotal
     pricingComplete: left.pricingComplete && right.pricingComplete,
     incompleteReasons: [...left.incompleteReasons, ...right.incompleteReasons].slice(0, 32)
   };
-}
-
-function usageFits(
-  usage: TaskUsageTotals,
-  executionLimits: Pick<Task["executionLimits"], "maxProviderCalls" | "maxTotalTokens">
-): boolean {
-  return usage.providerCalls <= executionLimits.maxProviderCalls &&
-    usage.totalTokens <= executionLimits.maxTotalTokens;
 }
 
 function usageEventData(usage: TaskUsageTotals): Readonly<Record<string, unknown>> {

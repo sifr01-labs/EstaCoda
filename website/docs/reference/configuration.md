@@ -226,7 +226,7 @@ Subagent delegation config is normalized with defaults when omitted.
 | `maxConcurrentChildren` | `3` | Maximum active children in a batch. |
 | `maxDelegateCallsPerTurn` | `3` | Per-provider-turn cap for separate `delegate_task` calls. |
 | `maxBatchTasks` | `10` | Maximum `tasks[]` length. |
-| `childTimeoutSeconds` | `600` | Child timeout floor is 30 seconds. |
+| `childTimeoutSeconds` | `600` | Per-phase delegated Step timeout; minimum 30 seconds. Multi-phase root Tasks derive a critical-path deadline plus a bounded scheduling allowance. |
 | `heartbeatSeconds` | `30` | Worker heartbeat interval while an agent Attempt runs. |
 | `heartbeatStaleCyclesIdle` | `3` | Idle stale-heartbeat threshold. |
 | `heartbeatStaleCyclesInTool` | `6` | In-tool stale-heartbeat threshold. |

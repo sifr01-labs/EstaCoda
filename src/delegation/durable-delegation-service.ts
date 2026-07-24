@@ -31,6 +31,8 @@ import {
 const STEP_PROVIDER_CALLS = 45;
 const STEP_TOTAL_TOKENS = 1_000_000;
 const STEP_RESULT_BYTES = 1_048_576;
+const MAX_TASK_SCHEDULING_ALLOWANCE_MS = 30_000;
+const TASK_SCHEDULING_ALLOWANCE_RATIO = 0.05;
 const DEFAULT_BATCH_SYNTHESIS_OBJECTIVE =
   "Synthesize all delegated results into one coherent, supported final answer. Resolve overlaps and contradictions instead of concatenating the reports.";
 
@@ -160,8 +162,10 @@ export class DurableDelegationService {
       : [...stepAuthorities, synthesisAuthority];
     const taskAuthority = mergeAuthorities(allAuthorities);
     const totalStepCount = request.tasks.length + (synthesis === undefined ? 0 : 1);
+    const sequentialPhaseCount = synthesis === undefined ? 1 : 2;
     const executionLimits = delegationExecutionLimits(
       totalStepCount,
+      sequentialPhaseCount,
       this.#config.maxConcurrentChildren,
       this.#config.childTimeoutSeconds,
       parent?.executionLimits
@@ -294,7 +298,7 @@ export class DurableDelegationService {
     taskId: string;
     attemptId: string;
     authority: TaskAuthorityPolicy;
-    executionLimits: TaskStepExecutionLimits;
+    executionLimits: TaskExecutionLimits;
     executionPreference: TaskExecutionPreference;
   } | undefined {
     if (this.#activeTaskExecution === undefined) return undefined;
@@ -314,7 +318,10 @@ export class DurableDelegationService {
       taskId: task.id,
       attemptId: attempt.id,
       authority: step.authorityPolicy,
-      executionLimits: step.executionLimits,
+      executionLimits: {
+        maxConcurrentAttempts: task.executionLimits.maxConcurrentAttempts,
+        ...step.executionLimits
+      },
       executionPreference: task.executionPreference
     };
   }
@@ -398,23 +405,43 @@ function delegatedRetryPolicy(idempotency: TaskIdempotency): TaskRetryPolicy {
 
 function delegationExecutionLimits(
   stepCount: number,
+  sequentialPhaseCount: number,
   maxConcurrentChildren: number,
   timeoutSeconds: number,
-  ceiling?: TaskStepExecutionLimits
+  ceiling?: TaskExecutionLimits
 ): {
   task: TaskExecutionLimits;
   step: TaskStepExecutionLimits;
 } {
   const wall = Math.max(1, Math.floor(timeoutSeconds * 1_000));
+  const phaseWall = ceiling === undefined
+    ? wall
+    : Math.max(1, Math.floor(ceiling.maxWallClockMs / sequentialPhaseCount));
+  let rootTaskWall = ceiling?.maxWallClockMs;
+  if (rootTaskWall === undefined) {
+    const schedulingAllowance = Math.min(
+      MAX_TASK_SCHEDULING_ALLOWANCE_MS,
+      Math.max(1, Math.floor(wall * TASK_SCHEDULING_ALLOWANCE_RATIO))
+    );
+    rootTaskWall = wall * sequentialPhaseCount + schedulingAllowance;
+    if (!Number.isSafeInteger(rootTaskWall)) {
+      throw new Error("Delegation wall-clock limit exceeds the safe integer range.");
+    }
+  }
   const totalCalls = STEP_PROVIDER_CALLS * stepCount;
   const totalTokens = STEP_TOTAL_TOKENS * stepCount;
   const task: TaskExecutionLimits = ceiling === undefined ? {
     maxConcurrentAttempts: Math.min(stepCount, maxConcurrentChildren, TASK_GRAPH_LIMITS.maxConcurrentAttempts),
     maxProviderCalls: totalCalls,
     maxTotalTokens: totalTokens,
-    maxWallClockMs: wall
+    maxWallClockMs: rootTaskWall
   } : {
-    maxConcurrentAttempts: Math.min(stepCount, maxConcurrentChildren, TASK_GRAPH_LIMITS.maxConcurrentAttempts),
+    maxConcurrentAttempts: Math.min(
+      stepCount,
+      maxConcurrentChildren,
+      TASK_GRAPH_LIMITS.maxConcurrentAttempts,
+      ceiling.maxConcurrentAttempts
+    ),
     maxProviderCalls: ceiling.maxProviderCalls,
     maxTotalTokens: ceiling.maxTotalTokens,
     maxWallClockMs: ceiling.maxWallClockMs
@@ -424,7 +451,7 @@ function delegationExecutionLimits(
     step: {
       maxProviderCalls: ceiling === undefined ? STEP_PROVIDER_CALLS : Math.floor(ceiling.maxProviderCalls / stepCount),
       maxTotalTokens: ceiling === undefined ? STEP_TOTAL_TOKENS : Math.floor(ceiling.maxTotalTokens / stepCount),
-      maxWallClockMs: ceiling === undefined ? wall : ceiling.maxWallClockMs
+      maxWallClockMs: phaseWall
     }
   };
 }

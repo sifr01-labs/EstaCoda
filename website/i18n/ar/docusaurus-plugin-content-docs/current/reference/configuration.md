@@ -226,7 +226,7 @@ model.staleTimeoutMs / model.fallbacks[].staleTimeoutMs
 | `maxConcurrentChildren` | `3` | أقصى عدد أطفال نشطين في دفعة. |
 | `maxDelegateCallsPerTurn` | `3` | سقف كل provider turn لاستدعاءات `delegate_task` المنفصلة. |
 | `maxBatchTasks` | `10` | أقصى طول لـ `tasks[]`. |
-| `childTimeoutSeconds` | `600` | حد timeout للطفل؛ الحد الأدنى 30 ثانية. |
+| `childTimeoutSeconds` | `600` | مهلة كل مرحلة من خطوات التفويض؛ الحد الأدنى 30 ثانية. تشتق المهام الجذرية متعددة المراحل مهلة للمسار الحرج مع سماح جدولة محدود. |
 | `heartbeatSeconds` | `30` | فترة heartbeat للعامل أثناء تشغيل Attempt. |
 | `heartbeatStaleCyclesIdle` | `3` | عتبة stale-heartbeat عندما يكون الطفل idle. |
 | `heartbeatStaleCyclesInTool` | `6` | عتبة stale-heartbeat عندما يكون الطفل داخل أداة. |
