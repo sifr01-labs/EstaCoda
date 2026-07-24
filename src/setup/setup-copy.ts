@@ -1,4 +1,4 @@
-import { isolateLtr, isolateRtl, LRI, PDI, RLI } from "../ui/bidi.js";
+import { isolateLtr, isolateRtl, isolateTechnicalTokens } from "../ui/bidi.js";
 
 export type SetupCopyLocale = "en" | "ar";
 
@@ -1150,23 +1150,8 @@ function copy(
 
 function isolateArabicCopy(value: string): string {
   let isolated = value.replace(/\{[A-Za-z][A-Za-z0-9]*\}/gu, (placeholder) => isolateLtr(placeholder));
-  const tokenPattern = new RegExp(TECHNICAL_TOKENS.map(escapeRegExp).join("|"), "gu");
-  return isolated.replace(tokenPattern, (token, offset: number) => isInsideBidiIsolation(isolated, offset) ? token : isolateLtr(token));
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function isInsideBidiIsolation(value: string, offset: number): boolean {
-  let depth = 0;
-  for (let index = 0; index < offset; index += 1) {
-    const char = value[index];
-    if (char === LRI || char === RLI) {
-      depth += 1;
-    } else if (char === PDI && depth > 0) {
-      depth -= 1;
-    }
-  }
-  return depth > 0;
+  return isolateTechnicalTokens(isolated, {
+    tokens: TECHNICAL_TOKENS,
+    detectCommonTokens: false,
+  });
 }
