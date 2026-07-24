@@ -506,7 +506,11 @@ describe("TaskOperatorService", () => {
 
   it("enforces session-scoped reads and creator-only mutation", () => {
     const created = service.begin({ objective: "Inspect status", workspace: workspace(), creatorSessionId: "owner" });
+    const listTasks = vi.spyOn(store, "listTasks");
+    expect(service.list({ authorizedSessionId: "owner", limit: 1 })).toHaveLength(1);
+    expect(listTasks).toHaveBeenLastCalledWith({ authorizedSessionId: "owner", limit: 1 });
     expect(() => service.status(created.taskId, "other")).toThrow("not found for this session");
+    expect(() => service.status("missing-task", "other")).toThrow("not found for this session");
     expect(() => service.pause(created.taskId, "other")).toThrow("not found for this session");
     expect(() => service.cancel(created.taskId, "other")).toThrow("not found for this session");
     expect(service.pause(created.taskId, "owner").status).toBe("paused");

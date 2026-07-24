@@ -4,10 +4,11 @@ import type { ProviderSpendingScope } from "../contracts/provider-spend.js";
 import type { SessionDB } from "../contracts/session.js";
 import { usageCostSummaryFromEntries } from "../providers/provider-usage-projection.js";
 import { spendingBudgetSummary } from "../providers/provider-spend-projection.js";
-import type { TaskStore } from "../workflow/task-store.js";
+import { taskListCursor, type TaskStore } from "../workflow/task-store.js";
 import { verifiedCompressionLineage } from "./session-lineage.js";
 
 const MAX_SESSION_TASKS = 1_000;
+const MAX_SESSION_TASK_PAGES = 100;
 
 /** Projects conversation and originating Task spend from the one canonical request ledger. */
 export async function loadSessionCostUsage(input: {
@@ -29,14 +30,22 @@ export async function loadSessionCostUsage(input: {
   }
 
   if (input.taskStore !== undefined) {
-    const listedTasks = input.taskStore.listTasks({ limit: MAX_SESSION_TASKS });
-    const roots = listedTasks.filter((task) =>
-      task.rootTaskId === task.id && lineageIds.has(task.originSessionId)
-    );
-    for (const task of roots) {
-      entries.push(...input.taskStore.listProviderUsageEntries({ rootTaskId: task.id }));
+    let cursor: ReturnType<typeof taskListCursor> | undefined;
+    for (let pageIndex = 0; pageIndex < MAX_SESSION_TASK_PAGES; pageIndex++) {
+      const tasks = input.taskStore.listTasks({
+        originSessionIds: [...lineageIds],
+        rootOnly: true,
+        order: "created_asc",
+        cursor,
+        limit: MAX_SESSION_TASKS
+      });
+      for (const task of tasks) {
+        entries.push(...input.taskStore.listProviderUsageEntries({ rootTaskId: task.id }));
+      }
+      if (tasks.length < MAX_SESSION_TASKS) break;
+      cursor = taskListCursor(tasks[tasks.length - 1]!, "created_asc");
+      if (pageIndex === MAX_SESSION_TASK_PAGES - 1) taskScanTruncated = true;
     }
-    taskScanTruncated = listedTasks.length >= MAX_SESSION_TASKS;
   }
 
   if (taskScanTruncated) {

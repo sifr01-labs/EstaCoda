@@ -25,7 +25,7 @@ import {
   type PreparedTaskResultBatch,
   type TaskResultService
 } from "./task-result-service.js";
-import type { TaskStore } from "./task-store.js";
+import { taskListCursor, type ListTasksOptions, type TaskStore } from "./task-store.js";
 import type { TaskApprovalService } from "./task-approval-service.js";
 import { cancelTaskInStore } from "./task-operator-service.js";
 import {
@@ -45,6 +45,7 @@ import {
 const DEFAULT_LEASE_MS = 30_000;
 const DEFAULT_ATTEMPT_LEASE_ABORT_GRACE_MS = 2_000;
 const MAX_RESULT_RECORDS_PER_SETTLEMENT = 64;
+const TASK_QUERY_ID_SCOPE_LIMIT = 900;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const TASK_STEP_EXECUTION_DEADLINE_ABORT_REASON = "task-step-execution-deadline";
 const ACTIVE_ATTEMPT_STATUSES: readonly TaskAttemptStatus[] = [
@@ -267,10 +268,9 @@ export class TaskScheduler {
     this.#reconcileApprovals(result, eligibleTaskIds);
     this.#reconcile(result, eligibleTaskIds);
 
-    const tasks = this.#store.listTasks({
-      statuses: ["queued", "running", "waiting_for_host"],
-      limit: 1_000
-    }).filter((task) => isEligibleTask(task.id, eligibleTaskIds)).sort(compareTasks);
+    const tasks = listFairTasks(this.#store, {
+      statuses: ["queued", "running", "waiting_for_host"]
+    }, eligibleTaskIds);
     const prepared: Task[] = [];
     for (const task of tasks) {
       const resumed = task.status === "waiting_for_host" ? this.#resumeForAvailableHost(task) : task;
@@ -645,9 +645,8 @@ export class TaskScheduler {
   }
 
   #reconcileApprovals(result: MutableRunResult, eligibleTaskIds: ReadonlySet<string> | undefined): void {
-    const links = this.#store.listApprovalLinks({ statuses: ["approved", "denied", "expired"], limit: 1_000 });
+    const links = listSettledApprovalLinks(this.#store, eligibleTaskIds);
     for (const link of links) {
-      if (!isEligibleTask(link.taskId, eligibleTaskIds)) continue;
       const task = this.#store.getTask(link.taskId);
       const step = this.#store.getStep(link.stepId);
       const attempt = this.#store.getAttempt(link.attemptId);
@@ -802,8 +801,7 @@ export class TaskScheduler {
 
   #reconcile(result: MutableRunResult, eligibleTaskIds: ReadonlySet<string> | undefined): void {
     const now = this.#now();
-    const tasks = this.#store.listTasks({ statuses: RECONCILABLE_TASK_STATUSES, limit: 1_000 })
-      .filter((task) => isEligibleTask(task.id, eligibleTaskIds));
+    const tasks = listFairTasks(this.#store, { statuses: RECONCILABLE_TASK_STATUSES }, eligibleTaskIds);
     for (const task of tasks) {
       for (const attempt of this.#store.listAttempts(task.id)) {
         if (!ACTIVE_ATTEMPT_STATUSES.includes(attempt.status)) continue;
@@ -2116,15 +2114,17 @@ export class TaskScheduler {
       executor: new Map(),
       provider: new Map()
     };
-    const tasks = this.#store.listTasks({ statuses: RECONCILABLE_TASK_STATUSES, limit: 1_000 });
-    for (const task of tasks) {
+    forEachTaskPage(this.#store, {
+      statuses: RECONCILABLE_TASK_STATUSES,
+      attemptStatuses: LEASE_OWNED_ATTEMPT_STATUSES
+    }, (task) => {
       for (const attempt of this.#store.listAttempts(task.id)) {
         if (!LEASE_OWNED_ATTEMPT_STATUSES.includes(attempt.status)) continue;
         const step = this.#store.getStep(attempt.stepId);
         if (step === null) continue;
         incrementCapacity(state, task, step);
       }
-    }
+    });
     return state;
   }
 
@@ -2148,14 +2148,16 @@ export class TaskScheduler {
       executor: new Map(),
       provider: new Map()
     };
-    const tasks = store.listTasks({ statuses: RECONCILABLE_TASK_STATUSES, limit: 1_000 });
-    for (const candidateTask of tasks) {
+    forEachTaskPage(store, {
+      statuses: RECONCILABLE_TASK_STATUSES,
+      attemptStatuses: LEASE_OWNED_ATTEMPT_STATUSES
+    }, (candidateTask) => {
       for (const attempt of store.listAttempts(candidateTask.id)) {
         if (!LEASE_OWNED_ATTEMPT_STATUSES.includes(attempt.status)) continue;
         const candidateStep = store.getStep(attempt.stepId);
         if (candidateStep !== null) incrementCapacity(state, candidateTask, candidateStep);
       }
-    }
+    });
     return this.#hasCapacity(task, step, state, store);
   }
 
@@ -2583,6 +2585,63 @@ function incrementMap(map: Map<string, number>, key: string): void {
 
 function compareTasks(left: Task, right: Task): number {
   return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
+}
+
+function listFairTasks(
+  store: TaskStore,
+  options: Omit<ListTasksOptions, "cursor" | "limit" | "order" | "taskIds">,
+  eligibleTaskIds: ReadonlySet<string> | undefined
+): Task[] {
+  if (eligibleTaskIds === undefined) {
+    return store.listTasks({ ...options, order: "created_asc", limit: 1_000 });
+  }
+  if (eligibleTaskIds.size === 0) return [];
+  const taskIds = [...eligibleTaskIds];
+  const tasks: Task[] = [];
+  for (let offset = 0; offset < taskIds.length; offset += TASK_QUERY_ID_SCOPE_LIMIT) {
+    tasks.push(...store.listTasks({
+      ...options,
+      taskIds: taskIds.slice(offset, offset + TASK_QUERY_ID_SCOPE_LIMIT),
+      order: "created_asc",
+      limit: 1_000
+    }));
+  }
+  return tasks.sort(compareTasks).slice(0, 1_000);
+}
+
+function listSettledApprovalLinks(
+  store: TaskStore,
+  eligibleTaskIds: ReadonlySet<string> | undefined
+): ReturnType<TaskStore["listApprovalLinks"]> {
+  if (eligibleTaskIds === undefined) {
+    return store.listApprovalLinks({ statuses: ["approved", "denied", "expired"], limit: 1_000 });
+  }
+  const taskIds = [...eligibleTaskIds];
+  const links: ReturnType<TaskStore["listApprovalLinks"]> = [];
+  for (let offset = 0; offset < taskIds.length; offset += TASK_QUERY_ID_SCOPE_LIMIT) {
+    links.push(...store.listApprovalLinks({
+      statuses: ["approved", "denied", "expired"],
+      taskIds: taskIds.slice(offset, offset + TASK_QUERY_ID_SCOPE_LIMIT),
+      limit: 1_000
+    }));
+  }
+  return links.sort((left, right) =>
+    left.requestedAt.localeCompare(right.requestedAt) || left.id.localeCompare(right.id)
+  ).slice(0, 1_000);
+}
+
+function forEachTaskPage(
+  store: TaskStore,
+  options: Omit<ListTasksOptions, "cursor" | "limit" | "order">,
+  visit: (task: Task) => void
+): void {
+  let cursor: ListTasksOptions["cursor"];
+  while (true) {
+    const page = store.listTasks({ ...options, order: "created_asc", cursor, limit: 1_000 });
+    for (const task of page) visit(task);
+    if (page.length < 1_000) return;
+    cursor = taskListCursor(page[page.length - 1]!, "created_asc");
+  }
 }
 
 function attemptLeaseHeartbeatIntervalMs(leaseMs: number): number {

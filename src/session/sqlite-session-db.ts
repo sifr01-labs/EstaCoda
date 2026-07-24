@@ -32,6 +32,7 @@ import {
   migrateTaskExecutionPreferenceSchemaV20,
   migrateTaskDiagnosticResultsSchemaV24,
   migrateTaskResultDisplaySummarySchemaV25,
+  migrateTaskScopedPaginationSchemaV26,
   migrateExecutionLimitsAndSpendingPolicySchemaV22,
   migrateTaskHostOwnershipSchemaV19,
   migrateTaskVerticalSliceSchemaV15,
@@ -783,6 +784,8 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       migrateTaskDiagnosticResultsSchemaV24(this.#db));
     this.#runMigrationStep(25, "v0.10-schema-v25-task-result-display-summary", () =>
       migrateTaskResultDisplaySummarySchemaV25(this.#db));
+    this.#runMigrationStep(26, "v0.10-schema-v26-task-scoped-pagination", () =>
+      migrateTaskScopedPaginationSchemaV26(this.#db));
   }
 
   #withMigrationLock(migrate: () => void): void {

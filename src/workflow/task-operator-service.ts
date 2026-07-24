@@ -289,9 +289,10 @@ export class TaskOperatorService {
 
   list(input: { authorizedSessionId?: string; limit?: number } = {}): TaskStatusProjection[] {
     const limit = Math.min(MAX_LISTED_TASKS, Math.max(1, Math.floor(input.limit ?? 20)));
-    return this.#store.listTasks({ limit: MAX_LISTED_TASKS })
-      .filter((task) => input.authorizedSessionId === undefined || this.#isLinked(task.id, input.authorizedSessionId))
-      .slice(0, limit)
+    return this.#store.listTasks({
+      ...(input.authorizedSessionId === undefined ? {} : { authorizedSessionId: input.authorizedSessionId }),
+      limit
+    })
       .map((task) => this.#project(task));
   }
 
@@ -597,18 +598,20 @@ export class TaskOperatorService {
 
   #authorizedTask(taskId: string, sessionId: string | undefined, mutate: boolean, store = this.#store): Task {
     const id = token(taskId, "Task ID");
-    const task = store.getTask(id);
-    if (task === null) throw new Error(`Task ${id} was not found in this profile.`);
-    if (sessionId !== undefined) {
-      const relationship = store.listSessionLinks(id).find((link) => link.sessionId === sessionId)?.relationship;
-      const allowed = mutate ? relationship === "creator" : relationship !== undefined;
-      if (!allowed) throw new Error(`Task ${id} was not found for this session.`);
+    const task = sessionId === undefined
+      ? store.getTask(id)
+      : store.listTasks({
+          taskIds: [id],
+          authorizedSessionId: sessionId,
+          ...(mutate ? { sessionRelationships: ["creator" as const] } : {}),
+          limit: 1
+        })[0] ?? null;
+    if (task === null) {
+      throw new Error(sessionId === undefined
+        ? `Task ${id} was not found in this profile.`
+        : `Task ${id} was not found for this session.`);
     }
     return task;
-  }
-
-  #isLinked(taskId: string, sessionId: string): boolean {
-    return this.#store.listSessionLinks(taskId).some((link) => link.sessionId === sessionId);
   }
 
   #event(
@@ -641,12 +644,19 @@ export function cancelTaskInStore(input: {
   const eventId = input.eventId ?? randomUUID;
   const reason = token(input.reasonCode, "cancellation reason code");
   return input.store.atomicWrite((store) => {
-    const task = store.getTask(token(input.taskId, "Task ID"));
-    if (task === null) throw new Error(`Task ${input.taskId} was not found.`);
-    if (input.authorizedSessionId !== undefined) {
-      const relationship = store.listSessionLinks(task.id)
-        .find((link) => link.sessionId === input.authorizedSessionId)?.relationship;
-      if (relationship !== "creator") throw new Error(`Task ${task.id} was not found for this session.`);
+    const taskId = token(input.taskId, "Task ID");
+    const task = input.authorizedSessionId === undefined
+      ? store.getTask(taskId)
+      : store.listTasks({
+          taskIds: [taskId],
+          authorizedSessionId: input.authorizedSessionId,
+          sessionRelationships: ["creator"],
+          limit: 1
+        })[0] ?? null;
+    if (task === null) {
+      throw new Error(input.authorizedSessionId === undefined
+        ? `Task ${taskId} was not found.`
+        : `Task ${taskId} was not found for this session.`);
     }
     if (isTerminalTaskStatus(task.status)) return task;
     const event = (kind: TaskEvent["kind"], data: Record<string, unknown>, step?: TaskStep): TaskEvent => ({

@@ -325,15 +325,90 @@ export class SQLiteTaskStore implements TaskStore {
   }
 
   listTasks(options: ListTasksOptions = {}): Task[] {
+    const taskIds = boundedIdentifierList(options.taskIds, "Task list Task IDs");
     const statuses = [...(options.statuses ?? [])];
+    const attemptStatuses = [...(options.attemptStatuses ?? [])];
+    const executionPreferences = [...(options.executionPreferences ?? [])];
+    const relationships = [...(options.sessionRelationships ?? [])];
+    const originSessionIds = boundedIdentifierList(options.originSessionIds, "Task list origin session IDs");
+    if (taskIds?.length === 0 ||
+        (executionPreferences.length === 0 && options.executionPreferences !== undefined) ||
+        (attemptStatuses.length === 0 && options.attemptStatuses !== undefined) ||
+        (relationships.length === 0 && options.sessionRelationships !== undefined) ||
+        originSessionIds?.length === 0) {
+      return [];
+    }
+    if (options.sessionRelationships !== undefined && options.authorizedSessionId === undefined) {
+      throw new TaskStoreIntegrityError("Task session relationships require an authorized session scope.");
+    }
+    const order = options.order ?? "updated_desc";
+    if (order !== "updated_desc" && order !== "created_asc") {
+      throw new TaskStoreIntegrityError("Task list order is invalid.");
+    }
     const limit = boundedLimit(options.limit);
-    let sql = "select * from tasks where profile_id = ?";
+    let sql = "select tasks.* from tasks where tasks.profile_id = ?";
     const params: SQLiteValue[] = [this.#profileId];
+    if (taskIds !== undefined) {
+      sql += ` and tasks.id in (${taskIds.map(() => "?").join(", ")})`;
+      params.push(...taskIds);
+    }
     if (statuses.length > 0) {
-      sql += ` and status in (${statuses.map(() => "?").join(", ")})`;
+      sql += ` and tasks.status in (${statuses.map(() => "?").join(", ")})`;
       params.push(...statuses);
     }
-    sql += " order by updated_at desc, id limit ?";
+    if (attemptStatuses.length > 0) {
+      sql += ` and exists (
+        select 1 from task_attempts scoped_attempt
+        where scoped_attempt.profile_id = tasks.profile_id
+          and scoped_attempt.task_id = tasks.id
+          and scoped_attempt.status in (${attemptStatuses.map(() => "?").join(", ")})
+      )`;
+      params.push(...attemptStatuses);
+    }
+    if (executionPreferences.length > 0) {
+      sql += ` and tasks.execution_preference in (${executionPreferences.map(() => "?").join(", ")})`;
+      params.push(...executionPreferences);
+    }
+    if (options.workspaceIdentityHash !== undefined) {
+      sql += " and tasks.workspace_identity_hash = ?";
+      params.push(requireBoundedText(options.workspaceIdentityHash, "Task list workspace identity", 256));
+    }
+    if (options.authorizedSessionId !== undefined) {
+      const sessionId = requireBoundedText(options.authorizedSessionId, "Task list authorized session ID", 256);
+      sql += ` and exists (
+        select 1 from task_session_links scoped_link
+        where scoped_link.profile_id = tasks.profile_id
+          and scoped_link.task_id = tasks.id
+          and scoped_link.session_id = ?`;
+      params.push(sessionId);
+      if (relationships.length > 0) {
+        sql += ` and scoped_link.relationship in (${relationships.map(() => "?").join(", ")})`;
+        params.push(...relationships);
+      }
+      sql += ")";
+    }
+    if (originSessionIds !== undefined) {
+      sql += ` and tasks.origin_session_id in (${originSessionIds.map(() => "?").join(", ")})`;
+      params.push(...originSessionIds);
+    }
+    if (options.rootOnly === true) sql += " and tasks.root_task_id = tasks.id";
+    if (options.cursor !== undefined) {
+      if (options.cursor.order !== order) {
+        throw new TaskStoreIntegrityError("Task list cursor order does not match the requested order.");
+      }
+      assertTimestamp(options.cursor.timestamp, "Task list cursor");
+      const cursorTaskId = requireBoundedText(options.cursor.taskId, "Task list cursor Task ID", 256);
+      if (order === "created_asc") {
+        sql += " and (tasks.created_at > ? or (tasks.created_at = ? and tasks.id > ?))";
+      } else {
+        sql += " and (tasks.updated_at < ? or (tasks.updated_at = ? and tasks.id > ?))";
+      }
+      params.push(options.cursor.timestamp, options.cursor.timestamp, cursorTaskId);
+    }
+    sql += order === "created_asc"
+      ? " order by tasks.created_at, tasks.id"
+      : " order by tasks.updated_at desc, tasks.id";
+    sql += " limit ?";
     params.push(limit);
     return this.#db.query<TaskRow>(sql).all(...params).map(rowToTask);
   }
@@ -803,7 +878,7 @@ export class SQLiteTaskStore implements TaskStore {
     const sql = ATTEMPT_SELECT +
       " where a.profile_id = ? and a.task_id = ?" +
       (stepId === undefined ? "" : " and a.step_id = ?") +
-      " order by a.created_at, a.attempt_number";
+      " order by a.created_at, a.rowid";
     const rows = stepId === undefined
       ? this.#db.query<AttemptWithLeaseRow>(sql).all(this.#profileId, taskId)
       : this.#db.query<AttemptWithLeaseRow>(sql).all(this.#profileId, taskId, stepId);
@@ -1222,10 +1297,43 @@ export class SQLiteTaskStore implements TaskStore {
   }
 
   listApprovalLinks(options: ListTaskApprovalLinksOptions = {}): TaskApprovalLink[] {
+    const taskIds = boundedIdentifierList(options.taskIds, "Task approval Task IDs");
+    if (taskIds?.length === 0) return [];
+    if (options.excludeTerminalTasks === true && options.terminalTasksOnly === true) {
+      throw new TaskStoreIntegrityError("Task approval query cannot both include and exclude only terminal Tasks.");
+    }
     let sql = "select * from task_approval_links where profile_id = ?";
     const params: SQLiteValue[] = [this.#profileId];
     if (options.taskId !== undefined) { sql += " and task_id = ?"; params.push(options.taskId); }
+    if (taskIds !== undefined) {
+      sql += ` and task_id in (${taskIds.map(() => "?").join(", ")})`;
+      params.push(...taskIds);
+    }
     if (options.attemptId !== undefined) { sql += " and attempt_id = ?"; params.push(options.attemptId); }
+    if (options.authorizedSessionId !== undefined) {
+      sql += " and authorized_session_id = ?";
+      params.push(requireBoundedText(options.authorizedSessionId, "Task approval authorized session ID", 256));
+    }
+    if (options.pendingApprovalId !== undefined) {
+      sql += " and pending_approval_id = ?";
+      params.push(requireBoundedText(options.pendingApprovalId, "Pending approval ID", 256));
+    }
+    if (options.excludeTerminalTasks === true) {
+      sql += ` and exists (
+        select 1 from tasks approval_task
+        where approval_task.profile_id = task_approval_links.profile_id
+          and approval_task.id = task_approval_links.task_id
+          and approval_task.status not in ('completed', 'partial', 'failed', 'cancelled')
+      )`;
+    }
+    if (options.terminalTasksOnly === true) {
+      sql += ` and exists (
+        select 1 from tasks approval_task
+        where approval_task.profile_id = task_approval_links.profile_id
+          and approval_task.id = task_approval_links.task_id
+          and approval_task.status in ('completed', 'partial', 'failed', 'cancelled')
+      )`;
+    }
     const statuses = [...(options.statuses ?? [])];
     if (statuses.length > 0) {
       sql += ` and status in (${statuses.map(() => "?").join(", ")})`;
@@ -2143,6 +2251,12 @@ function boundedLimit(limit: number | undefined): number {
     throw new TaskStoreIntegrityError("TaskStore list limit must be an integer between 1 and 1000.");
   }
   return limit;
+}
+
+function boundedIdentifierList(values: readonly string[] | undefined, label: string): string[] | undefined {
+  if (values === undefined) return undefined;
+  if (values.length > 900) throw new TaskStoreIntegrityError(`${label} cannot contain more than 900 values.`);
+  return [...new Set(values.map((value) => requireBoundedText(value, label, 256)))];
 }
 
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {

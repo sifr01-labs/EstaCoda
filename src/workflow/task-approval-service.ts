@@ -55,6 +55,7 @@ export type TaskApprovalServiceOptions = {
 };
 
 const DEFAULT_APPROVAL_TTL_MS = 24 * 60 * 60 * 1_000;
+const TASK_QUERY_ID_SCOPE_LIMIT = 900;
 
 /** Bridges an in-process security ask to the shared durable, session-authorized approval queue. */
 export class TaskApprovalService {
@@ -126,12 +127,13 @@ export class TaskApprovalService {
   listPendingForSession(authorizedSessionId: string): readonly PendingTaskApproval[] {
     const sessionId = requireIdentifier(authorizedSessionId, "Task approval session ID");
     if (this.#queue === undefined) return [];
-    return this.#store.listApprovalLinks({ statuses: ["pending"], limit: 1_000 })
-      .filter((link) => {
-        const task = this.#store.getTask(link.taskId);
-        return task !== null && !isTerminalTaskStatus(task.status) &&
-          link.authorizedSessionId === sessionId && link.pendingApprovalId !== undefined;
-      })
+    return this.#store.listApprovalLinks({
+      statuses: ["pending"],
+      authorizedSessionId: sessionId,
+      excludeTerminalTasks: true,
+      limit: 1_000
+    })
+      .filter((link) => link.pendingApprovalId !== undefined)
       .map((link) => ({
         approvalId: link.pendingApprovalId!,
         taskId: link.taskId,
@@ -156,12 +158,13 @@ export class TaskApprovalService {
     if (queue === undefined) throw new Error("Durable Task approval queue is unavailable.");
     const approvalId = requireIdentifier(input.approvalId, "Task approval ID");
     const sessionId = requireIdentifier(input.authorizedSessionId, "Task approval session ID");
-    const link = this.#store.listApprovalLinks({ statuses: ["pending"], limit: 1_000 })
-      .find((candidate) => {
-        const task = this.#store.getTask(candidate.taskId);
-        return task !== null && !isTerminalTaskStatus(task.status) &&
-          candidate.pendingApprovalId === approvalId && candidate.authorizedSessionId === sessionId;
-      });
+    const link = this.#store.listApprovalLinks({
+      statuses: ["pending"],
+      authorizedSessionId: sessionId,
+      pendingApprovalId: approvalId,
+      excludeTerminalTasks: true,
+      limit: 1
+    })[0];
     if (link === undefined) throw new Error("Pending Task approval not found for this session.");
     await queue.resolveApproval(approvalId, input.decision, "cli-operator", {
       profileId: this.#store.profileId,
@@ -200,11 +203,22 @@ export class TaskApprovalService {
   }
 
   async reconcile(options: { eligibleTaskIds?: ReadonlySet<string> } = {}): Promise<void> {
-    const links = this.#store.listApprovalLinks({ statuses: ["requesting", "pending"], limit: 1_000 });
+    const terminalLinks = this.#store.listApprovalLinks({
+      statuses: ["requesting", "pending"],
+      terminalTasksOnly: true,
+      limit: 1_000
+    });
+    for (const link of terminalLinks) await this.#closeForTerminalTask(link);
+    const links = options.eligibleTaskIds === undefined
+      ? this.#store.listApprovalLinks({
+          statuses: ["requesting", "pending"],
+          excludeTerminalTasks: true,
+          limit: 1_000
+        })
+      : listApprovalLinksForTasks(this.#store, options.eligibleTaskIds);
     for (const link of links) {
       const task = this.#store.getTask(link.taskId);
-      if (task === null || isTerminalTaskStatus(task.status)) await this.#closeForTerminalTask(link);
-      else if (options.eligibleTaskIds !== undefined && !options.eligibleTaskIds.has(link.taskId)) continue;
+      if (task === null || isTerminalTaskStatus(task.status)) continue;
       else if (link.status === "requesting") await this.#enqueue(link);
       else await this.#refresh(link);
     }
@@ -327,6 +341,25 @@ export function taskApprovalFingerprint(request: SecurityRequest): string {
     commandHash
   ])).digest("hex");
   return `sha256:${digest}`;
+}
+
+function listApprovalLinksForTasks(
+  store: TaskStore,
+  taskIds: ReadonlySet<string>
+): TaskApprovalLink[] {
+  const ids = [...taskIds];
+  const links: TaskApprovalLink[] = [];
+  for (let offset = 0; offset < ids.length; offset += TASK_QUERY_ID_SCOPE_LIMIT) {
+    links.push(...store.listApprovalLinks({
+      taskIds: ids.slice(offset, offset + TASK_QUERY_ID_SCOPE_LIMIT),
+      statuses: ["requesting", "pending"],
+      excludeTerminalTasks: true,
+      limit: 1_000
+    }));
+  }
+  return links.sort((left, right) =>
+    left.requestedAt.localeCompare(right.requestedAt) || left.id.localeCompare(right.id)
+  ).slice(0, 1_000);
 }
 
 function approvalRequest(request: SecurityRequest): TaskApprovalRequest {

@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { SecurityPolicy } from "../contracts/security.js";
-import type { Task, TaskAttempt, TaskStep } from "../contracts/task.js";
+import type { Task, TaskApprovalLink, TaskAttempt, TaskStep } from "../contracts/task.js";
 import type { TaskStore } from "./task-store.js";
 import { TaskApprovalService } from "./task-approval-service.js";
 
@@ -43,6 +43,40 @@ describe("TaskApprovalService security policy", () => {
       context: { trustedWorkspace: true }
     })).resolves.toMatchObject({ decision: "deny", reason: "hardline" });
     expect(service.takeRequest(attempt.id)).toBeUndefined();
+  });
+
+  it("scopes pending approval reads in the store before the page limit", () => {
+    const link = {
+      id: "link-alpha",
+      taskId: "task-alpha",
+      stepId: "step-alpha",
+      attemptId: "attempt-alpha",
+      authorizedSessionId: "creator-alpha",
+      pendingApprovalId: "approval-alpha",
+      toolName: "file.write",
+      riskClass: "workspace-write",
+      targetPreview: "write README.md",
+      requestedAt: "2030-01-01T00:00:00.000Z",
+      expiresAt: "2030-01-02T00:00:00.000Z"
+    } as TaskApprovalLink;
+    const listApprovalLinks = vi.fn(() => [link]);
+    const store = { profileId: "alpha", listApprovalLinks } as unknown as TaskStore;
+    const queue = {
+      createPendingApproval: vi.fn(),
+      getApproval: vi.fn(),
+      resolveApproval: vi.fn()
+    };
+    const service = new TaskApprovalService({ store, queue });
+
+    expect(service.listPendingForSession("creator-alpha")).toEqual([
+      expect.objectContaining({ approvalId: "approval-alpha", taskId: "task-alpha" })
+    ]);
+    expect(listApprovalLinks).toHaveBeenCalledWith({
+      statuses: ["pending"],
+      authorizedSessionId: "creator-alpha",
+      excludeTerminalTasks: true,
+      limit: 1_000
+    });
   });
 });
 

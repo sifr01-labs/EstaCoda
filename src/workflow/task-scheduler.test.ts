@@ -153,6 +153,47 @@ describe("TaskScheduler", () => {
     expect(store.getTask("task-selected")?.status).toBe("completed");
   });
 
+  it("does not starve an older authorized Task behind a full page of newer profile work", async () => {
+    const oldest = makeGraphFor("task-oldest-authorized", "oldest");
+    const oldestAt = "2029-12-31T23:00:00.000Z";
+    oldest.task = { ...oldest.task, createdAt: oldestAt, updatedAt: oldestAt };
+    oldest.revision = {
+      ...oldest.revision,
+      createdAt: oldestAt,
+      validatedAt: oldestAt,
+      activatedAt: oldestAt
+    };
+    oldest.steps = oldest.steps.map((step) => ({ ...step, createdAt: oldestAt, updatedAt: oldestAt }));
+    store.createTaskGraph(oldest);
+
+    const template = makeGraphFor("task-decoy-template", "decoy").task;
+    store.atomicWrite((tx) => {
+      for (let index = 0; index < 1_000; index++) {
+        const id = `task-newer-${String(index).padStart(4, "0")}`;
+        tx.createTask({
+          ...template,
+          id,
+          rootTaskId: id,
+          creationKey: `create-${id}`,
+          activePlanRevisionId: undefined,
+          createdAt: NOW,
+          updatedAt: NOW
+        });
+      }
+    });
+
+    const executor = new FakeTaskStepExecutor(() => ({
+      outcome: "succeeded",
+      results: [{ kind: "text", content: "oldest completed" }]
+    }));
+    const scheduler = makeScheduler(executor);
+
+    await expect(scheduler.runOnce({
+      dispatchGrants: dispatchGrantsFor("scheduler-alpha", [oldest.task.id])
+    })).resolves.toMatchObject({ dispatched: 1, completed: 1 });
+    expect(executor.executions.map(({ task }) => task.id)).toEqual([oldest.task.id]);
+  });
+
   it("denies expired and superseded host dispatch grants without creating Attempts", async () => {
     store.createTaskGraph(makeGraph([makeStep("fenced", 0)]));
     const executor = new FakeTaskStepExecutor(() => ({ outcome: "succeeded" }));

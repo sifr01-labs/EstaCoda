@@ -13,7 +13,7 @@ import {
   type TaskSchedulerDispatchResult,
   type TaskSchedulerRunResult
 } from "./task-scheduler.js";
-import type { InitialTaskHostLeaseInput, TaskStore } from "./task-store.js";
+import { taskListCursor, type InitialTaskHostLeaseInput, type TaskStore } from "./task-store.js";
 
 const RUNNABLE_TASK_STATUSES: readonly Task["status"][] = [
   "queued",
@@ -63,6 +63,8 @@ export class ForegroundTaskHost {
   readonly #logWarning: (message: string) => void;
   readonly #createExecutorRuntime: (() => Promise<ForegroundTaskExecutorRuntime>) | undefined;
   readonly #owned = new Map<string, TaskHostLease>();
+  #claimCursor: ReturnType<typeof taskListCursor> | undefined;
+  #dispatchOffset = 0;
   #executorRuntime: ForegroundTaskExecutorRuntime | undefined;
   #executor: ForegroundExecutor | undefined;
   #executorCreation: Promise<void> | undefined;
@@ -190,7 +192,7 @@ export class ForegroundTaskHost {
       if (this.#stopping) return emptyRunResult();
       this.#renewOwnedTasks();
       this.#claimAvailableTasks();
-      const dispatchGrants = [...this.#owned.values()].map(taskHostDispatchGrant);
+      const dispatchGrants = this.#dispatchGrants();
       if (dispatchGrants.length === 0) return emptyRunResult();
       await this.#ensureExecutorRuntime();
       const dispatch = await this.#scheduler.dispatchOnce({ dispatchGrants });
@@ -272,14 +274,32 @@ export class ForegroundTaskHost {
   }
 
   #claimAvailableTasks(): void {
-    const tasks = this.#store.listTasks({ statuses: RUNNABLE_TASK_STATUSES, limit: 1_000 });
+    const tasks = this.#store.listTasks({
+      statuses: RUNNABLE_TASK_STATUSES,
+      executionPreferences: ["auto"],
+      workspaceIdentityHash: this.#workspaceIdentityHash,
+      order: "created_asc",
+      cursor: this.#claimCursor,
+      limit: 1_000
+    });
     for (const task of tasks) {
-      if (task.executionPreference === "background" ||
-        task.workspace.identityHash !== this.#workspaceIdentityHash || this.#owned.has(task.id)) continue;
+      if (this.#owned.has(task.id)) continue;
       const existingLease = this.#store.getTaskHostLease(task.id);
       if (existingLease?.kind !== "foreground") continue;
       this.#claimTask(task.id);
     }
+    this.#claimCursor = tasks.length < 1_000
+      ? undefined
+      : taskListCursor(tasks[tasks.length - 1]!, "created_asc");
+  }
+
+  #dispatchGrants(limit = 1_000) {
+    const leases = [...this.#owned.values()];
+    if (leases.length <= limit) return leases.map(taskHostDispatchGrant);
+    const start = this.#dispatchOffset % leases.length;
+    const selected = [...leases.slice(start), ...leases.slice(0, start)].slice(0, limit);
+    this.#dispatchOffset = (start + selected.length) % leases.length;
+    return selected.map(taskHostDispatchGrant);
   }
 
   async #ensureExecutorRuntime(): Promise<void> {

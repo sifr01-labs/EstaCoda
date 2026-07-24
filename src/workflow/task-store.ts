@@ -4,6 +4,7 @@ import type {
   TaskApprovalStatus,
   TaskAttempt,
   TaskAttemptLease,
+  TaskAttemptStatus,
   TaskExecutionReservation,
   TaskDeliveryBinding,
   TaskDeliveryStatus,
@@ -32,9 +33,33 @@ export type CreateTaskGraphInput = {
 };
 
 export type ListTasksOptions = {
+  taskIds?: readonly string[];
   statuses?: readonly TaskStatus[];
+  attemptStatuses?: readonly TaskAttemptStatus[];
+  executionPreferences?: readonly Task["executionPreference"][];
+  workspaceIdentityHash?: string;
+  authorizedSessionId?: string;
+  sessionRelationships?: readonly TaskSessionLink["relationship"][];
+  originSessionIds?: readonly string[];
+  rootOnly?: boolean;
+  order?: "updated_desc" | "created_asc";
+  cursor?: TaskListCursor;
   limit?: number;
 };
+
+export type TaskListCursor = {
+  order: NonNullable<ListTasksOptions["order"]>;
+  timestamp: string;
+  taskId: string;
+};
+
+export function taskListCursor(task: Task, order: NonNullable<ListTasksOptions["order"]>): TaskListCursor {
+  return {
+    order,
+    timestamp: order === "created_asc" ? task.createdAt : task.updatedAt,
+    taskId: task.id
+  };
+}
 
 export type ListTaskEventsOptions = {
   kinds?: readonly TaskEventKind[];
@@ -131,7 +156,12 @@ export type SettleTaskDeliveryInput = {
 
 export type ListTaskApprovalLinksOptions = {
   taskId?: string;
+  taskIds?: readonly string[];
   attemptId?: string;
+  authorizedSessionId?: string;
+  pendingApprovalId?: string;
+  excludeTerminalTasks?: boolean;
+  terminalTasksOnly?: boolean;
   statuses?: readonly TaskApprovalStatus[];
   limit?: number;
 };

@@ -17,6 +17,7 @@ import type { ToolRiskClass } from "../contracts/tool.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 import { SQLiteTaskStore, TaskStoreIntegrityError, TaskStoreProfileError } from "./sqlite-task-store.js";
+import { taskListCursor } from "./task-store.js";
 import {
   migrateCanonicalProviderUsageSchemaV21,
   migrateTaskAgentExecutorSchemaV12,
@@ -66,6 +67,9 @@ describe("SQLiteTaskStore", () => {
     const hostLeaseColumns = sessionDb.db.query<{ name: string }>("pragma table_info(task_host_leases)").all();
     const attemptColumns = sessionDb.db.query<{ name: string }>("pragma table_info(task_attempts)").all();
     const taskColumns = sessionDb.db.query<{ name: string }>("pragma table_info(tasks)").all();
+    const indexes = new Set(sessionDb.db.query<{ name: string }>(
+      "select name from sqlite_master where type = 'index'"
+    ).all().map((row) => row.name));
 
     expect(version).toBe(TASK_SCHEMA_VERSION);
     expect(foreignKeys).toBe(1);
@@ -76,6 +80,14 @@ describe("SQLiteTaskStore", () => {
     expect(hostLeaseColumns.some((column) => column.name === "owner_kind")).toBe(true);
     expect(attemptColumns.some((column) => column.name === "lease_generation")).toBe(true);
     expect(taskColumns.some((column) => column.name === "host_lease_generation")).toBe(true);
+    expect([
+      "idx_tasks_profile_created",
+      "idx_tasks_profile_status_created",
+      "idx_tasks_profile_workspace_admission",
+      "idx_tasks_profile_origin_created",
+      "idx_task_session_links_authorization",
+      "idx_task_attempts_task_status"
+    ].every((index) => indexes.has(index))).toBe(true);
   });
 
   it("round-trips an immutable plan graph and creator session link atomically", () => {
@@ -93,6 +105,77 @@ describe("SQLiteTaskStore", () => {
       createdAt: NOW
     }]);
     expect(sessionDb.db.query("pragma foreign_key_check").all()).toEqual([]);
+  });
+
+  it("scopes Task predicates before keyset pagination", () => {
+    const base = makeGraph("alpha").task;
+    const create = (id: string, createdAt: string, workspaceIdentityHash: string): Task => ({
+      ...base,
+      id,
+      rootTaskId: id,
+      creationKey: `create-${id}`,
+      activePlanRevisionId: undefined,
+      workspace: { ...base.workspace, identityHash: workspaceIdentityHash },
+      createdAt,
+      updatedAt: createdAt
+    });
+    const first = create("task-page-a", "2029-12-31T23:59:58.000Z", "workspace-a");
+    const second = create("task-page-b", "2029-12-31T23:59:59.000Z", "workspace-a");
+    const unrelated = create("task-page-unrelated", NOW, "workspace-b");
+    store.atomicWrite((tx) => {
+      for (const task of [first, second, unrelated]) {
+        tx.createTask(task);
+        tx.linkSession({
+          taskId: task.id,
+          profileId: "alpha",
+          sessionId: "session-alpha",
+          relationship: "creator",
+          createdAt: task.createdAt
+        });
+      }
+      for (const task of [first, second]) {
+        tx.linkSession({
+          taskId: task.id,
+          profileId: "alpha",
+          sessionId: "worker-alpha",
+          relationship: "observer",
+          createdAt: task.createdAt
+        });
+      }
+    });
+
+    const page1 = store.listTasks({
+      authorizedSessionId: "worker-alpha",
+      sessionRelationships: ["observer"],
+      workspaceIdentityHash: "workspace-a",
+      originSessionIds: ["session-alpha"],
+      rootOnly: true,
+      order: "created_asc",
+      limit: 1
+    });
+    const page2 = store.listTasks({
+      authorizedSessionId: "worker-alpha",
+      sessionRelationships: ["observer"],
+      workspaceIdentityHash: "workspace-a",
+      originSessionIds: ["session-alpha"],
+      rootOnly: true,
+      order: "created_asc",
+      cursor: taskListCursor(page1[0]!, "created_asc"),
+      limit: 1
+    });
+
+    expect(page1.map((task) => task.id)).toEqual([first.id]);
+    expect(page2.map((task) => task.id)).toEqual([second.id]);
+    expect(store.listTasks({
+      taskIds: [unrelated.id],
+      authorizedSessionId: "worker-alpha",
+      limit: 1
+    })).toEqual([]);
+    expect(() => store.listTasks({
+      order: "updated_desc",
+      cursor: taskListCursor(first, "created_asc")
+    })).toThrow(/cursor order/i);
+    expect(() => store.listTasks({ sessionRelationships: ["creator"] })).toThrow(/authorized session scope/i);
   });
 
   it("rolls back every write when an atomic callback fails", () => {

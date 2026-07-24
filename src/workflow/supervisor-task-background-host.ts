@@ -9,7 +9,7 @@ import {
 import { TaskCompletionDeliveryService, type TaskCompletionDeliveryRouter } from "./task-completion-delivery.js";
 import { TaskScheduler, taskHostDispatchGrant, type TaskSchedulerLimits } from "./task-scheduler.js";
 import type { TaskResultService } from "./task-result-service.js";
-import type { TaskStore } from "./task-store.js";
+import { taskListCursor, type TaskStore } from "./task-store.js";
 import type { TaskApprovalService } from "./task-approval-service.js";
 
 const RUNNABLE_TASK_STATUSES: readonly Task["status"][] = [
@@ -54,6 +54,8 @@ export class SupervisorTaskBackgroundHost {
   readonly #owned = new Map<string, TaskHostLease>();
   readonly #workspaces = new Map<string, WorkspaceExecutorState>();
   readonly #workspaceWarnings = new Set<string>();
+  #claimCursor: ReturnType<typeof taskListCursor> | undefined;
+  #dispatchOffset = 0;
   #heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   #disposed = false;
   #disposePromise: Promise<void> | undefined;
@@ -257,12 +259,22 @@ export class SupervisorTaskBackgroundHost {
   }
 
   #dispatchGrants(limit = 1_000) {
-    return [...this.#owned.values()].slice(0, limit).map(taskHostDispatchGrant);
+    const leases = [...this.#owned.values()];
+    if (leases.length <= limit) return leases.map(taskHostDispatchGrant);
+    const start = this.#dispatchOffset % leases.length;
+    const selected = [...leases.slice(start), ...leases.slice(0, start)].slice(0, limit);
+    this.#dispatchOffset = (start + selected.length) % leases.length;
+    return selected.map(taskHostDispatchGrant);
   }
 
   async #claimAvailableTasks(): Promise<void> {
-    const tasks = this.#store.listTasks({ statuses: RUNNABLE_TASK_STATUSES, limit: 1_000 });
     const verified = new Map<string, Promise<TaskWorkspaceBinding | undefined>>();
+    const tasks = this.#store.listTasks({
+      statuses: RUNNABLE_TASK_STATUSES,
+      order: "created_asc",
+      cursor: this.#claimCursor,
+      limit: 1_000
+    });
     for (const task of tasks) {
       if (this.#owned.has(task.id)) continue;
       const workspaceKey = `${task.workspace.identityHash}:${task.workspace.canonicalPath}`;
@@ -290,6 +302,9 @@ export class SupervisorTaskBackgroundHost {
         });
       }
     }
+    this.#claimCursor = tasks.length < 1_000
+      ? undefined
+      : taskListCursor(tasks[tasks.length - 1]!, "created_asc");
   }
 
   async #revalidateOwnedWorkspaces(): Promise<void> {

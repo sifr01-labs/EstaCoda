@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ProviderUsageEntry } from "../contracts/provider-usage.js";
 import type { Task } from "../contracts/task.js";
 import { InMemorySessionDB } from "./in-memory-session-db.js";
@@ -115,12 +115,44 @@ describe("loadSessionCostUsage", () => {
     })).resolves.toBeUndefined();
   });
 
-  it("marks a bounded Task scan as unavailable instead of a false complete zero", async () => {
+  it("scopes unrelated Tasks out before applying the Task page limit", async () => {
     const db = new InMemorySessionDB();
     await createTurn(db, "session", "turn");
+    const listTasks = vi.fn(() => []);
     const taskStore = {
-      listTasks: () => Array.from({ length: 1_000 }, (_, index) => task(`unrelated-${index}`, "other-session")),
+      listTasks,
       listProviderUsageEntries: () => [],
+    };
+
+    const usage = await loadSessionCostUsage({
+      sessionDb: db,
+      taskStore: taskStore as never,
+      profileId: "alpha",
+      sessionId: "session",
+    });
+    expect(usage).toMatchObject({ costComplete: true, usageComplete: true, incompleteReasons: [] });
+    expect(listTasks).toHaveBeenCalledWith(expect.objectContaining({
+      originSessionIds: ["session"],
+      rootOnly: true,
+      order: "created_asc",
+      limit: 1_000
+    }));
+  });
+
+  it("continues session-scoped Task spend through keyset pages", async () => {
+    const db = new InMemorySessionDB();
+    await createTurn(db, "session", "turn");
+    const firstPage = Array.from({ length: 1_000 }, (_, index) => task(`root-${String(index).padStart(4, "0")}`, "session"));
+    const finalTask = task("root-final", "session");
+    const listTasks = vi.fn((options: { cursor?: unknown }) => options.cursor === undefined ? firstPage : [finalTask]);
+    const taskStore = {
+      listTasks,
+      listProviderUsageEntries: ({ rootTaskId }: { rootTaskId?: string }) => rootTaskId === finalTask.id
+        ? [usageEntry("task-session", "task-turn", "paginated-task-request", 0.6, {
+            taskId: finalTask.id,
+            rootTaskId: finalTask.id
+          })]
+        : []
     };
 
     await expect(loadSessionCostUsage({
@@ -129,16 +161,12 @@ describe("loadSessionCostUsage", () => {
       profileId: "alpha",
       sessionId: "session",
     })).resolves.toMatchObject({
-      costComplete: false,
-      usageComplete: false,
-      incompleteReasons: ["session-task-scan-truncated"],
+      providerCalls: 1,
+      estimatedCostUsd: 0.6,
+      costComplete: true,
+      usageComplete: true
     });
-    expect(await loadSessionCostUsage({
-      sessionDb: db,
-      taskStore: taskStore as never,
-      profileId: "alpha",
-      sessionId: "session",
-    })).not.toHaveProperty("estimatedCostUsd");
+    expect(listTasks).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -188,6 +216,15 @@ function usageEntry(
   };
 }
 
-function task(id: string, originSessionId: string): Pick<Task, "id" | "rootTaskId" | "originSessionId"> {
-  return { id, rootTaskId: id, originSessionId };
+function task(
+  id: string,
+  originSessionId: string
+): Pick<Task, "id" | "rootTaskId" | "originSessionId" | "createdAt" | "updatedAt"> {
+  return {
+    id,
+    rootTaskId: id,
+    originSessionId,
+    createdAt: "2030-01-01T00:00:00.000Z",
+    updatedAt: "2030-01-01T00:00:00.000Z"
+  };
 }

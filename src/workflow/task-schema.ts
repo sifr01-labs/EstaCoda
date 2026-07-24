@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 
-export const TASK_SCHEMA_VERSION = 25;
+export const TASK_SCHEMA_VERSION = 26;
 
 const OBSOLETE_EXECUTION_TABLES = [
   "workflow_event_summaries",
@@ -979,6 +979,24 @@ export function migrateTaskResultDisplaySummarySchemaV25(db: SQLiteDatabase): vo
   if (!columns.some((column) => column.name === "display_summary")) {
     db.exec("alter table task_results add column display_summary text");
   }
+}
+
+/** Adds covering indexes for scoped keyset pagination and oldest-first host admission. */
+export function migrateTaskScopedPaginationSchemaV26(db: SQLiteDatabase): void {
+  db.exec(`
+    create index if not exists idx_tasks_profile_created
+      on tasks(profile_id, created_at, id);
+    create index if not exists idx_tasks_profile_status_created
+      on tasks(profile_id, status, created_at, id);
+    create index if not exists idx_tasks_profile_workspace_admission
+      on tasks(profile_id, workspace_identity_hash, execution_preference, status, created_at, id);
+    create index if not exists idx_tasks_profile_origin_created
+      on tasks(profile_id, origin_session_id, created_at, id);
+    create index if not exists idx_task_session_links_authorization
+      on task_session_links(profile_id, session_id, task_id, relationship);
+    create index if not exists idx_task_attempts_task_status
+      on task_attempts(profile_id, task_id, status);
+  `);
 }
 
 /** Adds complete source, scope, and immutable pricing identity to provider usage facts. */
