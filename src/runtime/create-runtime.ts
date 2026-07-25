@@ -379,6 +379,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         resultService: taskResultService,
         sessionDb,
         profileId,
+        locale: options.ui?.language === "ar" ? "ar" : "en",
       });
   const taskOperatorService = taskStore === undefined ? undefined : new TaskOperatorService({
     store: taskStore,

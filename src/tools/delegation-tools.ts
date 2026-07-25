@@ -58,6 +58,7 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
         `Supports one task or up to ${delegationConfig.maxBatchTasks} batch tasks.`,
         "Batches add one fixed terminal synthesis Step by default; pass synthesis: false only for inspection-only work.",
         "A synthesis object can provide a custom final-answer objective and model.",
+        "A non-terminal root Task with a primary Result Step owns the requested answer: this provider turn ends after creation and the durable result is delivered when the Task settles.",
         "Research items should use distinct non-overlapping scopes; live and repository evidence requirements are verified from observed tool results, not model claims.",
         `The durable scheduler runs at most ${delegationConfig.maxConcurrentChildren} Steps in parallel.`,
         `Child delegation depth is limited to ${delegationConfig.maxSpawnDepth}.`

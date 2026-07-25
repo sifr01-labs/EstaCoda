@@ -5,6 +5,7 @@ import { verifiedCompressionLineage } from "../session/session-lineage.js";
 import { TASK_RESULT_PAGE_MAX_CHARS, type TaskResultService } from "./task-result-service.js";
 import type { TaskStore } from "./task-store.js";
 import { taskPrimaryResult, taskPrimaryResultStepId } from "./task-primary-result.js";
+import { isolateLtr } from "../ui/bidi.js";
 
 const MAX_SESSION_COMPLETION_CHARS = 100_000;
 const MAX_SESSION_COMPLETION_BINDINGS = 1_000;
@@ -18,7 +19,7 @@ export type TaskSessionCompletionMessage = {
   readonly bindingId: string;
   readonly messageId: string;
   readonly taskId: string;
-  readonly resultId: string;
+  readonly resultId?: string;
   readonly text: string;
 };
 
@@ -35,6 +36,7 @@ export class TaskSessionCompletionService {
   readonly #sessionDb: TaskCompletionSessionDb;
   readonly #profileId: string;
   readonly #now: () => Date;
+  readonly #locale: "en" | "ar";
   readonly #runs = new Map<string, Promise<readonly TaskSessionCompletionMessage[]>>();
 
   constructor(options: {
@@ -43,6 +45,7 @@ export class TaskSessionCompletionService {
     sessionDb: TaskCompletionSessionDb;
     profileId: string;
     now?: () => Date;
+    locale?: "en" | "ar";
   }) {
     if (options.store.profileId !== options.profileId) {
       throw new Error("Task session completion profile does not match its TaskStore profile.");
@@ -52,6 +55,7 @@ export class TaskSessionCompletionService {
     this.#sessionDb = options.sessionDb;
     this.#profileId = options.profileId;
     this.#now = options.now ?? (() => new Date());
+    this.#locale = options.locale ?? "en";
   }
 
   deliverPending(sessionId: string): Promise<readonly TaskSessionCompletionMessage[]> {
@@ -103,13 +107,14 @@ export class TaskSessionCompletionService {
         const task = this.#store.getTask(claimed.taskId);
         if (task === null) throw new Error("Task is unavailable.");
         const result = sessionCompletionResult(this.#store, task);
-        if (result === undefined) throw new TaskSessionCompletionUnavailableError();
-        const text = await this.#readResult(task.id, result, sessionId);
+        const text = result === undefined
+          ? terminalAnswerUnavailableReceipt(task, this.#locale)
+          : await this.#readResult(task.id, result, sessionId);
         const message = await this.#appendMessage({
           id: messageId,
           sessionId,
           taskId: task.id,
-          resultId: result.id,
+          ...(result === undefined ? {} : { resultId: result.id }),
           bindingId: claimed.id,
           text,
         });
@@ -117,17 +122,13 @@ export class TaskSessionCompletionService {
           bindingId: claimed.id,
           messageId: message.id,
           taskId: task.id,
-          resultId: result.id,
+          ...(result === undefined ? {} : { resultId: result.id }),
           text: message.content,
         });
       } catch (error) {
         const recovered = await this.#completionMessage(claimed);
         if (recovered !== undefined) {
           delivered.push(recovered);
-          continue;
-        }
-        if (error instanceof TaskSessionCompletionUnavailableError) {
-          this.#settleUnavailable(claimed);
           continue;
         }
         this.#requeuePreparationFailure(claimed, error);
@@ -159,7 +160,7 @@ export class TaskSessionCompletionService {
     id: string;
     sessionId: string;
     taskId: string;
-    resultId: string;
+    resultId?: string;
     bindingId: string;
     text: string;
   }): Promise<SessionMessage> {
@@ -174,7 +175,7 @@ export class TaskSessionCompletionService {
           version: 1,
           bindingId: input.bindingId,
           taskId: input.taskId,
-          resultId: input.resultId,
+          ...(input.resultId === undefined ? { outcome: "failure" } : { resultId: input.resultId }),
         },
       },
     });
@@ -186,15 +187,17 @@ export class TaskSessionCompletionService {
     const completion = message.metadata?.taskCompletion;
     if (typeof completion !== "object" || completion === null) return undefined;
     const metadata = completion as Record<string, unknown>;
+    const resultId = typeof metadata.resultId === "string" ? metadata.resultId : undefined;
+    const failureReceipt = metadata.outcome === "failure" && resultId === undefined;
     if (metadata.version !== 1 || metadata.bindingId !== binding.id || metadata.taskId !== binding.taskId ||
-        typeof metadata.resultId !== "string") {
+        (resultId === undefined && !failureReceipt)) {
       return undefined;
     }
     return {
       bindingId: binding.id,
       messageId: message.id,
       taskId: binding.taskId,
-      resultId: metadata.resultId,
+      ...(resultId === undefined ? {} : { resultId }),
       text: message.content,
     };
   }
@@ -229,16 +232,6 @@ export class TaskSessionCompletionService {
     });
   }
 
-  #settleUnavailable(binding: TaskDeliveryBinding): void {
-    this.#store.settleDeliveryBinding({
-      id: binding.id,
-      status: "failed",
-      settledAt: this.#now().toISOString(),
-      failureClass: "terminal-answer-unavailable",
-      failureMessage: "The Task settled without an accepted terminal answer.",
-    });
-  }
-
   #requeuePreparationFailure(binding: TaskDeliveryBinding, error: unknown): void {
     const timestamp = this.#now().toISOString();
     this.#store.settleDeliveryBinding({
@@ -252,19 +245,24 @@ export class TaskSessionCompletionService {
   }
 }
 
-class TaskSessionCompletionUnavailableError extends Error {
-  constructor() {
-    super("Task has no accepted terminal answer.");
-    this.name = "TaskSessionCompletionUnavailableError";
-  }
-}
-
 function sessionCompletionResult(store: TaskStore, task: Task): TaskResult | undefined {
   const primaryStepId = taskPrimaryResultStepId(store, task);
   if (primaryStepId !== undefined) return taskPrimaryResult(store, task);
   const accepted = store.listResults(task.id)
     .filter((result) => result.status === "available" && result.disposition === "accepted");
   return accepted.length === 1 ? accepted[0] : undefined;
+}
+
+function terminalAnswerUnavailableReceipt(task: Task, locale: "en" | "ar"): string {
+  return locale === "ar"
+    ? [
+        `اكتملت ${isolateLtr("Task")} ${isolateLtr(task.id)} بالحالة ${isolateLtr(task.status)} من دون إجابة مقبولة.`,
+        `لم تُنشأ إجابة بديلة. استخدم حالة ${isolateLtr("Task")} لفحص تفاصيل التنفيذ.`
+      ].join("\n")
+    : [
+        `Task ${task.id} settled ${task.status} without an accepted answer.`,
+        "No substitute answer was generated. Inspect Task status for execution details."
+      ].join("\n");
 }
 
 export function taskSessionCompletionMessageId(profileId: string, bindingId: string): string {

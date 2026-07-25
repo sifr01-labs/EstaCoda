@@ -34,6 +34,7 @@ import type { RuntimeRouter } from "./runtime-router.js";
 import type { SkillRouteShadowReranker } from "./skill-route-reranker.js";
 import type { SkillPlaybookRunner } from "./skill-playbook-runner.js";
 import type { ToolPlanRunner } from "./tool-plan-runner.js";
+import type { PendingDelegatedAnswerOwnership } from "./delegated-answer-ownership.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
 import { normalizeSessionCompressionConfig, type SessionCompressionConfig } from "../config/runtime-config.js";
 import type { MemoryCurationService } from "../memory/memory-curation-service.js";
@@ -293,6 +294,8 @@ async function createAgentLoop(input: {
   memoryProvider?: MemoryProvider;
   trajectoryStore?: Pick<TrajectoryStore, "saveTrajectory">;
   providerExecution?: ProviderExecutionResult;
+  providerLoopToolExecutions?: ToolExecutionRecord[];
+  delegatedAnswerOwnership?: PendingDelegatedAnswerOwnership;
   providerUsageCostUsd?: number;
   skillLearningManager?: SkillLearningManager;
   skillRouteShadowReranker?: SkillRouteShadowReranker;
@@ -394,8 +397,11 @@ async function createAgentLoop(input: {
       }
       return {
         providerExecution: input.providerExecution,
-        toolExecutions: [],
-        iterations: input.providerExecution === undefined ? 0 : 1
+        toolExecutions: input.providerLoopToolExecutions ?? [],
+        iterations: input.providerExecution === undefined ? 0 : 1,
+        ...(input.delegatedAnswerOwnership === undefined ? {} : {
+          delegatedAnswerOwnership: input.delegatedAnswerOwnership
+        })
       };
     })
   } as unknown as ProviderTurnLoop;
@@ -451,6 +457,83 @@ async function createAgentLoop(input: {
 }
 
 describe("AgentLoop provider availability gating", () => {
+  it("persists and returns only the deterministic acknowledgement for delegated answer ownership", async () => {
+    const delegatedExecution: ToolExecutionRecord = {
+      ...execution,
+      tool: {
+        ...execution.tool,
+        name: "delegate_task",
+        riskClass: "shared-state-mutation",
+        toolsets: ["core"]
+      },
+      riskClass: "shared-state-mutation",
+      result: {
+        ok: true,
+        content: "Created durable Task task-owned.",
+        metadata: {
+          taskId: "task-owned",
+          status: "running",
+          execution: "foreground",
+          childTask: false,
+          primaryResultStepId: "step-synthesis"
+        }
+      }
+    };
+    const { loop, sessionDb, sessionId, trajectoryRecorder } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("The workers have not returned, but here is my substitute answer."),
+      providerLoopToolExecutions: [delegatedExecution],
+      delegatedAnswerOwnership: {
+        tasks: [{ taskId: "task-owned", status: "running", execution: "foreground" }]
+      }
+    });
+
+    const response = await loop.handle({
+      text: "Delegate the research and return its synthesis.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(response.text).toBe([
+      "Task created: task-owned.",
+      "Current state: running (foreground).",
+      "This Task owns the requested answer. The result will be delivered when the Task settles."
+    ].join("\n"));
+    expect(response.text).not.toContain("substitute answer");
+    expect(JSON.stringify(response)).not.toContain("substitute answer");
+    expect(response.providerExecution?.response?.content).toBe("");
+    const messages = await sessionDb.listMessages(sessionId);
+    expect(messages.filter((message) => message.role === "agent").at(-1)?.content).toBe(response.text);
+    const assistantOutput = trajectoryRecorder.snapshot().events.find((event) => event.kind === "assistant-output");
+    expect(assistantOutput?.data.text).toBe(response.text);
+    expect(JSON.stringify(trajectoryRecorder.snapshot())).not.toContain("substitute answer");
+  });
+
+  it("returns the acknowledgement when the delegated Task succeeded despite provider failure", async () => {
+    const { loop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: failedProviderExecution(),
+      delegatedAnswerOwnership: {
+        tasks: [{ taskId: "task-preplanned", status: "queued", execution: "background" }]
+      }
+    });
+
+    const response = await loop.handle({
+      text: "Create the durable research Task.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(response.text).toBe([
+      "Task created: task-preplanned.",
+      "Current state: queued (background).",
+      "This Task owns the requested answer. The result will be delivered when the Task settles."
+    ].join("\n"));
+    expect(response.text).not.toContain("Provider note");
+  });
+
   it("projects persisted request accounting onto the delivered visible turn", async () => {
     const { loop } = await createAgentLoop({
       canRunProvider: true,

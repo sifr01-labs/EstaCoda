@@ -60,6 +60,10 @@ import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { emit, isAborted } from "../utils/runtime-helpers.js";
 import { emitContextEstimate, emitContextWindowUsage } from "./context-usage-events.js";
 import { normalizeSessionContextWindowUsage } from "../session/session-context-window-usage.js";
+import {
+  pendingDelegatedAnswerOwnership,
+  type PendingDelegatedAnswerOwnership
+} from "./delegated-answer-ownership.js";
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
 
@@ -192,6 +196,7 @@ export class ProviderTurnLoop {
     providerExecution: ProviderExecutionResult | undefined;
     toolExecutions: ToolExecutionRecord[];
     iterations: number;
+    delegatedAnswerOwnership?: PendingDelegatedAnswerOwnership;
   }> {
     this.#providerRequestSequence = 0;
     this.#toolPlanRunner.resetPerTurnBudgets?.();
@@ -210,6 +215,7 @@ export class ProviderTurnLoop {
     let reasoningOnlyPrefillRetries = 0;
     let pendingReasoningOnlyPrefill = false;
     let retryReasoningOnlyInitialResponse = false;
+    let delegatedAnswerOwnership: PendingDelegatedAnswerOwnership | undefined;
 
     for (let iteration = 0; iteration < this.#budgets.maxProviderIterations; iteration += 1) {
       if (isAborted(input.signal)) {
@@ -382,6 +388,7 @@ export class ProviderTurnLoop {
       const loopToolExecutions = loopToolExecutionResult.executions;
       maxObservedRisk = loopToolExecutionResult.maxObservedRisk;
       providerToolExecutions.push(...loopToolExecutions);
+      delegatedAnswerOwnership = pendingDelegatedAnswerOwnership(loopToolExecutions) ?? delegatedAnswerOwnership;
       if (loopToolExecutions.some((execution) => !isHousekeepingToolName(execution.tool.name))) {
         capturedContentWithHousekeepingTools = undefined;
       } else if (
@@ -450,6 +457,15 @@ export class ProviderTurnLoop {
         exhausted
       });
 
+      if (delegatedAnswerOwnership !== undefined) {
+        effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+        previousProviderExecution = execution;
+        if (consumedProviderIterations > 1) {
+          iteration += consumedProviderIterations - 1;
+        }
+        break;
+      }
+
       if (
         terminalPostToolEmpty &&
         !postToolEmptyRetried &&
@@ -513,7 +529,8 @@ export class ProviderTurnLoop {
     return {
       providerExecution: effectiveProviderExecution,
       toolExecutions: providerToolExecutions,
-      iterations
+      iterations,
+      ...(delegatedAnswerOwnership === undefined ? {} : { delegatedAnswerOwnership })
     };
   }
 
@@ -1184,6 +1201,7 @@ export class ProviderTurnLoop {
       ...toolCall,
       id: toolCall.id ?? stableToolCallId(toolCall)
     }));
+    const containsDelegationRequest = normalizedToolCalls.some((toolCall) => toolCall.name === "delegate_task");
     const secretIndexes = new Set<number>();
     normalizedToolCalls.forEach((toolCall, index) => {
       if (containsSensitiveToolArguments(toolCall.argumentsText)) {
@@ -1225,7 +1243,10 @@ export class ProviderTurnLoop {
     await this.#sessionDb.appendMessage({
       sessionId: this.#currentSessionId(),
       role: "agent",
-      content: execution.response.content,
+      // A delegation result may transfer user-facing answer ownership after this
+      // protocol turn is persisted. Keep pre-result provider prose out of the
+      // transcript; the deterministic Task acknowledgement is appended later.
+      content: containsDelegationRequest ? "" : execution.response.content,
       metadata: {
         kind: "provider-tool-call-turn",
         nativeReplaySafe,

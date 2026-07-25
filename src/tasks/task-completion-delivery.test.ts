@@ -123,6 +123,57 @@ describe("TaskCompletionDeliveryService", () => {
     expect(text).not.toContain("Intermediate worker evidence");
   });
 
+  it("delivers a deterministic failure receipt instead of diagnostic output or a substitute answer", async () => {
+    store.createTaskGraph(makeSynthesisGraph());
+    resultService.record({
+      taskId: "task-synthesis",
+      stepId: "step-synthesis-worker",
+      kind: "text",
+      disposition: "diagnostic",
+      content: "Incomplete worker text must not become the requested answer."
+    });
+    completeTask("task-synthesis");
+    const deliverText = vi.fn(async (_targets: DeliveryTarget[], _text: string) =>
+      new Map([["telegram:chat-1", { success: true }]]));
+    const service = createService(deliverText);
+    service.bind({
+      taskId: "task-synthesis",
+      authorizedSessionId: "creator-alpha",
+      deliveryKey: "failed-synthesis",
+      destination: { platform: "telegram", chatId: "chat-1" }
+    });
+
+    await service.runOnce();
+
+    expect(deliverText).toHaveBeenCalledOnce();
+    const text = deliverText.mock.calls[0]![1];
+    expect(text).toContain("The delegated Task settled without an accepted answer.");
+    expect(text).toContain("No substitute answer was generated.");
+    expect(text).not.toContain("Incomplete worker text");
+    await service.runOnce();
+    expect(deliverText).toHaveBeenCalledOnce();
+  });
+
+  it("localizes the external no-answer receipt in Arabic", async () => {
+    store.createTaskGraph(makeSynthesisGraph());
+    completeTask("task-synthesis");
+    const deliverText = vi.fn(async (_targets: DeliveryTarget[], _text: string) =>
+      new Map([["telegram:chat-1", { success: true }]]));
+    const service = createService(deliverText, "ar");
+    service.bind({
+      taskId: "task-synthesis",
+      authorizedSessionId: "creator-alpha",
+      deliveryKey: "failed-synthesis-ar",
+      destination: { platform: "telegram", chatId: "chat-1" }
+    });
+
+    await service.runOnce();
+
+    const text = deliverText.mock.calls[0]![1];
+    expect(text).toContain("اكتملت Task المفوضة من دون إجابة مقبولة");
+    expect(text).toContain("لم تُنشأ إجابة بديلة");
+  });
+
   it("leaves local CLI completion bindings for the interactive session", async () => {
     resultService.record({ taskId: "task-alpha", kind: "text", content: "Local answer." });
     completeTask();
@@ -326,13 +377,17 @@ describe("TaskCompletionDeliveryService", () => {
     })).toThrow(/chat ID is invalid/u);
   });
 
-  function createService(deliverText: TaskCompletionDeliveryRouter["deliverText"]) {
+  function createService(
+    deliverText: TaskCompletionDeliveryRouter["deliverText"],
+    locale: "en" | "ar" = "en"
+  ) {
     return new TaskCompletionDeliveryService({
       store,
       resultService,
       router: { deliverText },
       id: () => "delivery-1",
-      now: () => new Date(NOW)
+      now: () => new Date(NOW),
+      locale
     });
   }
 

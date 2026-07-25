@@ -143,7 +143,7 @@ describe("TaskSessionCompletionService", () => {
     expect(store.getDeliveryBinding("delivery-single")?.status).toBe("delivered");
   });
 
-  it("settles terminal no-answer delivery once instead of retrying forever", async () => {
+  it("delivers a deterministic terminal no-answer receipt exactly once", async () => {
     results.record({
       taskId: "task-synthesis",
       stepId: "step-worker",
@@ -153,14 +153,53 @@ describe("TaskSessionCompletionService", () => {
     });
     completeTask();
 
+    const delivered = await service.deliverPending("creator-alpha");
+    expect(delivered).toEqual([expect.objectContaining({
+      taskId: "task-synthesis",
+      text: [
+        "Task task-synthesis settled completed without an accepted answer.",
+        "No substitute answer was generated. Inspect Task status for execution details."
+      ].join("\n")
+    })]);
+    expect(delivered[0]).not.toHaveProperty("resultId");
+    expect(delivered[0]?.text).not.toContain("Incomplete diagnostic output");
+    expect(store.getDeliveryBinding("delivery-cli")?.status).toBe("delivering");
+    await acknowledge(delivered[0]!);
+    expect(store.getDeliveryBinding("delivery-cli")?.status).toBe("delivered");
     await expect(service.deliverPending("creator-alpha")).resolves.toEqual([]);
-    expect(store.getDeliveryBinding("delivery-cli")).toMatchObject({
-      status: "failed",
-      failureClass: "terminal-answer-unavailable",
-      failureMessage: "The Task settled without an accepted terminal answer.",
+    expect(await sessionDb.listMessages("creator-alpha")).toEqual([
+      expect.objectContaining({
+        role: "agent",
+        content: expect.stringContaining("No substitute answer was generated."),
+        metadata: {
+          taskCompletion: {
+            version: 1,
+            bindingId: "delivery-cli",
+            taskId: "task-synthesis",
+            outcome: "failure"
+          }
+        }
+      })
+    ]);
+  });
+
+  it("renders the terminal no-answer receipt with isolated Arabic Task tokens", async () => {
+    completeTask();
+    const arabicService = new TaskSessionCompletionService({
+      store,
+      resultService: results,
+      sessionDb,
+      profileId: "alpha",
+      locale: "ar",
+      now: () => new Date(currentNowMs)
     });
-    await expect(service.deliverPending("creator-alpha")).resolves.toEqual([]);
-    expect(await sessionDb.listMessages("creator-alpha")).toEqual([]);
+
+    const delivered = await arabicService.deliverPending("creator-alpha");
+
+    expect(delivered[0]?.text).toContain("من دون إجابة مقبولة");
+    expect(delivered[0]?.text).toContain("لم تُنشأ إجابة بديلة");
+    expect(delivered[0]?.text).toContain("\u2066Task\u2069");
+    expect(delivered[0]?.text).toContain("\u2066task-synthesis\u2069");
   });
 
   it("delivers after transcript-preserving compaction into the active descendant session", async () => {

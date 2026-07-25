@@ -1513,6 +1513,108 @@ describe("ProviderTurnLoop OpenAI-compatible stream recovery", () => {
 });
 
 describe("ProviderTurnLoop post-tool empty response recovery", () => {
+  it("stops before a substitute continuation when a delegated Task owns the answer", async () => {
+    const delegation = {
+      ...toolExecutionForTool("call-delegate", "delegate_task", "Created durable Task task-owned."),
+      riskClass: "shared-state-mutation" as const,
+      result: {
+        ok: true,
+        content: "Created durable Task task-owned.",
+        metadata: {
+          taskId: "task-owned",
+          status: "running",
+          execution: "foreground",
+          childTask: false,
+          primaryResultStepId: "step-synthesis"
+        }
+      }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("The workers have not returned, but here is a premature substitute.", [{
+          id: "call-delegate",
+          name: "delegate_task",
+          argumentsText: "{}"
+        }]),
+        providerExecution("The workers have not returned, but here is my direct synthesis.")
+      ],
+      toolSteps: [{ executions: [delegation] }]
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(1);
+    expect(result.delegatedAnswerOwnership).toEqual({
+      tasks: [{ taskId: "task-owned", status: "running", execution: "foreground" }]
+    });
+    expect(result.providerExecution?.response?.content).toContain("premature substitute");
+    expect(result.providerExecution?.response?.content).not.toContain("direct synthesis");
+    const messages = await harness.sessionDb.listMessages(harness.sessionId);
+    const protocolTurn = messages.find((message) => message.metadata?.kind === "provider-tool-call-turn");
+    expect(protocolTurn?.content).toBe("");
+    expect(JSON.stringify(messages)).not.toContain("premature substitute");
+  });
+
+  it("stops before empty-response recovery when a preplanned delegation owns the answer", async () => {
+    const delegation = {
+      ...toolExecutionForTool("call-preplanned", "delegate_task", "Created durable Task task-preplanned."),
+      riskClass: "shared-state-mutation" as const,
+      result: {
+        ok: true,
+        content: "Created durable Task task-preplanned.",
+        metadata: {
+          taskId: "task-preplanned",
+          status: "queued",
+          execution: "background",
+          childTask: false,
+          primaryResultStepId: "step-synthesis"
+        }
+      }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution(""), providerExecution("Unrequested substitute continuation.")],
+      toolSteps: [{ executions: [delegation] }]
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(1);
+    expect(result.delegatedAnswerOwnership).toEqual({
+      tasks: [{ taskId: "task-preplanned", status: "queued", execution: "background" }]
+    });
+    expect(result.providerExecution?.response?.content).toBe("");
+  });
+
+  it("keeps ordinary continuation behavior for inspection-only delegation", async () => {
+    const inspection = {
+      ...toolExecutionForTool("call-inspection", "delegate_task", "Created durable Task task-inspection."),
+      riskClass: "shared-state-mutation" as const,
+      result: {
+        ok: true,
+        content: "Created durable Task task-inspection.",
+        metadata: {
+          taskId: "task-inspection",
+          status: "running",
+          execution: "foreground",
+          childTask: false
+        }
+      }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [{ id: "call-inspection", name: "delegate_task", argumentsText: "{}" }]),
+        providerExecution("Inspection Task created; I can continue this turn.")
+      ],
+      toolSteps: [{ executions: [inspection] }]
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    expect(result.delegatedAnswerOwnership).toBeUndefined();
+    expect(result.providerExecution?.response?.content).toContain("I can continue this turn");
+  });
+
   it("persists provider tool-call turns before tool execution", async () => {
     const harness = await createPostToolNudgeHarness({
       responses: [

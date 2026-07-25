@@ -64,6 +64,7 @@ import { redactSensitiveText } from "../utils/redaction.js";
 import type { MemoryCurationService } from "../memory/memory-curation-service.js";
 import { emitContextEstimate } from "./context-usage-events.js";
 import { unavailableUsageCostSummary, usageCostSummaryFromEntries } from "../providers/provider-usage-projection.js";
+import { renderDelegatedAnswerAcknowledgement } from "./delegated-answer-ownership.js";
 
 export type AgentLoopInput = {
   text: string;
@@ -758,9 +759,15 @@ export class AgentLoop {
     const providerReturnedEmptyContent =
       effectiveProviderExecution?.ok === true &&
       rawProviderContent.trim().length === 0;
-    const displayText = providerReturnedEmptyContent
+    const delegatedAnswerAcknowledgement = providerLoop.delegatedAnswerOwnership === undefined
+      ? undefined
+      : renderDelegatedAnswerAcknowledgement(
+          providerLoop.delegatedAnswerOwnership,
+          this.#ui?.language === "ar" ? "ar" : "en"
+        );
+    const displayText = delegatedAnswerAcknowledgement ?? (providerReturnedEmptyContent
       ? "I completed the requested actions but did not produce any visible output."
-      : rawProviderContent;
+      : rawProviderContent);
     const providerSummary = summarizeProviderExecution({
       configuredModel: this.#model === undefined
         ? undefined
@@ -768,7 +775,28 @@ export class AgentLoop {
       execution: effectiveProviderExecution
     });
     const providerProgress = renderProviderExecutionSummary(providerSummary);
-    const response = effectiveProviderExecution?.ok === true && effectiveProviderExecution.response !== undefined
+    const delegatedAnswerResponse = delegatedAnswerAcknowledgement === undefined
+      ? undefined
+      : {
+          ...fallbackResponse,
+          text: delegatedAnswerAcknowledgement,
+          toolExecutions,
+          toolPlans,
+          skillOutcomes,
+          artifacts,
+          ...(effectiveProviderExecution === undefined ? {} : {
+            providerExecution: suppressProviderGeneratedText(effectiveProviderExecution)
+          }),
+          setupApprovals,
+          progress: [
+            ...fallbackResponse.progress,
+            ...renderArtifactProgress(artifacts),
+            ...renderToolPlanProgress(toolPlans),
+            ...providerProgress,
+            providerLoop.iterations > 1 ? `provider iterations: ${providerLoop.iterations}` : "provider continuation: not needed"
+          ]
+        };
+    const response = delegatedAnswerResponse ?? (effectiveProviderExecution?.ok === true && effectiveProviderExecution.response !== undefined
       ? {
           ...fallbackResponse,
           text: appendArtifactSummary(displayText, artifacts),
@@ -824,7 +852,7 @@ export class AgentLoop {
               ...renderToolPlanProgress(toolPlans),
             ...providerProgress
           ]
-        };
+        });
     const conversationContinuationState = updateConversationContinuationState({
       previous: previousConversationContinuationState,
       userText: effectiveText,
@@ -842,7 +870,10 @@ export class AgentLoop {
       noSkillResult: selectedSkill === undefined ? "not-applicable" : undefined,
       routeConfidence: intent.confidence,
       promptHash: hashSkillRoutePrompt(effectiveText),
-      outcomeStatus: finalOutcomeStatusForLearning(effectiveProviderExecution, toolExecutions),
+      outcomeStatus: finalOutcomeStatusForLearning(
+        delegatedAnswerAcknowledgement === undefined ? effectiveProviderExecution : undefined,
+        toolExecutions
+      ),
       candidatesShown: intent.suggestedSkills.map((skill) => skill.name),
       agentEvolutionPolicy: this.#agentEvolutionPolicy ?? noLearningPolicy(),
       toolExecutions
@@ -921,7 +952,11 @@ export class AgentLoop {
       onEvent: input.onEvent
     }).catch(() => undefined);
 
-    return await this.#completeAndReturn(response, outcomeFromResponse(response), visibleTurn.id);
+    return await this.#completeAndReturn(
+      response,
+      outcomeFromResponse(response, delegatedAnswerAcknowledgement !== undefined),
+      visibleTurn.id
+    );
   }
 
 
@@ -1509,11 +1544,11 @@ function buildSetupApprovalRequests(
     }));
 }
 
-function outcomeFromResponse(response: AgentLoopResponse): {
+function outcomeFromResponse(response: AgentLoopResponse, delegatedAnswerOwned = false): {
   success: boolean;
   summary: string;
 } {
-  if (
+  if (!delegatedAnswerOwned &&
     response.providerExecution?.ok === true &&
     (response.providerExecution.response?.content ?? "").trim().length === 0
   ) {
@@ -1523,7 +1558,7 @@ function outcomeFromResponse(response: AgentLoopResponse): {
     };
   }
 
-  if (response.providerExecution?.ok === false) {
+  if (!delegatedAnswerOwned && response.providerExecution?.ok === false) {
     return {
       success: false,
       summary: "Provider turn failed; fallback response returned."
@@ -1543,6 +1578,28 @@ function outcomeFromResponse(response: AgentLoopResponse): {
   return {
     success: true,
     summary: "Turn completed."
+  };
+}
+
+function suppressProviderGeneratedText(execution: ProviderExecutionResult): ProviderExecutionResult {
+  const response = execution.response === undefined
+    ? undefined
+    : {
+        ...execution.response,
+        content: "",
+        partialContent: undefined,
+        reasoning: undefined,
+        raw: undefined
+      };
+  return {
+    ...execution,
+    ...(response === undefined ? {} : { response }),
+    partialContent: undefined,
+    attempts: execution.attempts.map((attempt) => ({
+      ...attempt,
+      content: "",
+      partialContent: undefined
+    }))
   };
 }
 

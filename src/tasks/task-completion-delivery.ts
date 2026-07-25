@@ -323,9 +323,17 @@ export class TaskCompletionDeliveryService {
       lines.push(await this.#readTextResult(task.id, result, binding.authorizedSessionId));
     }
     if (results.length === 0) {
-      lines.push("", primaryResultStepId === undefined
-        ? "No durable results were produced."
-        : "No durable primary result was produced.");
+      lines.push(
+        "",
+        primaryResultStepId === undefined
+          ? copy(this.#locale, "No durable results were produced.", "لم تُنتج Results دائمة.")
+          : copy(this.#locale, "No durable primary result was produced.", "لم تُنتج Result رئيسية دائمة."),
+        copy(
+          this.#locale,
+          "The delegated Task settled without an accepted answer. No substitute answer was generated.",
+          "اكتملت Task المفوضة من دون إجابة مقبولة. لم تُنشأ إجابة بديلة."
+        )
+      );
     }
     if (acceptedResults.length > results.length) {
       const label = primaryResultStepId === undefined ? "additional" : "intermediate";
