@@ -343,7 +343,7 @@ Each research item may add a `research` contract with a bounded scope plus `requ
 
 Task scheduling owns concurrency, retries, cancellation, approvals, usage, results, restart recovery, and settlement. Worker sessions and model overrides are constructed only after a Step is leased. The returned creation result is a bounded handle, not the worker's final answer.
 
-`task.status` reports bounded Task status, Step progress, active Attempts, usage/pricing completeness, and opaque result metadata. It does not expose workspace paths, prompts, tool inputs, credentials, full result bodies, or raw failure messages. Missing and unauthorized identifiers return the same failure.
+The immediate successful operator row says **task created** because `delegate_task` returns after durable admission. Observed child settlement summaries still report their actual outcomes. For a primary Result Step, `task.status` also projects the optional provider-completed, result-captured, result-recorded, Attempt-settled, Task-finalized, delivery-started, and parent-delivered timestamps. It does not expose workspace paths, prompts, tool inputs, credentials, full result bodies, raw messages, or raw failure messages. Missing and unauthorized identifiers return the same failure.
 
 ### Config tools
 

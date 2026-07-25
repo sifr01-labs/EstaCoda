@@ -315,6 +315,9 @@ function renderTask(
     task.results.find((result) => result.primary) === undefined
       ? undefined
       : `${copy(locale, "Primary result", "النتيجة الرئيسية")}: ${technical(locale, task.results.find((result) => result.primary)!.handle)}`,
+    task.lifecycle === undefined ? undefined : "",
+    task.lifecycle === undefined ? undefined : copy(locale, "Completion lifecycle", "دورة حياة الإكمال"),
+    ...renderTaskLifecycle(task.lifecycle, locale),
     workspaceTrusted === undefined ? undefined : `${copy(locale, "Workspace", "مساحة العمل")}: ${workspaceTrusted ? copy(locale, "trusted", "موثوقة") : copy(locale, "not trusted", "غير موثوقة")}`,
     backgroundHost === undefined ? undefined : `${copy(locale, "Background host", "المضيف الخلفي")}: ${technical(locale, backgroundHost)}`,
     task.executionWaitingReason === undefined ? undefined : `${copy(locale, "Execution waiting reason", "سبب انتظار التنفيذ")}: ${oneLine(task.executionWaitingReason)}`,
@@ -322,6 +325,25 @@ function renderTask(
     task.failure === undefined ? undefined : `${copy(locale, "Failure", "الفشل")}: ${technical(locale, task.failure.class)}`
   ];
   return lines.filter((line): line is string => line !== undefined).join("\n");
+}
+
+function renderTaskLifecycle(
+  lifecycle: TaskStatusProjection["lifecycle"],
+  locale: TaskCommandLocale
+): string[] {
+  if (lifecycle === undefined) return [];
+  const rows: Array<[string, string, string | undefined]> = [
+    ["Provider completed", "اكتمل المزوّد", lifecycle.providerCompletedAt],
+    ["Result captured", "تم التقاط النتيجة", lifecycle.resultCapturedAt],
+    ["Result recorded", "تم تسجيل النتيجة", lifecycle.resultRecordedAt],
+    ["Attempt settled", "استقرت المحاولة", lifecycle.attemptSettledAt],
+    ["Task finalized", "اكتملت المهمة نهائيًا", lifecycle.taskFinalizedAt],
+    ["Delivery started", "بدأ التسليم", lifecycle.deliveryStartedAt],
+    ["Parent delivered", "تم التسليم إلى الأصل", lifecycle.parentDeliveredAt]
+  ];
+  return rows.map(([english, arabic, timestamp]) =>
+    `${copy(locale, english, arabic)}: ${timestamp === undefined ? copy(locale, "pending", "قيد الانتظار") : technical(locale, timestamp)}`
+  );
 }
 
 function formatTaskUsageCost(

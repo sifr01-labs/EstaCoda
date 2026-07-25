@@ -12,7 +12,7 @@ import type {
   TaskPlanRevision,
   TaskStep
 } from "../contracts/task.js";
-import { TASK_TOOL_RISK_CLASSES } from "../contracts/task.js";
+import { TASK_ORIGIN_COMPLETION_DELIVERY_KEY, TASK_TOOL_RISK_CLASSES } from "../contracts/task.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
 import { GatewayApprovalQueue } from "../gateway/approval-queue.js";
 import { WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
@@ -1090,6 +1090,66 @@ describe("TaskScheduler", () => {
         })
       })
     ]);
+  });
+
+  it("projects the ordered primary-result lifecycle through parent delivery", async () => {
+    const graph = makeGraph([makeStep("synthesis", 0, {
+      executor: { kind: "agent", role: "synthesis" }
+    })]);
+    store.createTaskGraph(graph);
+    store.atomicWrite((tx) => {
+      tx.createDeliveryBinding({
+        id: "delivery-lifecycle",
+        profileId: "alpha",
+        taskId: graph.task.id,
+        authorizedSessionId: "creator-alpha",
+        deliveryKey: TASK_ORIGIN_COMPLETION_DELIVERY_KEY,
+        destination: { platform: "cli" },
+        status: "pending",
+        createdAt: now().toISOString(),
+        updatedAt: now().toISOString()
+      });
+    });
+    const scheduler = makeScheduler(new FakeTaskStepExecutor((input) => {
+      nowMs += 1_000;
+      input.checkpoint({ milestone: "provider-completed" });
+      nowMs += 1_000;
+      input.checkpoint({ milestone: "result-captured" });
+      nowMs += 1_000;
+      return { outcome: "succeeded", results: [{ kind: "text", content: "Final synthesized answer." }] };
+    }));
+
+    await expect(scheduler.runOnce()).resolves.toMatchObject({ dispatched: 1, completed: 1, failed: 0 });
+    nowMs += 1_000;
+    expect(store.claimDeliveryBinding("delivery-lifecycle", now().toISOString())).not.toBeNull();
+    nowMs += 1_000;
+    store.settleDeliveryBinding({
+      id: "delivery-lifecycle",
+      status: "delivered",
+      settledAt: now().toISOString()
+    });
+
+    const projection = new TaskOperatorService({ store, now }).status(graph.task.id);
+    expect(projection.lifecycle).toEqual({
+      providerCompletedAt: "2030-01-01T00:00:01.000Z",
+      resultCapturedAt: "2030-01-01T00:00:02.000Z",
+      resultRecordedAt: "2030-01-01T00:00:03.000Z",
+      attemptSettledAt: "2030-01-01T00:00:03.000Z",
+      taskFinalizedAt: "2030-01-01T00:00:03.000Z",
+      deliveryStartedAt: "2030-01-01T00:00:04.000Z",
+      parentDeliveredAt: "2030-01-01T00:00:05.000Z"
+    });
+    const ordered = Object.values(projection.lifecycle!).map((timestamp) => Date.parse(timestamp));
+    expect(ordered.every((timestamp, index) => index === 0 || ordered[index - 1]! <= timestamp)).toBe(true);
+    const milestoneEvents = store.listEvents(graph.task.id, {
+      kinds: ["attempt-progressed"],
+      stepId: "step-synthesis"
+    }).filter((event) => event.data.milestone !== undefined);
+    expect(milestoneEvents.map((event) => event.data)).toEqual([
+      { milestone: "provider-completed" },
+      { milestone: "result-captured" }
+    ]);
+    expect(JSON.stringify(milestoneEvents)).not.toContain("Final synthesized answer");
   });
 
   it("reconciles an expired retry-safe Attempt after restart and retries only through policy", async () => {

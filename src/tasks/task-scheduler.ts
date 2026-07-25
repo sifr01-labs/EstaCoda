@@ -34,10 +34,12 @@ import {
   listTaskTreeAttempts
 } from "./task-tree-accounting.js";
 import {
+  TASK_ATTEMPT_MILESTONES,
   TASK_STEP_HOST_HANDOFF_ABORT_REASON,
   type ResolveTaskStepExecutor,
   type TaskAttemptActivity,
   type TaskAttemptCheckpoint,
+  type TaskAttemptMilestone,
   type TaskExecutorSettlement,
   type TaskStepExecutor
 } from "./task-step-executor.js";
@@ -458,7 +460,10 @@ export class TaskScheduler {
       ? undefined
       : requireToken(checkpoint.trajectoryId, "trajectory ID");
     const activity = checkpoint.activity === undefined ? undefined : normalizeCheckpointActivity(checkpoint.activity);
-    if (workerSessionId === undefined && trajectoryId === undefined && activity === undefined) {
+    const milestone = checkpoint.milestone === undefined
+      ? undefined
+      : normalizeAttemptMilestone(checkpoint.milestone);
+    if (workerSessionId === undefined && trajectoryId === undefined && activity === undefined && milestone === undefined) {
       throw new Error("Task Attempt checkpoint must contain worker progress.");
     }
 
@@ -517,7 +522,8 @@ export class TaskScheduler {
         data: {
           ...(workerSessionId === undefined ? {} : { workerSessionId }),
           ...(trajectoryId === undefined ? {} : { trajectoryId }),
-          ...(activity === undefined ? {} : { activity })
+          ...(activity === undefined ? {} : { activity }),
+          ...(milestone === undefined ? {} : { milestone })
         }
       }));
       return lease;
@@ -2222,6 +2228,13 @@ export class TaskScheduler {
       data: options.data
     };
   }
+}
+
+function normalizeAttemptMilestone(value: unknown): TaskAttemptMilestone {
+  if (typeof value === "string" && TASK_ATTEMPT_MILESTONES.includes(value as TaskAttemptMilestone)) {
+    return value as TaskAttemptMilestone;
+  }
+  throw new Error("Task Attempt checkpoint milestone is invalid.");
 }
 
 function isSynthesisStep(step: TaskStep): boolean {

@@ -64,6 +64,50 @@ describe("Task commands", () => {
     db.close();
   });
 
+  it("renders the bounded completion lifecycle in English and Arabic", async () => {
+    const db = await createSQLiteSessionDB({ path: join(root, "sessions.sqlite") });
+    await db.createSession({ id: "owner", profileId: "alpha" });
+    const service = new TaskOperatorService({
+      store: new SQLiteTaskStore({ db: db.db, profileId: "alpha" }),
+      now: () => new Date("2026-01-01T00:00:00.000Z")
+    });
+    const created = service.begin({
+      objective: "Inspect lifecycle output",
+      workspace: { canonicalPath: root, identityHash: "workspace-hash" },
+      creatorSessionId: "owner"
+    });
+    vi.spyOn(service, "status").mockReturnValue({
+      ...created,
+      lifecycle: {
+        providerCompletedAt: "2026-01-01T00:00:01.000Z",
+        resultCapturedAt: "2026-01-01T00:00:02.000Z",
+        resultRecordedAt: "2026-01-01T00:00:03.000Z",
+        attemptSettledAt: "2026-01-01T00:00:03.000Z",
+        taskFinalizedAt: "2026-01-01T00:00:03.000Z",
+        deliveryStartedAt: "2026-01-01T00:00:04.000Z"
+      }
+    });
+
+    const english = await executeTaskCommand({
+      args: ["show", created.taskId],
+      service,
+      authorizedSessionId: "owner"
+    });
+    const arabic = await executeTaskCommand({
+      args: ["show", created.taskId],
+      service,
+      authorizedSessionId: "owner",
+      locale: "ar"
+    });
+
+    expect(english.output).toContain("Completion lifecycle\nProvider completed: 2026-01-01T00:00:01.000Z");
+    expect(english.output).toContain("Parent delivered: pending");
+    expect(arabic.output).toContain("دورة حياة الإكمال");
+    expect(arabic.output).toContain("اكتمل المزوّد: \u20662026-01-01T00:00:01.000Z\u2069");
+    expect(arabic.output).toContain("تم التسليم إلى الأصل: قيد الانتظار");
+    db.close();
+  });
+
   it("keeps --profile command-local while creating an explicit Task creator session", async () => {
     writeActiveProfile("alpha", { homeDir: root });
     await new WorkspaceTrustStore({ homeDir: root }).grant(root);

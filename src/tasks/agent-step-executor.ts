@@ -319,6 +319,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
       }
 
       const response = runnerResult.response;
+      input.checkpoint({ milestone: "provider-completed" });
       const trajectoryId = child.agentLoop.trajectoryId;
       if (trajectoryId !== undefined) input.checkpoint({ trajectoryId });
       const common = { ...worker, ...(trajectoryId === undefined ? {} : { trajectoryId }) };
@@ -399,6 +400,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
           ...common
         };
       }
+      input.checkpoint({ milestone: "result-captured" });
       endReason = "task-step-completed";
       return { outcome: "succeeded", results: captured.results, ...metering, ...common };
     } finally {

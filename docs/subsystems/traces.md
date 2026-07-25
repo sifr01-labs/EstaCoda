@@ -43,7 +43,7 @@ The event-kind source of truth is the `TrajectoryEventKind` union in `src/contra
 
 ### User Corrections
 
-Durable delegation lifecycle is recorded in the Task journal, fenced Attempt checkpoints, Task result metadata, and worker trajectories. `delegate_task` itself produces an ordinary bounded tool result containing the queued Task handle; it does not relay a synchronous child lifecycle into the creating turn. A leased worker may append a bounded `delegation-diagnostic` session event for a timeout or stale heartbeat; Task state and settlement remain authoritative in the Task journal.
+Durable delegation lifecycle is recorded in the Task journal, fenced Attempt checkpoints, Task result metadata, and worker trajectories. `delegate_task` itself produces an ordinary bounded tool result containing the queued Task handle; it does not relay a synchronous child lifecycle into the creating turn. The primary Attempt records `provider-completed` after its final provider response and `result-captured` after capture/validation succeeds. Inspection combines those bounded milestones with the existing `result-recorded`, `attempt-completed`, terminal Task, and delivery timestamps. These events contain identifiers, classifications, counts, and timestamps only—not response bodies, tool arguments, prompts, messages, or private paths. A leased worker may append a bounded `delegation-diagnostic` session event for a timeout or stale heartbeat; Task state and settlement remain authoritative in the Task journal.
 
 `user-correction` is a structured trajectory event kind. When the user provides corrective feedback (e.g., "no, do it this way"), the runtime records:
 

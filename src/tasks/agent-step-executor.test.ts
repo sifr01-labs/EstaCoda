@@ -195,6 +195,12 @@ describe("AgentStepExecutor", () => {
     const assistantActivities = store.listEvents(graph.task.id, { kinds: ["attempt-progressed"] })
       .map((event) => event.data.activity)
       .filter((activity) => (activity as { kind?: string } | undefined)?.kind === "assistant");
+    const milestones = store.listEvents(graph.task.id, { kinds: ["attempt-progressed"] })
+      .map((event) => event.data.milestone)
+      .filter((milestone) => milestone !== undefined);
+    expect(milestones).toEqual(["provider-completed", "result-captured"]);
+    expect(JSON.stringify(store.listEvents(graph.task.id, { kinds: ["attempt-progressed"] })))
+      .not.toContain(FULL_RESULT);
     expect(assistantActivities).toHaveLength(MAX_PERSISTED_ASSISTANT_PREVIEWS_PER_ATTEMPT);
     expect(JSON.stringify(assistantActivities)).not.toContain("hunter2");
     expect(cleanup).toHaveBeenCalledOnce();

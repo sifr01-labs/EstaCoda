@@ -65,10 +65,15 @@ export type TaskExecutorSettlement =
       trajectoryId?: string;
     };
 
+export const TASK_ATTEMPT_MILESTONES = ["provider-completed", "result-captured"] as const;
+
+export type TaskAttemptMilestone = (typeof TASK_ATTEMPT_MILESTONES)[number];
+
 export type TaskAttemptCheckpoint = {
   workerSessionId?: string;
   trajectoryId?: string;
   activity?: TaskAttemptActivity;
+  milestone?: TaskAttemptMilestone;
 };
 
 export type TaskTraceCategory =

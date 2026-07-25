@@ -36,7 +36,7 @@ import { FixedTaskService } from "./fixed-task-service.js";
 import type { InitialTaskHostLeaseInput, TaskEventTraceSummary, TaskStore } from "./task-store.js";
 import { taskToolCategory } from "./task-safe-activity.js";
 import type { TaskTraceCategory } from "./task-step-executor.js";
-import { orderTaskResults, taskPrimaryResult } from "./task-primary-result.js";
+import { orderTaskResults, taskPrimaryResult, taskPrimaryResultStepId } from "./task-primary-result.js";
 import { cloneSpendingLimit, type SpendingLimit } from "../contracts/budget.js";
 
 const ACTIVE_ATTEMPT_STATUSES: readonly TaskAttemptStatus[] = [
@@ -63,6 +63,16 @@ export type TaskPhaseProjection = {
     settled: number;
     total: number;
   };
+};
+
+export type TaskLifecycleProjection = {
+  providerCompletedAt?: string;
+  resultCapturedAt?: string;
+  resultRecordedAt?: string;
+  attemptSettledAt?: string;
+  taskFinalizedAt?: string;
+  deliveryStartedAt?: string;
+  parentDeliveredAt?: string;
 };
 
 export type TaskStatusProjection = {
@@ -100,6 +110,7 @@ export type TaskStatusProjection = {
   usage: TaskUsageTotals;
   spending?: SpendingBudgetSummary;
   results: readonly TaskResultProjection[];
+  lifecycle?: TaskLifecycleProjection;
   waitReason?: string;
   failure?: Pick<NonNullable<Task["failure"]>, "class" | "retryable" | "uncertainSideEffects">;
   createdAt: string;
@@ -418,6 +429,7 @@ export class TaskOperatorService {
       : this.#store.getPlanRevision(task.activePlanRevisionId);
     const currentToolCategory = this.#currentToolCategory(task, attempts, activityByAttempt);
     const primaryResult = taskPrimaryResult(this.#store, task);
+    const primaryResultStepId = taskPrimaryResultStepId(this.#store, task);
     const results = orderTaskResults(this.#store.listResults(task.id), primaryResult)
       .slice(0, MAX_PROJECTED_RESULTS)
       .map((result) => projectResult(result, result.id === primaryResult?.id));
@@ -493,6 +505,15 @@ export class TaskOperatorService {
       usage: taskUsageFromEntries(treeUsageEntries),
       ...this.#taskSpending(task, treeUsageEntries),
       results,
+      ...(primaryResultStepId === undefined ? {} : {
+        lifecycle: projectTaskLifecycle(
+          this.#store,
+          task,
+          primaryResultStepId,
+          primaryResult,
+          attemptsByStep.get(primaryResultStepId)
+        )
+      }),
       ...(task.waitReason === undefined ? {} : { waitReason: safeText(task.waitReason.summary, 240) }),
       ...(task.failure === undefined ? {} : {
         failure: {
@@ -639,6 +660,53 @@ export class TaskOperatorService {
       data
     };
   }
+}
+
+function projectTaskLifecycle(
+  store: TaskStore,
+  task: Task,
+  primaryResultStepId: string,
+  primaryResult: TaskResult | undefined,
+  stepAttempts: readonly TaskAttempt[] | undefined
+): TaskLifecycleProjection {
+  const primaryAttempt = primaryResult?.attemptId === undefined
+    ? stepAttempts?.slice().sort((left, right) =>
+        right.attemptNumber - left.attemptNumber || right.updatedAt.localeCompare(left.updatedAt)
+      )[0]
+    : stepAttempts?.find((attempt) => attempt.id === primaryResult.attemptId);
+  const events = store.listEvents(task.id, {
+    kinds: ["attempt-progressed", "result-recorded", "attempt-completed"],
+    stepId: primaryResultStepId,
+    order: "desc",
+    limit: MAX_PROJECTED_TRACE_EVENTS
+  });
+  const attemptEvents = primaryAttempt === undefined
+    ? []
+    : events.filter((event) => event.attemptId === primaryAttempt.id);
+  const providerCompletedAt = attemptEvents.find((event) =>
+    event.kind === "attempt-progressed" && event.data.milestone === "provider-completed"
+  )?.timestamp;
+  const resultCapturedAt = attemptEvents.find((event) =>
+    event.kind === "attempt-progressed" && event.data.milestone === "result-captured"
+  )?.timestamp;
+  const resultRecordedAt = primaryResult === undefined
+    ? undefined
+    : attemptEvents.find((event) =>
+        event.kind === "result-recorded" && event.data.resultId === primaryResult.id
+      )?.timestamp ?? primaryResult.createdAt;
+  const attemptSettledAt = attemptEvents.find((event) => event.kind === "attempt-completed")?.timestamp ??
+    primaryAttempt?.completedAt;
+  const delivery = store.listDeliveryBindings({ taskId: task.id })
+    .find((binding) => binding.deliveryKey === TASK_ORIGIN_COMPLETION_DELIVERY_KEY);
+  return {
+    ...(providerCompletedAt === undefined ? {} : { providerCompletedAt }),
+    ...(resultCapturedAt === undefined ? {} : { resultCapturedAt }),
+    ...(resultRecordedAt === undefined ? {} : { resultRecordedAt }),
+    ...(attemptSettledAt === undefined ? {} : { attemptSettledAt }),
+    ...(task.completedAt === undefined ? {} : { taskFinalizedAt: task.completedAt }),
+    ...(delivery?.startedAt === undefined ? {} : { deliveryStartedAt: delivery.startedAt }),
+    ...(delivery?.deliveredAt === undefined ? {} : { parentDeliveredAt: delivery.deliveredAt })
+  };
 }
 
 export function cancelTaskInStore(input: {

@@ -202,7 +202,7 @@ function delegationCompletionLabel(
   if (statuses.size === 0) {
     if (parentStatus === "gated") return locale === "ar" ? "بانتظار الموافقة" : "approval required";
     if (parentStatus === "failed") return locale === "ar" ? "فشل الإسناد" : "delegation failed";
-    return locale === "ar" ? "اكتمل الإسناد" : "delegation completed";
+    return locale === "ar" ? "تم إنشاء المهمة" : "task created";
   }
 
   const values = [...statuses.values()];

@@ -96,6 +96,24 @@ describe("active work runtime mapper", () => {
     });
   });
 
+  it("labels immediate successful delegation as Task creation in English and Arabic", () => {
+    const english = new ActiveWorkRuntimeEventMapper();
+    const arabic = new ActiveWorkRuntimeEventMapper({ locale: "ar" });
+
+    const englishEvent = english.build({ kind: "tool-result", tool: "delegate_task", ok: true });
+    const arabicEvent = arabic.build({ kind: "tool-result", tool: "delegate_task", ok: true });
+    expect(englishEvent.target).toBe("task created");
+    expect(arabicEvent.target).toBe("تم إنشاء المهمة");
+    expect(renderActiveWorkSurface(
+      applyActiveWorkRuntimeEvent(createActiveWorkRuntimeState(), englishEvent),
+      { width: 80 }
+    ).join("\n")).toContain("task created");
+    expect(renderActiveWorkSurface(
+      applyActiveWorkRuntimeEvent(createActiveWorkRuntimeState(), arabicEvent),
+      { width: 80, locale: "ar" }
+    ).join("\n")).toContain("تم إنشاء المهمة");
+  });
+
   it("prefers display previews over security target summaries", () => {
     const mapper = new ActiveWorkRuntimeEventMapper();
 

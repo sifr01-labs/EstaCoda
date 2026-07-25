@@ -346,6 +346,11 @@ The completed turn retains the ordinary `delegate_task` row and its bounded
 handle metadata. Task progress, approval waits, cancellation, result bodies,
 and terminal settlement are sourced from the durable Task journal.
 
+An immediate successful tool result is labeled `task created` in English and
+`تم إنشاء المهمة` in Arabic because it confirms admission only. If child
+settlement events have been observed, the same row continues to summarize the
+actual completed, failed, cancelled, timed-out, or blocked worker counts.
+
 The delivered response also prints the durable Task handle and current bounded
 status. As asynchronous work settles, its retained Task card and the current
 session total refresh from persisted accounting; old assistant transcript
