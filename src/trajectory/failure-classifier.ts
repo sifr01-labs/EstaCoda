@@ -128,6 +128,20 @@ function classifyToolExecutionFailure(execution: ToolExecutionRecord): Classifie
 
   if (result.ok === false) {
     const errorMessage = typeof result.content === "string" ? result.content : "Unknown tool error";
+    if (result.metadata?.reason === "delegation-access-error") {
+      return {
+        class: "tool-invalid-args",
+        recoverable: true,
+        message: `Tool ${execution.tool.name} rejected delegated access arguments: ${truncate(errorMessage, 200)}`,
+        context: {
+          tool: execution.tool.name,
+          error: errorMessage,
+          reason: result.metadata.reason,
+          code: result.metadata.code,
+          taskIndex: result.metadata.taskIndex
+        }
+      };
+    }
 
     if (errorMessage.includes("timeout") || errorMessage.includes("timed out")) {
       return {

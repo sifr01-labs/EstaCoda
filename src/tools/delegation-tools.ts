@@ -81,7 +81,7 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
                     task: { type: "string" },
                     context: { type: "string" },
                     allowedToolsets: { type: "array", items: { type: "string" } },
-                    allowedTools: { type: "array", items: { type: "string" } },
+                    allowedTools: delegatedAllowedToolsSchema(),
                     role: { type: "string", enum: ["leaf", "orchestrator"] },
                     modelOverride: modelOverrideSchema(),
                     research: researchContractSchema()
@@ -102,7 +102,8 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
           },
           allowedTools: {
             type: "array",
-            items: { type: "string" }
+            items: { type: "string" },
+            description: delegatedAllowedToolsDescription()
           },
           role: {
             type: "string",
@@ -238,6 +239,22 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
       }
     }
   ];
+}
+
+function delegatedAllowedToolsSchema(): Record<string, unknown> {
+  return {
+    type: "array",
+    items: { type: "string" },
+    description: delegatedAllowedToolsDescription()
+  };
+}
+
+function delegatedAllowedToolsDescription(): string {
+  return [
+    "Optional exact child-tool allowlist.",
+    "Use provider-visible tool names from this turn, such as file_read or web_search.",
+    "EstaCoda resolves those aliases to canonical internal tool IDs before admission; unknown names fail closed."
+  ].join(" ");
 }
 
 export const delegationToolProvider: SessionToolProvider = {

@@ -14,6 +14,7 @@ describe("createDelegationTools", () => {
     const [tool] = tools(vi.fn());
 
     expect(tool?.description).toContain("Returns a Task handle immediately");
+    expect(JSON.stringify(tool?.inputSchema)).toContain("Use provider-visible tool names");
     expect(tool?.inputSchema).toMatchObject({
       type: "object",
       properties: {

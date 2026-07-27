@@ -59,7 +59,7 @@ export class ToolCallPlanner {
     return {
       id,
       tool,
-      input: parsed.input,
+      input: canonicalizeNestedToolNames(tool, parsed.input, this.#aliases),
       source: "provider-tool-call",
       status: "planned",
       raw: delta.raw
@@ -73,6 +73,57 @@ export class ToolCallPlanner {
 
     return this.#aliases.get(name) ?? name;
   }
+}
+
+function canonicalizeNestedToolNames(
+  tool: string,
+  input: Record<string, unknown>,
+  aliases: ReadonlyMap<string, string>
+): Record<string, unknown> {
+  if (tool !== "delegate_task" || aliases.size === 0) return input;
+
+  return {
+    ...input,
+    ...(input.allowedTools === undefined
+      ? {}
+      : { allowedTools: canonicalizeAllowedTools(input.allowedTools, aliases) }),
+    ...(input.tasks === undefined
+      ? {}
+      : { tasks: canonicalizeDelegatedTasks(input.tasks, aliases) })
+  };
+}
+
+function canonicalizeDelegatedTasks(value: unknown, aliases: ReadonlyMap<string, string>): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => canonicalizeDelegatedTaskItem(item, aliases));
+  }
+  if (typeof value !== "string") return value;
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return value;
+    return JSON.stringify(parsed.map((item) => canonicalizeDelegatedTaskItem(item, aliases)));
+  } catch {
+    return value;
+  }
+}
+
+function canonicalizeDelegatedTaskItem(item: unknown, aliases: ReadonlyMap<string, string>): unknown {
+  if (item === null || typeof item !== "object" || Array.isArray(item)) return item;
+  const record = item as Record<string, unknown>;
+  if (record.allowedTools === undefined) return item;
+  return {
+    ...record,
+    allowedTools: canonicalizeAllowedTools(record.allowedTools, aliases)
+  };
+}
+
+function canonicalizeAllowedTools(value: unknown, aliases: ReadonlyMap<string, string>): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((name) => {
+    if (typeof name !== "string") return name;
+    return aliases.get(name.trim()) ?? name;
+  });
 }
 
 export function stableToolCallId(delta: ProviderToolCallDelta): string {
