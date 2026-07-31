@@ -2,7 +2,7 @@ import { stringWidth } from "../screen/stringWidth.js";
 import { truncateVisible } from "../../renderers/layout.js";
 import type { StatusRailState } from "./operatorConsoleState.js";
 import { styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
-import { formatUsageCost, formatUsdAmount } from "../../usage-cost-format.js";
+import { formatUsageCost, formatUsdAmount, usageCostPresentationState } from "../../usage-cost-format.js";
 import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
 import { isolateLtr } from "../../bidi.js";
 
@@ -33,7 +33,7 @@ export function renderStatusRailSurface(
   const numbers = formatContextNumbers(state);
   const symbol = modelStateSymbol(state.model.state, state.model.route, options.style);
   const securityBadge = formatSecurityBadge(state, options.style);
-  const cost = state.sessionCost === undefined
+  const cost = state.sessionCost === undefined || usageCostPresentationState(state.sessionCost) === "unavailable"
     ? undefined
     : formatUsageCost(state.sessionCost, { locale: options.locale, compact: true });
   const sessionTokens = state.sessionCost === undefined
@@ -60,40 +60,35 @@ export function renderStatusRailSurface(
   const full = alignRight(
     joinSegments([model, ...identityFull, contextFull, timerSegment], options.style),
     sessionFull,
-    width,
-    options.style
+    width
   );
   if (full !== undefined) return full;
 
   const shortIdentity = alignRight(
     joinSegments([model, ...identityShort, contextFull, timerSegment], options.style),
     sessionFull,
-    width,
-    options.style
+    width
   );
   if (shortIdentity !== undefined) return shortIdentity;
 
   const compactIdentity = alignRight(
     joinSegments([model, ...identityShort, contextCompact, timerSegment], options.style),
     sessionFull,
-    width,
-    options.style
+    width
   );
   if (compactIdentity !== undefined) return compactIdentity;
 
   const fullWithoutIdentity = alignRight(
     joinSegments([model, contextFull, timerSegment], options.style),
     sessionFull,
-    width,
-    options.style
+    width
   );
   if (fullWithoutIdentity !== undefined) return fullWithoutIdentity;
 
   const compact = alignRight(
     joinSegments([model, contextCompact, timerSegment], options.style),
     sessionFull,
-    width,
-    options.style
+    width
   );
   if (compact !== undefined) return compact;
 
@@ -107,16 +102,14 @@ export function renderStatusRailSurface(
   const narrow = alignRight(
     joinSegments([`${narrowModel} ${symbol}`, contextCompact, timerSegment], options.style),
     narrowSession,
-    width,
-    options.style
+    width
   );
   if (narrow !== undefined) return narrow;
 
   const essential = alignRight(
     joinSegments([contextCompact, timerSegment], options.style),
     narrowSession,
-    width,
-    options.style
+    width
   );
   if (essential !== undefined) return essential;
 
@@ -335,17 +328,16 @@ function joinSegments(
 function alignRight(
   left: string,
   right: string,
-  width: number,
-  style: OperatorConsoleStyle | undefined
+  width: number
 ): string | undefined {
   if (right.length === 0) {
     const leftWidth = stringWidth(left);
     return leftWidth <= width ? `${left}${" ".repeat(width - leftWidth)}` : undefined;
   }
-  const minimumWidth = stringWidth(left) + stringWidth(SEGMENT_SEPARATOR) + stringWidth(right);
+  const minimumWidth = stringWidth(left) + 1 + stringWidth(right);
   if (minimumWidth > width) return undefined;
   const flexibleSpace = width - minimumWidth;
-  return `${left}${" ".repeat(flexibleSpace)}${renderSeparator(style)}${right}`;
+  return `${left}${" ".repeat(flexibleSpace + 1)}${right}`;
 }
 
 function renderSeparator(style: OperatorConsoleStyle | undefined): string {

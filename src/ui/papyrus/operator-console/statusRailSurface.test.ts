@@ -80,10 +80,26 @@ describe("Papyrus operator console status rail surface", () => {
 
     const completeOutput = renderStatusRailSurface(complete, { width: 80 });
     expect(completeOutput).toContain("18.4k/262k · ◷ 01:12");
+    expect(completeOutput).toMatch(/◷ 01:12\s+31\.4k tok · \$0\.73$/u);
+    expect(completeOutput).not.toContain("◷ 01:12 · 31.4k tok");
     expect(completeOutput.endsWith("31.4k tok · $0.73")).toBe(true);
     expect(renderStatusRailSurface(complete, { width: 30 })).toContain("$0.73");
     expect(renderStatusRailSurface(partial, { width: 30 })).toContain("≥ $0.84");
     expect(renderStatusRailSurface(partial, { width: 16 })).toContain("≥ $0.84");
+  });
+
+  it("keeps session tokens but omits unavailable subscription cost", () => {
+    const output = renderStatusRailSurface(status({
+      sessionCost: {
+        totalTokens: 119_400,
+        usageComplete: true,
+        costComplete: false,
+      },
+    }), { width: 100 });
+
+    expect(output).toMatch(/◷ 01:12\s+119\.4k tok$/u);
+    expect(output).not.toContain("unavailable");
+    expect(output).not.toContain("· 119.4k tok");
   });
 
   it("uses workspace as the identity badge before context when YOLO is off", () => {
