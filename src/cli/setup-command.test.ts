@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { runCliCommand } from "./cli.js";
@@ -158,7 +158,10 @@ describe("cli setup command", () => {
 
       expect(result.handled).toBe(true);
       expect(result.exitCode).toBe(0);
-      expect(result.launchRequested).toBe(true);
+      expect(result.launchHandoff).toEqual({
+        workspaceRoot: await realpath(workspaceRoot),
+        locale: "en",
+      });
     } finally {
       if (previousOpenAiKey === undefined) {
         delete process.env.OPENAI_API_KEY;
@@ -179,7 +182,7 @@ describe("cli setup command", () => {
 
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(0);
-    expect(result.launchRequested).toBe(false);
+    expect(result.launchHandoff).toBeUndefined();
   });
 
   it("cancels reviewed setup without applying config changes or trust", async () => {
@@ -991,8 +994,9 @@ describe("cli setup command", () => {
   it("entrypoint setup launch handoff re-enters the fresh interactive launch path", async () => {
     const entrypointSource = await readFile(join(process.cwd(), "src", "index.ts"), "utf8");
 
-    expect(entrypointSource).toContain("setupCommand.launchRequested === true");
+    expect(entrypointSource).toContain("setupCommand.launchHandoff !== undefined");
     expect(entrypointSource).toContain("launchInteractiveSession({ workspaceRoot, homeDir, profileId })");
+    expect(entrypointSource).toContain("runInteractiveStartup({ workspaceRoot, homeDir, profileId })");
     expect(entrypointSource).toContain("argv = []");
     expect(entrypointSource).toContain("const nowTrusted = await trustStore.isTrusted(workspaceRoot)");
     expect(entrypointSource).toContain("const latestConfig = await loadRuntimeConfig({ workspaceRoot, homeDir, profileId })");

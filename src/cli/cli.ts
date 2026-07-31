@@ -41,7 +41,7 @@ import { canRunInteractive } from "../ui/terminal-capabilities.js";
 import { createOperatorConsoleStyle } from "../ui/papyrus/operator-console/index.js";
 import { createInteractivePrompt } from "./create-interactive-prompt.js";
 import { createSessionRenderer } from "./session-renderer.js";
-import { promptUiContextForLocale } from "../contracts/ui.js";
+import { promptUiContextForLocale, type UiLocale } from "../contracts/ui.js";
 import { runFirstRunSetup } from "../setup/onboarding-wizard/runner.js";
 import { runConfigEditorSetup } from "../setup/config-editor/runner.js";
 import {
@@ -202,7 +202,10 @@ export type CliCommandResult = {
   handled: boolean;
   exitCode: number;
   output: string;
-  launchRequested?: boolean;
+  launchHandoff?: {
+    readonly workspaceRoot: string;
+    readonly locale: UiLocale;
+  };
 };
 
 export type CliOptions = {
@@ -453,7 +456,14 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
         handled: true,
         exitCode: result.exitCode,
         output: setupConsole !== undefined && result.setupConsoleRenderedOutput === true ? "" : result.output,
-        launchRequested: result.launchRequested === true,
+        ...(result.launchRequested === true
+          ? {
+              launchHandoff: {
+                workspaceRoot: result.selections.workspaceRoot ?? options.workspaceRoot,
+                locale: result.selections.language === "ar" ? "ar" : "en",
+              },
+            }
+          : {}),
       };
     }
 

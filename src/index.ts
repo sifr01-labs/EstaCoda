@@ -17,6 +17,7 @@ import { WorkspaceApprovalController } from "./security/workspace-approval-contr
 import { WorkspaceTrustStore } from "./security/workspace-trust-store.js";
 import { resolveTokens } from "./theme/token-resolver.js";
 import { launchInteractiveSession } from "./cli/interactive-launcher.js";
+import { runInteractiveStartup } from "./cli/interactive-startup.js";
 import { getPackageVersion } from "./cli/version-command.js";
 import { renderPlain } from "./ui/renderers/plain-renderer.js";
 import type { UiLocale } from "./contracts/ui.js";
@@ -74,7 +75,6 @@ async function main(): Promise<void> {
 
   const profileId = parsedGlobalOptions.profileId ?? readActiveProfile({ homeDir })?.profileId ?? defaultProfileId();
   const trustStore = new WorkspaceTrustStore({ path: stateHome.trustJsonPath });
-  let workspaceTrusted = await trustStore.isTrusted(workspaceRoot);
   let setupLaunchHandoffCompleted = false;
 
   if (argv[0] === "setup") {
@@ -89,21 +89,23 @@ async function main(): Promise<void> {
       if (setupCommand.output.length > 0) {
         console.log(setupCommand.output);
       }
-      if (setupCommand.launchRequested === true && setupCommand.exitCode === 0) {
+      if (setupCommand.launchHandoff !== undefined && setupCommand.exitCode === 0) {
+        workspaceRoot = setupCommand.launchHandoff.workspaceRoot;
+        launchLocale = setupCommand.launchHandoff.locale;
         const launchResult = await launchInteractiveSession({ workspaceRoot, homeDir, profileId });
-        if (!launchResult.launched) {
-          if (launchResult.output.length > 0) {
-            console.log(launchResult.output);
-          }
-          process.exit(launchResult.exitCode);
+        if (launchResult.kind !== "launch") {
+          console.log(
+            launchResult.output.length > 0
+              ? launchResult.output
+              : resolveSetupCopy(launchLocale, "onboarding.workspace.trust.deferredFinal")
+          );
+          process.exit(1);
         }
-        if (launchResult.workspaceRoot !== undefined) {
-          workspaceRoot = launchResult.workspaceRoot;
-        }
+        workspaceRoot = launchResult.workspaceRoot;
         launchLocale = launchResult.locale;
-        workspaceTrusted = await trustStore.isTrusted(workspaceRoot);
+        const workspaceTrusted = await trustStore.isTrusted(workspaceRoot);
         if (!workspaceTrusted) {
-          console.log(resolveSetupCopy(launchLocale ?? "en", "onboarding.workspace.trust.deferredFinal"));
+          console.log(resolveSetupCopy(launchLocale, "onboarding.workspace.trust.deferredFinal"));
           process.exit(1);
         }
         setupLaunchHandoffCompleted = true;
@@ -151,23 +153,17 @@ async function main(): Promise<void> {
 
   // Bare launch: use interactive launcher for setup/session routing
   if (!setupLaunchHandoffCompleted && argv.length === 0 && canRunInteractive()) {
-    const launchResult = await launchInteractiveSession({ workspaceRoot, homeDir, profileId });
+    const launchResult = await runInteractiveStartup({ workspaceRoot, homeDir, profileId });
 
+    if (launchResult.output.length > 0) {
+      console.log(launchResult.output);
+    }
     if (!launchResult.launched) {
-      if (launchResult.output.length > 0) {
-        console.log(launchResult.output);
-      }
       process.exit(launchResult.exitCode);
     }
 
-    if (launchResult.workspaceRoot !== undefined) {
-      workspaceRoot = launchResult.workspaceRoot;
-    }
+    workspaceRoot = launchResult.workspaceRoot;
     launchLocale = launchResult.locale;
-
-    if (launchResult.onboardingTriggered) {
-      workspaceTrusted = await trustStore.isTrusted(workspaceRoot);
-    }
   }
 
   let config: LoadedRuntimeConfig;

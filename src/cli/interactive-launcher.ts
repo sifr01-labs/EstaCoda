@@ -3,7 +3,7 @@ import { createInteractivePrompt } from "./create-interactive-prompt.js";
 import type { Prompt } from "./prompt-contract.js";
 import { canRunInteractive } from "../ui/terminal-capabilities.js";
 import type { UiLocale } from "../contracts/ui.js";
-import { collectSetupRoute, type SetupRouteDecision } from "../setup/setup-router.js";
+import { collectSetupRoute } from "../setup/setup-router.js";
 
 export type LaunchOptions = {
   workspaceRoot: string;
@@ -18,22 +18,41 @@ export type LaunchOptions = {
   }) => Promise<LoadedRuntimeConfig>;
 };
 
-export type LaunchResult = {
-  launched: boolean;
-  onboardingTriggered: boolean;
-  output: string;
-  exitCode: number;
-  workspaceRoot?: string;
-  locale?: UiLocale;
-};
+export type LaunchResult =
+  | {
+      readonly kind: "launch";
+      readonly launched: true;
+      readonly output: string;
+      readonly exitCode: 0;
+      readonly workspaceRoot: string;
+      readonly locale: UiLocale;
+    }
+  | {
+      readonly kind: "run-setup";
+      readonly launched: false;
+      readonly setupMode: "onboarding" | "repair";
+      readonly output: string;
+      readonly exitCode: 0;
+      readonly workspaceRoot: string;
+      readonly locale: UiLocale;
+    }
+  | {
+      readonly kind: "exit";
+      readonly launched: false;
+      readonly output: string;
+      readonly exitCode: number;
+      readonly workspaceRoot: string;
+      readonly locale?: UiLocale;
+    };
 
 export async function launchInteractiveSession(options: LaunchOptions): Promise<LaunchResult> {
   if (!canRunInteractive()) {
     return {
+      kind: "exit",
       launched: false,
-      onboardingTriggered: false,
       output: "Interactive session requires a TTY. Use estacoda <prompt> for one-shot mode.",
-      exitCode: 1
+      exitCode: 1,
+      workspaceRoot: options.workspaceRoot,
     };
   }
 
@@ -53,69 +72,57 @@ export async function launchInteractiveSession(options: LaunchOptions): Promise<
     }
     if (!["y", "yes"].includes(answer.trim().toLowerCase())) {
       return {
+        kind: "exit",
         launched: false,
-        onboardingTriggered: false,
         output: "Launch skipped. Run `estacoda setup --interactive` to review or repair setup.",
         exitCode: 0,
+        workspaceRoot: options.workspaceRoot,
         locale: currentLocale
       };
     }
 
     return {
+      kind: "launch",
       launched: true,
-      onboardingTriggered: false,
       output: "",
       exitCode: 0,
+      workspaceRoot: options.workspaceRoot,
       locale: currentLocale
     };
   }
 
-  if (setupRoute.state.kind === "untrusted-workspace") {
+  if (setupRoute.kind === "first-run-onboarding") {
     return {
+      kind: "run-setup",
       launched: false,
-      onboardingTriggered: false,
-      output: "Workspace trust is required before launch. Run `estacoda setup --interactive` to review trust repair.",
-      exitCode: 1,
-      locale: currentLocale
-    };
-  }
-
-  if (!canLaunchWithoutSetup(setupRoute)) {
-    const prompt = options.prompt ?? createInteractivePrompt();
-    const answer = await prompt(`${setupRoute.summary}\nRun setup now? [Y/n]: `);
-    if (options.prompt === undefined) {
-      prompt.close?.();
-    }
-    if (answer.trim().length > 0 && !["y", "yes"].includes(answer.trim().toLowerCase())) {
-      return {
-        launched: false,
-        onboardingTriggered: false,
-        output: "Setup skipped. Run `estacoda init` to bootstrap state, then `estacoda` when you are ready.",
-        exitCode: 0,
-        locale: currentLocale
-      };
-    }
-
-    return {
-      launched: false,
-      onboardingTriggered: false,
-      output: "Setup is incomplete. Run `estacoda setup --interactive` to review, apply, verify, and then launch.",
+      setupMode: "onboarding",
+      output: "",
       exitCode: 0,
+      workspaceRoot: options.workspaceRoot,
+      locale: currentLocale
+    };
+  }
+
+  if (setupRoute.state.kind !== "configured-ready") {
+    return {
+      kind: "run-setup",
+      launched: false,
+      setupMode: "repair",
+      output: "",
+      exitCode: 0,
+      workspaceRoot: options.workspaceRoot,
       locale: currentLocale
     };
   }
 
   return {
+    kind: "launch",
     launched: true,
-    onboardingTriggered: false,
     output: "",
     exitCode: 0,
+    workspaceRoot: options.workspaceRoot,
     locale: currentLocale
   };
-}
-
-function canLaunchWithoutSetup(decision: SetupRouteDecision): boolean {
-  return decision.state.kind === "configured-ready";
 }
 
 async function loadLaunchLocale(options: LaunchOptions): Promise<UiLocale> {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { launchInteractiveSession } from "./interactive-launcher.js";
@@ -42,20 +42,18 @@ describe("launchInteractiveSession", () => {
     });
 
     const result = await launchInteractiveSession({ workspaceRoot: process.cwd() });
+    expect(result.kind).toBe("exit");
     expect(result.launched).toBe(false);
     expect(result.exitCode).toBe(1);
     expect(result.output).toContain("requires a TTY");
   });
 
-  it("keeps launch locale English before first-run language selection when setup is skipped", async () => {
+  it("routes first-run state directly to onboarding without consuming a prompt", async () => {
     Object.defineProperty(process.stdin, "isTTY", {
       value: true,
       configurable: true
     });
-    const prompt = Object.assign(
-      async () => "n",
-      { close: () => undefined }
-    ) as Prompt;
+    const prompt = confirmationPrompt("n");
 
     const result = await launchInteractiveSession({
       workspaceRoot: join(tempDir, "workspace"),
@@ -63,12 +61,14 @@ describe("launchInteractiveSession", () => {
       prompt
     });
 
-    expect(result.launched).toBe(false);
-    expect(result.onboardingTriggered).toBe(false);
+    expect(result.kind).toBe("run-setup");
+    if (result.kind !== "run-setup") throw new Error("Expected setup routing");
+    expect(result.setupMode).toBe("onboarding");
     expect(result.locale).toBe("en");
+    expect(prompt).not.toHaveBeenCalled();
   });
 
-  it("offers canonical setup command instead of running setup from bare launch", async () => {
+  it("routes a fresh home to onboarding without an intermediate setup confirmation", async () => {
     Object.defineProperty(process.stdin, "isTTY", {
       value: true,
       configurable: true
@@ -76,17 +76,20 @@ describe("launchInteractiveSession", () => {
     const workspaceRoot = join(tempDir, "workspace");
     await mkdir(workspaceRoot, { recursive: true });
 
+    const prompt = confirmationPrompt("y");
     const result = await launchInteractiveSession({
       workspaceRoot,
       homeDir: tempDir,
-      prompt: confirmationPrompt("y")
+      prompt
     });
 
-    expect(result.launched).toBe(false);
-    expect(result.onboardingTriggered).toBe(false);
+    expect(result.kind).toBe("run-setup");
+    if (result.kind !== "run-setup") throw new Error("Expected setup routing");
+    expect(result.setupMode).toBe("onboarding");
     expect(result.exitCode).toBe(0);
     expect(result.locale).toBe("en");
-    expect(result.output).toContain("estacoda setup --interactive");
+    expect(result.output).toBe("");
+    expect(prompt).not.toHaveBeenCalled();
   });
 
   it("uses the Papyrus-capable prompt factory for degraded launch confirmation", async () => {
@@ -105,11 +108,11 @@ describe("launchInteractiveSession", () => {
     });
 
     expect(interactivePromptMock.createInteractivePrompt).toHaveBeenCalledOnce();
-    expect(result.launched).toBe(false);
+    expect(result.kind).toBe("exit");
     expect(result.output).toContain("Launch skipped");
   });
 
-  it("uses the Papyrus-capable prompt factory for incomplete setup launch prompts", async () => {
+  it("does not create a launch prompt for incomplete setup", async () => {
     Object.defineProperty(process.stdin, "isTTY", {
       value: true,
       configurable: true
@@ -122,9 +125,11 @@ describe("launchInteractiveSession", () => {
       loadRuntimeConfig: async () => ({ ui: { language: "en" } }) as any
     });
 
-    expect(interactivePromptMock.createInteractivePrompt).toHaveBeenCalledOnce();
-    expect(result.launched).toBe(false);
-    expect(result.output).toContain("estacoda setup --interactive");
+    expect(interactivePromptMock.createInteractivePrompt).not.toHaveBeenCalled();
+    expect(result.kind).toBe("run-setup");
+    if (result.kind !== "run-setup") throw new Error("Expected setup routing");
+    expect(result.setupMode).toBe("onboarding");
+    expect(result.output).toBe("");
   });
 
   it("preserves injected launch prompts without creating a factory prompt", async () => {
@@ -143,30 +148,30 @@ describe("launchInteractiveSession", () => {
     });
 
     expect(interactivePromptMock.createInteractivePrompt).not.toHaveBeenCalled();
-    expect(result.launched).toBe(false);
+    expect(result.kind).toBe("exit");
     expect(result.output).toContain("Launch skipped");
   });
 
-  it("routes broken config to setup instead of throwing during launch locale loading", async () => {
+  it("routes broken config to repair instead of throwing during launch locale loading", async () => {
     Object.defineProperty(process.stdin, "isTTY", {
       value: true,
       configurable: true
     });
     const workspaceRoot = join(tempDir, "workspace");
-    await mkdir(join(tempDir, ".estacoda"), { recursive: true });
     await mkdir(workspaceRoot, { recursive: true });
-    await writeFile(join(tempDir, ".estacoda", "config.json"), "{not-json", "utf8");
 
     const result = await launchInteractiveSession({
       workspaceRoot,
       homeDir: tempDir,
-      prompt: confirmationPrompt("y")
+      collectSetupRoute: async () => setupRouteDecision("broken-config", "Config is broken."),
+      loadRuntimeConfig: async () => { throw new Error("broken config"); }
     });
 
-    expect(result.launched).toBe(false);
-    expect(result.onboardingTriggered).toBe(false);
+    expect(result.kind).toBe("run-setup");
+    if (result.kind !== "run-setup") throw new Error("Expected setup routing");
+    expect(result.setupMode).toBe("repair");
     expect(result.locale).toBe("en");
-    expect(result.output).toContain("estacoda setup --interactive");
+    expect(result.output).toBe("");
   });
 
   it("returns persisted Arabic locale on later normal launches", async () => {
@@ -196,8 +201,7 @@ describe("launchInteractiveSession", () => {
 
     const result = await launchInteractiveSession({ workspaceRoot, homeDir: tempDir, prompt: confirmationPrompt("y") });
 
-    expect(result.launched).toBe(true);
-    expect(result.onboardingTriggered).toBe(false);
+    expect(result.kind).toBe("launch");
     expect(result.locale).toBe("ar");
   });
 
@@ -235,11 +239,11 @@ describe("launchInteractiveSession", () => {
 
     expect(settings.exitCode).toBe(0);
     expect(settings.output).toContain("UI language: en.");
-    expect(result.launched).toBe(true);
+    expect(result.kind).toBe("launch");
     expect(result.locale).toBe("en");
   });
 
-  it("does not launch a configured provider in an untrusted workspace", async () => {
+  it("routes a configured provider in an untrusted workspace to repair", async () => {
     Object.defineProperty(process.stdin, "isTTY", {
       value: true,
       configurable: true
@@ -258,9 +262,9 @@ describe("launchInteractiveSession", () => {
 
     const result = await launchInteractiveSession({ workspaceRoot, homeDir: tempDir });
 
-    expect(result.launched).toBe(false);
-    expect(result.onboardingTriggered).toBe(false);
-    expect(result.output).toContain("Workspace trust is required");
+    expect(result.kind).toBe("run-setup");
+    if (result.kind !== "run-setup") throw new Error("Expected setup routing");
+    expect(result.setupMode).toBe("repair");
   });
 
   it("reloads config and trust state at launch time", async () => {
@@ -295,9 +299,8 @@ describe("launchInteractiveSession", () => {
       prompt: confirmationPrompt("y")
     });
 
-    expect(beforeTrust.launched).toBe(false);
-    expect(beforeTrust.output).toContain("Workspace trust is required");
-    expect(afterTrust.launched).toBe(true);
+    expect(beforeTrust.kind).toBe("run-setup");
+    expect(afterTrust.kind).toBe("launch");
     expect(afterTrust.exitCode).toBe(0);
     expect(afterTrust.locale).toBe("ar");
   });
@@ -311,14 +314,20 @@ async function trustWorkspace(workspaceRoot: string, homeDir: string): Promise<v
 
 function confirmationPrompt(answer: string): Prompt {
   return Object.assign(
-    async () => answer,
+    vi.fn(async () => answer),
     { close: () => undefined }
   ) as Prompt;
 }
 
 function setupRouteDecision(stateKind: string, summary: string): any {
   return {
-    kind: stateKind === "configured-degraded" ? "configured-degraded-menu" : "first-run-onboarding",
+    kind: stateKind === "new-user"
+      ? "first-run-onboarding"
+      : stateKind === "configured-degraded"
+        ? "configured-degraded-menu"
+        : stateKind === "configured-ready" || stateKind === "untrusted-workspace"
+          ? "configured-menu"
+          : "repair-first-menu",
     title: "Setup",
     summary,
     state: { kind: stateKind },
