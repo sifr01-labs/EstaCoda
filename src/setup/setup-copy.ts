@@ -444,6 +444,9 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupRoute.action.acceptLimitedMode", "Accept limited mode after reviewing warnings", "اقبل الوضع المحدود بعد مراجعة التحذيرات", [], "agent-launch"),
   copy("setupRoute.action.verifySetup", "Run read-only verification", "شغّل تحققًا للقراءة فقط", [], "setup-verification"),
   copy("setupRoute.action.exit", "Exit without changes", "اخرج دون تغييرات", [], "none"),
+  copy("interactiveLauncher.degraded.repair", "Repair setup", "أصلح الإعداد", [], "config-repair"),
+  copy("interactiveLauncher.degraded.repair.description", "Open the guided repair path now.", "افتح مسار الإصلاح الموجّه الآن.", [], "config-repair"),
+  copy("interactiveLauncher.stateNotWritable.next", "Run {doctorCommand} after restoring write access, then try estacoda again.", "شغّل {doctorCommand} بعد استعادة صلاحية الكتابة، ثم جرّب estacoda مرة أخرى.", ["{doctorCommand}"], "config-repair"),
 
   copy("setupStateSummary.title", "EstaCoda setup", "إعداد EstaCoda", [], "config-summary"),
   copy("setupStateSummary.advancedTitle", "EstaCoda advanced setup", "إعداد EstaCoda المتقدم", [], "config-summary"),

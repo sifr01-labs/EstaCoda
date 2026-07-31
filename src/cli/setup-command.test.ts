@@ -219,6 +219,22 @@ describe("cli setup command", () => {
     expect(result.stderr).not.toContain("Warning: Detected unsettled");
   });
 
+  it("rejects a bare non-TTY launch before creating an unconfigured runtime", async () => {
+    const result = await runEntrypoint({
+      argv: [],
+      cwd: process.cwd(),
+      homeDir: tempDir,
+      input: "",
+    });
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toContain("Interactive session requires a TTY");
+    expect(result.stdout).not.toContain("EstaCoda is ready");
+    expect(result.stdout).not.toContain("model: unconfigured/unconfigured");
+    expect(result.stderr).toBe("");
+    await expect(stat(join(tempDir, ".estacoda", "sessions.sqlite"))).rejects.toThrow();
+  });
+
   it("rejects the retired init command before runtime loading without creating state", async () => {
     const result = await runEntrypoint({
       argv: ["init"],
@@ -1011,16 +1027,14 @@ describe("cli setup command", () => {
     expect(launcherSource).not.toContain("runInteractiveOnboarding");
   });
 
-  it("entrypoint setup launch handoff re-enters the fresh interactive launch path", async () => {
+  it("entrypoint shares setup launch handoff orchestration with bare startup", async () => {
     const entrypointSource = await readFile(join(process.cwd(), "src", "index.ts"), "utf8");
 
-    expect(entrypointSource).toContain("setupCommand.launchHandoff !== undefined");
-    expect(entrypointSource).toContain("launchInteractiveSession({ workspaceRoot, homeDir, profileId })");
+    expect(entrypointSource).toContain("runSetupStartup({");
     expect(entrypointSource).toContain("runInteractiveStartup({ workspaceRoot, homeDir, profileId })");
     expect(entrypointSource).toContain("argv = []");
     expect(entrypointSource).toContain("const nowTrusted = await trustStore.isTrusted(workspaceRoot)");
     expect(entrypointSource).toContain("const latestConfig = await loadRuntimeConfig({ workspaceRoot, homeDir, profileId })");
-    expect(entrypointSource).toContain("onboarding.workspace.trust.deferredFinal");
     expect(entrypointSource).toContain("return createRuntime({");
   });
 });

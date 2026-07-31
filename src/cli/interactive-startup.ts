@@ -16,6 +16,11 @@ export type InteractiveStartupOptions = {
   readonly runSetup?: (options: CliOptions) => Promise<CliCommandResult>;
 };
 
+export type SetupStartupOptions = InteractiveStartupOptions & {
+  readonly setupArgv?: readonly string[];
+  readonly locale?: UiLocale;
+};
+
 export type InteractiveStartupResult = {
   readonly launched: boolean;
   readonly output: string;
@@ -33,9 +38,20 @@ export async function runInteractiveStartup(
     return startupResult(initialDecision);
   }
 
+  return runSetupStartup({
+    ...options,
+    setupArgv: ["setup", "--interactive"],
+    locale: initialDecision.locale,
+  });
+}
+
+export async function runSetupStartup(
+  options: SetupStartupOptions
+): Promise<InteractiveStartupResult> {
+  const launch = options.launch ?? launchInteractiveSession;
   const dispatchSetup = options.runSetup ?? runCliCommand;
   const setupResult = await dispatchSetup({
-    argv: ["setup", "--interactive"],
+    argv: [...(options.setupArgv ?? ["setup", "--interactive"])],
     workspaceRoot: options.workspaceRoot,
     homeDir: options.homeDir,
     profileId: options.profileId,
@@ -47,7 +63,7 @@ export async function runInteractiveStartup(
       output: joinOutput(setupResult.output, "Interactive setup was not handled."),
       exitCode: 1,
       workspaceRoot: options.workspaceRoot,
-      locale: initialDecision.locale,
+      locale: options.locale,
     };
   }
   if (setupResult.exitCode !== 0 || setupResult.launchHandoff === undefined) {
@@ -56,7 +72,7 @@ export async function runInteractiveStartup(
       output: setupResult.output,
       exitCode: setupResult.exitCode,
       workspaceRoot: options.workspaceRoot,
-      locale: initialDecision.locale,
+      locale: options.locale,
     };
   }
 

@@ -23,7 +23,7 @@ src/smoke/
 
 | Case | Tags | Source | Notes |
 |------|------|--------|-------|
-| `bare-launch` | `lifecycle`, `launch` | Focused smoke case | Verifies bare interactive launch returns an expected status in TTY and non-TTY environments. |
+| `bare-launch` | `lifecycle`, `launch` | Focused smoke case | Verifies a fresh bare interactive launch selects first-run onboarding. |
 | `bundled-skill-sync` | `skills`, `bundled`, `sync` | Focused smoke case | Tests syncBundledSkills, resetBundledSkill, and hashSkillDirectory. |
 | `corrupt-skill-usage` | `skills`, `evolution`, `resilience` | Focused smoke case | Tests SkillEvolutionStore corrupt-file recovery. |
 | `delegation-mvp` | `delegation`, `runtime` | Focused smoke case | Covers the delegation MVP path. |

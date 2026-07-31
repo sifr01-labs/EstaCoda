@@ -16,14 +16,12 @@ import { resolveEffectiveSessionModelOverride } from "./providers/model-switch-r
 import { WorkspaceApprovalController } from "./security/workspace-approval-controller.js";
 import { WorkspaceTrustStore } from "./security/workspace-trust-store.js";
 import { resolveTokens } from "./theme/token-resolver.js";
-import { launchInteractiveSession } from "./cli/interactive-launcher.js";
-import { runInteractiveStartup } from "./cli/interactive-startup.js";
+import { runInteractiveStartup, runSetupStartup } from "./cli/interactive-startup.js";
 import { getPackageVersion } from "./cli/version-command.js";
 import { renderPlain } from "./ui/renderers/plain-renderer.js";
 import type { UiLocale } from "./contracts/ui.js";
 import { createSQLiteSessionDB } from "./session/session-setup.js";
 import { scheduleStartupUpdatePrefetch, shouldScheduleStartupUpdatePrefetch } from "./lifecycle/startup-update.js";
-import { resolveSetupCopy } from "./setup/setup-copy.js";
 import { createSessionId, resolveStartupSessionId } from "./session/session-id.js";
 import { GatewayApprovalQueue } from "./gateway/approval-queue.js";
 import { ForegroundTaskHost } from "./tasks/foreground-task-host.js";
@@ -78,42 +76,24 @@ async function main(): Promise<void> {
   let setupLaunchHandoffCompleted = false;
 
   if (argv[0] === "setup") {
-    const setupCommand = await runCliCommand({
-      argv,
+    const setupResult = await runSetupStartup({
       workspaceRoot,
       homeDir,
-      profileId
+      profileId,
+      setupArgv: argv,
     });
 
-    if (setupCommand.handled) {
-      if (setupCommand.output.length > 0) {
-        console.log(setupCommand.output);
-      }
-      if (setupCommand.launchHandoff !== undefined && setupCommand.exitCode === 0) {
-        workspaceRoot = setupCommand.launchHandoff.workspaceRoot;
-        launchLocale = setupCommand.launchHandoff.locale;
-        const launchResult = await launchInteractiveSession({ workspaceRoot, homeDir, profileId });
-        if (launchResult.kind !== "launch") {
-          console.log(
-            launchResult.output.length > 0
-              ? launchResult.output
-              : resolveSetupCopy(launchLocale, "onboarding.workspace.trust.deferredFinal")
-          );
-          process.exit(1);
-        }
-        workspaceRoot = launchResult.workspaceRoot;
-        launchLocale = launchResult.locale;
-        const workspaceTrusted = await trustStore.isTrusted(workspaceRoot);
-        if (!workspaceTrusted) {
-          console.log(resolveSetupCopy(launchLocale, "onboarding.workspace.trust.deferredFinal"));
-          process.exit(1);
-        }
-        setupLaunchHandoffCompleted = true;
-        argv = [];
-      } else {
-        process.exit(setupCommand.exitCode);
-      }
+    if (setupResult.output.length > 0) {
+      console.log(setupResult.output);
     }
+    if (!setupResult.launched) {
+      process.exit(setupResult.exitCode);
+    }
+
+    workspaceRoot = setupResult.workspaceRoot;
+    launchLocale = setupResult.locale;
+    setupLaunchHandoffCompleted = true;
+    argv = [];
   }
 
   if (argv[0] === "help" || argv[0] === "--help" || argv[0] === "-h") {
@@ -152,7 +132,7 @@ async function main(): Promise<void> {
   }
 
   // Bare launch: use interactive launcher for setup/session routing
-  if (!setupLaunchHandoffCompleted && argv.length === 0 && canRunInteractive()) {
+  if (!setupLaunchHandoffCompleted && argv.length === 0) {
     const launchResult = await runInteractiveStartup({ workspaceRoot, homeDir, profileId });
 
     if (launchResult.output.length > 0) {

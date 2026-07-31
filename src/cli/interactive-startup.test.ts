@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { runInteractiveStartup } from "./interactive-startup.js";
+import { runInteractiveStartup, runSetupStartup } from "./interactive-startup.js";
 import type { LaunchOptions, LaunchResult } from "./interactive-launcher.js";
 import type { CliOptions } from "./cli.js";
 
@@ -113,6 +113,36 @@ describe("runInteractiveStartup", () => {
     const result = await runInteractiveStartup({ workspaceRoot: "/workspace", launch, runSetup });
 
     expect(runSetup).not.toHaveBeenCalled();
+    expect(result.launched).toBe(true);
+  });
+
+  it("uses the same setup orchestration for an explicit setup command", async () => {
+    const launch = vi.fn<(options: LaunchOptions) => Promise<LaunchResult>>()
+      .mockResolvedValue(launchDecision("/workspace/selected", "en"));
+    const runSetup = vi.fn(async (_options: CliOptions) => ({
+      handled: true,
+      exitCode: 0,
+      output: "Setup verified.",
+      launchHandoff: {
+        workspaceRoot: "/workspace/selected",
+        locale: "en" as const,
+      },
+    }));
+
+    const result = await runSetupStartup({
+      workspaceRoot: "/workspace/initial",
+      setupArgv: ["setup", "--interactive", "--advanced"],
+      launch,
+      runSetup,
+    });
+
+    expect(runSetup).toHaveBeenCalledWith(expect.objectContaining({
+      argv: ["setup", "--interactive", "--advanced"],
+      workspaceRoot: "/workspace/initial",
+    }));
+    expect(launch).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceRoot: "/workspace/selected",
+    }));
     expect(result.launched).toBe(true);
   });
 });

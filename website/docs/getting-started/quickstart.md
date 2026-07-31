@@ -24,7 +24,7 @@ Pick the row that matches your goal:
 
 | Goal | Start here | Then |
 |---|---|---|
-| I want EstaCoda working locally | Install, then run `estacoda setup` | Accept the launch prompt or run `estacoda` |
+| I want EstaCoda working locally | Install, then run `estacoda` | Complete onboarding and accept the launch prompt |
 | I already installed it | `estacoda verify` | Check `estacoda model status` |
 | I ran `estacoda` and setup appears | Continue the setup prompt | Use `estacoda setup` if you exit early |
 | I want Telegram or WhatsApp | Get one local CLI session working first | Configure channels after verification |

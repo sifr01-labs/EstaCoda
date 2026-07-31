@@ -92,12 +92,12 @@ describe("launchInteractiveSession", () => {
     expect(prompt).not.toHaveBeenCalled();
   });
 
-  it("uses the Papyrus-capable prompt factory for degraded launch confirmation", async () => {
+  it("offers degraded users limited launch, repair, and exit through the shared selector", async () => {
     Object.defineProperty(process.stdin, "isTTY", {
       value: true,
       configurable: true
     });
-    const prompt = confirmationPrompt("n");
+    const prompt = selectionPrompt("repair");
     interactivePromptMock.createInteractivePrompt.mockReturnValue(prompt);
 
     const result = await launchInteractiveSession({
@@ -108,8 +108,16 @@ describe("launchInteractiveSession", () => {
     });
 
     expect(interactivePromptMock.createInteractivePrompt).toHaveBeenCalledOnce();
-    expect(result.kind).toBe("exit");
-    expect(result.output).toContain("Launch skipped");
+    expect(result.kind).toBe("run-setup");
+    if (result.kind !== "run-setup") throw new Error("Expected repair routing");
+    expect(result.setupMode).toBe("repair");
+    expect(prompt.select).toHaveBeenCalledWith(expect.objectContaining({
+      options: [
+        expect.objectContaining({ id: "continue-limited", value: "limited" }),
+        expect.objectContaining({ id: "repair-setup", value: "repair" }),
+        expect.objectContaining({ id: "exit", value: "exit" }),
+      ],
+    }));
   });
 
   it("does not create a launch prompt for incomplete setup", async () => {
@@ -132,12 +140,12 @@ describe("launchInteractiveSession", () => {
     expect(result.output).toBe("");
   });
 
-  it("preserves injected launch prompts without creating a factory prompt", async () => {
+  it("launches configured-degraded setup only after explicit limited-mode acceptance", async () => {
     Object.defineProperty(process.stdin, "isTTY", {
       value: true,
       configurable: true
     });
-    const prompt = confirmationPrompt("n");
+    const prompt = selectionPrompt("limited");
 
     const result = await launchInteractiveSession({
       workspaceRoot: join(tempDir, "workspace"),
@@ -148,8 +156,27 @@ describe("launchInteractiveSession", () => {
     });
 
     expect(interactivePromptMock.createInteractivePrompt).not.toHaveBeenCalled();
+    expect(result.kind).toBe("launch");
+  });
+
+  it("lets configured-degraded users exit without launching or opening repair", async () => {
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      configurable: true
+    });
+    const prompt = selectionPrompt("exit");
+
+    const result = await launchInteractiveSession({
+      workspaceRoot: join(tempDir, "workspace"),
+      homeDir: tempDir,
+      prompt,
+      collectSetupRoute: async () => setupRouteDecision("configured-degraded", "Setup has warnings."),
+      loadRuntimeConfig: async () => ({ ui: { language: "en" } }) as any
+    });
+
     expect(result.kind).toBe("exit");
-    expect(result.output).toContain("Launch skipped");
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toBe("Leave setup without launching.");
   });
 
   it("routes broken config to repair instead of throwing during launch locale loading", async () => {
@@ -172,6 +199,31 @@ describe("launchInteractiveSession", () => {
     expect(result.setupMode).toBe("repair");
     expect(result.locale).toBe("en");
     expect(result.output).toBe("");
+  });
+
+  it("returns state diagnostics with a nonzero exit when state is not writable", async () => {
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      configurable: true
+    });
+
+    const result = await launchInteractiveSession({
+      workspaceRoot: join(tempDir, "workspace"),
+      homeDir: tempDir,
+      collectSetupRoute: async () => ({
+        ...setupRouteDecision("state-not-writable", "State cannot be written."),
+        blockers: ["State path is read-only."],
+      }),
+      loadRuntimeConfig: async () => ({ ui: { language: "en" } }) as any
+    });
+
+    expect(result.kind).toBe("exit");
+    expect(result.launched).toBe(false);
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain("State directory is not writable.");
+    expect(result.output).toContain("State path is read-only.");
+    expect(result.output).toContain("estacoda doctor");
+    expect(interactivePromptMock.createInteractivePrompt).not.toHaveBeenCalled();
   });
 
   it("returns persisted Arabic locale on later normal launches", async () => {
@@ -199,10 +251,18 @@ describe("launchInteractiveSession", () => {
     });
     await trustWorkspace(workspaceRoot, tempDir);
 
-    const result = await launchInteractiveSession({ workspaceRoot, homeDir: tempDir, prompt: confirmationPrompt("y") });
+    const prompt = selectionPrompt("limited");
+    const result = await launchInteractiveSession({ workspaceRoot, homeDir: tempDir, prompt });
 
     expect(result.kind).toBe("launch");
     expect(result.locale).toBe("ar");
+    expect(prompt.select).toHaveBeenCalledWith(expect.objectContaining({
+      title: expect.stringMatching(/تم إعداد.*تحذيرات/u),
+      body: expect.stringContaining("الإعداد قابل للاستخدام مع تحذيرات"),
+      options: expect.arrayContaining([
+        expect.objectContaining({ id: "repair-setup", label: "أصلح الإعداد" }),
+      ]),
+    }));
   });
 
   it("returns English on later launches after the user explicitly changes UI language back", async () => {
@@ -235,7 +295,7 @@ describe("launchInteractiveSession", () => {
       workspaceRoot,
       homeDir: tempDir
     });
-    const result = await launchInteractiveSession({ workspaceRoot, homeDir: tempDir, prompt: confirmationPrompt("y") });
+    const result = await launchInteractiveSession({ workspaceRoot, homeDir: tempDir, prompt: selectionPrompt("limited") });
 
     expect(settings.exitCode).toBe(0);
     expect(settings.output).toContain("UI language: en.");
@@ -296,7 +356,7 @@ describe("launchInteractiveSession", () => {
     const afterTrust = await launchInteractiveSession({
       workspaceRoot,
       homeDir: tempDir,
-      prompt: confirmationPrompt("y")
+      prompt: selectionPrompt("limited")
     });
 
     expect(beforeTrust.kind).toBe("run-setup");
@@ -317,6 +377,12 @@ function confirmationPrompt(answer: string): Prompt {
     vi.fn(async () => answer),
     { close: () => undefined }
   ) as Prompt;
+}
+
+function selectionPrompt(answer: "limited" | "repair" | "exit"): Prompt {
+  const prompt = confirmationPrompt("");
+  prompt.select = vi.fn(async () => answer) as Prompt["select"];
+  return prompt;
 }
 
 function setupRouteDecision(stateKind: string, summary: string): any {
