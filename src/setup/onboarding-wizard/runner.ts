@@ -4,6 +4,7 @@ import {
 } from "../../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
 import { ensureDefaultProfileState } from "../../cli/profile-state.js";
+import { ensureGlobalStateDirectories } from "../../storage/state-bootstrap.js";
 import type { Prompt } from "../../cli/prompt-contract.js";
 import { withPromptUiContext } from "../../cli/prompt-contract.js";
 import type { PromptCardStatusLine } from "../../contracts/view-model.js";
@@ -219,7 +220,8 @@ export async function runFirstRunSetup(
   options: FirstRunSetupRunnerOptions
 ): Promise<FirstRunSetupRunnerResult> {
   const state = await collectSetupEntryState(options);
-  await ensureDefaultProfileState({ homeDir: options.homeDir, profileId: options.profileId ?? defaultProfileId() });
+  const globalState = await ensureGlobalStateDirectories({ homeDir: options.homeDir });
+  await ensureDefaultProfileState({ homeDir: globalState.homeDir, profileId: options.profileId ?? defaultProfileId() });
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
   const flowEngine = options.flowEngine ?? await createDefaultFlowEngine(options);
   const initialLocale = options.defaultSelections?.language ?? "en";

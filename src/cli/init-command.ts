@@ -1,7 +1,9 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { defaultProfileId, readActiveProfile } from "../config/profile-home.js";
 import { resolveStateHome } from "../config/state-home.js";
+import {
+  ensureGlobalStateBootstrap,
+  GLOBAL_STATE_DIRECTORIES
+} from "../storage/state-bootstrap.js";
 import { ensureDefaultProfileState } from "./profile-state.js";
 
 export type InitOptions = {
@@ -15,36 +17,8 @@ export type InitResult = {
   exitCode: number;
 };
 
-export const DEFAULT_STATE_DIRS = [
-  "memory/shared",
-  "packs",
-  ".backups"
-];
-
-export async function bootstrapStateDirectories(homeDir: string): Promise<void> {
-  const root = join(homeDir, ".estacoda");
-  for (const dir of DEFAULT_STATE_DIRS) {
-    await mkdir(join(root, dir), { recursive: true });
-  }
-}
-
-function isFileAlreadyExistsError(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "EEXIST";
-}
-
-async function writeFileIfAbsent(path: string, contents: string): Promise<void> {
-  try {
-    await writeFile(path, contents, { encoding: "utf8", flag: "wx" });
-  } catch (error) {
-    if (!isFileAlreadyExistsError(error)) {
-      throw error;
-    }
-  }
-}
-
 export async function runInitCommand(options: InitOptions): Promise<InitResult> {
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
-  const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
   const homeDir = stateHome.homeDir;
   if (homeDir.length === 0) {
     return {
@@ -53,14 +27,13 @@ export async function runInitCommand(options: InitOptions): Promise<InitResult> 
       exitCode: 1
     };
   }
+  const profileId = readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
 
   const root = stateHome.stateRoot;
 
   try {
-    await bootstrapStateDirectories(homeDir);
-
-    await ensureDefaultProfileState({ homeDir: options.homeDir, profileId });
-    await writeFileIfAbsent(stateHome.trustJsonPath, "{}\n");
+    await ensureGlobalStateBootstrap({ homeDir });
+    await ensureDefaultProfileState({ homeDir, profileId });
 
     return {
       ok: true,
@@ -68,7 +41,7 @@ export async function runInitCommand(options: InitOptions): Promise<InitResult> 
         "EstaCoda state initialized.",
         `Home: ${root}`,
         "Created:",
-        ...DEFAULT_STATE_DIRS.map((d) => `  ${d}/`),
+        ...GLOBAL_STATE_DIRECTORIES.map((d) => `  ${d}/`),
         "  config.json",
         "  .env",
         "  auth.json",

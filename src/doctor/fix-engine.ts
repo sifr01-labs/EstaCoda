@@ -1,12 +1,15 @@
 import { chmod, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { bootstrapStateDirectories, DEFAULT_STATE_DIRS } from "../cli/init-command.js";
 import {
   ensureDefaultProfileState,
   ensureProfileSkeleton
 } from "../cli/profile-state.js";
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import { resolveHomeDir } from "../config/home-dir.js";
+import {
+  ensureGlobalStateDirectories,
+  GLOBAL_STATE_DIRECTORIES
+} from "../storage/state-bootstrap.js";
 import type { DoctorLocale } from "./types.js";
 
 export type DoctorFixOperationKind = "create-directory" | "create-file" | "chmod-private-file";
@@ -60,7 +63,7 @@ export async function runDoctorFix(options: {
   const profileId = options.profileId ?? activeProfile.profileId;
   const plan = await planDoctorFix({ homeDir: options.homeDir, profileId });
 
-  await bootstrapStateDirectories(homeDir);
+  await ensureGlobalStateDirectories({ homeDir });
   if (activeProfile.valid) {
     await ensureDefaultProfileState({ homeDir: options.homeDir, profileId });
   } else {
@@ -99,7 +102,7 @@ export async function planDoctorFix(options: {
   const globalPaths = resolveGlobalStateHome({ homeDir: options.homeDir });
   const operations: DoctorFixOperation[] = [];
 
-  for (const dir of DEFAULT_STATE_DIRS) {
+  for (const dir of GLOBAL_STATE_DIRECTORIES) {
     const path = join(globalPaths.stateRoot, dir);
     if (!await isDirectory(path)) {
       operations.push({ id: `create-dir:${path}`, kind: "create-directory", path });

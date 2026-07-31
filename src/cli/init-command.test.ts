@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runInitCommand, bootstrapStateDirectories } from "./init-command.js";
+import { runInitCommand } from "./init-command.js";
+import { ensureGlobalStateBootstrap } from "../storage/state-bootstrap.js";
 
 function defaultProfileConfigPath(homeDir: string): string {
   return join(homeDir, ".estacoda", "profiles", "default", "config.json");
@@ -16,7 +17,7 @@ function defaultProfilePath(homeDir: string, path: string): string {
   return join(homeDir, ".estacoda", "profiles", "default", path);
 }
 
-describe("bootstrapStateDirectories", () => {
+describe("ensureGlobalStateBootstrap", () => {
   let tempHome: string;
 
   beforeEach(() => {
@@ -28,7 +29,7 @@ describe("bootstrapStateDirectories", () => {
   });
 
   it("creates all expected directories", async () => {
-    await bootstrapStateDirectories(tempHome);
+    await ensureGlobalStateBootstrap({ homeDir: tempHome });
     expect(existsSync(join(tempHome, ".estacoda", "memory", "shared"))).toBe(true);
     expect(existsSync(join(tempHome, ".estacoda", "packs"))).toBe(true);
     expect(existsSync(join(tempHome, ".estacoda", ".backups"))).toBe(true);

@@ -127,6 +127,7 @@ describe("cli setup command", () => {
     const trusted = await new WorkspaceTrustStore({
       path: join(tempDir, ".estacoda", "trust.json"),
     }).isTrusted(workspaceRoot);
+    const globalPaths = resolveGlobalStateHome({ homeDir: tempDir });
 
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(0);
@@ -134,6 +135,9 @@ describe("cli setup command", () => {
     expect(config.providers?.local?.apiKeyEnv).toBeUndefined();
     expect(trusted).toBe(true);
     expect(result.output).not.toContain("Dry-run apply plan");
+    expect((await stat(globalPaths.sharedMemoryPath)).isDirectory()).toBe(true);
+    expect((await stat(globalPaths.packsPath)).isDirectory()).toBe(true);
+    expect((await stat(join(globalPaths.stateRoot, ".backups"))).isDirectory()).toBe(true);
   });
 
   it("returns a launch request after first-run setup when requested", async () => {
