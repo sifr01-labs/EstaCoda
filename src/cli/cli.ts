@@ -172,7 +172,6 @@ import {
 } from "./voice-mode.js";
 
 import { runVersionCommand } from "./version-command.js";
-import { runInitCommand } from "./init-command.js";
 import { runUpdateCommand } from "./update-command.js";
 import { runUninstallCommand } from "./uninstall-command.js";
 import { isBackupReady } from "../lifecycle/state-preservation.js";
@@ -358,7 +357,7 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
     case "channels":
       return channels(options, args);
     case "init":
-      return init(options, args);
+      return retiredInit();
     case "update":
       return update(options, args);
     case "uninstall":
@@ -380,6 +379,17 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
         output: ""
       };
   }
+}
+
+function retiredInit(): CliCommandResult {
+  return {
+    handled: true,
+    exitCode: 1,
+    output: [
+      "`estacoda init` has been removed; state is prepared automatically.",
+      "Run `estacoda` to start onboarding, or `estacoda doctor --fix` to repair missing local state."
+    ].join("\n")
+  };
 }
 
 async function setup(options: CliOptions, args: string[]): Promise<CliCommandResult> {
@@ -596,20 +606,6 @@ async function verify(options: CliOptions): Promise<CliCommandResult> {
     handled: true,
     exitCode: ok ? 0 : 1,
     output
-  };
-}
-
-async function init(options: CliOptions, args: string[]): Promise<CliCommandResult> {
-  const homeFlag = valueAfter(args, "--home");
-  const result = await runInitCommand({
-    homeDir: homeFlag ?? options.homeDir,
-    yes: hasFlag(args, "--yes", "-y")
-  });
-
-  return {
-    handled: true,
-    exitCode: result.exitCode,
-    output: result.output
   };
 }
 

@@ -370,14 +370,6 @@ function registerAll(): void {
     scope: "cli",
   });
   commandRegistry.register({
-    name: "init",
-    aliases: [],
-    category: "Setup",
-    description: "Bootstrap state directories and default config",
-    visibility: "public",
-    scope: "cli",
-  });
-  commandRegistry.register({
     name: "update",
     aliases: [],
     category: "System",

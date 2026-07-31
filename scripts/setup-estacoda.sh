@@ -2,7 +2,6 @@
 set -euo pipefail
 
 INSTALLER_VERSION="v0.1.0-prerelease"
-SKIP_INIT=0
 
 usage() {
   cat <<'USAGE'
@@ -11,10 +10,9 @@ EstaCoda manual source setup
 Usage:
   git clone https://github.com/sifr01-labs/EstaCoda.git
   cd EstaCoda
-  ./scripts/setup-estacoda.sh [--skip-init]
+  ./scripts/setup-estacoda.sh
 
 Options:
-  --skip-init  Do not run `estacoda init` after building
   -h, --help   Show this help without changing files
 USAGE
 }
@@ -30,10 +28,6 @@ command_exists() {
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --skip-init)
-      SKIP_INIT=1
-      shift
-      ;;
     -h|--help)
       usage
       exit 0
@@ -206,15 +200,6 @@ writeFileSync(stampPath, `${JSON.stringify(stamp, null, 2)}\n`);
 NODE
 }
 
-run_init() {
-  if [ "$SKIP_INIT" -eq 1 ]; then
-    echo "Skipping estacoda init because --skip-init was provided."
-    return 0
-  fi
-  echo "Initializing EstaCoda state"
-  HOME="${HOME:-}" "$BIN_DIR/estacoda" init
-}
-
 echo "EstaCoda manual source setup"
 detect_platform
 validate_node
@@ -230,7 +215,6 @@ echo "Bin dir: $BIN_DIR"
 build_source
 write_stamp
 write_wrapper
-run_init
 
 echo ""
 echo "EstaCoda source checkout is set up."
@@ -239,9 +223,7 @@ echo ""
 echo "Next steps:"
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
   echo "  1. Add to PATH: export PATH=\"$BIN_DIR:\$PATH\""
-  echo "  2. Run: estacoda setup"
-  echo "  3. Run: estacoda"
-else
-  echo "  1. Run: estacoda setup"
   echo "  2. Run: estacoda"
+else
+  echo "  1. Run: estacoda"
 fi

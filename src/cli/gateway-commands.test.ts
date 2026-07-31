@@ -1415,7 +1415,7 @@ describe("gateway commands", () => {
       expect(result.output).toContain("Mode: cron-only");
       expect(result.output).toContain("Adapter identities: none");
       expect(result.output).toContain("State dirs: not initialized");
-      expect(result.output).toContain("run estacoda init");
+      expect(result.output).toContain("run estacoda doctor --fix");
       expect(result.output).toContain("Gateway lock: no active owner detected");
     });
 
@@ -1428,7 +1428,7 @@ describe("gateway commands", () => {
       expect(result.output).toContain("Adapters: none");
       expect(result.output).toContain("Mode: cron-only");
       expect(result.output).toContain("State dirs: ready");
-      expect(result.output).not.toContain("run estacoda init");
+      expect(result.output).not.toContain("run estacoda doctor --fix");
     });
 
     it("passes when an enabled adapter has locally derivable identity", async () => {

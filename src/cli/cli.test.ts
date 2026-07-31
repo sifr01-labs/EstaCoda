@@ -58,6 +58,25 @@ vi.mock("./update-command.js", () => ({
   runUpdateCommand: updateCommandMock.runUpdateCommand,
 }));
 
+describe("retired init command", () => {
+  it("returns migration guidance without recreating the removed bootstrap surface", async () => {
+    const result = await runCliCommand({
+      argv: ["init"],
+      workspaceRoot: "/tmp/workspace",
+      homeDir: "/tmp/home",
+    });
+
+    expect(result).toEqual({
+      handled: true,
+      exitCode: 1,
+      output: [
+        "`estacoda init` has been removed; state is prepared automatically.",
+        "Run `estacoda` to start onboarding, or `estacoda doctor --fix` to repair missing local state."
+      ].join("\n"),
+    });
+  });
+});
+
 describe("runCliCommand update dispatch", () => {
   beforeEach(() => {
     updateCommandMock.runUpdateCommand.mockReset();

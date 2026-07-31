@@ -71,7 +71,7 @@ Current smoke cases include:
 
 - bare launch
 - provider setup endpoint-first flow
-- init lifecycle
+- first-run state bootstrap
 - update dry run
 - pack lifecycle
 - bundled skill sync

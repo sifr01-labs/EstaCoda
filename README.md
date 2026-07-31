@@ -85,12 +85,10 @@ For the full setup flow, see the [Quickstart](https://www.estacoda.com/docs/gett
 ## First Run
 
 ```bash
-estacoda init    # create the default profile and state directories
-estacoda setup   # configure provider, model, security mode, and optional channels
-estacoda         # start an interactive session
+estacoda         # start onboarding; launch an interactive session when setup is ready
 ```
 
-`estacoda setup` walks through provider selection, endpoint or credential setup where needed, security mode, and optional capabilities. It shows the proposed configuration before anything is written.
+On a fresh install, `estacoda` opens the Onboarding Wizard directly. It walks through provider selection, endpoint or credential setup where needed, security mode, and optional capabilities, then shows the proposed configuration before anything is written. Later runs launch the interactive session; use `estacoda setup` to review, edit, or repair configuration.
 
 ---
 
@@ -98,8 +96,7 @@ estacoda         # start an interactive session
 
 ```bash
 estacoda                       # start a terminal session
-estacoda init                  # initialize profile and state directories
-estacoda setup                 # run the interactive setup wizard
+estacoda setup                 # review, edit, or repair setup
 estacoda update                # update using the current install method
 estacoda update --check        # check for updates without modifying files
 estacoda uninstall             # remove install code and wrappers; keep user data
@@ -259,8 +256,6 @@ The setup script installs dependencies, builds the project, and offers to symlin
 After setup:
 
 ```bash
-estacoda init
-estacoda setup
 estacoda
 ```
 

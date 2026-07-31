@@ -1,6 +1,6 @@
 import { corrupt_skill_usage_case } from "./corrupt-skill-usage.js";
 import { bundled_skill_sync_case } from "./bundled-skill-sync.js";
-import { init_lifecycle_case } from "./init-lifecycle.js";
+import { state_bootstrap_case } from "./state-bootstrap.js";
 import { update_dry_run_case } from "./update-dry-run.js";
 import { bare_launch_case } from "./bare-launch.js";
 import { pack_lifecycle_case } from "./pack-lifecycle.js";
@@ -14,7 +14,7 @@ import { provider_setup_endpoint_first_case } from "./provider-setup-endpoint-fi
 export const allSmokeCases = [
   corrupt_skill_usage_case,
   bundled_skill_sync_case,
-  init_lifecycle_case,
+  state_bootstrap_case,
   update_dry_run_case,
   bare_launch_case,
   pack_lifecycle_case,

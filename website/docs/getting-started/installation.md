@@ -50,10 +50,10 @@ The canonical quickstart command:
 curl -fsSL https://www.estacoda.com/install.sh | bash
 ```
 
-With flags:
+With a custom install directory:
 
 ```bash
-curl -fsSL https://www.estacoda.com/install.sh | bash -s -- --dir <path> --skip-init
+curl -fsSL https://www.estacoda.com/install.sh | bash -s -- --dir <path>
 ```
 
 This creates a **managed-source** install. The installer:
@@ -64,7 +64,8 @@ This creates a **managed-source** install. The installer:
 4. Builds `dist/` with `pnpm install --frozen-lockfile && pnpm run build`
 5. Writes a bash wrapper to `~/.local/bin/estacoda`
 6. Stamps `.install-method.json` with `method: managed-source`
-7. Runs `estacoda init` unless `--skip-init` is provided
+
+The installer does not create profile or trust state. Run `estacoda` after installation to enter first-run onboarding.
 
 If the directory already contains a managed-source install with a matching stamp, the installer updates it with `git fetch`, `git checkout`, and `git pull --ff-only` instead of re-cloning.
 
@@ -90,7 +91,8 @@ This creates a **manual-source** install. The setup script:
 2. Builds `dist/`
 3. Writes a bash wrapper to `~/.local/bin/estacoda`
 4. Stamps `.install-method.json` with `method: manual-source`
-5. Runs `estacoda init` unless `--skip-init` is provided
+
+The setup script does not create profile or trust state. Run `estacoda` after setup to enter first-run onboarding.
 
 Manual-source installs are treated as contributor checkouts. `estacoda update` checks and advises but does not self-mutate.
 
@@ -142,11 +144,10 @@ Flags for `scripts/install.sh` (passed via `bash -s --` when using curl):
 |---|---|
 | `--branch <branch>` | Clone or update from this branch (default: `main`) |
 | `--dir <path>` | Custom managed source directory |
-| `--skip-init` | Do not run `estacoda init` after building |
 | `--fhs` | Use Linux FHS paths: `/usr/local/lib/estacoda` and `/usr/local/bin/estacoda` |
 | `-h, --help` | Show help without changing files |
 
-The setup script (`scripts/setup-estacoda.sh`) supports `--skip-init` and `--help` only.
+The setup script (`scripts/setup-estacoda.sh`) supports `--help`.
 
 ## Validation
 

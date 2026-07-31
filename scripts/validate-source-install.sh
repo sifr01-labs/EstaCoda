@@ -76,11 +76,11 @@ mkdir -p "$MANAGED_HOME"
 PATH="$PNPM_SHIM_DIR:$PATH" HOME="$MANAGED_HOME" bash "$ROOT/scripts/install.sh" --help >/dev/null
 ESTACODA_SOURCE_URL="$ROOT" PATH="$PNPM_SHIM_DIR:$PATH" HOME="$MANAGED_HOME" bash "$ROOT/scripts/install.sh" \
   --dir "$MANAGED_INSTALL" \
-  --branch "$CURRENT_BRANCH" \
-  --skip-init
+  --branch "$CURRENT_BRANCH"
 
 test -f "$MANAGED_INSTALL/.install-method.json"
 assert_stamp_method "$MANAGED_INSTALL/.install-method.json" "managed-source"
+test ! -e "$MANAGED_HOME/.estacoda"
 PATH="$PNPM_SHIM_DIR:$PATH" HOME="$MANAGED_HOME" "$MANAGED_HOME/.local/bin/estacoda" --version
 PATH="$PNPM_SHIM_DIR:$PATH" HOME="$MANAGED_HOME" "$MANAGED_HOME/.local/bin/estacoda" --help >/dev/null
 
@@ -93,9 +93,10 @@ git clone --branch "$CURRENT_BRANCH" "$ROOT" "$MANUAL_REPO"
 (
   cd "$MANUAL_REPO"
   PATH="$PNPM_SHIM_DIR:$PATH" HOME="$MANUAL_HOME" bash scripts/setup-estacoda.sh --help >/dev/null
-  PATH="$PNPM_SHIM_DIR:$PATH" HOME="$MANUAL_HOME" bash scripts/setup-estacoda.sh --skip-init
+  PATH="$PNPM_SHIM_DIR:$PATH" HOME="$MANUAL_HOME" bash scripts/setup-estacoda.sh
   test -f .install-method.json
   assert_stamp_method "$MANUAL_REPO/.install-method.json" "manual-source"
+  test ! -e "$MANUAL_HOME/.estacoda"
   PATH="$PNPM_SHIM_DIR:$PATH" HOME="$MANUAL_HOME" "$MANUAL_HOME/.local/bin/estacoda" --version
   PATH="$PNPM_SHIM_DIR:$PATH" HOME="$MANUAL_HOME" "$MANUAL_HOME/.local/bin/estacoda" --help >/dev/null
 )

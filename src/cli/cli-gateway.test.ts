@@ -202,7 +202,7 @@ describe("cli gateway start", () => {
       });
 
       expect(result.exitCode).toBe(1);
-      expect(result.output).toContain("run estacoda init");
+      expect(result.output).toContain("run estacoda doctor --fix");
       expect(supervisorSpy).not.toHaveBeenCalled();
     } finally {
       await rm(tmpDir, { recursive: true, force: true });

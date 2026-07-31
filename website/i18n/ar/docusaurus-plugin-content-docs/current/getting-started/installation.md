@@ -50,10 +50,10 @@ EstaCoda هو نظام وكيل أمر سطري يملك تصليحاً صريح
 curl -fsSL https://www.estacoda.com/install.sh | bash
 ```
 
-مع الخيارات:
+مع مجلد تثبيت مخصص:
 
 ```bash
-curl -fsSL https://www.estacoda.com/install.sh | bash -s -- --dir <path> --skip-init
+curl -fsSL https://www.estacoda.com/install.sh | bash -s -- --dir <path>
 ```
 
 ينشئ هذا تثبيتًا من نوع **managed-source**. المثبت:
@@ -64,7 +64,8 @@ curl -fsSL https://www.estacoda.com/install.sh | bash -s -- --dir <path> --skip-
 4. يبني `dist/` عبر `pnpm install --frozen-lockfile && pnpm run build`
 5. يكتب مشغّل bash إلى `~/.local/bin/estacoda`
 6. يطبع `.install-method.json` بقيمة `method: managed-source`
-7. يشغّل `estacoda init` إلا إذا تم توفير `--skip-init`
+
+لا ينشئ المثبّت حالة الملف الشخصي أو الثقة. شغّل `estacoda` بعد التثبيت للدخول مباشرة إلى الإعداد الأول.
 
 إذا كان المجلد يحتوي على تثبيت managed-source مع ختم مطابق، يقوم المثبت بتحديثه عبر `git fetch`، `git checkout`، و `git pull --ff-only` بدلاً من إعادة الاستنساخ.
 
@@ -90,7 +91,8 @@ cd EstaCoda
 2. يبني `dist/`
 3. يكتب مشغّل إلى `~/.local/bin/estacoda`
 4. يطبع `.install-method.json` بقيمة `method: manual-source`
-5. يشغّل `estacoda init` إلا إذا تم توفير `--skip-init`
+
+لا ينشئ سكربت الإعداد حالة الملف الشخصي أو الثقة. شغّل `estacoda` بعد الإعداد للدخول مباشرة إلى الإعداد الأول.
 
 تثبيتات manual-source تعد مساهمات. امر `estacoda update` يقوم بالفحص والإرشاد فقط، ولا يقوم بالتعديل الذاتي.
 
@@ -142,11 +144,10 @@ EstaCoda يميّز بين ستة أنماط للتثبيت. تمرير التح
 |---|---|
 | `--branch <branch>` | الاستنساخ أو التحديث من هذا الفرع (الافتراضي: `main`) |
 | `--dir <path>` | مجلد مصدر مدار مخصّص |
-| `--skip-init` | لا تشغل `estacoda init` بعد البناء |
 | `--fhs` | استخدم مسارات FHS: `/usr/local/lib/estacoda` و `/usr/local/bin/estacoda` |
 | `-h, --help` | أظهر المساعدة دون تغيير الملفات |
 
-سيوم التهيئة (`scripts/setup-estacoda.sh`) يدعم `--skip-init` و `--help` فقط.
+سكربت الإعداد (`scripts/setup-estacoda.sh`) يدعم `--help`.
 
 ## التحقق
 

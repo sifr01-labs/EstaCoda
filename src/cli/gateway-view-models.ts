@@ -617,7 +617,7 @@ export function buildGatewayDiagnoseViewModel(data: GatewayDiagnoseData): Comman
     warnings.push(buildWarningErrorViewModel({
       severity: "warn",
       title: "Cron",
-      message: `${cronProblems.join("; ")}. Run estacoda init if this is a fresh state home.`,
+      message: `${cronProblems.join("; ")}. Run estacoda doctor --fix to create missing local state directories.`,
     }));
   }
   blocks.push(buildKeyValueBlockViewModel({ title: "Cron", entries: cronEntries }));

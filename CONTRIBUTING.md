@@ -111,11 +111,10 @@ alias estacoda-dev='ESTACODA_HOME="$HOME/.estacoda-dev" node /path/to/EstaCoda/d
 
 Do not alias directly to `dist/index.js`; run it through `node` unless you are using an installed wrapper.
 
-Then initialize dev state:
+Then start with isolated dev state:
 
 ```bash
-estacoda-dev init
-estacoda-dev setup
+estacoda-dev
 ```
 
 Rules:

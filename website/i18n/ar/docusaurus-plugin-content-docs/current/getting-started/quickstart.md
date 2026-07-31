@@ -44,7 +44,7 @@ sidebar_position: 2
 curl -fsSL https://www.estacoda.com/install.sh | bash
 ```
 
-ينشئ هذا تثبيتًا مُدار المصدر تحت `~/.estacoda/estacoda`، ثم يبني المشروع، ويكتب ملف تشغيل إلى `~/.local/bin/estacoda`، ويشغّل `estacoda init`.
+ينشئ هذا تثبيتًا مُدار المصدر تحت `~/.estacoda/estacoda`، ثم يبني المشروع، ويكتب ملف تشغيل إلى `~/.local/bin/estacoda`. لا ينشئ حالة الملف الشخصي أو الثقة قبل التشغيل الأول.
 
 إذا لم يكن `~/.local/bin` ضمن `PATH`، أضفه:
 
@@ -57,10 +57,10 @@ export PATH="$HOME/.local/bin:$PATH"
 ابدأ مسار الإعداد المُراجع:
 
 ```bash
-estacoda setup
+estacoda
 ```
 
-إذا شغّلت `estacoda` قبل اكتمال الإعداد، يكتشف `EstaCoda` الحالة غير المكتملة ويوجهك إلى الإعداد.
+عند استخدام جذر حالة جديد، يفتح الأمر `estacoda` معالج الإعداد الأول مباشرة. يجهّز الحالة المطلوبة عبر مسار الإعداد المُراجع، ثم يعرض تشغيل الجلسة بعد التحقق.
 
 يمر معالج الإعداد الأول بهذه المراحل:
 
@@ -194,10 +194,10 @@ estacoda setup
 
 ## 10. مسارات التثبيت المتقدمة
 
-ثبّت في مجلد مخصص وتجاوز تهيئة الحالة الأولى:
+ثبّت في مجلد مخصص:
 
 ```bash
-curl -fsSL https://www.estacoda.com/install.sh | bash -s -- --dir <path> --skip-init
+curl -fsSL https://www.estacoda.com/install.sh | bash -s -- --dir <path>
 ```
 
 إذا كنت تنوي تعديل المصدر، استنسخ المستودع وشغّل سكربت الإعداد:

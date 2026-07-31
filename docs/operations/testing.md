@@ -69,7 +69,7 @@ Smoke tests are the integration safety net. They exercise product flows with moc
 Current smoke cases include:
 
 - bare launch
-- init lifecycle
+- first-run state bootstrap
 - update dry run
 - pack lifecycle
 - bundled skill sync

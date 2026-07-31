@@ -296,7 +296,7 @@ describe("buildGatewayDiagnoseViewModel", () => {
     expect(rendered).toContain("[WARN] Lock dir: not writable");
     expect(cronWarningCount).toBe(1);
     expect(rendered).toContain(
-      "[WARN] Cron: jobs file not readable; output directory not writable; lock directory not writable. Run estacoda init if this is a fresh state home."
+      "[WARN] Cron: jobs file not readable; output directory not writable; lock directory not writable. Run estacoda doctor --fix to create missing local state directories."
     );
   });
 

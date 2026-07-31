@@ -577,7 +577,7 @@ export async function runGatewayStartDryRun(
     warnings.push(error);
   }
   if (!stateDirsReady) {
-    warnings.push("State dirs: run estacoda init to create cron output, cron locks, and logs directories");
+    warnings.push("State dirs: run estacoda doctor --fix to create missing local state directories");
   }
   if (lockSummary.severity !== "ok") {
     warnings.push(`Gateway lock: ${lockSummary.detail}`);

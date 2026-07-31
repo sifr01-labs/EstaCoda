@@ -30,7 +30,7 @@ src/smoke/
 | `evolution-lifecycle` | `evolution`, `skills` | Focused smoke case | Covers Agent Evolution lifecycle behavior. |
 | `evolution-safety` | `evolution`, `security` | Focused smoke case | Covers Agent Evolution safety behavior. |
 | `gateway-stop` | `gateway`, `channels` | Focused smoke case | Covers gateway stop behavior. |
-| `init-lifecycle` | `lifecycle`, `init` | Focused smoke case | Covers initialization lifecycle behavior. |
+| `state-bootstrap` | `lifecycle`, `setup` | Focused smoke case | Covers non-authorizing first-run state bootstrap behavior. |
 | `pack-lifecycle` | `packs`, `lifecycle` | Focused smoke case | Covers pack lifecycle behavior. |
 | `provider-setup-endpoint-first` | `setup`, `providers` | Focused smoke case | Exercises Local / Custom endpoint-first Setup Editor flow for primary, fallback, and auxiliary routes with mocked `/models`. |
 | `update-dry-run` | `lifecycle`, `update` | Focused smoke case | Covers update dry-run behavior. |

@@ -18,7 +18,7 @@ describe("installer scripts", () => {
 
       expect(result.stdout).toContain("EstaCoda source installer");
       expect(result.stdout).toContain("--branch <branch>");
-      expect(result.stdout).toContain("--skip-init");
+      expect(result.stdout).not.toContain("--skip-init");
       expect(result.stderr).toBe("");
       await expect(readdir(home)).resolves.toEqual([]);
     } finally {
@@ -35,7 +35,7 @@ describe("installer scripts", () => {
       });
 
       expect(result.stdout).toContain("EstaCoda manual source setup");
-      expect(result.stdout).toContain("--skip-init");
+      expect(result.stdout).not.toContain("--skip-init");
       expect(result.stderr).toBe("");
       await expect(readdir(home)).resolves.toEqual([]);
     } finally {

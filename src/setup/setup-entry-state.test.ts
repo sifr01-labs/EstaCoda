@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { collectSetupEntryState } from "./setup-entry-state.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
-import { runInitCommand } from "../cli/init-command.js";
+import { ensureDefaultProfileState } from "../cli/profile-state.js";
+import { ensureGlobalStateDirectories } from "../storage/state-bootstrap.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-setup-entry-state-"));
@@ -84,13 +85,13 @@ describe("collectSetupEntryState", () => {
     expect(state.blockers).toContain("First-run setup has not completed yet.");
   });
 
-  it("classifies init-created default profile state as new-user", async () => {
+  it("classifies an interrupted bootstrap skeleton as new-user", async () => {
     const { homeDir, workspaceRoot } = await makeHomeAndWorkspace();
-    const result = await runInitCommand({ homeDir });
+    await ensureGlobalStateDirectories({ homeDir });
+    await ensureDefaultProfileState({ homeDir });
 
     const state = await collectSetupEntryState({ homeDir, workspaceRoot });
 
-    expect(result.ok).toBe(true);
     expect(state.kind).toBe("new-user");
     expect(state.recommendedAction).toBe("start-first-run");
     expect(state.configSources).toHaveLength(1);

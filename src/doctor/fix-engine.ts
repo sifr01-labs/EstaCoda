@@ -135,6 +135,11 @@ async function appendProfileSkeletonOperations(
       operations.push({ id: `create-dir:${path}`, kind: "create-directory", path });
     }
   }
+  for (const path of [join(profilePaths.cronPath, "output"), join(profilePaths.cronPath, "locks")]) {
+    if (!await isDirectory(path)) {
+      operations.push({ id: `create-dir:${path}`, kind: "create-directory", path });
+    }
+  }
   for (const key of PROFILE_FILE_KEYS) {
     const path = profilePaths[key];
     if (!await isFile(path)) {

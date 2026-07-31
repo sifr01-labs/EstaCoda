@@ -74,16 +74,15 @@ If npm publication stays in the release strategy, update this document only afte
 For any path that gives you an `estacoda` command:
 
 ```bash
-estacoda init       # Bootstrap state directories
-estacoda setup      # Reviewed setup flow for provider, trust, security, Agent Evolution, and optional capabilities
+estacoda                    # Start onboarding on first run; launch a session when ready
+estacoda setup              # Review, edit, or repair setup
 estacoda setup --interactive
-estacoda verify     # Check readiness
-estacoda            # Start interactive session
+estacoda verify             # Check readiness
 ```
 
-`estacoda setup --interactive` routes new users into the Onboarding Wizard, opens the Setup Editor for configured or degraded setup (supporting primary provider/model, fallback route, auxiliary route, Agent Evolution, and optional capability editing), and shows repair-first diagnostics for missing credentials, broken provider routes, broken config, untrusted workspaces, and state paths that are not writable.
+Bare `estacoda` routes new users directly into the Onboarding Wizard. `estacoda setup --interactive` remains the operator surface: it opens the Setup Editor for configured or degraded setup (supporting primary provider/model, fallback route, auxiliary route, Agent Evolution, and optional capability editing), and shows repair-first diagnostics for missing credentials, broken provider routes, broken config, untrusted workspaces, and state paths that are not writable.
 
-Onboarding Wizard users see a configuration summary, confirm it, then setup applies and verifies. The redacted manifest and apply plan still exist internally for operator inspection, but they are not the normal first screen after setup questions. Cancelling before apply does not write config, trust, state, or `.env`. Workspace trust is required before EstaCoda can run in that workspace; if trust is deferred, setup may be saved but launch is blocked with `Setup saved. Workspace trust is still required before EstaCoda can run here.`
+Onboarding Wizard users see a configuration summary, confirm it, then setup applies and verifies. The redacted manifest and apply plan still exist internally for operator inspection, but they are not the normal first screen after setup questions. First-run detection may prepare an idempotent default profile skeleton; cancelling before apply does not apply the reviewed configuration, grant workspace trust, or save collected credentials. Workspace trust is required before EstaCoda can run in that workspace; if trust is deferred, setup may be saved but launch is blocked with `Setup saved. Workspace trust is still required before EstaCoda can run here.`
 
 `Start EstaCoda now?` appears only after successful apply and verification. If selected, setup reloads the selected profile config, reloads trust state, verifies workspace trust, rebuilds runtime from fresh config, and enters the normal interactive launcher.
 

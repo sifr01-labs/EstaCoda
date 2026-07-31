@@ -39,7 +39,7 @@ estacoda setup --provider <p> --model <m> --api-key-env <env>
 
 **Profile boundary:** Uses the active profile, or the profile selected via `--profile`.
 
-**Behavior:** Routes through a deterministic setup decision based on current state (`first-run`, configured-ready, configured-degraded, partial-provider, missing-credential, broken-config, untrusted-workspace, state-not-writable). The internal `first-run` state opens the Onboarding Wizard. Normal onboarding uses `summary -> confirm -> apply -> verify`; the redacted manifest and apply plan remain internal/operator-inspectable. Configured-ready state opens the Setup Editor with primary model route edit, fallback route edit, auxiliary route edit, security mode edit, Agent Evolution edit, one nested `Budgets` entry for independent Task/session spending limits, language, optional capability configuration, EstaCoda Doctor, and exit. Budget limits are monetary, Off by default, and apply prospectively to new Tasks or sessions. Doctor is the read-only health action for required fixes and provider route status. Cancelling review or summary confirmation produces no mutation. Raw secrets are never displayed in review metadata.
+**Behavior:** Routes through a deterministic setup decision based on current state (`first-run`, configured-ready, configured-degraded, partial-provider, missing-credential, broken-config, untrusted-workspace, state-not-writable). The internal `first-run` state opens the Onboarding Wizard. Normal onboarding uses `summary -> confirm -> apply -> verify`; the redacted manifest and apply plan remain internal/operator-inspectable. Configured-ready state opens the Setup Editor with primary model route edit, fallback route edit, auxiliary route edit, security mode edit, Agent Evolution edit, one nested `Budgets` entry for independent Task/session spending limits, language, optional capability configuration, EstaCoda Doctor, and exit. Budget limits are monetary, Off by default, and apply prospectively to new Tasks or sessions. Doctor is the read-only health action for required fixes and provider route status. First-run detection may prepare an idempotent default profile skeleton; cancelling review or summary confirmation does not apply reviewed configuration, grant trust, or save collected credentials. Raw secrets are never displayed in review metadata.
 
 **Failure modes:**
 - Broken config blocks normal edits until parsing is safe.
@@ -48,19 +48,7 @@ estacoda setup --provider <p> --model <m> --api-key-env <env>
 - Deferred workspace trust can save setup, but launch is blocked with `Setup saved. Workspace trust is still required before EstaCoda can run here.`
 - `Start EstaCoda now?` appears only after apply and verification. The launch handoff reloads profile config and trust state, rebuilds runtime from fresh config, then enters the normal interactive launcher.
 
-### `estacoda init`
-
-Bootstraps state directories and default config.
-
-```bash
-estacoda init                           # create state skeleton
-estacoda init --home <dir>              # custom state home
-estacoda init --yes                     # non-interactive; use defaults
-```
-
-**State touched:** `~/.estacoda/`, default profile skeleton, `active-profile.json`.
-
-**Failure modes:** Directory creation failures surface as exit code 1 with the path that failed.
+`estacoda init` has been removed. State is prepared automatically by first-run onboarding; use `estacoda doctor --fix` for safe local state repairs.
 
 ### `estacoda verify`
 

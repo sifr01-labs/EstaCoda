@@ -6,7 +6,6 @@ DEFAULT_SOURCE_URL="https://github.com/sifr01-labs/EstaCoda.git"
 SOURCE_URL="${ESTACODA_SOURCE_URL:-$DEFAULT_SOURCE_URL}"
 BRANCH="${ESTACODA_BRANCH:-main}"
 INSTALL_DIR=""
-SKIP_INIT=0
 FORCE_FHS=0
 
 usage() {
@@ -17,12 +16,11 @@ Usage:
   curl -fsSLO https://raw.githubusercontent.com/sifr01-labs/EstaCoda/main/scripts/install.sh
   less install.sh
   bash install.sh
-  bash scripts/install.sh [--branch <branch>] [--dir <path>] [--skip-init] [--fhs]
+  bash scripts/install.sh [--branch <branch>] [--dir <path>] [--fhs]
 
 Options:
   --branch <branch>  Clone or update the managed install from this branch (default: main)
   --dir <path>       Install into a custom managed source directory
-  --skip-init        Do not run `estacoda init` after building
   --fhs              Use Linux FHS paths: /usr/local/lib/estacoda and /usr/local/bin
   -h, --help         Show this help without changing files
 USAGE
@@ -48,10 +46,6 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -ge 2 ] || die "--dir requires a value"
       INSTALL_DIR="$2"
       shift 2
-      ;;
-    --skip-init)
-      SKIP_INIT=1
-      shift
       ;;
     --fhs)
       FORCE_FHS=1
@@ -293,15 +287,6 @@ writeFileSync(stampPath, `${JSON.stringify(stamp, null, 2)}\n`);
 NODE
 }
 
-run_init() {
-  if [ "$SKIP_INIT" -eq 1 ]; then
-    echo "Skipping estacoda init because --skip-init was provided."
-    return 0
-  fi
-  echo "Initializing EstaCoda state"
-  HOME="${HOME:-}" "$BIN_DIR/estacoda" init
-}
-
 echo "EstaCoda source installer"
 detect_platform
 validate_node
@@ -318,7 +303,6 @@ clone_or_update_managed_source
 build_source
 write_stamp
 write_wrapper
-run_init
 
 echo ""
 echo "EstaCoda installed."
@@ -327,9 +311,7 @@ echo ""
 echo "Next steps:"
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
   echo "  1. Add to PATH: export PATH=\"$BIN_DIR:\$PATH\""
-  echo "  2. Run: estacoda setup"
-  echo "  3. Run: estacoda"
-else
-  echo "  1. Run: estacoda setup"
   echo "  2. Run: estacoda"
+else
+  echo "  1. Run: estacoda"
 fi

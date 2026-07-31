@@ -7,7 +7,8 @@ import type { ProviderDiagnostic } from "../config/provider-diagnostics.js";
 import type { SetupVerificationReport } from "./verification.js";
 import type { SetupEntryRecommendedAction, SetupEntryState, SetupEntryStateKind } from "./setup-entry-state.js";
 import { collectSetupRoute, renderSetupRouteDecision, routeSetupEntryState, type SetupRouteKind } from "./setup-router.js";
-import { runInitCommand } from "../cli/init-command.js";
+import { ensureDefaultProfileState } from "../cli/profile-state.js";
+import { ensureGlobalStateDirectories } from "../storage/state-bootstrap.js";
 
 function providerDiagnostic(status: ProviderDiagnostic["status"] = "ready"): ProviderDiagnostic {
   return {
@@ -268,11 +269,12 @@ describe("collectSetupRoute", () => {
     expect(existsSync(join(homeDir, ".estacoda", "config.json"))).toBe(false);
   });
 
-  it("routes init-created default profile state to first-run onboarding", async () => {
+  it("routes an interrupted bootstrap skeleton to first-run onboarding", async () => {
     const homeDir = await mkdtemp(join(tmpdir(), "estacoda-setup-router-"));
     const workspaceRoot = join(homeDir, "workspace");
     await mkdir(workspaceRoot, { recursive: true });
-    await runInitCommand({ homeDir });
+    await ensureGlobalStateDirectories({ homeDir });
+    await ensureDefaultProfileState({ homeDir });
 
     const decision = await collectSetupRoute({ homeDir, workspaceRoot });
 

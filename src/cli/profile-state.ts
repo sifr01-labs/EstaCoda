@@ -148,6 +148,8 @@ export async function createProfileDirectories(profilePaths: ProfileStatePaths):
     mkdir(profilePaths.skillsPath, { recursive: true }),
     mkdir(join(profilePaths.skillsPath, ".evolution"), { recursive: true }),
     mkdir(profilePaths.cronPath, { recursive: true }),
+    mkdir(join(profilePaths.cronPath, "output"), { recursive: true }),
+    mkdir(join(profilePaths.cronPath, "locks"), { recursive: true }),
     mkdir(profilePaths.logsPath, { recursive: true }),
     mkdir(profilePaths.gatewayStatePath, { recursive: true }),
     mkdir(profilePaths.channelMediaPath, { recursive: true }),

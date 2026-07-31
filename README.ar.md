@@ -85,12 +85,10 @@ curl -fsSL https://www.estacoda.com/install.sh | bash
 ## التشغيل الأول
 
 ```bash
-estacoda init    # create the default profile and state directories
-estacoda setup   # configure provider, model, security mode, and optional channels
-estacoda         # start an interactive session
+estacoda         # يبدأ الإعداد الأول، ثم يشغّل جلسة تفاعلية عندما يصبح الإعداد جاهزًا
 ```
 
-يقودك `estacoda setup` خلال اختيار المزوّد، تخزين API key، وضع الأمان، والقدرات الاختيارية. يعرض الإعداد المقترح قبل كتابة أي شيء.
+في التثبيت الجديد، يفتح `estacoda` معالج الإعداد الأول مباشرة. يقودك خلال اختيار المزوّد، وإعداد نقطة النهاية أو بيانات الاعتماد عند الحاجة، ووضع الأمان، والقدرات الاختيارية، ثم يعرض الإعداد المقترح قبل كتابة أي شيء. تشغّل الاستدعاءات اللاحقة الجلسة التفاعلية؛ استخدم `estacoda setup` لمراجعة الإعداد أو تعديله أو إصلاحه.
 
 ---
 
@@ -98,8 +96,7 @@ estacoda         # start an interactive session
 
 ```bash
 estacoda                       # start a terminal session
-estacoda init                  # initialize profile and state directories
-estacoda setup                 # run the interactive setup wizard
+estacoda setup                 # review, edit, or repair setup
 estacoda update                # update using the current install method
 estacoda update --check        # check for updates without modifying files
 estacoda uninstall             # remove install code and wrappers; keep user data
@@ -259,8 +256,6 @@ cd EstaCoda
 بعد الإعداد:
 
 ```bash
-estacoda init
-estacoda setup
 estacoda
 ```
 

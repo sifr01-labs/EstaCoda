@@ -14,7 +14,7 @@ Default root: `~/.estacoda/`
 
 | Path | Purpose | Created by |
 |------|---------|------------|
-| `active-profile.json` | Active profile pointer | `estacoda init`, `estacoda profile switch` |
+| `active-profile.json` | Active profile pointer | First-run onboarding, `estacoda profile switch` |
 | `trust.json` | Workspace trust grants | `estacoda workspace trust` |
 | `workspace-approvals.json` | Workspace approval grants | Approval commands |
 | `sessions.sqlite` | Global session database with `profile_id` scoping; includes durable session-finalization jobs and leases | Runtime initialization and gateway finalization worker |
@@ -68,7 +68,7 @@ Profile root: `~/.estacoda/profiles/<id>/`
 
 | Path | Purpose | Created by |
 |------|---------|------------|
-| `config.json` | Selected profile runtime configuration | `estacoda init`, `estacoda setup`, manual edit |
+| `config.json` | Selected profile runtime configuration | First-run onboarding, `estacoda setup`, manual edit |
 | `.env` | Selected profile secrets | Setup flows, secret store |
 | `auth.json` | Selected profile OAuth auth state | Codex OAuth setup |
 | `USER.md` | Profile user preferences and communication style | Memory promotion, `memory.curate` |

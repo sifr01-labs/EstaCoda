@@ -522,7 +522,7 @@ HOME=/tmp/estacoda-qa-first-run pnpm run dev -- setup --interactive
 - Local / Custom Endpoint no-auth leaves credential state as none; entering an optional API key shows only the env-var reference and writes the raw key only after reviewed apply.
 - In Setup Editor, selecting Local / Custom for primary, fallback, or auxiliary routes shows the same endpoint-first Papyrus flow before model selection. Primary writes the primary route, fallback writes only `model.fallbacks`, and auxiliary writes only the selected `auxiliaryModels.<task>` slot.
 - Credential summary shows only `Not set`, `Existing credential detected`, or `New credential pending`.
-- Cancelling before apply leaves no config, trust, state, or `.env` mutation from the cancelled plan.
+- First-run detection may create the idempotent default profile skeleton; cancelling before apply does not apply reviewed configuration, grant trust, or save collected credentials.
 - Deferring workspace trust may save setup but must show `Setup saved. Workspace trust is still required before EstaCoda can run here.` and must not offer launch.
 
 ### 10.2 Configured Ready

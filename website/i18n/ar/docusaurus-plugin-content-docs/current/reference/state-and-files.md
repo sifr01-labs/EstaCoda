@@ -14,7 +14,7 @@ sidebar_position: 7
 
 | المسار | الغرض | المنشئ |
 |--------|-------|------|
-| `active-profile.json` | مؤشر الملف الشخصي النشط | `estacoda init`، `estacoda profile switch` |
+| `active-profile.json` | مؤشر الملف الشخصي النشط | الإعداد الأول، `estacoda profile switch` |
 | `trust.json` | منح الثقة في مساحات العمل | `estacoda workspace trust` |
 | `workspace-approvals.json` | منح الموافقة في مساحات العمل | أوامر الموافقة |
 | `sessions.sqlite` | قاعدة بيانات الجلسات العامة مع تحديد النطاق بواسطة `profile_id`؛ وتشمل مهام إنهاء الجلسة الدائمة وleases | تهيئة التشغيل وعامل الإنهاء في البوابة |
@@ -68,7 +68,7 @@ sidebar_position: 7
 
 | المسار | الغرض | منشئ |
 |--------|-------|------|
-| `config.json` | إعدادات التشغيل للملف الشخصي المحدد | `estacoda init`، `estacoda setup`، التحرير اليدوي |
+| `config.json` | إعدادات التشغيل للملف الشخصي المحدد | الإعداد الأول، `estacoda setup`، التحرير اليدوي |
 | `.env` | أسرار الملف الشخصي المحدد | تدفقات الإعداد، مخزن الأسرار |
 | `auth.json` | حالة مصادقة OAuth للملف الشخصي المحدد | إعداد Codex OAuth |
 | `USER.md` | تفضيلات المستخدم وأسلوب التواصل للملف الشخصي | ترقية الذاكرة، `memory.curate` |

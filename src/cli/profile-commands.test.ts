@@ -43,6 +43,8 @@ describe("profileCommand", () => {
       paths.promotionsPath,
       paths.skillsPath,
       paths.cronPath,
+      join(paths.cronPath, "output"),
+      join(paths.cronPath, "locks"),
       paths.logsPath,
       paths.gatewayStatePath,
       paths.channelMediaPath,

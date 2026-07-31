@@ -70,7 +70,7 @@ pnpm run smoke:dist
 تشمل حالات smoke الحالية:
 
 - bare launch
-- init lifecycle
+- تهيئة حالة التشغيل الأول
 - update dry run
 - pack lifecycle
 - bundled skill sync
