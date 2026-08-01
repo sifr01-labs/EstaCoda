@@ -264,7 +264,7 @@ describe("Papyrus operator console renderer", () => {
     expect(output).toContainEqual(expect.stringContaining("◷ read_file"));
     expect(output).toContainEqual(expect.stringContaining("Now checking the layout"));
     expect(output).toContainEqual(expect.stringContaining("Now checking the layout▍"));
-    expect(output).toContainEqual(expect.stringContaining("scribbling · 1 active · 1 done · 00:33"));
+    expect(output).toContainEqual(expect.stringContaining("working · 1 active · 1 done · 00:33"));
     expect(output.join("\n")).not.toContain("Running tools");
     expect(output.join("\n")).not.toContain("Assistant stream");
     expect(output.join("\n")).not.toContain("assistant:");

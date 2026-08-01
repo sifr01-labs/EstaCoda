@@ -2412,7 +2412,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const rendered = outputChunks.join("");
     expect(rendered).toContain("contemplating");
     expect(rendered).toContain("plotting");
-    expect(rendered).toContain("scribbling");
+    expect(rendered).toContain("working");
     expect(rendered).toContain("polishing");
   });
 
@@ -2810,7 +2810,7 @@ describe("runSessionLoop — active turn spinner", () => {
 
     const strippedChunks = outputChunks.map((chunk) => stripAnsi(chunk));
     expect(strippedChunks.some((chunk) =>
-      chunk.includes("scribbling ·") && chunk.includes("active") && chunk.includes("done")
+      chunk.includes("working ·") && chunk.includes("active") && chunk.includes("done")
     )).toBe(true);
     expect(strippedChunks.some((chunk) => chunk.includes("Running tools"))).toBe(false);
     expect(strippedChunks.some((chunk) => chunk.includes("more completed this turn"))).toBe(false);
@@ -2980,7 +2980,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const strippedChunks = outputChunks.map((chunk) => stripAnsi(chunk));
     const rendered = strippedChunks.join("");
     expect(rendered).toContain("Browser Status");
-    expect(rendered).toContain("scribbling");
+    expect(rendered).toContain("working");
     expect(rendered).not.toContain("────────────────────────────────────────────────────────────────────────────────\n↳ hello\n────────────────────────────────────────────────────────────────────────────────");
   });
 
@@ -3776,7 +3776,7 @@ describe("runSessionLoop — active turn spinner", () => {
     await loop;
 
     const strippedChunks = outputChunks.map((chunk) => stripAnsi(chunk));
-    const spinnerChunks = strippedChunks.filter((chunk) => chunk.includes("scribbling"));
+    const spinnerChunks = strippedChunks.filter((chunk) => chunk.includes("working"));
     expect(spinnerChunks.length).toBeGreaterThanOrEqual(1);
   });
 
@@ -5270,7 +5270,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const rendered = outputChunks.join("");
     expect(rendered).toContain("contemplating");
     expect(rendered).toContain("plotting");
-    expect(rendered).toContain("scribbling");
+    expect(rendered).toContain("working");
     expect(rendered).toContain("polishing");
     expect(rendered).not.toContain("thinking:");
     expect(rendered).not.toContain("intent:");
@@ -5353,7 +5353,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const rendered = outputChunks.join("");
     // Spinner should appear during thinking/provider phases
     expect(rendered).toContain("contemplating");
-    expect(rendered).toContain("scribbling");
+    expect(rendered).toContain("working");
     // Tool output should be present
     expect(rendered).toContain("Browser Status");
     const toolIndex = rendered.indexOf("Browser Status");
@@ -5361,10 +5361,10 @@ describe("runSessionLoop — active turn spinner", () => {
     // After the final assistant response, no spinner label should remain in the durable scrollback
     const assistantIndex = rendered.indexOf("Mock response");
     const afterAssistant = rendered.slice(assistantIndex);
-    // The only "contemplating" or "scribbling" or "tinkering" occurrences should be
+    // The only "contemplating" or "working" or "tinkering" occurrences should be
     // before the assistant response, not after.
     expect(afterAssistant).not.toContain("contemplating");
-    expect(afterAssistant).not.toContain("scribbling");
+    expect(afterAssistant).not.toContain("working");
     expect(afterAssistant).not.toContain("tinkering");
   });
 
@@ -5667,7 +5667,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(cancelIndex).toBeGreaterThan(-1);
     expect(secondPromptIndex).toBeGreaterThan(cancelIndex);
     expect(rendered.slice(cancelIndex, secondPromptIndex)).not.toContain("↳ first");
-    expect(rendered.slice(cancelIndex, secondPromptIndex)).not.toContain("scribbling");
+    expect(rendered.slice(cancelIndex, secondPromptIndex)).not.toContain("working");
     expect(rendered).toContain("Second response");
     expect(enqueueSessionFinalization).not.toHaveBeenCalledWith("sigint");
     expect(enqueueSessionFinalization).toHaveBeenCalledWith("cli-exit");
@@ -7055,7 +7055,7 @@ describe("runSessionLoop — animated spinner behavior", () => {
     const rendered = outputChunks.join("");
     // Spinner should appear during thinking/provider phases
     expect(rendered).toContain("contemplating");
-    expect(rendered).toContain("scribbling");
+    expect(rendered).toContain("working");
     // Tool output should be present
     expect(rendered).toContain("Browser Status");
     const toolIndex = rendered.indexOf("Browser Status");
@@ -7064,7 +7064,7 @@ describe("runSessionLoop — animated spinner behavior", () => {
     const assistantIndex = rendered.indexOf("Mock response");
     const afterAssistant = rendered.slice(assistantIndex);
     expect(afterAssistant).not.toContain("contemplating");
-    expect(afterAssistant).not.toContain("scribbling");
+    expect(afterAssistant).not.toContain("working");
     expect(afterAssistant).not.toContain("tinkering");
   });
 

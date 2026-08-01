@@ -148,7 +148,7 @@ const en: CliUiChromeCopy = {
 
   thinking: "contemplating",
   routing: "plotting",
-  provider: "scribbling",
+  provider: "working",
   tool: "tinkering",
   finalizing: "polishing",
   indexingSkills: "indexing skills",
@@ -263,7 +263,7 @@ const ar: CliUiChromeCopy = {
 
   thinking: "بفكر",
   routing: "بحدد",
-  provider: "بكتب",
+  provider: "بشتغل",
   tool: "شغال",
   finalizing: "بخلص",
   indexingSkills: "بفهرس المهارات",

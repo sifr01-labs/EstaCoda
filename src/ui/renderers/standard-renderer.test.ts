@@ -2849,6 +2849,7 @@ describe("StandardRenderer — prompt chrome rails", () => {
     const vm = buildActiveTurnSpinnerViewModel({ phase: "thinking" });
     const out = r.render(vm);
     expect(out).toContain("\u0628\u0641\u0643\u0631");
+    expect(r.render(buildActiveTurnSpinnerViewModel({ phase: "provider" }))).toContain("بشتغل");
     expect(hasAnsi(out)).toBe(true);
   });
 
@@ -2857,7 +2858,7 @@ describe("StandardRenderer — prompt chrome rails", () => {
     const vm = buildActiveTurnSpinnerViewModel({ phase: "provider" });
     const out = r.render(vm);
     expect(out).not.toContain("\uD80C\uDDE0");
-    expect(out).toContain("scribbling");
+    expect(out).toContain("working");
     expect(hasAnsi(out)).toBe(true);
   });
 
