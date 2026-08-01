@@ -436,7 +436,10 @@ describe("DeliveryRouter", () => {
 
       const artifact = { id: "art-1", kind: "document" as const, name: "report.md", mimeType: "text/markdown", path: "/tmp/report.md", bytes: 100, createdAt: new Date().toISOString() };
       const targets = router.parseTarget("telegram:123", baseSessionKey);
-      await router.deliverArtifact(targets[0], artifact);
+      await expect(router.deliverArtifact(targets[0], artifact)).resolves.toEqual({
+        status: "delivered",
+        method: "native-upload"
+      });
 
       expect(telegram.records).toHaveLength(1);
       expect(telegram.records[0].kind).toBe("artifact");
@@ -747,6 +750,40 @@ describe("DeliveryRouter", () => {
       expect(payload.kind).toBe("artifact");
     });
 
+    it("delivery:degraded emitted when only an artifact fallback notice was delivered", async () => {
+      const hookRegistry = new HookRegistry();
+      const router = new DeliveryRouter({ homeDir: tmpDir, hookRegistry });
+      const telegram = createFakeTelegramAdapter() as FakeAdapter;
+      (telegram as any).delivery!.sendArtifact = async () => ({
+        status: "degraded",
+        method: "fallback-notice",
+        reasonCode: "native-upload-failed",
+        errorClass: "Error",
+        errorMessage: "upload rejected"
+      });
+      router.registerAdapter(telegram);
+
+      const artifact = { id: "art-1", kind: "document" as const, mimeType: "text/markdown", path: "/tmp/report.md", bytes: 100, createdAt: new Date().toISOString() };
+      const targets = router.parseTarget("telegram:123", baseSessionKey);
+      await expect(router.deliverArtifact(targets[0], artifact)).resolves.toMatchObject({
+        status: "degraded",
+        method: "fallback-notice",
+        reasonCode: "native-upload-failed"
+      });
+
+      expect(events.filter((event) => event.name === "delivery:success")).toHaveLength(0);
+      const degradedEvents = events.filter((event) => event.name === "delivery:degraded");
+      expect(degradedEvents).toHaveLength(1);
+      expect(degradedEvents[0].payload).toMatchObject({
+        kind: "artifact",
+        platform: "telegram",
+        method: "fallback-notice",
+        reasonCode: "native-upload-failed",
+        errorClass: "Error",
+        errorMessage: "upload rejected"
+      });
+    });
+
     it("delivery:error emitted on artifact delivery failure", async () => {
       const hookRegistry = new HookRegistry();
       const router = new DeliveryRouter({ homeDir: tmpDir, hookRegistry });
@@ -759,7 +796,13 @@ describe("DeliveryRouter", () => {
 
       const artifact = { id: "art-1", kind: "document" as const, name: "report.md", mimeType: "text/markdown", path: "/tmp/report.md", bytes: 100, createdAt: new Date().toISOString() };
       const targets = router.parseTarget("telegram:123", baseSessionKey);
-      await router.deliverArtifact(targets[0], artifact);
+      await expect(router.deliverArtifact(targets[0], artifact)).resolves.toMatchObject({
+        status: "failed",
+        method: "none",
+        reasonCode: "artifact-delivery-failed",
+        errorClass: "Error",
+        errorMessage: "artifact failed"
+      });
 
       const errorEvents = events.filter((e) => e.name === "delivery:error");
       expect(errorEvents).toHaveLength(1);

@@ -33,6 +33,7 @@ export type GatewayHookEventName =
   | "session:cache:miss"
   | "session:cache:evict"
   | "delivery:success"
+  | "delivery:degraded"
   | "delivery:error"
   | "gateway:stt:preprocess"
   | "cron:tick:start"
@@ -155,6 +156,15 @@ export type GatewayHookPayloadByName = {
     truncated?: boolean;
     overflowSaved?: boolean;
     chunkCount?: number;
+  };
+  "delivery:degraded": {
+    kind: "artifact";
+    target: string;
+    platform?: string;
+    method: "fallback-notice";
+    reasonCode: string;
+    errorClass?: string;
+    errorMessage?: string;
   };
   "delivery:error": {
     kind: "text" | "progress" | "artifact";

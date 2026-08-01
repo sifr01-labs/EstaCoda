@@ -126,6 +126,37 @@ describe("DiscordAdapter", () => {
     }
   });
 
+  it("reports whether artifact delivery uploaded a file or degraded to a notice", async () => {
+    const send = vi.fn(async () => undefined);
+    const adapter = new DiscordAdapter({ botToken: "test" });
+    (adapter as any).client = {
+      channels: {
+        fetch: vi.fn(async () => ({
+          send,
+          sendTyping: vi.fn(async () => undefined)
+        }))
+      }
+    };
+    const sessionKey = { platform: "discord" as const, chatId: "channel-1" };
+    const artifact = {
+      id: "report",
+      path: "/tmp/report.md",
+      kind: "document" as const,
+      bytes: 12,
+      createdAt: new Date().toISOString()
+    };
+
+    await expect(adapter.delivery.sendArtifact!(sessionKey, artifact)).resolves.toEqual({
+      status: "delivered",
+      method: "native-upload"
+    });
+    await expect(adapter.delivery.sendArtifact!(sessionKey, { ...artifact, path: "" })).resolves.toEqual({
+      status: "degraded",
+      method: "fallback-notice",
+      reasonCode: "artifact-path-unavailable"
+    });
+  });
+
   it("renders generic actions as Discord message components", async () => {
     const send = vi.fn(async () => undefined);
     const adapter = new DiscordAdapter({ botToken: "test" });

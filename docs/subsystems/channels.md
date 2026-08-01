@@ -253,7 +253,7 @@ Voice-hinted ephemeral audio artifacts use object/artifact delivery, not arbitra
 - Adapter handoff: channel targets receive full text by default through the resolved adapter. `DeliveryRouter` does not perform platform-specific chunking.
 - Legacy truncation: explicit `maxOutputChars` remains as opt-in router truncation for legacy callers. There is no default router text cap.
 - Error persistence: delivery failures are recorded and visible via `estacoda gateway status`.
-- Progress/artifact variants: `deliverProgress`, `deliverArtifact`.
+- Progress/artifact variants: `deliverProgress`, `deliverArtifact`. Artifact delivery returns a structured `delivered`, `degraded`, or `failed` outcome instead of treating adapter completion as proof of native upload.
 
 ### Delivery Limits
 
@@ -273,6 +273,8 @@ Remote channel messages and public hook payloads must not expose local overflow 
 - `truncated`
 - `overflowSaved`
 - `chunkCount` (reserved for adapter-reported chunk counts)
+
+Native artifact uploads emit `delivery:success`. If the platform rejects the file but the adapter delivers a fallback notice, the router records the degraded outcome and emits `delivery:degraded` with a bounded reason code and sanitized error classification. `delivery:error` is reserved for outcomes where neither native upload nor a useful fallback delivery was confirmed. Fallback notices must say that the file was not attached and must not expose its local path.
 
 Hooks and remote messages must not include `overflowPath`, `fullPath`, raw local filesystem paths, chat IDs, email addresses, or raw target metadata from overflow filenames.
 

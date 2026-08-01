@@ -61,6 +61,11 @@ export type TaskResultPage = {
   hasMore: boolean;
 };
 
+export type TaskTextResult = {
+  result: TaskResult;
+  content: string;
+};
+
 /** Opaque handle for bodies prepared on disk but not yet published in Task metadata. */
 export type PreparedTaskResultBatch = {
   id: string;
@@ -477,6 +482,33 @@ export class TaskResultService {
   }
 
   async readPage(input: ReadTaskResultPageInput): Promise<TaskResultPage> {
+    const offset = boundedInteger(input.offset, 0, Number.MAX_SAFE_INTEGER, 0, "offset");
+    const maxChars = boundedInteger(
+      input.maxChars,
+      1,
+      TASK_RESULT_PAGE_MAX_CHARS,
+      TASK_RESULT_PAGE_DEFAULT_CHARS,
+      "maxChars"
+    );
+    const { result, content: text } = await this.readText(input);
+    const characters = Array.from(text);
+    if (offset > characters.length) {
+      throw new TaskResultContentError("offset-out-of-range", "Task result offset exceeds its character length.");
+    }
+    const end = Math.min(characters.length, offset + maxChars);
+    const hasMore = end < characters.length;
+    return {
+      result,
+      content: characters.slice(offset, end).join(""),
+      offset,
+      ...(hasMore ? { nextOffset: end } : {}),
+      totalChars: characters.length,
+      hasMore
+    };
+  }
+
+  /** Reads one authorized, integrity-verified text Result without exposing its storage path. */
+  async readText(input: Pick<ReadTaskResultPageInput, "taskId" | "resultId" | "sessionId">): Promise<TaskTextResult> {
     const taskId = nonEmpty(input.taskId, "Task ID");
     const resultId = nonEmpty(input.resultId, "Result ID");
     const sessionId = nonEmpty(input.sessionId, "session ID");
@@ -492,39 +524,19 @@ export class TaskResultService {
     if (!isTextReadable(result)) {
       throw new TaskResultContentError(
         "result-not-text",
-        "Task result is binary and cannot be read through the text paging tool."
+        "Task result is binary and cannot be exported or read as text."
       );
     }
 
-    const offset = boundedInteger(input.offset, 0, Number.MAX_SAFE_INTEGER, 0, "offset");
-    const maxChars = boundedInteger(
-      input.maxChars,
-      1,
-      TASK_RESULT_PAGE_MAX_CHARS,
-      TASK_RESULT_PAGE_DEFAULT_CHARS,
-      "maxChars"
-    );
     const bytes = this.#readVerifiedContent(result);
-    let text: string;
     try {
-      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      return {
+        result,
+        content: new TextDecoder("utf-8", { fatal: true }).decode(bytes)
+      };
     } catch (error) {
       throw new TaskResultContentError("invalid-utf8", "Task result is not valid UTF-8 text.", { cause: error });
     }
-    const characters = Array.from(text);
-    if (offset > characters.length) {
-      throw new TaskResultContentError("offset-out-of-range", "Task result offset exceeds its character length.");
-    }
-    const end = Math.min(characters.length, offset + maxChars);
-    const hasMore = end < characters.length;
-    return {
-      result,
-      content: characters.slice(offset, end).join(""),
-      offset,
-      ...(hasMore ? { nextOffset: end } : {}),
-      totalChars: characters.length,
-      hasMore
-    };
   }
 
   prune(taskId: string, resultId: string): TaskResult {

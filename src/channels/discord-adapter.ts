@@ -161,12 +161,16 @@ export class DiscordAdapter implements ChannelAdapter {
       },
 
       sendArtifact: async (sessionKey: ChannelSessionKey, artifact: ArtifactRecord) => {
-        if (!this.client) return;
+        if (!this.client) {
+          return { status: "failed" as const, method: "none" as const, reasonCode: "adapter-unavailable" };
+        }
         if (await this.voiceBridge?.playArtifact(sessionKey, artifact)) {
-          return;
+          return { status: "delivered" as const, method: "native-upload" as const };
         }
         const channel = await this.client.channels.fetch(sessionKey.chatId);
-        if (!channel || !isSendableChannel(channel)) return;
+        if (!channel || !isSendableChannel(channel)) {
+          return { status: "failed" as const, method: "none" as const, reasonCode: "destination-unavailable" };
+        }
         const sendable = channel as any;
         const caption = renderArtifactNotice(artifact);
         const filePath = artifact.localPath ?? artifact.path;
@@ -176,11 +180,17 @@ export class DiscordAdapter implements ChannelAdapter {
             files: [filePath],
             allowedMentions: { parse: [] },
           });
+          return { status: "delivered" as const, method: "native-upload" as const };
         } else {
           await sendable.send({
             content: caption,
             allowedMentions: { parse: [] },
           });
+          return {
+            status: "degraded" as const,
+            method: "fallback-notice" as const,
+            reasonCode: "artifact-path-unavailable"
+          };
         }
       },
     };

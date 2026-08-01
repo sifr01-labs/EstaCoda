@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type {
+  ArtifactDeliveryOutcome,
   ChannelAdapter,
   ChannelDelivery,
   ChannelKind,
@@ -295,9 +296,13 @@ export class DeliveryRouter {
   async deliverArtifact(
     target: DeliveryTarget,
     artifact: ArtifactRecord
-  ): Promise<void> {
+  ): Promise<ArtifactDeliveryOutcome> {
     if (target.kind === "silent" || target.kind === "local") {
-      return;
+      return {
+        status: "failed",
+        method: "none",
+        reasonCode: "artifact-target-unsupported"
+      };
     }
 
     let sessionKey: ChannelSessionKey;
@@ -314,20 +319,70 @@ export class DeliveryRouter {
       };
       adapter = this.#adapters.get(target.platform);
     } else {
-      return;
+      return {
+        status: "failed",
+        method: "none",
+        reasonCode: "artifact-target-unsupported"
+      };
     }
 
     if (!adapter?.delivery?.sendArtifact) {
-      return;
-    }
-
-    try {
-      await adapter.delivery.sendArtifact(sessionKey, artifact);
-      emitDeliveryHook(this.#hookRegistry, "delivery:success", {
+      const outcome: ArtifactDeliveryOutcome = {
+        status: "failed",
+        method: "none",
+        reasonCode: "artifact-delivery-unavailable"
+      };
+      await this.#recordDeliveryError(this.#targetToString(target), `artifact: ${outcome.reasonCode}`);
+      emitDeliveryHook(this.#hookRegistry, "delivery:error", {
         kind: "artifact",
         target: this.#sanitizeHookTarget(target),
         platform: target.kind === "channel" ? target.platform : target.kind === "origin" ? target.originalSessionKey.platform : undefined,
+        errorClass: "ArtifactDeliveryError",
+        errorMessage: outcome.reasonCode,
       });
+      return outcome;
+    }
+
+    try {
+      const outcome = await adapter.delivery.sendArtifact(sessionKey, artifact);
+      const hookTarget = this.#sanitizeHookTarget(target);
+      const platform = target.kind === "channel"
+        ? target.platform
+        : target.kind === "origin" ? target.originalSessionKey.platform : undefined;
+      if (outcome.status === "delivered") {
+        emitDeliveryHook(this.#hookRegistry, "delivery:success", {
+          kind: "artifact",
+          target: hookTarget,
+          platform,
+        });
+      } else if (outcome.status === "degraded") {
+        await this.#recordDeliveryError(
+          this.#targetToString(target),
+          `artifact degraded: ${outcome.reasonCode}${outcome.errorMessage === undefined ? "" : ` (${outcome.errorMessage})`}`
+        );
+        emitDeliveryHook(this.#hookRegistry, "delivery:degraded", {
+          kind: "artifact",
+          target: hookTarget,
+          platform,
+          method: outcome.method,
+          reasonCode: outcome.reasonCode,
+          errorClass: outcome.errorClass,
+          errorMessage: outcome.errorMessage,
+        });
+      } else {
+        await this.#recordDeliveryError(
+          this.#targetToString(target),
+          `artifact: ${outcome.reasonCode}${outcome.errorMessage === undefined ? "" : ` (${outcome.errorMessage})`}`
+        );
+        emitDeliveryHook(this.#hookRegistry, "delivery:error", {
+          kind: "artifact",
+          target: hookTarget,
+          platform,
+          errorClass: outcome.errorClass ?? "ArtifactDeliveryError",
+          errorMessage: outcome.errorMessage ?? outcome.reasonCode,
+        });
+      }
+      return outcome;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await this.#recordDeliveryError(this.#targetToString(target), `artifact: ${message}`);
@@ -339,6 +394,13 @@ export class DeliveryRouter {
         errorClass,
         errorMessage,
       });
+      return {
+        status: "failed",
+        method: "none",
+        reasonCode: "artifact-delivery-failed",
+        errorClass,
+        errorMessage
+      };
     }
   }
 

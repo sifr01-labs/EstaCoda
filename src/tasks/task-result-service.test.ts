@@ -96,6 +96,14 @@ describe("TaskResultService", () => {
     ]);
 
     const restarted = createService();
+    await expect(restarted.readText({
+      taskId: "task-alpha",
+      resultId: result.id,
+      sessionId: "creator-alpha"
+    })).resolves.toMatchObject({
+      result: { id: "result-1" },
+      content: "A😀BC"
+    });
     const first = await restarted.readPage({
       taskId: "task-alpha",
       resultId: result.id,

@@ -258,7 +258,11 @@ export class WhatsAppAdapter implements ChannelAdapter {
             throw new Error(result.error?.message ?? "WhatsApp bridge artifact notice failed");
           }
           this.rememberSentIds(result.messageIds ?? (result.messageId === undefined ? [] : [result.messageId]));
-          return;
+          return {
+            status: "degraded" as const,
+            method: "fallback-notice" as const,
+            reasonCode: "artifact-path-unavailable"
+          };
         }
 
         const prepared = await this.prepareOutboundMedia(artifact);
@@ -274,6 +278,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
             throw new Error(result.error?.message ?? "WhatsApp bridge media send failed");
           }
           this.rememberSentIds(result.messageIds ?? (result.messageId === undefined ? [] : [result.messageId]));
+          return { status: "delivered" as const, method: "native-upload" as const };
         } finally {
           if (prepared.cleanupPath !== undefined) {
             await rm(prepared.cleanupPath, { recursive: true, force: true }).catch(() => undefined);

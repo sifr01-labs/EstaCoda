@@ -34,6 +34,7 @@ export class MockChannelAdapter implements ChannelAdapter {
     },
     sendArtifact: async (sessionKey: ChannelSessionKey, artifact: ArtifactRecord) => {
       this.deliveries.push({ type: "artifact", sessionKey, artifact });
+      return { status: "delivered" as const, method: "native-upload" as const };
     }
   };
 

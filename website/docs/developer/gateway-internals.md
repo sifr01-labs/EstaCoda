@@ -266,7 +266,7 @@ Event categories include:
 | Adapter | `adapter:start`, `adapter:stop`, `adapter:error`, `adapter:retry`, `adapter:degraded`, `adapter:recovered` |
 | Session | `session:turn:start`, `session:turn:complete`, `session:turn:error`, `session:turn:abort` |
 | Cache | `session:cache:hit`, `session:cache:miss`, `session:cache:evict` |
-| Delivery | `delivery:success`, `delivery:error` |
+| Delivery | `delivery:success`, `delivery:degraded`, `delivery:error` |
 | Voice/STT | `gateway:stt:preprocess` |
 | Cron | `cron:tick:start`, `cron:tick:complete`, `cron:job:fail` |
 

@@ -913,7 +913,7 @@ describe("WhatsAppAdapter", () => {
     const reportPath = join(tmpDir, "media", "report.pdf");
     await writeFile(reportPath, "pdf");
 
-    await adapter.delivery!.sendArtifact!(
+    const outcome = await adapter.delivery!.sendArtifact!(
       { platform: "whatsapp", chatId: "971501234567@s.whatsapp.net", userId: "971501234567", chatType: "dm" },
       { id: "art-1", path: reportPath, mimeType: "application/pdf", kind: "document", bytes: 1024, createdAt: new Date().toISOString() }
     );
@@ -926,6 +926,7 @@ describe("WhatsAppAdapter", () => {
         fileName: "report.pdf",
       }),
     ]);
+    expect(outcome).toEqual({ status: "delivered", method: "native-upload" });
   });
 
   it("sends image, video, audio, voice, and document artifacts with correct bridge media types", async () => {
@@ -1093,11 +1094,16 @@ describe("WhatsAppAdapter", () => {
     const adapter = createAdapter();
     await adapter.start(async () => {});
 
-    await adapter.delivery!.sendArtifact!(
+    const outcome = await adapter.delivery!.sendArtifact!(
       { platform: "whatsapp", chatId: "971501234567@s.whatsapp.net", userId: "971501234567", chatType: "dm" },
       { id: "art-2", path: "", mimeType: "text/plain", kind: "document", bytes: 24, createdAt: new Date().toISOString() }
     );
 
     expect(bridge.sentText[0]!.message).toContain("art-2");
+    expect(outcome).toEqual({
+      status: "degraded",
+      method: "fallback-notice",
+      reasonCode: "artifact-path-unavailable"
+    });
   });
 });

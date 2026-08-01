@@ -77,6 +77,7 @@ const expectedLabels: Record<string, ToolDisplayLabelSet> = {
   "memory.file_compaction_restore": { en: "Restore Memory", ar: "استعادة ملف الذاكرة" },
   session_search: { en: "Search Sessions", ar: "بحث الجلسات" },
   "task.result.read": { en: "Read Task Result", ar: "قراءة نتيجة مهمة" },
+  "task.result.export": { en: "Export Task Result", ar: "تصدير نتيجة مهمة" },
   "task.status": { en: "Task Status", ar: "حالة المهمة" },
   "skill.list": { en: "List Skills", ar: "عرض المهارات" },
   "skill.read": { en: "Read Skill", ar: "قراءة مهارة" },
@@ -143,6 +144,7 @@ describe("tool display labels", () => {
   it("suppresses icons on plain and ACP surfaces", () => {
     expect(toolDisplayIcon("web.search", "channel")).toBe("🔎");
     expect(toolDisplayIcon("task.result.read", "papyrus")).toBe("📖");
+    expect(toolDisplayIcon("task.result.export", "papyrus")).toBe("📄");
     expect(toolDisplayIcon("task.status", "papyrus")).toBe("📋");
     expect(toolDisplayIcon("terminal.run", "cli")).toBe("🖥️");
     expect(toolDisplayIcon("terminal.run", "plain-log")).toBe("");

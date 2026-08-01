@@ -121,7 +121,14 @@ export class EmailAdapter implements ChannelAdapter {
     },
     sendArtifact: async (sessionKey: ChannelSessionKey, artifact: ArtifactRecord) => {
       const notice = renderArtifactNotice(artifact);
-      await this.#sendReply(sessionKey, notice, [artifact]);
+      const delivery = await this.#sendReply(sessionKey, notice, [artifact]);
+      return delivery.artifactAttachmentCount === 1
+        ? { status: "delivered" as const, method: "native-upload" as const }
+        : {
+            status: "degraded" as const,
+            method: "fallback-notice" as const,
+            reasonCode: "artifact-content-unavailable"
+          };
     }
   };
 
@@ -270,7 +277,11 @@ export class EmailAdapter implements ChannelAdapter {
     };
   }
 
-  async #sendReply(sessionKey: ChannelSessionKey, text: string, artifacts?: ArtifactRecord[]): Promise<void> {
+  async #sendReply(
+    sessionKey: ChannelSessionKey,
+    text: string,
+    artifacts?: ArtifactRecord[]
+  ): Promise<{ artifactAttachmentCount: number }> {
     const conversationId = sessionKey.chatId;
     const toAddr = conversationId.split("::")[0] ?? conversationId;
 
@@ -284,6 +295,7 @@ export class EmailAdapter implements ChannelAdapter {
       mime_type: string;
       data_b64: string;
     }> = [];
+    let artifactAttachmentCount = 0;
 
     for (const mediaPath of mediaPaths) {
       try {
@@ -310,10 +322,11 @@ export class EmailAdapter implements ChannelAdapter {
         const { basename } = await import("node:path");
         const data = await readFile(localPath);
         attachments.push({
-          filename: artifact.id ?? basename(localPath),
+          filename: basename(localPath),
           mime_type: artifact.mimeType ?? guessMimeType(localPath),
           data_b64: Buffer.from(data).toString("base64")
         });
+        artifactAttachmentCount++;
       } catch {
         // Skip unreadable artifact
       }
@@ -336,10 +349,15 @@ export class EmailAdapter implements ChannelAdapter {
       }
     });
 
-    if (result.ok && result.message_id) {
+    if (!result.ok) {
+      throw new Error(result.error ?? "Email delivery failed");
+    }
+
+    if (result.message_id) {
       const updatedRefs = [...references, result.message_id];
       this.#conversationIdToReferences.set(conversationId, updatedRefs);
     }
+    return { artifactAttachmentCount };
   }
 
   async #emailToChannelMessage(email: EmailWorkerMessage): Promise<ChannelMessage | undefined> {

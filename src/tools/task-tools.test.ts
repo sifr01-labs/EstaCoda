@@ -10,6 +10,9 @@ describe("task.status", () => {
     expect(status).toHaveBeenCalledWith("task-1", "session-1");
     expect(result).toMatchObject({ ok: true, metadata: { taskId: "task-1", status: "running" } });
     expect(result.content).toContain("Estimated cost: $0.01");
+    expect(result.content).toContain("result_id: result-1");
+    expect(result.content).toContain("handle: task-result:opaque");
+    expect(result.content).toContain("primary: true");
     expect(result.content).not.toContain("/private/workspace");
     expect(result.content).not.toContain("secret");
   });
@@ -44,6 +47,26 @@ describe("task.status", () => {
     });
     expect((await zeroTool!.run({ task_id: "task-1" })).content)
       .toContain("Estimated cost: $0.00");
+  });
+
+  it("bounds visible result handles while preserving the total count", async () => {
+    const status = projection();
+    status.results = Array.from({ length: 22 }, (_, index) => ({
+      id: `result-${index + 1}`,
+      handle: `task-result:opaque-${index + 1}`,
+      kind: "text",
+      disposition: "accepted",
+      status: "available",
+      byteLength: 10,
+      primary: index === 0
+    }));
+    const [tool] = createTaskTools({ service: { status: () => status } as never, currentSessionId: () => "session-1" });
+    const result = await tool!.run({ task_id: "task-1" });
+
+    expect(result.content).toContain("Results: 22");
+    expect(result.content).toContain("result_id: result-20");
+    expect(result.content).not.toContain("result_id: result-21");
+    expect(result.content).toContain("Result handles omitted: 2");
   });
 
   it("fails closed with one indistinguishable not-found response", async () => {
@@ -101,7 +124,15 @@ function projection() {
       pricingComplete: true,
       incompleteReasons: []
     },
-    results: [{ id: "result-1", handle: "task-result:opaque", kind: "text", status: "available", byteLength: 10 }],
+    results: [{
+      id: "result-1",
+      handle: "task-result:opaque",
+      kind: "text",
+      disposition: "accepted",
+      status: "available",
+      byteLength: 10,
+      primary: true
+    }],
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:01:00.000Z"
   };

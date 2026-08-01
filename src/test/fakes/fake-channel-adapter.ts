@@ -62,6 +62,7 @@ export function createFakeChannelAdapter(options: FakeChannelAdapterOptions): Ch
         artifact,
         timestamp: new Date().toISOString()
       });
+      return { status: "delivered" as const, method: "native-upload" as const };
     }
   };
 

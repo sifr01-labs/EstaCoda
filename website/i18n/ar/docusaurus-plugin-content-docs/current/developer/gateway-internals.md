@@ -266,7 +266,7 @@ sudo estacoda gateway uninstall --system
 | الموائم | `adapter:start`، `adapter:stop`، `adapter:error`، `adapter:retry`، `adapter:degraded`، `adapter:recovered` |
 | الجلسة | `session:turn:start`، `session:turn:complete`، `session:turn:error`، `session:turn:abort` |
 | Runtime cache | `session:cache:hit`، `session:cache:miss`، `session:cache:evict` |
-| التسليم | `delivery:success`، `delivery:error` |
+| التسليم | `delivery:success`، `delivery:degraded`، `delivery:error` |
 | الصوت/STT | `gateway:stt:preprocess` |
 | Cron | `cron:tick:start`، `cron:tick:complete`، `cron:job:fail` |
 

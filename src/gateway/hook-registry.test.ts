@@ -234,6 +234,27 @@ describe("HookRegistry", () => {
     expect(received[0]).not.toHaveProperty("fullPath");
   });
 
+  it("types and emits degraded artifact delivery outcomes", async () => {
+    const registry = new HookRegistry();
+    const received: unknown[] = [];
+    registry.on("delivery:degraded", (event) => {
+      received.push(event.payload);
+    });
+
+    const payload: GatewayHookPayloadByName["delivery:degraded"] = {
+      kind: "artifact",
+      target: "telegram:hashed",
+      platform: "telegram",
+      method: "fallback-notice",
+      reasonCode: "native-upload-failed",
+      errorClass: "Error",
+      errorMessage: "upload rejected"
+    };
+    await registry.emit("delivery:degraded", payload);
+
+    expect(received).toEqual([payload]);
+  });
+
   it("typed payload compile coverage for representative event names", async () => {
     const registry = new HookRegistry();
     const allEvents: unknown[] = [];

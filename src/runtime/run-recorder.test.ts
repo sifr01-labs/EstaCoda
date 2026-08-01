@@ -28,6 +28,47 @@ function makeTempDir(): string {
 }
 
 describe("RunRecorder", () => {
+  it("records artifacts nested in safe tool metadata envelopes", async () => {
+    const db = new SQLiteSessionDB({ path: join(makeTempDir(), "sessions.sqlite") });
+    try {
+      const session = await db.createSession({ id: "session-artifact", profileId: "default" });
+      const runRecorder = new RunRecorder({
+        sessionDb: db,
+        sessionId: session.id,
+        trajectoryRecorder: new TrajectoryRecorder({
+          profileId: "default",
+          sessionId: session.id,
+          modelId: "test-model",
+          id: () => "trajectory-artifact"
+        }),
+        trajectoryStore: db,
+        profileId: "default"
+      });
+      const toolExecution = execution("task.result.export");
+      toolExecution.result!.metadata = {
+        artifact: {
+          id: "artifact-1",
+          path: "answer.md",
+          localPath: "/private/profile/channel-media/answer.md",
+          kind: "document",
+          bytes: 12,
+          createdAt: "2030-01-01T00:00:00.000Z"
+        }
+      };
+
+      await expect(runRecorder.recordArtifactsFromExecutions([toolExecution], new Set())).resolves.toEqual([
+        expect.objectContaining({ id: "artifact-1", path: "answer.md", kind: "document" })
+      ]);
+      await expect(db.listEvents(session.id)).resolves.toContainEqual(expect.objectContaining({
+        kind: "artifact-created",
+        artifact: expect.objectContaining({ id: "artifact-1" }),
+        tool: "task.result.export"
+      }));
+    } finally {
+      db.close();
+    }
+  });
+
   it("records legacy-compatible skill-route telemetry without storing raw prompt text", async () => {
     const db = new SQLiteSessionDB({ path: join(makeTempDir(), "sessions.sqlite") });
 

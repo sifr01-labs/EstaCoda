@@ -4448,6 +4448,7 @@ describe("createRuntime SQLite session lifecycle", () => {
         expect(taskResultToolProvider.name).toBe("taskResult");
         expect(taskToolProvider.name).toBe("task");
         expect(runtime.tools().map((tool) => tool.name)).toContain("task.result.read");
+        expect(runtime.tools().map((tool) => tool.name)).toContain("task.result.export");
         expect(runtime.tools().map((tool) => tool.name)).toContain("task.status");
       } finally {
         await runtime.dispose();

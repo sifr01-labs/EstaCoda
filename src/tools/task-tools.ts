@@ -3,6 +3,7 @@ import { formatUsageCost, formatUsageCostNotice } from "../ui/usage-cost-format.
 import type { TaskOperatorService } from "../tasks/task-operator-service.js";
 
 export const TASK_STATUS_MAX_RESULT_CHARS = 12_000;
+export const TASK_STATUS_MAX_VISIBLE_RESULTS = 20;
 
 export function createTaskTools(options: {
   service?: TaskOperatorService;
@@ -35,6 +36,7 @@ export function createTaskTools(options: {
         const cost = taskUsageCostSummary(status.usage);
         const acceptedResults = status.results.filter((result) => result.disposition === "accepted");
         const diagnosticResults = status.results.filter((result) => result.disposition === "diagnostic");
+        const visibleResults = status.results.slice(0, TASK_STATUS_MAX_VISIBLE_RESULTS);
         return {
           ok: true,
           content: [
@@ -49,6 +51,20 @@ export function createTaskTools(options: {
             `Running: ${status.progress.running}`,
             `Waiting: ${status.progress.waiting_for_input + status.progress.waiting_for_approval}`,
             `Results: ${acceptedResults.length}`,
+            ...(visibleResults.length === 0 ? [] : [
+              "Result handles:",
+              ...visibleResults.map((result) => [
+                `- result_id: ${result.id}`,
+                `handle: ${result.handle}`,
+                `kind: ${result.kind}`,
+                `disposition: ${result.disposition}`,
+                `bytes: ${result.byteLength}`,
+                `primary: ${result.primary}`
+              ].join(" | ")),
+              ...(status.results.length > visibleResults.length
+                ? [`Result handles omitted: ${status.results.length - visibleResults.length}`]
+                : [])
+            ]),
             ...(diagnosticResults.length === 0 ? [] : [
               `Recovered output: ${diagnosticResults.length}`,
               "The Attempt failed. This output may be incomplete and was not accepted as the successful Step result."

@@ -315,6 +315,46 @@ else:
     expect(true).toBe(true);
   });
 
+  it("reports whether artifact content was attached or only a notice was sent", async () => {
+    const mockScript = `
+import json, sys
+req = json.loads(sys.stdin.readline())
+print(json.dumps({"ok": True, "message_id": "<artifact@test.com>"}))
+`;
+    await createMockWorker(mockScript);
+    const reportPath = join(tmpDir, "report.md");
+    await writeFile(reportPath, "report", "utf8");
+    const adapter = createAdapter();
+    await adapter.start(async () => {});
+    const sessionKey = {
+      platform: "email" as const,
+      chatId: "user@test.com::Topic",
+      userId: "user@test.com",
+      chatType: "dm" as const,
+      threadId: "Topic"
+    };
+    const artifact = {
+      id: "report",
+      path: reportPath,
+      localPath: reportPath,
+      kind: "document" as const,
+      bytes: 6,
+      createdAt: new Date().toISOString(),
+      mimeType: "text/markdown"
+    };
+
+    await expect(adapter.delivery.sendArtifact!(sessionKey, artifact)).resolves.toEqual({
+      status: "delivered",
+      method: "native-upload"
+    });
+    await expect(adapter.delivery.sendArtifact!(sessionKey, { ...artifact, path: "", localPath: "" })).resolves.toEqual({
+      status: "degraded",
+      method: "fallback-notice",
+      reasonCode: "artifact-content-unavailable"
+    });
+    await adapter.stop();
+  });
+
   it("returns 0 messages when poll returns empty", async () => {
     const mockScript = `
 import json, sys

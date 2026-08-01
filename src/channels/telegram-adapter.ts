@@ -16,6 +16,7 @@ import type {
 } from "../contracts/channel.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { TelegramChannelConfig } from "../config/runtime-config.js";
+import { sanitizeHookError } from "../gateway/hook-registry.js";
 import { buildAdapterCapability } from "./adapter-capability.js";
 import { renderChannelProgressLabel, type ActivityLabelLocale } from "./activity-labels.js";
 import { formatTelegramReply } from "./telegram-format.js";
@@ -199,6 +200,10 @@ type TelegramMediaGroupBuffer = {
   timer?: ReturnType<typeof setTimeout>;
 };
 
+type TelegramArtifactUploadAttempt =
+  | { ok: true }
+  | { ok: false; error: unknown };
+
 const DEFAULT_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const TELEGRAM_MAX_TEXT_UTF16 = 4096;
 const TELEGRAM_RICH_MESSAGE_MAX_CHARS = 32768;
@@ -359,17 +364,21 @@ export class TelegramAdapter implements ChannelAdapter {
     sendArtifact: async (sessionKey: ChannelSessionKey, artifact: ArtifactRecord) => {
       const address = telegramDeliveryAddress(sessionKey);
       this.#clearProgress(sessionKey);
+      let failedAttempt: Extract<TelegramArtifactUploadAttempt, { ok: false }> | undefined;
+      let reasonCode = "native-upload-failed";
       if (artifact.kind === "audio") {
-        const delivered = await this.#sendAudioArtifact(address, artifact);
-        if (delivered) {
-          return;
+        const attempt = await this.#sendAudioArtifact(address, artifact);
+        if (attempt.ok) {
+          return { status: "delivered" as const, method: "native-upload" as const };
         }
+        failedAttempt = attempt;
       }
       if (artifact.kind === "image") {
-        const delivered = await this.#sendImageArtifact(address, artifact);
-        if (delivered) {
-          return;
+        const attempt = await this.#sendImageArtifact(address, artifact);
+        if (attempt.ok) {
+          return { status: "delivered" as const, method: "native-upload" as const };
         }
+        failedAttempt = attempt;
       }
       // Telegram Bot API limits:
       // - Multipart uploads: 50 MB for documents, videos, and other non-photo files
@@ -382,21 +391,33 @@ export class TelegramAdapter implements ChannelAdapter {
         const info = await stat(filePath).catch(() => undefined);
         exceedsLimit = (info?.size ?? 0) > effectiveLimit;
       }
+      if (exceedsLimit) {
+        reasonCode = "attachment-too-large";
+      }
       if (!exceedsLimit) {
         if (artifact.kind === "video") {
-          const delivered = await this.#sendVideoArtifact(address, artifact);
-          if (delivered) {
-            return;
+          const attempt = await this.#sendVideoArtifact(address, artifact);
+          if (attempt.ok) {
+            return { status: "delivered" as const, method: "native-upload" as const };
           }
+          failedAttempt = attempt;
         }
         if (artifact.kind === "document" || artifact.kind === "data" || artifact.kind === "other") {
-          const delivered = await this.#sendDocumentArtifact(address, artifact);
-          if (delivered) {
-            return;
+          const attempt = await this.#sendDocumentArtifact(address, artifact);
+          if (attempt.ok) {
+            return { status: "delivered" as const, method: "native-upload" as const };
           }
+          failedAttempt = attempt;
         }
       }
-      await this.#sendMessage(address, renderArtifactNotice(artifact));
+      await this.#sendMessage(address, renderArtifactFallbackNotice(artifact));
+      const diagnostic = failedAttempt === undefined ? undefined : sanitizeHookError(failedAttempt.error);
+      return {
+        status: "degraded" as const,
+        method: "fallback-notice" as const,
+        reasonCode,
+        ...(diagnostic === undefined ? {} : diagnostic)
+      };
     },
     startStreamingText: (sessionKey: ChannelSessionKey, options?: ChannelStreamingTextOptions) => {
       return this.#startStreamingText(sessionKey, options);
@@ -1073,7 +1094,7 @@ export class TelegramAdapter implements ChannelAdapter {
     return localPath;
   }
 
-  async #sendAudioArtifact(address: TelegramDeliveryAddress, artifact: ArtifactRecord): Promise<boolean> {
+  async #sendAudioArtifact(address: TelegramDeliveryAddress, artifact: ArtifactRecord): Promise<TelegramArtifactUploadAttempt> {
     let cleanupPath: string | undefined;
     try {
       const localPath = artifact.localPath ?? artifact.path;
@@ -1091,9 +1112,9 @@ export class TelegramAdapter implements ChannelAdapter {
       }
       await this.#sendChatAction(address, "upload_voice");
       await this.#callMultipart<TelegramSentMessage>(voiceBubble ? "sendVoice" : "sendAudio", form);
-      return true;
-    } catch {
-      return false;
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error };
     } finally {
       if (cleanupPath !== undefined) {
         await rm(cleanupPath, { recursive: true, force: true }).catch(() => {});
@@ -1177,7 +1198,7 @@ export class TelegramAdapter implements ChannelAdapter {
     };
   }
 
-  async #sendImageArtifact(address: TelegramDeliveryAddress, artifact: ArtifactRecord): Promise<boolean> {
+  async #sendImageArtifact(address: TelegramDeliveryAddress, artifact: ArtifactRecord): Promise<TelegramArtifactUploadAttempt> {
     try {
       const form = new FormData();
       appendTelegramAddress(form, address);
@@ -1194,13 +1215,13 @@ export class TelegramAdapter implements ChannelAdapter {
       }
       await this.#sendChatAction(address, "upload_photo");
       await this.#callMultipart<TelegramSentMessage>("sendPhoto", form);
-      return true;
-    } catch {
-      return false;
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error };
     }
   }
 
-  async #sendDocumentArtifact(address: TelegramDeliveryAddress, artifact: ArtifactRecord): Promise<boolean> {
+  async #sendDocumentArtifact(address: TelegramDeliveryAddress, artifact: ArtifactRecord): Promise<TelegramArtifactUploadAttempt> {
     try {
       const form = new FormData();
       appendTelegramAddress(form, address);
@@ -1217,13 +1238,13 @@ export class TelegramAdapter implements ChannelAdapter {
       }
       await this.#sendChatAction(address, "upload_document");
       await this.#callMultipart<TelegramSentMessage>("sendDocument", form);
-      return true;
-    } catch {
-      return false;
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error };
     }
   }
 
-  async #sendVideoArtifact(address: TelegramDeliveryAddress, artifact: ArtifactRecord): Promise<boolean> {
+  async #sendVideoArtifact(address: TelegramDeliveryAddress, artifact: ArtifactRecord): Promise<TelegramArtifactUploadAttempt> {
     try {
       const form = new FormData();
       appendTelegramAddress(form, address);
@@ -1240,9 +1261,9 @@ export class TelegramAdapter implements ChannelAdapter {
       }
       await this.#sendChatAction(address, "upload_video");
       await this.#callMultipart<TelegramSentMessage>("sendVideo", form);
-      return true;
-    } catch {
-      return false;
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error };
     }
   }
 
@@ -2494,11 +2515,12 @@ function disposeProgressState(state: TelegramProgressState): void {
   }
 }
 
-function renderArtifactNotice(artifact: ArtifactRecord): string {
+function renderArtifactFallbackNotice(artifact: ArtifactRecord): string {
   return [
-    "💎 Artifact ready",
+    "⚠️ Artifact file upload unavailable",
+    "The file was not attached.",
     `Type: ${artifact.kind}`,
-    `Path: ${artifact.path}`,
+    `Artifact: ${artifact.id}`,
     artifact.summary === undefined ? undefined : `Summary: ${truncateSummary(artifact.summary)}`
   ].filter((line) => line !== undefined).join("\n");
 }

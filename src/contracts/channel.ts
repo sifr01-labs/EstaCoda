@@ -139,10 +139,30 @@ export type ChannelStreamingTextOptions = {
   transport?: "auto" | "edit" | "draft";
 };
 
+export type ArtifactDeliveryOutcome =
+  | {
+      status: "delivered";
+      method: "native-upload";
+    }
+  | {
+      status: "degraded";
+      method: "fallback-notice";
+      reasonCode: string;
+      errorClass?: string;
+      errorMessage?: string;
+    }
+  | {
+      status: "failed";
+      method: "none";
+      reasonCode: string;
+      errorClass?: string;
+      errorMessage?: string;
+    };
+
 export type ChannelDelivery = {
   sendText(sessionKey: ChannelSessionKey, text: string, options?: ChannelTextOptions): Promise<void>;
   sendProgress?(sessionKey: ChannelSessionKey, event: RuntimeEvent): Promise<void>;
-  sendArtifact?(sessionKey: ChannelSessionKey, artifact: ArtifactRecord): Promise<void>;
+  sendArtifact?(sessionKey: ChannelSessionKey, artifact: ArtifactRecord): Promise<ArtifactDeliveryOutcome>;
   startStreamingText?(sessionKey: ChannelSessionKey, options?: ChannelStreamingTextOptions): ChannelStreamingTextHandle;
 };
 

@@ -2885,7 +2885,10 @@ describe("TelegramAdapter", () => {
         mimeType: "application/pdf"
       };
 
-      await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123", threadId: "42" }, artifact);
+      await expect(adapter.delivery.sendArtifact(
+        { platform: "telegram", chatId: "123", threadId: "42" },
+        artifact
+      )).resolves.toEqual({ status: "delivered", method: "native-upload" });
 
       const form = formDataBody(callsForArtifactMethod(calls, "sendDocument")[0]);
       const document = form.get("document");
@@ -2992,7 +2995,7 @@ describe("TelegramAdapter", () => {
   it("delivery.sendArtifact falls back to a text notice for unsupported HTTP document URLs", async () => {
     const { adapter, calls } = createTelegramArtifactHarness({ failMethods: ["sendDocument"] });
 
-    await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123" }, {
+    const outcome = await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123" }, {
       id: "remote-text",
       path: "https://example.com/file.txt",
       kind: "document",
@@ -3002,8 +3005,14 @@ describe("TelegramAdapter", () => {
     });
 
     const fallback = jsonBody(callsForArtifactMethod(calls, "sendMessage")[0]);
-    expect(fallback.text).toContain("Artifact ready");
-    expect(fallback.text).toContain("Path: https://example.com/file.txt");
+    expect(outcome).toMatchObject({
+      status: "degraded",
+      method: "fallback-notice",
+      reasonCode: "native-upload-failed"
+    });
+    expect(fallback.text).toContain("Artifact file upload unavailable");
+    expect(fallback.text).toContain("The file was not attached.");
+    expect(fallback.text).not.toContain("https://example.com/file.txt");
   });
 
   it("delivery.sendArtifact falls back to a text notice for oversized local documents", async () => {
@@ -3013,7 +3022,7 @@ describe("TelegramAdapter", () => {
       await writeFile(path, "larger than one byte");
       const { adapter, calls } = createTelegramArtifactHarness({ maxAttachmentBytes: 1 });
 
-      await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123" }, {
+      const outcome = await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123" }, {
         id: "large-doc",
         path,
         localPath: path,
@@ -3025,8 +3034,13 @@ describe("TelegramAdapter", () => {
 
       expect(callsForArtifactMethod(calls, "sendDocument")).toHaveLength(0);
       const fallback = jsonBody(callsForArtifactMethod(calls, "sendMessage")[0]);
-      expect(fallback.text).toContain("Artifact ready");
-      expect(fallback.text).toContain(`Path: ${path}`);
+      expect(outcome).toEqual({
+        status: "degraded",
+        method: "fallback-notice",
+        reasonCode: "attachment-too-large"
+      });
+      expect(fallback.text).toContain("Artifact file upload unavailable");
+      expect(fallback.text).not.toContain(path);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
@@ -3039,7 +3053,7 @@ describe("TelegramAdapter", () => {
       await writeFile(path, "pdf");
       const { adapter, calls } = createTelegramArtifactHarness({ failMethods: ["sendDocument"] });
 
-      await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123" }, {
+      const outcome = await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123" }, {
         id: "doc-fail",
         path,
         localPath: path,
@@ -3050,8 +3064,14 @@ describe("TelegramAdapter", () => {
       });
 
       const fallback = jsonBody(callsForArtifactMethod(calls, "sendMessage")[0]);
-      expect(fallback.text).toContain("Artifact ready");
-      expect(fallback.text).toContain(`Path: ${path}`);
+      expect(outcome).toMatchObject({
+        status: "degraded",
+        method: "fallback-notice",
+        reasonCode: "native-upload-failed",
+        errorClass: "TelegramApiError"
+      });
+      expect(fallback.text).toContain("Artifact file upload unavailable");
+      expect(fallback.text).not.toContain(path);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
@@ -3064,7 +3084,7 @@ describe("TelegramAdapter", () => {
       await writeFile(path, "video");
       const { adapter, calls } = createTelegramArtifactHarness({ failMethods: ["sendVideo"] });
 
-      await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123" }, {
+      const outcome = await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123" }, {
         id: "video-fail",
         path,
         localPath: path,
@@ -3075,8 +3095,15 @@ describe("TelegramAdapter", () => {
       });
 
       const fallback = jsonBody(callsForArtifactMethod(calls, "sendMessage")[0]);
-      expect(fallback.text).toContain("Artifact ready");
-      expect(fallback.text).toContain(`Path: ${path}`);
+      expect(outcome).toMatchObject({
+        status: "degraded",
+        method: "fallback-notice",
+        reasonCode: "native-upload-failed",
+        errorClass: "TelegramApiError"
+      });
+      expect(fallback.text).toContain("Artifact file upload unavailable");
+      expect(fallback.text).toContain("The file was not attached");
+      expect(fallback.text).not.toContain(path);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
