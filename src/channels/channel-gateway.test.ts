@@ -7015,7 +7015,13 @@ describe("ChannelGateway commands", () => {
       });
 
       it("combines WhatsApp DM texts within the quiet window into one runtime call", async () => {
-        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        vi.useFakeTimers();
+        let resolveHandled: (() => void) | undefined;
+        const handled = new Promise<void>((resolve) => { resolveHandled = resolve; });
+        const handle = vi.fn(async () => {
+          resolveHandled?.();
+          return runtimeResponse({ text: "ok", securityDecision: "allow" });
+        });
         const { gateway } = createDebounceGateway({
           handle,
           config: { textDebounceMs: 10, textDebounceMaxMessages: 10, textDebounceMaxChars: 8_000 }
@@ -7025,7 +7031,8 @@ describe("ChannelGateway commands", () => {
         await gateway.receive(makeWhatsAppMessage("second", { id: "m2" }));
         expect(handle).not.toHaveBeenCalled();
 
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        await vi.advanceTimersByTimeAsync(10);
+        await handled;
 
         expect(handle).toHaveBeenCalledTimes(1);
         expect(handle).toHaveBeenCalledWith(expect.objectContaining({
@@ -7039,19 +7046,26 @@ describe("ChannelGateway commands", () => {
       });
 
       it("resets the quiet timer when another WhatsApp text arrives", async () => {
-        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        vi.useFakeTimers();
+        let resolveHandled: (() => void) | undefined;
+        const handled = new Promise<void>((resolve) => { resolveHandled = resolve; });
+        const handle = vi.fn(async () => {
+          resolveHandled?.();
+          return runtimeResponse({ text: "ok", securityDecision: "allow" });
+        });
         const { gateway } = createDebounceGateway({
           handle,
           config: { textDebounceMs: 10, textDebounceMaxMessages: 10, textDebounceMaxChars: 8_000 }
         });
 
         await gateway.receive(makeWhatsAppMessage("first"));
-        await new Promise((resolve) => setTimeout(resolve, 8));
+        await vi.advanceTimersByTimeAsync(8);
         await gateway.receive(makeWhatsAppMessage("second"));
-        await new Promise((resolve) => setTimeout(resolve, 8));
+        await vi.advanceTimersByTimeAsync(9);
         expect(handle).not.toHaveBeenCalled();
 
-        await new Promise((resolve) => setTimeout(resolve, 5));
+        await vi.runOnlyPendingTimersAsync();
+        await handled;
         expect(handle).toHaveBeenCalledTimes(1);
         expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "first\n\nsecond" }));
       });
