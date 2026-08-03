@@ -1,5 +1,5 @@
 import { stringWidth } from "../screen/stringWidth.js";
-import { closeOpenBidiIsolates, isolateLtr } from "../../bidi.js";
+import { closeOpenBidiIsolates, isolateLtr, isolateRtl } from "../../bidi.js";
 import type { UiLocale } from "../../cli-ui-copy.js";
 import { padVisibleEnd, padVisibleStart, truncateVisible } from "../../renderers/layout.js";
 import type { StartupCommandState, StartupDashboardState } from "./operatorConsoleState.js";
@@ -185,7 +185,7 @@ function arabicSessionRowsForStackedSurface(
     { label: "الجلسة", value: state.sessionId },
     { label: "مساحة العمل", value: state.session.workspace },
     { label: "الموافقة", value: localizeApprovalValue(state.session.security), order: "tight-value-label" },
-    { label: "تطور الوكيل", value: localizeStackedEvolutionValue(state.session.autonomy), order: "tight-value-label" },
+    { label: "تطوّر الوكيل", value: localizeStackedEvolutionValue(state.session.autonomy), order: "tight-value-label" },
   ];
 }
 
@@ -216,7 +216,7 @@ function arabicUpdateRowsForStackedSurface(state: StartupDashboardState): readon
 function arabicTipRowsForStackedSurface(): readonly ArabicStackedRow[] {
   return [
     { value: "الصق السياق الكبير كمرفقات" },
-    { label: "لتغيير المسارات استخدم", value: "/model" },
+    { label: "لتغيير النموذج استخدم", value: "/model" },
   ];
 }
 
@@ -267,7 +267,7 @@ function formatArabicStackedRow(row: ArabicStackedRow, blockWidth: number, label
   const value = truncateVisibleCells(row.value, valueWidth);
   const label = truncateVisibleCells(row.label, labelWidth);
   if (row.order === "tight-value-label") {
-    return padVisibleStart(`${value}${" ".repeat(gapWidth)}${label}`, blockWidth);
+    return padVisibleStart(`${isolateRtl(value)}${" ".repeat(gapWidth)}${isolateRtl(label)}`, blockWidth);
   }
   if (row.order === "label-value") {
     return `${padVisibleEnd(label, labelWidth)}${" ".repeat(gapWidth)}${padVisibleStart(value, valueWidth)}`;
