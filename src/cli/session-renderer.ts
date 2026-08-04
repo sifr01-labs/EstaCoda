@@ -42,7 +42,7 @@ export function createSessionRenderer(options: CreateSessionRendererOptions = {}
   const locale = options.locale ?? "en";
 
   if (shouldUsePlain) {
-    return { render: (vm) => renderPlain(vm, locale), tokens, capabilities: caps, locale };
+    return { render: (vm) => renderPlain(vm, locale, caps.terminalWidth), tokens, capabilities: caps, locale };
   }
 
   const renderer = new StandardRenderer({ tokens, capabilities: caps, locale });

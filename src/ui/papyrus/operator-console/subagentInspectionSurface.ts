@@ -26,6 +26,7 @@ type SubagentCopy = {
   readonly retainedTimeline: string;
   readonly noActivity: string;
   readonly resultSummary: string;
+  readonly noResultSummary: string;
   readonly filesAndArtifacts: string;
   readonly attempts: string;
   readonly current: string;
@@ -55,6 +56,7 @@ const COPY: Readonly<Record<OperatorConsoleLocale, SubagentCopy>> = {
     retainedTimeline: "Retained safe activity",
     noActivity: "No retained safe activity yet",
     resultSummary: "Result summary",
+    noResultSummary: "Open to inspect the full result",
     filesAndArtifacts: "Results and artifacts",
     attempts: "Attempts and retries",
     current: "current",
@@ -82,6 +84,7 @@ const COPY: Readonly<Record<OperatorConsoleLocale, SubagentCopy>> = {
     retainedTimeline: "النشاط الآمن المحفوظ",
     noActivity: "لا يوجد نشاط آمن محفوظ بعد",
     resultSummary: "ملخص النتيجة",
+    noResultSummary: "افتح النتيجة لفحصها كاملة",
     filesAndArtifacts: "النتائج والمخرجات",
     attempts: "المحاولات وإعادات المحاولة",
     current: "الحالية",
@@ -203,7 +206,7 @@ export function subagentInspectionContentLines(
         `${formatTimestamp(event.timestamp)} · ${formatCategory(event.category, locale)} · ${event.label}`
       ), style);
 
-  const summaries = resultSummaryLines(subagent);
+  const summaries = resultSummaryLines(subagent, copy);
   addSection(lines, copy.resultSummary, summaries.length === 0 ? [copy.none] : summaries, style);
   addSection(lines, copy.filesAndArtifacts, subagent.results.length === 0
     ? [copy.none]
@@ -228,19 +231,28 @@ export function subagentInspectionContentLines(
   return lines;
 }
 
-function resultSummaryLines(subagent: TaskCardSubagentState): readonly string[] {
-  const values: string[] = [];
+function resultSummaryLines(
+  subagent: TaskCardSubagentState,
+  copy: SubagentCopy
+): readonly string[] {
+  const acceptedResults = subagent.results.filter((result) => result.disposition === "accepted");
+  if (acceptedResults.length > 0) {
+    const summaries = acceptedResults.flatMap((result) => {
+      const summary = deriveTaskResultSummary(result.displaySummary ?? result.summary, 480);
+      return summary === undefined ? [] : [summary];
+    });
+    const livePreview = subagent.status === "running"
+      ? normalizeText(
+          subagent.assistantPreview ?? subagent.activeAttempt?.assistantPreview ?? subagent.latestAttempt?.assistantPreview
+        )
+      : undefined;
+    const values = [...(livePreview === undefined ? [] : [livePreview]), ...summaries];
+    return values.length === 0 ? [copy.noResultSummary] : [...new Set(values)];
+  }
   const preview = normalizeText(
     subagent.assistantPreview ?? subagent.activeAttempt?.assistantPreview ?? subagent.latestAttempt?.assistantPreview
   );
-  if (preview !== undefined) values.push(preview);
-  for (const result of subagent.results) {
-    const summary = deriveTaskResultSummary(result.displaySummary ?? result.summary, 480);
-    if (result.disposition === "accepted" && summary !== undefined) {
-      values.push(summary);
-    }
-  }
-  return [...new Set(values)];
+  return preview === undefined ? [] : [preview];
 }
 
 function blockerLines(

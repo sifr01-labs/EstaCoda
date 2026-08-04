@@ -366,6 +366,15 @@ function cloneTranscriptBlock(block: TranscriptBlock): TranscriptBlock {
     ...block,
     ...(block.attachmentIds === undefined ? {} : { attachmentIds: [...block.attachmentIds] }),
     ...(block.toolTrail === undefined ? {} : { toolTrail: block.toolTrail.map(cloneInlineToolTrailEntry) }),
+    ...(block.taskTrace === undefined ? {} : {
+      taskTrace: {
+        ...block.taskTrace,
+        spans: block.taskTrace.spans.map((span) => ({ ...span, scope: { ...span.scope } })),
+        ...(block.taskTrace.workerOutcomes === undefined
+          ? {}
+          : { workerOutcomes: { ...block.taskTrace.workerOutcomes } }),
+      },
+    }),
   };
 }
 

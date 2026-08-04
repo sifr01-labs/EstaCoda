@@ -44,7 +44,7 @@ import type {
 // Generic dispatcher
 // ─────────────────────────────────────────────────────────────
 
-export function renderPlain(viewModel: ViewModel, locale?: UiLocale): string {
+export function renderPlain(viewModel: ViewModel, locale?: UiLocale, width = 80): string {
   switch (viewModel.kind) {
     case "status":
       return renderStatus(viewModel);
@@ -75,7 +75,7 @@ export function renderPlain(viewModel: ViewModel, locale?: UiLocale): string {
     case "plainFallback":
       return renderPlainFallback(viewModel);
     case "assistantResponse":
-      return renderAssistantResponse(viewModel, locale);
+      return renderAssistantResponse(viewModel, locale, width);
     case "conversationMessage":
       return renderConversationMessage(viewModel, locale);
     case "sessionStatusRail":
@@ -1211,14 +1211,18 @@ export function renderStartupDashboard(vm: StartupDashboardViewModel, locale: Ui
 // Command Result
 // ──────────────────────────────────────
 
-export function renderAssistantResponse(vm: AssistantResponseViewModel, locale: UiLocale = "en"): string {
+export function renderAssistantResponse(
+  vm: AssistantResponseViewModel,
+  locale: UiLocale = "en",
+  width = 80
+): string {
   const plainLabel = /^[\x00-\x7F]+$/.test(vm.label) ? vm.label : "EstaCoda";
   const lines: string[] = [
     ...(vm.taskTrace === undefined
       ? []
       : [
           ...renderTaskCompletionTrace(vm.taskTrace, {
-            width: 80,
+            width: Math.max(1, Math.floor(width)),
             locale: locale === "ar" ? "ar" : "en",
             useUnicode: false,
           }),

@@ -363,21 +363,16 @@ foreground/background/waiting ownership, show the immutable preference and
 background-continuation readiness, and include only a bounded safe wait reason.
 Expired leases and Task status alone are never presented as active ownership.
 Cards remain available after completion, failure, partial settlement, or
-cancellation; they are not transient worker rows. The main-session Task region
-shows stable `Subagent N` identities beneath the live assistant stream. Each
-full Subagent card occupies exactly seven rows, including its title and truthful
-status/elapsed/tokens/cost footer. The interior continually refreshes with the
-latest retained safe activity. Cards use the elevated grey surface token,
-whitespace gutters instead of permanent perimeter borders, and the existing
-worker motion token while running. Focus adds the action-color leading rail and
-title treatment. The main card is a presentation projection: lifecycle and
-accounting events such as `Worker finished`, Step-state changes, Attempt
-bookkeeping, and usage recording remain available in inspection but do not
-consume its activity rows. Running cards show semantic safe work such as
-searching, reading, writing, or preparing an answer. Completed cards replace
-those transient rows with `Result ready` and up to three wrapped lines from the
-accepted result summary, falling back to the retained assistant preview only
-when no result summary exists.
+cancellation; they are not transient worker rows. Every live delegated Task
+uses one compact command center beneath the live assistant stream: Task header,
+stage tracker, current-stage summary, logical activity ribbon, current activity,
+compact worker rows, and state-valid controls. Worker rows keep stable
+`Subagent N` identities and use the elevated surface token; focus adds the
+action-color treatment. Selecting a row opens its detailed activity, result,
+Attempt, dependency, and accounting inspection. Lifecycle and accounting events
+such as `Worker finished`, Step-state changes, Attempt bookkeeping, and usage
+recording remain available in inspection but do not consume the main ribbon or
+current-activity line.
 
 The main-session Task header uses a compact display identity: generated
 `task_<uuid>` values render as `task_` plus the first eight UUID characters,
@@ -386,30 +381,28 @@ namespace. The exact durable Task ID remains visible in inspection and remains
 the only value used for focus, hit regions, routing, commands, and persistence.
 
 When every delegated Subagent is settled and the durable synthesis Step is
-`ready`, `running`, `waiting_for_input`, or `waiting_for_approval`, the
-main-session Task region gives the parent stage visual priority. It shows a
-distinct `Parent synthesis` panel sourced from that Step's persisted status,
-current Attempt, safe activity, usage, and semantic trace. The panel reports
-the factual number of Subagent results being synthesized and the worker-only
-settlement fact, such as `3 of 3 delegated Steps completed`. The live Task
-header and whole-Task view derive a read-only user phase from the persisted
-graph, so a durable lifecycle of `running` is presented as `delegating` or
-`synthesizing` when the Step state proves it. This projection does not mutate
-the Task, scheduler, or API lifecycle. It never invents intermediate prose or
-a completion percentage. Audit-only lifecycle events do not become its
-selected activity callout.
+`ready`, `running`, `waiting_for_input`, or `waiting_for_approval`, the same
+command center advances its active stage to synthesis. The stage summary is
+sourced from the synthesis Step's persisted status, current Attempt, safe
+activity, and usage; worker outcomes remain a separate completed or warning
+stage. The live Task header and whole-Task view derive this read-only user phase
+from the persisted graph, so a durable lifecycle of `running` is presented as
+`delegating` or `synthesizing` when the Step state proves it. This projection
+does not mutate the Task, scheduler, or API lifecycle. It never invents
+intermediate prose or a completion percentage. Audit-only lifecycle events do
+not become its selected activity callout.
 
 The rich Papyrus session does not retain a one-time `running` transcript notice
 above a live Task card because that snapshot would become stale. The live card
 is authoritative. Plain and non-TTY sessions instead print the current derived
 phase and worker settlement as a bounded snapshot because no live card exists.
 
-While that parent stage is active, settled seven-row Subagent cards collapse to
-individually focusable one-row summaries beneath it. Their exact Step IDs and
-mouse/keyboard routes do not change, and their complete safe activity and
-accepted result summaries remain available in inspection. The parent panel
-opens whole-Task inspection. Before synthesis becomes active, and after it
-settles, the ordinary seven-row Subagent presentation remains in effect.
+The compact worker rows remain individually focusable throughout delegation and
+synthesis. Their exact Step IDs and mouse/keyboard routes do not change, and
+their complete safe activity and accepted result summaries remain available in
+inspection. The Task header opens whole-Task inspection. When the Task settles,
+the retained Task rolls into its existing one-row receipt while the permanent
+completion ribbon moves above the delivered answer.
 
 An interactive CLI delegation with one worker receives a durable local
 completion binding, as does a batch with its default synthesis Step. Once the
@@ -428,7 +421,7 @@ recovery may safely show the same durable answer again after the claim becomes
 stale. A settled Result is displayed normally; the CLI does not replay
 completed text as fake token streaming.
 
-Completed Subagent cards prefer the Result's dedicated `displaySummary` over
+Completed Subagent inspection prefers the Result's dedicated `displaySummary` over
 generic Result metadata or streaming previews. The field is immutable,
 single-line plain text bounded to 480 Unicode characters; Agent Steps populate
 it from the deliberately requested opening summary paragraph. Results created
@@ -436,12 +429,11 @@ before this contract remain compatible: Papyrus safely extracts the first
 complete usable paragraph from their generic `summary` metadata. It never uses
 an arbitrary assistant-stream tail as the settled summary.
 
-One to three Subagents stack vertically. Four to six use two equal-width,
-column-major columns when both remain readable. A third column is added only at
-a readable width; otherwise the surface keeps complete seven-row cards and
-shows `+N more Subagents`. Narrow and height-constrained terminals use the
-single-column or compact deterministic fallback instead of clipping a card.
-The Task header opens the whole-Task view; a Subagent card opens that Subagent.
+Compact Subagent rows stack vertically at narrow widths and use at most two
+equal-width, column-major columns when both remain readable. Height-constrained
+terminals preserve stage and ribbon truth first, then show as many complete
+worker rows as fit with a factual `+N more Subagents` summary. The Task header
+opens the whole-Task view; a Subagent row opens that Subagent.
 
 The whole-Task inspection workspace shows the objective, lifecycle, elapsed
 time, aggregate usage/cost, factual Step state, Subagent summaries, approvals,
@@ -524,14 +516,16 @@ visible response is delivered.
 
 When a durable Task answer is delivered into its originating CLI transcript,
 the session message also persists a versioned, bounded snapshot of the final
-logical activity spans. The renderer keeps that compact ribbon immediately
-above the answer after settlement, with terminal outcome, total duration, and
-degraded worker truth. The answer body remains unchanged, old completion
-messages without a snapshot remain readable, and malformed snapshot metadata is
-ignored rather than blocking delivery. At most 96 safe logical spans are stored;
-an earlier marker and lower-bound activity count preserve truth when history was
-already bounded. Raw Task Events, provider text, tool input/output, paths, and
-result bodies are never copied into the snapshot.
+logical activity spans. Both the structured Operator Console transcript and the
+plain renderer keep that compact ribbon immediately above the answer after
+settlement, using the actual terminal width and showing terminal outcome, total
+duration, and degraded worker truth. New snapshots retain the factual total
+worker count; older version-1 snapshots without it remain readable. The answer
+body remains unchanged, and malformed snapshot metadata is ignored rather than
+blocking delivery. At most 96 safe logical spans are stored; an earlier marker
+and lower-bound activity count preserve truth when history was already bounded.
+Raw Task Events, provider text, tool input/output, paths, and result bodies are
+never copied into the snapshot.
 
 Interactive input precedence is centralized as: modal Task inspection,
 approval prompt, autocomplete/typeahead, attachment selection, then ordinary

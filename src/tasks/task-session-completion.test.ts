@@ -95,6 +95,7 @@ describe("TaskSessionCompletionService", () => {
           answerAvailable: true,
           activityCount: 6,
           activityCountComplete: true,
+          workerOutcomes: expect.objectContaining({ total: 1 }),
         }),
       }),
     ]);

@@ -88,6 +88,19 @@ describe("plain assistant response", () => {
     expect(output).toContain("\\ Deliver · Task · 1:50 total · Final answer ready");
     assertNoAnsi(output);
   });
+
+  it("uses the actual plain terminal width for the persisted ribbon", () => {
+    const width = 32;
+    const output = renderAssistantResponse(buildAssistantResponseViewModel({
+      label: "EstaCoda",
+      text: "Delivered.",
+      taskTrace: completionTrace(),
+    }), "en", width);
+    const trace = output.slice(0, output.indexOf("EstaCoda:")).trimEnd().split("\n");
+
+    expect(trace).toContainEqual(expect.stringContaining("Activity trace"));
+    expect(trace.every((line) => measureVisibleWidth(line) <= width)).toBe(true);
+  });
 });
 
 function completionTrace() {
@@ -101,6 +114,7 @@ function completionTrace() {
     activityCountComplete: true,
     totalDurationMs: 110_000,
     hasEarlierActivities: false,
+    workerOutcomes: { usable: 1, failed: 0, cancelled: 0, total: 1 },
     spans: [
       { category: "plan" as const, scope: { kind: "task" as const, label: "Task" }, status: "completed" as const, durationMs: 10_000, label: "Planning" },
       { category: "search" as const, scope: { kind: "subagent" as const, label: "Subagent 1" }, status: "completed" as const, durationMs: 20_000, label: "Searching" },

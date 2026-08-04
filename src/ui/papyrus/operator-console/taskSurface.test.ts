@@ -23,7 +23,7 @@ import {
 } from "./index.js";
 
 describe("durable Task surfaces", () => {
-  it("renders one Subagent as exactly seven borderless grey rows with semantic title and truthful footer", () => {
+  it("renders one Subagent as a compact command-center row with details retained in inspection", () => {
     const tokens = resolveTokens("standard", "dark", "kemetBlue");
     const style = createOperatorConsoleStyle({
       tokens,
@@ -53,24 +53,22 @@ describe("durable Task surfaces", () => {
     });
     const text = stripAnsi(lines.join("\n"));
 
-    expect(lines).toHaveLength(9);
-    expect(lines.slice(1, 8)).toHaveLength(7);
-    expect(text).toContain("Task 1/1");
-    expect(text).toContain("Subagent 1 · Research how modern AI agents improve themselves auto…");
+    expect(lines).toHaveLength(11);
+    expect(text).toContain("Competitor comparison");
+    expect(text).toContain("Plan ✓ ─── Subagents • ─── Synthesis ○ ─── Deliver ○");
+    expect(text).toContain("Research how modern AI agents improve themselves…");
     expect(text).not.toContain("Full research objective retained for detailed inspection");
     expect(subagentInspectionContentLines(card, card.subagents[0]!, 72).join("\n"))
       .toContain("Full research objective retained for detailed inspection");
-    expect(text).toContain("+3 earlier activities");
-    expect(text).toContain("I found the relevant comparison data.");
-    expect(text).toContain("running · 03:18 · 100 tokens · $0.0060");
+    expect(text).toContain("Activity trace · 0 activities");
+    expect(text).not.toContain("Safe activity 5");
+    expect(text).not.toContain("I found the relevant comparison data.");
     expect(text).not.toMatch(/[╭╮╰╯│]/u);
-    expect(lines.slice(1, 8).every((line) => line.includes("\x1b[48;2;37;37;37m"))).toBe(true);
+    expect(lines.some((line) => line.includes("\x1b[48;2;37;37;37m"))).toBe(true);
     expect(text).toContain("D detach · P pause · C cancel");
     expect(lines[0]).toContain("\x1b[38;2;64;224;208m");
-    expect(lines[1]).toContain(ansiFg(tokens.contract.palette.accent));
-    expect(lines[1]).toContain(ansiFg(tokens.contract.text.secondary));
-    expect(lines[7]).toContain(ansiFg(tokens.contract.palette.action));
-    expect(lines[7]).toContain(ansiFg(tokens.contract.text.muted));
+    expect(lines.some((line) => line.includes(ansiFg(tokens.contract.palette.accent)))).toBe(true);
+    expect(lines.some((line) => line.includes(ansiFg(tokens.contract.palette.action)))).toBe(true);
     expect(lines.every((line) => visibleWidth(line) <= 72)).toBe(true);
   });
 
@@ -82,7 +80,7 @@ describe("durable Task surfaces", () => {
     const card = makeCard({ subagents: [subagent] });
     const text = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 72 }).join("\n");
 
-    expect(text).toContain("Subagent 1 · Research how modern AI agents improve themselves auto…");
+    expect(text).toContain("Research how modern AI agents improve themselves…");
     expect(text).not.toContain("Delegated work 1");
     expect(subagentInspectionContentLines(card, subagent, 72).join("\n"))
       .toContain("Research how modern AI agents improve themselves autonomously using measurable evaluation loops");
@@ -96,7 +94,7 @@ describe("durable Task surfaces", () => {
       { cards: [arabicCard], scrollOffset: 0 },
       { width: 72, locale: "ar" }
     ).join("\n");
-    expect(arabicText).toContain("Subagent 2 · مراجعة النتائج ومقارنة الأدلة وإعداد ملخص واضح");
+    expect(arabicText).toContain("مراجعة النتائج ومقارنة الأدلة وإعداد ملخص واضح");
     expect(arabicText).not.toContain("Delegated work 2");
   });
 
@@ -111,10 +109,9 @@ describe("durable Task surfaces", () => {
       scrollOffset: 0,
     }, { width: 100, height: 8 });
 
-    expect(main[0]).toContain("\u2068task_37c8496f\u2069");
-    expect(main[0]).not.toContain(taskId);
+    expect(main[1]).toContain("Task #task_37c8496f");
+    expect(main.join("\n")).not.toContain(taskId);
     expect(inspection[0]).toContain(`\u2068${taskId}\u2069`);
-    expect(main[0]).toContain("Ctrl+G");
     expect(main[0]).toContain("Competitor comparison");
     expect(main.every((line) => visibleWidth(line) <= 100)).toBe(true);
 
@@ -123,29 +120,28 @@ describe("durable Task surfaces", () => {
       { cards: [makeCard({ taskId: customTaskId })], scrollOffset: 0 },
       { width: 100 },
     );
-    expect(custom[0]).toContain(`\u2068${customTaskId}\u2069`);
+    expect(custom[1]).toContain(customTaskId);
   });
 
-  it("uses column-major 1-3 | 4-6 placement, equal widths, and +N more instead of squeezing", () => {
+  it("uses compact column-major worker rows without squeezing", () => {
     const four = makeCard({ subagents: Array.from({ length: 4 }, (_, index) => makeSubagent(index + 1)) });
     const wide = renderTaskCardSurface({ cards: [four], scrollOffset: 0 }, { width: 100, isTty: true });
 
-    expect(getTaskCardSurfaceDesiredHeight({ cards: [four], scrollOffset: 0 }, 100)).toBe(25);
-    expect(wide).toHaveLength(25);
-    expect(wide[1]).toContain("Subagent 1");
-    expect(wide[1]).toContain("Subagent 4");
-    expect(wide[9]).toContain("Subagent 2");
-    expect(wide[17]).toContain("Subagent 3");
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [four], scrollOffset: 0 }, 100)).toBe(15);
+    expect(wide).toHaveLength(15);
+    expect(wide[11]).toContain("Research Company 1");
+    expect(wide[11]).toContain("Research Company 3");
+    expect(wide[13]).toContain("Research Company 2");
+    expect(wide[13]).toContain("Research Company 4");
     expect(wide.every((line) => visibleWidth(line) === 100)).toBe(true);
 
     const narrow = renderTaskCardSurface({ cards: [four], scrollOffset: 0 }, { width: 72, isTty: true });
     const narrowText = narrow.join("\n");
-    expect(getTaskCardSurfaceDesiredHeight({ cards: [four], scrollOffset: 0 }, 72)).toBe(26);
-    expect(narrowText).toContain("Subagent 1");
-    expect(narrowText).toContain("Subagent 2");
-    expect(narrowText).toContain("Subagent 3");
-    expect(narrowText).not.toContain("Subagent 4 ·");
-    expect(narrowText).toContain("+1 more Subagents");
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [four], scrollOffset: 0 }, 72)).toBe(17);
+    expect(narrowText).toContain("Research Company 1");
+    expect(narrowText).toContain("Research Company 2");
+    expect(narrowText).toContain("Research Company 3");
+    expect(narrowText).toContain("Research Company 4");
   });
 
   it("focuses and opens main-session Subagents directly with the keyboard", () => {
@@ -168,8 +164,9 @@ describe("durable Task surfaces", () => {
       style,
       focusedSubagentStepId: "step-1",
     });
-    expect(stripAnsi(focused[1] ?? "")).toContain("▌");
-    expect(focused[1]).toContain("\x1b[38;2;64;224;208m");
+    const focusedWorker = focused.find((line) => stripAnsi(line).includes("Research Company 1"));
+    expect(stripAnsi(focusedWorker ?? "")).toContain("▌");
+    expect(focusedWorker).toContain("\x1b[38;2;64;224;208m");
 
     state = routeTaskSurfaceKey(state, { type: "key", key: "down" }, 24).state;
     expect(state.focus.target).toEqual({ kind: "taskSubagent", taskId: card.taskId, stepId: "step-2" });
@@ -199,30 +196,29 @@ describe("durable Task surfaces", () => {
       .toContain("Subagent 8");
   });
 
-  it("adds a third column only when seven Subagents remain readable", () => {
+  it("keeps at most two readable compact worker columns", () => {
     const card = makeCard({ subagents: Array.from({ length: 7 }, (_, index) => makeSubagent(index + 1)) });
     const threeColumns = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 140, isTty: true });
     const twoColumns = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 100, isTty: true });
 
-    expect(threeColumns[1]).toContain("Subagent 1");
-    expect(threeColumns[1]).toContain("Subagent 4");
-    expect(threeColumns[1]).toContain("Subagent 7");
+    expect(threeColumns.join("\n")).toContain("Research Company 1");
+    expect(threeColumns.join("\n")).toContain("Research Company 7");
     expect(threeColumns.join("\n")).not.toContain("more Subagents");
-    expect(twoColumns.join("\n")).toContain("+1 more Subagents");
+    expect(twoColumns.join("\n")).not.toContain("more Subagents");
   });
 
-  it("never clips a visible card below seven rows and uses a compact tiny-terminal fallback", () => {
+  it("prioritizes stage and ribbon truth in height-constrained and tiny terminals", () => {
     const card = makeCard({ subagents: Array.from({ length: 4 }, (_, index) => makeSubagent(index + 1)) });
     const constrained = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 100, height: 9 });
     const tiny = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 36, height: 5 });
 
     expect(constrained).toHaveLength(9);
-    expect(constrained.join("\n")).toContain("Subagent 1");
-    expect(constrained.join("\n")).toContain("Subagent 2");
-    expect(constrained.join("\n")).toContain("+2 more Subagents");
+    expect(constrained.join("\n")).toContain("Subagents");
+    expect(constrained.join("\n")).toContain("Activity trace");
+    expect(constrained.join("\n")).not.toContain("Research Company");
     expect(tiny).toHaveLength(5);
-    expect(tiny.join("\n")).toContain("Subagent 1 · running");
-    expect(tiny.join("\n")).toContain("Subagent 4 · running");
+    expect(tiny.join("\n")).toContain("Subagents");
+    expect(tiny.join("\n")).not.toContain("Research Company");
     expect(tiny.join("\n")).not.toMatch(/[╭╮╰╯│]/u);
   });
 
@@ -232,8 +228,8 @@ describe("durable Task surfaces", () => {
     const before = renderTaskCardSurface({ cards: [first], scrollOffset: 0 }, { width: 72 }).join("\n");
     const after = renderTaskCardSurface({ cards: [next], scrollOffset: 0 }, { width: 72 }).join("\n");
 
-    expect(before).toContain("Subagent 1");
-    expect(after).toContain("Subagent 1");
+    expect(before).toContain("Research Company 1");
+    expect(after).toContain("Research Company 1");
     expect(before).not.toContain("no earlier activity");
     expect(after).not.toContain("no earlier activity");
     expect(before).toContain("Reading package.json");
@@ -257,8 +253,8 @@ describe("durable Task surfaces", () => {
     const inspection = subagentInspectionContentLines(card, subagent, 72).join("\n");
 
     expect(text).toContain("Comparing trust-boundary mechanisms");
-    expect(text).toContain("Inspecting memory architecture");
-    expect(text).toContain("Writing recommendations");
+    expect(text).not.toContain("Inspecting memory architecture");
+    expect(text).not.toContain("Writing recommendations");
     expect(text).not.toContain("Worker finished");
     expect(text).not.toContain("Step status changed");
     expect(text).not.toContain("Usage recorded");
@@ -301,18 +297,10 @@ describe("durable Task surfaces", () => {
     });
     const styled = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 72, style });
 
-    expect(lines).toHaveLength(9);
-    expect(lines.slice(1, 8)).toHaveLength(7);
-    expect(text).toContain("Summary");
-    expect(stripAnsi(lines[2]!)).toContain("> Summary");
-    expect(lines.slice(3, 7).every((line) => stripAnsi(line).trim().length > 0)).toBe(true);
-    expect(styled[2]).toContain("◆");
-    expect(styled[2]).toContain(ansiFg(tokens.contract.palette.action));
-    expect(compactText).toContain("Found that EstaCoda already has strong file and profile boundaries");
-    expect(compactText).toContain("memory writes need explicit provenance and review semantics");
-    expect(compactText).toContain("Produced 7 recommendations.");
-    expect(compactText).toContain("every durable memory write before broad rollout.");
-    expect(compactText).not.toContain("Summary: Found");
+    expect(lines).toHaveLength(11);
+    expect(text).toContain("Report ready");
+    expect(styled.some((line) => line.includes(ansiFg(tokens.contract.severity.ok)))).toBe(true);
+    expect(compactText).not.toContain("Found that EstaCoda already has strong file and profile boundaries");
     expect(text).not.toContain("A shorter provider preview.");
     expect(text).not.toContain("arbitrary legacy slice");
     expect(inspection).toContain("Found that EstaCoda already has strong file and profile boundaries");
@@ -321,7 +309,7 @@ describe("durable Task surfaces", () => {
     expect(overview).not.toContain("arbitrary legacy slice");
     expect(text).not.toContain("Worker finished");
     expect(text).not.toContain("Usage recorded");
-    expect(text).toContain("completed · 03:18");
+    expect(text).not.toContain("completed · 03:18");
   });
 
   it("retains a real history row and uses three summary rows when completed activity was truncated", () => {
@@ -351,10 +339,11 @@ describe("durable Task surfaces", () => {
       { width: 72 }
     );
 
-    expect(lines).toHaveLength(9);
-    expect(stripAnsi(lines[2]!)).toContain("+2 earlier activities");
-    expect(stripAnsi(lines[3]!)).toContain("> Summary");
-    expect(stripAnsi(lines[7]!)).toContain("completed");
+    expect(lines).toHaveLength(11);
+    expect(lines.join("\n")).toContain("Report ready");
+    expect(lines.join("\n")).not.toContain("Reviewed evidence source");
+    expect(subagentInspectionContentLines(makeCard({ subagents: [subagent] }), subagent, 72).join("\n"))
+      .toContain("Reviewed evidence source 5");
   });
 
   it("keeps the completed summary marker and compact spacing deterministic in plain narrow Arabic", () => {
@@ -383,10 +372,11 @@ describe("durable Task surfaces", () => {
     );
     const text = lines.join("\n");
 
-    expect(lines).toHaveLength(9);
-    expect(lines[2]).toContain("> الملخص");
-    expect(text.match(/الملخص/gu)).toHaveLength(1);
-    expect(text).toContain("قارنت الأدلة");
+    expect(lines).toHaveLength(5);
+    expect(text).toContain("الوكلاء الفرعيون");
+    expect(text).not.toContain("قارنت الأدلة");
+    expect(subagentInspectionContentLines(makeCard({ subagents: [subagent] }), subagent, 72, { locale: "ar" }).join("\n"))
+      .toContain("قارنت الأدلة");
     expect(text).not.toMatch(/\u001B\[/u);
     expect(lines.every((line) => visibleWidth(line) === 38)).toBe(true);
   });
@@ -406,10 +396,8 @@ describe("durable Task surfaces", () => {
         summary: "## Summary\n\n**Compared [leading agent harnesses](https://example.com) across extension systems, persistent memory, lifecycle hooks, and trust boundaries.**",
       }],
     });
-    const text = stripAnsi(renderTaskCardSurface(
-      { cards: [makeCard({ subagents: [subagent] })], scrollOffset: 0 },
-      { width: 72 }
-    ).join("\n"));
+    const card = makeCard({ subagents: [subagent] });
+    const text = stripAnsi(subagentInspectionContentLines(card, subagent, 72).join("\n"));
     const compactText = text.replace(/\s+/gu, " ");
 
     expect(compactText).toContain("Compared leading agent harnesses across extension systems");
@@ -434,10 +422,8 @@ describe("durable Task surfaces", () => {
         primary: true,
       }],
     });
-    const text = stripAnsi(renderTaskCardSurface(
-      { cards: [makeCard({ subagents: [subagent] })], scrollOffset: 0 },
-      { width: 72 }
-    ).join("\n"));
+    const card = makeCard({ subagents: [subagent] });
+    const text = stripAnsi(subagentInspectionContentLines(card, subagent, 72).join("\n"));
 
     expect(text).toContain("Open to inspect the full result");
     expect(text).not.toContain("…firmation gates");
@@ -701,14 +687,14 @@ describe("durable Task surfaces", () => {
     })).toBe(false);
   });
 
-  it("collapses workers only while synthesis is active and keeps constrained output truthful", () => {
+  it("keeps the compact command center across delegation and synthesis", () => {
     const pending = makeSynthesisCard("pending");
     const running = makeSynthesisCard("running");
     const completed = makeSynthesisCard("completed");
 
-    expect(getTaskCardSurfaceDesiredHeight({ cards: [pending], scrollOffset: 0 }, 100)).toBe(25);
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [pending], scrollOffset: 0 }, 100)).toBe(17);
     expect(getTaskCardSurfaceDesiredHeight({ cards: [running], scrollOffset: 0 }, 100)).toBe(17);
-    expect(getTaskCardSurfaceDesiredHeight({ cards: [completed], scrollOffset: 0 }, 100)).toBe(25);
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [completed], scrollOffset: 0 }, 100)).toBe(17);
     expect(renderTaskCardSurface({ cards: [pending], scrollOffset: 0 }, { width: 100 }).join("\n"))
       .not.toContain("Parent synthesis");
     expect(renderTaskCardSurface({ cards: [completed], scrollOffset: 0 }, { width: 100 }).join("\n"))
@@ -908,10 +894,11 @@ describe("durable Task surfaces", () => {
     const light = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 72, style: lightStyle });
     const plain = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 72, style: plainStyle });
 
-    expect(light.slice(1, 8).every((line) => line.includes("\x1b[48;2;245;245;245m"))).toBe(true);
+    const lightWorker = light.find((line) => stripAnsi(line).includes("Research Company 1"));
+    expect(lightWorker).toContain("\x1b[48;2;245;245;245m");
     expect(plain.join("\n")).not.toMatch(/\u001B\[/u);
-    expect(plain.join("\n")).toContain(". Subagent 1");
-    expect(plain.join("\n")).toContain("> Reading company 1");
+    expect(plain.join("\n")).toContain("Research Company 1");
+    expect(plain.join("\n")).toContain("Reading company 1");
     expect(plain.every((line) => visibleWidth(line) === 72)).toBe(true);
   });
 
@@ -1290,8 +1277,8 @@ describe("durable Task surfaces", () => {
     const lines = renderOperatorConsoleTextLines(state, createOperatorConsoleLayout(state));
     const text = lines.join("\n");
 
-    expect(text).toContain("المهمة");
-    expect(text).toContain("\u2068T-104\u2069");
+    expect(text).toContain("مقارنة الشركات");
+    expect(text).toContain("الوكلاء الفرعيون");
     expect(text).not.toMatch(/\u001B\[/u);
     expect(lines.every((line) => visibleWidth(line) <= 28)).toBe(true);
   });

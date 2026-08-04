@@ -1,4 +1,5 @@
 import { padVisibleEnd, truncateVisible } from "../../renderers/layout.js";
+import { semanticMotionFrame } from "../../semantic-motion.js";
 import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
 import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 import { styleBackgroundRow, styleBold, styleColor } from "./operatorConsoleStyle.js";
@@ -67,6 +68,7 @@ export function renderTaskWorkerRows(
     readonly style?: OperatorConsoleStyle;
     readonly focusedStepId?: string;
     readonly columns?: number;
+    readonly motionElapsedMs?: number;
   }
 ): readonly string[] {
   const width = Math.max(1, Math.floor(options.width));
@@ -85,7 +87,14 @@ export function renderTaskWorkerRows(
     const cells = Array.from({ length: layout.columns }, (_, columnIndex) => {
       const subagent = subagents[columnIndex * layout.rows + rowIndex];
       if (subagent === undefined) return "".padEnd(layout.columnWidth);
-      return renderWorkerRow(subagent, layout.columnWidth, locale, options.style, options.focusedStepId === subagent.stepId);
+      return renderWorkerRow(
+        subagent,
+        layout.columnWidth,
+        locale,
+        options.style,
+        options.focusedStepId === subagent.stepId,
+        options.motionElapsedMs
+      );
     });
     rows.push(padVisibleEnd(truncateVisible(cells.join("  "), width, "…"), width));
   }
@@ -97,11 +106,12 @@ function renderWorkerRow(
   width: number,
   locale: OperatorConsoleLocale,
   style: OperatorConsoleStyle | undefined,
-  focused: boolean
+  focused: boolean,
+  motionElapsedMs: number | undefined
 ): string {
   const tokens = style?.tokens.contract;
   const copy = COPY[locale];
-  const symbol = workerSymbol(subagent, style);
+  const symbol = workerSymbol(subagent, style, motionElapsedMs);
   const titleText = conciseTitle(isGenericTitle(subagent.title) ? subagent.objective : subagent.title);
   const displayTitle = locale === "ar" ? isolate(titleText) : titleText;
   const titleColor = focused ? tokens?.palette.action : tokens?.palette.accent;
@@ -113,8 +123,18 @@ function renderWorkerRow(
   return styleBackgroundRow(style, row, width, tokens?.surface.bgElevated ?? "");
 }
 
-function workerSymbol(subagent: TaskCardSubagentState, style: OperatorConsoleStyle | undefined): string {
+function workerSymbol(
+  subagent: TaskCardSubagentState,
+  style: OperatorConsoleStyle | undefined,
+  motionElapsedMs: number | undefined
+): string {
   const tokens = style?.tokens.contract;
+  if (subagent.status === "running") {
+    if (tokens === undefined) return ".";
+    const motion = tokens.motion.worker;
+    const elapsed = tokens.behavior.allowAnimation ? motionElapsedMs : 0;
+    return styleColor(style, semanticMotionFrame(motion, elapsed, subagent.displayIndex * 2), motion.color);
+  }
   if (subagent.status === "completed" && subagent.outcome.usable) {
     const glyph = tokens?.glyph.check ?? "✓";
     return tokens === undefined ? glyph : styleColor(style, glyph, tokens.severity.ok);
@@ -130,7 +150,7 @@ function workerSymbol(subagent: TaskCardSubagentState, style: OperatorConsoleSty
     const glyph = tokens?.glyph.bullet ?? "-";
     return tokens === undefined ? glyph : styleColor(style, glyph, tokens.text.muted);
   }
-  const glyph = tokens?.glyph.bullet ?? "●";
+  const glyph = tokens?.glyph.bullet ?? ".";
   return tokens === undefined ? glyph : styleColor(style, glyph, tokens.palette.action);
 }
 

@@ -1705,17 +1705,24 @@ describe("runSessionLoop — user prompt rail behavior", () => {
           outputChunks.push(String(chunk));
           return true;
         },
-      } as NodeJS.WritableStream,
+        isTTY: true,
+        columns: 52,
+        rows: 24,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 52, supportsAnimation: false }),
+      operatorConsole: { enabled: true },
       prompt,
       close: () => {},
     });
 
     const rendered = outputChunks.join("");
+    const readable = stripAnsi(rendered);
+    const compact = readable.replace(/\s+/gu, " ");
     expect(rendered).toContain("EstaCoda");
-    expect(rendered).toContain("Activity trace · 3 activities · 1:30");
-    expect(rendered).toContain("The three reports agree on explicit provenance and review gates.");
-    expect(rendered.indexOf("Activity trace")).toBeLessThan(rendered.indexOf("The three reports agree"));
-    expect(rendered).toContain("Ending EstaCoda session.");
+    expect(readable).toContain("Activity trace · 3 activities · 1:30");
+    expect(compact).toContain("The three reports agree on explicit provenance and review gates.");
+    expect(readable.indexOf("Activity trace")).toBeLessThan(readable.indexOf("The three reports agree"));
+    expect(readable).toContain("Ending EstaCoda session.");
     expect(drainTaskSessionCompletions).toHaveBeenCalled();
     expect(acknowledgeTaskSessionCompletion).toHaveBeenCalledWith({
       bindingId: "delivery-1",

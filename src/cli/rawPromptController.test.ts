@@ -307,7 +307,7 @@ describe("raw prompt controller", () => {
     read.input.send("\u0007");
     await Promise.resolve();
     expect(read.output.writes.join("")).toContain("Mouse Mode");
-    read.input.send("\x1b[<0;2;2M\x1b[<0;2;2m");
+    read.input.send("\x1b[<0;2;10M\x1b[<0;2;10m");
     await Promise.resolve();
     expect(read.output.writes.join("")).toContain("Retained safe activity");
 
@@ -525,7 +525,7 @@ describe("raw prompt controller", () => {
       });
 
       expect(refreshTasks).toHaveBeenCalledTimes(1);
-      expect(stripAnsi(output.writes.join(""))).toContain("• Subagent 1");
+      expect(stripAnsi(output.writes.join(""))).toContain("• Finish work");
       input.send("ab");
       input.send("\u007f");
       expect(refreshTasks).toHaveBeenCalledTimes(1);
@@ -533,7 +533,7 @@ describe("raw prompt controller", () => {
       output.writes.length = 0;
       vi.advanceTimersByTime(tokens.contract.motion.worker.cadenceMs);
       expect(refreshTasks).toHaveBeenCalledTimes(2);
-      expect(stripAnsi(output.writes.join(""))).toContain("● Subagent 1");
+      expect(stripAnsi(output.writes.join(""))).toContain("● Finish work");
 
       input.send("\r");
       await expect(pending).resolves.toEqual({ type: "submit", text: "a" });

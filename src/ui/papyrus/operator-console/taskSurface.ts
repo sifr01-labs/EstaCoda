@@ -18,7 +18,6 @@ import type {
   TaskCardActivitySpanState,
   TaskCardActivityState,
   TaskCardState,
-  TaskCardStepState,
   TaskCardSubagentState,
   TaskSurfaceState,
 } from "./operatorConsoleState.js";
@@ -45,7 +44,7 @@ const SUBAGENT_COLUMN_GAP = 2;
 const SUBAGENT_ROW_GAP = 1;
 const COLLAPSED_SUBAGENT_CARD_HEIGHT = 1;
 const COLLAPSED_SUBAGENT_ROW_GAP = 1;
-const PARENT_SYNTHESIS_STAGE_GAP = 1;
+const TASK_COMMAND_CENTER_STAGE_GAP = 1;
 const TASK_CONTROL_HEIGHT = 1;
 const MIN_SUBAGENT_CARD_WIDTH = 44;
 const MAX_SUBAGENT_TITLE_WORDS = 8;
@@ -294,15 +293,14 @@ export function getTaskCardSurfaceDesiredHeight(state: TaskSurfaceState, width =
   const card = selectedTask(state);
   if (card === undefined) return 0;
   if (card.presentation === "receipt") return 1;
-  const synthesis = activeParentSynthesisStep(card);
-  if (synthesis !== undefined) {
+  if (usesTaskCommandCenter(card)) {
     const normalizedWidth = dimension(width);
     if (normalizedWidth < 60) {
       return taskStageHeaderHeight(normalizedWidth) + activityRibbonHeight(normalizedWidth) + TASK_CONTROL_HEIGHT;
     }
     return taskStageHeaderHeight(normalizedWidth) +
       activityRibbonHeight(normalizedWidth) +
-      PARENT_SYNTHESIS_STAGE_GAP * 2 +
+      TASK_COMMAND_CENTER_STAGE_GAP * 2 +
       resolveTaskWorkerRowsLayout(card.subagents.length, normalizedWidth).height +
       TASK_CONTROL_HEIGHT;
   }
@@ -338,9 +336,8 @@ export function renderTaskCardSurface(
   if (card.presentation === "receipt") {
     return [renderTaskReceipt(card, state, copy, options, width, isFocused)];
   }
-  const synthesis = activeParentSynthesisStep(card);
-  if (synthesis !== undefined) {
-    return renderParentSynthesisTaskSurface(card, state, copy, options, width, height, isFocused);
+  if (usesTaskCommandCenter(card)) {
+    return renderTaskCommandCenterSurface(card, state, copy, options, width, height, isFocused);
   }
   if (card.subagents.length === 0) {
     const summary = `${formatStatus(card.status)} · ${isolateIfArabic(formatExecution(card), options.locale)} · ${formatDuration(card.elapsedMs)} · ${formatCardUsage(card.usage, options.locale ?? "en")} · ${copy.inspectHint}`;
@@ -410,13 +407,13 @@ export function getTaskCardHitTargets(
       height: 1,
     }];
   }
-  const synthesis = activeParentSynthesisStep(card);
-  const taskTargetHeight = synthesis === undefined
+  const commandCenter = usesTaskCommandCenter(card);
+  const taskTargetHeight = !commandCenter
     ? 1
     : Math.min(
         normalizedHeight,
         taskStageHeaderHeight(normalizedWidth) +
-          PARENT_SYNTHESIS_STAGE_GAP +
+          TASK_COMMAND_CENTER_STAGE_GAP +
           activityRibbonHeight(normalizedWidth)
       );
   const targets: TaskCardHitTarget[] = [{
@@ -428,8 +425,8 @@ export function getTaskCardHitTargets(
     height: taskTargetHeight,
   }];
   if (card.subagents.length === 0) return targets;
-  if (synthesis !== undefined) {
-    const layout = resolveCollapsedSynthesisLayout(card, normalizedWidth, normalizedHeight);
+  if (commandCenter) {
+    const layout = resolveCommandCenterLayout(card, normalizedWidth, normalizedHeight);
     const columnWidth = resolveEqualColumnWidth(normalizedWidth, layout.grid.columns);
     for (let columnIndex = 0; columnIndex < layout.grid.columns; columnIndex += 1) {
       for (let rowIndex = 0; rowIndex < layout.grid.rows; rowIndex += 1) {
@@ -1123,8 +1120,8 @@ function visibleSubagentGrid(card: TaskCardState, width: number, height: number)
   if (card.presentation === "receipt") {
     return { columns: 1, rows: 0, hiddenCount: card.subagents.length };
   }
-  if (activeParentSynthesisStep(card) !== undefined) {
-    return resolveCollapsedSynthesisLayout(card, dimension(width), dimension(height)).grid;
+  if (usesTaskCommandCenter(card)) {
+    return resolveCommandCenterLayout(card, dimension(width), dimension(height)).grid;
   }
   const grid = resolveSubagentGrid(card.subagents.length, dimension(width));
   const fitted = fitSubagentGridToHeight(grid, card.subagents.length, dimension(height));
@@ -1136,8 +1133,8 @@ function visibleSubagentGrid(card: TaskCardState, width: number, height: number)
 function visibleSubagents(card: TaskCardState, width: number, height: number): readonly TaskCardSubagentState[] {
   if (card.presentation === "receipt") return [];
   const normalizedHeight = dimension(height);
-  if (activeParentSynthesisStep(card) !== undefined) {
-    const layout = resolveCollapsedSynthesisLayout(card, dimension(width), normalizedHeight);
+  if (usesTaskCommandCenter(card)) {
+    const layout = resolveCommandCenterLayout(card, dimension(width), normalizedHeight);
     return card.subagents.slice(0, layout.visibleCount);
   }
   const grid = resolveSubagentGrid(card.subagents.length, dimension(width));
@@ -1245,36 +1242,27 @@ type TaskCardRenderOptions = {
   readonly motionElapsedMs?: number;
 };
 
-type CollapsedSynthesisLayout = {
+type TaskCommandCenterLayout = {
   readonly grid: SubagentGrid;
   readonly workerTop: number;
   readonly visibleCount: number;
 };
 
-function activeParentSynthesisStep(card: TaskCardState): TaskCardStepState | undefined {
-  if (card.subagents.length === 0 || !card.subagents.every((subagent) => isSettledSubagent(subagent.status))) {
-    return undefined;
-  }
-  return card.steps.find((step) =>
-    step.executorRole === "synthesis" &&
-    (step.status === "ready" ||
-      step.status === "running" ||
-      step.status === "waiting_for_input" ||
-      step.status === "waiting_for_approval")
-  );
+function usesTaskCommandCenter(card: TaskCardState): boolean {
+  return card.phase?.workerProgress !== undefined || card.subagents.length > 0;
 }
 
-function resolveCollapsedSynthesisLayout(
+function resolveCommandCenterLayout(
   card: TaskCardState,
   width: number,
   height: number
-): CollapsedSynthesisLayout {
+): TaskCommandCenterLayout {
   const commandHeight = taskStageHeaderHeight(width) +
-    (width >= 60 ? PARENT_SYNTHESIS_STAGE_GAP : 0) +
+    (width >= 60 ? TASK_COMMAND_CENTER_STAGE_GAP : 0) +
     activityRibbonHeight(width);
-  const showControls = showSynthesisControls(card, width, height);
+  const showControls = showTaskCommandCenterControls(card, width, height);
   const hasStageGap = width >= 60 && height > commandHeight;
-  const workerTop = commandHeight + (hasStageGap ? PARENT_SYNTHESIS_STAGE_GAP : 0);
+  const workerTop = commandHeight + (hasStageGap ? TASK_COMMAND_CENTER_STAGE_GAP : 0);
   const workerHeight = hasStageGap
     ? Math.max(0, height - workerTop - (showControls ? TASK_CONTROL_HEIGHT : 0))
     : 0;
@@ -1300,7 +1288,7 @@ function resolveCollapsedSynthesisLayout(
   };
 }
 
-function renderParentSynthesisTaskSurface(
+function renderTaskCommandCenterSurface(
   card: TaskCardState,
   state: TaskSurfaceState,
   copy: TaskCopy,
@@ -1309,7 +1297,7 @@ function renderParentSynthesisTaskSurface(
   height: number,
   focused: boolean
 ): readonly string[] {
-  const showControls = showSynthesisControls(card, width, height);
+  const showControls = showTaskCommandCenterControls(card, width, height);
   const rows: string[] = [...renderTaskStageSurface(card, {
     width,
     locale: options.locale,
@@ -1321,7 +1309,7 @@ function renderParentSynthesisTaskSurface(
     width,
     locale: options.locale,
     style: options.style,
-    scope: "synthesis",
+    scope: "auto",
     ...(state.traceMode?.taskId === card.taskId ? { selection: state.traceMode } : {}),
   }));
   if (rows.length >= height || width < 60) {
@@ -1330,7 +1318,7 @@ function renderParentSynthesisTaskSurface(
       ...(showControls ? [renderTaskControls(card, state, copy, options.style, width, options.locale)] : []),
     ], height, width);
   }
-  const layout = resolveCollapsedSynthesisLayout(card, width, height);
+  const layout = resolveCommandCenterLayout(card, width, height);
   if (layout.workerTop > rows.length) rows.push("".padEnd(width));
   const visibleSubagents = card.subagents.slice(0, layout.visibleCount);
   rows.push(...renderTaskWorkerRows(visibleSubagents, {
@@ -1339,6 +1327,7 @@ function renderParentSynthesisTaskSurface(
     style: options.style,
     focusedStepId: options.focusedSubagentStepId,
     columns: layout.grid.columns,
+    motionElapsedMs: options.motionElapsedMs,
   }));
   const hiddenCount = card.subagents.length - visibleSubagents.length;
   if (hiddenCount > 0 && rows.length < height - (showControls ? TASK_CONTROL_HEIGHT : 0)) {
@@ -1348,11 +1337,11 @@ function renderParentSynthesisTaskSurface(
   return padSurfaceRows(rows, height, width);
 }
 
-function showSynthesisControls(card: TaskCardState, width: number, height: number): boolean {
+function showTaskCommandCenterControls(card: TaskCardState, width: number, height: number): boolean {
   const commandHeight = taskStageHeaderHeight(width) + activityRibbonHeight(width);
   if (width < 60) return height >= commandHeight + TASK_CONTROL_HEIGHT;
   const fullHeight = commandHeight +
-    PARENT_SYNTHESIS_STAGE_GAP * 2 +
+    TASK_COMMAND_CENTER_STAGE_GAP * 2 +
     resolveTaskWorkerRowsLayout(card.subagents.length, width).height +
     TASK_CONTROL_HEIGHT;
   return height >= fullHeight;
@@ -1366,6 +1355,9 @@ function renderTaskControls(
   width: number,
   locale: OperatorConsoleLocale = "en"
 ): string {
+  if (state.mouseModeActive === true) {
+    return fitControlRow(styleMuted(style, copy.mouseActiveHint), width);
+  }
   if (state.pendingControl?.taskId === card.taskId) {
     const enter = isolateIfArabic("Enter", locale);
     const escape = isolateIfArabic("Esc", locale);

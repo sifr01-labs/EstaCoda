@@ -54,6 +54,7 @@ export function createTaskCompletionTraceSnapshot(
         usable: boundedCount(workerProgress.usable),
         failed: boundedCount(workerProgress.failed),
         cancelled: boundedCount(workerProgress.cancelled),
+        total: boundedCount(workerProgress.total),
       },
     }),
   };
@@ -122,7 +123,16 @@ function parseWorkerOutcomes(value: unknown): NonNullable<TaskCompletionTraceSna
   if (!isRecord(value) || !isCount(value.usable) || !isCount(value.failed) || !isCount(value.cancelled)) {
     return undefined;
   }
-  return { usable: value.usable, failed: value.failed, cancelled: value.cancelled };
+  if (value.total !== undefined && !isCount(value.total)) return undefined;
+  if (typeof value.total === "number" && value.usable + value.failed + value.cancelled > value.total) {
+    return undefined;
+  }
+  return {
+    usable: value.usable,
+    failed: value.failed,
+    cancelled: value.cancelled,
+    ...(value.total === undefined ? {} : { total: value.total }),
+  };
 }
 
 function boundedCount(value: number): number {

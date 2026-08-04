@@ -183,13 +183,13 @@ describe("LiveOperatorConsoleController", () => {
     });
 
     controller.refresh();
-    expect(stripAnsi(output.text())).toContain("• Subagent 1");
+    expect(stripAnsi(output.text())).toContain("• Research Company A");
     controller.resetActiveWork();
     output.clear();
     vi.advanceTimersByTime(105);
 
     expect(runtimeHost.getState().activeWork.items).toEqual([]);
-    expect(stripAnsi(output.text())).toContain("● Subagent 1");
+    expect(stripAnsi(output.text())).toContain("● Research Company A");
   });
 
   it("refreshes durable Task snapshots on their own timer", () => {

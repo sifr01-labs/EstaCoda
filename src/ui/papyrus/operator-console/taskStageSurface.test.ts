@@ -19,7 +19,7 @@ describe("Task stage command center", () => {
       { name: "synthesis", status: "active" },
       { name: "deliver", status: "pending" },
     ]);
-    expect(model.workerOutcomes).toEqual({ usable: 1, failed: 1, cancelled: 0, total: 2 });
+    expect(model.workerOutcomes).toEqual({ usable: 1, failed: 2, cancelled: 0, total: 3 });
   });
 
   it("renders wide, medium, and narrow hierarchies without exposing orchestration jargon", () => {
@@ -32,7 +32,7 @@ describe("Task stage command center", () => {
     expect(widePlain).toContain("Research recursive improvement");
     expect(widePlain).toContain("SYNTHESIZING");
     expect(widePlain).toContain("Task #task_05f70fba");
-    expect(widePlain).toContain("1 usable report · 1 failed");
+    expect(widePlain).toContain("1 usable report · 2 failed");
     expect(widePlain).toContain("Plan ✓ ─── Subagents ⚠ ─── Synthesis ● ─── Deliver ○");
     expect(widePlain).toContain("Elapsed 12:37 · Est. provider cost $0.55 · 84.7k tokens");
     expect(medium.split("\n")).toHaveLength(3);
@@ -55,7 +55,7 @@ describe("Task stage command center", () => {
     expect(text).toContain("التخطيط [OK]");
     expect(text).toContain("الوكلاء الفرعيون !");
     expect(text).toContain("التجميع -");
-    expect(stripBidi(text)).toContain("نتائج صالحة: 1 · فشل: 1");
+    expect(stripBidi(text)).toContain("نتائج صالحة: 1 · فشل: 2");
     expect(text).toContain("⁨المهمة #task_05f70fba⁩");
     expect(text).not.toMatch(/\u001B\[/u);
   });
@@ -98,12 +98,12 @@ function makeSynthesisCard(): TaskCardState {
       name: "synthesizing",
       workerProgress: {
         completed: 1,
-        failed: 1,
+        failed: 2,
         cancelled: 0,
-        settled: 2,
+        settled: 3,
         usable: 1,
         recovered: 0,
-        total: 2,
+        total: 3,
       },
     },
     recentActivity: [],

@@ -8,6 +8,25 @@ describe("persisted Task completion trace", () => {
     expect(parseTaskCompletionTraceSnapshot(snapshot, "task-1")).toEqual(snapshot);
   });
 
+  it("retains the worker total while accepting older version-1 snapshots without it", () => {
+    const snapshot = completionTrace();
+    const legacy = {
+      ...snapshot,
+      workerOutcomes: { usable: 1, failed: 2, cancelled: 0 },
+    };
+
+    expect(parseTaskCompletionTraceSnapshot(snapshot, "task-1")?.workerOutcomes?.total).toBe(3);
+    expect(parseTaskCompletionTraceSnapshot(legacy, "task-1")).toEqual(legacy);
+    expect(parseTaskCompletionTraceSnapshot({
+      ...snapshot,
+      workerOutcomes: { ...snapshot.workerOutcomes!, total: -1 },
+    }, "task-1")).toBeUndefined();
+    expect(parseTaskCompletionTraceSnapshot({
+      ...snapshot,
+      workerOutcomes: { ...snapshot.workerOutcomes!, total: 2 },
+    }, "task-1")).toBeUndefined();
+  });
+
   it("ignores mismatched or malformed metadata instead of blocking answer delivery", () => {
     const snapshot = completionTrace();
     expect(parseTaskCompletionTraceSnapshot(snapshot, "task-other")).toBeUndefined();
@@ -34,6 +53,7 @@ function completionTrace(): TaskCompletionTraceSnapshot {
     activityCountComplete: true,
     totalDurationMs: 12_000,
     hasEarlierActivities: false,
+    workerOutcomes: { usable: 1, failed: 2, cancelled: 0, total: 3 },
     spans: [{
       category: "deliver",
       scope: { kind: "delivery", label: "Delivery" },

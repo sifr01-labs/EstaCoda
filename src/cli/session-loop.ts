@@ -63,6 +63,7 @@ import {
   renderContextCompactionStatusSurface,
   renderCompletedActiveWorkSurface,
   renderOperatorConsoleLines,
+  renderTranscriptSurface,
   routeSteerKey,
   type ContextCompactionStatusSurfaceState,
   type ContextCompactionSurfaceState,
@@ -524,11 +525,22 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       .then(async (messages) => {
         if (runtime !== targetRuntime) return;
         for (const message of messages) {
-          const rendered = renderer.render(buildAssistantResponseViewModel({
-            label: targetRuntime.getStartup().agentName,
-            text: message.text,
-            taskTrace: message.trace,
-          }));
+          const rendered = operatorConsoleEnabled && message.trace !== undefined
+            ? renderTranscriptSurface([{
+                id: message.messageId,
+                role: "assistant",
+                text: message.text,
+                taskTrace: message.trace,
+              }], {
+                width: (output as { readonly columns?: number }).columns ?? renderer.capabilities.terminalWidth,
+                locale: renderer.locale === "ar" ? "ar" : "en",
+                style: operatorConsoleStyle,
+              }).join("\n")
+            : renderer.render(buildAssistantResponseViewModel({
+                label: targetRuntime.getStartup().agentName,
+                text: message.text,
+                taskTrace: message.trace,
+              }));
           if (prompt.writeDurable?.(rendered) !== true) {
             output.write(rendered.endsWith("\n") ? rendered : `${rendered}\n`);
           }

@@ -43,5 +43,7 @@ export type TaskCompletionTraceSnapshot = {
     readonly usable: number;
     readonly failed: number;
     readonly cancelled: number;
+    /** Optional only for version-1 snapshots written before lifecycle integration. */
+    readonly total?: number;
   };
 };

@@ -145,7 +145,7 @@ function createRegionDescriptors(
       kind: "transcript",
       priority: TRANSCRIPT_PRIORITY,
       minHeight: 1,
-      desiredHeight: getTranscriptSurfaceDesiredHeight(state.transcript, terminal.width),
+      desiredHeight: getTranscriptSurfaceDesiredHeight(state.transcript, terminal.width, state.locale),
     });
   }
 

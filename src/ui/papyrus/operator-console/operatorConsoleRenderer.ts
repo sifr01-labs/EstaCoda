@@ -136,6 +136,7 @@ function renderRegionLines(
     return renderTranscriptSurface(state.transcript, {
       width: region.width,
       height: region.height,
+      locale: state.locale,
       style: state.style,
     }).map((text) => ({ region: region.kind, text }));
   }
