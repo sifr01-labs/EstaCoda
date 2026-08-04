@@ -238,7 +238,7 @@ describe("LiveOperatorConsoleController", () => {
     controller.routeInput({ type: "key", key: "left" });
     expect(runtimeHost.getState().tasks.inspection).toMatchObject({
       followLive: false,
-      selectedTraceEventId: "event-1",
+      selectedTraceSpanId: "event-1",
     });
 
     output.resize(48, 16);
@@ -268,7 +268,7 @@ describe("LiveOperatorConsoleController", () => {
     expect(state.tasks.inspectedTaskId).toBe("T-live-1");
     expect(state.tasks.inspection).toMatchObject({
       followLive: false,
-      selectedTraceEventId: "event-1",
+      selectedTraceSpanId: "event-1",
     });
     expect(state.tasks.cards[0]).toMatchObject({
       status: "completed",
@@ -278,6 +278,40 @@ describe("LiveOperatorConsoleController", () => {
     expect(text).toContain("Read first file");
     expect(text).toContain("Return to live");
     expect(text).not.toContain("Finished Task");
+  });
+
+  it("dispatches confirmed Task controls through the authorized operator service", () => {
+    const output = createOutput();
+    let task = makeLiveTask();
+    const pause = vi.fn(() => {
+      task = { ...task, status: "paused", phase: { name: "paused" } };
+      return {} as never;
+    });
+    const cancel = vi.fn(() => {
+      task = { ...task, status: "cancelled", phase: { name: "cancelled" } };
+      return {} as never;
+    });
+    const retry = vi.fn();
+    const refreshTasks = vi.fn(() => true);
+    const { controller, runtimeHost } = createControllerFixture(output, {
+      getTasks: () => [task],
+      refreshTasks,
+      taskOperator: { pause, cancel, retry },
+      taskSessionId: "session-authorized",
+    });
+
+    controller.routeInput({ type: "key", key: "tab" });
+    expect(controller.routeInput({ type: "text", text: "p" })).toBe(true);
+    expect(pause).toHaveBeenCalledWith(task.taskId, "session-authorized");
+    expect(refreshTasks).toHaveBeenLastCalledWith(true);
+    expect(runtimeHost.getState().tasks.cards[0]?.status).toBe("paused");
+
+    expect(controller.routeInput({ type: "text", text: "c" })).toBe(true);
+    expect(cancel).not.toHaveBeenCalled();
+    expect(runtimeHost.getState().tasks.pendingControl).toEqual({ kind: "cancel", taskId: task.taskId });
+    expect(controller.routeInput({ type: "key", key: "enter" })).toBe(true);
+    expect(cancel).toHaveBeenCalledWith(task.taskId, "session-authorized");
+    expect(runtimeHost.getState().tasks.cards[0]?.status).toBe("cancelled");
   });
 
   it("returns prompt editing and hard interrupts after active Task inspection", () => {
@@ -714,6 +748,7 @@ function createController(
     ConstructorParameters<typeof LiveOperatorConsoleController>[0],
     "animationIntervalMs" | "now" | "streamingRefreshIntervalMs" | "turnStartedAtMs"
       | "getTasks" | "refreshTasks" | "taskRefreshIntervalMs" | "onMouseModeChange"
+      | "taskOperator" | "taskSessionId" | "onTaskControlError"
   > = {}
 ): LiveOperatorConsoleController {
   return createControllerFixture(output, options).controller;
@@ -725,6 +760,7 @@ function createControllerFixture(
     ConstructorParameters<typeof LiveOperatorConsoleController>[0],
     "animationIntervalMs" | "now" | "streamingRefreshIntervalMs" | "turnStartedAtMs"
       | "getTasks" | "refreshTasks" | "taskRefreshIntervalMs" | "onMouseModeChange"
+      | "taskOperator" | "taskSessionId" | "onTaskControlError"
   > = {}
 ): {
   readonly controller: LiveOperatorConsoleController;

@@ -217,6 +217,12 @@ security policy remain authoritative.
 Durable Tasks linked to the active session remain visible as cards after their
 creating turn and after terminal settlement. Use `Ctrl+T` or an available `Tab`
 transition to focus them, arrow keys to select a Task, and `Enter` to inspect.
+On a focused Task, press `T` to enter its logical activity trace; use
+`Left`/`Right` or `Home`/`End` to inspect history or return live, `Enter` to open
+the selected activity, and `Escape` to collapse the trace. The control row shows
+only actions valid for the current state: `R` retry, `D` detach, `P` pause, and
+`C` cancel with confirmation. Settled Tasks retain trace inspection without
+showing mutation controls.
 The inspection page supports arrow scrolling, `Page Up`/`Page Down`,
 `Home`/`End`, and `Escape` to return. It shows bounded plan, Step, Attempt,
 elapsed-time, safe-activity, tool-category, usage/cost, result-handle, and

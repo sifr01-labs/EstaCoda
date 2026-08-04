@@ -1,6 +1,6 @@
 import { padVisibleEnd, truncateVisible, wrapText } from "../../renderers/layout.js";
 import { formatUsageCost, formatUsageCostNotice, formatUsdAmount } from "../../usage-cost-format.js";
-import { renderActivityTraceSurface } from "./activityTraceSurface.js";
+import { renderActivitySpanTraceSurface } from "./activityTraceSurface.js";
 import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
 import type {
   TaskCardResultState,
@@ -88,7 +88,7 @@ const COPY: Readonly<Record<OperatorConsoleLocale, OverviewCopy>> = {
     limit: "Limit",
     none: "none",
     noSubagents: "No delegated Subagents",
-    closeHint: "Esc return · ↑/↓ select Subagent · Enter inspect · ←/→ events · PgUp/PgDn scroll",
+    closeHint: "Esc return · ↑/↓ select Subagent · Enter inspect · ←/→ activities · PgUp/PgDn scroll",
     mouseActiveHint: "[Mouse Mode] Click or wheel here · Esc release",
     mouseToggleHint: "Ctrl+G mouse",
   },
@@ -125,7 +125,7 @@ const COPY: Readonly<Record<OperatorConsoleLocale, OverviewCopy>> = {
     limit: "الحد",
     none: "لا يوجد",
     noSubagents: "لا يوجد وكلاء فرعيون مفوضون",
-    closeHint: "Esc للعودة · ↑/↓ لاختيار وكيل فرعي · Enter للفحص · ←/→ للأحداث · PgUp/PgDn للتمرير",
+    closeHint: "Esc للعودة · ↑/↓ لاختيار وكيل فرعي · Enter للفحص · ←/→ للأنشطة · PgUp/PgDn للتمرير",
     mouseActiveHint: "[وضع الماوس] انقر أو مرّر هنا · Esc للتحرير",
     mouseToggleHint: "Ctrl+G للماوس",
   },
@@ -196,7 +196,7 @@ export function taskOverviewContentLines(
     ...objectiveLines,
     lifecycleColor === undefined ? lifecycle : styleColor(style, lifecycle, lifecycleColor),
     "",
-    ...renderActivityTraceSurface(card, options.inspection, { width: contentWidth, locale, style }),
+    ...renderActivitySpanTraceSurface(card, options.inspection, { width: contentWidth, locale, style }),
     "",
   ];
 

@@ -603,6 +603,24 @@ export class RawPromptController {
         ).tasks;
         attachmentFocus = routed.state.focus;
         if (!routed.handled) return routed;
+        if (routed.taskIntent !== undefined) {
+          const handleTaskIntent = this.#operatorConsole.onTaskIntent;
+          if (handleTaskIntent !== undefined) {
+            try {
+              void Promise.resolve(handleTaskIntent(routed.taskIntent)).then(
+                () => {
+                  this.#operatorConsole?.refreshTasks?.(true);
+                  if (!settled) render();
+                },
+                () => {
+                  if (!settled) render();
+                }
+              );
+            } catch {
+              if (!settled) render();
+            }
+          }
+        }
         // A handled navigation event is also an explicit projection refresh: Task
         // data can change independently while the idle prompt is waiting.
         render();

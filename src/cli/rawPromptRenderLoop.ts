@@ -64,8 +64,10 @@ export type RawPromptOperatorConsoleOptions = Omit<OperatorConsoleRawPromptSnaps
   readonly getStatus?: () => OperatorConsoleRawPromptSnapshot["status"];
   readonly getTerminal?: () => Partial<TerminalMetrics>;
   /** Refreshes the prepared Task snapshot outside prompt-edit render calls. */
-  readonly refreshTasks?: () => boolean;
+  readonly refreshTasks?: (force?: boolean) => boolean;
   readonly getTasks?: () => readonly TaskCardState[];
+  readonly onTaskIntent?: (intent: import("../ui/papyrus/operator-console/taskSurface.js").TaskControlIntent) =>
+    void | Promise<void>;
   readonly getApprovals?: () => readonly ApprovalCardState[];
   readonly onApprovalIntent?: (intent: import("../ui/papyrus/operator-console/approvalSurface.js").ApprovalIntent) =>
     void | Promise<void>;

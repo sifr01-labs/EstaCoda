@@ -1,6 +1,6 @@
 import { padVisibleEnd, truncateVisible, wrapText } from "../../renderers/layout.js";
 import { formatUsageCost, formatUsageCostNotice } from "../../usage-cost-format.js";
-import { renderActivityTraceSurface } from "./activityTraceSurface.js";
+import { renderActivitySpanTraceSurface } from "./activityTraceSurface.js";
 import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
 import type {
   TaskCardAttemptState,
@@ -67,7 +67,7 @@ const COPY: Readonly<Record<OperatorConsoleLocale, SubagentCopy>> = {
     retryable: "retryable",
     notRetryable: "not retryable",
     recoveredDiagnostic: "Recovered output is available for inspection and was not accepted for synthesis.",
-    closeHint: "Esc return to Task · ←/→ inspect events · Home oldest visible · End live · ↑/↓ scroll",
+    closeHint: "Esc return to Task · ←/→ inspect activities · Home oldest · End live · ↑/↓ scroll",
     mouseActiveHint: "[Mouse Mode] Click or wheel here · Esc release",
     mouseToggleHint: "Ctrl+G mouse",
   },
@@ -94,7 +94,7 @@ const COPY: Readonly<Record<OperatorConsoleLocale, SubagentCopy>> = {
     retryable: "قابل لإعادة المحاولة",
     notRetryable: "غير قابل لإعادة المحاولة",
     recoveredDiagnostic: "تتوفر مخرجات مستردة للفحص ولم تُقبل للاستخدام في التجميع.",
-    closeHint: "Esc للعودة إلى المهمة · ←/→ لفحص الأحداث · Home للأقدم · End للمباشر · ↑/↓ للتمرير",
+    closeHint: "Esc للعودة إلى المهمة · ←/→ لفحص الأنشطة · Home للأقدم · End للمباشر · ↑/↓ للتمرير",
     mouseActiveHint: "[وضع الماوس] انقر أو مرّر هنا · Esc للتحرير",
     mouseToggleHint: "Ctrl+G للماوس",
   },
@@ -191,7 +191,7 @@ export function subagentInspectionContentLines(
       hasEarlierEvents: subagent.traceSummary?.hasEarlierEvents ?? false,
     },
   };
-  lines.push("", ...renderActivityTraceSurface(traceCard, options.inspection?.subagentTrace, {
+  lines.push("", ...renderActivitySpanTraceSurface(traceCard, options.inspection?.subagentTrace, {
     width: contentWidth,
     locale,
     style,

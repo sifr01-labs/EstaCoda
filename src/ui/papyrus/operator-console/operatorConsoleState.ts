@@ -308,9 +308,22 @@ export type TaskCardState = {
 };
 
 export type ActivityTraceInspectionState = {
-  /** Stable event identity selected for inspection. Omitted while following the live tail. */
+  /** Stable raw-event identity retained for the diagnostic event debugger. */
   readonly selectedTraceEventId?: string;
+  /** Stable logical activity identity selected in the human-facing trace. */
+  readonly selectedTraceSpanId?: string;
   readonly followLive: boolean;
+};
+
+export type TaskTraceModeState = {
+  readonly taskId: string;
+  readonly followLive: boolean;
+  readonly selectedSpanId?: string;
+};
+
+export type PendingTaskControlState = {
+  readonly taskId: string;
+  readonly kind: "cancel";
 };
 
 export type TaskInspectionState = ActivityTraceInspectionState & {
@@ -327,6 +340,9 @@ export type TaskSurfaceState = {
   readonly selectedTaskId?: string;
   readonly inspectedTaskId?: string;
   readonly inspection?: TaskInspectionState;
+  /** Compact ribbon navigation is opt-in so normal card arrows keep navigating Tasks and workers. */
+  readonly traceMode?: TaskTraceModeState;
+  readonly pendingControl?: PendingTaskControlState;
   /** Explicit temporary terminal mouse capture. Native terminal mouse behavior is the default. */
   readonly mouseModeActive?: boolean;
   readonly scrollOffset: number;

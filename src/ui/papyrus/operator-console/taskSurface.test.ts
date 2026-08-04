@@ -53,8 +53,8 @@ describe("durable Task surfaces", () => {
     });
     const text = stripAnsi(lines.join("\n"));
 
-    expect(lines).toHaveLength(8);
-    expect(lines.slice(1)).toHaveLength(7);
+    expect(lines).toHaveLength(9);
+    expect(lines.slice(1, 8)).toHaveLength(7);
     expect(text).toContain("Task 1/1");
     expect(text).toContain("Subagent 1 · Research how modern AI agents improve themselves auto…");
     expect(text).not.toContain("Full research objective retained for detailed inspection");
@@ -64,12 +64,13 @@ describe("durable Task surfaces", () => {
     expect(text).toContain("I found the relevant comparison data.");
     expect(text).toContain("running · 03:18 · 100 tokens · $0.0060");
     expect(text).not.toMatch(/[╭╮╰╯│]/u);
-    expect(lines.slice(1).every((line) => line.includes("\x1b[48;2;37;37;37m"))).toBe(true);
+    expect(lines.slice(1, 8).every((line) => line.includes("\x1b[48;2;37;37;37m"))).toBe(true);
+    expect(text).toContain("D detach · P pause · C cancel");
     expect(lines[0]).toContain("\x1b[38;2;64;224;208m");
     expect(lines[1]).toContain(ansiFg(tokens.contract.palette.accent));
     expect(lines[1]).toContain(ansiFg(tokens.contract.text.secondary));
-    expect(lines.at(-1)).toContain(ansiFg(tokens.contract.palette.action));
-    expect(lines.at(-1)).toContain(ansiFg(tokens.contract.text.muted));
+    expect(lines[7]).toContain(ansiFg(tokens.contract.palette.action));
+    expect(lines[7]).toContain(ansiFg(tokens.contract.text.muted));
     expect(lines.every((line) => visibleWidth(line) <= 72)).toBe(true);
   });
 
@@ -129,8 +130,8 @@ describe("durable Task surfaces", () => {
     const four = makeCard({ subagents: Array.from({ length: 4 }, (_, index) => makeSubagent(index + 1)) });
     const wide = renderTaskCardSurface({ cards: [four], scrollOffset: 0 }, { width: 100, isTty: true });
 
-    expect(getTaskCardSurfaceDesiredHeight({ cards: [four], scrollOffset: 0 }, 100)).toBe(24);
-    expect(wide).toHaveLength(24);
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [four], scrollOffset: 0 }, 100)).toBe(25);
+    expect(wide).toHaveLength(25);
     expect(wide[1]).toContain("Subagent 1");
     expect(wide[1]).toContain("Subagent 4");
     expect(wide[9]).toContain("Subagent 2");
@@ -139,7 +140,7 @@ describe("durable Task surfaces", () => {
 
     const narrow = renderTaskCardSurface({ cards: [four], scrollOffset: 0 }, { width: 72, isTty: true });
     const narrowText = narrow.join("\n");
-    expect(getTaskCardSurfaceDesiredHeight({ cards: [four], scrollOffset: 0 }, 72)).toBe(25);
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [four], scrollOffset: 0 }, 72)).toBe(26);
     expect(narrowText).toContain("Subagent 1");
     expect(narrowText).toContain("Subagent 2");
     expect(narrowText).toContain("Subagent 3");
@@ -300,8 +301,8 @@ describe("durable Task surfaces", () => {
     });
     const styled = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 72, style });
 
-    expect(lines).toHaveLength(8);
-    expect(lines.slice(1)).toHaveLength(7);
+    expect(lines).toHaveLength(9);
+    expect(lines.slice(1, 8)).toHaveLength(7);
     expect(text).toContain("Summary");
     expect(stripAnsi(lines[2]!)).toContain("> Summary");
     expect(lines.slice(3, 7).every((line) => stripAnsi(line).trim().length > 0)).toBe(true);
@@ -350,7 +351,7 @@ describe("durable Task surfaces", () => {
       { width: 72 }
     );
 
-    expect(lines).toHaveLength(8);
+    expect(lines).toHaveLength(9);
     expect(stripAnsi(lines[2]!)).toContain("+2 earlier activities");
     expect(stripAnsi(lines[3]!)).toContain("> Summary");
     expect(stripAnsi(lines[7]!)).toContain("completed");
@@ -382,7 +383,7 @@ describe("durable Task surfaces", () => {
     );
     const text = lines.join("\n");
 
-    expect(lines).toHaveLength(8);
+    expect(lines).toHaveLength(9);
     expect(lines[2]).toContain("> الملخص");
     expect(text.match(/الملخص/gu)).toHaveLength(1);
     expect(text).toContain("قارنت الأدلة");
@@ -454,8 +455,8 @@ describe("durable Task surfaces", () => {
     const text = lines.join("\n");
     const inspection = taskInspectionContentLines(card, 100).join("\n");
 
-    expect(getTaskCardSurfaceDesiredHeight(state, 100)).toBe(16);
-    expect(lines).toHaveLength(16);
+    expect(getTaskCardSurfaceDesiredHeight(state, 100)).toBe(17);
+    expect(lines).toHaveLength(17);
     expect(text).toContain("Competitor comparison");
     expect(text).toContain("⁨Task #T-104⁩");
     expect(text).toContain("3 usable reports");
@@ -492,7 +493,7 @@ describe("durable Task surfaces", () => {
 
     const six = makeSynthesisCard("running", 6);
     const sixLines = renderTaskCardSurface({ cards: [six], scrollOffset: 0 }, { width: 100 });
-    expect(getTaskCardSurfaceDesiredHeight({ cards: [six], scrollOffset: 0 }, 100)).toBe(16);
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [six], scrollOffset: 0 }, 100)).toBe(17);
     expect(sixLines[11]).toContain("Research Company 1");
     expect(sixLines[11]).toContain("Research Company 4");
     expect(sixLines.join("\n")).toContain("6 usable reports");
@@ -603,6 +604,87 @@ describe("durable Task surfaces", () => {
     expect(arabicReceipt).toContain("اكتملت مع تحذيرات");
   });
 
+  it("enters trace mode explicitly and keeps historical span selection stable across refresh", () => {
+    const card = makeSynthesisCard("running");
+    let state = createInitialOperatorConsoleState({
+      terminal: { width: 100, height: 30, isTty: true },
+      tasks: { cards: [card], selectedTaskId: card.taskId, scrollOffset: 0 },
+    });
+    state = routeTaskSurfaceKey(state, { type: "key", key: "tab" }).state;
+
+    const beforeTrace = routeTaskSurfaceKey(state, { type: "key", key: "left" });
+    expect(beforeTrace.handled).toBe(false);
+    expect(beforeTrace.state.tasks.traceMode).toBeUndefined();
+
+    state = routeTaskSurfaceKey(state, { type: "text", text: "t" }).state;
+    expect(state.tasks.traceMode).toEqual({ taskId: card.taskId, followLive: true });
+    state = routeTaskSurfaceKey(state, { type: "key", key: "left" }).state;
+    expect(state.tasks.traceMode).toEqual({
+      taskId: card.taskId,
+      followLive: false,
+      selectedSpanId: "span-synthesis-read",
+    });
+
+    const appended = {
+      ...card,
+      trace: {
+        ...card.trace,
+        spans: [...card.trace.spans, {
+          ...card.trace.spans.at(-1)!,
+          id: "span-synthesis-validate",
+          category: "validate" as const,
+          label: "Checking citations",
+        }],
+      },
+    };
+    state = { ...state, tasks: reconcileTaskSurfaceState(state.tasks, [appended]) };
+    expect(state.tasks.traceMode?.selectedSpanId).toBe("span-synthesis-read");
+    expect(renderTaskCardSurface(state.tasks, { width: 100 }).join("\n"))
+      .toContain("Read · Synthesis · 9s · Loading usable reports");
+
+    state = routeTaskSurfaceKey(state, { type: "key", key: "enter" }).state;
+    expect(state.tasks.inspection).toMatchObject({
+      followLive: false,
+      selectedTraceSpanId: "span-synthesis-read",
+    });
+    state = routeTaskSurfaceKey(state, { type: "key", key: "escape" }).state;
+    state = routeTaskSurfaceKey(state, { type: "key", key: "end" }).state;
+    expect(state.tasks.traceMode).toEqual({ taskId: card.taskId, followLive: true });
+    state = routeTaskSurfaceKey(state, { type: "key", key: "escape" }).state;
+    expect(state.tasks.traceMode).toBeUndefined();
+  });
+
+  it("emits only state-valid Task intents and confirms cancellation", () => {
+    const card = makeSynthesisCard("running");
+    let state = createInitialOperatorConsoleState({
+      terminal: { width: 100, height: 30, isTty: true },
+      tasks: { cards: [card], selectedTaskId: card.taskId, scrollOffset: 0 },
+    });
+    state = routeTaskSurfaceKey(state, { type: "key", key: "tab" }).state;
+
+    const pause = routeTaskSurfaceKey(state, { type: "text", text: "p" });
+    expect(pause.intent).toEqual({ type: "pauseTask", taskId: card.taskId });
+    const pending = routeTaskSurfaceKey(state, { type: "text", text: "c" });
+    expect(pending.intent).toBeUndefined();
+    expect(pending.state.tasks.pendingControl).toEqual({ kind: "cancel", taskId: card.taskId });
+    expect(renderTaskCardSurface(pending.state.tasks, { width: 100 }).join("\n"))
+      .toContain("Cancel Task? · Enter confirm · Esc keep running");
+    const cancelled = routeTaskSurfaceKey(pending.state, { type: "key", key: "enter" });
+    expect(cancelled.intent).toEqual({ type: "cancelTask", taskId: card.taskId });
+    expect(cancelled.state.tasks.pendingControl).toBeUndefined();
+
+    const detached = routeTaskSurfaceKey(state, { type: "text", text: "d" });
+    expect(detached.intent).toEqual({ type: "detachTask", taskId: card.taskId });
+    expect(detached.state.focus.target).toEqual({ kind: "prompt" });
+
+    const completed = { ...card, status: "completed" as const, phase: { ...card.phase, name: "completed" as const } };
+    const completedText = renderTaskCardSurface({ cards: [completed], scrollOffset: 0 }, { width: 100 }).join("\n");
+    expect(completedText).toContain("T trace");
+    expect(completedText).not.toContain("D detach");
+    expect(completedText).not.toContain("P pause");
+    expect(completedText).not.toContain("C cancel");
+  });
+
   it("keeps semantic motion scoped to the visible running worker or synthesis card", () => {
     const worker = makeCard();
     const synthesis = makeSynthesisCard("ready");
@@ -624,9 +706,9 @@ describe("durable Task surfaces", () => {
     const running = makeSynthesisCard("running");
     const completed = makeSynthesisCard("completed");
 
-    expect(getTaskCardSurfaceDesiredHeight({ cards: [pending], scrollOffset: 0 }, 100)).toBe(24);
-    expect(getTaskCardSurfaceDesiredHeight({ cards: [running], scrollOffset: 0 }, 100)).toBe(16);
-    expect(getTaskCardSurfaceDesiredHeight({ cards: [completed], scrollOffset: 0 }, 100)).toBe(24);
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [pending], scrollOffset: 0 }, 100)).toBe(25);
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [running], scrollOffset: 0 }, 100)).toBe(17);
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [completed], scrollOffset: 0 }, 100)).toBe(25);
     expect(renderTaskCardSurface({ cards: [pending], scrollOffset: 0 }, { width: 100 }).join("\n"))
       .not.toContain("Parent synthesis");
     expect(renderTaskCardSurface({ cards: [completed], scrollOffset: 0 }, { width: 100 }).join("\n"))
@@ -826,7 +908,7 @@ describe("durable Task surfaces", () => {
     const light = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 72, style: lightStyle });
     const plain = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 72, style: plainStyle });
 
-    expect(light.slice(1).every((line) => line.includes("\x1b[48;2;245;245;245m"))).toBe(true);
+    expect(light.slice(1, 8).every((line) => line.includes("\x1b[48;2;245;245;245m"))).toBe(true);
     expect(plain.join("\n")).not.toMatch(/\u001B\[/u);
     expect(plain.join("\n")).toContain(". Subagent 1");
     expect(plain.join("\n")).toContain("> Reading company 1");
@@ -1095,7 +1177,7 @@ describe("durable Task surfaces", () => {
     expect(createOperatorConsoleLayout(state).regions.map((region) => region.kind)).toEqual(["taskInspection"]);
 
     state = routeTaskSurfaceKey(state, { type: "key", key: "left" }).state;
-    expect(state.tasks.inspection).toMatchObject({ followLive: false, selectedTraceEventId: "event-attempt-started" });
+    expect(state.tasks.inspection).toMatchObject({ followLive: false, selectedTraceSpanId: "event-attempt-started" });
     state = routeTaskSurfaceKey(state, { type: "key", key: "end" }).state;
     expect(state.tasks.inspection).toMatchObject({ followLive: true });
     state = routeTaskSurfaceKey(state, { type: "key", key: "pagedown" }).state;
@@ -1138,7 +1220,7 @@ describe("durable Task surfaces", () => {
     expect(renderTaskInspectionSurface(state.tasks, { width: 80, height: 20 }).join("\n"))
       .toContain("Main session / Task ⁨T-104⁩ / Subagent 2");
     state = routeTaskSurfaceKey(state, { type: "key", key: "left" }).state;
-    expect(state.tasks.inspection?.subagentTrace).toEqual({ followLive: false, selectedTraceEventId: "second-1" });
+    expect(state.tasks.inspection?.subagentTrace).toEqual({ followLive: false, selectedTraceSpanId: "second-1" });
 
     const refreshedCard = { ...card, subagents: [second, first] };
     state = { ...state, tasks: { ...state.tasks, cards: [refreshedCard] } };
@@ -1415,7 +1497,7 @@ describe("durable Task surfaces", () => {
     });
     const layout = createOperatorConsoleLayout(initial);
     const eventHit = createOperatorConsoleHitRegions(initial, layout)
-      .find((region) => region.id === `task:${card.taskId}:task:event:trace-1`)!;
+      .find((region) => region.id === `task:${card.taskId}:task:activity:trace-1`)!;
     expect(eventHit).toBeDefined();
     const selected = routeOperatorConsoleInput({
       state: initial,
@@ -1428,7 +1510,7 @@ describe("durable Task surfaces", () => {
     });
     expect(selected.state.tasks.inspection).toMatchObject({
       followLive: false,
-      selectedTraceEventId: "trace-1",
+      selectedTraceSpanId: "trace-1",
     });
 
     const selectedState = {

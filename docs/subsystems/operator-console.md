@@ -446,14 +446,14 @@ The Task header opens the whole-Task view; a Subagent card opens that Subagent.
 The whole-Task inspection workspace shows the objective, lifecycle, elapsed
 time, aggregate usage/cost, factual Step state, Subagent summaries, approvals,
 blockers, dependencies, results, child Tasks, and safe artifacts. Its activity
-trace is an event sequence, not a completion meter: one semantic-color square
-per retained `Terminal`, `Search`, `Plan`, `Read`, `Edit`, `Answer`, `Wait`,
-`Finish`, or `Failed` event, plus all-time category counters. The outlined
-square is the inspected event; the separate live-tail marker is the newest
-event. Selecting history disables follow-live and exposes `Return to live`.
-Overflow uses a bounded readable window with an earlier-event count. The view
-may state `N of M Steps settled`, but never derives or renders a Task completion
-percentage. All-time counters come from profile-scoped aggregate metadata; the
+trace is an execution history, not a completion meter. Adjacent retained events
+of the same logical activity become duration-weighted `Plan`, `Search`, `Read`,
+`Write`, `Execute`, `Wait`, `Retry`, `Deliver`, or `Failed` spans. The outlined
+span is the inspected activity; the separate live-tail marker is the newest
+activity. Selecting history disables follow-live and exposes `Return to live`.
+Overflow uses a bounded readable window with an earlier-activity count. The
+view may state `N of M Steps settled`, but never derives or renders a Task
+completion percentage. Aggregate metadata remains profile scoped; the
 projection does not load or expose omitted Event payloads.
 
 Subagent inspection reuses the workspace filtered by stable Step ID. It shows
@@ -468,10 +468,17 @@ handles and summaries; it does not claim a separate file-access history.
 `Ctrl+T` focuses the Task header. `Up`/`Down` change Tasks, `Right` enters the
 visible Subagent grid, and the arrow keys then move among complete visible
 Subagent cards. `Enter` opens the focused Task header or opens a focused
-Subagent directly. Native terminal selection, copy/paste, and scroll behavior
+Subagent directly. On a focused Task, `T` enters compact trace mode;
+`Left`/`Right` select logical activities, `Home` selects the oldest activity,
+`End` returns to live, `Enter` inspects the selection, and `Escape` collapses
+trace mode. Available Task controls are rendered from current state: `R` retries
+the single eligible failed Step, `D` detaches the foreground session without
+mutating the Task, `P` pauses at a safe boundary, and `C` opens an explicit
+cancel confirmation. Invalid actions are omitted, and settled Tasks retain only
+trace inspection. Native terminal selection, copy/paste, and scroll behavior
 remains available by default. `Ctrl+G` explicitly enables temporary Mouse Mode
 for the Task region; while active, Task/Subagent cards, breadcrumbs, trace
-events, and `Return to live` use the same actions as their keyboard routes.
+activities, and `Return to live` use the same actions as their keyboard routes.
 `Up`/`Down`, `Page Up`/`Page Down`,
 `Home`, and `End` navigate or scroll according to the active inspection target;
 `Escape` first releases an active Mouse Mode, then unwinds Subagent to Task to
@@ -484,7 +491,7 @@ while Mouse Mode is active. Terminal startup defensively resets stale tracking,
 and cleanup disables it on normal exit, failure, and suspend.
 
 The existing Task refresh updates projections and newly settled provider usage
-in place. Established cards retain their order, selected Task/Subagent/event
+in place. Established cards retain their order, selected Task/Subagent/activity
 IDs remain selected while present, history remains frozen when follow-live is
 off, and terminal resize recomputes the layout without closing inspection.
 

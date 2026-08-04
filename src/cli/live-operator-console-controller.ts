@@ -33,6 +33,8 @@ import {
 } from "../ui/papyrus/operator-console/index.js";
 import { RawPromptRenderLoop } from "./rawPromptRenderLoop.js";
 import { semanticMotionForPhase, semanticMotionFrameIndex } from "../ui/semantic-motion.js";
+import type { TaskOperatorService } from "../tasks/task-operator-service.js";
+import type { TaskControlIntent } from "../ui/papyrus/operator-console/taskSurface.js";
 
 export type LiveOperatorConsoleControllerOptions = {
   readonly output: Pick<Writable, "write"> & {
@@ -46,8 +48,11 @@ export type LiveOperatorConsoleControllerOptions = {
   readonly animationIntervalMs?: number;
   readonly streamingRefreshIntervalMs?: number;
   readonly getStatus: () => StatusRailState;
-  readonly refreshTasks?: () => boolean;
+  readonly refreshTasks?: (force?: boolean) => boolean;
   readonly getTasks?: () => readonly TaskCardState[];
+  readonly taskOperator?: Pick<TaskOperatorService, "pause" | "cancel" | "retry">;
+  readonly taskSessionId?: string;
+  readonly onTaskControlError?: (error: Error, intent: TaskControlIntent) => void;
   readonly taskRefreshIntervalMs?: number;
   readonly turnStartedAtMs?: number;
   readonly promptPlaceholder?: string;
@@ -74,8 +79,11 @@ export class LiveOperatorConsoleController {
   readonly #animationIntervalMs: number;
   readonly #streamingRefreshIntervalMs: number;
   readonly #getStatus: () => StatusRailState;
-  readonly #refreshTasks: (() => boolean) | undefined;
+  readonly #refreshTasks: ((force?: boolean) => boolean) | undefined;
   readonly #getTasks: (() => readonly TaskCardState[]) | undefined;
+  readonly #taskOperator: LiveOperatorConsoleControllerOptions["taskOperator"];
+  readonly #taskSessionId: string | undefined;
+  readonly #onTaskControlError: LiveOperatorConsoleControllerOptions["onTaskControlError"];
   readonly #taskRefreshIntervalMs: number;
   readonly #turnStartedAtMs: number | undefined;
   readonly #promptPlaceholder: string | undefined;
@@ -115,6 +123,9 @@ export class LiveOperatorConsoleController {
     this.#getStatus = options.getStatus;
     this.#refreshTasks = options.refreshTasks;
     this.#getTasks = options.getTasks;
+    this.#taskOperator = options.taskOperator;
+    this.#taskSessionId = options.taskSessionId;
+    this.#onTaskControlError = options.onTaskControlError;
     this.#taskRefreshIntervalMs = normalizePositiveInteger(
       options.taskRefreshIntervalMs ?? DEFAULT_TASK_REFRESH_INTERVAL_MS,
       DEFAULT_TASK_REFRESH_INTERVAL_MS
@@ -182,6 +193,7 @@ export class LiveOperatorConsoleController {
       this.#runtimeHost.setFocus(routed.state.focus);
       this.refresh();
     }
+    if (routed.taskIntent !== undefined) this.#handleTaskIntent(routed.taskIntent);
     if (!routed.handled) return false;
     return true;
   }
@@ -465,6 +477,27 @@ export class LiveOperatorConsoleController {
     }, this.#taskRefreshIntervalMs);
     const timer = this.#taskRefreshTimer as { unref?: () => void };
     timer.unref?.();
+  }
+
+  #handleTaskIntent(intent: TaskControlIntent): void {
+    if (intent.type === "detachTask") return;
+    if (this.#taskOperator === undefined) return;
+    try {
+      if (intent.type === "pauseTask") {
+        this.#taskOperator.pause(intent.taskId, this.#taskSessionId);
+      } else if (intent.type === "cancelTask") {
+        this.#taskOperator.cancel(intent.taskId, this.#taskSessionId);
+      } else {
+        this.#taskOperator.retry(intent.taskId, intent.stepId, this.#taskSessionId);
+      }
+    } catch (error) {
+      this.#onTaskControlError?.(error instanceof Error ? error : new Error(String(error)), intent);
+      return;
+    }
+    this.#refreshTasks?.(true);
+    this.#tasks = reconcileTaskSurfaceState(this.#tasks, this.#getTasks?.() ?? []);
+    this.#runtimeHost.setTasks(this.#tasks);
+    this.refresh({ dirtyRegions: ["taskCards", "taskInspection", "statusRail"] });
   }
 
   #stopTaskRefreshTimer(): void {

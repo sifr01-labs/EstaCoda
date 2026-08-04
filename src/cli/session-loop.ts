@@ -70,6 +70,7 @@ import {
   type OperatorConsoleRuntimeHost,
   type QueuedSteerState,
   type SteerState,
+  type TaskControlIntent,
   type TurnActivityState,
 } from "../ui/papyrus/operator-console/index.js";
 import type { ParsedKeypress } from "../ui/input/parseKeypress.js";
@@ -442,10 +443,10 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   let cachedTaskCards: readonly TaskCardState[] = [];
   let cachedTaskCardsAtMs = Number.NEGATIVE_INFINITY;
   let taskTurnScope = await initialTaskTurnScope(runtime);
-  const refreshOperatorConsoleTasks = (): boolean => {
+  const refreshOperatorConsoleTasks = (force = false): boolean => {
     void refreshSessionCost();
     const timestamp = Date.now();
-    if (cachedTaskRuntime === runtime &&
+    if (!force && cachedTaskRuntime === runtime &&
         timestamp - cachedTaskCardsAtMs < OPERATOR_CONSOLE_TASK_REFRESH_INTERVAL_MS) {
       return false;
     }
@@ -472,6 +473,15 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       authorizedSessionId: runtime.sessionId,
       decision: intent.type === "approve" ? "approved" : "denied"
     });
+  };
+  const onOperatorConsoleTaskIntent = (intent: TaskControlIntent): void => {
+    if (intent.type === "detachTask") return;
+    const taskOperator = runtime.taskOperator;
+    if (taskOperator === undefined) throw new Error("Durable Task controls are unavailable.");
+    if (intent.type === "pauseTask") taskOperator.pause(intent.taskId, runtime.sessionId);
+    else if (intent.type === "cancelTask") taskOperator.cancel(intent.taskId, runtime.sessionId);
+    else taskOperator.retry(intent.taskId, intent.stepId, runtime.sessionId);
+    refreshOperatorConsoleTasks(true);
   };
   const prompt = options.prompt ?? createInteractivePrompt({
     input: cliInput,
@@ -500,6 +510,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           getTasks: getOperatorConsoleTasks,
           getApprovals: getOperatorConsoleApprovals,
           onApprovalIntent: onOperatorConsoleApprovalIntent,
+          onTaskIntent: onOperatorConsoleTaskIntent,
           style: operatorConsoleStyle,
         },
       }),
@@ -688,6 +699,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             getStatus: getOperatorConsoleStatus,
             refreshTasks: refreshOperatorConsoleTasks,
             getTasks: getOperatorConsoleTasks,
+            taskOperator: runtime.taskOperator,
+            taskSessionId: runtime.sessionId,
             turnStartedAtMs: now(),
             promptPlaceholder: COMPACTION_PROMPT_PLACEHOLDER,
           });
@@ -831,6 +844,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             getStatus: getOperatorConsoleStatus,
             refreshTasks: refreshOperatorConsoleTasks,
             getTasks: getOperatorConsoleTasks,
+            taskOperator: runtime.taskOperator,
+            taskSessionId: runtime.sessionId,
             onMouseModeChange: (active) => {
               operatorConsoleInputLifecycle?.setMouseTracking(active);
             },

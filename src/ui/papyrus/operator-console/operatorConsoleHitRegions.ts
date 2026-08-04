@@ -1,4 +1,4 @@
-import { getActivityTraceHitLayout, renderActivityTraceSurface } from "./activityTraceSurface.js";
+import { getActivitySpanTraceHitLayout, renderActivitySpanTraceSurface } from "./activityTraceSurface.js";
 import type { OperatorConsoleLayout, OperatorConsoleRegion } from "./operatorConsoleLayout.js";
 import type { OperatorConsoleState, TaskCardState, TaskCardSubagentState } from "./operatorConsoleState.js";
 import { subagentInspectionContentLines } from "./subagentInspectionSurface.js";
@@ -151,27 +151,27 @@ function addTraceRegions(
     ? state.tasks.inspection
     : state.tasks.inspection?.subagentTrace;
   const traceWidth = Math.max(1, region.width - 2);
-  const traceLines = renderActivityTraceSurface(traceCard, traceInspection, {
+  const traceLines = renderActivitySpanTraceSurface(traceCard, traceInspection, {
     width: traceWidth,
     locale: state.locale,
   });
   const traceTitleRow = content.findIndex((line) => line === traceLines[0]);
   const traceRow = traceTitleRow < 0 ? -1 : traceTitleRow + 1;
-  const hitLayout = getActivityTraceHitLayout(traceCard, traceInspection, {
+  const hitLayout = getActivitySpanTraceHitLayout(traceCard, traceInspection, {
     width: traceWidth,
     locale: state.locale,
   });
   if (hitLayout !== undefined) {
-    for (const event of hitLayout.events) {
+    for (const activity of hitLayout.activities) {
       addVisibleRegion(regions, {
-        id: `task:${card.taskId}:${scope}:event:${event.eventId}`,
-        x: region.x + event.column,
+        id: `task:${card.taskId}:${scope}:activity:${activity.spanId}`,
+        x: region.x + activity.column,
         contentRow: traceRow,
         offset,
         contentHeight,
         region,
-        width: 1,
-        action: { type: "selectTraceEvent", scope, eventId: event.eventId },
+        width: activity.width,
+        action: { type: "selectTraceSpan", scope, spanId: activity.spanId },
       });
     }
     addVisibleRegion(regions, {

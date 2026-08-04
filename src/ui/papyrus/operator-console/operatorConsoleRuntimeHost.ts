@@ -441,6 +441,9 @@ function cloneTaskSurfaceState(tasks: TaskSurfaceState): TaskSurfaceState {
             ...(tasks.inspection.selectedTraceEventId === undefined
               ? {}
               : { selectedTraceEventId: tasks.inspection.selectedTraceEventId }),
+            ...(tasks.inspection.selectedTraceSpanId === undefined
+              ? {}
+              : { selectedTraceSpanId: tasks.inspection.selectedTraceSpanId }),
             ...(tasks.inspection.selectedSubagentStepId === undefined
               ? {}
               : { selectedSubagentStepId: tasks.inspection.selectedSubagentStepId }),
@@ -452,6 +455,8 @@ function cloneTaskSurfaceState(tasks: TaskSurfaceState): TaskSurfaceState {
               : { subagentTrace: { ...tasks.inspection.subagentTrace } })
           }
         }),
+    ...(tasks.traceMode === undefined ? {} : { traceMode: { ...tasks.traceMode } }),
+    ...(tasks.pendingControl === undefined ? {} : { pendingControl: { ...tasks.pendingControl } }),
     scrollOffset: normalizeNonNegativeInteger(tasks.scrollOffset),
   };
 }
