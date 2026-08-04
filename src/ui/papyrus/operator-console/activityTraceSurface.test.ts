@@ -139,6 +139,7 @@ function makeCard(events: readonly TaskCardActivityState[]): TaskCardState {
       elapsedMs: 1_000,
       usage: { total: usage() },
       attempts: [],
+      outcome: { usable: false, recovered: false, attemptsUsed: 0, maxAttempts: 3 },
       trace: events,
       results: [],
     }],
@@ -146,7 +147,15 @@ function makeCard(events: readonly TaskCardActivityState[]): TaskCardState {
     childTasks: [],
     phase: {
       name: "delegating",
-      workerProgress: { completed: 0, settled: 0, total: 1 },
+      workerProgress: {
+        completed: 0,
+        failed: 0,
+        cancelled: 0,
+        settled: 0,
+        usable: 0,
+        recovered: 0,
+        total: 1
+      },
     },
     recentActivity: events.slice(-3),
     elapsedMs: 1_000,

@@ -35,6 +35,9 @@ type SubagentCopy = {
   readonly diagnostic: string;
   readonly waitingForApproval: string;
   readonly waitingForInput: string;
+  readonly retryable: string;
+  readonly notRetryable: string;
+  readonly recoveredDiagnostic: string;
   readonly closeHint: string;
   readonly mouseActiveHint: string;
   readonly mouseToggleHint: string;
@@ -61,6 +64,9 @@ const COPY: Readonly<Record<OperatorConsoleLocale, SubagentCopy>> = {
     diagnostic: "diagnostic only",
     waitingForApproval: "waiting for approval",
     waitingForInput: "waiting for input",
+    retryable: "retryable",
+    notRetryable: "not retryable",
+    recoveredDiagnostic: "Recovered output is available for inspection and was not accepted for synthesis.",
     closeHint: "Esc return to Task · ←/→ inspect events · Home oldest visible · End live · ↑/↓ scroll",
     mouseActiveHint: "[Mouse Mode] Click or wheel here · Esc release",
     mouseToggleHint: "Ctrl+G mouse",
@@ -85,6 +91,9 @@ const COPY: Readonly<Record<OperatorConsoleLocale, SubagentCopy>> = {
     diagnostic: "للتشخيص فقط",
     waitingForApproval: "بانتظار الموافقة",
     waitingForInput: "بانتظار إدخال",
+    retryable: "قابل لإعادة المحاولة",
+    notRetryable: "غير قابل لإعادة المحاولة",
+    recoveredDiagnostic: "تتوفر مخرجات مستردة للفحص ولم تُقبل للاستخدام في التجميع.",
     closeHint: "Esc للعودة إلى المهمة · ←/→ لفحص الأحداث · Home للأقدم · End للمباشر · ↑/↓ للتمرير",
     mouseActiveHint: "[وضع الماوس] انقر أو مرّر هنا · Esc للتحرير",
     mouseToggleHint: "Ctrl+G للماوس",
@@ -243,7 +252,14 @@ function blockerLines(
   if (status === "waiting_for_approval") return [copy.waitingForApproval];
   if (status === "waiting_for_input") return [copy.waitingForInput];
   if (status === "failed" || status === "cancelled" || status === "interrupted" || status === "expired") {
-    return [formatStatus(status, locale)];
+    const failure = attempt?.failure ?? subagent.outcome.failure;
+    return [
+      failure === undefined
+        ? formatStatus(status, locale)
+        : `${isolate(failure.class)} · ${failure.retryable ? copy.retryable : copy.notRetryable}` +
+          ` · ${copy.attempt} ${attempt?.attemptNumber ?? subagent.outcome.attemptsUsed}/${attempt?.maxAttempts ?? subagent.outcome.maxAttempts}`,
+      ...(subagent.outcome.recovered ? [copy.recoveredDiagnostic] : []),
+    ];
   }
   return [copy.none];
 }
@@ -255,7 +271,10 @@ function formatAttempt(
   locale: OperatorConsoleLocale
 ): string {
   const current = attempt.attemptId === currentAttemptId ? ` · ${copy.current}` : "";
-  return `${copy.attempt} ${attempt.attemptNumber} · ${formatStatus(attempt.status, locale)}${current} · ${formatDuration(attempt.elapsedMs)} · ${formatCompactNumber(attempt.usage.totalTokens)} ${copy.tokens} · ${formatCost(attempt.usage, locale)}`;
+  const failure = attempt.failure === undefined
+    ? ""
+    : ` · ${isolate(attempt.failure.class)} · ${attempt.failure.retryable ? copy.retryable : copy.notRetryable}`;
+  return `${copy.attempt} ${attempt.attemptNumber}/${attempt.maxAttempts} · ${formatStatus(attempt.status, locale)}${current}${failure} · ${formatDuration(attempt.elapsedMs)} · ${formatCompactNumber(attempt.usage.totalTokens)} ${copy.tokens} · ${formatCost(attempt.usage, locale)}`;
 }
 
 function formatResult(result: TaskCardResultState, copy: SubagentCopy): string {

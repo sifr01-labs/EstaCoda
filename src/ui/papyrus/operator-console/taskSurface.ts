@@ -74,10 +74,12 @@ type TaskCopy = {
   delegatedStepsCompleted: (completed: number, total: number) => string;
   delegatedStepsSettled: (settled: number, total: number) => string;
   delegatedProgressCompact: (completed: number, settled: number, total: number) => string;
+  workerOutcomes: (usable: number, failed: number, cancelled: number) => string;
   phaseLabel: (phase: TaskCardState["phase"]["name"]) => string;
   earlierActivities: string;
   waitingForActivity: string;
   resultReady: string;
+  recoveredOutput: string;
   resultUnavailable: string;
   noResultSummary: string;
   parentSynthesis: string;
@@ -103,10 +105,16 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     delegatedProgressCompact: (completed, settled, total) => completed === total
       ? `${completed}/${total} completed`
       : `${settled}/${total} settled`,
-    phaseLabel: (phase) => phase.replaceAll("_", " "),
+    workerOutcomes: (usable, failed, cancelled) => [
+      `${usable} usable ${usable === 1 ? "report" : "reports"}`,
+      ...(failed === 0 ? [] : [`${failed} failed`]),
+      ...(cancelled === 0 ? [] : [`${cancelled} cancelled`]),
+    ].join(" · "),
+    phaseLabel: (phase) => phase === "partial" ? "completed with warnings" : phase.replaceAll("_", " "),
     earlierActivities: "earlier activities",
     waitingForActivity: "Waiting for safe activity",
     resultReady: "Summary",
+    recoveredOutput: "Recovered output · diagnostic only",
     resultUnavailable: "Result unavailable",
     noResultSummary: "Open to inspect the full result",
     parentSynthesis: "Parent synthesis",
@@ -130,10 +138,16 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     delegatedProgressCompact: (completed, settled, total) => completed === total
       ? `${completed}/${total} مكتملة`
       : `${settled}/${total} مستقرة`,
+    workerOutcomes: (usable, failed, cancelled) => [
+      `نتائج صالحة: ${usable}`,
+      ...(failed === 0 ? [] : [`فشل: ${failed}`]),
+      ...(cancelled === 0 ? [] : [`أُلغي: ${cancelled}`]),
+    ].join(" · "),
     phaseLabel: localizedArabicTaskPhase,
     earlierActivities: "أنشطة سابقة",
     waitingForActivity: "بانتظار نشاط آمن",
     resultReady: "الملخص",
+    recoveredOutput: "مخرجات مستردة · للتشخيص فقط",
     resultUnavailable: "النتيجة غير متاحة",
     noResultSummary: "افتح لفحص النتيجة الكاملة",
     parentSynthesis: "تجميع الوكيل الرئيسي",
@@ -1141,13 +1155,11 @@ function renderParentSynthesisStage(
   const workerProgress = card.phase.workerProgress;
   const progressText = workerProgress === undefined
     ? undefined
-    : workerProgress.completed === workerProgress.total
-      ? copy.delegatedStepsCompleted(workerProgress.completed, workerProgress.total)
-      : copy.delegatedStepsSettled(workerProgress.settled, workerProgress.total);
+    : formatWorkerProgress(workerProgress, copy, false);
   const titleRow = [`${symbol} ${title}`, description, progressText]
     .filter((value): value is string => value !== undefined)
     .join(` ${styleMuted(style, "·")} `);
-  const resultCount = card.subagents.filter((subagent) => subagent.status === "completed").length;
+  const resultCount = workerProgress?.usable ?? card.subagents.filter((subagent) => subagent.outcome.usable).length;
   const headlineText = parentSynthesisHeadline(synthesis, resultCount, copy);
   const currentActivity = semanticParentSynthesisActivityLabel(
     attempt?.currentActivity,
@@ -1222,12 +1234,28 @@ function formatTaskHeader(
   const phase = styleMuted(style, copy.phaseLabel(card.phase.name));
   const progressText = workerProgress === undefined
     ? `${card.progress.completed + card.progress.skipped} of ${card.progress.total} ${copy.stepsSettled}`
-    : copy.delegatedProgressCompact(workerProgress.completed, workerProgress.settled, workerProgress.total);
+    : formatWorkerProgress(workerProgress, copy, true);
   const progress = styleMuted(style, progressText);
   if (workerProgress === undefined) {
     return `${styledRail} ${styledTitle} ${separator} ${taskId} ${separator} ${styledMouseHint} ${separator} ${card.objective} ${separator} ${progress}`;
   }
   return `${styledRail} ${styledTitle} ${separator} ${taskId} ${separator} ${phase} ${separator} ${progress} ${separator} ${styledMouseHint} ${separator} ${card.objective}`;
+}
+
+function formatWorkerProgress(
+  progress: NonNullable<TaskCardState["phase"]["workerProgress"]>,
+  copy: TaskCopy,
+  compact: boolean
+): string {
+  if (progress.settled === progress.total && (progress.failed > 0 || progress.cancelled > 0)) {
+    return copy.workerOutcomes(progress.usable, progress.failed, progress.cancelled);
+  }
+  if (compact) {
+    return copy.delegatedProgressCompact(progress.completed, progress.settled, progress.total);
+  }
+  return progress.completed === progress.total
+    ? copy.delegatedStepsCompleted(progress.completed, progress.total)
+    : copy.delegatedStepsSettled(progress.settled, progress.total);
 }
 
 function renderTaskReceipt(
@@ -1257,7 +1285,7 @@ function renderTaskReceipt(
   const phase = styleTaskReceiptStatus(copy.phaseLabel(card.phase.name), card.status, style);
   const progress = workerProgress === undefined
     ? `${card.progress.completed + card.progress.skipped}/${card.progress.total} ${copy.stepsSettled}`
-    : copy.delegatedProgressCompact(workerProgress.completed, workerProgress.settled, workerProgress.total);
+    : formatWorkerProgress(workerProgress, copy, true);
   const metrics = styleMuted(
     style,
     `${formatDuration(card.elapsedMs)} · ${formatCompactTokenCount(card.usage.totalTokens)} ${copy.tokens} · ${formatCardUsage(card.usage, options.locale ?? "en")}`
@@ -1308,7 +1336,7 @@ function localizedArabicTaskPhase(phase: TaskCardState["phase"]["name"]): string
     case "waiting_for_approval": return "بانتظار الموافقة";
     case "paused": return "متوقفة مؤقتاً";
     case "completed": return "مكتملة";
-    case "partial": return "مكتملة جزئياً";
+    case "partial": return "اكتملت مع تحذيرات";
     case "failed": return "فشلت";
     case "cancelled": return "ملغاة";
   }
@@ -1681,7 +1709,11 @@ function formatSettledSubagentState(
   const successful = subagent.status === "completed";
   const label = successful
     ? copy.resultReady
-    : subagent.status === "skipped" ? formatSubagentStatus(subagent.status) : copy.resultUnavailable;
+    : subagent.status === "skipped"
+      ? formatSubagentStatus(subagent.status)
+      : subagent.outcome.recovered
+        ? copy.recoveredOutput
+        : copy.resultUnavailable;
   const tokens = style?.tokens.contract;
   const glyph = successful
     ? tokens?.glyph.trace.live ?? ">"

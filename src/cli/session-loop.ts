@@ -3110,7 +3110,20 @@ function delegatedTaskNotices(
       ? isolateRtl(`مهمة مفوضة ${isolateLtr(taskId)} · ${localizedTaskStatus(phase, "ar")}`)
       : `Delegated Task ${taskId} · ${localizedTaskStatus(phase, "en")}`);
     if (workerProgress !== undefined) {
-      const progress = workerProgress.completed === workerProgress.total
+      const progress = workerProgress.settled === workerProgress.total &&
+          (workerProgress.failed > 0 || workerProgress.cancelled > 0)
+        ? locale === "ar"
+          ? [
+              `نتائج صالحة: ${workerProgress.usable}`,
+              ...(workerProgress.failed === 0 ? [] : [`فشل: ${workerProgress.failed}`]),
+              ...(workerProgress.cancelled === 0 ? [] : [`أُلغي: ${workerProgress.cancelled}`]),
+            ].join(" · ")
+          : [
+              `${workerProgress.usable} usable ${workerProgress.usable === 1 ? "report" : "reports"}`,
+              ...(workerProgress.failed === 0 ? [] : [`${workerProgress.failed} failed`]),
+              ...(workerProgress.cancelled === 0 ? [] : [`${workerProgress.cancelled} cancelled`]),
+            ].join(" · ")
+        : workerProgress.completed === workerProgress.total
         ? locale === "ar"
           ? `اكتملت ${workerProgress.completed} من ${workerProgress.total} خطوات مفوضة`
           : `${workerProgress.completed} of ${workerProgress.total} delegated Steps completed`
@@ -3124,14 +3137,14 @@ function delegatedTaskNotices(
 }
 
 function localizedTaskStatus(status: string, locale: "en" | "ar"): string {
-  if (locale === "en") return status;
+  if (locale === "en") return status === "partial" ? "completed with warnings" : status;
   switch (status) {
     case "queued": return "قيد الانتظار";
     case "running": return "قيد التنفيذ";
     case "delegating": return "يتم تنفيذ العمل المفوض";
     case "synthesizing": return "يتم تجميع النتائج";
     case "completed": return "مكتملة";
-    case "partial": return "مكتملة جزئياً";
+    case "partial": return "اكتملت مع تحذيرات";
     case "failed": return "فشلت";
     case "cancelled": return "ملغاة";
     case "paused": return "متوقفة مؤقتاً";
@@ -3366,6 +3379,10 @@ export function taskProjectionToCard(
       attempts: subagent.attempts.map(taskAttemptToCard),
       ...(subagent.latestAttempt === undefined ? {} : { latestAttempt: taskAttemptToCard(subagent.latestAttempt) }),
       ...(subagent.activeAttempt === undefined ? {} : { activeAttempt: taskAttemptToCard(subagent.activeAttempt) }),
+      outcome: {
+        ...subagent.outcome,
+        ...(subagent.outcome.failure === undefined ? {} : { failure: { ...subagent.outcome.failure } })
+      },
       trace: subagent.trace.map((event) => ({ ...event })),
       traceSummary: {
         totalEvents: subagent.traceSummary.totalEvents,
@@ -3422,6 +3439,8 @@ function taskAttemptToCard(
     ...(attempt.currentActivity === undefined ? {} : { currentActivity: attempt.currentActivity }),
     ...(attempt.currentToolCategory === undefined ? {} : { currentToolCategory: attempt.currentToolCategory }),
     ...(attempt.assistantPreview === undefined ? {} : { assistantPreview: attempt.assistantPreview }),
+    maxAttempts: attempt.maxAttempts,
+    ...(attempt.failure === undefined ? {} : { failure: { ...attempt.failure } }),
     usage: taskUsageToCard(attempt.usage)
   };
 }

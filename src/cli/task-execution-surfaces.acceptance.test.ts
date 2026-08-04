@@ -152,7 +152,18 @@ describe("Task execution ownership surface acceptance", () => {
     expect(taskProjectionToCard({
       ...delegatedProjection,
       status: "completed",
-      phase: { name: "completed", workerProgress: { completed: 1, settled: 1, total: 1 } },
+      phase: {
+        name: "completed",
+        workerProgress: {
+          completed: 1,
+          failed: 0,
+          cancelled: 0,
+          settled: 1,
+          usable: 0,
+          recovered: 0,
+          total: 1
+        }
+      },
     }).presentation).toBe("receipt");
 
     const projection = operator.status(automatic.taskId, "interactive");

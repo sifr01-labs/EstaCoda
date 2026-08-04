@@ -2329,6 +2329,7 @@ function promptTaskCardWithSubagentTrace(
       currentToolCategory: "read",
       usage: { total: card.usage, currentAttempt: card.usage },
       attempts: [],
+      outcome: { usable: false, recovered: false, attemptsUsed: 0, maxAttempts: 3 },
       trace,
       results: [],
     }],

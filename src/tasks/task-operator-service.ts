@@ -8,6 +8,7 @@ import type {
   TaskDeliveryDestination,
   TaskEvent,
   TaskExecutionPreference,
+  TaskFailure,
   TaskHostLease,
   TaskResult,
   TaskStatus,
@@ -60,7 +61,11 @@ export type TaskPhaseProjection = {
   name: TaskPhaseName;
   workerProgress?: {
     completed: number;
+    failed: number;
+    cancelled: number;
     settled: number;
+    usable: number;
+    recovered: number;
     total: number;
   };
 };
@@ -132,6 +137,8 @@ export type TaskAttemptProjection = {
   currentActivity?: string;
   currentToolCategory?: string;
   assistantPreview?: string;
+  maxAttempts: number;
+  failure?: Pick<TaskFailure, "class" | "retryable" | "uncertainSideEffects">;
   usage: TaskUsageTotals;
 };
 
@@ -146,6 +153,7 @@ export type TaskStepProjection = {
   status: TaskStep["status"];
   dependsOn: readonly string[];
   childTaskPolicy: TaskStep["childTaskPolicy"];
+  maxAttempts: number;
   usage: TaskUsageTotals;
   attempts: readonly TaskAttemptProjection[];
   latestAttempt?: TaskAttemptProjection;
@@ -206,6 +214,13 @@ export type TaskSubagentProjection = {
   attempts: readonly TaskAttemptProjection[];
   latestAttempt?: TaskAttemptProjection;
   activeAttempt?: TaskAttemptProjection;
+  outcome: {
+    usable: boolean;
+    recovered: boolean;
+    attemptsUsed: number;
+    maxAttempts: number;
+    failure?: Pick<TaskFailure, "class" | "retryable" | "uncertainSideEffects">;
+  };
   trace: readonly TaskTraceEventProjection[];
   traceSummary: Omit<TaskTraceProjection, "events">;
   results: readonly TaskResultProjection[];
@@ -430,7 +445,8 @@ export class TaskOperatorService {
     const currentToolCategory = this.#currentToolCategory(task, attempts, activityByAttempt);
     const primaryResult = taskPrimaryResult(this.#store, task);
     const primaryResultStepId = taskPrimaryResultStepId(this.#store, task);
-    const results = orderTaskResults(this.#store.listResults(task.id), primaryResult)
+    const taskResults = orderTaskResults(this.#store.listResults(task.id), primaryResult);
+    const results = taskResults
       .slice(0, MAX_PROJECTED_RESULTS)
       .map((result) => projectResult(result, result.id === primaryResult?.id));
     const eventTraceSummary = this.#store.summarizeEventTrace(task.id);
@@ -452,6 +468,7 @@ export class TaskOperatorService {
         status: step.status,
         dependsOn: step.dependsOn.slice(0, TASK_GRAPH_LIMITS.maxDependenciesPerStep),
         childTaskPolicy: step.childTaskPolicy,
+        maxAttempts: step.retryPolicy.maxAttempts,
         usage: taskUsageFromEntries(treeUsageEntries.filter((entry) =>
           entry.attemptId !== undefined && stepAttemptIds.has(entry.attemptId)
         )),
@@ -459,15 +476,28 @@ export class TaskOperatorService {
           attempt,
           usageByAttempt.get(attempt.id) ?? [],
           activityByAttempt,
-          projectionNow
+          projectionNow,
+          step.retryPolicy.maxAttempts
         )),
-        ...projectLatestAttempt(attemptsByStep.get(step.id), usageByAttempt, activityByAttempt, projectionNow),
-        ...projectActiveAttempt(attemptsByStep.get(step.id), usageByAttempt, activityByAttempt, projectionNow)
+        ...projectLatestAttempt(
+          attemptsByStep.get(step.id),
+          usageByAttempt,
+          activityByAttempt,
+          projectionNow,
+          step.retryPolicy.maxAttempts
+        ),
+        ...projectActiveAttempt(
+          attemptsByStep.get(step.id),
+          usageByAttempt,
+          activityByAttempt,
+          projectionNow,
+          step.retryPolicy.maxAttempts
+        )
       } satisfies TaskStepProjection;
     });
     const subagents = projectedSteps.flatMap((step) =>
       step.executorRole === "worker" || step.executorRole === "orchestrator"
-        ? [projectSubagent(task.id, step, trace.events, eventTraceSummary, results)]
+        ? [projectSubagent(task.id, step, trace.events, eventTraceSummary, taskResults, results)]
         : []
     );
     return {
@@ -487,7 +517,7 @@ export class TaskOperatorService {
         status: child.status,
         ...(child.parentAttemptId === undefined ? {} : { parentAttemptId: child.parentAttemptId })
       })),
-      phase: projectTaskPhase(task, projectedSteps),
+      phase: projectTaskPhase(task, projectedSteps, taskResults),
       progress,
       activeAttempts: attempts.filter((attempt) => ACTIVE_ATTEMPT_STATUSES.includes(attempt.status)).length,
       ...(planRevision === null || planRevision === undefined ? {} : {
@@ -796,25 +826,55 @@ function emptyProgress(): TaskProgress {
   };
 }
 
-function projectTaskPhase(task: Task, steps: readonly TaskStepProjection[]): TaskPhaseProjection {
+function projectTaskPhase(
+  task: Task,
+  steps: readonly TaskStepProjection[],
+  results: readonly TaskResult[]
+): TaskPhaseProjection {
   const workers = task.source === "delegation"
     ? steps.filter((step) => step.executorRole === "worker" || step.executorRole === "orchestrator")
     : [];
+  const workerStepIds = new Set(workers.map((step) => step.stepId));
   const completed = workers.filter((step) => step.status === "completed").length;
+  const failed = workers.filter((step) => step.status === "failed").length;
+  const cancelled = workers.filter((step) => step.status === "cancelled").length;
   const settled = workers.filter((step) =>
     step.status === "completed" ||
     step.status === "failed" ||
     step.status === "skipped" ||
     step.status === "cancelled"
   ).length;
+  const usableStepIds = new Set(results.flatMap((result) =>
+    result.stepId !== undefined && workerStepIds.has(result.stepId) &&
+      result.status === "available" && result.disposition === "accepted"
+      ? [result.stepId]
+      : []
+  ));
+  const recoveredStepIds = new Set(results.flatMap((result) =>
+    result.stepId !== undefined && workerStepIds.has(result.stepId) &&
+      result.status === "available" && result.disposition === "diagnostic"
+      ? [result.stepId]
+      : []
+  ));
   const workerProgress = workers.length === 0
     ? undefined
-    : { completed, settled, total: workers.length };
+    : {
+        completed,
+        failed,
+        cancelled,
+        settled,
+        usable: usableStepIds.size,
+        recovered: recoveredStepIds.size,
+        total: workers.length
+      };
   const synthesis = steps.find((step) => step.executorRole === "synthesis");
   const synthesisActive = synthesis !== undefined &&
-    completed === workers.length &&
+    settled === workers.length &&
     workers.length > 0 &&
-    (synthesis.status === "pending" || synthesis.status === "ready" || synthesis.status === "running");
+    (synthesis.status === "ready" ||
+      synthesis.status === "running" ||
+      synthesis.status === "waiting_for_input" ||
+      synthesis.status === "waiting_for_approval");
   const name: TaskPhaseName = isTerminalTaskStatus(task.status) ||
     task.status === "planning" ||
     task.status === "waiting_for_host" ||
@@ -905,7 +965,8 @@ function projectActiveAttempt(
   attempts: readonly TaskAttempt[] | undefined,
   usageByAttempt: ReadonlyMap<string, readonly ProviderUsageEntry[]>,
   activityByAttempt: ReadonlyMap<string, ReturnType<typeof eventActivity>>,
-  now: Date
+  now: Date,
+  maxAttempts: number
 ): { readonly activeAttempt?: TaskAttemptProjection } {
   const attempt = attempts
     ?.filter((candidate) => ACTIVE_ATTEMPT_STATUSES.includes(candidate.status))
@@ -916,7 +977,8 @@ function projectActiveAttempt(
       attempt,
       usageByAttempt.get(attempt.id) ?? [],
       activityByAttempt,
-      now
+      now,
+      maxAttempts
     )
   };
 }
@@ -925,7 +987,8 @@ function projectLatestAttempt(
   attempts: readonly TaskAttempt[] | undefined,
   usageByAttempt: ReadonlyMap<string, readonly ProviderUsageEntry[]>,
   activityByAttempt: ReadonlyMap<string, ReturnType<typeof eventActivity>>,
-  now: Date
+  now: Date,
+  maxAttempts: number
 ): { readonly latestAttempt?: TaskAttemptProjection } {
   const attempt = attempts
     ?.slice()
@@ -938,7 +1001,8 @@ function projectLatestAttempt(
       attempt,
       usageByAttempt.get(attempt.id) ?? [],
       activityByAttempt,
-      now
+      now,
+      maxAttempts
     )
   };
 }
@@ -947,7 +1011,8 @@ function projectAttempt(
   attempt: TaskAttempt,
   usageEntries: readonly ProviderUsageEntry[],
   activityByAttempt: ReadonlyMap<string, ReturnType<typeof eventActivity>>,
-  now: Date
+  now: Date,
+  maxAttempts: number
 ): TaskAttemptProjection {
   const activity = activityByAttempt.get(attempt.id);
   return {
@@ -965,6 +1030,8 @@ function projectAttempt(
     ...(activity === undefined ? {} : { currentActivity: activity.label }),
     ...(activity?.toolCategory === undefined ? {} : { currentToolCategory: activity.toolCategory }),
     ...(activity?.assistantPreview === undefined ? {} : { assistantPreview: activity.assistantPreview }),
+    maxAttempts,
+    ...(attempt.failure === undefined ? {} : { failure: projectFailure(attempt.failure) }),
     usage: taskUsageFromEntries(usageEntries)
   };
 }
@@ -993,6 +1060,7 @@ function projectSubagent(
   step: TaskStepProjection,
   trace: readonly TaskTraceEventProjection[],
   traceSummary: TaskEventTraceSummary,
+  taskResults: readonly TaskResult[],
   results: readonly TaskResultProjection[]
 ): TaskSubagentProjection {
   if (step.executorRole === "synthesis") {
@@ -1006,6 +1074,8 @@ function projectSubagent(
   const subagentTrace = trace.filter((event) => event.stepId === step.stepId);
   const subagentTraceCounts = traceSummary.counts.filter((count) => count.stepId === step.stepId);
   const subagentTraceTotal = subagentTraceCounts.reduce((total, count) => total + count.count, 0);
+  const stepResults = taskResults.filter((result) => result.stepId === step.stepId && result.status === "available");
+  const failure = latestAttempt?.failure;
   return {
     stepId: step.stepId,
     position: step.position,
@@ -1035,6 +1105,13 @@ function projectSubagent(
     attempts,
     ...(latestAttempt === undefined ? {} : { latestAttempt }),
     ...(step.activeAttempt === undefined ? {} : { activeAttempt: step.activeAttempt }),
+    outcome: {
+      usable: stepResults.some((result) => result.disposition === "accepted"),
+      recovered: stepResults.some((result) => result.disposition === "diagnostic"),
+      attemptsUsed: attempts.length,
+      maxAttempts: step.maxAttempts,
+      ...(failure === undefined ? {} : { failure })
+    },
     trace: subagentTrace,
     traceSummary: {
       totalEvents: subagentTraceTotal,
@@ -1042,6 +1119,16 @@ function projectSubagent(
       hasEarlierEvents: subagentTraceTotal > subagentTrace.length
     },
     results: results.filter((result) => result.stepId === step.stepId)
+  };
+}
+
+function projectFailure(
+  failure: TaskFailure
+): Pick<TaskFailure, "class" | "retryable" | "uncertainSideEffects"> {
+  return {
+    class: safeText(failure.class, 160),
+    retryable: failure.retryable,
+    uncertainSideEffects: failure.uncertainSideEffects
   };
 }
 

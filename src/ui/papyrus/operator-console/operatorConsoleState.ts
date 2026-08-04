@@ -155,6 +155,12 @@ export type TaskCardAttemptState = {
   readonly currentActivity?: string;
   readonly currentToolCategory?: string;
   readonly assistantPreview?: string;
+  readonly maxAttempts: number;
+  readonly failure?: {
+    readonly class: string;
+    readonly retryable: boolean;
+    readonly uncertainSideEffects: boolean;
+  };
   readonly usage: TaskCardUsageState;
 };
 
@@ -212,6 +218,17 @@ export type TaskCardSubagentState = {
   readonly attempts: readonly TaskCardAttemptState[];
   readonly latestAttempt?: TaskCardAttemptState;
   readonly activeAttempt?: TaskCardAttemptState;
+  readonly outcome: {
+    readonly usable: boolean;
+    readonly recovered: boolean;
+    readonly attemptsUsed: number;
+    readonly maxAttempts: number;
+    readonly failure?: {
+      readonly class: string;
+      readonly retryable: boolean;
+      readonly uncertainSideEffects: boolean;
+    };
+  };
   readonly trace: readonly TaskCardActivityState[];
   readonly traceSummary?: Omit<TaskCardTraceState, "events">;
   readonly results: readonly TaskCardResultState[];
@@ -248,7 +265,11 @@ export type TaskCardState = {
     readonly name: "planning" | "queued" | "running" | "waiting_for_host" | "waiting_for_input" | "waiting_for_approval" | "paused" | "completed" | "partial" | "failed" | "cancelled" | "delegating" | "synthesizing";
     readonly workerProgress?: {
       readonly completed: number;
+      readonly failed: number;
+      readonly cancelled: number;
       readonly settled: number;
+      readonly usable: number;
+      readonly recovered: number;
       readonly total: number;
     };
   };

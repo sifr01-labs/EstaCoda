@@ -798,7 +798,15 @@ describe("runSessionLoop — user prompt rail behavior", () => {
           status: "running",
           phase: {
             name: "synthesizing",
-            workerProgress: { completed: 3, settled: 3, total: 3 },
+            workerProgress: {
+              completed: 3,
+              failed: 0,
+              cancelled: 0,
+              settled: 3,
+              usable: 3,
+              recovered: 0,
+              total: 3
+            },
           },
         }),
       } as unknown as NonNullable<Runtime["taskOperator"]>,

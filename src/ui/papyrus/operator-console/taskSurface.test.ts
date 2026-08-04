@@ -495,6 +495,86 @@ describe("durable Task surfaces", () => {
     expect(sixLines.join("\n")).toContain("Synthesizing 6 Subagent results");
   });
 
+  it("keeps degraded synthesis truthful about usable, failed, and recovered worker outcomes", () => {
+    const card = makeSynthesisCard("running");
+    const failed = {
+      ...card.subagents[0]!,
+      status: "failed" as const,
+      outcome: {
+        usable: false,
+        recovered: true,
+        attemptsUsed: 2,
+        maxAttempts: 2,
+        failure: {
+          class: "provider-timeout",
+          retryable: true,
+          uncertainSideEffects: false,
+        },
+      },
+      results: [{
+        id: "result-worker-1-diagnostic",
+        handle: "result://worker-1-diagnostic",
+        kind: "summary",
+        disposition: "diagnostic" as const,
+        status: "available",
+        byteLength: 180,
+        primary: false,
+        stepId: "step-1",
+        displaySummary: "Recovered partial technical review",
+      }],
+    };
+    const degraded: TaskCardState = {
+      ...card,
+      subagents: [failed, ...card.subagents.slice(1)],
+      phase: {
+        name: "synthesizing",
+        workerProgress: {
+          completed: 2,
+          failed: 1,
+          cancelled: 0,
+          settled: 3,
+          usable: 2,
+          recovered: 1,
+          total: 3,
+        },
+      },
+    };
+
+    const english = renderTaskCardSurface(
+      { cards: [degraded], selectedTaskId: degraded.taskId, scrollOffset: 0 },
+      { width: 100 }
+    ).join("\n");
+    const arabic = renderTaskCardSurface(
+      { cards: [degraded], selectedTaskId: degraded.taskId, scrollOffset: 0 },
+      { width: 100, locale: "ar" }
+    ).join("\n");
+    const englishInspection = subagentInspectionContentLines(degraded, failed, 100).join("\n");
+    const arabicInspection = subagentInspectionContentLines(degraded, failed, 100, { locale: "ar" }).join("\n");
+    const warnedReceipt: TaskCardState = {
+      ...degraded,
+      status: "partial",
+      presentation: "receipt",
+      phase: { ...degraded.phase, name: "partial" },
+    };
+    const englishReceipt = renderTaskCardSurface(
+      { cards: [warnedReceipt], selectedTaskId: warnedReceipt.taskId, scrollOffset: 0 },
+      { width: 100 }
+    ).join("\n");
+    const arabicReceipt = renderTaskCardSurface(
+      { cards: [warnedReceipt], selectedTaskId: warnedReceipt.taskId, scrollOffset: 0 },
+      { width: 100, locale: "ar" }
+    ).join("\n");
+
+    expect(english).toContain("2 usable reports · 1 failed");
+    expect(english).toContain("Synthesizing 2 Subagent results");
+    expect(englishInspection).toContain("Recovered output is available for inspection and was not accepted for synthesis.");
+    expect(englishReceipt).toContain("completed with warnings");
+    expect(arabic).toContain("نتائج صالحة: 2 · فشل: 1");
+    expect(arabic).toContain("يتم تجميع 2 من نتائج الوكلاء الفرعيين");
+    expect(arabicInspection).toContain("تتوفر مخرجات مستردة للفحص ولم تُقبل للاستخدام في التجميع.");
+    expect(arabicReceipt).toContain("اكتملت مع تحذيرات");
+  });
+
   it("keeps semantic motion scoped to the visible running worker or synthesis card", () => {
     const worker = makeCard();
     const synthesis = makeSynthesisCard("ready");
@@ -613,7 +693,18 @@ describe("durable Task surfaces", () => {
     const receipt = makeCard({
       presentation: "receipt",
       status: "completed",
-      phase: { name: "completed", workerProgress: { completed: 3, settled: 3, total: 3 } },
+      phase: {
+        name: "completed",
+        workerProgress: {
+          completed: 3,
+          failed: 0,
+          cancelled: 0,
+          settled: 3,
+          usable: 3,
+          recovered: 0,
+          total: 3
+        }
+      },
       progress: { completed: 3, skipped: 0, total: 3 },
     });
     const taskState = { cards: [receipt], selectedTaskId: receipt.taskId, scrollOffset: 0 };
@@ -756,6 +847,7 @@ describe("durable Task surfaces", () => {
       completedAt: "2026-07-20T09:59:00.000Z",
       elapsedMs: 60_000,
       assistantPreview: "Recovered a partial comparison.",
+      maxAttempts: 3,
       usage: cardUsage(0.004),
     };
     const secondAttempt = {
@@ -828,8 +920,8 @@ describe("durable Task surfaces", () => {
     expect(text).not.toContain("Other Subagent activity");
     expect(text).toContain("The retry has validated both sources.");
     expect(text).toContain("result://comparison-b");
-    expect(text).toContain("Attempt 1 · failed");
-    expect(text).toContain("Attempt 2 · running · current");
+    expect(text).toContain("Attempt 1/3 · failed");
+    expect(text).toContain("Attempt 2/3 · running · current");
     expect(text).toContain("Research Company A");
     expect(text).not.toContain("worker-session-secret");
 
@@ -1395,6 +1487,7 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
           elapsedMs: 198_000,
           currentActivity: "Browsing",
           currentToolCategory: "browser",
+          maxAttempts: 3,
           usage: cardUsage(0.006)
         }],
         activeAttempt: {
@@ -1410,6 +1503,7 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
           elapsedMs: 198_000,
           currentActivity: "Browsing",
           currentToolCategory: "browser",
+          maxAttempts: 3,
           usage: cardUsage(0.006)
         },
       },
@@ -1431,6 +1525,7 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
       currentToolCategory: "browser",
       usage: { total: cardUsage(0.006), currentAttempt: cardUsage(0.006) },
       attempts: [],
+      outcome: { usable: false, recovered: false, attemptsUsed: 0, maxAttempts: 3 },
       trace: [],
       results: []
     }],
@@ -1483,7 +1578,15 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
     ...overrides,
     phase: overrides.phase ?? {
       name: "delegating",
-      workerProgress: { completed: 1, settled: 1, total: 2 },
+      workerProgress: {
+        completed: 1,
+        failed: 0,
+        cancelled: 0,
+        settled: 1,
+        usable: 1,
+        recovered: 0,
+        total: 2
+      },
     },
   };
 }
@@ -1534,6 +1637,7 @@ function makeSynthesisCard(
     currentActivity: "Comparing overlapping recommendations",
     currentToolCategory: "read",
     assistantPreview: "Preparing final response",
+    maxAttempts: 3,
     usage: cardUsage(0.03),
   };
   const synthesisStep: TaskCardState["steps"][number] = {
@@ -1563,7 +1667,11 @@ function makeSynthesisCard(
           : "running",
       workerProgress: {
         completed: subagentCount,
+        failed: 0,
+        cancelled: 0,
         settled: subagentCount,
+        usable: subagentCount,
+        recovered: 0,
         total: subagentCount,
       },
     },
@@ -1677,6 +1785,15 @@ function makeSubagent(
     trace: [],
     results: [],
     ...overrides,
+    outcome: overrides.outcome ?? {
+      usable: overrides.results?.some((result) => result.disposition === "accepted") ?? false,
+      recovered: overrides.results?.some((result) => result.disposition === "diagnostic") ?? false,
+      attemptsUsed: overrides.attempts?.length ?? 0,
+      maxAttempts: overrides.latestAttempt?.maxAttempts ?? 3,
+      ...(overrides.latestAttempt?.failure === undefined
+        ? {}
+        : { failure: overrides.latestAttempt.failure })
+    },
   };
 }
 
