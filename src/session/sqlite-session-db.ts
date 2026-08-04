@@ -10,7 +10,9 @@ import type {
   SessionRecord,
   SessionRole,
   SessionSearchOptions,
-  SessionSearchResult
+  SessionSearchResult,
+  SessionSummaryOptions,
+  SessionSummaryRecord
 } from "../contracts/session.js";
 import type { ChannelKind } from "../contracts/channel.js";
 import type { Trajectory, CompressedTrajectory } from "../contracts/trajectory.js";
@@ -43,6 +45,12 @@ import {
 } from "../tasks/task-schema.js";
 import { insertProviderUsageEntry, selectProviderUsageEntries } from "../tasks/sqlite-provider-usage.js";
 import { assertSpendingLimit, cloneSpendingLimit, type SpendingLimit } from "../contracts/budget.js";
+import {
+  deriveSessionDescription,
+  INTERNAL_SESSION_KINDS,
+  isPlaceholderSessionTitle,
+  withImmutableSessionOrigin,
+} from "./session-presentation.js";
 
 type SessionRow = {
   id: string;
@@ -66,6 +74,16 @@ type MessageRow = {
   created_at: string;
   channel: ChannelKind | null;
   metadata_json: string | null;
+};
+
+type SessionSummaryRow = SessionRow & {
+  message_count: number;
+  user_message_count: number;
+  first_user_message_id: string | null;
+  first_user_content: string | null;
+  first_user_created_at: string | null;
+  first_user_channel: ChannelKind | null;
+  first_user_metadata_json: string | null;
 };
 
 type SessionEventRow = {
@@ -197,7 +215,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
         spendingLimit === undefined ? null : JSON.stringify(spendingLimit),
         input.endedAt ?? null,
         input.endReason ?? null,
-        stringifyJson(input.metadata)
+        stringifyJson(withImmutableSessionOrigin(input.metadata, undefined))
       );
 
     const session = await this.getSessionForProfile(id, profileId);
@@ -235,6 +253,100 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
             .all(profileId);
 
     return rows.map(rowToSession);
+  }
+
+  async listSessionSummaries(
+    profileId: string,
+    options: SessionSummaryOptions = {}
+  ): Promise<SessionSummaryRecord[]> {
+    const conditions = ["s.profile_id = ?"];
+    const parameters: Array<string | number> = [profileId];
+    if (options.workspaceRoot !== undefined) {
+      conditions.push(`case when json_valid(s.metadata_json) then coalesce(
+          json_extract(s.metadata_json, '$.workspaceRoot'),
+          json_extract(s.metadata_json, '$.workspaceDirectory'),
+          json_extract(s.metadata_json, '$.projectRoot')
+        )
+      end = ?`);
+      parameters.push(options.workspaceRoot);
+    }
+    if (options.rootSessionsOnly === true || options.userFacingOnly === true) {
+      conditions.push("s.parent_session_id is null");
+    }
+    if (options.activeSessionsOnly === true) {
+      conditions.push("s.ended_at is null");
+    }
+    if (options.userActivityOnly === true) {
+      conditions.push("exists (select 1 from messages activity where activity.session_id = s.id and activity.role = 'user')");
+    }
+    if (options.userFacingOnly === true) {
+      conditions.push(`coalesce(
+        case when json_valid(s.metadata_json) then json_extract(s.metadata_json, '$.kind') end,
+        ''
+      ) not in (${INTERNAL_SESSION_KINDS.map(() => "?").join(", ")})`);
+      parameters.push(...INTERNAL_SESSION_KINDS);
+    }
+    parameters.push(normalizeSummaryLimit(options.limit));
+
+    const rows = this.#db.query<SessionSummaryRow>(`
+      with selected_sessions as (
+        select s.*
+        from sessions s
+        where ${conditions.join(" and ")}
+        order by s.updated_at desc, s.id asc
+        limit ?
+      ),
+      message_stats as (
+        select
+          m.session_id,
+          count(*) as message_count,
+          sum(case when m.role = 'user' then 1 else 0 end) as user_message_count
+        from messages m
+        inner join selected_sessions selected on selected.id = m.session_id
+        group by m.session_id
+      ),
+      ranked_user_messages as (
+        select
+          m.*,
+          row_number() over (partition by m.session_id order by m.created_at asc, m.id asc) as user_rank
+        from messages m
+        inner join selected_sessions selected on selected.id = m.session_id
+        where m.role = 'user'
+      )
+      select
+        selected.*,
+        coalesce(stats.message_count, 0) as message_count,
+        coalesce(stats.user_message_count, 0) as user_message_count,
+        first_user.id as first_user_message_id,
+        first_user.content as first_user_content,
+        first_user.created_at as first_user_created_at,
+        first_user.channel as first_user_channel,
+        first_user.metadata_json as first_user_metadata_json
+      from selected_sessions selected
+      left join message_stats stats on stats.session_id = selected.id
+      left join ranked_user_messages first_user
+        on first_user.session_id = selected.id and first_user.user_rank = 1
+      order by selected.updated_at desc, selected.id asc
+    `).all(...parameters);
+
+    return rows.map((row): SessionSummaryRecord => ({
+      session: rowToSession(row),
+      messageCount: row.message_count,
+      userMessageCount: row.user_message_count,
+      ...(row.first_user_message_id === null || row.first_user_content === null || row.first_user_created_at === null
+        ? {}
+        : {
+            firstUserMessage: {
+              id: row.first_user_message_id,
+              sessionId: row.id,
+              role: "user",
+              content: row.first_user_content,
+              createdAt: row.first_user_created_at,
+              channel: row.first_user_channel ?? undefined,
+              metadata: parseJson(row.first_user_metadata_json),
+            }
+          })
+    }));
   }
 
   async appendMessage(input: AppendMessageInput): Promise<SessionMessage> {
@@ -279,6 +391,18 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     this.#db
       .query("insert into messages_fts(rowid, message_id, content) values ((select rowid from messages where id = ?), ?, ?)")
       .run(message.id, message.id, message.content);
+
+    if (message.role === "user") {
+      const nextTitle = isPlaceholderSessionTitle(session.title)
+        ? deriveSessionDescription(session.title, message.content)
+        : session.title;
+      const nextMetadata = withImmutableSessionOrigin(session.metadata, message.channel);
+      if (nextTitle !== session.title || nextMetadata !== session.metadata) {
+        this.#db
+          .query("update sessions set title = ?, metadata_json = ? where id = ?")
+          .run(nextTitle ?? null, stringifyJson(nextMetadata), message.sessionId);
+      }
+    }
 
     this.#touch(message.sessionId);
 
@@ -1060,6 +1184,13 @@ function rowToMessage(row: MessageRow): SessionMessage {
 
 function stringifyJson(value: Record<string, unknown> | undefined): string | null {
   return value === undefined ? null : JSON.stringify(value);
+}
+
+function normalizeSummaryLimit(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) {
+    return 20;
+  }
+  return Math.min(100, Math.max(1, Math.floor(value)));
 }
 
 function parseJson(value: string | null): Record<string, unknown> | undefined {

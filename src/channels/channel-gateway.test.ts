@@ -1272,6 +1272,7 @@ function createMinimalRuntime(): Runtime {
       }),
       getSession: async () => undefined,
       listSessions: async () => [],
+      listSessionSummaries: async () => [],
       endSession: async () => {},
       setSessionModelOverride: async () => {},
       clearSessionModelOverride: async () => {},

@@ -621,6 +621,22 @@ export type SessionSearchOptions = {
   rootSessionsOnly?: boolean;
 };
 
+export type SessionSummaryOptions = {
+  workspaceRoot?: string;
+  limit?: number;
+  rootSessionsOnly?: boolean;
+  activeSessionsOnly?: boolean;
+  userActivityOnly?: boolean;
+  userFacingOnly?: boolean;
+};
+
+export type SessionSummaryRecord = {
+  session: SessionRecord;
+  messageCount: number;
+  userMessageCount: number;
+  firstUserMessage?: SessionMessage;
+};
+
 export type CreateSessionInput = {
   id?: string;
   profileId: string;
@@ -662,6 +678,7 @@ export type SessionDB = {
   createSession(input: CreateSessionInput): Promise<SessionRecord>;
   getSession(id: string): Promise<SessionRecord | undefined>;
   listSessions(profileId?: string): Promise<SessionRecord[]>;
+  listSessionSummaries(profileId: string, options?: SessionSummaryOptions): Promise<SessionSummaryRecord[]>;
   endSession(sessionId: string, reason: string): Promise<void>;
   setSessionModelOverride(sessionId: string, override: SessionModelOverride): Promise<void>;
   clearSessionModelOverride(sessionId: string): Promise<void>;

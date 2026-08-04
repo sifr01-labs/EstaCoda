@@ -824,6 +824,7 @@ function forwardingSessionDb(db: InMemorySessionDB, overrides: Partial<SessionDB
     createSession: overrides.createSession ?? db.createSession.bind(db),
     getSession: overrides.getSession ?? db.getSession.bind(db),
     listSessions: overrides.listSessions ?? db.listSessions.bind(db),
+    listSessionSummaries: overrides.listSessionSummaries ?? db.listSessionSummaries.bind(db),
     endSession: overrides.endSession ?? db.endSession.bind(db),
     appendMessage: overrides.appendMessage ?? db.appendMessage.bind(db),
     replaceMessages: overrides.replaceMessages ?? db.replaceMessages.bind(db),
