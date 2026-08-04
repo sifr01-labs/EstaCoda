@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -50,7 +50,7 @@ describe("entrypoint home directory propagation", () => {
     expect(result.stdout).not.toContain(prodPaths.profileRoot);
   });
 
-  it("uses the ESTACODA_HOME-resolved state home for entrypoint CLI session state", async () => {
+  it("creates a fresh session for each invocation in the ESTACODA_HOME-resolved state home", async () => {
     const profilePaths = await ensureProfileSkeleton({ homeDir: devHome, profileId: "default", blank: true });
     await writeFile(profilePaths.configPath, JSON.stringify({
       model: { provider: "unconfigured", id: "unconfigured" },
@@ -63,24 +63,31 @@ describe("entrypoint home directory propagation", () => {
       }
     }, null, 2));
 
-    const result = await runEntrypoint({
-      argv: ["/status"],
+    const first = await runEntrypoint({
+      argv: ["/doctor"],
       cwd: workspaceRoot,
       homeDir: prodHome,
       estacodaHome: devHome
     });
-    const devCliSessionsPath = join(devHome, ".estacoda", "cli-sessions.json");
-    const prodCliSessionsPath = join(prodHome, ".estacoda", "cli-sessions.json");
-    const sessionState = JSON.parse(await readFile(devCliSessionsPath, "utf8")) as {
-      entries?: Array<{ workspaceRoot?: string }>;
-    };
+    const second = await runEntrypoint({
+      argv: ["/doctor"],
+      cwd: workspaceRoot,
+      homeDir: prodHome,
+      estacodaHome: devHome
+    });
+    const firstSessionId = extractSessionId(first.stdout);
+    const secondSessionId = extractSessionId(second.stdout);
 
-    expect(result.code).toBe(0);
-    expect(await pathExists(devCliSessionsPath)).toBe(true);
-    expect(await pathExists(prodCliSessionsPath)).toBe(false);
-    expect(sessionState.entries).toEqual([
-      expect.objectContaining({ workspaceRoot })
-    ]);
+    expect(first.code).toBe(0);
+    expect(second.code).toBe(0);
+    expect(first.stderr).toBe("");
+    expect(second.stderr).toBe("");
+    expect(firstSessionId).toBeDefined();
+    expect(secondSessionId).toBeDefined();
+    expect(secondSessionId).not.toBe(firstSessionId);
+    await expect(access(join(devHome, ".estacoda", "sessions.sqlite"))).resolves.toBeUndefined();
+    await expect(access(join(prodHome, ".estacoda", "sessions.sqlite"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(access(join(devHome, ".estacoda", "cli-sessions.json"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
 
@@ -137,14 +144,6 @@ function runEntrypoint(input: {
   });
 }
 
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return false;
-    }
-    throw error;
-  }
+function extractSessionId(output: string): string | undefined {
+  return output.match(/Session:\s+([^\s]+)/)?.[1];
 }

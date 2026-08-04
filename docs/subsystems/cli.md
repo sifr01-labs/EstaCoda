@@ -308,7 +308,7 @@ Approval inspection commands are normal interactive slash commands:
 
 ## Session Resume
 
-CLI startup restores the active workspace session from `cli-session-store.ts`. Fresh launches are no longer forced back to the default `scaffold` session.
+Every CLI invocation that reaches the runtime starts a fresh session unless the user explicitly selected one through `estacoda sessions`. The picker handoff is the only startup resume path; normal setup, profile, workspace, and trust checks still run before the selected session starts. In-session `/switch` remains available for an already-running CLI.
 
 ## Setup And Onboarding
 

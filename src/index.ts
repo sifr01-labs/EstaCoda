@@ -3,7 +3,6 @@ import { resolveHomeDir } from "./config/home-dir.js";
 import { loadRuntimeConfig, type LoadedRuntimeConfig } from "./config/runtime-config.js";
 import { resolveStateHome } from "./config/state-home.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "./config/profile-home.js";
-import { PersistentCliSessionStore } from "./cli/cli-session-store.js";
 import { parseGlobalCliOptions, runCliCommand } from "./cli/cli.js";
 import type { SessionDB } from "./contracts/session.js";
 import { canRunInteractive } from "./ui/terminal-capabilities.js";
@@ -67,7 +66,6 @@ async function main(): Promise<void> {
   }
 
   const stateHome = resolveStateHome({ homeDir });
-  const cliSessionStore = new PersistentCliSessionStore({ homeDir: stateHome.homeDir });
   const cliApprovalController = new WorkspaceApprovalController();
   let launchLocale: UiLocale | undefined;
 
@@ -290,18 +288,15 @@ async function main(): Promise<void> {
   }
 
   const sessionDb = await openLocalSessionDb();
-  const restoredSessionId = await cliSessionStore.getSessionId(workspaceRoot);
   const startupSessionId = resolveStartupSessionId(
-    restoredSessionId,
-    createSessionId,
-    sessionHandoff?.sessionId
+    sessionHandoff?.sessionId,
+    createSessionId
   );
 
   const runtime = await buildRuntime({
     sessionId: startupSessionId,
     sessionDb
   });
-  await cliSessionStore.setSessionId(workspaceRoot, runtime.sessionId);
   if (shouldScheduleStartupUpdatePrefetch(argv, canRunInteractive())) {
     scheduleStartupUpdatePrefetch({
       homeDir: stateHome.homeDir,
@@ -383,7 +378,6 @@ async function main(): Promise<void> {
             sessionId: options?.preserveSession === true ? runtime.sessionId : createSessionId(),
             sessionDb: await openLocalSessionDb()
           });
-          await cliSessionStore.setSessionId(workspaceRoot, nextRuntime.sessionId);
           return nextRuntime;
         },
         switchRuntime: async (sessionId) => {
@@ -391,7 +385,6 @@ async function main(): Promise<void> {
             sessionId,
             sessionDb: await openLocalSessionDb()
           });
-          await cliSessionStore.setSessionId(workspaceRoot, nextRuntime.sessionId);
           return nextRuntime;
         },
         modelSwitchContext

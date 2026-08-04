@@ -280,6 +280,8 @@ See [Scheduled Jobs](../user-guide/cron.md) for the full cron behavior model.
 
 ## Sessions
 
+Bare `estacoda` starts a fresh CLI session on every launch. Resume is explicit through `estacoda sessions`.
+
 ```bash
 estacoda sessions                       # interactively choose and resume a recent session
 estacoda sessions list                  # recent sessions with attached surfaces

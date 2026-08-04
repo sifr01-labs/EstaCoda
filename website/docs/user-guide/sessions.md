@@ -44,6 +44,8 @@ Task and session limits are monetary controls; token counts remain read-only usa
 
 ## Session Commands
 
+Running bare `estacoda` starts a fresh CLI session every time. To continue earlier work, run `estacoda sessions` and select the session explicitly; EstaCoda does not silently restore the last workspace session.
+
 ```bash
 # Choose and resume a recent session
 estacoda sessions
@@ -123,16 +125,13 @@ Session persistence is global but profile-scoped:
 ```
 ~/.estacoda/
   sessions.sqlite      # SQLite sessions, messages, events, and finalization queue
-  cli-sessions.json    # Active CLI session pointers keyed by workspace
 ```
 
-The session DB is SQLite. Session and finalization rows carry `profile_id` scope; the global location does not permit cross-profile reads. It stores messages, events, compression state, and durable background-finalization metadata. Surface pointers remain in profile-local gateway state. If the session DB is missing or corrupted, sessions cannot be listed, recalled, or resumed.
+The session DB is SQLite. Session and finalization rows carry `profile_id` scope; the global location does not permit cross-profile reads. It stores messages, events, compression state, and durable background-finalization metadata. Surface pointers remain in profile-local gateway state. Legacy `cli-sessions.json` files from earlier versions are ignored. If the session DB is missing or corrupted, sessions cannot be listed, recalled, or resumed.
 
 ---
 
 ## Failure Modes
-
-**Stale session:** A session resumed from `cli-sessions.json` may reference an old profile or workspace. If the profile has changed, the session may load with stale context. Use `/reset` or `estacoda sessions current` to inspect.
 
 **Wrong profile:** Sessions are profile-scoped. If you switch profiles with `estacoda profile use <name>`, existing sessions from the previous profile are no longer visible. They are not deleted; they belong to the other profile.
 

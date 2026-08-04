@@ -277,6 +277,8 @@ estacoda cron tick                      # دورة مجدول يدوية
 
 ## الجلسات
 
+يبدأ `estacoda` المجرّد جلسة CLI جديدة عند كل تشغيل. يكون الاستئناف صريحًا عبر `estacoda sessions`.
+
 ```bash
 estacoda sessions                       # اختيار جلسة حديثة واستئنافها تفاعليًا
 estacoda sessions list                  # الجلسات الأخيرة مع الأسطح المرتبطة

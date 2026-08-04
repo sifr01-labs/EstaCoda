@@ -376,7 +376,7 @@ Capability-first security boundary.
 
 - Interactive/session state written to session DB
 - Global SQLite session DB at `~/.estacoda/sessions.sqlite`, with rows scoped by `profile_id`
-- CLI session context persisted in `.estacoda/cli-sessions.json`
+- CLI launches create fresh session context unless an existing session is explicitly selected
 - Channel session context persisted under the bound profile gateway state via `ChannelSessionStore`
 - Cross-surface pointers under the bound profile gateway state
 - Channel session identity includes explicit chat/thread policy
