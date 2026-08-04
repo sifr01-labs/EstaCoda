@@ -235,6 +235,24 @@ describe("TaskOperatorService", () => {
           }
         }
       });
+      tx.appendEvent({
+        id: "event-retry-preview-continued",
+        profileId: "alpha",
+        taskId: graph.task.id,
+        planRevisionId: graph.revision.id,
+        stepId: researchStep!.id,
+        attemptId: retryAttempt.id,
+        kind: "attempt-progressed",
+        timestamp: "2026-01-01T00:00:04.002Z",
+        data: {
+          activity: {
+            kind: "assistant",
+            label: "Assistant answer",
+            traceCategory: "answer",
+            assistantPreview: "The bounded answer continues."
+          }
+        }
+      });
       tx.recordResult({
         id: "result-research",
         profileId: "alpha",
@@ -288,7 +306,7 @@ describe("TaskOperatorService", () => {
       objective: "Research authentication",
       currentActivity: "Assistant answer",
       currentToolCategory: "files",
-      assistantPreview: "The session guards are mapped safely.",
+      assistantPreview: "The bounded answer continues.",
       latestAttempt: {
         attemptId: retryAttempt.id,
         attemptNumber: 2,
@@ -318,8 +336,24 @@ describe("TaskOperatorService", () => {
         subagentIndex: 1,
         category: "answer",
         label: "The session guards are mapped safely. · Research authentication"
+      }),
+      expect.objectContaining({
+        eventId: "event-retry-preview-continued",
+        attemptId: retryAttempt.id,
+        subagentIndex: 1,
+        category: "answer",
+        label: "The bounded answer continues. · Research authentication"
       })
     ]);
+    expect(projection.trace.spans.find((span) => span.id === "event-retry-preview")).toMatchObject({
+      category: "write",
+      scope: { kind: "subagent", stepId: researchStep!.id, label: "Subagent 1" },
+      status: "running",
+      eventCount: 2,
+      label: "Writing response",
+      attemptId: retryAttempt.id
+    });
+    expect(JSON.stringify(projection.trace.spans)).not.toContain("The bounded answer continues.");
     expect(projection.subagents[0]?.results).toEqual([
       expect.objectContaining({
         id: "result-research",

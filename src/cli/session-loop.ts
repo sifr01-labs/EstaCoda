@@ -3393,6 +3393,10 @@ export function taskProjectionToCard(
     })),
     trace: {
       events: task.trace.events.map((event) => ({ ...event })),
+      spans: task.trace.spans.map((span) => ({
+        ...span,
+        scope: { ...span.scope },
+      })),
       totalEvents: task.trace.totalEvents,
       categoryCounts: { ...task.trace.categoryCounts },
       hasEarlierEvents: task.trace.hasEarlierEvents

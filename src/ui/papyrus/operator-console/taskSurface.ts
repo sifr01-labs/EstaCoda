@@ -1181,7 +1181,11 @@ function renderParentSynthesisStage(
   const traceCard: TaskCardState = {
     ...card,
     subagents: [],
-    trace: { events: traceEvents, hasEarlierEvents: false },
+    trace: {
+      events: traceEvents,
+      spans: card.trace.spans.filter((span) => span.scope.stepId === synthesis.stepId),
+      hasEarlierEvents: false,
+    },
     recentActivity: traceEvents.slice(-12).reverse(),
   };
   const traceRows = renderActivityTraceSurface(traceCard, { followLive: true }, {

@@ -419,6 +419,7 @@ function cloneTaskSurfaceState(tasks: TaskSurfaceState): TaskSurfaceState {
       })),
       trace: {
         events: card.trace.events.map((event) => ({ ...event })),
+        spans: card.trace.spans.map((span) => ({ ...span, scope: { ...span.scope } })),
         ...(card.trace.totalEvents === undefined ? {} : { totalEvents: card.trace.totalEvents }),
         ...(card.trace.categoryCounts === undefined ? {} : { categoryCounts: { ...card.trace.categoryCounts } }),
         hasEarlierEvents: card.trace.hasEarlierEvents

@@ -600,7 +600,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
       activeAttempts: 1,
       steps: [],
       subagents: [],
-      trace: { events: [], totalEvents: 0, categoryCounts: {}, hasEarlierEvents: false },
+      trace: { events: [], spans: [], totalEvents: 0, categoryCounts: {}, hasEarlierEvents: false },
       recentActivity: [],
       elapsedMs: 1_000,
       usage: usageSummary(0.01),

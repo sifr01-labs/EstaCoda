@@ -3,6 +3,30 @@ import type { TaskAttemptActivity, TaskTraceCategory } from "./task-step-executo
 
 type DelegationProgressEvent = Extract<RuntimeEvent, { kind: "delegation-progress" }>;
 
+export type TaskActivityCategory =
+  | "plan"
+  | "search"
+  | "read"
+  | "execute"
+  | "write"
+  | "validate"
+  | "wait"
+  | "retry"
+  | "failure"
+  | "deliver";
+
+/** Converts the durable event vocabulary into the smaller ribbon vocabulary. */
+export function taskActivityCategoryFromTrace(category: TaskTraceCategory): TaskActivityCategory {
+  switch (category) {
+    case "terminal": return "execute";
+    case "edit":
+    case "answer": return "write";
+    case "finish": return "validate";
+    case "failed": return "failure";
+    default: return category;
+  }
+}
+
 /** Converts already-sanitized child progress into a small persistence-safe Task checkpoint. */
 export function taskActivityFromDelegationProgress(event: DelegationProgressEvent): TaskAttemptActivity | undefined {
   const child = event.childEvent;

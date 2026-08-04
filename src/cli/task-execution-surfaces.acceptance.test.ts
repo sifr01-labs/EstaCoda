@@ -172,6 +172,8 @@ describe("Task execution ownership surface acceptance", () => {
       expect.objectContaining({ displayLabel: "Subagent 1", position: 0, role: "worker" })
     ]);
     expect(card.trace.events.length).toBeGreaterThan(0);
+    expect(card.trace.spans.length).toBeGreaterThan(0);
+    expect(card.trace.spans[0]?.scope).not.toBe(projection.trace.spans[0]?.scope);
     const state = createInitialOperatorConsoleState({
       locale: "ar",
       terminal: { width: 30, height: 12, isTty: false },

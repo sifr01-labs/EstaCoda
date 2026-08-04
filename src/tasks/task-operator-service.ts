@@ -37,6 +37,10 @@ import { FixedTaskService } from "./fixed-task-service.js";
 import type { InitialTaskHostLeaseInput, TaskEventTraceSummary, TaskStore } from "./task-store.js";
 import { taskToolCategory } from "./task-safe-activity.js";
 import type { TaskTraceCategory } from "./task-step-executor.js";
+import {
+  deriveTaskActivitySpans,
+  type TaskActivitySpan,
+} from "./task-activity-spans.js";
 import { orderTaskResults, taskPrimaryResult, taskPrimaryResultStepId } from "./task-primary-result.js";
 import { cloneSpendingLimit, type SpendingLimit } from "../contracts/budget.js";
 
@@ -177,6 +181,7 @@ export type TaskTraceCategoryCounts = Readonly<Record<TaskTraceCategory, number>
 
 export type TaskTraceProjection = {
   events: readonly TaskTraceEventProjection[];
+  spans: readonly TaskActivitySpan[];
   totalEvents: number;
   categoryCounts: TaskTraceCategoryCounts;
   hasEarlierEvents: boolean;
@@ -222,7 +227,7 @@ export type TaskSubagentProjection = {
     failure?: Pick<TaskFailure, "class" | "retryable" | "uncertainSideEffects">;
   };
   trace: readonly TaskTraceEventProjection[];
-  traceSummary: Omit<TaskTraceProjection, "events">;
+  traceSummary: Omit<TaskTraceProjection, "events" | "spans">;
   results: readonly TaskResultProjection[];
 };
 
@@ -450,7 +455,7 @@ export class TaskOperatorService {
       .slice(0, MAX_PROJECTED_RESULTS)
       .map((result) => projectResult(result, result.id === primaryResult?.id));
     const eventTraceSummary = this.#store.summarizeEventTrace(task.id);
-    const trace = this.#trace(task, steps, eventTraceSummary);
+    const trace = this.#trace(task, steps, attempts, projectionNow, eventTraceSummary);
     const recentActivity = trace.events.slice(-MAX_RECENT_ACTIVITY).reverse();
     const projectedSteps = steps.slice(0, MAX_PROJECTED_STEPS).map((step) => {
       const stepAttempts = listStepTreeAttempts(this.#store, task.id, step.id);
@@ -579,6 +584,8 @@ export class TaskOperatorService {
   #trace(
     task: Task,
     steps: readonly TaskStep[],
+    attempts: readonly TaskAttempt[],
+    projectionNow: Date,
     summary: TaskEventTraceSummary
   ): TaskTraceProjection {
     const titles = new Map(steps.map((step) => [step.id, safeText(step.title, 80)]));
@@ -589,19 +596,39 @@ export class TaskOperatorService {
       limit: MAX_PROJECTED_TRACE_EVENTS + 1,
       order: "desc"
     });
+    const projectedEvents = events.slice(0, MAX_PROJECTED_TRACE_EVENTS).map((event) => ({
+      eventId: event.id,
+      kind: event.kind,
+      label: taskActivityLabel(event, titles),
+      category: taskTraceCategoryFromTaskEvent(event),
+      timestamp: event.timestamp,
+      ...(event.stepId === undefined ? {} : { stepId: event.stepId }),
+      ...(event.attemptId === undefined ? {} : { attemptId: event.attemptId }),
+      ...(event.stepId === undefined || subagentIndices.get(event.stepId) === undefined
+        ? {}
+        : { subagentIndex: subagentIndices.get(event.stepId) })
+    })).reverse();
     return {
-      events: events.slice(0, MAX_PROJECTED_TRACE_EVENTS).map((event) => ({
-        eventId: event.id,
-        kind: event.kind,
-        label: taskActivityLabel(event, titles),
-        category: taskTraceCategoryFromTaskEvent(event),
-        timestamp: event.timestamp,
-        ...(event.stepId === undefined ? {} : { stepId: event.stepId }),
-        ...(event.attemptId === undefined ? {} : { attemptId: event.attemptId }),
-        ...(event.stepId === undefined || subagentIndices.get(event.stepId) === undefined
+      events: projectedEvents,
+      spans: deriveTaskActivitySpans(projectedEvents, {
+        steps: steps.map((step) => ({
+          stepId: step.id,
+          kind: step.executor.role === "synthesis" ? "synthesis" : "subagent",
+          label: step.executor.role === "synthesis"
+            ? "Synthesis"
+            : `Subagent ${subagentIndices.get(step.id) ?? step.position + 1}`,
+        })),
+        attempts: attempts.map((attempt) => ({
+          attemptId: attempt.id,
+          attemptNumber: attempt.attemptNumber,
+          status: attempt.status,
+          ...(attempt.completedAt === undefined ? {} : { completedAt: attempt.completedAt }),
+        })),
+        projectionTimestamp: projectionNow.toISOString(),
+        ...(task.completedAt === undefined && task.cancelledAt === undefined
           ? {}
-          : { subagentIndex: subagentIndices.get(event.stepId) })
-      })).reverse(),
+          : { taskCompletedAt: task.completedAt ?? task.cancelledAt }),
+      }),
       totalEvents: summary.totalEvents,
       categoryCounts: traceCategoryCounts(summary.counts),
       hasEarlierEvents: summary.totalEvents > MAX_PROJECTED_TRACE_EVENTS
@@ -1240,7 +1267,7 @@ function taskTraceCategoryFromTaskEvent(event: TaskEvent): TaskTraceCategory {
   const activity = eventActivity(event);
   if (activity !== undefined) return activity.traceCategory;
   const status = typeof event.data.to === "string" ? event.data.to : undefined;
-  if (status === "completed" || status === "succeeded") return "finish";
+  if (status === "completed" || status === "partial" || status === "succeeded") return "finish";
   if (status === "waiting_for_input" || status === "waiting_for_approval" || status === "blocked") return "wait";
   if (status === "failed" || status === "cancelled") return "failed";
   switch (event.kind) {

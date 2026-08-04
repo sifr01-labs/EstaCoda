@@ -2260,7 +2260,7 @@ function promptTaskCard(): TaskCardState {
       attempts: []
     }],
     subagents: [],
-    trace: { events: [], hasEarlierEvents: false },
+    trace: { events: [], spans: [], hasEarlierEvents: false },
     childTasks: [],
     phase: { name: "completed" },
     recentActivity: [{ eventId: "event-completed", kind: "attempt-completed", label: "Attempt completed", category: "finish", timestamp: "2026-07-20T10:00:00.000Z" }],
@@ -2285,6 +2285,7 @@ function promptTaskCardWithTrace(labels: readonly string[]): TaskCardState {
     status: "running",
     phase: { name: "running" },
     trace: {
+      spans: [],
       events: labels.map((label, index) => ({
         eventId: `event-${index}`,
         kind: "attempt-progressed",

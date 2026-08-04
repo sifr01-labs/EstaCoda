@@ -75,6 +75,7 @@ describe("Task activity trace surface", () => {
     const card = {
       ...makeCard(makeEvents(3)),
       trace: {
+        spans: [],
         events: makeEvents(3),
         totalEvents: 12,
         categoryCounts: { ...emptyCounts(), terminal: 8, search: 3, plan: 1 },
@@ -143,7 +144,7 @@ function makeCard(events: readonly TaskCardActivityState[]): TaskCardState {
       trace: events,
       results: [],
     }],
-    trace: { events, totalEvents: events.length, categoryCounts: countEvents(events), hasEarlierEvents: false },
+    trace: { events, spans: [], totalEvents: events.length, categoryCounts: countEvents(events), hasEarlierEvents: false },
     childTasks: [],
     phase: {
       name: "delegating",

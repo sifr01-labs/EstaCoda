@@ -175,8 +175,26 @@ export type TaskCardActivityState = {
   readonly subagentIndex?: number;
 };
 
+export type TaskCardActivitySpanState = {
+  readonly id: string;
+  readonly category: "plan" | "search" | "read" | "execute" | "write" | "validate" | "wait" | "retry" | "failure" | "deliver";
+  readonly scope: {
+    readonly kind: "task" | "subagent" | "synthesis" | "delivery";
+    readonly stepId?: string;
+    readonly label: string;
+  };
+  readonly status: "completed" | "running" | "failed";
+  readonly startedAt: string;
+  readonly endedAt?: string;
+  readonly durationMs: number;
+  readonly eventCount: number;
+  readonly label: string;
+  readonly attemptId?: string;
+};
+
 export type TaskCardTraceState = {
   readonly events: readonly TaskCardActivityState[];
+  readonly spans: readonly TaskCardActivitySpanState[];
   readonly totalEvents?: number;
   readonly categoryCounts?: Readonly<Record<TaskCardActivityState["category"], number>>;
   readonly hasEarlierEvents: boolean;
@@ -230,7 +248,7 @@ export type TaskCardSubagentState = {
     };
   };
   readonly trace: readonly TaskCardActivityState[];
-  readonly traceSummary?: Omit<TaskCardTraceState, "events">;
+  readonly traceSummary?: Omit<TaskCardTraceState, "events" | "spans">;
   readonly results: readonly TaskCardResultState[];
 };
 

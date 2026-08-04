@@ -181,6 +181,7 @@ export function subagentInspectionContentLines(
     subagents: [subagent],
     trace: {
       events: subagent.trace,
+      spans: card.trace.spans.filter((span) => span.scope.stepId === subagent.stepId),
       ...(subagent.traceSummary?.totalEvents === undefined
         ? {}
         : { totalEvents: subagent.traceSummary.totalEvents }),

@@ -220,6 +220,7 @@ describe("LiveOperatorConsoleController", () => {
     const output = createOutput();
     let task = makeLiveTask({
       trace: {
+        spans: [],
         events: [
           { eventId: "event-1", kind: "read", label: "Read first file", category: "read", timestamp: "2026-07-20T10:00:00.000Z" },
           { eventId: "event-2", kind: "answer", label: "Summarized first file", category: "answer", timestamp: "2026-07-20T10:01:00.000Z" },
@@ -252,6 +253,7 @@ describe("LiveOperatorConsoleController", () => {
         pricingComplete: true,
       },
       trace: {
+        spans: [],
         events: [
           ...task.trace.events,
           { eventId: "event-3", kind: "finish", label: "Finished Task", category: "finish", timestamp: "2026-07-20T10:02:00.000Z" },
@@ -828,7 +830,7 @@ function makeLiveTask(overrides: Partial<TaskCardState> = {}): TaskCardState {
       },
     }],
     subagents: [],
-    trace: { events: [], hasEarlierEvents: false },
+    trace: { events: [], spans: [], hasEarlierEvents: false },
     childTasks: [],
     recentActivity: [],
     currentToolCategory: "browser",

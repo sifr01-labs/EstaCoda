@@ -627,6 +627,7 @@ describe("durable Task surfaces", () => {
       taskId: "T-second",
       objective: "Second Task",
       trace: {
+        spans: [],
         events: [
           { eventId: "second-1", kind: "read", label: "Read first file", category: "read", timestamp: "2026-07-20T10:00:00.000Z" },
           { eventId: "second-2", kind: "answer", label: "Summarized file", category: "answer", timestamp: "2026-07-20T10:01:00.000Z" },
@@ -652,6 +653,7 @@ describe("durable Task surfaces", () => {
       status: "completed" as const,
       usage: cardUsage(0.42),
       trace: {
+        spans: [],
         events: [
           ...second.trace.events,
           { eventId: "second-3", kind: "finish" as const, label: "Finished Task", category: "finish" as const, timestamp: "2026-07-20T10:02:00.000Z" },
@@ -1370,7 +1372,7 @@ describe("durable Task surfaces", () => {
     }));
     const card = makeCard({
       subagents: [makeSubagent(1, { trace })],
-      trace: { events: trace, hasEarlierEvents: false },
+      trace: { events: trace, spans: [], hasEarlierEvents: false },
     });
     const initial = createInitialOperatorConsoleState({
       terminal: { width: 60, height: 10, isTty: true },
@@ -1530,6 +1532,7 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
       results: []
     }],
     trace: {
+      spans: [],
       events: [{
         eventId: "event-attempt-started",
         kind: "attempt-started",
@@ -1697,6 +1700,7 @@ function makeSynthesisCard(
     ],
     subagents,
     trace: {
+      spans: [],
       events: [
         {
           eventId: "synthesis-reading",
