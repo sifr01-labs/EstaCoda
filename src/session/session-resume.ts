@@ -34,14 +34,15 @@ export async function resolveSessionForResume(input: {
   workspaceRoot: string;
   sessionId: string;
 }): Promise<{ ok: true; sessionId: string } | { ok: false; reason: SessionResumeFailure }> {
-  const session = await input.sessionDb.getSession(input.sessionId);
-  if (session === undefined || session.profileId !== input.profileId) {
+  const session = await input.sessionDb.getSessionForProfile(input.sessionId, input.profileId);
+  if (session === undefined) {
     return { ok: false, reason: "not-found" };
   }
   if (
     session.endedAt !== undefined ||
     !isUserFacingRootSession(session) ||
-    resolveSessionWorkspaceRoot(session) !== input.workspaceRoot
+    resolveSessionWorkspaceRoot(session) !== input.workspaceRoot ||
+    !(await input.sessionDb.hasUserMessageForProfile(session.id, input.profileId))
   ) {
     return { ok: false, reason: "not-resumable" };
   }

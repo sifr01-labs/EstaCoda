@@ -218,6 +218,20 @@ export class StandardRenderer {
     return this.#color(text, this.#tokens.contract.surface.border);
   }
 
+  #surfaceBorderSubtle(text: string): string {
+    return this.#color(text, this.#tokens.contract.surface.borderSubtle);
+  }
+
+  #selectedRow(text: string): string {
+    if (!this.#useColor) return text;
+    const foreground = hexToRgb(this.#tokens.contract.interactive.selected);
+    const background = hexToRgb(this.#tokens.contract.interactive.selectedBg);
+    if (this.#capabilities.supportsTrueColor) {
+      return `\x1b[38;2;${foreground.r};${foreground.g};${foreground.b};48;2;${background.r};${background.g};${background.b}m${text}\x1b[0m`;
+    }
+    return `\x1b[38;5;${hexToAnsi256(this.#tokens.contract.interactive.selected)};48;5;${hexToAnsi256(this.#tokens.contract.interactive.selectedBg)}m${text}\x1b[0m`;
+  }
+
   #severity(text: string, sev: ViewModelSeverity): string {
     const hex = this.#tokens.contract.severity[sev];
     return this.#color(text, hex);
@@ -1521,18 +1535,25 @@ export class StandardRenderer {
   }
 
   #renderColumnPicker(vm: PickerViewModel): string {
+    if (vm.surface === "sessionPicker" && this.#capabilities.terminalWidth < 100) {
+      return this.#renderNarrowSessionPicker(vm);
+    }
     const columns = vm.columns ?? [];
     const rows = vm.options.map((option) => columns.map((column) =>
       option.cells?.[column.key] ?? (column === columns[columns.length - 1] ? option.label : "")
     ));
-    const availableWidth = Math.max(1, this.#capabilities.terminalWidth - 3);
+    const availableWidth = Math.max(
+      1,
+      this.#capabilities.terminalWidth - (vm.surface === "sessionPicker" ? 7 : 3)
+    );
     const widths = fitPickerColumnWidths(columns, rows, availableWidth);
     const renderCells = (values: readonly string[], selected = false) => columns.map((column, columnIndex) => {
       const width = widths[columnIndex] ?? 0;
       const rawValue = pickerCellText(values[columnIndex] ?? "", vm.direction, columnIndex === 0);
       const value = measureVisibleWidth(rawValue) <= width ? rawValue : truncateVisible(rawValue, width);
       const padded = padVisibleAlign(value, width, column.alignment ?? "left");
-      if (selected) return this.#action(padded);
+      if (selected) return vm.surface === "sessionPicker" ? padded : this.#action(padded);
+      if (vm.surface === "sessionPicker" && column.key === "origin") return this.#action(padded);
       return columnIndex === 0 ? this.#muted(padded) : this.#primary(padded);
     }).join("  ");
     const lines = [
@@ -1548,15 +1569,18 @@ export class StandardRenderer {
         );
         return this.#secondary(value);
       }).join("  ")}`,
-      `   ${this.#surfaceBorder(columns.map((_column, index) => (this.#useUnicode ? "─" : "-").repeat(widths[index] ?? 0)).join("  "))}`,
+      `   ${vm.surface === "sessionPicker" ? this.#surfaceBorderSubtle(columns.map((_column, index) => (this.#useUnicode ? "─" : "-").repeat(widths[index] ?? 0)).join("  ")) : this.#surfaceBorder(columns.map((_column, index) => (this.#useUnicode ? "─" : "-").repeat(widths[index] ?? 0)).join("  "))}`,
     ];
 
     for (let index = 0; index < vm.options.length; index += 1) {
       const option = vm.options[index]!;
       const selected = option.selected === true;
-      const marker = selected ? this.#action(this.#useUnicode ? "❯" : ">") : " ";
-      lines.push(`${marker}  ${renderCells(rows[index] ?? [], selected)}`);
+      const rawMarker = selected ? (this.#useUnicode ? "❯" : ">") : " ";
+      const marker = selected && vm.surface !== "sessionPicker" ? this.#action(rawMarker) : rawMarker;
+      const rawRow = `${marker}  ${renderCells(rows[index] ?? [], selected)}`;
+      lines.push(selected && vm.surface === "sessionPicker" ? this.#selectedRow(rawRow) : rawRow);
       if (
+        vm.surface !== "sessionPicker" &&
         option.description !== undefined &&
         (vm.descriptionVisibility !== "selected" || selected)
       ) {
@@ -1570,10 +1594,84 @@ export class StandardRenderer {
       }
     }
 
+    if (vm.surface === "sessionPicker") {
+      const title = lines[0] ?? "";
+      const panelRows = lines.slice(1);
+      const panelWidth = Math.max(1, ...panelRows.map(measureVisibleWidth));
+      const horizontal = this.#useUnicode ? "─" : "-";
+      const top = this.#useUnicode
+        ? `╭${horizontal.repeat(panelWidth + 2)}╮`
+        : `+${horizontal.repeat(panelWidth + 2)}+`;
+      const bottom = this.#useUnicode
+        ? `╰${horizontal.repeat(panelWidth + 2)}╯`
+        : `+${horizontal.repeat(panelWidth + 2)}+`;
+      const left = this.#useUnicode ? "│ " : "| ";
+      const right = this.#useUnicode ? " │" : " |";
+      lines.splice(
+        0,
+        lines.length,
+        title,
+        this.#surfaceBorderSubtle(top),
+        ...panelRows.map((line) =>
+          `${this.#surfaceBorderSubtle(left)}${padVisibleEnd(line, panelWidth)}${this.#surfaceBorderSubtle(right)}`
+        ),
+        this.#surfaceBorderSubtle(bottom)
+      );
+    }
+
     if (vm.instruction !== undefined) {
       const rawInstruction = this.#useUnicode ? vm.instruction : asciiPickerText(vm.instruction);
       const instruction = vm.direction === "rtl" ? isolateRtl(rawInstruction) : rawInstruction;
       lines.push("", ...wrapText(instruction, this.#capabilities.terminalWidth).map((line) => this.#muted(line)));
+    }
+    return lines.join("\n");
+  }
+
+  #renderNarrowSessionPicker(vm: PickerViewModel): string {
+    const frameWidth = Math.max(8, Math.min(this.#capabilities.terminalWidth, 72));
+    const innerWidth = frameWidth - 4;
+    const horizontal = this.#useUnicode ? "─" : "-";
+    const top = this.#useUnicode ? `╭${horizontal.repeat(frameWidth - 2)}╮` : `+${horizontal.repeat(frameWidth - 2)}+`;
+    const bottom = this.#useUnicode ? `╰${horizontal.repeat(frameWidth - 2)}╯` : `+${horizontal.repeat(frameWidth - 2)}+`;
+    const lines = [
+      this.#brand(this.#bold(vm.direction === "rtl" ? isolateRtl(vm.title) : vm.title)),
+      this.#surfaceBorderSubtle(top),
+    ];
+
+    for (const option of vm.options) {
+      const selected = option.selected === true;
+      const number = option.cells?.number ?? "";
+      const description = pickerCellText(option.cells?.session ?? option.label, vm.direction, false);
+      const marker = selected ? (this.#useUnicode ? "❯" : ">") : " ";
+      const row = `${marker} ${number.padStart(2)}  ${truncateVisible(description, Math.max(1, innerWidth - 6))}`;
+      const paddedRow = padVisibleEnd(row, innerWidth);
+      const left = this.#surfaceBorderSubtle(this.#useUnicode ? "│ " : "| ");
+      const right = this.#surfaceBorderSubtle(this.#useUnicode ? " │" : " |");
+      lines.push(`${left}${selected ? this.#selectedRow(paddedRow) : this.#primary(paddedRow)}${right}`);
+
+      if (selected) {
+        const started = option.cells?.started ?? "";
+        const active = option.cells?.active ?? "";
+        const origin = pickerCellText(option.cells?.origin ?? "", vm.direction, true);
+        for (const detail of [
+          `${vm.columns?.find((column) => column.key === "started")?.header ?? "Started"}: ${started}`,
+          `${vm.columns?.find((column) => column.key === "active")?.header ?? "Last active"}: ${active}`,
+        ]) {
+          for (const detailLine of wrapText(detail, innerWidth - 2)) {
+            lines.push(`${left}${this.#muted(padVisibleEnd(`  ${detailLine}`, innerWidth))}${right}`);
+          }
+        }
+        const originLabel = vm.columns?.find((column) => column.key === "origin")?.header ?? "Via";
+        const originLine = padVisibleEnd(`  ${originLabel}: ${origin}`, innerWidth);
+        lines.push(`${left}${this.#action(originLine)}${right}`);
+      }
+    }
+    lines.push(this.#surfaceBorderSubtle(bottom));
+
+    if (vm.instruction !== undefined) {
+      const rawInstruction = this.#useUnicode ? vm.instruction : asciiPickerText(vm.instruction);
+      const instruction = vm.direction === "rtl" ? isolateRtl(rawInstruction) : rawInstruction;
+      lines.push(...wrapText(instruction, frameWidth).map((line) => this.#muted(line)));
     }
     return lines.join("\n");
   }

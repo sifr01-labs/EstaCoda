@@ -96,7 +96,8 @@ On a fresh install, `estacoda` opens the Onboarding Wizard directly. It walks th
 
 ```bash
 estacoda                       # start a fresh terminal session
-estacoda --continue            # explicitly continue the last session for this profile and workspace
+estacoda -c                    # explicitly continue the last session for this profile and workspace
+estacoda --continue            # long form of -c
 estacoda sessions              # choose a resumable session interactively
 estacoda sessions open <id>    # resume a known session by id
 estacoda setup                 # review, edit, or repair setup

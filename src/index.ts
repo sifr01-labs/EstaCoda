@@ -22,8 +22,9 @@ import { renderPlain } from "./ui/renderers/plain-renderer.js";
 import type { UiLocale } from "./contracts/ui.js";
 import { createSQLiteSessionDB } from "./session/session-setup.js";
 import { scheduleStartupUpdatePrefetch, shouldScheduleStartupUpdatePrefetch } from "./lifecycle/startup-update.js";
-import { createSessionId, resolveStartupSessionId } from "./session/session-id.js";
+import { createSessionId } from "./session/session-id.js";
 import { resolveSessionForResume } from "./session/session-resume.js";
+import { resolveSessionLaunchIntent } from "./session/session-launch-intent.js";
 import { GatewayApprovalQueue } from "./gateway/approval-queue.js";
 import { ForegroundTaskHost } from "./tasks/foreground-task-host.js";
 import { SQLiteTaskStore } from "./tasks/sqlite-task-store.js";
@@ -297,8 +298,13 @@ async function main(): Promise<void> {
   }
 
   const sessionDb = await openLocalSessionDb();
-  let requestedSessionId = sessionHandoff?.sessionId;
-  if (continueLastSession) {
+  const launchIntent = resolveSessionLaunchIntent({
+    argv,
+    continueSession: continueLastSession,
+    selectedSessionId: sessionHandoff?.sessionId,
+  });
+  let startupSessionId: string;
+  if (launchIntent.kind === "continue") {
     const continuedSessionId = await cliSessionStore.getSessionId({ profileId, workspaceRoot });
     if (continuedSessionId === undefined) {
       await sessionDb.close();
@@ -316,16 +322,19 @@ async function main(): Promise<void> {
       console.error("The previous session is no longer resumable in this profile and workspace. Run `estacoda sessions` to choose another.");
       process.exit(1);
     }
-    requestedSessionId = resolution.sessionId;
+    startupSessionId = resolution.sessionId;
+  } else if (launchIntent.kind === "open") {
+    startupSessionId = launchIntent.sessionId;
+  } else {
+    startupSessionId = createSessionId();
   }
-  const startupSessionId = resolveStartupSessionId(
-    requestedSessionId,
-    createSessionId
-  );
 
   const runtime = await buildRuntime({
     sessionId: startupSessionId,
-    sessionDb
+    sessionDb,
+    ...(launchIntent.kind === "new"
+      ? { sessionMetadata: { kind: "interactive-root", originSurface: "cli" } }
+      : {}),
   });
   const rememberCliSession = async (sessionId: string): Promise<void> => {
     await cliSessionStore.setSessionId({ profileId, workspaceRoot, sessionId }).catch(() => {
@@ -410,9 +419,11 @@ async function main(): Promise<void> {
           }
         },
         refreshRuntime: async (options) => {
+          const preserveSession = options?.preserveSession === true;
           const nextRuntime = await buildRuntime({
-            sessionId: options?.preserveSession === true ? runtime.sessionId : createSessionId(),
-            sessionDb: await openLocalSessionDb()
+            sessionId: preserveSession ? runtime.sessionId : createSessionId(),
+            sessionDb: await openLocalSessionDb(),
+            ...(preserveSession ? {} : { sessionMetadata: { kind: "interactive-root", originSurface: "cli" } }),
           });
           await rememberCliSession(nextRuntime.sessionId);
           return nextRuntime;
@@ -448,7 +459,10 @@ async function main(): Promise<void> {
       runtime,
       refreshRuntime: async (options) => buildRuntime({
         sessionId: options?.preserveSession === true ? runtime.sessionId : createSessionId(),
-        sessionDb: await openLocalSessionDb()
+        sessionDb: await openLocalSessionDb(),
+        ...(options?.preserveSession === true
+          ? {}
+          : { sessionMetadata: { kind: "interactive-root", originSurface: "cli" } }),
       }),
       modelSwitchContext,
       output,

@@ -44,7 +44,7 @@ Task and session limits are monetary controls; token counts remain read-only usa
 
 ## Session Commands
 
-Running bare `estacoda` starts a fresh CLI session every time. Use `estacoda --continue` for the last scoped session, or run `estacoda sessions` to choose another session explicitly. EstaCoda does not silently restore the last workspace session.
+Running bare `estacoda` starts a fresh CLI session every time. Use `estacoda --continue` (or `estacoda -c`) for the last scoped session, or run `estacoda sessions` to choose another session explicitly. EstaCoda does not silently restore the last workspace session.
 
 ```bash
 # Continue the last CLI session for this profile and workspace
@@ -80,9 +80,9 @@ estacoda sessions compact <session-id> [--topic <topic>]
 
 Valid surfaces: `cli`, `telegram`, `discord`, `whatsapp`, `email`.
 
-In an interactive terminal, `estacoda sessions` opens a two-column picker containing up to 20 of the most recently active resumable sessions for the selected profile and current workspace. The main rows show a session number and safe brief description. The focused row also shows the start date, last activity date, and immutable origin such as CLI or Telegram. Use the arrow keys and press Enter to resume; press Escape to cancel. Empty, ended, child, and internal Task sessions are hidden. `estacoda sessions list` keeps the existing non-interactive operator listing.
+In an interactive terminal, `estacoda sessions` opens a responsive picker containing up to 20 of the most recently active resumable sessions for the selected profile and current workspace. Wide terminals show the session number, safe brief description, localized start date, localized last-activity date, and immutable origin such as CLI or Telegram. Narrow terminals keep the number and description on the main row and place the dates and origin beneath the focused row. Use the arrow keys and press Enter to resume; press Escape to cancel. Empty, ended, child, and internal Task sessions are hidden. `estacoda sessions list` keeps the existing non-interactive operator listing.
 
-`estacoda sessions open <session-id>` bypasses the picker but not the safety boundary. The target must be an active, user-facing root session in the selected profile and current workspace. `estacoda --continue` applies the same validation to the profile/workspace-scoped last-session pointer. Neither path changes channel attachments or the session's original CLI/Telegram origin.
+`estacoda sessions open <session-id>` bypasses the picker but not the safety boundary. The target must contain user activity and be an active, user-facing root session in the selected profile and current workspace. `estacoda --continue` applies the same validation to the profile/workspace-scoped last-session pointer. Neither path changes channel attachments or the session's original CLI/Telegram origin. `sessions show` displays the session's origin and workspace for operator inspection.
 
 `sessions recall` is bounded historical recall. It is profile-scoped and workspace-scoped when workspace metadata is available. Recalled content is labeled as untrusted context and cannot override current instructions.
 

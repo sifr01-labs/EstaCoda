@@ -243,7 +243,7 @@ export function parseGlobalCliOptions(argv: readonly string[]): ParsedGlobalCliO
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === "--continue") {
+    if (arg === "--continue" || arg === "-c") {
       continueSession = true;
       continue;
     }
@@ -4171,7 +4171,7 @@ function help(): string {
     "",
     "Launch options",
     "  estacoda                         Start a fresh interactive session",
-    "  estacoda --continue              Continue the last session for this profile and workspace",
+    "  estacoda -c, --continue          Continue the last session for this profile and workspace",
     "  estacoda --profile <id> [...]    Select a profile for this command only",
   ].join("\n");
 }

@@ -91,6 +91,30 @@ export class InMemorySessionDB implements SessionDB {
     return session === undefined ? undefined : cloneSession(session);
   }
 
+  async getSessionForProfile(id: string, profileId: string): Promise<SessionRecord | undefined> {
+    const session = this.#sessions.get(id);
+    return session === undefined || session.profileId !== profileId ? undefined : cloneSession(session);
+  }
+
+  async hasUserMessageForProfile(sessionId: string, profileId: string): Promise<boolean> {
+    if ((await this.getSessionForProfile(sessionId, profileId)) === undefined) {
+      return false;
+    }
+    return (this.#messages.get(sessionId) ?? []).some((message) => message.role === "user");
+  }
+
+  async setSessionTitleIfPlaceholder(sessionId: string, title: string): Promise<boolean> {
+    const session = this.#sessions.get(sessionId);
+    if (session === undefined) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+    if (!isPlaceholderSessionTitle(session.title)) {
+      return false;
+    }
+    session.title = title;
+    return true;
+  }
+
   async listSessions(profileId?: string): Promise<SessionRecord[]> {
     return [...this.#sessions.values()]
       .filter((session) => profileId === undefined || session.profileId === profileId)
@@ -146,9 +170,10 @@ export class InMemorySessionDB implements SessionDB {
 
     this.#messages.get(input.sessionId)?.push(message);
     if (message.role === "user") {
-      if (isPlaceholderSessionTitle(session.title)) {
-        session.title = deriveSessionDescription(session.title, message.content);
-      }
+      await this.setSessionTitleIfPlaceholder(
+        input.sessionId,
+        deriveSessionDescription(session.title, message.content)
+      );
       session.metadata = cloneMetadata(withImmutableSessionOrigin(session.metadata, message.channel));
     }
     this.#touch(input.sessionId);

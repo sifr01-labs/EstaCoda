@@ -124,6 +124,9 @@ describe("CLI session commands", () => {
       expect(selection?.columns).toEqual([
         { key: "number", header: "#", align: "right" },
         { key: "session", header: "Session" },
+        { key: "started", header: "Started" },
+        { key: "active", header: "Last active" },
+        { key: "origin", header: "Via" },
       ]);
       expect(selection?.options.map((option) => option.value)).toEqual(["sess-selected"]);
       expect(selection?.options[0]?.description).toContain("Via Telegram");
@@ -295,6 +298,22 @@ describe("CLI session commands", () => {
       await expect(pointers.getPointer("telegram", "chat-1")).resolves.toMatchObject({ sessionId: "sess-open" });
     });
 
+    it("rejects empty sessions", async () => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      db.query("insert into sessions (id, profile_id, title, created_at, updated_at, metadata_json) values (?, ?, ?, ?, ?, ?)")
+        .run("sess-empty", "default", "EstaCoda session", "2026-08-01T08:00:00.000Z", "2026-08-01T08:00:00.000Z", JSON.stringify({ workspaceRoot: tmpDir, originSurface: "cli" }));
+      db.close();
+
+      const result = await runCliCommand({
+        argv: ["sessions", "open", "sess-empty"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.sessionHandoff).toBeUndefined();
+    });
+
     it.each([
       { name: "another profile", profileId: "work", workspaceRoot: undefined, kind: undefined },
       { name: "another workspace", profileId: "default", workspaceRoot: "/other", kind: undefined },
@@ -398,8 +417,8 @@ describe("CLI session commands", () => {
   describe("sessions show", () => {
     it("shows session details", async () => {
       const db = openDefaultSQLiteDatabase({ path: dbPath });
-      db.query("insert into sessions (id, profile_id, title, created_at, updated_at) values (?, ?, ?, ?, ?)")
-        .run("sess-1", "default", "Test Session", "2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z");
+      db.query("insert into sessions (id, profile_id, title, created_at, updated_at, metadata_json) values (?, ?, ?, ?, ?, ?)")
+        .run("sess-1", "default", "Test Session", "2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z", JSON.stringify({ workspaceRoot: tmpDir, originSurface: "cli" }));
       db.query("insert into messages (id, session_id, role, content, created_at) values (?, ?, ?, ?, ?)")
         .run("msg-1", "sess-1", "user", "hello", "2024-01-01T00:00:00Z");
       db.close();
@@ -413,6 +432,8 @@ describe("CLI session commands", () => {
       expect(result.output).toContain("sess-1");
       expect(result.output).toContain("Test Session");
       expect(result.output).toContain("Messages: 1");
+      expect(result.output).toContain(`Workspace: ${tmpDir}`);
+      expect(result.output).toContain("Origin: cli");
     });
 
     it("returns error for missing session", async () => {

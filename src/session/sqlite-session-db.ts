@@ -46,9 +46,10 @@ import {
 import { insertProviderUsageEntry, selectProviderUsageEntries } from "../tasks/sqlite-provider-usage.js";
 import { assertSpendingLimit, cloneSpendingLimit, type SpendingLimit } from "../contracts/budget.js";
 import {
+  DEFAULT_SESSION_TITLE,
   deriveSessionDescription,
   INTERNAL_SESSION_KINDS,
-  isPlaceholderSessionTitle,
+  UNTITLED_SESSION_DESCRIPTION,
   withImmutableSessionOrigin,
 } from "./session-presentation.js";
 
@@ -239,6 +240,30 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     return row === null ? undefined : rowToSession(row);
   }
 
+  async hasUserMessageForProfile(sessionId: string, profileId: string): Promise<boolean> {
+    return this.#db
+      .query<{ present: number }>(
+        `select 1 as present
+        from messages m
+        join sessions s on s.id = m.session_id
+        where s.profile_id = ? and m.session_id = ? and m.role = 'user'
+        limit 1`
+      )
+      .get(profileId, sessionId) !== null;
+  }
+
+  async setSessionTitleIfPlaceholder(sessionId: string, title: string): Promise<boolean> {
+    let changed = false;
+    this.#withWriteTransaction(() => {
+      const session = this.#db.query<SessionRow>("select * from sessions where id = ?").get(sessionId);
+      if (session === null) {
+        throw new Error(`Session not found: ${sessionId}`);
+      }
+      changed = this.#setSessionTitleIfPlaceholder(sessionId, title);
+    });
+    return changed;
+  }
+
   async getMessage(id: string): Promise<SessionMessage | undefined> {
     const row = this.#db.query<MessageRow>("select * from messages where id = ?").get(id);
     return row === null ? undefined : rowToMessage(row);
@@ -350,12 +375,6 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
   }
 
   async appendMessage(input: AppendMessageInput): Promise<SessionMessage> {
-    const session = await this.getSession(input.sessionId);
-
-    if (session === undefined) {
-      throw new Error(`Session not found: ${input.sessionId}`);
-    }
-
     const message: SessionMessage = {
       id: input.id ?? this.#id(),
       sessionId: input.sessionId,
@@ -366,47 +385,74 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       metadata: input.metadata
     };
 
-    this.#db
-      .query(
-        `insert into messages (
-          id,
-          session_id,
-          role,
-          content,
-          created_at,
-          channel,
-          metadata_json
-        ) values (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        message.id,
-        message.sessionId,
-        message.role,
-        message.content,
-        message.createdAt,
-        message.channel ?? null,
-        stringifyJson(message.metadata)
-      );
-
-    this.#db
-      .query("insert into messages_fts(rowid, message_id, content) values ((select rowid from messages where id = ?), ?, ?)")
-      .run(message.id, message.id, message.content);
-
-    if (message.role === "user") {
-      const nextTitle = isPlaceholderSessionTitle(session.title)
-        ? deriveSessionDescription(session.title, message.content)
-        : session.title;
-      const nextMetadata = withImmutableSessionOrigin(session.metadata, message.channel);
-      if (nextTitle !== session.title || nextMetadata !== session.metadata) {
-        this.#db
-          .query("update sessions set title = ?, metadata_json = ? where id = ?")
-          .run(nextTitle ?? null, stringifyJson(nextMetadata), message.sessionId);
+    this.#withWriteTransaction(() => {
+      const row = this.#db.query<SessionRow>("select * from sessions where id = ?").get(input.sessionId);
+      if (row === null) {
+        throw new Error(`Session not found: ${input.sessionId}`);
       }
-    }
+      const session = rowToSession(row);
 
-    this.#touch(message.sessionId);
+      this.#db
+        .query(
+          `insert into messages (
+            id,
+            session_id,
+            role,
+            content,
+            created_at,
+            channel,
+            metadata_json
+          ) values (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          message.id,
+          message.sessionId,
+          message.role,
+          message.content,
+          message.createdAt,
+          message.channel ?? null,
+          stringifyJson(message.metadata)
+        );
+
+      this.#db
+        .query("insert into messages_fts(rowid, message_id, content) values ((select rowid from messages where id = ?), ?, ?)")
+        .run(message.id, message.id, message.content);
+
+      if (message.role === "user") {
+        this.#setSessionTitleIfPlaceholder(
+          message.sessionId,
+          deriveSessionDescription(session.title, message.content)
+        );
+        const nextMetadata = withImmutableSessionOrigin(session.metadata, message.channel);
+        if (nextMetadata !== session.metadata) {
+          this.#db
+            .query("update sessions set metadata_json = ? where id = ?")
+            .run(stringifyJson(nextMetadata), message.sessionId);
+        }
+      }
+
+      this.#touch(message.sessionId);
+    });
 
     return message;
+  }
+
+  #setSessionTitleIfPlaceholder(sessionId: string, title: string): boolean {
+    return this.#db
+      .query(
+        `update sessions
+        set title = ?
+        where id = ? and (
+          title is null or trim(title) = '' or
+          lower(trim(title)) in (?, ?)
+        )`
+      )
+      .run(
+        title,
+        sessionId,
+        DEFAULT_SESSION_TITLE.toLocaleLowerCase("en"),
+        UNTITLED_SESSION_DESCRIPTION.toLocaleLowerCase("en")
+      ).changes === 1;
   }
 
   async endSession(sessionId: string, reason: string): Promise<void> {

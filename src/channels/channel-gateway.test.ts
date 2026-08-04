@@ -1271,8 +1271,11 @@ function createMinimalRuntime(): Runtime {
         metadata: input.metadata
       }),
       getSession: async () => undefined,
+      getSessionForProfile: async () => undefined,
       listSessions: async () => [],
       listSessionSummaries: async () => [],
+      hasUserMessageForProfile: async () => false,
+      setSessionTitleIfPlaceholder: async () => false,
       endSession: async () => {},
       setSessionModelOverride: async () => {},
       clearSessionModelOverride: async () => {},

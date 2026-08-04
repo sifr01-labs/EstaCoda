@@ -26,6 +26,7 @@ import {
 } from "./session-view-models.js";
 import type { Prompt } from "./prompt-contract.js";
 import type { SessionPresentation } from "../session/session-presentation.js";
+import { resolveSessionOriginSurface, resolveSessionWorkspaceRoot } from "../session/session-presentation.js";
 import { listResumableSessions, resolveSessionForResume } from "../session/session-resume.js";
 import {
   buildSessionPickerPrompt,
@@ -296,6 +297,11 @@ export async function runSessionsCommand(
       const viewModel = buildSessionShowViewModel({
         session,
         messageCount: messages.length,
+        originSurface: resolveSessionOriginSurface(
+          session,
+          messages.find((message) => message.role === "user")
+        ),
+        workspaceRoot: resolveSessionWorkspaceRoot(session),
         pointers: sessionPointers.map((p) => ({
           surfaceType: p.surfaceType,
           surfaceId: p.surfaceId,

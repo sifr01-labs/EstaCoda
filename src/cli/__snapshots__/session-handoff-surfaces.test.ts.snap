@@ -748,6 +748,8 @@ exports[`Session surfaces — show > renders in narrow width > session-show-narr
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: telegram
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 5
@@ -762,6 +764,8 @@ exports[`Session surfaces — show > renders in no Unicode > session-show-no Uni
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: telegram
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 5
@@ -776,6 +780,8 @@ exports[`Session surfaces — show > renders in no color > session-show-no color
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: telegram
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 5
@@ -790,6 +796,8 @@ exports[`Session surfaces — show > renders in plain > session-show-plain 1`] =
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: telegram
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 5
@@ -804,6 +812,8 @@ exports[`Session surfaces — show > renders in standard dark > session-show-sta
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: telegram
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 5
@@ -818,6 +828,8 @@ exports[`Session surfaces — show > renders in standard light > session-show-st
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: telegram
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 5
@@ -832,6 +844,8 @@ exports[`Session surfaces — show no pointers > renders in narrow width > sessi
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: cli
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 0
@@ -846,6 +860,8 @@ exports[`Session surfaces — show no pointers > renders in no Unicode > session
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: cli
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 0
@@ -860,6 +876,8 @@ exports[`Session surfaces — show no pointers > renders in no color > session-s
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: cli
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 0
@@ -874,6 +892,8 @@ exports[`Session surfaces — show no pointers > renders in plain > session-show
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: cli
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 0
@@ -888,6 +908,8 @@ exports[`Session surfaces — show no pointers > renders in standard dark > sess
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: cli
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 0
@@ -902,6 +924,8 @@ exports[`Session surfaces — show no pointers > renders in standard light > ses
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: cli
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 0

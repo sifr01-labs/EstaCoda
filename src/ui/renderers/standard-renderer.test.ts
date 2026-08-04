@@ -2282,6 +2282,58 @@ describe("StandardRenderer — empty and edge states", () => {
     expect(out).toContain("A");
     expect(out).toContain("B");
   });
+
+  it("renders the session picker as a tokenized wide table", () => {
+    const r = renderer("dark", fullCaps());
+    const vm = buildPickerViewModel({
+      title: "Choose a session",
+      surface: "sessionPicker",
+      columns: [
+        { key: "number", header: "#", alignment: "right" },
+        { key: "session", header: "Session" },
+        { key: "started", header: "Started" },
+        { key: "active", header: "Last active" },
+        { key: "origin", header: "Via" },
+      ],
+      options: [{
+        id: "one",
+        label: "Review deployment",
+        selected: true,
+        cells: { number: "1", session: "Review deployment", started: "04 Aug, 10:00", active: "04 Aug, 11:00", origin: "Telegram" },
+      }],
+    });
+    const out = r.renderPicker(vm);
+    expect(stripAnsi(out)).toContain("Last active");
+    expect(stripAnsi(out)).toContain("Telegram");
+    expect(out).toContain("48;2;26;58;92m");
+  });
+
+  it("collapses session activity under the selected row in narrow and ASCII terminals", () => {
+    const r = renderer("dark", { ...noUnicodeCaps(), supportsColor: false, terminalWidth: 64 });
+    const vm = buildPickerViewModel({
+      title: "Choose a session",
+      surface: "sessionPicker",
+      columns: [
+        { key: "number", header: "#", alignment: "right" },
+        { key: "session", header: "Session" },
+        { key: "started", header: "Started" },
+        { key: "active", header: "Last active" },
+        { key: "origin", header: "Via" },
+      ],
+      options: [{
+        id: "one",
+        label: "Review deployment",
+        selected: true,
+        cells: { number: "1", session: "Review deployment", started: "04 Aug, 10:00", active: "04 Aug, 11:00", origin: "CLI" },
+      }],
+      instruction: "Up/Down navigate | ESC cancel",
+    });
+    const out = r.renderPicker(vm);
+    expect(out).toContain("+--------------------------------------------------------------+");
+    expect(out).toContain("Started: 04 Aug, 10:00");
+    expect(out).toContain("Last active: 04 Aug, 11:00");
+    expect(out).toContain("Via: CLI");
+  });
 });
 
 describe("StandardRenderer — deterministic output", () => {

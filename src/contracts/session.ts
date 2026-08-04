@@ -677,8 +677,11 @@ export type RewriteSessionTranscriptInput = {
 export type SessionDB = {
   createSession(input: CreateSessionInput): Promise<SessionRecord>;
   getSession(id: string): Promise<SessionRecord | undefined>;
+  getSessionForProfile(id: string, profileId: string): Promise<SessionRecord | undefined>;
   listSessions(profileId?: string): Promise<SessionRecord[]>;
   listSessionSummaries(profileId: string, options?: SessionSummaryOptions): Promise<SessionSummaryRecord[]>;
+  hasUserMessageForProfile(sessionId: string, profileId: string): Promise<boolean>;
+  setSessionTitleIfPlaceholder(sessionId: string, title: string): Promise<boolean>;
   endSession(sessionId: string, reason: string): Promise<void>;
   setSessionModelOverride(sessionId: string, override: SessionModelOverride): Promise<void>;
   clearSessionModelOverride(sessionId: string): Promise<void>;

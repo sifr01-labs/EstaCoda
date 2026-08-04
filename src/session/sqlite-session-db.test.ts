@@ -149,6 +149,27 @@ describe("SQLiteSessionDB", () => {
     }
   });
 
+  it("atomically assigns only the first meaningful session title", async () => {
+    const first = new SQLiteSessionDB({ path: dbPath });
+    const second = new SQLiteSessionDB({ path: dbPath });
+    try {
+      await first.createSession({ id: "atomic-title", profileId: "alpha", title: "EstaCoda session" });
+      await Promise.all([
+        first.appendMessage({ sessionId: "atomic-title", role: "user", content: "First candidate" }),
+        second.appendMessage({ sessionId: "atomic-title", role: "user", content: "Second candidate" }),
+      ]);
+
+      const session = await first.getSessionForProfile("atomic-title", "alpha");
+      expect(["First candidate", "Second candidate"]).toContain(session?.title);
+      await expect(first.setSessionTitleIfPlaceholder("atomic-title", "Late candidate")).resolves.toBe(false);
+      await expect(first.getSessionForProfile("atomic-title", "alpha"))
+        .resolves.toMatchObject({ title: session?.title });
+    } finally {
+      first.close();
+      second.close();
+    }
+  });
+
   it("persists immutable logical-session spending scopes", async () => {
     const db = new SQLiteSessionDB({ path: dbPath });
     try {

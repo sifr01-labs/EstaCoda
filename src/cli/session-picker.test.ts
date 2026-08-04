@@ -8,7 +8,7 @@ import {
 } from "./session-picker.js";
 
 describe("session picker presentation", () => {
-  it("builds a two-column picker with selected-row activity details", () => {
+  it("builds a dedicated picker with session activity columns and narrow-row details", () => {
     const input = buildSessionPickerPrompt([
       presentation({
         id: "newer-session",
@@ -24,9 +24,13 @@ describe("session picker presentation", () => {
       }),
     ]);
 
+    expect(input.surface).toBe("sessionPicker");
     expect(input.columns).toEqual([
       { key: "number", header: "#", align: "right" },
       { key: "session", header: "Session" },
+      { key: "started", header: "Started" },
+      { key: "active", header: "Last active" },
+      { key: "origin", header: "Via" },
     ]);
     expect(input.descriptionVisibility).toBe("selected");
     expect(input.visibleRows).toBe(10);
@@ -35,12 +39,16 @@ describe("session picker presentation", () => {
         id: "newer-session",
         value: "newer-session",
         label: "Implement session picker",
-        cells: { number: "1", session: "Implement session picker" },
-        description: "Started 2026-08-04 08:15 UTC  ·  Last active 2026-08-04 09:45 UTC  ·  Via CLI",
+        cells: expect.objectContaining({
+          number: "1",
+          session: "Implement session picker",
+          origin: "CLI",
+        }),
+        description: expect.stringMatching(/^Started .+  ·  Last active .+  ·  Via CLI$/u),
       }),
       expect.objectContaining({
         id: "older-session",
-        cells: { number: "2", session: "Telegram deployment review" },
+        cells: expect.objectContaining({ number: "2", session: "Telegram deployment review", origin: "Telegram" }),
         description: expect.stringContaining("Via Telegram"),
       }),
     ]);
@@ -55,11 +63,13 @@ describe("session picker presentation", () => {
     expect(input.direction).toBe("rtl");
     expect(input.options[0]?.description).toContain("آخر نشاط");
     expect(input.options[0]?.description).toContain("Telegram");
+    expect(input.instruction).toContain("ESC");
     expect(noResumableSessionsMessage("ar")).toContain("لا توجد جلسات");
   });
 
   it("formats timestamps and known origins deterministically", () => {
-    expect(formatSessionTimestamp("2026-08-04T12:34:56+03:00")).toBe("2026-08-04 09:34 UTC");
+    expect(formatSessionTimestamp("2026-08-04T12:34:56+03:00", "en", "UTC")).toBe("04 Aug 2026, 09:34");
+    expect(formatSessionTimestamp("2026-08-04T12:34:56+03:00", "ar", "UTC")).toContain("أغسطس");
     expect(formatSessionTimestamp("not-a-date")).toBe("Unknown");
     expect(formatSessionOrigin("whatsapp")).toBe("WhatsApp");
     expect(formatSessionOrigin(undefined)).toBe("Unknown");

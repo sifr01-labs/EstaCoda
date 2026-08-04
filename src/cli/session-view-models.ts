@@ -82,6 +82,8 @@ export interface SessionPointer {
 export interface SessionShowData {
   readonly session: SessionRecord;
   readonly messageCount: number;
+  readonly originSurface?: string;
+  readonly workspaceRoot?: string;
   readonly pointers: readonly SessionPointer[];
 }
 
@@ -100,6 +102,8 @@ export function buildSessionShowViewModel(data: SessionShowData): ViewModel {
           kv("Session", session.id),
           kv("Title", session.title ?? "(no title)"),
           kv("Profile", session.profileId),
+          kv("Workspace", data.workspaceRoot ?? "unknown"),
+          kv("Origin", data.originSurface ?? "unknown"),
           kv("Created", session.createdAt),
           kv("Updated", session.updatedAt ?? "no activity"),
           kv("Messages", data.messageCount),

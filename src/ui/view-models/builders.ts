@@ -234,6 +234,7 @@ export function buildProgressContextRailViewModel(
 
 export interface BuildPickerInput {
   readonly title: string;
+  readonly surface?: PickerViewModel["surface"];
   readonly options: readonly PickerOption[];
   readonly columns?: PickerViewModel["columns"];
   readonly descriptionVisibility?: PickerViewModel["descriptionVisibility"];
@@ -244,6 +245,7 @@ export interface BuildPickerInput {
 export function buildPickerViewModel(input: BuildPickerInput): PickerViewModel {
   return {
     kind: "picker",
+    surface: input.surface,
     title: input.title,
     options: input.options,
     columns: input.columns,

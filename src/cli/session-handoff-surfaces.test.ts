@@ -213,6 +213,8 @@ describe("Session surfaces — show", () => {
   const vm = buildSessionShowViewModel({
     session: fakeSessionRecord(),
     messageCount: 5,
+    originSurface: "telegram",
+    workspaceRoot: "/workspace",
     pointers: [
       { surfaceType: "telegram", surfaceId: "chat-1", attachedAt: "2024-01-01T00:00:00Z" },
     ],
@@ -229,6 +231,8 @@ describe("Session surfaces — show no pointers", () => {
   const vm = buildSessionShowViewModel({
     session: fakeSessionRecord(),
     messageCount: 0,
+    originSurface: "cli",
+    workspaceRoot: "/workspace",
     pointers: [],
   });
   for (const ctx of snapshotContexts()) {

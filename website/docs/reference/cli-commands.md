@@ -14,11 +14,12 @@ EstaCoda is a command-line agent system. Every surface that mutates state, inspe
 estacoda --profile <id> <command>
 estacoda -p <id> <command>
 estacoda --continue [prompt-or-slash-command]
+estacoda -c [prompt-or-slash-command]
 ```
 
 The `--profile` / `-p` flag selects a profile for the current command only. It does not change `active-profile.json`. Only `estacoda profile use <name>` changes the active profile. The flag is valid before any command.
 
-`--continue` explicitly resumes the last CLI session for the selected profile and current workspace. Bare `estacoda` starts fresh. The continuation flag is valid for an interactive launch, one-shot prompt, or slash command, but not for standalone operator commands that dispatch before a conversational runtime.
+`--continue` / `-c` explicitly resumes the last CLI session for the selected profile and current workspace. Bare `estacoda` starts fresh. The continuation flag is valid for an interactive launch, one-shot prompt, or slash command, but not for standalone operator commands that dispatch before a conversational runtime.
 
 ---
 

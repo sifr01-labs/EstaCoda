@@ -363,11 +363,11 @@ Capability-first security boundary.
 
 ### Sessions
 
-- `estacoda --continue` — explicitly resume the last CLI session pointer for the selected profile and current workspace.
+- `estacoda -c` / `estacoda --continue` — explicitly resume the last CLI session pointer for the selected profile and current workspace.
 - `estacoda sessions` — interactively choose and resume a recent user-facing session in the current profile and workspace.
 - `estacoda sessions open <session-id>` — resume a known active user-facing root session after profile/workspace validation.
 - `estacoda sessions list` — recent sessions with attached surfaces.
-- `estacoda sessions show <session-id>` — session detail with surface pointers.
+- `estacoda sessions show <session-id>` — session detail with origin, workspace, and surface pointers.
 - `estacoda sessions current` — current runtime session (when present).
 - `estacoda sessions attach <surface> <surface-id> <session-id>` — explicit attach.
 - `estacoda sessions detach <surface> <surface-id>` — explicit detach.

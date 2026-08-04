@@ -28,6 +28,8 @@ estacoda
 
 # Continue the last CLI session for this profile and workspace
 estacoda --continue
+# Short form
+estacoda -c
 
 # Choose a different resumable session
 estacoda sessions
@@ -45,9 +47,9 @@ estacoda -p work doctor
 
 `--profile` / `-p` selects a profile for the current command only. It does not change the active profile on disk. Only `estacoda profile use <name>` updates `~/.estacoda/active-profile.json`.
 
-Every CLI invocation that reaches the runtime starts a fresh session by default. Continuation is explicit: `--continue` uses the last CLI session pointer for the selected profile and current workspace, while `estacoda sessions` opens the session picker and `estacoda sessions open <session-id>` resumes a known session directly. All three paths still run normal setup and workspace-trust checks.
+Every CLI invocation that reaches the runtime starts a fresh session by default. Continuation is explicit: `--continue` / `-c` uses the last CLI session pointer for the selected profile and current workspace, while `estacoda sessions` opens the session picker and `estacoda sessions open <session-id>` resumes a known session directly. All three paths still run normal setup and workspace-trust checks.
 
-The `--continue` flag also works with a one-shot prompt or slash command. It is rejected with standalone operator commands that dispatch before a conversational runtime. If the scoped pointer is missing, malformed, ended, internal, or belongs to another profile or workspace, startup fails closed and suggests `estacoda sessions`.
+The `--continue` / `-c` flag also works with a one-shot prompt or slash command. It is rejected with standalone operator commands that dispatch before a conversational runtime. If the scoped pointer is missing, malformed, empty, ended, internal, or belongs to another profile or workspace, startup fails closed and suggests `estacoda sessions`.
 
 ---
 

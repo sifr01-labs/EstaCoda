@@ -337,6 +337,14 @@ describe("profileCommand", () => {
     });
   });
 
+  it("parses -c as the short continuation alias", () => {
+    expect(parseGlobalCliOptions(["-c", "/doctor"])).toEqual({
+      ok: true,
+      argv: ["/doctor"],
+      continueSession: true,
+    });
+  });
+
   it("documents fresh launch, explicit continuation, and command-local profiles in CLI help", async () => {
     const result = await runCliCommand({
       argv: ["help"],
@@ -347,7 +355,7 @@ describe("profileCommand", () => {
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("Launch options");
     expect(result.output).toContain("estacoda                         Start a fresh interactive session");
-    expect(result.output).toContain("estacoda --continue              Continue the last session for this profile and workspace");
+    expect(result.output).toContain("estacoda -c, --continue          Continue the last session for this profile and workspace");
     expect(result.output).toContain("estacoda --profile <id> [...]    Select a profile for this command only");
   });
 

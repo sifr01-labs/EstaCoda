@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { ensureProfileSkeleton } from "./profile-state.js";
+import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 
 const require = createRequire(import.meta.url);
 const tsxLoaderPath = require.resolve("tsx");
@@ -69,16 +70,26 @@ describe("entrypoint home directory propagation", () => {
       homeDir: prodHome,
       estacodaHome: devHome
     });
+    const firstSessionId = extractSessionId(first.stdout);
+    const firstDetail = await runEntrypoint({
+      argv: ["sessions", "show", firstSessionId!],
+      cwd: workspaceRoot,
+      homeDir: prodHome,
+      estacodaHome: devHome,
+    });
     const second = await runEntrypoint({
       argv: ["/doctor"],
       cwd: workspaceRoot,
       homeDir: prodHome,
       estacodaHome: devHome
     });
-    const firstSessionId = extractSessionId(first.stdout);
     const secondSessionId = extractSessionId(second.stdout);
+    const sessionsDb = openDefaultSQLiteDatabase({ path: join(devHome, ".estacoda", "sessions.sqlite") });
+    sessionsDb.query("insert into messages (id, session_id, role, content, created_at) values (?, ?, ?, ?, ?)")
+      .run("continue-user-message", secondSessionId!, "user", "Continue this session", new Date().toISOString());
+    sessionsDb.close();
     const continued = await runEntrypoint({
-      argv: ["--continue", "/doctor"],
+      argv: ["-c", "/doctor"],
       cwd: workspaceRoot,
       homeDir: prodHome,
       estacodaHome: devHome
@@ -93,6 +104,9 @@ describe("entrypoint home directory propagation", () => {
     expect(second.code).toBe(0);
     expect(continued.code).toBe(0);
     expect(first.stderr).toBe("");
+    expect(firstDetail.code).toBe(0);
+    expect(firstDetail.stdout).toContain(`Workspace: ${workspaceRoot}`);
+    expect(firstDetail.stdout).toContain("Origin: cli");
     expect(second.stderr).toBe("");
     expect(continued.stderr).toBe("");
     expect(firstSessionId).toBeDefined();

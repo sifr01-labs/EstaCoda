@@ -178,6 +178,7 @@ export interface PickerColumn {
 
 export interface PickerViewModel {
   readonly kind: "picker";
+  readonly surface?: "sessionPicker";
   readonly title: string;
   readonly options: readonly PickerOption[];
   readonly columns?: readonly PickerColumn[];

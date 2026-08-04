@@ -12,22 +12,29 @@ export function buildSessionPickerPrompt(
   const copy = sessionPickerCopy(locale);
   return {
     title: copy.title,
+    surface: "sessionPicker",
     columns: [
       { key: "number", header: "#", align: "right" },
       { key: "session", header: copy.session },
+      { key: "started", header: copy.started },
+      { key: "active", header: copy.lastActive },
+      { key: "origin", header: copy.via },
     ],
     options: sessions.map((session, index) => ({
       id: session.id,
       value: session.id,
       label: session.description,
       description: [
-        `${copy.started} ${technicalValue(formatSessionTimestamp(session.createdAt), locale)}`,
-        `${copy.lastActive} ${technicalValue(formatSessionTimestamp(session.updatedAt), locale)}`,
+        `${copy.started} ${formatSessionTimestamp(session.createdAt, locale)}`,
+        `${copy.lastActive} ${formatSessionTimestamp(session.updatedAt, locale)}`,
         `${copy.via} ${technicalValue(formatSessionOrigin(session.originSurface, locale), locale)}`,
       ].join("  ·  "),
       cells: {
         number: String(index + 1),
         session: session.description,
+        started: formatSessionTimestamp(session.createdAt, locale),
+        active: formatSessionTimestamp(session.updatedAt, locale),
+        origin: formatSessionOrigin(session.originSurface, locale),
       },
     })),
     defaultIndex: 0,
@@ -46,12 +53,20 @@ function technicalValue(value: string, locale: UiLocale): string {
   return locale === "ar" ? isolateLtr(value) : value;
 }
 
-export function formatSessionTimestamp(value: string): string {
+export function formatSessionTimestamp(value: string, locale: UiLocale = "en", timeZone?: string): string {
   const parsed = new Date(value);
   if (!Number.isFinite(parsed.getTime())) {
-    return "Unknown";
+    return locale === "ar" ? "غير معروف" : "Unknown";
   }
-  return `${parsed.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+  return new Intl.DateTimeFormat(locale === "ar" ? "ar-EG" : "en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    ...(timeZone === undefined ? {} : { timeZone }),
+  }).format(parsed);
 }
 
 export function formatSessionOrigin(origin: string | undefined, locale: UiLocale = "en"): string {
@@ -97,7 +112,7 @@ function sessionPickerCopy(locale: UiLocale): {
       via: "عبر",
       fallbackPrompt: "رقم الجلسة [1]: ",
       selectedLabel: "فتح الجلسة",
-      instruction: "↑↓ للتنقل  ·  ENTER للفتح  ·  CTRL+C للخروج",
+      instruction: "↑↓ للتنقل  ·  ENTER للفتح  ·  ESC للإلغاء  ·  CTRL+C للخروج",
     };
   }
   return {
@@ -108,6 +123,6 @@ function sessionPickerCopy(locale: UiLocale): {
     via: "Via",
     fallbackPrompt: "Session number [1]: ",
     selectedLabel: "Opening session",
-    instruction: "↑↓ navigate  ·  ENTER open  ·  CTRL+C exit",
+    instruction: "↑↓ navigate  ·  ENTER open  ·  ESC cancel  ·  CTRL+C exit",
   };
 }

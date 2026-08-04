@@ -51,7 +51,7 @@ export type SelectPromptInput<T> = {
   }>;
   defaultIndex?: number;
   fallbackPrompt: string;
-  surface?: "promptCard";
+  surface?: "promptCard" | "sessionPicker";
   locale?: Locale;
   direction?: TextDirection;
   technicalLines?: readonly string[];
@@ -396,6 +396,7 @@ function buildSelectionViewModel<T>(
   });
   return buildPickerViewModel({
     title: selection.title,
+    surface: selection.surface === "sessionPicker" ? "sessionPicker" : undefined,
     options,
     columns: selection.columns?.map((column) => ({
       key: column.key,

@@ -5022,6 +5022,12 @@ describe("runSessionLoop — active turn spinner", () => {
       profileId: "default",
       metadata: { workspaceRoot },
     });
+    await runtime.sessionDb.appendMessage({
+      sessionId: "target-session",
+      role: "user",
+      content: "Earlier user activity",
+      channel: "cli",
+    });
     const switchedRuntime = withModelInfo({
       ...createMockRuntime(),
       sessionDb: runtime.sessionDb,

@@ -42,13 +42,13 @@ describe("session resume boundary", () => {
     }
   });
 
-  it("allows an explicitly continued empty session while keeping it out of the picker", async () => {
+  it("rejects an explicitly continued empty session and keeps it out of the picker", async () => {
     const db = new InMemorySessionDB();
     await db.createSession({ id: "empty", profileId: "default", metadata: { workspaceRoot: "/workspace" } });
 
     await expect(resolveSessionForResume({
       sessionDb: db, profileId: "default", workspaceRoot: "/workspace", sessionId: "empty",
-    })).resolves.toEqual({ ok: true, sessionId: "empty" });
+    })).resolves.toEqual({ ok: false, reason: "not-resumable" });
     await expect(listResumableSessions({
       sessionDb: db, profileId: "default", workspaceRoot: "/workspace", limit: 20,
     })).resolves.toEqual([]);
