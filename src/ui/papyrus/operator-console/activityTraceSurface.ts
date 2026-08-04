@@ -3,6 +3,7 @@ import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
 import type {
   ActivityTraceInspectionState,
   TaskCardActivityState,
+  TaskCardActivitySpanState,
   TaskCardState,
 } from "./operatorConsoleState.js";
 import {
@@ -25,6 +26,8 @@ const TRACE_CATEGORIES: readonly TaskCardActivityState["category"][] = [
 
 type TraceCopy = {
   readonly activityTrace: string;
+  readonly activity: string;
+  readonly activities: string;
   readonly event: string;
   readonly events: string;
   readonly noActivity: string;
@@ -35,11 +38,19 @@ type TraceCopy = {
   readonly retained: string;
   readonly returnToLive: string;
   readonly task: string;
+  readonly synthesis: string;
+  readonly subagents: string;
+  readonly delivery: string;
+  readonly complete: string;
+  readonly waiting: string;
+  readonly noLogicalActivity: string;
 };
 
 const COPY: Readonly<Record<OperatorConsoleLocale, TraceCopy>> = {
   en: {
     activityTrace: "Activity trace",
+    activity: "activity",
+    activities: "activities",
     event: "event",
     events: "events",
     noActivity: "No retained safe activity yet",
@@ -50,9 +61,17 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TraceCopy>> = {
     retained: "retained",
     returnToLive: "Return to live → End",
     task: "Task",
+    synthesis: "Synthesis",
+    subagents: "Subagents",
+    delivery: "Delivery",
+    complete: "COMPLETE",
+    waiting: "WAITING",
+    noLogicalActivity: "No logical activity yet",
   },
   ar: {
     activityTrace: "مسار النشاط",
+    activity: "نشاط",
+    activities: "أنشطة",
     event: "حدث",
     events: "أحداث",
     noActivity: "لا يوجد نشاط آمن محفوظ بعد",
@@ -63,8 +82,105 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TraceCopy>> = {
     retained: "محفوظ",
     returnToLive: "العودة للبث المباشر ← End",
     task: "المهمة",
+    synthesis: "التجميع",
+    subagents: "الوكلاء الفرعيون",
+    delivery: "التسليم",
+    complete: "مكتمل",
+    waiting: "انتظار",
+    noLogicalActivity: "لا يوجد نشاط منطقي بعد",
   },
 };
+
+export type ActivityRibbonScope = "auto" | "task" | "subagents" | "synthesis" | "delivery" | "all";
+
+export type ActivityRibbonSegment = {
+  readonly span: TaskCardActivitySpanState;
+  readonly width: number;
+  readonly running: boolean;
+};
+
+export function activityRibbonHeight(width: number): number {
+  return width < 60 ? 2 : 4;
+}
+
+/** Render logical activity spans as execution history, never as completion progress. */
+export function renderActivityRibbonSurface(
+  card: TaskCardState,
+  options: {
+    readonly width: number;
+    readonly locale?: OperatorConsoleLocale;
+    readonly style?: OperatorConsoleStyle;
+    readonly scope?: ActivityRibbonScope;
+  }
+): readonly string[] {
+  const width = Math.max(1, Math.floor(options.width));
+  const locale = options.locale ?? "en";
+  const copy = COPY[locale];
+  const style = options.style;
+  const tokens = style?.tokens.contract;
+  const scope = resolveRibbonScope(card, options.scope ?? "auto");
+  const spans = filterSpans(card.trace.spans, scope);
+  const selected = [...spans].reverse().find((span) => span.status === "running") ?? spans.at(-1);
+  const activityLabel = spans.length === 1 ? copy.activity : copy.activities;
+  const title = `${copy.activityTrace} · ${spans.length} ${activityLabel}`;
+  const styledTitle = tokens === undefined
+    ? title
+    : styleColor(style, styleBold(style, title), tokens.palette.accent);
+  const live = isTaskLive(card);
+  const waiting = card.phase.name === "waiting_for_input" || card.phase.name === "waiting_for_approval";
+  const stateLabel = waiting ? copy.waiting : live ? copy.live.toLocaleUpperCase() : copy.complete;
+  const stateColor = waiting ? tokens?.severity.warn : live ? tokens?.palette.action : tokens?.severity.ok;
+  const styledState = stateColor === undefined ? stateLabel : styleColor(style, styleBold(style, stateLabel), stateColor);
+  const scopeLabel = formatRibbonScope(scope, copy);
+  const scopeRow = alignStatus(scopeLabel, styledState, width);
+
+  if (width < 60) {
+    const compactRibbon = spans.length === 0
+      ? copy.noLogicalActivity
+      : `${renderRibbon(spans, Math.max(1, width - 22), style)} ${renderLiveMarker(live, copy, style)}`;
+    const compactCategory = selected === undefined ? "" : ` · ${formatSpanCategory(selected.category, locale)}`;
+    return [
+      fit(scopeRow, width),
+      fit(`${spans.length} ${activityLabel}${compactCategory} · ${compactRibbon}`, width),
+    ];
+  }
+  if (selected === undefined) {
+    return [
+      fit(scopeRow, width),
+      fit(styledTitle, width),
+      fit(`  ${copy.noLogicalActivity}`, width),
+      "".padEnd(width),
+    ];
+  }
+  const ribbonCapacity = Math.max(1, width - 13);
+  const ribbon = renderRibbon(spans, ribbonCapacity, style);
+  const ribbonLine = locale === "ar"
+    ? `  \u2066${ribbon} ${renderLiveMarker(live, copy, style)}\u2069`
+    : `  ${ribbon} ${renderLiveMarker(live, copy, style)}`;
+  const category = formatSpanCategory(selected.category, locale);
+  const categoryColor = spanColor(selected.category, style);
+  const styledCategory = categoryColor === undefined
+    ? category
+    : styleColor(style, styleBold(style, category), categoryColor);
+  const callout = `  └ ${styledCategory} · ${formatSpanScope(selected.scope, locale)} · ${isolateIfArabic(formatSpanDuration(selected.durationMs), locale)} · ${isolateIfArabic(selected.label, locale)}`;
+  return [
+    fit(scopeRow, width),
+    fit(styledTitle, width),
+    fit(ribbonLine, width),
+    fit(callout, width),
+  ];
+}
+
+export function getActivityRibbonSegments(
+  spans: readonly TaskCardActivitySpanState[],
+  maxSegmentWidth = 8
+): readonly ActivityRibbonSegment[] {
+  return spans.map((span) => ({
+    span,
+    width: Math.max(1, Math.min(maxSegmentWidth, Math.round(1 + Math.log2(1 + span.durationMs / 1_000)))),
+    running: span.status === "running",
+  }));
+}
 
 export type ActivityTraceWindow = {
   readonly events: readonly TaskCardActivityState[];
@@ -286,4 +402,158 @@ function formatTimestamp(timestamp: string): string {
 
 function isolateIfArabic(value: string, locale: OperatorConsoleLocale): string {
   return locale === "ar" ? `\u2068${value}\u2069` : value;
+}
+
+function resolveRibbonScope(card: TaskCardState, requested: ActivityRibbonScope): Exclude<ActivityRibbonScope, "auto"> {
+  if (requested !== "auto") return requested;
+  if (card.phase.name === "synthesizing") return "synthesis";
+  if (card.phase.name === "delegating") return "subagents";
+  if (card.phase.name === "completed" || card.phase.name === "partial") return "delivery";
+  return "task";
+}
+
+function filterSpans(
+  spans: readonly TaskCardActivitySpanState[],
+  scope: Exclude<ActivityRibbonScope, "auto">
+): readonly TaskCardActivitySpanState[] {
+  if (scope === "all") return spans;
+  if (scope === "subagents") return spans.filter((span) => span.scope.kind === "subagent");
+  if (scope === "task") return spans.filter((span) => span.scope.kind === "task");
+  return spans.filter((span) => span.scope.kind === scope);
+}
+
+function renderRibbon(
+  spans: readonly TaskCardActivitySpanState[],
+  capacity: number,
+  style: OperatorConsoleStyle | undefined
+): string {
+  const segments = getActivityRibbonSegments(spans);
+  const rendered = segments.map((segment) => renderRibbonSegment(segment, style));
+  const widths = segments.map((segment) => segment.width);
+  let totalWidth = widths.reduce((sum, value) => sum + value, 0);
+  let start = 0;
+  while (start < rendered.length - 1 && totalWidth > capacity) {
+    totalWidth -= widths[start] ?? 0;
+    start += 1;
+  }
+  const visible = rendered.slice(start).join("");
+  if (visible.length === 0) return "";
+  const earlier = start > 0 ? styleMutedRibbon(style, style?.tokens.contract.glyph.trace.earlier ?? "<") : "";
+  return `${earlier}${truncateVisible(visible, Math.max(1, capacity - (start > 0 ? 1 : 0)), "")}`;
+}
+
+function renderRibbonSegment(
+  segment: ActivityRibbonSegment,
+  style: OperatorConsoleStyle | undefined
+): string {
+  const tokens = style?.tokens.contract;
+  const fill = tokens?.glyph.progress.filled ?? "█";
+  const selected = tokens?.glyph.trace.selected ?? "□";
+  const failed = style?.tokens.mode === "plain" ? "x" : tokens?.glyph.cross ?? "×";
+  const glyph = segment.span.status === "failed"
+    ? failed.repeat(segment.width)
+    : segment.running
+      ? `${fill.repeat(Math.max(0, segment.width - 1))}${selected}`
+      : fill.repeat(segment.width);
+  const color = spanColor(segment.span.category, style);
+  return color === undefined ? glyph : styleColor(style, glyph, color);
+}
+
+function renderLiveMarker(
+  live: boolean,
+  copy: TraceCopy,
+  style: OperatorConsoleStyle | undefined
+): string {
+  const tokens = style?.tokens.contract;
+  const glyph = live ? tokens?.glyph.trace.live ?? "◆" : tokens?.glyph.check ?? "✓";
+  const label = live ? copy.live : copy.complete.toLocaleLowerCase();
+  const color = live ? tokens?.palette.action : tokens?.severity.ok;
+  return color === undefined ? `${glyph} ${label}` : styleColor(style, `${glyph} ${label}`, color);
+}
+
+function spanColor(
+  category: TaskCardActivitySpanState["category"],
+  style: OperatorConsoleStyle | undefined
+): string | undefined {
+  const tokens = style?.tokens.contract;
+  if (tokens === undefined) return undefined;
+  switch (category) {
+    case "plan": return tokens.trace.plan;
+    case "search": return tokens.trace.search;
+    case "read": return tokens.trace.read;
+    case "execute": return tokens.palette.caution;
+    case "write": return tokens.trace.answer;
+    case "validate": return tokens.trace.finish;
+    case "wait": return tokens.text.muted;
+    case "retry": return tokens.severity.warn;
+    case "failure": return tokens.trace.failed;
+    case "deliver": return tokens.trace.finish;
+  }
+}
+
+function formatSpanCategory(
+  category: TaskCardActivitySpanState["category"],
+  locale: OperatorConsoleLocale
+): string {
+  if (locale === "en") return category[0]!.toUpperCase() + category.slice(1);
+  const labels: Readonly<Record<TaskCardActivitySpanState["category"], string>> = {
+    plan: "تخطيط",
+    search: "بحث",
+    read: "قراءة",
+    execute: "تنفيذ",
+    write: "كتابة",
+    validate: "تحقق",
+    wait: "انتظار",
+    retry: "إعادة محاولة",
+    failure: "فشل",
+    deliver: "تسليم",
+  };
+  return labels[category];
+}
+
+function formatSpanScope(
+  scope: TaskCardActivitySpanState["scope"],
+  locale: OperatorConsoleLocale
+): string {
+  if (scope.kind === "task") return locale === "ar" ? "المهمة" : "Task";
+  if (scope.kind === "synthesis") return locale === "ar" ? "التجميع" : "Synthesis";
+  if (scope.kind === "delivery") return locale === "ar" ? "التسليم" : "Delivery";
+  return isolateIfArabic(scope.label, locale);
+}
+
+function formatRibbonScope(scope: Exclude<ActivityRibbonScope, "auto">, copy: TraceCopy): string {
+  if (scope === "synthesis") return copy.synthesis;
+  if (scope === "subagents") return copy.subagents;
+  if (scope === "delivery") return copy.delivery;
+  return copy.task;
+}
+
+function formatSpanDuration(durationMs: number): string {
+  const seconds = Math.max(0, durationMs) / 1_000;
+  if (seconds < 1) return `${Math.round(durationMs)}ms`;
+  if (seconds < 60) return `${seconds < 10 ? seconds.toFixed(1).replace(/\.0$/u, "") : Math.round(seconds)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remaining = Math.round(seconds % 60);
+  return `${minutes}:${String(remaining).padStart(2, "0")}`;
+}
+
+function isTaskLive(card: TaskCardState): boolean {
+  return !["completed", "partial", "failed", "cancelled"].includes(card.status);
+}
+
+function alignStatus(left: string, right: string, width: number): string {
+  const leftWidth = measureVisibleWidth(left);
+  const rightWidth = measureVisibleWidth(right);
+  return leftWidth + rightWidth + 1 >= width
+    ? `${left} · ${right}`
+    : `${left}${" ".repeat(width - leftWidth - rightWidth)}${right}`;
+}
+
+function fit(value: string, width: number): string {
+  return truncateVisible(value, width, "…");
+}
+
+function styleMutedRibbon(style: OperatorConsoleStyle | undefined, value: string): string {
+  const color = style?.tokens.contract.text.muted;
+  return color === undefined ? value : styleColor(style, value, color);
 }

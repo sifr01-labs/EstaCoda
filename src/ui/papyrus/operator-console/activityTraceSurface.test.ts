@@ -2,14 +2,78 @@ import { describe, expect, it } from "vitest";
 import { resolveTokens } from "../../../theme/token-resolver.js";
 import {
   createOperatorConsoleStyle,
+  getActivityRibbonSegments,
   getActivityTraceWindow,
   navigateActivityTrace,
+  renderActivityRibbonSurface,
   renderActivityTraceSurface,
   type TaskCardActivityState,
   type TaskCardState,
 } from "./index.js";
 
 describe("Task activity trace surface", () => {
+  it("renders duration-weighted logical spans without implying remaining progress", () => {
+    const style = createOperatorConsoleStyle({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const card = {
+      ...makeCard([]),
+      phase: { name: "synthesizing" as const },
+      trace: {
+        events: [],
+        spans: [
+          span("plan", 1_000, "completed", "Planning next action"),
+          span("read", 9_000, "completed", "Loading two reports"),
+          span("write", 80_000, "running", "Writing current response"),
+        ],
+        hasEarlierEvents: false,
+      },
+    };
+    const lines = renderActivityRibbonSurface(card, { width: 100, style });
+    const text = stripAnsi(lines.join("\n"));
+    const segments = getActivityRibbonSegments(card.trace.spans);
+
+    expect(text).toContain("Synthesis");
+    expect(text).toContain("Activity trace · 3 activities");
+    expect(text).toContain("□ ◆ live");
+    expect(text).toContain("Write · Synthesis · 1:20 · Writing current response");
+    expect(text).not.toContain("events");
+    expect(text).not.toContain("%");
+    expect(text).not.toContain("░");
+    expect(segments.map((segment) => segment.width)).toEqual([2, 4, 7]);
+    expect(lines[2]).toContain("\x1b[38;2;");
+  });
+
+  it("keeps the compact Arabic ribbon chronological and deterministic without ANSI color", () => {
+    const style = createOperatorConsoleStyle({
+      tokens: resolveTokens("plain", "dark", "kemetBlue"),
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const card = {
+      ...makeCard([]),
+      phase: { name: "synthesizing" as const },
+      trace: {
+        events: [],
+        spans: [
+          span("plan", 1_000, "completed", "تحديد الخطوة التالية"),
+          span("write", 3_000, "running", "كتابة الإجابة"),
+        ],
+        hasEarlierEvents: false,
+      },
+    };
+    const lines = renderActivityRibbonSurface(card, { width: 48, locale: "ar", style });
+    const text = lines.join("\n");
+
+    expect(lines).toHaveLength(2);
+    expect(text).toContain("التجميع");
+    expect(text).toContain("أنشطة");
+    expect(text).toContain("#");
+    expect(text).toContain("o");
+    expect(text).not.toMatch(/\u001B\[/u);
+    expect(text).not.toContain("-");
+  });
+
   it("renders semantic event colors, a selected event, an independent live marker, and all-time counters", () => {
     const style = createOperatorConsoleStyle({
       tokens: resolveTokens("standard", "dark", "kemetBlue"),
@@ -186,6 +250,25 @@ function usage(): TaskCardState["usage"] {
     totalTokens: 0,
     usageComplete: true,
     pricingComplete: true,
+  };
+}
+
+function span(
+  category: TaskCardState["trace"]["spans"][number]["category"],
+  durationMs: number,
+  status: TaskCardState["trace"]["spans"][number]["status"],
+  label: string
+): TaskCardState["trace"]["spans"][number] {
+  return {
+    id: `span-${category}`,
+    category,
+    scope: { kind: "synthesis", stepId: "step-synthesis", label: "Synthesis" },
+    status,
+    startedAt: "2026-07-20T10:00:00.000Z",
+    ...(status === "running" ? {} : { endedAt: "2026-07-20T10:00:01.000Z" }),
+    durationMs,
+    eventCount: 1,
+    label,
   };
 }
 

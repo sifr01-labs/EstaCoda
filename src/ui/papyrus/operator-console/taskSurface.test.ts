@@ -454,17 +454,20 @@ describe("durable Task surfaces", () => {
     const text = lines.join("\n");
     const inspection = taskInspectionContentLines(card, 100).join("\n");
 
-    expect(getTaskCardSurfaceDesiredHeight(state, 100)).toBe(14);
-    expect(lines).toHaveLength(14);
-    expect(text).toContain("Delegated Task 1/1 · ⁨T-104⁩ · synthesizing");
-    expect(text).toContain("3 of 3 delegated Steps completed");
-    expect(text).toContain("Parent synthesis · Synthesize delegated results");
-    expect(text).toContain("Synthesizing 3 Subagent results");
-    expect(text).toContain("Comparing overlapping recommendations");
-    expect(text).toContain("Activity trace · 2 events");
-    expect(text).toContain("Preparing final response");
+    expect(getTaskCardSurfaceDesiredHeight(state, 100)).toBe(16);
+    expect(lines).toHaveLength(16);
+    expect(text).toContain("Competitor comparison");
+    expect(text).toContain("⁨Task #T-104⁩");
+    expect(text).toContain("3 usable reports");
+    expect(text).toContain("Plan ✓ ─── Subagents ✓ ─── Synthesis ● ─── Deliver ○");
+    expect(text).toContain("Synthesis");
+    expect(text).toContain("Activity trace · 3 activities");
+    expect(text).toContain("Write · Synthesis · 12s · Writing current response");
     expect(text).not.toContain("Usage recorded");
-    expect(text.match(/Subagent [123]/gu)).toHaveLength(3);
+    expect(text).not.toContain("Delegated Task");
+    expect(text).not.toContain("Parent synthesis");
+    expect(text).not.toContain("settled");
+    expect(text.match(/Research Company [123]/gu)).toHaveLength(3);
     expect(text).not.toContain("Summary");
     expect(text).not.toContain("Accepted worker summary");
     expect(inspection).toContain("synthesizing");
@@ -472,27 +475,50 @@ describe("durable Task surfaces", () => {
     expect(inspection).toContain("Accepted worker summary 1");
     expect(lines.every((line) => visibleWidth(line) === 100)).toBe(true);
 
-    const targets = getTaskCardHitTargets(state, 100, 14);
-    expect(targets[0]).toMatchObject({ kind: "taskHeader", y: 0, height: 8 });
+    const targets = getTaskCardHitTargets(state, 100, 16);
+    expect(targets[0]).toMatchObject({ kind: "taskHeader", y: 0, height: 10 });
     expect(targets.filter((target) => target.kind === "subagentCard")).toEqual([
-      expect.objectContaining({ stepId: "step-1", y: 9, height: 1 }),
-      expect.objectContaining({ stepId: "step-2", y: 11, height: 1 }),
-      expect.objectContaining({ stepId: "step-3", y: 13, height: 1 }),
+      expect.objectContaining({ stepId: "step-1", y: 11, height: 1 }),
+      expect.objectContaining({ stepId: "step-2", y: 13, height: 1 }),
+      expect.objectContaining({ stepId: "step-3", y: 15, height: 1 }),
     ]);
 
     const styled = renderTaskCardSurface(state, { width: 100, isTty: true, style, motionElapsedMs: 105 });
-    expect(styled[1]).toContain(ansiFg(tokens.contract.palette.brand));
+    expect(styled[0]).toContain(ansiFg(tokens.contract.palette.brand));
     expect(styled[2]).toContain(ansiFg(tokens.contract.palette.action));
-    expect(styled[4]).toContain(ansiFg(tokens.contract.trace.read));
-    expect(styled[4]).toContain(ansiFg(tokens.contract.trace.answer));
-    expect(styled[9]).toContain("\x1b[48;2;37;37;37m");
+    expect(styled[8]).toContain(ansiFg(tokens.contract.trace.read));
+    expect(styled[8]).toContain(ansiFg(tokens.contract.trace.answer));
+    expect(styled[11]).toContain("\x1b[48;2;37;37;37m");
 
     const six = makeSynthesisCard("running", 6);
     const sixLines = renderTaskCardSurface({ cards: [six], scrollOffset: 0 }, { width: 100 });
-    expect(getTaskCardSurfaceDesiredHeight({ cards: [six], scrollOffset: 0 }, 100)).toBe(14);
-    expect(sixLines[9]).toContain("Subagent 1");
-    expect(sixLines[9]).toContain("Subagent 4");
-    expect(sixLines.join("\n")).toContain("Synthesizing 6 Subagent results");
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [six], scrollOffset: 0 }, 100)).toBe(16);
+    expect(sixLines[11]).toContain("Research Company 1");
+    expect(sixLines[11]).toContain("Research Company 4");
+    expect(sixLines.join("\n")).toContain("6 usable reports");
+
+    for (const width of [28, 52, 80, 100, 140]) {
+      const responsive = renderTaskCardSurface(state, { width });
+      expect(responsive).toHaveLength(getTaskCardSurfaceDesiredHeight(state, width));
+      expect(responsive.every((line) => visibleWidth(line) === width)).toBe(true);
+      expect(responsive.join("\n")).not.toContain("░");
+      if (width < 60) expect(responsive.join("\n")).not.toContain("Research Company");
+      if (width >= 60) expect(responsive.join("\n")).toContain("Research Company 1");
+    }
+
+    const lightStyle = createOperatorConsoleStyle({
+      tokens: resolveTokens("standard", "light", "kemetBlue"),
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const noColorStyle = createOperatorConsoleStyle({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      capabilities: { supportsColor: false, supportsTrueColor: false },
+    });
+    const light = renderTaskCardSurface(state, { width: 100, style: lightStyle });
+    const noColor = renderTaskCardSurface(state, { width: 100, style: noColorStyle }).join("\n");
+    expect(light[11]).toContain("\x1b[48;2;245;245;245m");
+    expect(noColor).not.toMatch(/\u001B\[/u);
+    expect(noColor).toContain("Write · Synthesis");
   });
 
   it("keeps degraded synthesis truthful about usable, failed, and recovered worker outcomes", () => {
@@ -566,11 +592,13 @@ describe("durable Task surfaces", () => {
     ).join("\n");
 
     expect(english).toContain("2 usable reports · 1 failed");
-    expect(english).toContain("Synthesizing 2 Subagent results");
+    expect(english).toContain("Subagents ⚠");
+    expect(english).toContain("Provider timeout · Partial saved");
     expect(englishInspection).toContain("Recovered output is available for inspection and was not accepted for synthesis.");
     expect(englishReceipt).toContain("completed with warnings");
-    expect(arabic).toContain("نتائج صالحة: 2 · فشل: 1");
-    expect(arabic).toContain("يتم تجميع 2 من نتائج الوكلاء الفرعيين");
+    expect(stripBidi(arabic)).toContain("نتائج صالحة: 2 · فشل: 1");
+    expect(arabic).toContain("التجميع");
+    expect(arabic).toContain("حُفظت نتيجة جزئية");
     expect(arabicInspection).toContain("تتوفر مخرجات مستردة للفحص ولم تُقبل للاستخدام في التجميع.");
     expect(arabicReceipt).toContain("اكتملت مع تحذيرات");
   });
@@ -597,16 +625,16 @@ describe("durable Task surfaces", () => {
     const completed = makeSynthesisCard("completed");
 
     expect(getTaskCardSurfaceDesiredHeight({ cards: [pending], scrollOffset: 0 }, 100)).toBe(24);
-    expect(getTaskCardSurfaceDesiredHeight({ cards: [running], scrollOffset: 0 }, 100)).toBe(14);
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [running], scrollOffset: 0 }, 100)).toBe(16);
     expect(getTaskCardSurfaceDesiredHeight({ cards: [completed], scrollOffset: 0 }, 100)).toBe(24);
     expect(renderTaskCardSurface({ cards: [pending], scrollOffset: 0 }, { width: 100 }).join("\n"))
       .not.toContain("Parent synthesis");
     expect(renderTaskCardSurface({ cards: [completed], scrollOffset: 0 }, { width: 100 }).join("\n"))
       .not.toContain("Parent synthesis");
     expect(renderTaskCardSurface({ cards: [makeSynthesisCard("ready")], scrollOffset: 0 }, { width: 100 }).join("\n"))
-      .toContain("Preparing to synthesize 3 Subagent results");
+      .toContain("Synthesis ●");
     expect(renderTaskCardSurface({ cards: [makeSynthesisCard("waiting_for_approval")], scrollOffset: 0 }, { width: 100 }).join("\n"))
-      .toContain("Synthesis waiting for approval");
+      .toContain("WAITING");
 
     const constrained = renderTaskCardSurface(
       { cards: [running], scrollOffset: 0 },
@@ -614,8 +642,8 @@ describe("durable Task surfaces", () => {
     );
     const constrainedText = constrained.join("\n");
     expect(constrained).toHaveLength(10);
-    expect(constrainedText).toContain("تجميع الوكيل الرئيسي");
-    expect(constrainedText).toContain("يتم تجميع 3 من نتائج الوكلاء الفرعيين");
+    expect(constrainedText).toContain("التجميع");
+    expect(constrainedText).toContain("مسار النشاط · 3 أنشطة");
     expect(constrainedText).toContain("+3 وكلاء فرعيون إضافيون");
     expect(constrainedText).not.toMatch(/\u001B\[/u);
     expect(constrained.map(visibleWidth)).toEqual(Array.from({ length: 10 }, () => 72));
@@ -1700,7 +1728,44 @@ function makeSynthesisCard(
     ],
     subagents,
     trace: {
-      spans: [],
+      spans: [
+        {
+          id: "span-synthesis-plan",
+          category: "plan",
+          scope: { kind: "synthesis", stepId: "step-synthesis", label: "Synthesis" },
+          status: "completed",
+          startedAt: "2026-07-20T10:03:18.000Z",
+          endedAt: "2026-07-20T10:03:20.000Z",
+          durationMs: 2_000,
+          eventCount: 1,
+          label: "Planning next action",
+          attemptId: "attempt-synthesis-1",
+        },
+        {
+          id: "span-synthesis-read",
+          category: "read",
+          scope: { kind: "synthesis", stepId: "step-synthesis", label: "Synthesis" },
+          status: "completed",
+          startedAt: "2026-07-20T10:03:20.000Z",
+          endedAt: "2026-07-20T10:03:29.000Z",
+          durationMs: 9_000,
+          eventCount: 1,
+          label: "Loading usable reports",
+          attemptId: "attempt-synthesis-1",
+        },
+        {
+          id: "span-synthesis-write",
+          category: "write",
+          scope: { kind: "synthesis", stepId: "step-synthesis", label: "Synthesis" },
+          status: synthesisStatus === "completed" ? "completed" : "running",
+          startedAt: "2026-07-20T10:03:29.000Z",
+          ...(synthesisStatus === "completed" ? { endedAt: "2026-07-20T10:03:30.000Z" } : {}),
+          durationMs: synthesisStatus === "completed" ? 1_000 : 12_000,
+          eventCount: 12,
+          label: "Writing current response",
+          attemptId: "attempt-synthesis-1",
+        },
+      ],
       events: [
         {
           eventId: "synthesis-reading",
@@ -1807,6 +1872,10 @@ function visibleWidth(value: string): number {
 
 function stripAnsi(value: string): string {
   return value.replace(/\u001B\[[0-?]*[ -/]*[@-~]/gu, "");
+}
+
+function stripBidi(value: string): string {
+  return value.replace(/[\u2066-\u2069]/gu, "");
 }
 
 function ansiFg(hex: string): string {
