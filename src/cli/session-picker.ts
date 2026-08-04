@@ -36,6 +36,7 @@ export function buildSessionPickerPrompt(
     instruction: copy.instruction,
     descriptionVisibility: "selected",
     visibleRows: 10,
+    escapeCancels: true,
     locale,
     direction: locale === "ar" ? "rtl" : "ltr",
   };

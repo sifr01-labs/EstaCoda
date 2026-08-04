@@ -233,15 +233,20 @@ export type CliOptions = {
 };
 
 export type ParsedGlobalCliOptions =
-  | { ok: true; argv: string[]; profileId?: string }
+  | { ok: true; argv: string[]; profileId?: string; continueSession?: true }
   | { ok: false; error: string };
 
 export function parseGlobalCliOptions(argv: readonly string[]): ParsedGlobalCliOptions {
   const nextArgv: string[] = [];
   let profileId: string | undefined;
+  let continueSession = false;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
+    if (arg === "--continue") {
+      continueSession = true;
+      continue;
+    }
     if (arg === "--profile" || arg === "-p") {
       const value = argv[i + 1];
       if (value === undefined || value.startsWith("-")) {
@@ -267,9 +272,12 @@ export function parseGlobalCliOptions(argv: readonly string[]): ParsedGlobalCliO
     nextArgv.push(arg);
   }
 
-  return profileId === undefined
-    ? { ok: true, argv: nextArgv }
-    : { ok: true, argv: nextArgv, profileId };
+  return {
+    ok: true,
+    argv: nextArgv,
+    ...(profileId === undefined ? {} : { profileId }),
+    ...(continueSession ? { continueSession: true as const } : {}),
+  };
 }
 
 export async function runCliCommand(options: CliOptions): Promise<CliCommandResult> {

@@ -13,7 +13,9 @@ import { CLIPBOARD_MODE_ENV_VAR } from "./clipboard-mode.js";
 import { MCP_SUGGESTIONS_MODE_ENV_VAR } from "./mcp-suggestions-mode.js";
 import { SKILL_SUGGESTIONS_MODE_ENV_VAR } from "./skill-suggestions-mode.js";
 import { INPUT_KEYMAP_MODE_ENV_VAR } from "./input-keymap-mode.js";
-import type { PromptOptions } from "./prompt-contract.js";
+import type { Prompt, PromptOptions } from "./prompt-contract.js";
+import type { SelectPromptInput } from "./interactive-select.js";
+import { InteractiveSelectCancelledError } from "./interactive-select.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { loadSessionContextWindowUsage } from "../session/session-context-window-usage.js";
 import type { Runtime } from "../runtime/create-runtime.js";
@@ -4867,6 +4869,134 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(outputChunks.join("")).not.toContain("private transcript text");
   });
 
+  it("uses the shared workspace-scoped picker for /sessions and preserves the origin surface", async () => {
+    const workspaceRoot = "/workspace";
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({
+      id: "current-session",
+      profileId: "default",
+      metadata: { workspaceRoot },
+    });
+    await sessionDb.createSession({
+      id: "telegram-session",
+      profileId: "default",
+      title: "Review gateway deployment",
+      metadata: { workspaceRoot },
+    });
+    await sessionDb.appendMessage({
+      id: "telegram-first-message",
+      sessionId: "telegram-session",
+      role: "user",
+      content: "Review the gateway deployment",
+      channel: "telegram",
+    });
+    await sessionDb.appendMessage({
+      id: "cli-follow-up-message",
+      sessionId: "telegram-session",
+      role: "user",
+      content: "Continue from the CLI",
+      channel: "cli",
+    });
+    await sessionDb.createSession({
+      id: "other-workspace-session",
+      profileId: "default",
+      metadata: { workspaceRoot: "/other-workspace" },
+    });
+    await sessionDb.appendMessage({
+      id: "other-workspace-message",
+      sessionId: "other-workspace-session",
+      role: "user",
+      content: "Private work from another workspace",
+      channel: "cli",
+    });
+
+    let selection: SelectPromptInput<string> | undefined;
+    const prompt = Object.assign(async () => "", {
+      select: async (input: SelectPromptInput<string>) => {
+        selection = input;
+        return "telegram-session";
+      },
+    }) as unknown as Prompt;
+    const switchedRuntime = createMockRuntime({
+      sessionDb,
+      sessionId: "telegram-session",
+    });
+    const switchRuntime = vi.fn(async () => switchedRuntime);
+    const outputChunks: string[] = [];
+
+    const result = await handleSlashCommand({
+      text: "/sessions",
+      runtime: createMockRuntime({ sessionDb, sessionId: "current-session" }),
+      switchRuntime,
+      prompt,
+      workspaceRoot,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+      } as unknown as NodeJS.WritableStream,
+      renderer: { render: renderPlain, locale: "en" },
+    });
+
+    expect(selection?.options.map((option) => option.value)).toEqual(["telegram-session"]);
+    expect(selection?.options[0]?.description).toContain("Via Telegram");
+    expect(selection?.options[0]?.description).not.toContain("Private work from another workspace");
+    expect(switchRuntime).toHaveBeenCalledWith("telegram-session");
+    expect(typeof result).toBe("object");
+    if (typeof result === "object") {
+      expect(result.runtime).toBe(switchedRuntime);
+      expect(result.notice(switchedRuntime)).toContain("Switched this session to an existing session.");
+    }
+    expect(outputChunks).toEqual([]);
+  });
+
+  it("treats Escape from the in-session /sessions picker as a no-op", async () => {
+    const workspaceRoot = "/workspace";
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({
+      id: "current-session",
+      profileId: "default",
+      metadata: { workspaceRoot },
+    });
+    await sessionDb.createSession({
+      id: "resumable-session",
+      profileId: "default",
+      metadata: { workspaceRoot },
+    });
+    await sessionDb.appendMessage({
+      id: "resumable-message",
+      sessionId: "resumable-session",
+      role: "user",
+      content: "Resume this work",
+      channel: "cli",
+    });
+    const prompt = Object.assign(async () => "", {
+      select: async () => { throw new InteractiveSelectCancelledError(); },
+    }) as unknown as Prompt;
+    const outputChunks: string[] = [];
+    const switchRuntime = vi.fn();
+
+    const result = await handleSlashCommand({
+      text: "/sessions",
+      runtime: createMockRuntime({ sessionDb, sessionId: "current-session" }),
+      switchRuntime,
+      prompt,
+      workspaceRoot,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+      } as unknown as NodeJS.WritableStream,
+      renderer: { render: renderPlain, locale: "en" },
+    });
+
+    expect(result).toBe(false);
+    expect(switchRuntime).not.toHaveBeenCalled();
+    expect(outputChunks.join("")).toContain("Session selection cancelled.");
+  });
+
   it("clears the completed turn timer after /switch swaps to another session", async () => {
     const outputChunks: string[] = [];
     const output = {
@@ -4886,7 +5016,12 @@ describe("runSessionLoop — active turn spinner", () => {
         return mockResponse();
       },
     });
-    await runtime.sessionDb.createSession({ id: "target-session", profileId: "default" });
+    const workspaceRoot = "/workspace";
+    await runtime.sessionDb.createSession({
+      id: "target-session",
+      profileId: "default",
+      metadata: { workspaceRoot },
+    });
     const switchedRuntime = withModelInfo({
       ...createMockRuntime(),
       sessionDb: runtime.sessionDb,
@@ -4905,6 +5040,7 @@ describe("runSessionLoop — active turn spinner", () => {
       runtime,
       output,
       switchRuntime: async () => switchedRuntime,
+      workspaceRoot,
       now: () => nowMs,
       capabilities: interactiveCaps({ supportsAnimation: false }),
       prompt: Object.assign(

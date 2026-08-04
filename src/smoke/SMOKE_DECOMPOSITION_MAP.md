@@ -33,6 +33,7 @@ src/smoke/
 | `state-bootstrap` | `lifecycle`, `setup` | Focused smoke case | Covers non-authorizing first-run state bootstrap behavior. |
 | `pack-lifecycle` | `packs`, `lifecycle` | Focused smoke case | Covers pack lifecycle behavior. |
 | `provider-setup-endpoint-first` | `setup`, `providers` | Focused smoke case | Exercises Local / Custom endpoint-first Setup Editor flow for primary, fallback, and auxiliary routes with mocked `/models`. |
+| `session-continuation` | `sessions`, `cli`, `security` | Focused smoke case | Verifies scoped continuation pointers, resume validation, and immutable gateway origin presentation. |
 | `update-dry-run` | `lifecycle`, `update` | Focused smoke case | Covers update dry-run behavior. |
 | `whatsapp-support` | `channels`, `whatsapp` | Focused smoke case | Covers WhatsApp support behavior. |
 

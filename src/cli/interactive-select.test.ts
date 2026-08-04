@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { PassThrough, Readable, Writable } from "node:stream";
-import { selectOption, type SelectPromptInput } from "./interactive-select.js";
+import { InteractiveSelectCancelledError, selectOption, type SelectPromptInput } from "./interactive-select.js";
 import { measureVisibleWidth, stripAnsi } from "../ui/renderers/layout.js";
 import { isolateLtr, isolateRtl, LRI, PDI, RLI } from "../ui/bidi.js";
 
@@ -66,6 +66,21 @@ describe("interactive-select prompt card surface", () => {
     press(input, "\x03");
 
     expect(emitSpy).toHaveBeenCalledWith("SIGINT");
+    expect(output.getText()).toContain("\x1b[?25h");
+  });
+
+  it("supports opt-in Escape cancellation with terminal cleanup", async () => {
+    clearCiEnv();
+    const { input, output } = makeTtyStreams();
+    const pending = selectOption(input, output, {
+      ...promptCardSelection(),
+      escapeCancels: true,
+    });
+
+    await Promise.resolve();
+    press(input, "\x1b");
+
+    await expect(pending).rejects.toBeInstanceOf(InteractiveSelectCancelledError);
     expect(output.getText()).toContain("\x1b[?25h");
   });
 

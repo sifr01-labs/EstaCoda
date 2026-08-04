@@ -9,6 +9,7 @@ import { resolveProfileStateHome } from "../config/profile-home.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
 import type { Prompt } from "./prompt-contract.js";
 import type { SelectPromptInput } from "./interactive-select.js";
+import { InteractiveSelectCancelledError } from "./interactive-select.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-cli-sess-test-"));
@@ -35,6 +36,8 @@ describe("CLI session commands", () => {
         created_at text not null,
         updated_at text,
         parent_session_id text,
+        ended_at text,
+        end_reason text,
         metadata_json text
       )
     `);
@@ -203,6 +206,140 @@ describe("CLI session commands", () => {
       expect(result.output).toContain("sess-list");
       expect(result.sessionHandoff).toBeUndefined();
       expect(prompted).toBe(false);
+    });
+
+    it("treats Escape cancellation as a successful no-op", async () => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      seedPickerSession(db, {
+        id: "sess-cancel",
+        profileId: "default",
+        title: "Leave this session untouched",
+        workspaceRoot: tmpDir,
+      });
+      db.close();
+
+      const result = await runCliCommand({
+        argv: ["sessions"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        interactive: true,
+        prompt: pickerPrompt(async () => { throw new InteractiveSelectCancelledError(); }),
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Session selection cancelled");
+      expect(result.sessionHandoff).toBeUndefined();
+    });
+
+    it("revalidates the selected session before returning a handoff", async () => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      seedPickerSession(db, {
+        id: "sess-stale",
+        profileId: "default",
+        title: "Session ending while the picker is open",
+        workspaceRoot: tmpDir,
+      });
+      db.close();
+
+      const result = await runCliCommand({
+        argv: ["sessions"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        interactive: true,
+        prompt: pickerPrompt(async () => {
+          const updateDb = openDefaultSQLiteDatabase({ path: dbPath });
+          updateDb.query("update sessions set ended_at = ?, end_reason = ? where id = ?")
+            .run("2026-08-04T12:00:00.000Z", "done", "sess-stale");
+          updateDb.close();
+          return "sess-stale";
+        }),
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("no longer resumable");
+      expect(result.sessionHandoff).toBeUndefined();
+    });
+  });
+
+  describe("sessions open", () => {
+    it("returns a handoff for an active session in the selected profile and workspace", async () => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      seedPickerSession(db, {
+        id: "sess-open",
+        profileId: "default",
+        title: "Continue deployment review",
+        workspaceRoot: tmpDir,
+        originSurface: "telegram",
+      });
+      db.close();
+      const pointers = new FileSurfacePointerStore({ path: surfacePointerPath });
+      await pointers.setPointer("telegram", "chat-1", {
+        sessionId: "sess-open",
+        attachedAt: "2026-08-01T08:00:00.000Z",
+      });
+
+      const result = await runCliCommand({
+        argv: ["sessions", "open", "sess-open"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+      });
+
+      expect(result).toEqual(expect.objectContaining({
+        exitCode: 0,
+        sessionHandoff: { sessionId: "sess-open", workspaceRoot: tmpDir },
+      }));
+      const verifyDb = openDefaultSQLiteDatabase({ path: dbPath });
+      const row = verifyDb.query<{ metadata_json: string }>("select metadata_json from sessions where id = ?").get("sess-open");
+      verifyDb.close();
+      expect(JSON.parse(row!.metadata_json).originSurface).toBe("telegram");
+      await expect(pointers.getPointer("telegram", "chat-1")).resolves.toMatchObject({ sessionId: "sess-open" });
+    });
+
+    it.each([
+      { name: "another profile", profileId: "work", workspaceRoot: undefined, kind: undefined },
+      { name: "another workspace", profileId: "default", workspaceRoot: "/other", kind: undefined },
+      { name: "an internal session", profileId: "default", workspaceRoot: undefined, kind: "task-step-worker" },
+    ])("rejects $name without exposing a handoff", async ({ profileId, workspaceRoot, kind }) => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      seedPickerSession(db, {
+        id: `blocked-${profileId}-${kind ?? "session"}`,
+        profileId,
+        title: "Blocked",
+        workspaceRoot: workspaceRoot ?? tmpDir,
+        kind,
+      });
+      db.close();
+
+      const result = await runCliCommand({
+        argv: ["sessions", "open", `blocked-${profileId}-${kind ?? "session"}`],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("not available in the selected profile and current workspace");
+      expect(result.sessionHandoff).toBeUndefined();
+    });
+
+    it("rejects ended sessions", async () => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      seedPickerSession(db, {
+        id: "sess-ended",
+        profileId: "default",
+        title: "Ended",
+        workspaceRoot: tmpDir,
+      });
+      db.query("update sessions set ended_at = ?, end_reason = ? where id = ?")
+        .run("2026-08-04T12:00:00.000Z", "done", "sess-ended");
+      db.close();
+
+      const result = await runCliCommand({
+        argv: ["sessions", "open", "sess-ended"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+      });
+      expect(result.exitCode).toBe(1);
+      expect(result.sessionHandoff).toBeUndefined();
     });
   });
 

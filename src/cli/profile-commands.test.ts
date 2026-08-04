@@ -328,6 +328,15 @@ describe("profileCommand", () => {
     });
   });
 
+  it("parses --continue as a global launch option alongside a command-local profile", () => {
+    expect(parseGlobalCliOptions(["--profile", "research", "--continue", "/doctor"])).toEqual({
+      ok: true,
+      argv: ["/doctor"],
+      profileId: "research",
+      continueSession: true,
+    });
+  });
+
   it("uses --profile for the current command without changing active-profile.json", async () => {
     await ensureProfileSkeleton({ homeDir: tempDir, profileId: "default", blank: true });
     await ensureProfileSkeleton({ homeDir: tempDir, profileId: "research", blank: true });

@@ -135,6 +135,13 @@ import { mergeUsageCostSummaries, unavailableUsageCostSummary } from "../provide
 import { formatTurnUsageFooter } from "../ui/usage-cost-format.js";
 import { isolateLtr, isolateRtl } from "../ui/bidi.js";
 import { resolveWorkspaceStatus } from "./workspace-status.js";
+import { listResumableSessions, resolveSessionForResume } from "../session/session-resume.js";
+import {
+  buildSessionPickerPrompt,
+  noResumableSessionsMessage,
+  SESSION_PICKER_LIMIT,
+} from "./session-picker.js";
+import { InteractiveSelectCancelledError } from "./interactive-select.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -1699,6 +1706,14 @@ export async function handleSlashCommand(input: {
         input.output.write(`${await renderSessionRecall(input.runtime, args.slice(1).join(" "))}\n\n`);
         return false;
       }
+      if (
+        args.length === 0 &&
+        input.prompt?.select !== undefined &&
+        input.switchRuntime !== undefined &&
+        input.workspaceRoot !== undefined
+      ) {
+        return handleInteractiveSessionPicker(input);
+      }
       input.output.write(`${await renderSessionList(input.runtime)}\n\n`);
       return false;
     case "search":
@@ -1730,18 +1745,23 @@ export async function handleSlashCommand(input: {
         input.output.write("This session cannot switch sessions here.\n\n");
         return false;
       }
-      const targetSession = await input.runtime.sessionDb.getSession(target);
-      if (targetSession === undefined) {
-        input.output.write(`Session not found: ${target}\n\n`);
+      if (input.workspaceRoot === undefined) {
+        input.output.write("This session cannot verify the target workspace.\n\n");
         return false;
       }
       const activeProfileId = await runtimeProfileId(input.runtime);
-      if (targetSession.profileId !== activeProfileId) {
-        input.output.write(`Session not found in active profile: ${target}\n\n`);
+      const resolution = await resolveSessionForResume({
+        sessionDb: input.runtime.sessionDb,
+        profileId: activeProfileId,
+        workspaceRoot: input.workspaceRoot,
+        sessionId: target,
+      });
+      if (!resolution.ok) {
+        input.output.write("Session not available in the active profile and workspace.\n\n");
         return false;
       }
       return {
-        runtime: await input.switchRuntime(target),
+        runtime: await input.switchRuntime(resolution.sessionId),
         notice: (runtime) => [
           "Switched this session to an existing session.",
           `Session: ${runtime.sessionId}`,
@@ -2597,6 +2617,66 @@ async function handleBrowserCommand(input: {
     "  /browser connect http://127.0.0.1:9222",
     "  /browser disconnect"
   ].join("\n");
+}
+
+async function handleInteractiveSessionPicker(input: {
+  runtime: Runtime;
+  switchRuntime?: (sessionId: string) => Promise<Runtime>;
+  prompt?: Prompt;
+  output: NodeJS.WritableStream;
+  renderer: { locale?: "en" | "ar" };
+  workspaceRoot?: string;
+}): Promise<boolean | { runtime: Runtime; notice: (runtime: Runtime) => string }> {
+  const profileId = await runtimeProfileId(input.runtime);
+  const workspaceRoot = input.workspaceRoot!;
+  const sessions = await listResumableSessions({
+    sessionDb: input.runtime.sessionDb,
+    profileId,
+    workspaceRoot,
+    limit: SESSION_PICKER_LIMIT,
+    excludeSessionId: input.runtime.sessionId,
+  });
+  const locale = input.renderer.locale === "ar" ? "ar" : "en";
+  if (sessions.length === 0) {
+    input.output.write(`${noResumableSessionsMessage(locale)}\n\n`);
+    return false;
+  }
+
+  let selectedSessionId: string;
+  try {
+    selectedSessionId = await input.prompt!.select!(buildSessionPickerPrompt(sessions, locale));
+  } catch (error) {
+    if (error instanceof InteractiveSelectCancelledError) {
+      input.output.write(`${locale === "ar" ? "تم إلغاء اختيار الجلسة." : "Session selection cancelled."}\n\n`);
+      return false;
+    }
+    throw error;
+  }
+
+  const selected = sessions.find((session) => session.id === selectedSessionId);
+  if (selected === undefined) {
+    input.output.write(`${locale === "ar" ? "تعذر فتح الجلسة المحددة." : "The selected session could not be opened."}\n\n`);
+    return false;
+  }
+  const resolution = await resolveSessionForResume({
+    sessionDb: input.runtime.sessionDb,
+    profileId,
+    workspaceRoot,
+    sessionId: selected.id,
+  });
+  if (!resolution.ok) {
+    input.output.write(`${locale === "ar" ? "لم تعد الجلسة المحددة قابلة للاستئناف." : "The selected session is no longer resumable."}\n\n`);
+    return false;
+  }
+  return {
+    runtime: await input.switchRuntime!(resolution.sessionId),
+    notice: (runtime) => [
+      locale === "ar" ? "تم الانتقال إلى جلسة موجودة." : "Switched this session to an existing session.",
+      `Session: ${runtime.sessionId}`,
+      "",
+      runtime.describe(),
+    ].join("\n"),
+  };
 }
 
 async function renderLatestResume(runtime: Runtime): Promise<string> {

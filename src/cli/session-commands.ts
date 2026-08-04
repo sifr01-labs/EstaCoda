@@ -25,15 +25,14 @@ import {
   buildSessionUsageErrorViewModel,
 } from "./session-view-models.js";
 import type { Prompt } from "./prompt-contract.js";
-import {
-  buildSessionPresentation,
-  type SessionPresentation,
-} from "../session/session-presentation.js";
+import type { SessionPresentation } from "../session/session-presentation.js";
+import { listResumableSessions, resolveSessionForResume } from "../session/session-resume.js";
 import {
   buildSessionPickerPrompt,
   noResumableSessionsMessage,
   SESSION_PICKER_LIMIT,
 } from "./session-picker.js";
+import { InteractiveSelectCancelledError } from "./interactive-select.js";
 
 export type SessionRenderer = (viewModel: ViewModel) => string;
 
@@ -82,42 +81,93 @@ export async function runSessionsCommand(
 
   if (subcommand === undefined && input.interactive === true && input.prompt?.select !== undefined) {
     const db = await createSQLiteSessionDB({ path: globalPaths.sessionsSqlitePath });
-    let presentations: SessionPresentation[];
     try {
-      const summaries = await db.listSessionSummaries(profileId, {
+      const presentations: SessionPresentation[] = await listResumableSessions({
+        sessionDb: db,
+        profileId,
         workspaceRoot: input.workspaceRoot,
         limit: SESSION_PICKER_LIMIT,
-        rootSessionsOnly: true,
-        activeSessionsOnly: true,
-        userActivityOnly: true,
-        userFacingOnly: true,
       });
-      presentations = summaries.map(buildSessionPresentation).filter((session) => session.resumable);
+      const locale = input.locale ?? "en";
+      if (presentations.length === 0) {
+        return { ok: true, output: noResumableSessionsMessage(locale) };
+      }
+
+      let selectedSessionId: string;
+      try {
+        selectedSessionId = await input.prompt.select(buildSessionPickerPrompt(presentations, locale));
+      } catch (error) {
+        if (error instanceof InteractiveSelectCancelledError) {
+          return { ok: true, output: sessionSelectionCancelledMessage(locale) };
+        }
+        throw error;
+      }
+      const selected = presentations.find((session) => session.id === selectedSessionId);
+      if (selected === undefined) {
+        return {
+          ok: false,
+          output: locale === "ar" ? "تعذر فتح الجلسة المحددة." : "The selected session could not be opened.",
+        };
+      }
+      const resolution = await resolveSessionForResume({
+        sessionDb: db,
+        profileId,
+        workspaceRoot: input.workspaceRoot,
+        sessionId: selected.id,
+      });
+      if (!resolution.ok) {
+        return {
+          ok: false,
+          output: locale === "ar"
+            ? "لم تعد الجلسة المحددة قابلة للاستئناف."
+            : "The selected session is no longer resumable.",
+        };
+      }
+      return {
+        ok: true,
+        output: "",
+        selectedSession: {
+          sessionId: resolution.sessionId,
+          workspaceRoot: input.workspaceRoot,
+        },
+      };
     } finally {
       await db.close();
     }
+  }
 
-    const locale = input.locale ?? "en";
-    if (presentations.length === 0) {
-      return { ok: true, output: noResumableSessionsMessage(locale) };
+  if (subcommand === "open") {
+    const sessionId = rest[0];
+    if (sessionId === undefined || rest.length !== 1) {
+      const viewModel = buildSessionUsageErrorViewModel({
+        message: "Usage: estacoda sessions open <session-id>",
+      });
+      return { ok: false, output: renderer(viewModel) };
     }
-
-    const selectedSessionId = await input.prompt.select(buildSessionPickerPrompt(presentations, locale));
-    const selected = presentations.find((session) => session.id === selectedSessionId);
-    if (selected === undefined) {
-      return {
-        ok: false,
-        output: locale === "ar" ? "تعذر فتح الجلسة المحددة." : "The selected session could not be opened.",
-      };
-    }
-    return {
-      ok: true,
-      output: "",
-      selectedSession: {
-        sessionId: selected.id,
+    const db = await createSQLiteSessionDB({ path: globalPaths.sessionsSqlitePath });
+    try {
+      const resolution = await resolveSessionForResume({
+        sessionDb: db,
+        profileId,
         workspaceRoot: input.workspaceRoot,
-      },
-    };
+        sessionId,
+      });
+      if (!resolution.ok) {
+        return {
+          ok: false,
+          output: input.locale === "ar"
+            ? "الجلسة غير متاحة في الملف الشخصي المحدد ومساحة العمل الحالية."
+            : "The session is not available in the selected profile and current workspace.",
+        };
+      }
+      return {
+        ok: true,
+        output: "",
+        selectedSession: { sessionId: resolution.sessionId, workspaceRoot: input.workspaceRoot },
+      };
+    } finally {
+      await db.close();
+    }
   }
 
   if (subcommand === "list" || subcommand === undefined) {
@@ -339,6 +389,10 @@ export async function runSessionsCommand(
   }
 
   return { ok: true, output: renderer(buildSessionsHelpViewModel()) };
+}
+
+function sessionSelectionCancelledMessage(locale: UiLocale): string {
+  return locale === "ar" ? "تم إلغاء اختيار الجلسة." : "Session selection cancelled.";
 }
 
 function parseCompactArgs(args: readonly string[]): { ok: true; sessionId: string; topic?: string } | { ok: false; message: string } {

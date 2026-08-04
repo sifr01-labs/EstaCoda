@@ -60,11 +60,19 @@ export type SelectPromptInput<T> = {
   showColumnHeaders?: boolean;
   descriptionVisibility?: "always" | "selected";
   visibleRows?: number;
+  escapeCancels?: boolean;
   tableDirection?: "ltr" | "rtl";
   tableWidth?: "full" | "content";
   tableMaxWidth?: number;
   tableAlign?: "left" | "center" | "right";
 };
+
+export class InteractiveSelectCancelledError extends Error {
+  constructor() {
+    super("Interactive selection cancelled.");
+    this.name = "InteractiveSelectCancelledError";
+  }
+}
 
 export async function selectOption<T>(input: Readable, output: Writable, selection: SelectPromptInput<T>): Promise<T> {
   const isTty = Boolean((input as NodeJS.ReadStream).isTTY && (output as NodeJS.WriteStream).isTTY);
@@ -90,7 +98,7 @@ async function plainFallback<T>(input: Readable, output: Writable, selection: Se
 }
 
 async function ttySelect<T>(input: Readable, output: Writable, selection: SelectPromptInput<T>): Promise<T> {
-  return await new Promise<T>((resolve) => {
+  return await new Promise<T>((resolve, reject) => {
     const ttyInput = input as NodeJS.ReadStream;
     let selectState = createPapyrusSelectState(selection);
     let settled = false;
@@ -142,6 +150,16 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
       resolve(value);
     };
 
+    const cancel = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      restoreTerminal();
+      output.write("\n");
+      reject(new InteractiveSelectCancelledError());
+    };
+
     const keypressDispatcher = createKeypressStreamDispatcher({
       onEvents: (events) => {
         for (const keypress of events) {
@@ -149,6 +167,10 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
             restoreTerminal();
             output.write("\n");
             process.emit("SIGINT");
+            return;
+          }
+          if (selection.escapeCancels === true && keypress.type === "key" && keypress.key === "escape") {
+            cancel();
             return;
           }
           const event = selectKeyEventFromParsedKeypress(keypress);

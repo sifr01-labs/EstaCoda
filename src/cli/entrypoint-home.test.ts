@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { access, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -50,7 +50,7 @@ describe("entrypoint home directory propagation", () => {
     expect(result.stdout).not.toContain(prodPaths.profileRoot);
   });
 
-  it("creates a fresh session for each invocation in the ESTACODA_HOME-resolved state home", async () => {
+  it("starts fresh by default and continues only the profile/workspace v2 pointer explicitly", async () => {
     const profilePaths = await ensureProfileSkeleton({ homeDir: devHome, profileId: "default", blank: true });
     await writeFile(profilePaths.configPath, JSON.stringify({
       model: { provider: "unconfigured", id: "unconfigured" },
@@ -77,17 +77,54 @@ describe("entrypoint home directory propagation", () => {
     });
     const firstSessionId = extractSessionId(first.stdout);
     const secondSessionId = extractSessionId(second.stdout);
+    const continued = await runEntrypoint({
+      argv: ["--continue", "/doctor"],
+      cwd: workspaceRoot,
+      homeDir: prodHome,
+      estacodaHome: devHome
+    });
+    const continuedSessionId = extractSessionId(continued.stdout);
+    const continuationState = JSON.parse(await readFile(join(devHome, ".estacoda", "cli-sessions.json"), "utf8")) as {
+      version: number;
+      entries: Array<{ profileId: string; workspaceRoot: string; sessionId: string }>;
+    };
 
     expect(first.code).toBe(0);
     expect(second.code).toBe(0);
+    expect(continued.code).toBe(0);
     expect(first.stderr).toBe("");
     expect(second.stderr).toBe("");
+    expect(continued.stderr).toBe("");
     expect(firstSessionId).toBeDefined();
     expect(secondSessionId).toBeDefined();
     expect(secondSessionId).not.toBe(firstSessionId);
+    expect(continuedSessionId).toBe(secondSessionId);
+    expect(continuationState).toMatchObject({
+      version: 2,
+      entries: [{ profileId: "default", workspaceRoot, sessionId: secondSessionId }],
+    });
     await expect(access(join(devHome, ".estacoda", "sessions.sqlite"))).resolves.toBeUndefined();
     await expect(access(join(prodHome, ".estacoda", "sessions.sqlite"))).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(access(join(devHome, ".estacoda", "cli-sessions.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(access(join(prodHome, ".estacoda", "cli-sessions.json"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("fails closed when --continue has no pointer for the profile and workspace", async () => {
+    const profilePaths = await ensureProfileSkeleton({ homeDir: devHome, profileId: "default", blank: true });
+    await writeFile(profilePaths.configPath, JSON.stringify({
+      model: { provider: "unconfigured", id: "unconfigured" },
+    }, null, 2));
+
+    const result = await runEntrypoint({
+      argv: ["--continue", "/doctor"],
+      cwd: workspaceRoot,
+      homeDir: prodHome,
+      estacodaHome: devHome,
+    });
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("No previous session is available for this profile and workspace");
+    await expect(access(join(devHome, ".estacoda", "cli-sessions.json")))
+      .rejects.toMatchObject({ code: "ENOENT" });
   });
 });
 

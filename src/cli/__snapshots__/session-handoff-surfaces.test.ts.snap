@@ -444,6 +444,7 @@ exports[`Session surfaces — help > renders in narrow width > sessions-help-nar
 "[38;2;76;175;80m[OK][0m [1mEstaCoda sessions[0m
 
 • estacoda sessions                           Choose and resume a recent session
+• estacoda sessions open <session-id>         Resume a session by id
 • estacoda sessions list                      List recent sessions
 • estacoda sessions recall <query>            Summarize historical session matches
 • estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
@@ -457,6 +458,7 @@ exports[`Session surfaces — help > renders in no Unicode > sessions-help-no Un
 "[38;2;76;175;80m[OK][0m [1mEstaCoda sessions[0m
 
 - estacoda sessions                           Choose and resume a recent session
+- estacoda sessions open <session-id>         Resume a session by id
 - estacoda sessions list                      List recent sessions
 - estacoda sessions recall <query>            Summarize historical session matches
 - estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
@@ -470,6 +472,7 @@ exports[`Session surfaces — help > renders in no color > sessions-help-no colo
 "[OK] EstaCoda sessions
 
 • estacoda sessions                           Choose and resume a recent session
+• estacoda sessions open <session-id>         Resume a session by id
 • estacoda sessions list                      List recent sessions
 • estacoda sessions recall <query>            Summarize historical session matches
 • estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
@@ -483,6 +486,7 @@ exports[`Session surfaces — help > renders in plain > sessions-help-plain 1`] 
 "[OK] EstaCoda sessions
 
 - estacoda sessions                           Choose and resume a recent session
+- estacoda sessions open <session-id>         Resume a session by id
 - estacoda sessions list                      List recent sessions
 - estacoda sessions recall <query>            Summarize historical session matches
 - estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
@@ -496,6 +500,7 @@ exports[`Session surfaces — help > renders in standard dark > sessions-help-st
 "[38;2;76;175;80m[OK][0m [1mEstaCoda sessions[0m
 
 • estacoda sessions                           Choose and resume a recent session
+• estacoda sessions open <session-id>         Resume a session by id
 • estacoda sessions list                      List recent sessions
 • estacoda sessions recall <query>            Summarize historical session matches
 • estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
@@ -509,6 +514,7 @@ exports[`Session surfaces — help > renders in standard light > sessions-help-s
 "[38;2;46;125;50m[OK][0m [1mEstaCoda sessions[0m
 
 • estacoda sessions                           Choose and resume a recent session
+• estacoda sessions open <session-id>         Resume a session by id
 • estacoda sessions list                      List recent sessions
 • estacoda sessions recall <query>            Summarize historical session matches
 • estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
