@@ -522,6 +522,17 @@ is not repeated in the main transcript or completed-work surface. Multiple
 runtime turns caused by one CLI steering submission are summed before the final
 visible response is delivered.
 
+When a durable Task answer is delivered into its originating CLI transcript,
+the session message also persists a versioned, bounded snapshot of the final
+logical activity spans. The renderer keeps that compact ribbon immediately
+above the answer after settlement, with terminal outcome, total duration, and
+degraded worker truth. The answer body remains unchanged, old completion
+messages without a snapshot remain readable, and malformed snapshot metadata is
+ignored rather than blocking delivery. At most 96 safe logical spans are stored;
+an earlier marker and lower-bound activity count preserve truth when history was
+already bounded. Raw Task Events, provider text, tool input/output, paths, and
+result bodies are never copied into the snapshot.
+
 Interactive input precedence is centralized as: modal Task inspection,
 approval prompt, autocomplete/typeahead, attachment selection, then ordinary
 prompt or steering input. Plain, CI, dumb-terminal, and non-TTY Task inspection

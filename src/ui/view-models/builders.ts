@@ -372,6 +372,7 @@ export function buildPlainFallbackViewModel(
 export interface BuildAssistantResponseInput {
   readonly label: string;
   readonly text: string;
+  readonly taskTrace?: AssistantResponseViewModel["taskTrace"];
   readonly usageFooter?: string;
   readonly matchedSkills?: readonly string[];
   readonly progress?: readonly string[];
@@ -384,6 +385,7 @@ export function buildAssistantResponseViewModel(
     kind: "assistantResponse",
     label: input.label,
     text: input.text,
+    taskTrace: input.taskTrace,
     usageFooter: input.usageFooter,
     matchedSkills: input.matchedSkills,
     progress: input.progress,

@@ -2396,6 +2396,50 @@ describe("StandardRenderer — assistant response", () => {
     expect(stripAnsi(out)).not.toContain("Turn total:");
   });
 
+  it("renders a multicolour persisted Task ribbon above the delivered answer", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const r = new StandardRenderer({ tokens, capabilities: fullCaps() });
+    const out = r.renderAssistantResponse(buildAssistantResponseViewModel({
+      label: "EstaCoda",
+      text: "The final synthesized answer.",
+      taskTrace: completionTrace(),
+    }));
+    const plain = stripAnsi(out);
+
+    expect(plain).toContain("Synthesis");
+    expect(plain).toContain("Activity trace · 4 activities · 1:50");
+    expect(plain).toContain("✓ complete");
+    expect(plain.indexOf("Activity trace")).toBeLessThan(plain.indexOf("The final synthesized answer."));
+    expect(out).toContain(ansiFgForHex(tokens.contract.trace.plan));
+    expect(out).toContain(ansiFgForHex(tokens.contract.trace.search));
+    expect(out).toContain(ansiFgForHex(tokens.contract.trace.answer));
+    expect(out).toContain(ansiFgForHex(tokens.contract.trace.finish));
+  });
+
+  it("localizes and bounds a degraded Arabic Task ribbon", () => {
+    const caps = { ...fullCaps(), terminalWidth: 48 };
+    const r = new StandardRenderer({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      capabilities: caps,
+      locale: "ar",
+    });
+    const out = stripAnsi(r.renderAssistantResponse(buildAssistantResponseViewModel({
+      label: "إستاكودا",
+      text: "الإجابة النهائية.",
+      taskTrace: {
+        ...completionTrace(),
+        outcome: "complete_with_warnings",
+        workerOutcomes: { usable: 1, failed: 2, cancelled: 0 },
+      },
+    })));
+
+    expect(out).toContain("مكتمل مع تحذيرات");
+    expect(out).toContain("مسار النشاط");
+    expect(out).toContain("نتائج صالحة: 1");
+    expect(out.split("\n").every((line) => measureVisibleWidth(line) <= 48)).toBe(true);
+    expectBalancedBidiIsolates(out);
+  });
+
   it("wraps the usage footer without losing values on narrow terminals", () => {
     const caps = { ...fullCaps(), terminalWidth: 24 };
     const r = new StandardRenderer({
@@ -2426,6 +2470,26 @@ describe("StandardRenderer — assistant response", () => {
     expectBalancedBidiIsolates(out);
   });
 });
+
+function completionTrace() {
+  return {
+    version: 1 as const,
+    taskId: "task-1",
+    stage: "synthesis" as const,
+    outcome: "complete" as const,
+    answerAvailable: true,
+    activityCount: 4,
+    activityCountComplete: true,
+    totalDurationMs: 110_000,
+    hasEarlierActivities: false,
+    spans: [
+      { category: "plan" as const, scope: { kind: "task" as const, label: "Task" }, status: "completed" as const, durationMs: 10_000, label: "Planning" },
+      { category: "search" as const, scope: { kind: "subagent" as const, label: "Subagent 1" }, status: "completed" as const, durationMs: 20_000, label: "Searching" },
+      { category: "write" as const, scope: { kind: "synthesis" as const, label: "Synthesis" }, status: "completed" as const, durationMs: 70_000, label: "Writing response" },
+      { category: "deliver" as const, scope: { kind: "delivery" as const, label: "Delivery" }, status: "completed" as const, durationMs: 10_000, label: "Finalizing task delivery" },
+    ],
+  };
+}
 
 describe("StandardRenderer — conversation message", () => {
   it("renders assistant message with open horizontal frame and brand title", () => {

@@ -1,11 +1,17 @@
 import { createHash } from "node:crypto";
 import type { SessionDB, SessionMessage } from "../contracts/session.js";
 import type { Task, TaskDeliveryBinding, TaskResult } from "../contracts/task.js";
+import type { TaskCompletionTraceSnapshot } from "../contracts/task-completion-trace.js";
 import { verifiedCompressionLineage } from "../session/session-lineage.js";
 import { TASK_RESULT_PAGE_MAX_CHARS, type TaskResultService } from "./task-result-service.js";
 import type { TaskStore } from "./task-store.js";
 import { taskPrimaryResult, taskPrimaryResultStepId } from "./task-primary-result.js";
 import { isolateLtr } from "../ui/bidi.js";
+import { TaskOperatorService } from "./task-operator-service.js";
+import {
+  createTaskCompletionTraceSnapshot,
+  parseTaskCompletionTraceSnapshot,
+} from "./task-completion-trace.js";
 
 const MAX_SESSION_COMPLETION_CHARS = 100_000;
 const MAX_SESSION_COMPLETION_BINDINGS = 1_000;
@@ -21,6 +27,7 @@ export type TaskSessionCompletionMessage = {
   readonly taskId: string;
   readonly resultId?: string;
   readonly text: string;
+  readonly trace?: TaskCompletionTraceSnapshot;
 };
 
 /**
@@ -37,6 +44,7 @@ export class TaskSessionCompletionService {
   readonly #profileId: string;
   readonly #now: () => Date;
   readonly #locale: "en" | "ar";
+  readonly #taskOperator: TaskOperatorService;
   readonly #runs = new Map<string, Promise<readonly TaskSessionCompletionMessage[]>>();
 
   constructor(options: {
@@ -56,6 +64,7 @@ export class TaskSessionCompletionService {
     this.#profileId = options.profileId;
     this.#now = options.now ?? (() => new Date());
     this.#locale = options.locale ?? "en";
+    this.#taskOperator = new TaskOperatorService({ store: options.store, now: this.#now });
   }
 
   deliverPending(sessionId: string): Promise<readonly TaskSessionCompletionMessage[]> {
@@ -107,6 +116,7 @@ export class TaskSessionCompletionService {
         const task = this.#store.getTask(claimed.taskId);
         if (task === null) throw new Error("Task is unavailable.");
         const result = sessionCompletionResult(this.#store, task);
+        const trace = createTaskCompletionTraceSnapshot(this.#taskOperator.status(task.id), result !== undefined);
         const text = result === undefined
           ? terminalAnswerUnavailableReceipt(task, this.#locale)
           : await this.#readResult(task.id, result, sessionId);
@@ -117,6 +127,7 @@ export class TaskSessionCompletionService {
           ...(result === undefined ? {} : { resultId: result.id }),
           bindingId: claimed.id,
           text,
+          trace,
         });
         delivered.push({
           bindingId: claimed.id,
@@ -124,6 +135,7 @@ export class TaskSessionCompletionService {
           taskId: task.id,
           ...(result === undefined ? {} : { resultId: result.id }),
           text: message.content,
+          trace,
         });
       } catch (error) {
         const recovered = await this.#completionMessage(claimed);
@@ -163,6 +175,7 @@ export class TaskSessionCompletionService {
     resultId?: string;
     bindingId: string;
     text: string;
+    trace: TaskCompletionTraceSnapshot;
   }): Promise<SessionMessage> {
     return await this.#sessionDb.appendMessage({
       id: input.id,
@@ -176,6 +189,7 @@ export class TaskSessionCompletionService {
           bindingId: input.bindingId,
           taskId: input.taskId,
           ...(input.resultId === undefined ? { outcome: "failure" } : { resultId: input.resultId }),
+          trace: input.trace,
         },
       },
     });
@@ -188,6 +202,7 @@ export class TaskSessionCompletionService {
     if (typeof completion !== "object" || completion === null) return undefined;
     const metadata = completion as Record<string, unknown>;
     const resultId = typeof metadata.resultId === "string" ? metadata.resultId : undefined;
+    const trace = parseTaskCompletionTraceSnapshot(metadata.trace, binding.taskId);
     const failureReceipt = metadata.outcome === "failure" && resultId === undefined;
     if (metadata.version !== 1 || metadata.bindingId !== binding.id || metadata.taskId !== binding.taskId ||
         (resultId === undefined && !failureReceipt)) {
@@ -199,6 +214,7 @@ export class TaskSessionCompletionService {
       taskId: binding.taskId,
       ...(resultId === undefined ? {} : { resultId }),
       text: message.content,
+      ...(trace === undefined ? {} : { trace }),
     };
   }
 

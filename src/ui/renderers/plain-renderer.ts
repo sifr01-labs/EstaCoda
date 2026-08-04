@@ -7,6 +7,7 @@ import type { UiLocale } from "../../ui/cli-ui-copy.js";
 import { chromeCopy } from "../../ui/cli-ui-copy.js";
 import { closeOpenBidiIsolates, isolateLtr, isolateRtl } from "../../ui/bidi.js";
 import { formatUsageCost } from "../usage-cost-format.js";
+import { renderTaskCompletionTrace } from "../task-completion-trace.js";
 import type {
   ActiveTurnSpinnerViewModel,
   ActivityTimelineViewModel,
@@ -74,7 +75,7 @@ export function renderPlain(viewModel: ViewModel, locale?: UiLocale): string {
     case "plainFallback":
       return renderPlainFallback(viewModel);
     case "assistantResponse":
-      return renderAssistantResponse(viewModel);
+      return renderAssistantResponse(viewModel, locale);
     case "conversationMessage":
       return renderConversationMessage(viewModel, locale);
     case "sessionStatusRail":
@@ -1210,9 +1211,19 @@ export function renderStartupDashboard(vm: StartupDashboardViewModel, locale: Ui
 // Command Result
 // ──────────────────────────────────────
 
-export function renderAssistantResponse(vm: AssistantResponseViewModel): string {
+export function renderAssistantResponse(vm: AssistantResponseViewModel, locale: UiLocale = "en"): string {
   const plainLabel = /^[\x00-\x7F]+$/.test(vm.label) ? vm.label : "EstaCoda";
   const lines: string[] = [
+    ...(vm.taskTrace === undefined
+      ? []
+      : [
+          ...renderTaskCompletionTrace(vm.taskTrace, {
+            width: 80,
+            locale: locale === "ar" ? "ar" : "en",
+            useUnicode: false,
+          }),
+          "",
+        ]),
     `${plainLabel}:`,
     ...vm.text.split("\n"),
   ];

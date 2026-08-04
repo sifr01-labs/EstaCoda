@@ -43,6 +43,8 @@ import type { TextDirection } from "../../contracts/ui.js";
 import { formatSessionDisplayId } from "../../session/session-id.js";
 import { semanticMotionForPhase, semanticMotionFrame } from "../semantic-motion.js";
 import { formatUsageCost } from "../usage-cost-format.js";
+import { renderTaskCompletionTrace } from "../task-completion-trace.js";
+import type { TaskCompletionTraceCategory, TaskCompletionTraceOutcome } from "../../contracts/task-completion-trace.js";
 
 const STARTUP_TITLE_SEPARATOR = "  𓂀  ";
 const STARTUP_TITLE_SEPARATOR_ASCII = "  *  ";
@@ -2150,8 +2152,23 @@ export class StandardRenderer {
     }
 
     const frameTitle = this.#isRtl() ? this.#natural(rawTitle, Math.max(1, width - 4)) : rawTitle;
+    const traceLines = vm.taskTrace === undefined
+      ? []
+      : renderTaskCompletionTrace(vm.taskTrace, {
+          width: requestedWidth,
+          locale: this.#isRtl() ? "ar" : "en",
+          useUnicode: this.#useUnicode,
+          style: {
+            accent: (text) => this.#color(this.#bold(text), this.#tokens.contract.palette.accent),
+            muted: (text) => this.#muted(text),
+            outcome: (text, outcome) => this.#taskCompletionOutcome(text, outcome),
+            span: (text, category) => this.#taskCompletionSpan(text, category),
+          },
+        }).map((line) => this.#isRtl() ? this.#natural(line) : line);
     const lines: string[] = [
       "",
+      ...traceLines,
+      ...(traceLines.length === 0 ? [] : [""]),
       this.#openSideFrame(frameTitle, contentLines, {
         minWidth: 40,
         width,
@@ -2168,6 +2185,26 @@ export class StandardRenderer {
     }
 
     return lines.join("\n");
+  }
+
+  #taskCompletionOutcome(text: string, outcome: TaskCompletionTraceOutcome): string {
+    if (outcome === "complete") return this.#severity(text, "ok");
+    if (outcome === "complete_with_warnings" || outcome === "cancelled") return this.#severity(text, "warn");
+    return this.#severity(text, "error");
+  }
+
+  #taskCompletionSpan(text: string, category: TaskCompletionTraceCategory): string {
+    const trace = this.#tokens.contract.trace;
+    const color = category === "plan" ? trace.plan
+      : category === "search" ? trace.search
+        : category === "read" ? trace.read
+          : category === "execute" ? this.#tokens.contract.palette.caution
+            : category === "write" ? trace.answer
+              : category === "validate" || category === "deliver" ? trace.finish
+                : category === "wait" ? this.#tokens.contract.text.muted
+                  : category === "retry" ? this.#tokens.contract.severity.warn
+                    : trace.failed;
+    return this.#color(text, color);
   }
 
   // ──────────────────────────────────────

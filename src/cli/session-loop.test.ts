@@ -1673,6 +1673,22 @@ describe("runSessionLoop — user prompt rail behavior", () => {
         taskId: "task-1",
         resultId: "result-synthesis",
         text: "The three reports agree on explicit provenance and review gates.",
+        trace: {
+          version: 1,
+          taskId: "task-1",
+          stage: "synthesis",
+          outcome: "complete",
+          answerAvailable: true,
+          activityCount: 3,
+          activityCountComplete: true,
+          totalDurationMs: 90_000,
+          hasEarlierActivities: false,
+          spans: [
+            { category: "plan", scope: { kind: "task", label: "Task" }, status: "completed", durationMs: 10_000, label: "Planning" },
+            { category: "write", scope: { kind: "synthesis", label: "Synthesis" }, status: "completed", durationMs: 70_000, label: "Writing response" },
+            { category: "deliver", scope: { kind: "delivery", label: "Delivery" }, status: "completed", durationMs: 10_000, label: "Finalizing task delivery" },
+          ],
+        },
       }])
       .mockResolvedValue([]);
     const acknowledgeTaskSessionCompletion = vi.fn(async () => undefined);
@@ -1696,7 +1712,9 @@ describe("runSessionLoop — user prompt rail behavior", () => {
 
     const rendered = outputChunks.join("");
     expect(rendered).toContain("EstaCoda");
+    expect(rendered).toContain("Activity trace · 3 activities · 1:30");
     expect(rendered).toContain("The three reports agree on explicit provenance and review gates.");
+    expect(rendered.indexOf("Activity trace")).toBeLessThan(rendered.indexOf("The three reports agree"));
     expect(rendered).toContain("Ending EstaCoda session.");
     expect(drainTaskSessionCompletions).toHaveBeenCalled();
     expect(acknowledgeTaskSessionCompletion).toHaveBeenCalledWith({

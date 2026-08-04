@@ -3,6 +3,7 @@
 // No ANSI, formatting, terminal-width, or rendering logic.
 
 import type { SessionCostSummary } from "./usage-cost.js";
+import type { TaskCompletionTraceSnapshot } from "./task-completion-trace.js";
 
 export type ViewModelSeverity = "ok" | "warn" | "error" | "info";
 
@@ -287,6 +288,7 @@ export interface AssistantResponseViewModel {
   readonly kind: "assistantResponse";
   readonly label: string;
   readonly text: string;
+  readonly taskTrace?: TaskCompletionTraceSnapshot;
   readonly usageFooter?: string;
   readonly matchedSkills?: readonly string[];
   readonly progress?: readonly string[];

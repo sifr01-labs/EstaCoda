@@ -73,7 +73,42 @@ describe("plain assistant response", () => {
       usageFooter: "15.2k tokens · ≈ $0.55",
     }))).toBe("EstaCoda:\nFinished the review.\n\n15.2k tokens · ≈ $0.55");
   });
+
+  it("renders a persisted Task trace immediately above the delivered answer", () => {
+    const output = renderAssistantResponse(buildAssistantResponseViewModel({
+      label: "EstaCoda",
+      text: "The final synthesized answer.",
+      taskTrace: completionTrace(),
+    }));
+
+    expect(output).toContain("Synthesis");
+    expect(output).toContain("Activity trace · 4 activities · 1:50");
+    expect(output).toContain("[ok] complete");
+    expect(output.indexOf("Activity trace")).toBeLessThan(output.indexOf("EstaCoda:"));
+    expect(output).toContain("\\ Deliver · Task · 1:50 total · Final answer ready");
+    assertNoAnsi(output);
+  });
 });
+
+function completionTrace() {
+  return {
+    version: 1 as const,
+    taskId: "task-1",
+    stage: "synthesis" as const,
+    outcome: "complete" as const,
+    answerAvailable: true,
+    activityCount: 4,
+    activityCountComplete: true,
+    totalDurationMs: 110_000,
+    hasEarlierActivities: false,
+    spans: [
+      { category: "plan" as const, scope: { kind: "task" as const, label: "Task" }, status: "completed" as const, durationMs: 10_000, label: "Planning" },
+      { category: "search" as const, scope: { kind: "subagent" as const, label: "Subagent 1" }, status: "completed" as const, durationMs: 20_000, label: "Searching" },
+      { category: "write" as const, scope: { kind: "synthesis" as const, label: "Synthesis" }, status: "completed" as const, durationMs: 70_000, label: "Writing response" },
+      { category: "deliver" as const, scope: { kind: "delivery" as const, label: "Delivery" }, status: "completed" as const, durationMs: 10_000, label: "Finalizing task delivery" },
+    ],
+  };
+}
 
 function assertAsciiSafe(text: string): void {
   for (const ch of text) {

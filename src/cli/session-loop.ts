@@ -527,6 +527,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           const rendered = renderer.render(buildAssistantResponseViewModel({
             label: targetRuntime.getStartup().agentName,
             text: message.text,
+            taskTrace: message.trace,
           }));
           if (prompt.writeDurable?.(rendered) !== true) {
             output.write(rendered.endsWith("\n") ? rendered : `${rendered}\n`);

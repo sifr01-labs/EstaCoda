@@ -231,6 +231,11 @@ event payloads, tool arguments/results, credentials, private paths, or result
 bodies. Plain, CI, dumb-terminal, and non-TTY sessions use the deterministic
 `task` and `/task` command output instead.
 
+When the Task delivers its answer, the final compact activity ribbon remains
+visible immediately above that answer. It records execution history and terminal
+outcome, not completion percentage; degraded runs retain their warning and
+worker-outcome summary.
+
 Input ownership is deterministic: modal Task inspection, then approval prompts,
 then autocomplete/typeahead, then attachment selection, then ordinary prompt or
 steering input.

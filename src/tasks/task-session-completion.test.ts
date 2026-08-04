@@ -65,6 +65,7 @@ describe("TaskSessionCompletionService", () => {
   });
 
   it("appends only the accepted synthesis answer to the creator transcript exactly once", async () => {
+    recordSynthesisTrace();
     results.record({
       taskId: "task-synthesis",
       stepId: "step-worker",
@@ -86,6 +87,15 @@ describe("TaskSessionCompletionService", () => {
         taskId: "task-synthesis",
         resultId: primary.id,
         text: "The final synthesized answer.",
+        trace: expect.objectContaining({
+          version: 1,
+          taskId: "task-synthesis",
+          stage: "synthesis",
+          outcome: "complete",
+          answerAvailable: true,
+          activityCount: 6,
+          activityCountComplete: true,
+        }),
       }),
     ]);
     expect(store.getDeliveryBinding("delivery-cli")?.status).toBe("delivering");
@@ -103,6 +113,15 @@ describe("TaskSessionCompletionService", () => {
           bindingId: "delivery-cli",
           taskId: "task-synthesis",
           resultId: primary.id,
+          trace: expect.objectContaining({
+            version: 1,
+            stage: "synthesis",
+            spans: expect.arrayContaining([
+              expect.objectContaining({ category: "search", scope: { kind: "subagent", label: "Subagent 1" } }),
+              expect.objectContaining({ category: "write", scope: { kind: "synthesis", label: "Synthesis" } }),
+              expect.objectContaining({ category: "deliver", scope: { kind: "delivery", label: "Delivery" } }),
+            ]),
+          }),
         },
       },
     });
@@ -171,14 +190,14 @@ describe("TaskSessionCompletionService", () => {
       expect.objectContaining({
         role: "agent",
         content: expect.stringContaining("No substitute answer was generated."),
-        metadata: {
-          taskCompletion: {
+        metadata: expect.objectContaining({
+          taskCompletion: expect.objectContaining({
             version: 1,
             bindingId: "delivery-cli",
             taskId: "task-synthesis",
             outcome: "failure"
-          }
-        }
+          })
+        })
       })
     ]);
   });
@@ -367,6 +386,47 @@ describe("TaskSessionCompletionService", () => {
     const running = { ...task, status: "running" as const, startedAt: NOW, updatedAt: NOW };
     store.updateTask(running);
     store.updateTask({ ...running, status: "completed", completedAt: NOW, updatedAt: NOW });
+  }
+
+  function recordSynthesisTrace(): void {
+    const events = [
+      {
+        id: "trace-plan",
+        kind: "task-created" as const,
+        timestamp: "2029-12-31T23:58:10.000Z",
+        data: {},
+      },
+      {
+        id: "trace-search",
+        kind: "attempt-progressed" as const,
+        timestamp: "2029-12-31T23:58:30.000Z",
+        stepId: "step-worker",
+        data: { activity: { kind: "tool", label: "Searching", traceCategory: "search" } },
+      },
+      {
+        id: "trace-write",
+        kind: "attempt-progressed" as const,
+        timestamp: "2029-12-31T23:59:10.000Z",
+        stepId: "step-synthesis",
+        data: { activity: { kind: "assistant", label: "Assistant answer", traceCategory: "answer", assistantPreview: "Writing response" } },
+      },
+      {
+        id: "trace-deliver",
+        kind: "task-state-changed" as const,
+        timestamp: NOW,
+        data: { from: "running", to: "completed" },
+      },
+    ];
+    store.atomicWrite((transaction) => {
+      for (const event of events) {
+        transaction.appendEvent({
+          ...event,
+          profileId: "alpha",
+          taskId: "task-synthesis",
+          planRevisionId: "revision-synthesis",
+        });
+      }
+    });
   }
 });
 
