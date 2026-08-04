@@ -58,6 +58,8 @@ export type SelectPromptInput<T> = {
   statusLines?: readonly PromptCardStatusLine[];
   showCurrentBadge?: boolean;
   showColumnHeaders?: boolean;
+  descriptionVisibility?: "always" | "selected";
+  visibleRows?: number;
   tableDirection?: "ltr" | "rtl";
   tableWidth?: "full" | "content";
   tableMaxWidth?: number;
@@ -223,7 +225,7 @@ function renderTtySelection<T>(
       }),
     }).join("\n");
   }
-  const vm = buildSelectionViewModel(selection, selectedIndex);
+  const vm = buildSelectionViewModel(selection, selectedIndex, true);
   return renderer.render(vm);
 }
 
@@ -273,7 +275,7 @@ function createPapyrusSelectState<T>(
     })),
     {
       focusedValue: optionValueForIndex(clampIndex(selection.defaultIndex ?? 0, selection.options.length)),
-      viewportSize: Math.max(1, selection.options.length),
+      viewportSize: Math.max(1, Math.min(selection.options.length, selection.visibleRows ?? selection.options.length)),
       wrap: true,
     }
   );
@@ -313,7 +315,11 @@ function digitFromKeypress(value: string): number | undefined {
   return Number.parseInt(value, 10);
 }
 
-function buildSelectionViewModel<T>(selection: SelectPromptInput<T>, selectedIndex: number): ViewModel {
+function buildSelectionViewModel<T>(
+  selection: SelectPromptInput<T>,
+  selectedIndex: number,
+  visibleOnly = false
+): ViewModel {
   if (selection.surface === "promptCard") {
     const options: OnboardingPromptOption[] = selection.options.map((opt, i) => ({
       id: String(i),
@@ -346,13 +352,38 @@ function buildSelectionViewModel<T>(selection: SelectPromptInput<T>, selectedInd
     });
   }
 
-  const options: PickerOption[] = selection.options.map((opt, i) => ({
-    id: String(i),
-    label: opt.label,
-    description: opt.description,
-    selected: i === selectedIndex,
-  }));
-  return buildPickerViewModel({ title: selection.title, options });
+  const visibleRows = visibleOnly
+    ? Math.max(1, Math.min(selection.options.length, selection.visibleRows ?? selection.options.length))
+    : selection.options.length;
+  const startIndex = visibleOnly
+    ? Math.min(
+        Math.max(0, selectedIndex - visibleRows + 1),
+        Math.max(0, selection.options.length - visibleRows)
+      )
+    : 0;
+  const visibleOptions = selection.options.slice(startIndex, startIndex + visibleRows);
+  const options: PickerOption[] = visibleOptions.map((opt, visibleIndex) => {
+    const absoluteIndex = startIndex + visibleIndex;
+    return {
+      id: String(absoluteIndex),
+      label: opt.label,
+      description: opt.description,
+      cells: opt.cells,
+      selected: absoluteIndex === selectedIndex,
+    };
+  });
+  return buildPickerViewModel({
+    title: selection.title,
+    options,
+    columns: selection.columns?.map((column) => ({
+      key: column.key,
+      header: column.header,
+      alignment: column.align,
+    })),
+    descriptionVisibility: selection.descriptionVisibility,
+    instruction: selection.hint ?? selection.instruction,
+    direction: selection.direction ?? (selection.locale === "ar" ? "rtl" : "ltr"),
+  });
 }
 
 function selectedOutputLine<T>(

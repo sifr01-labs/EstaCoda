@@ -104,6 +104,14 @@ estacoda trace failures <trajectory-id>
 
 ## Memory And Session Recall Commands
 
+Interactive session selection:
+
+```bash
+estacoda sessions
+```
+
+In a TTY, this opens a two-column picker for the 20 most recently active resumable root sessions in the selected profile and current workspace. The focused row shows when the session started, its last activity time, and whether it originated in CLI, Telegram, or another channel. Pressing Enter resumes that session through the normal setup, trust, and runtime launch path. `estacoda sessions list` remains the non-interactive operator listing.
+
 Top-level session recall commands:
 
 ```bash

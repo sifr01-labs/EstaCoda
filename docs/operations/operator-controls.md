@@ -267,6 +267,7 @@ estacoda cron remove <job-id>         # Delete job
 ## Session Operator Commands
 
 ```bash
+estacoda sessions                                     # Choose and resume a recent session
 estacoda sessions list                                # Recent sessions with attached surfaces
 estacoda sessions show <session-id>                   # Session detail + surface pointers
 estacoda sessions current                             # Current runtime session
@@ -278,6 +279,8 @@ estacoda sessions compact <session-id> [--topic <topic>] # Compact session histo
 ```
 
 Valid surfaces: `cli`, `telegram`, `discord`, `whatsapp`, `email`.
+
+In an interactive terminal, bare `estacoda sessions` shows up to 20 resumable user-facing root sessions from the selected profile and current workspace. The two-column picker keeps the session number and description primary; the focused row shows start time, last activity, and origin surface. Enter resumes the selected session after normal setup and workspace-trust checks. Empty, ended, child, and internal Task sessions are omitted. Use `estacoda sessions list` for the existing non-interactive operator view.
 
 Sessions are **separate by default**. A CLI session and a channel session for the same user do not share context automatically. Explicit attach/detach is required.
 

@@ -144,9 +144,9 @@ function registerAll(): void {
     name: "sessions",
     aliases: ["session"],
     category: "Session",
-    description: "List recent sessions",
+    description: "Browse recent sessions",
     visibility: "public",
-    scope: "slash",
+    scope: "both",
   });
   commandRegistry.register({
     name: "switch",

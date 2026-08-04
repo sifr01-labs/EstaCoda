@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import type { ViewModel } from "../contracts/view-model.js";
 import type { SessionRecord } from "../contracts/session.js";
+import type { UiLocale } from "../contracts/ui.js";
 import { loadRuntimeConfig, type LoadRuntimeConfigOptions } from "../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
@@ -23,13 +24,27 @@ import {
   buildInvalidSurfaceViewModel,
   buildSessionUsageErrorViewModel,
 } from "./session-view-models.js";
+import type { Prompt } from "./prompt-contract.js";
+import {
+  buildSessionPresentation,
+  type SessionPresentation,
+} from "../session/session-presentation.js";
+import {
+  buildSessionPickerPrompt,
+  noResumableSessionsMessage,
+  SESSION_PICKER_LIMIT,
+} from "./session-picker.js";
 
 export type SessionRenderer = (viewModel: ViewModel) => string;
 
 export type SessionCommandInput = {
   args: string[];
   homeDir: string;
-  workspaceRoot?: string;
+  profileId?: string;
+  workspaceRoot: string;
+  interactive?: boolean;
+  locale?: UiLocale;
+  prompt?: Prompt;
   providerFetch?: LoadRuntimeConfigOptions["providerFetch"];
   modelsDevOptions?: LoadRuntimeConfigOptions["modelsDevOptions"];
   runtime?: {
@@ -43,18 +58,67 @@ export type SessionCommandInput = {
   };
 };
 
+export type SessionCommandResult = {
+  ok: boolean;
+  output: string;
+  selectedSession?: {
+    sessionId: string;
+    workspaceRoot: string;
+  };
+};
+
 const VALID_SURFACES = ["cli", "telegram", "discord", "whatsapp", "email"] as const;
 
 export async function runSessionsCommand(
   input: SessionCommandInput,
   renderer: SessionRenderer = renderPlain
-): Promise<{ ok: boolean; output: string }> {
+): Promise<SessionCommandResult> {
   const [subcommand, ...rest] = input.args;
   const homeDir = input.homeDir;
-  const profileId = readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
+  const profileId = input.profileId ?? readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
   const globalPaths = resolveGlobalStateHome({ homeDir });
   const profilePaths = resolveProfileStateHome({ homeDir, profileId });
   const surfacePointerPath = join(profilePaths.gatewayStatePath, "surface-pointers.json");
+
+  if (subcommand === undefined && input.interactive === true && input.prompt?.select !== undefined) {
+    const db = await createSQLiteSessionDB({ path: globalPaths.sessionsSqlitePath });
+    let presentations: SessionPresentation[];
+    try {
+      const summaries = await db.listSessionSummaries(profileId, {
+        workspaceRoot: input.workspaceRoot,
+        limit: SESSION_PICKER_LIMIT,
+        rootSessionsOnly: true,
+        activeSessionsOnly: true,
+        userActivityOnly: true,
+        userFacingOnly: true,
+      });
+      presentations = summaries.map(buildSessionPresentation).filter((session) => session.resumable);
+    } finally {
+      await db.close();
+    }
+
+    const locale = input.locale ?? "en";
+    if (presentations.length === 0) {
+      return { ok: true, output: noResumableSessionsMessage(locale) };
+    }
+
+    const selectedSessionId = await input.prompt.select(buildSessionPickerPrompt(presentations, locale));
+    const selected = presentations.find((session) => session.id === selectedSessionId);
+    if (selected === undefined) {
+      return {
+        ok: false,
+        output: locale === "ar" ? "تعذر فتح الجلسة المحددة." : "The selected session could not be opened.",
+      };
+    }
+    return {
+      ok: true,
+      output: "",
+      selectedSession: {
+        sessionId: selected.id,
+        workspaceRoot: input.workspaceRoot,
+      },
+    };
+  }
 
   if (subcommand === "list" || subcommand === undefined) {
     const db = await createSQLiteSessionDB({ path: globalPaths.sessionsSqlitePath });

@@ -507,6 +507,10 @@ function toolActivityStatusMarker(status: ToolActivityRailEvent["status"]): stri
 // ──────────────────────────────────────
 
 export function renderPicker(vm: PickerViewModel): string {
+  if (vm.columns !== undefined && vm.columns.length > 0) {
+    return renderColumnPicker(vm);
+  }
+
   const lines: string[] = [vm.title];
 
   for (let i = 0; i < vm.options.length; i++) {
@@ -519,7 +523,62 @@ export function renderPicker(vm: PickerViewModel): string {
     }
   }
 
+  if (vm.instruction !== undefined) {
+    lines.push("", asciiPickerText(vm.instruction));
+  }
+
   return lines.join("\n");
+}
+
+function renderColumnPicker(vm: PickerViewModel): string {
+  const columns = vm.columns ?? [];
+  const rows = vm.options.map((option) => columns.map((column) =>
+    option.cells?.[column.key] ?? (column === columns[columns.length - 1] ? option.label : "")
+  ));
+  const widths = columns.map((column, columnIndex) => Math.max(
+    measureTextWidth(column.header),
+    ...rows.map((row) => measureTextWidth(row[columnIndex] ?? ""))
+  ));
+  const renderCells = (values: readonly string[]) => columns.map((column, columnIndex) => {
+    const value = pickerCellText(values[columnIndex] ?? "", vm.direction, columnIndex === 0);
+    return padVisibleAlign(value, widths[columnIndex] ?? 0, column.alignment ?? "left");
+  }).join("  ");
+  const lines = [
+    vm.direction === "rtl" ? isolateRtl(vm.title) : vm.title,
+    `   ${renderCells(columns.map((column) => column.header))}`,
+    `   ${columns.map((_column, index) => "-".repeat(widths[index] ?? 0)).join("  ")}`,
+  ];
+
+  for (let index = 0; index < vm.options.length; index += 1) {
+    const option = vm.options[index]!;
+    lines.push(`${option.selected ? ">" : " "}  ${renderCells(rows[index] ?? [])}`);
+    if (
+      option.description !== undefined &&
+      (vm.descriptionVisibility !== "selected" || option.selected === true)
+    ) {
+      const description = asciiPickerText(option.description);
+      lines.push(`   ${" ".repeat((widths[0] ?? 0) + 2)}${vm.direction === "rtl" ? isolateRtl(description) : description}`);
+    }
+  }
+
+  if (vm.instruction !== undefined) {
+    const instruction = asciiPickerText(vm.instruction);
+    lines.push("", vm.direction === "rtl" ? isolateRtl(instruction) : instruction);
+  }
+  return lines.join("\n");
+}
+
+function asciiPickerText(value: string): string {
+  return value.replaceAll("↑↓", "Up/Down").replaceAll("·", "|");
+}
+
+function pickerCellText(
+  value: string,
+  direction: PickerViewModel["direction"],
+  technical: boolean
+): string {
+  if (direction !== "rtl" || value.length === 0) return value;
+  return technical || !/\p{Script=Arabic}/u.test(value) ? isolateLtr(value) : isolateRtl(value);
 }
 
 // ──────────────────────────────────────

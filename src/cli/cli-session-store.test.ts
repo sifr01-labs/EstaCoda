@@ -60,4 +60,9 @@ describe("resolveStartupSessionId", () => {
   it("generates a session id when no workspace session was restored", () => {
     expect(resolveStartupSessionId(undefined, () => "new-session")).toBe("new-session");
   });
+
+  it("prefers an explicitly selected session over a restored workspace session", () => {
+    expect(resolveStartupSessionId("restored-session", () => "new-session", "selected-session"))
+      .toBe("selected-session");
+  });
 });

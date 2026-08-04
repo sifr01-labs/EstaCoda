@@ -201,6 +201,10 @@ export type CliCommandResult = {
   handled: boolean;
   exitCode: number;
   output: string;
+  sessionHandoff?: {
+    readonly sessionId: string;
+    readonly workspaceRoot: string;
+  };
   launchHandoff?: {
     readonly workspaceRoot: string;
     readonly locale: UiLocale;
@@ -4054,15 +4058,48 @@ async function handoff(options: CliOptions, args: string[]): Promise<CliCommandR
 }
 
 async function sessions(options: CliOptions, args: string[]): Promise<CliCommandResult> {
-  const result = await runSessionsCommand({
-    args,
-    homeDir: resolveHomeDir(options.homeDir),
-    workspaceRoot: options.workspaceRoot,
-    providerFetch: options.providerFetch,
-    modelsDevOptions: options.modelsDevOptions,
-    runtime: options.runtime,
-  });
-  return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
+  const homeDir = resolveHomeDir(options.homeDir);
+  const profileId = options.profileId ?? readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
+  const interactive = options.interactive ?? canRunInteractive();
+  const locale = options.prompt?.uiContext?.locale ?? await readSessionCommandLocale(homeDir, profileId);
+  const ownsPrompt = args.length === 0 && interactive && options.prompt === undefined;
+  const prompt = ownsPrompt
+    ? createInteractivePrompt({ uiContext: promptUiContextForLocale(locale) })
+    : options.prompt;
+  try {
+    const result = await runSessionsCommand({
+      args,
+      homeDir,
+      profileId,
+      workspaceRoot: options.workspaceRoot,
+      interactive,
+      locale,
+      prompt,
+      providerFetch: options.providerFetch,
+      modelsDevOptions: options.modelsDevOptions,
+      runtime: options.runtime,
+    });
+    return {
+      handled: true,
+      exitCode: result.ok ? 0 : 1,
+      output: result.output,
+      ...(result.selectedSession === undefined ? {} : { sessionHandoff: result.selectedSession }),
+    };
+  } finally {
+    if (ownsPrompt) {
+      prompt?.close?.();
+    }
+  }
+}
+
+async function readSessionCommandLocale(homeDir: string, profileId: string): Promise<UiLocale> {
+  try {
+    const profilePaths = resolveProfileStateHome({ homeDir, profileId });
+    const loaded = await readConfig(profilePaths.configPath);
+    return loaded.config.ui?.language === "ar" ? "ar" : "en";
+  } catch {
+    return "en";
+  }
 }
 
 async function channels(options: CliOptions, args: string[]): Promise<CliCommandResult> {

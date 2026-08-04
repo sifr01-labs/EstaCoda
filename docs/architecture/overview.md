@@ -363,6 +363,7 @@ Capability-first security boundary.
 
 ### Sessions
 
+- `estacoda sessions` — interactively choose and resume a recent user-facing session in the current profile and workspace.
 - `estacoda sessions list` — recent sessions with attached surfaces.
 - `estacoda sessions show <session-id>` — session detail with surface pointers.
 - `estacoda sessions current` — current runtime session (when present).

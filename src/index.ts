@@ -74,6 +74,7 @@ async function main(): Promise<void> {
   const profileId = parsedGlobalOptions.profileId ?? readActiveProfile({ homeDir })?.profileId ?? defaultProfileId();
   const trustStore = new WorkspaceTrustStore({ path: stateHome.trustJsonPath });
   let setupLaunchHandoffCompleted = false;
+  let sessionHandoff: { readonly sessionId: string; readonly workspaceRoot: string } | undefined;
 
   if (argv[0] === "setup") {
     const setupResult = await runSetupStartup({
@@ -123,7 +124,13 @@ async function main(): Promise<void> {
       }
     });
 
-    if (command.handled) {
+    if (command.sessionHandoff !== undefined) {
+      sessionHandoff = command.sessionHandoff;
+      if (command.output.length > 0) {
+        console.log(command.output);
+      }
+      argv = [];
+    } else if (command.handled) {
       if (command.output.length > 0) {
         console.log(command.output);
       }
@@ -144,6 +151,11 @@ async function main(): Promise<void> {
 
     workspaceRoot = launchResult.workspaceRoot;
     launchLocale = launchResult.locale;
+  }
+
+  if (sessionHandoff !== undefined && sessionHandoff.workspaceRoot !== workspaceRoot) {
+    console.error("The selected session belongs to a different workspace. Run `estacoda sessions` again from this workspace.");
+    process.exit(1);
   }
 
   let config: LoadedRuntimeConfig;
@@ -279,7 +291,11 @@ async function main(): Promise<void> {
 
   const sessionDb = await openLocalSessionDb();
   const restoredSessionId = await cliSessionStore.getSessionId(workspaceRoot);
-  const startupSessionId = resolveStartupSessionId(restoredSessionId);
+  const startupSessionId = resolveStartupSessionId(
+    restoredSessionId,
+    createSessionId,
+    sessionHandoff?.sessionId
+  );
 
   const runtime = await buildRuntime({
     sessionId: startupSessionId,

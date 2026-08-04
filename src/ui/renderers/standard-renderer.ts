@@ -1496,6 +1496,10 @@ export class StandardRenderer {
   // ──────────────────────────────────────
 
   renderPicker(vm: PickerViewModel): string {
+    if (vm.columns !== undefined && vm.columns.length > 0) {
+      return this.#renderColumnPicker(vm);
+    }
+
     const lines: string[] = [this.#bold(vm.title)];
 
     for (let i = 0; i < vm.options.length; i++) {
@@ -1509,6 +1513,68 @@ export class StandardRenderer {
       }
     }
 
+    if (vm.instruction !== undefined) {
+      lines.push("", this.#muted(vm.instruction));
+    }
+
+    return lines.join("\n");
+  }
+
+  #renderColumnPicker(vm: PickerViewModel): string {
+    const columns = vm.columns ?? [];
+    const rows = vm.options.map((option) => columns.map((column) =>
+      option.cells?.[column.key] ?? (column === columns[columns.length - 1] ? option.label : "")
+    ));
+    const availableWidth = Math.max(1, this.#capabilities.terminalWidth - 3);
+    const widths = fitPickerColumnWidths(columns, rows, availableWidth);
+    const renderCells = (values: readonly string[], selected = false) => columns.map((column, columnIndex) => {
+      const width = widths[columnIndex] ?? 0;
+      const rawValue = pickerCellText(values[columnIndex] ?? "", vm.direction, columnIndex === 0);
+      const value = measureVisibleWidth(rawValue) <= width ? rawValue : truncateVisible(rawValue, width);
+      const padded = padVisibleAlign(value, width, column.alignment ?? "left");
+      if (selected) return this.#action(padded);
+      return columnIndex === 0 ? this.#muted(padded) : this.#primary(padded);
+    }).join("  ");
+    const lines = [
+      this.#brand(this.#bold(vm.direction === "rtl" ? isolateRtl(vm.title) : vm.title)),
+      `   ${columns.map((column, index) => {
+        const header = pickerCellText(column.header, vm.direction, index === 0);
+        const value = padVisibleAlign(
+          measureVisibleWidth(header) <= (widths[index] ?? 0)
+            ? header
+            : truncateVisible(header, widths[index] ?? 0),
+          widths[index] ?? 0,
+          column.alignment ?? "left"
+        );
+        return this.#secondary(value);
+      }).join("  ")}`,
+      `   ${this.#surfaceBorder(columns.map((_column, index) => (this.#useUnicode ? "─" : "-").repeat(widths[index] ?? 0)).join("  "))}`,
+    ];
+
+    for (let index = 0; index < vm.options.length; index += 1) {
+      const option = vm.options[index]!;
+      const selected = option.selected === true;
+      const marker = selected ? this.#action(this.#useUnicode ? "❯" : ">") : " ";
+      lines.push(`${marker}  ${renderCells(rows[index] ?? [], selected)}`);
+      if (
+        option.description !== undefined &&
+        (vm.descriptionVisibility !== "selected" || selected)
+      ) {
+        const indent = " ".repeat((widths[0] ?? 0) + 5);
+        const descriptionWidth = Math.max(1, this.#capabilities.terminalWidth - measureVisibleWidth(indent));
+        const rawDescription = this.#useUnicode ? option.description : asciiPickerText(option.description);
+        const description = vm.direction === "rtl" ? isolateRtl(rawDescription) : rawDescription;
+        for (const descriptionLine of wrapText(description, descriptionWidth)) {
+          lines.push(`${indent}${this.#muted(descriptionLine)}`);
+        }
+      }
+    }
+
+    if (vm.instruction !== undefined) {
+      const rawInstruction = this.#useUnicode ? vm.instruction : asciiPickerText(vm.instruction);
+      const instruction = vm.direction === "rtl" ? isolateRtl(rawInstruction) : rawInstruction;
+      lines.push("", ...wrapText(instruction, this.#capabilities.terminalWidth).map((line) => this.#muted(line)));
+    }
     return lines.join("\n");
   }
 
@@ -2357,6 +2423,45 @@ function computeRtlOnboardingBodyBlockWidth(bodyLines: readonly string[], conten
 
 function containsArabicScript(value: string): boolean {
   return /\p{Script=Arabic}/u.test(value);
+}
+
+function asciiPickerText(value: string): string {
+  return value.replaceAll("↑↓", "Up/Down").replaceAll("·", "|");
+}
+
+function pickerCellText(
+  value: string,
+  direction: PickerViewModel["direction"],
+  technical: boolean
+): string {
+  if (direction !== "rtl" || value.length === 0) return value;
+  return technical || !containsArabicScript(value) ? isolateLtr(value) : isolateRtl(value);
+}
+
+function fitPickerColumnWidths(
+  columns: readonly { readonly header: string }[],
+  rows: readonly (readonly string[])[],
+  availableWidth: number
+): number[] {
+  if (columns.length === 0) return [];
+  const gapWidth = Math.max(0, columns.length - 1) * 2;
+  const contentBudget = Math.max(columns.length, availableWidth - gapWidth);
+  const widths = columns.map((column, columnIndex) => Math.max(
+    1,
+    measureVisibleWidth(column.header),
+    ...rows.map((row) => measureVisibleWidth(row[columnIndex] ?? ""))
+  ));
+  let excess = Math.max(0, widths.reduce((sum, width) => sum + width, 0) - contentBudget);
+
+  for (let columnIndex = widths.length - 1; columnIndex >= 0 && excess > 0; columnIndex -= 1) {
+    const minimum = Math.max(1, measureVisibleWidth(columns[columnIndex]?.header ?? ""));
+    const reducible = Math.max(0, (widths[columnIndex] ?? 0) - minimum);
+    const reduction = Math.min(reducible, excess);
+    widths[columnIndex] = (widths[columnIndex] ?? 0) - reduction;
+    excess -= reduction;
+  }
+
+  return widths;
 }
 
 function boundedFileChangePreviewLines(

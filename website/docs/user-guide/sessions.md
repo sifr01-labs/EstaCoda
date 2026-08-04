@@ -45,6 +45,9 @@ Task and session limits are monetary controls; token counts remain read-only usa
 ## Session Commands
 
 ```bash
+# Choose and resume a recent session
+estacoda sessions
+
 # List recent sessions with attached surfaces
 estacoda sessions list
 
@@ -68,6 +71,8 @@ estacoda sessions compact <session-id> [--topic <topic>]
 ```
 
 Valid surfaces: `cli`, `telegram`, `discord`, `whatsapp`, `email`.
+
+In an interactive terminal, `estacoda sessions` opens a two-column picker containing up to 20 of the most recently active resumable sessions for the selected profile and current workspace. The main rows show a session number and safe brief description. The focused row also shows the start date, last activity date, and origin such as CLI or Telegram. Use the arrow keys and press Enter to resume. Empty, ended, child, and internal Task sessions are hidden. `estacoda sessions list` keeps the existing non-interactive operator listing.
 
 `sessions recall` is bounded historical recall. It is profile-scoped and workspace-scoped when workspace metadata is available. Recalled content is labeled as untrusted context and cannot override current instructions.
 

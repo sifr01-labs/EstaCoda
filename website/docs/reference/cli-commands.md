@@ -281,6 +281,7 @@ See [Scheduled Jobs](../user-guide/cron.md) for the full cron behavior model.
 ## Sessions
 
 ```bash
+estacoda sessions                       # interactively choose and resume a recent session
 estacoda sessions list                  # recent sessions with attached surfaces
 estacoda sessions show <session-id>     # session detail + surface pointers
 estacoda sessions current               # current runtime session
@@ -296,6 +297,8 @@ Valid surfaces: `cli`, `telegram`, `discord`, `whatsapp`, `email`.
 **State touched:** SQLite session DB (`~/.estacoda/sessions.sqlite`).
 
 **Profile boundary:** Sessions are profile-scoped. `sessions recall` is bounded to the active profile and workspace when metadata is available.
+
+**Picker behavior:** In a TTY, bare `estacoda sessions` shows up to 20 resumable user-facing root sessions from the selected profile and current workspace. It displays session number and description, with start time, last activity, and origin on the focused row. Enter resumes the selection through normal setup and workspace-trust checks. `sessions list` remains the non-interactive operator listing.
 
 **Failure modes:**
 - `sessions compact` is non-rotating in this implementation; it does not adopt a compacted child session.

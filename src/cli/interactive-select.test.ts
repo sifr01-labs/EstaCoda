@@ -305,6 +305,37 @@ describe("interactive-select prompt card surface", () => {
     expect(stripAnsi(output.getText())).toContain("Selected: Cancel");
   });
 
+  it("keeps bounded generic picker rows in view while navigating a longer list", async () => {
+    clearCiEnv();
+    const { input, output } = makeTtyStreams(80);
+    const pending = selectOption(input, output, {
+      title: "Choose a session",
+      columns: [
+        { key: "number", header: "#", align: "right" },
+        { key: "session", header: "Session" },
+      ],
+      options: Array.from({ length: 6 }, (_value, index) => ({
+        value: `session-${index + 1}`,
+        label: `Session ${index + 1}`,
+        cells: { number: String(index + 1), session: `Session ${index + 1}` },
+      })),
+      visibleRows: 3,
+      fallbackPrompt: "Session number [1]: ",
+    });
+
+    await Promise.resolve();
+    expect(stripAnsi(latestRenderedFrame(output.getText()))).toContain("Session 1");
+    expect(stripAnsi(latestRenderedFrame(output.getText()))).not.toContain("Session 4");
+    press(input, "\x1b[F");
+    const finalFrame = stripAnsi(latestRenderedFrame(output.getText()));
+    expect(finalFrame).toContain("Session 4");
+    expect(finalFrame).toContain("Session 6");
+    expect(finalFrame).not.toContain("Session 1");
+    press(input, "\r");
+
+    await expect(pending).resolves.toBe("session-6");
+  });
+
   it("renders no-color prompt cards without ANSI leakage", async () => {
     process.env.FORCE_COLOR = "0";
     const input = Readable.from(["\n"]);

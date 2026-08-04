@@ -235,6 +235,10 @@ export function buildProgressContextRailViewModel(
 export interface BuildPickerInput {
   readonly title: string;
   readonly options: readonly PickerOption[];
+  readonly columns?: PickerViewModel["columns"];
+  readonly descriptionVisibility?: PickerViewModel["descriptionVisibility"];
+  readonly instruction?: string;
+  readonly direction?: PickerViewModel["direction"];
 }
 
 export function buildPickerViewModel(input: BuildPickerInput): PickerViewModel {
@@ -242,6 +246,10 @@ export function buildPickerViewModel(input: BuildPickerInput): PickerViewModel {
     kind: "picker",
     title: input.title,
     options: input.options,
+    columns: input.columns,
+    descriptionVisibility: input.descriptionVisibility,
+    instruction: input.instruction,
+    direction: input.direction,
   };
 }
 

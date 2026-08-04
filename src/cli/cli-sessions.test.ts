@@ -7,6 +7,8 @@ import { FileSurfacePointerStore } from "../channels/surface-pointer-store.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
+import type { Prompt } from "./prompt-contract.js";
+import type { SelectPromptInput } from "./interactive-select.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-cli-sess-test-"));
@@ -67,6 +69,141 @@ describe("CLI session commands", () => {
 
   afterEach(async () => {
     await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  describe("sessions picker", () => {
+    it("returns a workspace-scoped resume handoff for the selected session", async () => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      seedPickerSession(db, {
+        id: "sess-selected",
+        profileId: "default",
+        title: "Review Telegram deployment",
+        workspaceRoot: tmpDir,
+        originSurface: "telegram",
+        updatedAt: "2026-08-04T10:00:00.000Z",
+      });
+      seedPickerSession(db, {
+        id: "sess-other-workspace",
+        profileId: "default",
+        title: "Other workspace",
+        workspaceRoot: "/other/workspace",
+        updatedAt: "2026-08-04T11:00:00.000Z",
+      });
+      seedPickerSession(db, {
+        id: "sess-internal",
+        profileId: "default",
+        title: "Internal task worker",
+        workspaceRoot: tmpDir,
+        kind: "task-step-worker",
+        updatedAt: "2026-08-04T12:00:00.000Z",
+      });
+      db.close();
+
+      let selection: SelectPromptInput<string> | undefined;
+      const prompt = pickerPrompt(async (input) => {
+        selection = input;
+        return input.options[0]!.value;
+      });
+      const result = await runCliCommand({
+        argv: ["sessions"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        interactive: true,
+        prompt,
+      });
+
+      expect(result).toEqual(expect.objectContaining({
+        handled: true,
+        exitCode: 0,
+        output: "",
+        sessionHandoff: { sessionId: "sess-selected", workspaceRoot: tmpDir },
+      }));
+      expect(selection?.columns).toEqual([
+        { key: "number", header: "#", align: "right" },
+        { key: "session", header: "Session" },
+      ]);
+      expect(selection?.options.map((option) => option.value)).toEqual(["sess-selected"]);
+      expect(selection?.options[0]?.description).toContain("Via Telegram");
+    });
+
+    it("honors a command-local profile override", async () => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      seedPickerSession(db, {
+        id: "default-session",
+        profileId: "default",
+        title: "Default profile",
+        workspaceRoot: tmpDir,
+      });
+      seedPickerSession(db, {
+        id: "work-session",
+        profileId: "work",
+        title: "Work profile",
+        workspaceRoot: tmpDir,
+      });
+      db.close();
+
+      let optionValues: string[] = [];
+      const result = await runCliCommand({
+        argv: ["sessions"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        profileId: "work",
+        interactive: true,
+        prompt: pickerPrompt(async (input) => {
+          optionValues = input.options.map((option) => option.value);
+          return input.options[0]!.value;
+        }),
+      });
+
+      expect(optionValues).toEqual(["work-session"]);
+      expect(result.sessionHandoff?.sessionId).toBe("work-session");
+    });
+
+    it("returns a non-error empty state without prompting", async () => {
+      let prompted = false;
+      const result = await runCliCommand({
+        argv: ["sessions"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        interactive: true,
+        prompt: pickerPrompt(async () => {
+          prompted = true;
+          return "unexpected";
+        }),
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("No resumable sessions");
+      expect(result.sessionHandoff).toBeUndefined();
+      expect(prompted).toBe(false);
+    });
+
+    it("keeps explicit sessions list non-interactive", async () => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      seedPickerSession(db, {
+        id: "sess-list",
+        profileId: "default",
+        title: "List only",
+        workspaceRoot: tmpDir,
+      });
+      db.close();
+      let prompted = false;
+
+      const result = await runCliCommand({
+        argv: ["sessions", "list"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        interactive: true,
+        prompt: pickerPrompt(async () => {
+          prompted = true;
+          return "unexpected";
+        }),
+      });
+
+      expect(result.output).toContain("sess-list");
+      expect(result.sessionHandoff).toBeUndefined();
+      expect(prompted).toBe(false);
+    });
   });
 
   describe("sessions list", () => {
@@ -463,6 +600,34 @@ describe("CLI session commands", () => {
     });
   });
 });
+
+function pickerPrompt(select: (input: SelectPromptInput<string>) => Promise<string>): Prompt {
+  return Object.assign(async () => "", { select }) as Prompt;
+}
+
+function seedPickerSession(
+  db: ReturnType<typeof openDefaultSQLiteDatabase>,
+  input: {
+    id: string;
+    profileId: string;
+    title: string;
+    workspaceRoot: string;
+    originSurface?: string;
+    kind?: string;
+    updatedAt?: string;
+  }
+): void {
+  const createdAt = "2026-08-01T08:00:00.000Z";
+  const updatedAt = input.updatedAt ?? "2026-08-02T09:00:00.000Z";
+  db.query("insert into sessions (id, profile_id, title, created_at, updated_at, metadata_json) values (?, ?, ?, ?, ?, ?)")
+    .run(input.id, input.profileId, input.title, createdAt, updatedAt, JSON.stringify({
+      workspaceRoot: input.workspaceRoot,
+      ...(input.originSurface === undefined ? {} : { originSurface: input.originSurface }),
+      ...(input.kind === undefined ? {} : { kind: input.kind }),
+    }));
+  db.query("insert into messages (id, session_id, role, content, created_at, channel) values (?, ?, ?, ?, ?, ?)")
+    .run(`message-${input.id}`, input.id, "user", input.title, updatedAt, input.originSurface ?? "cli");
+}
 
 function compactResult(overrides: {
   fallbackUsed?: boolean;
