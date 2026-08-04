@@ -23,8 +23,17 @@ The CLI is not a chat wrapper. It is a stateful agent command surface with expli
 ## Starting and Resuming
 
 ```bash
-# Start interactive session
+# Start a fresh interactive session
 estacoda
+
+# Continue the last CLI session for this profile and workspace
+estacoda --continue
+
+# Choose a different resumable session
+estacoda sessions
+
+# Resume a known session by id
+estacoda sessions open <session-id>
 
 # Run a one-shot command
 estacoda --profile work "explain this file"
@@ -36,7 +45,9 @@ estacoda -p work doctor
 
 `--profile` / `-p` selects a profile for the current command only. It does not change the active profile on disk. Only `estacoda profile use <name>` updates `~/.estacoda/active-profile.json`.
 
-CLI startup restores the active workspace session from the session store. Fresh launches are no longer forced back to a default scaffold session.
+Every CLI invocation that reaches the runtime starts a fresh session by default. Continuation is explicit: `--continue` uses the last CLI session pointer for the selected profile and current workspace, while `estacoda sessions` opens the session picker and `estacoda sessions open <session-id>` resumes a known session directly. All three paths still run normal setup and workspace-trust checks.
+
+The `--continue` flag also works with a one-shot prompt or slash command. It is rejected with standalone operator commands that dispatch before a conversational runtime. If the scoped pointer is missing, malformed, ended, internal, or belongs to another profile or workspace, startup fails closed and suggests `estacoda sessions`.
 
 ---
 
@@ -95,13 +106,17 @@ Runs deterministic eval fixtures and returns pass/fail per assertion with timing
 
 ---
 
-## Session Recall and Compaction
+## Session Navigation, Recall, and Compaction
 
 ```bash
+estacoda sessions
+estacoda sessions open <session-id>
 estacoda session recall <query>
 estacoda sessions recall <query>
 estacoda sessions compact <session-id> [--topic <topic>]
 ```
+
+In a TTY, `estacoda sessions` displays up to 20 active user-facing root sessions with user activity from the selected profile and current workspace. The rows show a safe description; the focused row adds start time, last activity, and immutable origin surface. Enter resumes the selected session and Escape cancels without changing the active session.
 
 Recall commands summarize historical session matches. They use the selected profile, apply workspace scoping when a workspace root is available, and fall back to deterministic snippets if auxiliary summarization fails.
 
@@ -115,7 +130,7 @@ Inside an active session, slash commands provide operational controls. This is a
 
 | Command | Purpose |
 |---------|---------|
-| `/sessions` | List active sessions |
+| `/sessions` | Choose another resumable session in an interactive CLI; list sessions on non-picker surfaces |
 | `/search <query>` | Search session history |
 | `/session recall <query>` | Summarize historical session matches |
 | `/compact [topic]` | Compact in-session context |
@@ -323,6 +338,8 @@ estacoda model status
 # Session state
 /sessions
 /switch <session-id>
+estacoda --continue
+estacoda sessions open <session-id>
 
 # Approval state
 /approvals

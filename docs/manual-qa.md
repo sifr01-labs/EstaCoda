@@ -157,6 +157,24 @@ terminal lifecycle cleanup.
 | Resize | `estacoda` then resize narrower and wider while idle, during slash autocomplete, and during active-turn chrome | Prompt rows, slash menu rows, and Operator Console regions reflow without full-screen clear, scrollback clear, or overlapping text. Focused slash rows remain visible. |
 | Cancel/EOF | `estacoda`, then press `Ctrl-C`; relaunch and press `Ctrl-D` on an empty prompt | `Ctrl-C` cancels/cleans up the raw prompt. `Ctrl-D` exits cleanly from an empty prompt. Terminal raw mode is restored after each exit path. |
 
+### 2.1.1 Session Continuation Matrix
+
+Run these checks from two disposable workspaces and, where noted, two profiles. Do not inspect or edit real user session state during this QA.
+
+| Scenario | Command | Verify |
+|----------|---------|--------|
+| Fresh-by-default launch | Run `estacoda`, use `/doctor` to record the session ID, exit, then repeat | The two launches use different session IDs. The second launch does not silently restore the first transcript. |
+| Explicit last-session continuation | Start a session, use `/doctor` to record its ID, exit, then run `estacoda --continue` from the same profile and workspace | The prior session ID and transcript are restored. Normal setup and workspace-trust gates still run. |
+| Missing/stale pointer | In a disposable home with no pointer, run `estacoda --continue`; repeat after ending or removing the referenced session | Startup fails closed, suggests `estacoda sessions`, and does not create or guess a continuation. No raw pointer or foreign session metadata is printed. |
+| Top-level picker | Run `estacoda sessions` with at least three eligible sessions | The picker shows two main columns (`#` and session), and the focused row shows Started, Last active, and Via metadata. Enter opens the focused session. Escape cancels without changing session state. |
+| Picker compatibility | Repeat the picker in wide, narrow, `NO_COLOR`, no-Unicode, and Arabic terminal configurations | Layout remains readable, token hierarchy degrades cleanly, technical values remain isolated in Arabic, and no ANSI leaks appear in plain/no-color output. |
+| Direct open | Run `estacoda sessions open <session-id>` for an eligible session | The requested session opens without showing the picker and still passes setup/trust/profile/workspace validation. |
+| In-session picker | Run `/sessions` inside an interactive CLI | The same picker appears without the current session. Enter switches runtime and Escape returns to the current session. |
+| Scope enforcement | Try `--continue`, `sessions open`, `/sessions`, and `/switch` with another profile, another workspace, an ended session, a child session, and an internal Task session | Every route rejects the target with bounded generic copy and exposes no cross-scope metadata. |
+| Origin preservation | Create a session from Telegram, continue it in CLI, then reopen the picker | `Via Telegram` remains the origin after later CLI activity. Opening or switching does not rewrite the origin. |
+| Attachment preservation | Attach a Telegram chat to a session, open/switch to it from CLI, then inspect `sessions show` and gateway status | The attachment remains intact; CLI continuation does not attach, detach, or authorize a channel. |
+| Pointer file hygiene | Inspect the disposable `~/.estacoda/cli-sessions.json` after launch/switch | It is version 2, mode `0600`, and contains only the versioned entry index plus profile/workspace/session/timestamp fields, with one current entry per profile/workspace pair. |
+
 The renderer/input rollout flags are removed and should no longer activate
 legacy interactive modes:
 
@@ -177,7 +195,7 @@ ESTACODA_SKILL_SUGGESTIONS=1 estacoda
 
 No Slack suggestion provider is enabled by default.
 
-### 2.1.1 Terminal Recovery
+### 2.1.2 Terminal Recovery
 
 Use these recovery steps if a local terminal is left in an odd state after a
 crash, forced kill, or interrupted manual test:

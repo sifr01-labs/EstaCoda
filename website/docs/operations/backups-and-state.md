@@ -18,6 +18,7 @@ Default root: `~/.estacoda/`
 | `trust.json` | Workspace trust grants | Yes. Losing it means re-trusting workspaces. |
 | `workspace-approvals.json` | Persistent workspace approvals | Yes. Losing it means re-approving scopes. |
 | `sessions.sqlite` | Session database with `profile_id` scoping | Yes. Contains session history, trajectories, and eval records. |
+| `cli-sessions.json` | Scoped last-CLI-session pointers used by `--continue` | No. Convenience state; sessions remain in SQLite. |
 | `update-cache.json` | Update check cache | No. Ephemeral. |
 | `packs/registry.jsonl` | Global pack cache | No. Re-downloadable. |
 | `memory/shared/` | Global shared memory snippets | Yes. Contains cross-profile knowledge. |
@@ -49,6 +50,7 @@ Profile root: `~/.estacoda/profiles/<id>/`
 ## What not to edit blindly
 
 - `sessions.sqlite` — Do not edit directly. The schema is internal. Use CLI commands for inspection.
+- `cli-sessions.json` — Safe to omit from backups. Delete it to clear stale `--continue` pointers without deleting session history.
 - `.env` and `auth.json` — Store encrypted backups. These files contain credentials.
 - `gateway/` — Do not delete while the gateway is running. Stop the gateway first.
 - `promotions.json` — Do not hand-edit unless you understand the promotion schema. Corrupting it can suppress memory entries.
@@ -111,6 +113,7 @@ estacoda gateway diagnose --profile work
 - Sessions are profile-scoped. A session from profile `default` does not appear in profile `work`.
 - Global state is shared. Restoring `trust.json` affects all profiles.
 - `active-profile.json` is a pointer, not state. You can switch profiles without migrating data.
+- `cli-sessions.json` is also pointer state. Restoring `sessions.sqlite` without it preserves history; choose a session with `estacoda sessions`.
 
 ## Related docs
 

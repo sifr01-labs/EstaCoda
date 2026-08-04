@@ -18,6 +18,7 @@ Default root: `~/.estacoda/`
 | `trust.json` | Workspace trust grants | `estacoda workspace trust` |
 | `workspace-approvals.json` | Workspace approval grants | Approval commands |
 | `sessions.sqlite` | Global session database with `profile_id` scoping; includes durable session-finalization jobs and leases | Runtime initialization and gateway finalization worker |
+| `cli-sessions.json` | Version 2 CLI continuation pointers keyed by profile and normalized workspace root; contains no transcript data | CLI runtime launch, `/new`, `/switch`, and session picker/open handoffs |
 | `update-cache.json` | Update check cache (global, 6-hour TTL) | Startup prefetch, update command |
 | `packs/registry.jsonl` | Global pack cache | Pack operations |
 | `memory/shared/` | Global shared memory snippets | Memory operations |
@@ -94,6 +95,8 @@ Delegation writes profile-owned Task graphs, journal events, Attempts, session l
 
 Session-finalization jobs also live in `sessions.sqlite`. They store profile/session identifiers, an immutable message cutoff, reason, status, attempts, leases, timestamps, and bounded outcome/error codes. They do not store a transcript copy. The managed gateway processes jobs for its selected profile using the originating session workspace. The worker retains the latest 1,000 terminal rows per profile; local CLI commands can inspect, retry, or prune the metadata.
 
+`cli-sessions.json` is a convenience pointer index for explicit `estacoda --continue`. Version 2 entries contain only `profileId`, normalized `workspaceRoot`, `sessionId`, and `updatedAt`. The file is atomically replaced with `0600` permissions. Legacy version 1 and malformed data fail closed, and the referenced SQLite session is always revalidated before launch.
+
 ## Ownership rule
 
 - Global files are shared across all profiles.
@@ -123,6 +126,7 @@ tail -f ~/.estacoda/profiles/work/logs/gateway.log
 ## What not to do
 
 - Do not edit `sessions.sqlite` directly unless you know the schema.
+- Do not use `cli-sessions.json` as an authorization or transcript source. Deleting it only clears `--continue` convenience pointers; it does not delete sessions.
 - Do not copy `.env` files between profiles without updating the paths and secrets.
 - Do not delete `gateway/` while the gateway is running; stop the gateway first.
 - Do not delete `.install-method.json` unless you intend to convert a `managed-source` install to `manual-source`.

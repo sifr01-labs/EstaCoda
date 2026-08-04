@@ -44,11 +44,17 @@ Task and session limits are monetary controls; token counts remain read-only usa
 
 ## Session Commands
 
-Running bare `estacoda` starts a fresh CLI session every time. To continue earlier work, run `estacoda sessions` and select the session explicitly; EstaCoda does not silently restore the last workspace session.
+Running bare `estacoda` starts a fresh CLI session every time. Use `estacoda --continue` for the last scoped session, or run `estacoda sessions` to choose another session explicitly. EstaCoda does not silently restore the last workspace session.
 
 ```bash
+# Continue the last CLI session for this profile and workspace
+estacoda --continue
+
 # Choose and resume a recent session
 estacoda sessions
+
+# Resume a known session by id
+estacoda sessions open <session-id>
 
 # List recent sessions with attached surfaces
 estacoda sessions list
@@ -74,7 +80,9 @@ estacoda sessions compact <session-id> [--topic <topic>]
 
 Valid surfaces: `cli`, `telegram`, `discord`, `whatsapp`, `email`.
 
-In an interactive terminal, `estacoda sessions` opens a two-column picker containing up to 20 of the most recently active resumable sessions for the selected profile and current workspace. The main rows show a session number and safe brief description. The focused row also shows the start date, last activity date, and origin such as CLI or Telegram. Use the arrow keys and press Enter to resume. Empty, ended, child, and internal Task sessions are hidden. `estacoda sessions list` keeps the existing non-interactive operator listing.
+In an interactive terminal, `estacoda sessions` opens a two-column picker containing up to 20 of the most recently active resumable sessions for the selected profile and current workspace. The main rows show a session number and safe brief description. The focused row also shows the start date, last activity date, and immutable origin such as CLI or Telegram. Use the arrow keys and press Enter to resume; press Escape to cancel. Empty, ended, child, and internal Task sessions are hidden. `estacoda sessions list` keeps the existing non-interactive operator listing.
+
+`estacoda sessions open <session-id>` bypasses the picker but not the safety boundary. The target must be an active, user-facing root session in the selected profile and current workspace. `estacoda --continue` applies the same validation to the profile/workspace-scoped last-session pointer. Neither path changes channel attachments or the session's original CLI/Telegram origin.
 
 `sessions recall` is bounded historical recall. It is profile-scoped and workspace-scoped when workspace metadata is available. Recalled content is labeled as untrusted context and cannot override current instructions.
 
@@ -88,8 +96,8 @@ Inside an active CLI session:
 
 | Command | Purpose |
 |---------|---------|
-| `/sessions` | List active sessions |
-| `/switch <session-id>` | Switch to another session |
+| `/sessions` | Open the same picker, excluding the current session |
+| `/switch <session-id>` | Switch to an active user-facing root session in this profile and workspace |
 | `/new` | Start a fresh session |
 | `/reset` | Start a fresh session |
 
@@ -124,10 +132,13 @@ Session persistence is global but profile-scoped:
 
 ```
 ~/.estacoda/
-  sessions.sqlite      # SQLite sessions, messages, events, and finalization queue
+  sessions.sqlite       # SQLite sessions, messages, events, and finalization queue
+  cli-sessions.json     # v2 last-CLI-session pointers by profile and workspace
 ```
 
-The session DB is SQLite. Session and finalization rows carry `profile_id` scope; the global location does not permit cross-profile reads. It stores messages, events, compression state, and durable background-finalization metadata. Surface pointers remain in profile-local gateway state. Legacy `cli-sessions.json` files from earlier versions are ignored. If the session DB is missing or corrupted, sessions cannot be listed, recalled, or resumed.
+The session DB is SQLite. Session and finalization rows carry `profile_id` scope; the global location does not permit cross-profile reads. It stores messages, events, compression state, and durable background-finalization metadata. Surface pointers remain in profile-local gateway state.
+
+`cli-sessions.json` is a versioned convenience index, not a transcript store or authorization boundary. Version 2 stores only `profileId`, normalized `workspaceRoot`, `sessionId`, and `updatedAt`; it is written atomically with `0600` permissions. Version 1 and malformed files are ignored. Every referenced session is revalidated against `sessions.sqlite` before it can be resumed.
 
 ---
 
@@ -135,7 +146,9 @@ The session DB is SQLite. Session and finalization rows carry `profile_id` scope
 
 **Wrong profile:** Sessions are profile-scoped. If you switch profiles with `estacoda profile use <name>`, existing sessions from the previous profile are no longer visible. They are not deleted; they belong to the other profile.
 
-**Missing session:** If a session ID does not exist in the current profile's session DB, commands return `session not found`. Check `estacoda sessions list` and verify the active profile.
+**Missing or out-of-scope session:** `sessions open`, `/sessions`, `/switch`, and `--continue` reject sessions that are missing, ended, internal, child sessions, or outside the selected profile and current workspace. The failure is deliberately generic so another profile or workspace is not disclosed. Run `estacoda sessions` in the intended workspace.
+
+**Missing or stale continuation pointer:** `estacoda --continue` fails instead of creating or guessing a session. Choose one with `estacoda sessions`, or start fresh with bare `estacoda`.
 
 **Session DB issues:** If `sessions.sqlite` is corrupted or locked, session commands fail. The CLI may fall back to an in-memory session. In that case, persistence, recall, attach/detach, and queued finalization are unavailable. Restart the CLI and check file permissions.
 
@@ -154,6 +167,12 @@ estacoda sessions list
 
 # Inspect current session
 estacoda sessions current
+
+# Continue the last scoped CLI session
+estacoda --continue
+
+# Open a known safe session directly
+estacoda sessions open <session-id>
 
 # Switch to a known good session
 /switch <session-id>

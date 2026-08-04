@@ -81,6 +81,7 @@ Not every file or directory exists before the related capability runs.
 |---|---|
 | `~/.estacoda/active-profile.json` | Currently selected profile |
 | `~/.estacoda/sessions.sqlite` | Session database, with rows scoped by `profile_id` |
+| `~/.estacoda/cli-sessions.json` | Version 2 explicit-continuation pointers keyed by profile and workspace; never an authorization boundary |
 | `~/.estacoda/memory/shared/` | Shared memory across profiles |
 | `~/.estacoda/trust.json` | Workspace trust grants keyed by directory |
 | `~/.estacoda/workspace-approvals.json` | Persistent workspace approval grants keyed by directory and action |

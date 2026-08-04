@@ -337,6 +337,20 @@ describe("profileCommand", () => {
     });
   });
 
+  it("documents fresh launch, explicit continuation, and command-local profiles in CLI help", async () => {
+    const result = await runCliCommand({
+      argv: ["help"],
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Launch options");
+    expect(result.output).toContain("estacoda                         Start a fresh interactive session");
+    expect(result.output).toContain("estacoda --continue              Continue the last session for this profile and workspace");
+    expect(result.output).toContain("estacoda --profile <id> [...]    Select a profile for this command only");
+  });
+
   it("uses --profile for the current command without changing active-profile.json", async () => {
     await ensureProfileSkeleton({ homeDir: tempDir, profileId: "default", blank: true });
     await ensureProfileSkeleton({ homeDir: tempDir, profileId: "research", blank: true });

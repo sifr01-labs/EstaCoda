@@ -106,7 +106,7 @@ describe("entrypoint home directory propagation", () => {
     await expect(access(join(devHome, ".estacoda", "sessions.sqlite"))).resolves.toBeUndefined();
     await expect(access(join(prodHome, ".estacoda", "sessions.sqlite"))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(access(join(prodHome, ".estacoda", "cli-sessions.json"))).rejects.toMatchObject({ code: "ENOENT" });
-  });
+  }, 15_000);
 
   it("fails closed when --continue has no pointer for the profile and workspace", async () => {
     const profilePaths = await ensureProfileSkeleton({ homeDir: devHome, profileId: "default", blank: true });

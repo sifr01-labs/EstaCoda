@@ -167,7 +167,7 @@ In-session commands:
 
 | Command | Purpose |
 |---------|---------|
-| `/sessions` | List active sessions |
+| `/sessions` | Open the workspace-scoped picker in an interactive CLI; list sessions where picker adoption is unavailable |
 | `/search <query>` | Search session history |
 | `/session recall <query>` | Summarize historical session matches |
 | `/sessions recall <query>` | Alias for session recall where supported |
@@ -308,7 +308,9 @@ Approval inspection commands are normal interactive slash commands:
 
 ## Session Resume
 
-Every CLI invocation that reaches the runtime starts a fresh session unless the user explicitly selected one through `estacoda sessions`. The picker handoff is the only startup resume path; normal setup, profile, workspace, and trust checks still run before the selected session starts. In-session `/switch` remains available for an already-running CLI.
+Every CLI invocation that reaches the runtime starts a fresh session unless the user explicitly resumes one. Startup has three explicit continuation paths: `estacoda --continue` reads the version 2 profile/workspace pointer, `estacoda sessions` returns a picker handoff, and `estacoda sessions open <session-id>` returns a direct handoff. Normal setup, profile, workspace, and trust checks still run before the selected session starts.
+
+`PersistentCliSessionStore` writes `~/.estacoda/cli-sessions.json` atomically with `0600` permissions. Entries are keyed by normalized profile and workspace and contain no transcript data. Version 1 or malformed files fail closed. `resolveSessionForResume` then checks the SQLite record before every continuation or switch: the target must match the selected profile and current workspace and be an active, user-facing root session. `/sessions` excludes the active session and revalidates after selection; `/switch` applies the same boundary. Gateway `/sessions` retains its non-picker surface semantics, and CLI continuation never rewrites gateway origin or attachment state.
 
 ## Setup And Onboarding
 

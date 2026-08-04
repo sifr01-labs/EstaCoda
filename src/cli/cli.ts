@@ -4168,6 +4168,11 @@ function help(): string {
     ...commands.map(
       (cmd) => `  estacoda ${cmd.name.padEnd(maxWidth)}  ${cmd.description}`
     ),
+    "",
+    "Launch options",
+    "  estacoda                         Start a fresh interactive session",
+    "  estacoda --continue              Continue the last session for this profile and workspace",
+    "  estacoda --profile <id> [...]    Select a profile for this command only",
   ].join("\n");
 }
 
