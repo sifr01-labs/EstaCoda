@@ -878,6 +878,7 @@ cursor navigation. Use the same Arabic/Latin input in each emulator:
 | Native bidi terminal | Arabic shaping remains connected; `subagents` and `RSI` remain internally LTR; the row is RTL-aligned; neighboring prompt/status chrome does not move. |
 | Windows Terminal or VS Code integrated terminal | Papyrus selects software ordering; the visible cluster order matches native mode without double reversal. |
 | Submit with Enter | The submitted prompt rail preserves the same Arabic/Latin reading order, keeps its marker fixed at the left edge, and does not replace the logical runtime payload with visual-order text. |
+| Paste as an attachment | The attachment card preview preserves the Arabic/Latin reading order in native and software modes, stays inside its borders at narrow widths, and submission retains the original logical text. |
 | Soft wrap before an Arabic word | The caret at the first character after the wrap appears on the next row. Left/Right crosses the wrap once and never becomes stuck. |
 | Explicit newline between two Arabic lines | Left/Right follows logical continuity at the line boundary and never jumps from the start of the first line to the end of the second. |
 | Mixed-direction ghost completion | The completion is visible in both native and software modes, while accepting or submitting still uses only the logical editor buffer. |

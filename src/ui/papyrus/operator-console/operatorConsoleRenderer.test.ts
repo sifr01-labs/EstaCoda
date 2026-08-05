@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { resolveTokens } from "../../../theme/token-resolver.js";
+import { RLI } from "../../bidi.js";
 import { stringWidth } from "../screen/stringWidth.js";
 import {
+  createPastedTextAttachment,
   createOperatorConsoleStyle,
   createInitialOperatorConsoleState,
   createOperatorConsoleLayout,
@@ -199,6 +201,26 @@ describe("Papyrus operator console renderer", () => {
     );
     expect(output.at(-1)).toContain("◷ 01:12");
     expect(output.every((line) => stringWidth(line) <= 120)).toBe(true);
+  });
+
+  it("forwards the terminal software bidi mode to attachment previews", () => {
+    const text = "هلا ممكن تستخدم ٣ subagents وتبحث عن RSI";
+    const state = createState({
+      terminal: { width: 100, height: 20, isTty: true, bidiMode: "software" },
+      attachments: [createPastedTextAttachment({
+        id: "paste-mixed-software",
+        content: text,
+      })],
+    });
+    const layout = createOperatorConsoleLayout(state, { width: 100, height: 20, isTty: true });
+    const attachmentOutput = renderOperatorConsoleLines(state, layout)
+      .filter((line) => line.region === "attachments")
+      .map((line) => line.text)
+      .join("\n");
+
+    expect(attachmentOutput).toContain("RSI نع ثحبتو subagents ٣ مدختست نكمم اله");
+    expect(attachmentOutput).not.toContain(RLI);
+    expect(state.attachments[0]?.content).toBe(text);
   });
 
   it("renders streaming segments and live tail between transcript and turn activity", () => {

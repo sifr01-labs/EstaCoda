@@ -86,6 +86,7 @@ function renderRegionLines(
       width: region.width,
       height: region.height,
       focusedAttachmentId: state.focus.target.kind === "attachment" ? state.focus.target.attachmentId : undefined,
+      bidi: state.terminal.bidiMode,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "taskCards") {

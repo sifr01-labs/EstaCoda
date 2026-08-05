@@ -406,6 +406,9 @@ console chrome. Pure LTR input retains the existing fast path without isolates.
 Submitted user prompt rails reuse the same layout in read-only mode without RTL
 alignment. The rail marker remains outside the directional paragraph, technical
 tokens stay isolated, and the runtime payload remains the original logical text.
+Pasted-text attachment cards use that read-only layout for their bounded preview
+row as well. Preview redaction still happens before layout, and neither native nor
+software rendering changes the stored attachment content that is submitted.
 
 The live terminal boundary resolves Papyrus's existing bidi policy once per
 frame. Native mode emits isolated logical-order text so the terminal retains
