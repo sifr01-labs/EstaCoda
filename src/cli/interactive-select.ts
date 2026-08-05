@@ -25,6 +25,9 @@ import {
 
 const HIDE_CURSOR = "\x1b[?25l";
 const SHOW_CURSOR = "\x1b[?25h";
+const SESSION_PICKER_WIDE_CHROME_ROWS = 7;
+const SESSION_PICKER_NARROW_CHROME_ROWS = 10;
+const SESSION_PICKER_VIEWPORT_GUTTER_ROWS = 1;
 
 export type SelectPromptInput<T> = {
   title: string;
@@ -100,7 +103,7 @@ async function plainFallback<T>(input: Readable, output: Writable, selection: Se
 async function ttySelect<T>(input: Readable, output: Writable, selection: SelectPromptInput<T>): Promise<T> {
   return await new Promise<T>((resolve, reject) => {
     const ttyInput = input as NodeJS.ReadStream;
-    let selectState = createPapyrusSelectState(selection);
+    let selectState = createPapyrusSelectState(fitSelectionToTerminalHeight(selection, output));
     let settled = false;
     let restored = false;
     let cursorHidden = false;
@@ -111,7 +114,11 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
 
     const render = () => {
       const selectedIndex = focusedSelectionIndex(selectState);
-      const text = renderTtySelection(selection, selectedIndex, renderer);
+      const text = renderTtySelection(
+        fitSelectionToTerminalHeight(selection, output),
+        selectedIndex,
+        renderer
+      );
       renderLoop.render(text);
     };
 
@@ -203,6 +210,31 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
 
     renderSafely();
   });
+}
+
+function fitSelectionToTerminalHeight<T>(
+  selection: SelectPromptInput<T>,
+  output: Writable
+): SelectPromptInput<T> {
+  if (selection.surface !== "sessionPicker") return selection;
+  const terminalRows = (output as NodeJS.WriteStream).rows;
+  if (typeof terminalRows !== "number" || !Number.isFinite(terminalRows) || terminalRows <= 0) {
+    return selection;
+  }
+  const configuredRows = Math.max(
+    1,
+    Math.min(selection.options.length, selection.visibleRows ?? selection.options.length)
+  );
+  const terminalColumns = (output as NodeJS.WriteStream).columns ?? 80;
+  const chromeRows = terminalColumns < 100
+    ? SESSION_PICKER_NARROW_CHROME_ROWS
+    : SESSION_PICKER_WIDE_CHROME_ROWS;
+  const availableRows = Math.max(
+    1,
+    Math.floor(terminalRows) - chromeRows - SESSION_PICKER_VIEWPORT_GUTTER_ROWS
+  );
+  const visibleRows = Math.min(configuredRows, availableRows);
+  return visibleRows === selection.visibleRows ? selection : { ...selection, visibleRows };
 }
 
 class TtySelectRenderLoop {

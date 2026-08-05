@@ -351,6 +351,99 @@ describe("interactive-select prompt card surface", () => {
     await expect(pending).resolves.toBe("session-6");
   });
 
+  it("keeps session picker redraws inside the terminal viewport", async () => {
+    clearCiEnv();
+    process.env.FORCE_COLOR = "1";
+    process.env.LANG = "ar_EG.UTF-8";
+    const { input, output } = makeTtyStreams(120, 14);
+    const pending = selectOption(input, output, {
+      title: "Choose a session",
+      surface: "sessionPicker",
+      columns: [
+        { key: "number", header: "#", align: "right" },
+        { key: "session", header: "Session" },
+        { key: "started", header: "Started" },
+        { key: "active", header: "Last active" },
+        { key: "origin", header: "Via" },
+      ],
+      options: Array.from({ length: 10 }, (_value, index) => ({
+        value: `session-${index + 1}`,
+        label: `جلسة ${index + 1} لمراجعة mixed Arabic and English terminal rendering`,
+        cells: {
+          number: String(index + 1),
+          session: `جلسة ${index + 1} لمراجعة mixed Arabic and English terminal rendering`,
+          started: "04 Aug 2026, 10:00",
+          active: "05 Aug 2026, 12:30",
+          origin: index % 2 === 0 ? "CLI" : "Telegram",
+        },
+      })),
+      visibleRows: 10,
+      instruction: "↑↓ navigate  ·  ENTER open  ·  ESC cancel  ·  CTRL+C exit",
+      fallbackPrompt: "Session number [1]: ",
+      escapeCancels: true,
+    });
+
+    await Promise.resolve();
+    const initialFrame = stripAnsi(latestRenderedFrame(output.getText()));
+    expect(initialFrame).toContain("جلسة 1");
+    expect(initialFrame).toContain("جلسة 6");
+    expect(initialFrame).not.toContain("جلسة 7");
+    expect(initialFrame.split("\n").length).toBeLessThanOrEqual(13);
+    expect(Math.max(...initialFrame.split("\n").map(measureVisibleWidth))).toBeLessThanOrEqual(118);
+
+    press(input, "\x1b[F");
+    const finalFrame = stripAnsi(latestRenderedFrame(output.getText()));
+    expect(finalFrame.match(/Choose a session/gu)).toHaveLength(1);
+    expect(finalFrame).not.toContain("جلسة 1 لمراجعة");
+    expect(finalFrame).toContain("جلسة 10");
+    expect(finalFrame.split("\n").length).toBeLessThanOrEqual(13);
+    expect(Math.max(...finalFrame.split("\n").map(measureVisibleWidth))).toBeLessThanOrEqual(118);
+    press(input, "\r");
+
+    await expect(pending).resolves.toBe("session-10");
+  });
+
+  it("reserves narrow session detail rows when sizing the picker viewport", async () => {
+    clearCiEnv();
+    const { input, output } = makeTtyStreams(64, 14);
+    const pending = selectOption(input, output, {
+      title: "Choose a session",
+      surface: "sessionPicker",
+      columns: [
+        { key: "number", header: "#", align: "right" },
+        { key: "session", header: "Session" },
+        { key: "started", header: "Started" },
+        { key: "active", header: "Last active" },
+        { key: "origin", header: "Via" },
+      ],
+      options: Array.from({ length: 8 }, (_value, index) => ({
+        value: `session-${index + 1}`,
+        label: `Session ${index + 1}`,
+        cells: {
+          number: String(index + 1),
+          session: `Session ${index + 1}`,
+          started: "04 Aug 2026, 10:00",
+          active: "05 Aug 2026, 12:30",
+          origin: "Telegram",
+        },
+      })),
+      visibleRows: 10,
+      instruction: "↑↓ navigate  ·  ENTER open  ·  ESC cancel  ·  CTRL+C exit",
+      fallbackPrompt: "Session number [1]: ",
+    });
+
+    await Promise.resolve();
+    const frame = stripAnsi(latestRenderedFrame(output.getText()));
+    expect(frame).toContain("Session 1");
+    expect(frame).toContain("Session 3");
+    expect(frame).not.toContain("Session 4");
+    expect(frame.split("\n").length).toBeLessThanOrEqual(13);
+    expect(Math.max(...frame.split("\n").map(measureVisibleWidth))).toBeLessThanOrEqual(62);
+    press(input, "\r");
+
+    await expect(pending).resolves.toBe("session-1");
+  });
+
   it("renders no-color prompt cards without ANSI leakage", async () => {
     process.env.FORCE_COLOR = "0";
     const input = Readable.from(["\n"]);
@@ -742,12 +835,14 @@ function clearCiEnv(): void {
   delete process.env.CIRCLECI;
 }
 
-function makeTtyStreams(columns = 80): { input: TtyInput; output: CapturingOutput } {
+function makeTtyStreams(columns = 80, rows?: number): { input: TtyInput; output: CapturingOutput } {
   const input = new PassThrough() as TtyInput;
   input.isTTY = true;
   input.setRawMode = vi.fn();
   input.resume = vi.fn(() => input);
-  return { input, output: makeOutput(true, columns) };
+  const output = makeOutput(true, columns);
+  if (rows !== undefined) output.rows = rows;
+  return { input, output };
 }
 
 function press(input: TtyInput, sequence: string): void {

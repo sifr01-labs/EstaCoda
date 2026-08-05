@@ -196,6 +196,10 @@ export class StandardRenderer {
     return this.#color(text, this.#tokens.contract.palette.action);
   }
 
+  #accent(text: string): string {
+    return this.#color(text, this.#tokens.contract.palette.accent);
+  }
+
   #primary(text: string): string {
     return this.#color(text, this.#tokens.contract.text.primary);
   }
@@ -1546,16 +1550,21 @@ export class StandardRenderer {
     ));
     const availableWidth = Math.max(
       1,
-      this.#capabilities.terminalWidth - (vm.surface === "sessionPicker" ? 7 : 3)
+      this.#capabilities.terminalWidth - (vm.surface === "sessionPicker" ? 10 : 3)
     );
-    const widths = fitPickerColumnWidths(columns, rows, availableWidth);
+    const widths = vm.surface === "sessionPicker"
+      ? fitSessionPickerColumnWidths(columns, rows, availableWidth)
+      : fitPickerColumnWidths(columns, rows, availableWidth);
     const renderCells = (values: readonly string[], selected = false) => columns.map((column, columnIndex) => {
       const width = widths[columnIndex] ?? 0;
       const rawValue = pickerCellText(values[columnIndex] ?? "", vm.direction, columnIndex === 0);
       const value = measureVisibleWidth(rawValue) <= width ? rawValue : truncateVisible(rawValue, width);
       const padded = padVisibleAlign(value, width, column.alignment ?? "left");
       if (selected) return vm.surface === "sessionPicker" ? padded : this.#action(padded);
-      if (vm.surface === "sessionPicker" && column.key === "origin") return this.#action(padded);
+      if (vm.surface === "sessionPicker") {
+        if (column.key === "origin") return this.#accent(padded);
+        if (column.key === "started" || column.key === "active") return this.#secondary(padded);
+      }
       return columnIndex === 0 ? this.#muted(padded) : this.#primary(padded);
     }).join("  ");
     const lines = [
@@ -1630,7 +1639,8 @@ export class StandardRenderer {
   }
 
   #renderNarrowSessionPicker(vm: PickerViewModel): string {
-    const frameWidth = Math.max(8, Math.min(this.#capabilities.terminalWidth, 72));
+    const terminalGutter = this.#capabilities.terminalWidth >= 10 ? 2 : 0;
+    const frameWidth = Math.max(8, Math.min(this.#capabilities.terminalWidth - terminalGutter, 72));
     const innerWidth = frameWidth - 4;
     const horizontal = this.#useUnicode ? "─" : "-";
     const top = this.#useUnicode ? `╭${horizontal.repeat(frameWidth - 2)}╮` : `+${horizontal.repeat(frameWidth - 2)}+`;
@@ -1645,7 +1655,8 @@ export class StandardRenderer {
       const number = option.cells?.number ?? "";
       const description = pickerCellText(option.cells?.session ?? option.label, vm.direction, false);
       const marker = selected ? (this.#useUnicode ? "❯" : ">") : " ";
-      const row = `${marker} ${number.padStart(2)}  ${truncateVisible(description, Math.max(1, innerWidth - 6))}`;
+      const rowPrefix = `${marker} ${number.padStart(2)}  `;
+      const row = `${rowPrefix}${truncateVisible(description, Math.max(1, innerWidth - measureVisibleWidth(rowPrefix)))}`;
       const paddedRow = padVisibleEnd(row, innerWidth);
       const left = this.#surfaceBorderSubtle(this.#useUnicode ? "│ " : "| ");
       const right = this.#surfaceBorderSubtle(this.#useUnicode ? " │" : " |");
@@ -1665,7 +1676,7 @@ export class StandardRenderer {
         }
         const originLabel = vm.columns?.find((column) => column.key === "origin")?.header ?? "Via";
         const originLine = padVisibleEnd(`  ${originLabel}: ${origin}`, innerWidth);
-        lines.push(`${left}${this.#action(originLine)}${right}`);
+        lines.push(`${left}${this.#accent(originLine)}${right}`);
       }
     }
     lines.push(this.#surfaceBorderSubtle(bottom));
@@ -2594,6 +2605,59 @@ function fitPickerColumnWidths(
     const reduction = Math.min(reducible, excess);
     widths[columnIndex] = (widths[columnIndex] ?? 0) - reduction;
     excess -= reduction;
+  }
+
+  return widths;
+}
+
+function fitSessionPickerColumnWidths(
+  columns: readonly { readonly key: string; readonly header: string }[],
+  rows: readonly (readonly string[])[],
+  availableWidth: number
+): number[] {
+  if (columns.length === 0) return [];
+  const maximumWidths: Readonly<Record<string, number>> = {
+    number: 2,
+    session: 60,
+    started: 20,
+    active: 20,
+    origin: 10,
+  };
+  const gapWidth = Math.max(0, columns.length - 1) * 2;
+  const contentBudget = Math.max(columns.length, availableWidth - gapWidth);
+  const widths = columns.map((column, columnIndex) => {
+    const naturalWidth = Math.max(
+      1,
+      measureVisibleWidth(column.header),
+      ...rows.map((row) => measureVisibleWidth(row[columnIndex] ?? ""))
+    );
+    return Math.min(naturalWidth, maximumWidths[column.key] ?? naturalWidth);
+  });
+  let excess = Math.max(0, widths.reduce((sum, width) => sum + width, 0) - contentBudget);
+
+  const sessionIndex = columns.findIndex((column) => column.key === "session");
+  if (sessionIndex >= 0 && excess > 0) {
+    const minimum = Math.max(1, measureVisibleWidth(columns[sessionIndex]?.header ?? ""), 24);
+    const reducible = Math.max(0, (widths[sessionIndex] ?? 0) - minimum);
+    const reduction = Math.min(reducible, excess);
+    widths[sessionIndex] = (widths[sessionIndex] ?? 0) - reduction;
+    excess -= reduction;
+  }
+
+  for (let columnIndex = widths.length - 1; columnIndex >= 0 && excess > 0; columnIndex -= 1) {
+    if (columnIndex === sessionIndex) continue;
+    const minimum = Math.max(1, measureVisibleWidth(columns[columnIndex]?.header ?? ""));
+    const reducible = Math.max(0, (widths[columnIndex] ?? 0) - minimum);
+    const reduction = Math.min(reducible, excess);
+    widths[columnIndex] = (widths[columnIndex] ?? 0) - reduction;
+    excess -= reduction;
+  }
+
+  if (sessionIndex >= 0 && excess > 0) {
+    const minimum = Math.max(1, measureVisibleWidth(columns[sessionIndex]?.header ?? ""));
+    const reducible = Math.max(0, (widths[sessionIndex] ?? 0) - minimum);
+    const reduction = Math.min(reducible, excess);
+    widths[sessionIndex] = (widths[sessionIndex] ?? 0) - reduction;
   }
 
   return widths;

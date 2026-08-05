@@ -2284,7 +2284,9 @@ describe("StandardRenderer — empty and edge states", () => {
   });
 
   it("renders the session picker as a tokenized wide table", () => {
-    const r = renderer("dark", fullCaps());
+    const caps = { ...fullCaps(), terminalWidth: 150 };
+    const r = renderer("dark", caps);
+    const longDescription = "Review deployment evidence and investigate every remaining production issue before release ".repeat(2);
     const vm = buildPickerViewModel({
       title: "Choose a session",
       surface: "sessionPicker",
@@ -2295,16 +2297,42 @@ describe("StandardRenderer — empty and edge states", () => {
         { key: "active", header: "Last active" },
         { key: "origin", header: "Via" },
       ],
-      options: [{
-        id: "one",
-        label: "Review deployment",
-        selected: true,
-        cells: { number: "1", session: "Review deployment", started: "04 Aug, 10:00", active: "04 Aug, 11:00", origin: "Telegram" },
-      }],
+      options: [
+        {
+          id: "one",
+          label: longDescription,
+          selected: true,
+          cells: {
+            number: "1",
+            session: longDescription,
+            started: "04 Aug 2026, 10:00",
+            active: "04 Aug 2026, 11:00",
+            origin: "CLI",
+          },
+        },
+        {
+          id: "two",
+          label: "Review Telegram deployment",
+          cells: {
+            number: "2",
+            session: "Review Telegram deployment",
+            started: "03 Aug 2026, 09:00",
+            active: "05 Aug 2026, 12:30",
+            origin: "Telegram",
+          },
+        },
+      ],
     });
     const out = r.renderPicker(vm);
-    expect(stripAnsi(out)).toContain("Last active");
-    expect(stripAnsi(out)).toContain("Telegram");
+    const plain = stripAnsi(out);
+    expect(plain).toContain("Last active");
+    expect(plain).toContain("03 Aug 2026, 09:00");
+    expect(plain).toContain("05 Aug 2026, 12:30");
+    expect(plain).toContain("Telegram");
+    expect(plain).not.toContain(longDescription);
+    expect(Math.max(...plain.split("\n").map(measureVisibleWidth))).toBeLessThanOrEqual(130);
+    expect(out).toContain("38;2;176;176;176m03 Aug 2026, 09:00");
+    expect(out).toContain("38;2;78;161;255mTelegram");
     expect(out).toContain("48;2;26;58;92m");
   });
 
@@ -2329,7 +2357,7 @@ describe("StandardRenderer — empty and edge states", () => {
       instruction: "Up/Down navigate | ESC cancel",
     });
     const out = r.renderPicker(vm);
-    expect(out).toContain("+--------------------------------------------------------------+");
+    expect(out.split("\n").some((line) => line.startsWith("+") && measureVisibleWidth(line) === 62)).toBe(true);
     expect(out).toContain("Started: 04 Aug, 10:00");
     expect(out).toContain("Last active: 04 Aug, 11:00");
     expect(out).toContain("Via: CLI");
