@@ -10,6 +10,7 @@ import {
 import { createOperatorConsoleRuntimeHost } from "../ui/papyrus/operator-console/operatorConsoleRuntimeHost.js";
 import type { SetupSurfaceState, StatusRailState, StreamingState } from "../ui/papyrus/operator-console/operatorConsoleState.js";
 import { createPastedTextAttachment } from "../ui/papyrus/operator-console/index.js";
+import { resolveBidiMode } from "../ui/papyrus/screen/bidi.js";
 
 const forbiddenManagedRegionOutput = /\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u;
 
@@ -66,6 +67,22 @@ describe("raw prompt render loop", () => {
     expect(output.text()).toContain("kimi-k2.7-code ● · ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k");
     expect(output.text()).toContain("· ◷ 01:12");
     expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("routes the resolved software bidi policy through the Operator Console prompt", () => {
+    const output = fakeOutput({ columns: 20 });
+    const loop = new RawPromptRenderLoop(output);
+
+    loop.render({
+      prompt: "",
+      state: createLineEditorState("هلا RSI"),
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 20, height: 6, isTty: true, bidiMode: "software" },
+      },
+    });
+
+    expect(output.text()).toContain("RSI اله");
   });
 
   it("redraws Operator Console frames from the previous prompt cursor row", () => {
@@ -214,7 +231,12 @@ describe("raw prompt render loop", () => {
       mode: "prompt",
     }));
     expect(render).toHaveBeenCalledTimes(2);
-    expect(host.getState().terminal).toEqual({ width: 60, height: 10, isTty: true });
+    expect(host.getState().terminal).toEqual({
+      width: 60,
+      height: 10,
+      isTty: true,
+      bidiMode: resolveBidiMode(),
+    });
     expect(host.getState().status.context.usedTokens).toBe(2000);
     expect(host.getState().status.sessionTimer.elapsedMs).toBe(2000);
   });
@@ -753,6 +775,32 @@ describe("raw prompt render loop", () => {
     expect(output.text()).toContain("> hello");
     expect(output.text()).toContain("\x1b[5C");
     expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("renders mixed-direction ghost text in native and software terminal modes", () => {
+    const value = "هلا ";
+    const nativeOutput = fakeOutput({ columns: 20 });
+    const softwareOutput = fakeOutput({ columns: 20 });
+
+    new RawPromptRenderLoop(nativeOutput).render({
+      prompt: "> ",
+      state: createLineEditorState(value),
+      ghostText: { text: "RSI" },
+      bidiMode: "native",
+    });
+    new RawPromptRenderLoop(softwareOutput).render({
+      prompt: "> ",
+      state: createLineEditorState(value),
+      ghostText: { text: "RSI" },
+      bidiMode: "software",
+    });
+
+    expect(nativeOutput.text()).toContain(
+      `> ${" ".repeat(11)}${isolateRtl(isolateTechnicalTokens("هلا RSI"))}`
+    );
+    expect(softwareOutput.text()).toContain(`> ${" ".repeat(11)}RSI اله`);
+    expect(nativeOutput.text()).toContain("\x1b[16C");
+    expect(softwareOutput.text()).toContain("\x1b[16C");
   });
 
   it("keeps fallback overlay rows only when Operator Console is disabled", () => {

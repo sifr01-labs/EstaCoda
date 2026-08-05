@@ -56,6 +56,7 @@ describe("Papyrus substrate boundaries", () => {
     expect(read("index.ts").trim()).toBe("export {};");
     expect(exportedModules(read("input/index.ts"))).toEqual([
       "./clipboardHelper.js",
+      "./editableTextLayout.js",
       "./providers/directoryProvider.js",
       "./providers/fileProvider.js",
       "./providers/mcpResourceProvider.js",

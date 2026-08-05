@@ -863,6 +863,29 @@ fallback prompt selection. Use disposable homes and fake credentials only.
 | Back/cancel behavior | Use `Back`, `Cancel`, `Esc`, or `Ctrl-C` in setup/editor prompts | `Back` returns to the previous meaningful structured step where supported. Cancel before apply leaves config, trust, and `.env` unchanged. Terminal state is restored. |
 | Non-TTY summary/plain output | Pipe setup/help output, for example `estacoda setup --help \| cat` or run a non-interactive setup path in CI | Output remains plain and deterministic, with no cursor controls, raw prompt behavior, or Papyrus select cursor movement. |
 
+### 10.18 Mixed-direction editable input matrix
+
+Run this matrix in a real interactive terminal after changing editable text
+layout, prompt/steer rendering, raw redraws, terminal capability resolution, or
+cursor navigation. Use the same Arabic/Latin input in each emulator:
+
+```text
+هلا ممكن تستخدم ٣ subagents وتبحث عن RSI
+```
+
+| Scenario | Verify |
+|----------|--------|
+| Native bidi terminal | Arabic shaping remains connected; `subagents` and `RSI` remain internally LTR; the row is RTL-aligned; neighboring prompt/status chrome does not move. |
+| Windows Terminal or VS Code integrated terminal | Papyrus selects software ordering; the visible cluster order matches native mode without double reversal. |
+| Soft wrap before an Arabic word | The caret at the first character after the wrap appears on the next row. Left/Right crosses the wrap once and never becomes stuck. |
+| Explicit newline between two Arabic lines | Left/Right follows logical continuity at the line boundary and never jumps from the start of the first line to the end of the second. |
+| Mixed-direction ghost completion | The completion is visible in both native and software modes, while accepting or submitting still uses only the logical editor buffer. |
+| Pasted leading RLM, ALM, or bidi override | Removed untrusted controls do not affect base direction, alignment, wrapping, or adjacent chrome. |
+
+Record the emulator name/version and whether Papyrus selected native or software
+mode. A new terminal family is not considered supported until its real visual
+output and cursor movement pass this matrix.
+
 The renderer/input rollout flags no longer activate alternate interactive modes:
 
 ```bash

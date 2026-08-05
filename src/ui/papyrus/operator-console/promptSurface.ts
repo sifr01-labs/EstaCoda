@@ -6,6 +6,7 @@ import {
   type EditableTextRow,
 } from "../input/editableTextLayout.js";
 import type { PromptSurfaceState, TerminalMetrics } from "./operatorConsoleState.js";
+import type { BidiMode } from "../screen/bidi.js";
 import {
   styleBackgroundRow,
   styleColor,
@@ -17,6 +18,7 @@ export type PromptSurfaceRenderOptions = {
   readonly height?: number;
   readonly terminalHeight?: number;
   readonly style?: OperatorConsoleStyle;
+  readonly bidi?: BidiMode;
 };
 
 export type PromptSurfaceMetrics = {
@@ -60,7 +62,7 @@ export function renderPromptSurface(
   const contentWidth = width;
   const chrome = resolvePromptChrome(height);
   const inputRows = Math.max(1, height - chrome.topRows - chrome.bottomRows);
-  const logicalRows = getPromptLogicalRows(state, width);
+  const logicalRows = getPromptLogicalRows(state, width, options.bidi);
   const overflow = logicalRows.length > inputRows;
   const cursor = getPromptCursorPosition(state, logicalRows);
   const scrollOffset = getCursorVisibleScrollOffset(state, logicalRows.length, inputRows, overflow, cursor.row);
@@ -92,7 +94,7 @@ export function getPromptSurfaceMetrics(
     height: options.terminalHeight ?? 24,
     width: options.width,
   }));
-  const logicalRows = getPromptLogicalRows(state, options.width);
+  const logicalRows = getPromptLogicalRows(state, options.width, options.bidi);
   const chrome = resolvePromptChrome(height);
   const visibleRows = Math.max(1, height - chrome.topRows - chrome.bottomRows);
   const overflow = logicalRows.length > visibleRows;
@@ -141,12 +143,15 @@ type PromptLogicalRow = {
   readonly prefix: string;
   readonly startOffset: number;
   readonly endOffset: number;
-  readonly sourceEndOffset: number;
   readonly editable?: EditableTextRow;
   readonly cursorColumn?: number;
 };
 
-function getPromptLogicalRows(state: PromptSurfaceState, width: number | undefined): readonly PromptLogicalRow[] {
+function getPromptLogicalRows(
+  state: PromptSurfaceState,
+  width: number | undefined,
+  bidiMode: BidiMode = "native"
+): readonly PromptLogicalRow[] {
   const value = state.value.length === 0 ? state.placeholder ?? "" : state.value;
   const rows: PromptLogicalRow[] = [];
   const normalizedWidth = width === undefined ? Number.POSITIVE_INFINITY : normalizeDimension(width);
@@ -161,14 +166,13 @@ function getPromptLogicalRows(state: PromptSurfaceState, width: number | undefin
 
   for (const [index, editable] of layout.rows.entries()) {
     const prefix = rows.length === 0 ? "› " : "  ";
-    const renderedText = renderEditableTextRow(editable);
+    const renderedText = renderEditableTextRow(editable, { bidi: bidiMode });
     rows.push({
       text: editable.text,
       prefix,
       content: `${prefix}${renderedText}`,
       startOffset: editable.startOffset,
       endOffset: editable.endOffset,
-      sourceEndOffset: editable.sourceEndOffset,
       editable,
       cursorColumn: index === layout.cursorRow
         ? stringWidth(prefix) + (state.value.length === 0 ? 0 : layout.cursorColumn)
@@ -183,7 +187,6 @@ function getPromptLogicalRows(state: PromptSurfaceState, width: number | undefin
       prefix: "› ",
       startOffset: 0,
       endOffset: 0,
-      sourceEndOffset: 0,
       cursorColumn: 2,
     }];
   }
@@ -238,7 +241,7 @@ function getPromptCursorPosition(
   const index = rows.findIndex((row, rowIndex) => {
     const next = rows[rowIndex + 1];
     return cursor >= row.startOffset &&
-      (cursor <= row.sourceEndOffset || next === undefined || cursor < next.startOffset);
+      (cursor <= row.endOffset || next === undefined || cursor < next.startOffset);
   });
   const rowIndex = index < 0 ? Math.max(0, rows.length - 1) : index;
   const row = rows[rowIndex];
@@ -276,11 +279,9 @@ function renderContentRow(
   const textColor = placeholder
     ? tokens.text.placeholder
     : row.prefix.length === 0 ? tokens.text.muted : tokens.text.primary;
-  const styledText = styleColor(style, row.editable?.renderText ?? row.text, textColor);
-  const renderedText = row.editable === undefined
-    ? styledText
-    : renderEditableTextRow(row.editable, styledText);
-  const content = `${prefix}${renderedText}`;
+  const renderedText = row.content.slice(row.prefix.length);
+  const styledText = styleColor(style, renderedText, textColor);
+  const content = `${prefix}${styledText}`;
   return styleBackgroundRow(style, content, width, tokens.surface.bgElevated);
 }
 
@@ -314,7 +315,6 @@ function staticPromptRow(content: string): PromptLogicalRow {
     prefix: "",
     startOffset: 0,
     endOffset: 0,
-    sourceEndOffset: 0,
   };
 }
 

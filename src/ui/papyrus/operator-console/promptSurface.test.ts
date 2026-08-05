@@ -269,6 +269,28 @@ describe("Papyrus operator console prompt surface", () => {
     expect(metrics.cursorColumn).toBe(16);
     expect(state.value).toBe(value);
   });
+
+  it("uses software visual ordering when the terminal policy requires it", () => {
+    const value = "هلا RSI";
+    const output = renderPromptSurface(prompt({ value, cursorOffset: value.length }), {
+      width: 20,
+      height: 3,
+      bidi: "software",
+    });
+
+    expect(output[1]).toContain(`› ${" ".repeat(11)}RSI اله`);
+    expect(output[1]).not.toContain(RLI);
+  });
+
+  it("places the cursor on the next row at an RTL soft-wrap boundary", () => {
+    const metrics = getPromptSurfaceMetrics(
+      prompt({ value: "مرحبا عالم", cursorOffset: 6 }),
+      { width: 8, height: 4 }
+    );
+
+    expect(metrics.logicalRows).toBe(2);
+    expect(metrics.cursorRow).toBe(1);
+  });
 });
 
 function prompt(input: Partial<PromptSurfaceState>): PromptSurfaceState {

@@ -354,10 +354,12 @@ function cloneTerminalMetrics(terminal: TerminalMetrics): TerminalMetrics {
 
 function normalizeTerminalMetrics(terminal: Partial<TerminalMetrics>): TerminalMetrics {
   const fallback = createDefaultTerminalMetrics();
+  const bidiMode = terminal.bidiMode ?? fallback.bidiMode;
   return {
     width: normalizeNonNegativeInteger(terminal.width ?? fallback.width),
     height: normalizeNonNegativeInteger(terminal.height ?? fallback.height),
     isTty: terminal.isTty ?? fallback.isTty,
+    ...(bidiMode === undefined ? {} : { bidiMode }),
   };
 }
 

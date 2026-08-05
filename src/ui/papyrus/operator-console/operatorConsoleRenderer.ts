@@ -70,6 +70,7 @@ function renderRegionLines(
       return renderSteerInputSurface(state.steer, {
         width: region.width,
         height: region.height,
+        bidi: state.terminal.bidiMode,
       }).map((text) => ({ region: region.kind, text }));
     }
     return renderPromptSurface(state.prompt, {
@@ -77,6 +78,7 @@ function renderRegionLines(
       height: region.height,
       terminalHeight: layoutHeightForRegion(region),
       style: state.style,
+      bidi: state.terminal.bidiMode,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "attachments") {

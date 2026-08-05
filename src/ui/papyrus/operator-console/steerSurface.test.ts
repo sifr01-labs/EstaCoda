@@ -44,6 +44,16 @@ describe("Papyrus operator console steer surface", () => {
     expect(metrics.cursorColumn).toBe(18);
   });
 
+  it("places the cursor on the next row at an RTL soft-wrap boundary", () => {
+    const metrics = getSteerInputSurfaceMetrics(steerDraft("مرحبا عالم", 6), {
+      width: 12,
+      height: 4,
+    });
+
+    expect(metrics.logicalRows).toBe(2);
+    expect(metrics.cursorRow).toBe(1);
+  });
+
   it("renders queued steer text and safe-boundary cancellation copy", () => {
     const output = renderQueuedSteerSurface(queuedSteer(), { width: 72 });
     const text = output.join("\n");
@@ -199,10 +209,10 @@ describe("Papyrus operator console steer surface", () => {
   });
 });
 
-function steerDraft(draft: string): SteerState {
+function steerDraft(draft: string, cursorOffset = draft.length): SteerState {
   return {
     draft,
-    cursorOffset: draft.length,
+    cursorOffset,
     mode: "drafting",
   };
 }

@@ -4,8 +4,10 @@ import {
   isolateLtr,
   isolateRtl,
   isolateTechnicalTokens,
+  FSI,
   LRI,
   PDI,
+  RLI,
   sanitizeBidiControls,
 } from "../../bidi.js";
 import {
@@ -14,12 +16,14 @@ import {
   moveCursorRight,
   normalizeCursorIndex,
 } from "../../input/cursor.js";
+import { shouldUseSoftwareBidi, type BidiMode } from "../screen/bidi.js";
 import { stringWidth } from "../screen/stringWidth.js";
 
 export type EditableTextDirection = "ltr" | "rtl";
 
 export type EditableTextVisualCluster = {
   readonly text: string;
+  readonly renderText: string;
   readonly logicalStart: number;
   readonly logicalEnd: number;
   readonly visualColumn: number;
@@ -32,7 +36,6 @@ export type EditableTextRow = {
   readonly renderText: string;
   readonly startOffset: number;
   readonly endOffset: number;
-  readonly sourceEndOffset: number;
   readonly direction: EditableTextDirection;
   readonly width: number;
   readonly leftPadding: number;
@@ -51,6 +54,10 @@ export type EditableTextLayoutOptions = {
   readonly cursorOffset?: number;
   readonly wrap?: boolean;
   readonly alignRtl?: boolean;
+};
+
+export type EditableTextRenderOptions = {
+  readonly bidi?: BidiMode;
 };
 
 const bidi = createBidi();
@@ -78,9 +85,15 @@ export function layoutEditableText(
   };
 }
 
-export function renderEditableTextRow(row: EditableTextRow, renderedText = row.renderText): string {
-  if (!row.hasBidi) return `${" ".repeat(row.leftPadding)}${renderedText}`;
-  const isolated = row.direction === "rtl" ? isolateRtl(renderedText) : isolateLtr(renderedText);
+export function renderEditableTextRow(
+  row: EditableTextRow,
+  options: EditableTextRenderOptions = {}
+): string {
+  if (!row.hasBidi) return `${" ".repeat(row.leftPadding)}${row.renderText}`;
+  if (shouldUseSoftwareBidi(options.bidi ?? "native")) {
+    return `${" ".repeat(row.leftPadding)}${visualText(row)}`;
+  }
+  const isolated = row.direction === "rtl" ? isolateRtl(row.renderText) : isolateLtr(row.renderText);
   return `${" ".repeat(row.leftPadding)}${isolated}`;
 }
 
@@ -109,21 +122,13 @@ export function moveEditableCursorVisual(
     ? [...stops].reverse().find((stop) => stop.column < currentColumn)
     : stops.find((stop) => stop.column > currentColumn);
   if (candidate !== undefined) return candidate.offset;
-
-  const adjacentRow = direction === "left"
-    ? layout.rows[layout.cursorRow - 1]
-    : layout.rows[layout.cursorRow + 1];
-  if (adjacentRow === undefined) return normalizeCursorIndex(text, cursorOffset);
-  const adjacentStops = visualCaretStops(adjacentRow);
-  const adjacent = direction === "left" ? adjacentStops.at(-1) : adjacentStops[0];
-  return adjacent?.offset ?? normalizeCursorIndex(text, cursorOffset);
+  return moveAcrossLogicalRowBoundary(layout, cursorOffset, direction);
 }
 
 type LogicalSegment = {
   readonly text: string;
   readonly startOffset: number;
   readonly endOffset: number;
-  readonly sourceEndOffset: number;
 };
 
 type ExplicitLine = {
@@ -139,7 +144,8 @@ function buildRows(
 ): readonly EditableTextRow[] {
   const rows: EditableTextRow[] = [];
   for (const line of splitExplicitLines(text)) {
-    const levels = bidi.getEmbeddingLevels(line.text);
+    const sanitizedLine = sanitizeBidiControls(line.text, "untrusted");
+    const levels = bidi.getEmbeddingLevels(sanitizedLine);
     const direction: EditableTextDirection = levels.paragraphs[0]?.level === 1 ? "rtl" : "ltr";
     const segments = wrap
       ? wrapLogicalLine(line.text, line.startOffset, maxCells)
@@ -157,7 +163,8 @@ function buildVisualRow(
   maxCells: number,
   alignRtl: boolean
 ): EditableTextRow {
-  const renderText = isolateTechnicalTokens(sanitizeBidiControls(segment.text, "untrusted"));
+  const sanitizedText = sanitizeBidiControls(segment.text, "untrusted");
+  const renderText = isolateTechnicalTokens(sanitizedText);
   const sourceIndices = mapRenderedIndicesToSource(segment.text, renderText);
   const levels = bidi.getEmbeddingLevels(renderText, direction);
   const spans = graphemeSpans(segment.text);
@@ -170,6 +177,9 @@ function buildVisualRow(
     if (sourceIndex === undefined) continue;
     visualRank.set(sourceIndex, Math.min(visualRank.get(sourceIndex) ?? Number.POSITIVE_INFINITY, rank));
   }
+  const renderedSourceIndices = new Set(
+    sourceIndices.filter((sourceIndex): sourceIndex is number => sourceIndex !== undefined)
+  );
   const visualSpans = [...spans].sort((left, right) => {
     return minimumVisualRank(left.start, left.end, visualRank) -
       minimumVisualRank(right.start, right.end, visualRank);
@@ -177,9 +187,16 @@ function buildVisualRow(
 
   let visualColumn = 0;
   const visualClusters = visualSpans.map((span): EditableTextVisualCluster => {
-    const width = stringWidth(span.text);
+    const clusterRenderText = renderableSourceText(
+      segment.text,
+      span.start,
+      span.end,
+      renderedSourceIndices
+    );
+    const width = stringWidth(clusterRenderText);
     const cluster = {
       text: span.text,
+      renderText: clusterRenderText,
       logicalStart: segment.startOffset + span.start,
       logicalEnd: segment.startOffset + span.end,
       visualColumn,
@@ -189,7 +206,7 @@ function buildVisualRow(
     visualColumn += width;
     return cluster;
   });
-  const hasBidi = hasRtlText(segment.text);
+  const hasBidi = hasRtlText(sanitizedText);
   const leftPadding = alignRtl && direction === "rtl" ? Math.max(0, maxCells - visualColumn) : 0;
 
   return {
@@ -201,6 +218,26 @@ function buildVisualRow(
     hasBidi,
     visualClusters,
   };
+}
+
+function visualText(row: EditableTextRow): string {
+  return row.visualClusters.map((cluster) => cluster.renderText).join("");
+}
+
+function renderableSourceText(
+  source: string,
+  start: number,
+  end: number,
+  renderedSourceIndices: ReadonlySet<number>
+): string {
+  let result = "";
+  for (let index = start; index < end; index += 1) {
+    if (!renderedSourceIndices.has(index)) continue;
+    const character = source[index]!;
+    if (character === LRI || character === RLI || character === FSI || character === PDI) continue;
+    result += character;
+  }
+  return result;
 }
 
 function cursorColumnForOffset(row: EditableTextRow, cursorOffset: number): number {
@@ -237,11 +274,33 @@ function visualCaretStops(row: EditableTextRow): readonly { readonly column: num
     .sort((left, right) => left.column - right.column);
 }
 
+function moveAcrossLogicalRowBoundary(
+  layout: EditableTextLayout,
+  cursorOffset: number,
+  direction: "left" | "right"
+): number {
+  const rowIndex = layout.cursorRow;
+  const row = layout.rows[rowIndex];
+  if (row === undefined) return cursorOffset;
+
+  const towardLogicalStart = row.direction === "rtl" ? "right" : "left";
+  if (direction === towardLogicalStart && cursorOffset <= row.startOffset) {
+    return layout.rows[rowIndex - 1]?.endOffset ?? cursorOffset;
+  }
+
+  const towardLogicalEnd = row.direction === "rtl" ? "left" : "right";
+  if (direction === towardLogicalEnd && cursorOffset >= row.endOffset) {
+    return layout.rows[rowIndex + 1]?.startOffset ?? cursorOffset;
+  }
+
+  return cursorOffset;
+}
+
 function findCursorRow(rows: readonly EditableTextRow[], cursorOffset: number): number {
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index]!;
     const next = rows[index + 1];
-    if (cursorOffset <= row.sourceEndOffset || next === undefined) return index;
+    if (cursorOffset <= row.endOffset || next === undefined) return index;
     if (cursorOffset < next.startOffset) return index;
   }
   return Math.max(0, rows.length - 1);
@@ -280,14 +339,12 @@ function wrapLogicalLine(text: string, startOffset: number, maxCells: number): r
 
     const first = spans[rowStartIndex]!;
     const last = spans[contentEndIndex - 1]!;
-    const next = spans[nextStartIndex];
     const segmentStart = startOffset + first.start;
     const segmentEnd = startOffset + last.end;
     rows.push({
       text: text.slice(first.start, last.end),
       startOffset: segmentStart,
       endOffset: segmentEnd,
-      sourceEndOffset: next === undefined ? startOffset + text.length : startOffset + next.start,
     });
     rowStartIndex = nextStartIndex;
   }
@@ -300,7 +357,6 @@ function logicalSegment(text: string, startOffset: number, endOffset: number): L
     text,
     startOffset,
     endOffset,
-    sourceEndOffset: endOffset,
   };
 }
 
@@ -331,7 +387,6 @@ function emptyRow(maxCells: number): EditableTextRow {
     renderText: "",
     startOffset: 0,
     endOffset: 0,
-    sourceEndOffset: 0,
     direction: "ltr",
     width: 0,
     leftPadding: 0,

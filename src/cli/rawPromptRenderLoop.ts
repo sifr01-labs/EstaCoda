@@ -1,4 +1,5 @@
 import { stringWidth } from "../ui/papyrus/screen/stringWidth.js";
+import { resolveBidiMode, type ResolvedBidiMode } from "../ui/papyrus/screen/bidi.js";
 import type { LineEditorState } from "../ui/input/lineEditor.js";
 import {
   layoutEditableText,
@@ -52,6 +53,7 @@ export type RawPromptGhostText = {
 export type RawPromptRenderSnapshot = {
   readonly prompt: string;
   readonly state: LineEditorState;
+  readonly bidiMode?: ResolvedBidiMode;
   readonly ghostText?: RawPromptGhostText;
   readonly fallbackRows?: readonly RawPromptOverlayRow[];
   readonly operatorConsole?: RawPromptOperatorConsoleOptions;
@@ -139,6 +141,7 @@ export class RawPromptRenderLoop {
   }
 
   #renderVisibleFrame(snapshot: RawPromptRenderSnapshot, options: RawPromptRenderOptions): number {
+    const liveTerminal = snapshot.operatorConsole?.getTerminal?.();
     const frame = snapshot.operatorConsole?.enabled === true
       ? buildOperatorConsoleRawPromptFrameWithRuntimeHost(this.#getOperatorConsoleHost(), {
         mode: snapshot.operatorConsole.mode,
@@ -152,7 +155,10 @@ export class RawPromptRenderLoop {
         turnActivity: snapshot.operatorConsole.turnActivity,
         terminal: {
           ...snapshot.operatorConsole.terminal,
-          ...snapshot.operatorConsole.getTerminal?.(),
+          ...liveTerminal,
+          bidiMode: liveTerminal?.bidiMode ??
+            snapshot.operatorConsole.terminal?.bidiMode ??
+            resolveBidiMode(),
         },
         attachments: snapshot.operatorConsole.attachments,
         approvals: snapshot.operatorConsole.approvals,
@@ -166,7 +172,11 @@ export class RawPromptRenderLoop {
         style: snapshot.operatorConsole.style,
         focus: snapshot.operatorConsole.focus,
       })
-      : buildFallbackRawPromptFrame(snapshot, this.#output.columns ?? 80);
+      : buildFallbackRawPromptFrame(
+        snapshot,
+        this.#output.columns ?? 80,
+        snapshot.bidiMode ?? resolveBidiMode()
+      );
 
     if (this.#canRedrawDirtyOperatorConsoleRegions(frame, options.dirtyRegions)) {
       this.#redrawDirtyOperatorConsoleRegions(frame, options.dirtyRegions!);
@@ -298,19 +308,23 @@ type RawPromptFrame = OperatorConsoleRawPromptFrame | {
   readonly cursorColumn: number;
 };
 
-function buildFallbackRawPromptFrame(snapshot: RawPromptRenderSnapshot, terminalWidth: number): RawPromptFrame {
+function buildFallbackRawPromptFrame(
+  snapshot: RawPromptRenderSnapshot,
+  terminalWidth: number,
+  bidiMode: ReturnType<typeof resolveBidiMode>
+): RawPromptFrame {
   const promptWidth = stringWidth(snapshot.prompt);
-  const layout = layoutEditableText(snapshot.state.text, {
+  const ghostText = snapshot.ghostText?.text ?? "";
+  const displayText = ghostText.length === 0
+    ? snapshot.state.text
+    : `${snapshot.state.text.slice(0, snapshot.state.cursor)}${ghostText}${snapshot.state.text.slice(snapshot.state.cursor)}`;
+  const layout = layoutEditableText(displayText, {
     maxCells: Math.max(1, terminalWidth - promptWidth),
     cursorOffset: snapshot.state.cursor,
     wrap: false,
   });
   const promptRows = layout.rows.map((row, index) => {
-    let renderedLine = renderEditableTextRow(row);
-    if (!row.hasBidi && index === layout.cursorRow && snapshot.ghostText?.text) {
-      const cursorOffsetInRow = Math.max(0, snapshot.state.cursor - row.startOffset);
-      renderedLine = `${row.text.slice(0, cursorOffsetInRow)}${snapshot.ghostText.text}${row.text.slice(cursorOffsetInRow)}`;
-    }
+    const renderedLine = renderEditableTextRow(row, { bidi: bidiMode });
     return index === 0 ? `${snapshot.prompt}${renderedLine}` : renderedLine;
   });
   const fallbackRows = (snapshot.fallbackRows ?? []).map((row) => row.text);

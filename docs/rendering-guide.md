@@ -404,6 +404,15 @@ and visual left/right navigation from the same result. Rendered rows are placed
 inside a paragraph-direction isolate so terminal shaping cannot reorder adjacent
 console chrome. Pure LTR input retains the existing fast path without isolates.
 
+The live terminal boundary resolves Papyrus's existing bidi policy once per
+frame. Native mode emits isolated logical-order text so the terminal retains
+Arabic shaping ownership. Software mode emits the layout's UAX #9 visual
+clusters for terminal families that Papyrus identifies as needing software
+ordering, including Windows Terminal and VS Code's integrated terminal. Pure
+surface tests must pass a resolved `native` or `software` mode explicitly rather
+than reading process environment during rendering. When adding terminal support,
+verify the real emulator using the mixed-input matrix in `docs/manual-qa.md`.
+
 Inside the Papyrus screen buffer, zero-width direction controls are packed into
 an adjacent visible cell's string when that content exists. They never receive
 a standalone narrow or spacer cell, so clipping, cursor advancement, and diff

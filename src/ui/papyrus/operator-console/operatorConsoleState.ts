@@ -7,6 +7,7 @@ import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
 import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 import type { SessionCostSummary, SpendingBudgetSummary } from "../../../contracts/usage-cost.js";
 import type { TaskCompletionTraceSnapshot } from "../../../contracts/task-completion-trace.js";
+import type { ResolvedBidiMode } from "../screen/bidi.js";
 
 export type OperatorConsoleMode = "session" | "setup";
 
@@ -538,6 +539,7 @@ export type TerminalMetrics = {
   readonly width: number;
   readonly height: number;
   readonly isTty: boolean;
+  readonly bidiMode?: ResolvedBidiMode;
 };
 
 export type OperatorConsoleState = {

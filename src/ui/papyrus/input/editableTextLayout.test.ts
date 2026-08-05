@@ -63,6 +63,26 @@ describe("Papyrus editable bidi text layout", () => {
     expect(moveEditableCursorVisual(text, 0, "right", { maxCells: 10, wrap: true })).toBe(0);
   });
 
+  it("crosses explicit line boundaries by logical continuity without teleporting", () => {
+    const text = "سلام\nعالم";
+
+    expect(moveEditableCursorVisual(text, 0, "right", { maxCells: 10, wrap: true })).toBe(0);
+    expect(moveEditableCursorVisual(text, 4, "left", { maxCells: 10, wrap: true })).toBe(5);
+    expect(moveEditableCursorVisual(text, 5, "right", { maxCells: 10, wrap: true })).toBe(4);
+    expect(moveEditableCursorVisual(text, text.length, "left", { maxCells: 10, wrap: true })).toBe(text.length);
+  });
+
+  it("assigns a soft-wrap boundary to the next visual row", () => {
+    const text = "مرحبا عالم";
+    const beforeWrap = layoutEditableText(text, { maxCells: 6, cursorOffset: 5, wrap: true });
+    const afterWrap = layoutEditableText(text, { maxCells: 6, cursorOffset: 6, wrap: true });
+
+    expect(beforeWrap.cursorRow).toBe(0);
+    expect(afterWrap.cursorRow).toBe(1);
+    expect(moveEditableCursorVisual(text, 5, "left", { maxCells: 6, wrap: true })).toBe(6);
+    expect(moveEditableCursorVisual(text, 6, "right", { maxCells: 6, wrap: true })).toBe(5);
+  });
+
   it("soft-wraps mixed text without exceeding terminal cells", () => {
     const text = "مرحبا world مرحبا again";
     const layout = layoutEditableText(text, {
@@ -119,6 +139,22 @@ describe("Papyrus editable bidi text layout", () => {
     expect(stringWidth(renderEditableTextRow(layout.rows[0]!))).toBe(4);
   });
 
+  it("renders explicit native and software terminal bidi modes deterministically", () => {
+    const layout = layoutEditableText("هلا RSI", {
+      maxCells: 20,
+      cursorOffset: 7,
+      wrap: true,
+    });
+    const row = layout.rows[0]!;
+
+    expect(renderEditableTextRow(row, { bidi: "native" })).toBe(
+      `${" ".repeat(13)}${RLI}${isolateTechnicalTokens("هلا RSI")}${PDI}`
+    );
+    expect(renderEditableTextRow(row, { bidi: "software" })).toBe(
+      `${" ".repeat(13)}RSI اله`
+    );
+  });
+
   it("contains unsafe bidi controls in rendering without mutating source text", () => {
     const text = "مرحبا\u202eabc";
     const layout = layoutEditableText(text, {
@@ -131,5 +167,20 @@ describe("Papyrus editable bidi text layout", () => {
     expect(layout.rows[0]?.text).toBe(text);
     expect(rendered).not.toContain("\u202e");
     expect(rendered).toContain("abc");
+  });
+
+  it("does not let removed leading direction controls affect paragraph alignment", () => {
+    for (const text of ["\u200fabc", "\u061cabc"]) {
+      const layout = layoutEditableText(text, {
+        maxCells: 10,
+        cursorOffset: text.length,
+        wrap: true,
+      });
+
+      expect(layout.rows[0]?.direction).toBe("ltr");
+      expect(layout.rows[0]?.leftPadding).toBe(0);
+      expect(renderEditableTextRow(layout.rows[0]!, { bidi: "native" })).toBe("abc");
+      expect(renderEditableTextRow(layout.rows[0]!, { bidi: "software" })).toBe("abc");
+    }
   });
 });

@@ -154,7 +154,9 @@ measurement, wrapping, truncation, focus, resize behavior, and Arabic/bidi
 safety. Editable prompt and steer text share a UAX #9-backed layout primitive
 that preserves the logical input buffer while producing visual rows, terminal
 cell cursor coordinates, and visual arrow navigation. RTL row alignment and
-directional isolation are render concerns and never mutate submitted text.
+directional isolation are render concerns and never mutate submitted text. The
+raw terminal host resolves Papyrus's native/software bidi policy and passes the
+resolved value into the otherwise deterministic prompt and steer surfaces.
 
 ### Phase A: Surface State
 

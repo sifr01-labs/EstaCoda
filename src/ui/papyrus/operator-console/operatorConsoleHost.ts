@@ -217,6 +217,7 @@ function normalizeTerminal(input: Partial<TerminalMetrics> | undefined): Termina
     width: normalizeDimension(input?.width, DEFAULT_TERMINAL.width),
     height: normalizeDimension(input?.height, DEFAULT_TERMINAL.height),
     isTty: input?.isTty ?? DEFAULT_TERMINAL.isTty,
+    ...(input?.bidiMode === undefined ? {} : { bidiMode: input.bidiMode }),
   };
 }
 

@@ -1,5 +1,6 @@
 import type { ParsedKeypress } from "../../input/parseKeypress.js";
 import { stringWidth } from "../screen/stringWidth.js";
+import type { BidiMode } from "../screen/bidi.js";
 import {
   layoutEditableText,
   renderEditableTextRow,
@@ -14,6 +15,7 @@ import type {
 export type SteerSurfaceRenderOptions = {
   readonly width: number;
   readonly height?: number;
+  readonly bidi?: BidiMode;
 };
 
 export type SteerInputSurfaceMetrics = {
@@ -65,7 +67,7 @@ export function renderSteerInputSurface(
   const contentWidth = Math.max(0, width - 4);
   const inputRows = Math.max(1, height - 2);
   const rows = padRows(
-    getSteerDraftLogicalRows(state, Math.max(1, contentWidth - 2)).map(renderSteerDraftRow),
+    getSteerDraftLogicalRows(state, Math.max(1, contentWidth - 2), options.bidi).map(renderSteerDraftRow),
     inputRows
   );
 
@@ -84,7 +86,7 @@ export function getSteerInputSurfaceMetrics(
   const height = normalizeDimension(options.height ?? getSteerInputSurfaceDesiredHeight(state));
   const contentWidth = Math.max(0, width - 4);
   const inputRows = height < 3 ? 1 : Math.max(1, height - 2);
-  const logicalRows = getSteerDraftLogicalRows(state, Math.max(1, contentWidth - 2));
+  const logicalRows = getSteerDraftLogicalRows(state, Math.max(1, contentWidth - 2), options.bidi);
   const cursorOffset = clampInteger(state.cursorOffset, 0, state.draft.length);
   const cursorLogicalRow = findSteerCursorRow(logicalRows, cursorOffset);
   const visibleRow = Math.min(cursorLogicalRow, inputRows - 1);
@@ -166,12 +168,15 @@ type SteerDraftLogicalRow = {
   readonly prefix: string;
   readonly startOffset: number;
   readonly endOffset: number;
-  readonly sourceEndOffset: number;
   readonly editable?: EditableTextRow;
   readonly cursorColumn?: number;
 };
 
-function getSteerDraftLogicalRows(state: SteerState, maxTextCells: number): readonly SteerDraftLogicalRow[] {
+function getSteerDraftLogicalRows(
+  state: SteerState,
+  maxTextCells: number,
+  bidiMode: BidiMode = "native"
+): readonly SteerDraftLogicalRow[] {
   const layout = layoutEditableText(state.draft, {
     maxCells: maxTextCells,
     cursorOffset: state.cursorOffset,
@@ -183,9 +188,8 @@ function getSteerDraftLogicalRows(state: SteerState, maxTextCells: number): read
       text: editable.text,
       startOffset: editable.startOffset,
       endOffset: editable.endOffset,
-      sourceEndOffset: editable.sourceEndOffset,
       prefix,
-      content: `${prefix}${renderEditableTextRow(editable)}`,
+      content: `${prefix}${renderEditableTextRow(editable, { bidi: bidiMode })}`,
       editable,
       cursorColumn: index === layout.cursorRow
         ? stringWidth(prefix) + layout.cursorColumn
@@ -196,8 +200,7 @@ function getSteerDraftLogicalRows(state: SteerState, maxTextCells: number): read
 }
 
 function renderSteerDraftRow(row: SteerDraftLogicalRow): string {
-  if (row.editable === undefined) return row.content;
-  return `${row.prefix}${renderEditableTextRow(row.editable)}`;
+  return row.content;
 }
 
 function staticSteerRow(text: string): SteerDraftLogicalRow {
@@ -207,7 +210,6 @@ function staticSteerRow(text: string): SteerDraftLogicalRow {
     prefix: "",
     startOffset: 0,
     endOffset: 0,
-    sourceEndOffset: 0,
   };
 }
 
@@ -215,7 +217,7 @@ function findSteerCursorRow(rows: readonly SteerDraftLogicalRow[], cursorOffset:
   const index = rows.findIndex((row, rowIndex) => {
     const next = rows[rowIndex + 1];
     return cursorOffset >= row.startOffset &&
-      (cursorOffset <= row.sourceEndOffset || next === undefined || cursorOffset < next.startOffset);
+      (cursorOffset <= row.endOffset || next === undefined || cursorOffset < next.startOffset);
   });
   return index < 0 ? Math.max(0, rows.length - 1) : index;
 }
