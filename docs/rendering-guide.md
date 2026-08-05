@@ -403,6 +403,9 @@ cluster mappings, right-aligns RTL rows, and derives the terminal cursor column
 and visual left/right navigation from the same result. Rendered rows are placed
 inside a paragraph-direction isolate so terminal shaping cannot reorder adjacent
 console chrome. Pure LTR input retains the existing fast path without isolates.
+Submitted user prompt rails reuse the same layout in read-only mode without RTL
+alignment. The rail marker remains outside the directional paragraph, technical
+tokens stay isolated, and the runtime payload remains the original logical text.
 
 The live terminal boundary resolves Papyrus's existing bidi policy once per
 frame. Native mode emits isolated logical-order text so the terminal retains

@@ -58,7 +58,7 @@ import {
   renderActiveTurnSpinner,
   renderFileChangePreview,
 } from "./plain-renderer.js";
-import { closeOpenBidiIsolates, isolateLtr, isolateRtl, LRI, PDI, RLI } from "../bidi.js";
+import { closeOpenBidiIsolates, isolateLtr, isolateRtl, isolateTechnicalTokens, LRI, PDI, RLI } from "../bidi.js";
 import { measureVisibleWidth } from "./layout.js";
 
 function assertNoAnsi(text: string): void {
@@ -2125,6 +2125,28 @@ describe("PlainRenderer — prompt chrome rails", () => {
     expect(out).toBe("> line one\n  line two");
     assertNoAnsi(out);
     assertAsciiSafe(out);
+  });
+
+  it("renders mixed Arabic user prompt rails with native bidi isolation", () => {
+    const text = "هلا ممكن تستخدم ٣ subagents وتبحث عن RSI";
+    const out = renderUserPromptRail(buildUserPromptRailViewModel({ text }), 80, "native");
+
+    expect(out).toBe(`> ${RLI}${isolateTechnicalTokens(text)}${PDI}`);
+    expect(out).toContain(isolateLtr("subagents"));
+    expect(out).toContain(isolateLtr("RSI"));
+    expectBalancedBidiIsolates(out);
+    assertNoAnsi(out);
+  });
+
+  it("renders mixed Arabic user prompt rails in deterministic software bidi mode", () => {
+    const out = renderUserPromptRail(buildUserPromptRailViewModel({
+      text: "هلا ممكن تستخدم ٣ subagents وتبحث عن RSI",
+    }), 80, "software");
+
+    expect(out).toBe("> RSI نع ثحبتو subagents ٣ مدختست نكمم اله");
+    expect(out).not.toContain(RLI);
+    expect(out).not.toContain(PDI);
+    assertNoAnsi(out);
   });
 });
 

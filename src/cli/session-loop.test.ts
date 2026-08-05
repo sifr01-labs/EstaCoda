@@ -24,7 +24,7 @@ import type { AgentLoopResponse } from "../runtime/agent-loop.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { TerminalCapabilities, UiLocale } from "../contracts/ui.js";
 import type { CompactResult } from "../prompt/session-compression-service.js";
-import { isolateLtr } from "../ui/bidi.js";
+import { isolateLtr, PDI, RLI } from "../ui/bidi.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import { measureVisibleWidth, stripAnsi } from "../ui/renderers/layout.js";
 import { StandardRenderer } from "../ui/renderers/standard-renderer.js";
@@ -1662,6 +1662,44 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     const rendered = outputChunks.join("");
     expect(rendered).toContain("> hello");
     expect(rendered).not.toContain("+----------------------------------------------------------+");
+  });
+
+  it("keeps the submitted payload logical while rendering a bidi-safe Arabic prompt rail", async () => {
+    const text = "هلا ممكن تستخدم ٣ subagents وتبحث عن RSI";
+    const outputChunks: string[] = [];
+    const handle = vi.fn(async (_input: Parameters<Runtime["handle"]>[0]) => mockResponse());
+    const runtime = createMockRuntime({ handle });
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      locale: "ar",
+      prompt: Object.assign(
+        async () => {
+          const values = [text, "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    expect(handle).toHaveBeenCalledTimes(1);
+    expect(handle.mock.calls[0]?.[0]).toMatchObject({ text });
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain(`↳ ${RLI}`);
+    expect(rendered).toContain(isolateLtr("subagents"));
+    expect(rendered).toContain(isolateLtr("RSI"));
+    expect(rendered).toContain(PDI);
   });
 
   it("renders a delivered Task synthesis as a normal assistant message before the next prompt", async () => {

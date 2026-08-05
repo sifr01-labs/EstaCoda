@@ -60,6 +60,8 @@ export type EditableTextRenderOptions = {
   readonly bidi?: BidiMode;
 };
 
+export type ReadOnlyTextRenderOptions = Omit<EditableTextLayoutOptions, "cursorOffset"> & EditableTextRenderOptions;
+
 const bidi = createBidi();
 
 export function layoutEditableText(
@@ -95,6 +97,18 @@ export function renderEditableTextRow(
   }
   const isolated = row.direction === "rtl" ? isolateRtl(row.renderText) : isolateLtr(row.renderText);
   return `${" ".repeat(row.leftPadding)}${isolated}`;
+}
+
+export function renderReadOnlyTextRows(
+  text: string,
+  options: ReadOnlyTextRenderOptions
+): readonly string[] {
+  const layout = layoutEditableText(text, {
+    maxCells: options.maxCells,
+    wrap: options.wrap,
+    alignRtl: options.alignRtl,
+  });
+  return layout.rows.map((row) => renderEditableTextRow(row, { bidi: options.bidi }));
 }
 
 export function moveEditableCursorVisual(

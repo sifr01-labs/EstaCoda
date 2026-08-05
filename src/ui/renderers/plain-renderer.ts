@@ -8,6 +8,8 @@ import { chromeCopy } from "../../ui/cli-ui-copy.js";
 import { closeOpenBidiIsolates, isolateLtr, isolateRtl } from "../../ui/bidi.js";
 import { formatUsageCost } from "../usage-cost-format.js";
 import { renderTaskCompletionTrace } from "../task-completion-trace.js";
+import { renderReadOnlyTextRows } from "../papyrus/input/editableTextLayout.js";
+import type { ResolvedBidiMode } from "../papyrus/screen/bidi.js";
 import type {
   ActiveTurnSpinnerViewModel,
   ActivityTimelineViewModel,
@@ -83,7 +85,7 @@ export function renderPlain(viewModel: ViewModel, locale?: UiLocale, width = 80)
     case "shortcutHintRail":
       return renderShortcutHintRail(viewModel, locale);
     case "userPromptRail":
-      return renderUserPromptRail(viewModel);
+      return renderUserPromptRail(viewModel, width);
     case "activeTurnSpinner":
       return renderActiveTurnSpinner(viewModel, locale);
     case "toolActivityRail":
@@ -1359,9 +1361,18 @@ export function renderShortcutHintRail(vm: ShortcutHintRailViewModel, locale?: U
   return `> ${locale === "ar" ? isolateRtl(text) : text}`;
 }
 
-export function renderUserPromptRail(vm: UserPromptRailViewModel): string {
-  return vm.text
-    .split(/\r\n|\r|\n/u)
+export function renderUserPromptRail(
+  vm: UserPromptRailViewModel,
+  width = 80,
+  bidiMode: ResolvedBidiMode = "native"
+): string {
+  const textWidth = Math.max(1, width - 2);
+  return renderReadOnlyTextRows(vm.text, {
+    maxCells: textWidth,
+    wrap: true,
+    alignRtl: false,
+    bidi: bidiMode,
+  })
     .map((line, index) => `${index === 0 ? ">" : " "} ${line}`)
     .join("\n");
 }

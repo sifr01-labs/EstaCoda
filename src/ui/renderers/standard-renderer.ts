@@ -45,6 +45,8 @@ import { semanticMotionForPhase, semanticMotionFrame } from "../semantic-motion.
 import { formatUsageCost } from "../usage-cost-format.js";
 import { renderTaskCompletionTrace } from "../task-completion-trace.js";
 import type { TaskCompletionTraceCategory, TaskCompletionTraceOutcome } from "../../contracts/task-completion-trace.js";
+import { renderReadOnlyTextRows } from "../papyrus/input/editableTextLayout.js";
+import { resolveBidiMode, type ResolvedBidiMode } from "../papyrus/screen/bidi.js";
 
 const STARTUP_TITLE_SEPARATOR = "  𓂀  ";
 const STARTUP_TITLE_SEPARATOR_ASCII = "  *  ";
@@ -53,6 +55,7 @@ export interface StandardRendererOptions {
   readonly tokens: ResolvedTokens;
   readonly capabilities: TerminalCapabilities;
   readonly locale?: UiLocale;
+  readonly bidiMode?: ResolvedBidiMode;
 }
 
 export class StandardRenderer {
@@ -62,6 +65,7 @@ export class StandardRenderer {
   readonly #useUnicode: boolean;
   readonly #locale: UiLocale;
   readonly #copy: ReturnType<typeof chromeCopy>;
+  readonly #bidiMode: ResolvedBidiMode;
 
   constructor(options: StandardRendererOptions) {
     this.#tokens = options.tokens;
@@ -72,6 +76,7 @@ export class StandardRenderer {
     this.#useUnicode = this.#capabilities.supportsUnicode;
     this.#locale = options.locale ?? "en";
     this.#copy = chromeCopy(this.#locale);
+    this.#bidiMode = options.bidiMode ?? resolveBidiMode();
   }
 
   // ──────────────────────────────────────
@@ -2379,9 +2384,12 @@ export class StandardRenderer {
     const width = this.#capabilities.terminalWidth ?? 60;
     const marker = this.#useUnicode ? "↳" : ">";
     const textWidth = Math.max(1, width - measureVisibleWidth(`${marker} `));
-    const rows = vm.text
-      .split(/\r\n|\r|\n/u)
-      .flatMap((line) => wrapText(line, textWidth));
+    const rows = renderReadOnlyTextRows(vm.text, {
+      maxCells: textWidth,
+      wrap: true,
+      alignRtl: false,
+      bidi: this.#bidiMode,
+    });
     return rows
       .map((line, index) => {
         const prefix = `${index === 0 ? marker : " "} `;

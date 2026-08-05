@@ -6,6 +6,7 @@ import {
   layoutEditableText,
   moveEditableCursorVisual,
   renderEditableTextRow,
+  renderReadOnlyTextRows,
 } from "./editableTextLayout.js";
 
 describe("Papyrus editable bidi text layout", () => {
@@ -153,6 +154,23 @@ describe("Papyrus editable bidi text layout", () => {
     expect(renderEditableTextRow(row, { bidi: "software" })).toBe(
       `${" ".repeat(13)}RSI اله`
     );
+  });
+
+  it("shares native and software bidi rendering with read-only text rows", () => {
+    const text = "هلا ممكن تستخدم ٣ subagents وتبحث عن RSI";
+
+    expect(renderReadOnlyTextRows(text, {
+      maxCells: 48,
+      wrap: true,
+      alignRtl: false,
+      bidi: "native",
+    })).toEqual([`${RLI}${isolateTechnicalTokens(text)}${PDI}`]);
+    expect(renderReadOnlyTextRows(text, {
+      maxCells: 48,
+      wrap: true,
+      alignRtl: false,
+      bidi: "software",
+    })).toEqual(["RSI نع ثحبتو subagents ٣ مدختست نكمم اله"]);
   });
 
   it("contains unsafe bidi controls in rendering without mutating source text", () => {

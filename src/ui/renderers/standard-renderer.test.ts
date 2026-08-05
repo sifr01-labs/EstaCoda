@@ -37,7 +37,7 @@ import {
   slashMenuOption,
 } from "../view-models/builders.js";
 import { StandardRenderer } from "./standard-renderer.js";
-import { closeOpenBidiIsolates, isolateLtr, isolateRtl, LRI, PDI, RLI } from "../bidi.js";
+import { closeOpenBidiIsolates, isolateLtr, isolateRtl, isolateTechnicalTokens, LRI, PDI, RLI } from "../bidi.js";
 import { measureVisibleWidth, stripAnsi } from "./layout.js";
 
 function fullCaps(): TerminalCapabilities {
@@ -2953,6 +2953,59 @@ describe("StandardRenderer — prompt chrome rails", () => {
     const vm = buildUserPromptRailViewModel({ text: "line one\nline two" });
     const out = r.render(vm);
     expect(stripAnsi(out)).toBe("↳ line one\n  line two");
+  });
+
+  it("renders mixed Arabic user prompt rails with native bidi isolation", () => {
+    const text = "هلا ممكن تستخدم ٣ subagents وتبحث عن RSI";
+    const r = new StandardRenderer({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      capabilities: fullCaps(),
+      locale: "ar",
+      bidiMode: "native",
+    });
+    const out = stripAnsi(r.render(buildUserPromptRailViewModel({ text })));
+
+    expect(out).toBe(`↳ ${RLI}${isolateTechnicalTokens(text)}${PDI}`);
+    expect(out).toContain(isolateLtr("subagents"));
+    expect(out).toContain(isolateLtr("RSI"));
+    expectBalancedBidiIsolates(out);
+  });
+
+  it("renders mixed Arabic user prompt rails in deterministic software bidi mode", () => {
+    const r = new StandardRenderer({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      capabilities: fullCaps(),
+      locale: "ar",
+      bidiMode: "software",
+    });
+    const out = stripAnsi(r.render(buildUserPromptRailViewModel({
+      text: "هلا ممكن تستخدم ٣ subagents وتبحث عن RSI",
+    })));
+
+    expect(out).toBe("↳ RSI نع ثحبتو subagents ٣ مدختست نكمم اله");
+    expect(out).not.toContain(RLI);
+    expect(out).not.toContain(PDI);
+  });
+
+  it("wraps mixed Arabic user prompt rails without moving the rail marker or overflowing", () => {
+    const capabilities = { ...fullCaps(), terminalWidth: 24 };
+    const r = new StandardRenderer({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      capabilities,
+      locale: "ar",
+      bidiMode: "native",
+    });
+    const rows = stripAnsi(r.render(buildUserPromptRailViewModel({
+      text: "هلا ممكن تستخدم ٣ subagents وتبحث عن RSI",
+    }))).split("\n");
+
+    expect(rows.length).toBeGreaterThan(1);
+    expect(rows[0]).toMatch(/^↳ /u);
+    expect(rows.slice(1).every((row) => row.startsWith("  "))).toBe(true);
+    expect(rows.every((row) => measureVisibleWidth(row) <= capabilities.terminalWidth)).toBe(true);
+    expect(rows.join("\n")).toContain(isolateLtr("subagents"));
+    expect(rows.join("\n")).toContain(isolateLtr("RSI"));
+    for (const row of rows) expectBalancedBidiIsolates(row);
   });
 
   it("renders active turn thinking motion with its localized label", () => {
