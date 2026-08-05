@@ -394,8 +394,15 @@ truncation or padding.
 Live and settled assistant text share one render-time bidi preparation path.
 It contains untrusted directional controls to each logical line, isolates mixed
 LTR runs before wrapping, and gives each wrapped Arabic row its own directional
-isolate. Stored transcript and streaming state remain in logical order. Editable
-prompt rows continue to use terminal-native bidi and are not software-reordered.
+isolate. Stored transcript and streaming state remain in logical order.
+
+Editable Papyrus text uses the shared `editableTextLayout` primitive. The
+backing prompt or steer draft remains in logical order, while the layout resolves
+UAX #9 embedding levels, wraps on grapheme boundaries, retains logical-to-visual
+cluster mappings, right-aligns RTL rows, and derives the terminal cursor column
+and visual left/right navigation from the same result. Rendered rows are placed
+inside a paragraph-direction isolate so terminal shaping cannot reorder adjacent
+console chrome. Pure LTR input retains the existing fast path without isolates.
 
 Inside the Papyrus screen buffer, zero-width direction controls are packed into
 an adjacent visible cell's string when that content exists. They never receive

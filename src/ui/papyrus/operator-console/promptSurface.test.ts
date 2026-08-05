@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { stringWidth } from "../screen/stringWidth.js";
+import { isolateTechnicalTokens, PDI, RLI } from "../../bidi.js";
 import { resolveTokens } from "../../../theme/token-resolver.js";
 import {
   createOperatorConsoleStyle,
@@ -255,6 +256,18 @@ describe("Papyrus operator console prompt surface", () => {
 
     expect(renderPromptSurface(state, { width: 40, height: 3 })).toEqual(renderPromptSurface(state, { width: 40, height: 3 }));
     expect(JSON.stringify(state)).toBe(snapshot);
+  });
+
+  it("right-aligns mixed Arabic input and maps the logical cursor to its visual cell", () => {
+    const value = "هلا RSI";
+    const state = prompt({ value, cursorOffset: value.length });
+    const output = renderPromptSurface(state, { width: 20, height: 3 });
+    const metrics = getPromptSurfaceMetrics(state, { width: 20, height: 3 });
+
+    expect(output[1]).toContain(`› ${" ".repeat(11)}${RLI}${isolateTechnicalTokens(value)}${PDI}`);
+    expect(metrics.cursorRow).toBe(0);
+    expect(metrics.cursorColumn).toBe(16);
+    expect(state.value).toBe(value);
   });
 });
 

@@ -78,6 +78,7 @@ import type { ParsedKeypress } from "../ui/input/parseKeypress.js";
 import { applyKeypress, createLineEditorState } from "../ui/input/lineEditor.js";
 import { createKeypressStreamDispatcher } from "../ui/input/keyPressStreamDispatcher.js";
 import { createTerminalLifecycle, type TerminalLifecycle } from "../ui/input/terminalLifecycle.js";
+import { moveEditableCursorVisual } from "../ui/papyrus/input/editableTextLayout.js";
 import { centerVisibleBlock, measureVisibleWidth, truncateVisible } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { resolveShellHistoryMode } from "./shell-history-mode.js";
@@ -989,7 +990,35 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
               current?.mode === "drafting" ? current.draft : "",
               current?.mode === "drafting" ? current.cursorOffset : 0
             ),
-            event
+            event,
+            {
+              navigation: {
+                moveLeft: (inputLine) => moveEditableCursorVisual(
+                  inputLine.text,
+                  inputLine.cursor,
+                  "left",
+                  {
+                    maxCells: Math.max(
+                      1,
+                      (operatorConsoleRuntimeHost?.getState().terminal.width ?? 80) - 6
+                    ),
+                    wrap: true,
+                  }
+                ),
+                moveRight: (inputLine) => moveEditableCursorVisual(
+                  inputLine.text,
+                  inputLine.cursor,
+                  "right",
+                  {
+                    maxCells: Math.max(
+                      1,
+                      (operatorConsoleRuntimeHost?.getState().terminal.width ?? 80) - 6
+                    ),
+                    wrap: true,
+                  }
+                ),
+              },
+            }
           ).state;
           const unchanged = current?.mode === "drafting"
             ? line.text === current.draft && line.cursor === current.cursorOffset

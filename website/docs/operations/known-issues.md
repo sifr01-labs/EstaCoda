@@ -52,7 +52,7 @@ These channels and providers exist in code but lack live validation evidence for
 - Query-selective memory rendering and lexical memory retrieval are ranked. Freshness/staleness handling remains narrow: stale derived indexes can be detected, but there is no general age- or TTL-based memory policy.
 - Image turns require a configured vision-capable route. Text-only primary or fallback routes are skipped for image-bearing provider requests, and `vision.analyze` fails loudly when no usable vision route is available.
 - Gateway status probes PID and service-manager liveness and suppresses untrustworthy runtime/cache state. Its persisted supervisor summary can still reflect stale lifecycle state.
-- Full runtime CLI localization is incomplete. Arabic terminal rendering supports shaped, bidirectional Arabic, but not every CLI string is localized.
+- Full runtime CLI localization is incomplete. Arabic terminal rendering supports shaped, bidirectional Arabic, including mixed-direction Papyrus prompt and steer editing, but not every CLI string is localized.
 - Deterministic automated benchmark lanes collect metrics, evidence, and history, but there is no single scored benchmark or release threshold.
 - Internal alpha harness is manual and not yet a strict release gate.
 - Provider message content supports structured image/text parts on the tested vision paths. New provider adapters and prompt-processing paths still need explicit coverage before they are treated as image-safe.

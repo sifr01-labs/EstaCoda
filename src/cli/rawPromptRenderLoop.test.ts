@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import { createLineEditorState } from "../ui/input/lineEditor.js";
-import { isolateAuto, isolateLtr } from "../ui/bidi.js";
+import { isolateAuto, isolateLtr, isolateRtl, isolateTechnicalTokens } from "../ui/bidi.js";
 import {
   RawPromptOverlayHost,
   RawPromptRenderLoop,
@@ -27,6 +27,20 @@ describe("raw prompt render loop", () => {
     expect(output.text()).toContain("> abc");
     expect(output.text()).toContain("\x1b[3C");
     expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("uses bidi layout and visual cursor cells in the fallback raw prompt", () => {
+    const output = fakeOutput({ columns: 20 });
+    const loop = new RawPromptRenderLoop(output);
+    const value = "هلا RSI";
+
+    loop.render({
+      prompt: "> ",
+      state: createLineEditorState(value),
+    });
+
+    expect(output.text()).toContain(`> ${" ".repeat(11)}${isolateRtl(isolateTechnicalTokens(value))}`);
+    expect(output.text()).toContain("\x1b[16C");
   });
 
   it("can render through the Operator Console host when explicitly enabled", () => {
@@ -865,7 +879,7 @@ describe("raw prompt render loop", () => {
   });
 });
 
-function fakeOutput(options: { readonly isTTY?: boolean } = {}): RawPromptRenderOutput & {
+function fakeOutput(options: { readonly isTTY?: boolean; readonly columns?: number } = {}): RawPromptRenderOutput & {
   text(): string;
   chunks(): readonly string[];
   clear(): void;
@@ -873,6 +887,7 @@ function fakeOutput(options: { readonly isTTY?: boolean } = {}): RawPromptRender
   const writes: string[] = [];
   return {
     ...(options.isTTY === undefined ? {} : { isTTY: options.isTTY }),
+    ...(options.columns === undefined ? {} : { columns: options.columns }),
     write: vi.fn((chunk: string) => {
       writes.push(chunk);
     }),

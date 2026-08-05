@@ -1,6 +1,10 @@
 import { stringWidth } from "../ui/papyrus/screen/stringWidth.js";
 import type { LineEditorState } from "../ui/input/lineEditor.js";
 import {
+  layoutEditableText,
+  renderEditableTextRow,
+} from "../ui/papyrus/input/editableTextLayout.js";
+import {
   buildOperatorConsoleRawPromptFrameWithRuntimeHost,
   type OperatorConsoleRawPromptFrame,
   type OperatorConsoleRawPromptSnapshot,
@@ -162,7 +166,7 @@ export class RawPromptRenderLoop {
         style: snapshot.operatorConsole.style,
         focus: snapshot.operatorConsole.focus,
       })
-      : buildFallbackRawPromptFrame(snapshot);
+      : buildFallbackRawPromptFrame(snapshot, this.#output.columns ?? 80);
 
     if (this.#canRedrawDirtyOperatorConsoleRegions(frame, options.dirtyRegions)) {
       this.#redrawDirtyOperatorConsoleRegions(frame, options.dirtyRegions!);
@@ -294,23 +298,25 @@ type RawPromptFrame = OperatorConsoleRawPromptFrame | {
   readonly cursorColumn: number;
 };
 
-function buildFallbackRawPromptFrame(snapshot: RawPromptRenderSnapshot): RawPromptFrame {
-  const textBeforeCursor = snapshot.state.text.slice(0, snapshot.state.cursor);
-  const beforeCursorLines = textBeforeCursor.split("\n");
-  const textLines = snapshot.state.text.split("\n");
-  const cursorLineIndex = beforeCursorLines.length - 1;
-  const cursorOffsetInLine = beforeCursorLines[beforeCursorLines.length - 1]?.length ?? 0;
-  const promptRows = textLines.map((line, index) => {
-    const renderedLine = index === cursorLineIndex && snapshot.ghostText?.text
-      ? `${line.slice(0, cursorOffsetInLine)}${snapshot.ghostText.text}${line.slice(cursorOffsetInLine)}`
-      : line;
+function buildFallbackRawPromptFrame(snapshot: RawPromptRenderSnapshot, terminalWidth: number): RawPromptFrame {
+  const promptWidth = stringWidth(snapshot.prompt);
+  const layout = layoutEditableText(snapshot.state.text, {
+    maxCells: Math.max(1, terminalWidth - promptWidth),
+    cursorOffset: snapshot.state.cursor,
+    wrap: false,
+  });
+  const promptRows = layout.rows.map((row, index) => {
+    let renderedLine = renderEditableTextRow(row);
+    if (!row.hasBidi && index === layout.cursorRow && snapshot.ghostText?.text) {
+      const cursorOffsetInRow = Math.max(0, snapshot.state.cursor - row.startOffset);
+      renderedLine = `${row.text.slice(0, cursorOffsetInRow)}${snapshot.ghostText.text}${row.text.slice(cursorOffsetInRow)}`;
+    }
     return index === 0 ? `${snapshot.prompt}${renderedLine}` : renderedLine;
   });
   const fallbackRows = (snapshot.fallbackRows ?? []).map((row) => row.text);
   const rows = [...promptRows, ...fallbackRows];
-  const cursorRow = cursorLineIndex;
-  const cursorLinePrefix = beforeCursorLines[beforeCursorLines.length - 1] ?? "";
-  const cursorColumn = (cursorRow === 0 ? stringWidth(snapshot.prompt) : 0) + stringWidth(cursorLinePrefix);
+  const cursorRow = layout.cursorRow;
+  const cursorColumn = (cursorRow === 0 ? promptWidth : 0) + layout.cursorColumn;
 
   return {
     rows: rows.length === 0 ? [""] : rows,

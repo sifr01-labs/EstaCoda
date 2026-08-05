@@ -29,6 +29,15 @@ export type LineEditorResult = {
   intent?: LineEditorIntent;
 };
 
+export type LineEditorNavigation = {
+  readonly moveLeft: (state: LineEditorState) => number;
+  readonly moveRight: (state: LineEditorState) => number;
+};
+
+export type LineEditorOptions = {
+  readonly navigation?: LineEditorNavigation;
+};
+
 export function createLineEditorState(text = "", cursor = text.length): LineEditorState {
   return {
     text,
@@ -36,7 +45,11 @@ export function createLineEditorState(text = "", cursor = text.length): LineEdit
   };
 }
 
-export function applyKeypress(state: LineEditorState, event: ParsedKeypress): LineEditorResult {
+export function applyKeypress(
+  state: LineEditorState,
+  event: ParsedKeypress,
+  options: LineEditorOptions = {}
+): LineEditorResult {
   const normalized = createLineEditorState(state.text, state.cursor);
 
   if (event.type === "text") {
@@ -85,11 +98,15 @@ export function applyKeypress(state: LineEditorState, event: ParsedKeypress): Li
   }
 
   if (event.key === "left") {
-    return { state: { ...normalized, cursor: moveCursorLeft(normalized.text, normalized.cursor) } };
+    const cursor = options.navigation?.moveLeft(normalized) ??
+      moveCursorLeft(normalized.text, normalized.cursor);
+    return { state: { ...normalized, cursor: normalizeCursorIndex(normalized.text, cursor) } };
   }
 
   if (event.key === "right") {
-    return { state: { ...normalized, cursor: moveCursorRight(normalized.text, normalized.cursor) } };
+    const cursor = options.navigation?.moveRight(normalized) ??
+      moveCursorRight(normalized.text, normalized.cursor);
+    return { state: { ...normalized, cursor: normalizeCursorIndex(normalized.text, cursor) } };
   }
 
   if (event.key === "home") {

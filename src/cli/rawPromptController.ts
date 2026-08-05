@@ -24,6 +24,8 @@ import { RawPromptOverlayHost, RawPromptRenderLoop, type RawPromptOperatorConsol
 import { buildRawPromptSlashAutocompleteRows } from "./rawPromptSlashAutocomplete.js";
 import type { Prompt, PromptOptions } from "./prompt-contract.js";
 import { type GhostTextState, isGhostTextVisible } from "../ui/papyrus/input/ghostTextController.js";
+import { moveEditableCursorVisual } from "../ui/papyrus/input/editableTextLayout.js";
+import { stringWidth } from "../ui/papyrus/screen/stringWidth.js";
 import {
   applyPapyrusVimKeymap,
   createPapyrusVimKeymapState,
@@ -681,7 +683,27 @@ export class RawPromptController {
             finish({ type: "cancel" });
             return;
           }
-          const result = applyKeypress(state, event);
+          const terminalWidth = currentTerminal().width;
+          const wrapEditableText = this.#operatorConsole?.enabled === true;
+          const maxCells = wrapEditableText
+            ? Math.max(1, terminalWidth - 2)
+            : Math.max(1, terminalWidth - stringWidth(question));
+          const result = applyKeypress(state, event, {
+            navigation: {
+              moveLeft: (line) => moveEditableCursorVisual(
+                line.text,
+                line.cursor,
+                "left",
+                { maxCells, wrap: wrapEditableText }
+              ),
+              moveRight: (line) => moveEditableCursorVisual(
+                line.text,
+                line.cursor,
+                "right",
+                { maxCells, wrap: wrapEditableText }
+              ),
+            },
+          });
           if (result.intent?.type === "submit") {
             finish(formatSubmittedText(result.intent.text));
             return;

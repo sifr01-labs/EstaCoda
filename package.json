@@ -84,6 +84,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",
+    "bidi-js": "^1.0.3",
     "discord.js": "^14.26.4"
   }
 }

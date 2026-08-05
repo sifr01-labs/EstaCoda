@@ -1,4 +1,5 @@
 export * from "./clipboardHelper.js";
+export * from "./editableTextLayout.js";
 export * from "./providers/directoryProvider.js";
 export * from "./providers/fileProvider.js";
 export * from "./providers/mcpResourceProvider.js";

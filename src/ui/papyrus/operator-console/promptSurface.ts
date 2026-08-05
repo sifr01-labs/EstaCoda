@@ -1,5 +1,10 @@
 import { stringWidth } from "../screen/stringWidth.js";
 import { truncateVisible } from "../../renderers/layout.js";
+import {
+  layoutEditableText,
+  renderEditableTextRow,
+  type EditableTextRow,
+} from "../input/editableTextLayout.js";
 import type { PromptSurfaceState, TerminalMetrics } from "./operatorConsoleState.js";
 import {
   styleBackgroundRow,
@@ -136,6 +141,9 @@ type PromptLogicalRow = {
   readonly prefix: string;
   readonly startOffset: number;
   readonly endOffset: number;
+  readonly sourceEndOffset: number;
+  readonly editable?: EditableTextRow;
+  readonly cursorColumn?: number;
 };
 
 function getPromptLogicalRows(state: PromptSurfaceState, width: number | undefined): readonly PromptLogicalRow[] {
@@ -145,16 +153,27 @@ function getPromptLogicalRows(state: PromptSurfaceState, width: number | undefin
   const maxTextCells = Number.isFinite(normalizedWidth)
     ? Math.max(1, normalizedWidth - 2)
     : Number.POSITIVE_INFINITY;
+  const layout = layoutEditableText(value, {
+    maxCells: maxTextCells,
+    cursorOffset: state.value.length === 0 ? 0 : state.cursorOffset,
+    wrap: true,
+  });
 
-  for (const explicitLine of splitExplicitLines(value)) {
-    for (const segment of wrapPromptLine(explicitLine.text, explicitLine.startOffset, maxTextCells)) {
-      const prefix = rows.length === 0 ? "› " : "  ";
-      rows.push({
-        ...segment,
-        prefix,
-        content: `${prefix}${segment.text}`,
-      });
-    }
+  for (const [index, editable] of layout.rows.entries()) {
+    const prefix = rows.length === 0 ? "› " : "  ";
+    const renderedText = renderEditableTextRow(editable);
+    rows.push({
+      text: editable.text,
+      prefix,
+      content: `${prefix}${renderedText}`,
+      startOffset: editable.startOffset,
+      endOffset: editable.endOffset,
+      sourceEndOffset: editable.sourceEndOffset,
+      editable,
+      cursorColumn: index === layout.cursorRow
+        ? stringWidth(prefix) + (state.value.length === 0 ? 0 : layout.cursorColumn)
+        : undefined,
+    });
   }
 
   if (rows.length === 0) {
@@ -164,6 +183,8 @@ function getPromptLogicalRows(state: PromptSurfaceState, width: number | undefin
       prefix: "› ",
       startOffset: 0,
       endOffset: 0,
+      sourceEndOffset: 0,
+      cursorColumn: 2,
     }];
   }
 
@@ -214,10 +235,17 @@ function getPromptCursorPosition(
   rows = getPromptLogicalRows(state, undefined)
 ): { readonly row: number; readonly column: number } {
   const cursor = clampInteger(state.cursorOffset, 0, state.value.length);
-  const index = rows.findIndex((row) => cursor >= row.startOffset && cursor <= row.endOffset);
+  const index = rows.findIndex((row, rowIndex) => {
+    const next = rows[rowIndex + 1];
+    return cursor >= row.startOffset &&
+      (cursor <= row.sourceEndOffset || next === undefined || cursor < next.startOffset);
+  });
   const rowIndex = index < 0 ? Math.max(0, rows.length - 1) : index;
   const row = rows[rowIndex];
   if (row === undefined) return { row: 0, column: 0 };
+  if (row.cursorColumn !== undefined) {
+    return { row: rowIndex, column: row.cursorColumn };
+  }
   const cursorText = row.text.slice(0, Math.max(0, Math.min(cursor, row.endOffset) - row.startOffset));
   return {
     row: rowIndex,
@@ -248,7 +276,11 @@ function renderContentRow(
   const textColor = placeholder
     ? tokens.text.placeholder
     : row.prefix.length === 0 ? tokens.text.muted : tokens.text.primary;
-  const content = `${prefix}${styleColor(style, row.text, textColor)}`;
+  const styledText = styleColor(style, row.editable?.renderText ?? row.text, textColor);
+  const renderedText = row.editable === undefined
+    ? styledText
+    : renderEditableTextRow(row.editable, styledText);
+  const content = `${prefix}${renderedText}`;
   return styleBackgroundRow(style, content, width, tokens.surface.bgElevated);
 }
 
@@ -275,86 +307,6 @@ function truncateVisibleCells(value: string, maxCells: number): string {
   return truncateVisible(value, width, "");
 }
 
-function splitExplicitLines(value: string): readonly { readonly text: string; readonly startOffset: number }[] {
-  const lines: { text: string; startOffset: number }[] = [];
-  const newlinePattern = /\r\n|\n|\r/gu;
-  let lastIndex = 0;
-  for (const match of value.matchAll(newlinePattern)) {
-    const index = match.index ?? lastIndex;
-    lines.push({ text: value.slice(lastIndex, index), startOffset: lastIndex });
-    lastIndex = index + match[0].length;
-  }
-  lines.push({ text: value.slice(lastIndex), startOffset: lastIndex });
-  return lines;
-}
-
-function wrapPromptLine(
-  text: string,
-  startOffset: number,
-  maxTextCells: number
-): readonly Pick<PromptLogicalRow, "text" | "startOffset" | "endOffset">[] {
-  if (text.length === 0) return [{ text: "", startOffset, endOffset: startOffset }];
-  const rows: Pick<PromptLogicalRow, "text" | "startOffset" | "endOffset">[] = [];
-  let current = "";
-  let currentStartOffset = startOffset;
-  let lastBreakBefore = -1;
-  let lastBreakAfter = -1;
-  let offset = startOffset;
-
-  for (const char of text) {
-    const next = `${current}${char}`;
-    if (current.length > 0 && stringWidth(next) > maxTextCells) {
-      if (lastBreakBefore > 0 && lastBreakAfter > lastBreakBefore) {
-        const rowText = current.slice(0, lastBreakBefore);
-        rows.push({
-          text: rowText,
-          startOffset: currentStartOffset,
-          endOffset: currentStartOffset + rowText.length,
-        });
-        current = `${current.slice(lastBreakAfter)}${char}`;
-        currentStartOffset += lastBreakAfter;
-        const breakPoint = findLastWhitespaceBreak(current);
-        lastBreakBefore = breakPoint.before;
-        lastBreakAfter = breakPoint.after;
-      } else {
-        rows.push({ text: current, startOffset: currentStartOffset, endOffset: offset });
-        current = char;
-        currentStartOffset = offset;
-        lastBreakBefore = -1;
-        lastBreakAfter = -1;
-      }
-    } else {
-      current = next;
-      if (isWhitespace(char)) {
-        lastBreakBefore = current.length - char.length;
-        lastBreakAfter = current.length;
-      }
-    }
-    offset += char.length;
-  }
-
-  rows.push({ text: current, startOffset: currentStartOffset, endOffset: offset });
-  return rows;
-}
-
-function findLastWhitespaceBreak(text: string): { readonly before: number; readonly after: number } {
-  let before = -1;
-  let after = -1;
-  let index = 0;
-  for (const char of text) {
-    if (isWhitespace(char)) {
-      before = index;
-      after = index + char.length;
-    }
-    index += char.length;
-  }
-  return { before, after };
-}
-
-function isWhitespace(char: string): boolean {
-  return /\s/u.test(char);
-}
-
 function staticPromptRow(content: string): PromptLogicalRow {
   return {
     content,
@@ -362,6 +314,7 @@ function staticPromptRow(content: string): PromptLogicalRow {
     prefix: "",
     startOffset: 0,
     endOffset: 0,
+    sourceEndOffset: 0,
   };
 }
 

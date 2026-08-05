@@ -1142,6 +1142,12 @@ describe("raw prompt controller", () => {
     expect(lifecycle.calls).toEqual(["start", "stop"]);
   });
 
+  it("maps arrow-key movement through the visual order for Arabic input", async () => {
+    const { result } = await readWithFakeInput("سلام\x1b[CX\r");
+
+    expect(result).toEqual({ type: "submit", text: "سلاXم" });
+  });
+
   it("routes Vim insert and normal mode transitions behind the raw keymap option", async () => {
     expect((await readWithVimChunks(["abc", "\x1b", "0iX\r"])).result).toEqual({
       type: "submit",
