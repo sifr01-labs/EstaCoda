@@ -1,4 +1,5 @@
 import type { EnvironmentType } from "./security.js";
+import type { ProviderUsageLineage } from "./provider-usage.js";
 import type { RuntimeEventSink } from "./runtime-event.js";
 import type { RuntimeToolContext, SessionToolContext } from "./tool-context.js";
 
@@ -55,6 +56,8 @@ export type ToolExecutionContext = {
   toolCallId?: string;
   /** Persisted visible user-message identity; never substitute the provider tool-call ID. */
   visibleTurnId?: string;
+  /** Immutable Session and Task lineage for provider calls initiated by this tool. */
+  providerUsageLineage?: ProviderUsageLineage;
   signal?: AbortSignal;
   environmentType?: EnvironmentType;
   onEvent?: RuntimeEventSink;

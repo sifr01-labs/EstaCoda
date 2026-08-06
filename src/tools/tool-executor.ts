@@ -10,6 +10,7 @@ import {
 import type { SessionDB } from "../contracts/session.js";
 import type { ToolDefinition, ToolResult, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
+import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
 import { assessCommandSafety } from "../security/command-safety.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { ToolRegistry } from "./tool-registry.js";
@@ -37,6 +38,7 @@ export type ToolExecutionRequest = {
   sessionId: string;
   environmentType?: EnvironmentType;
   excludedTools?: string[];
+  providerUsageLineage?: ProviderUsageLineage;
   signal?: AbortSignal;
 };
 
@@ -48,6 +50,7 @@ export type NamedToolExecutionRequest = {
   environmentType?: EnvironmentType;
   toolCallId?: string;
   visibleTurnId?: string;
+  providerUsageLineage?: ProviderUsageLineage;
   toolCallName?: string;
   providerNativeToolCall?: unknown;
   signal?: AbortSignal;
@@ -110,6 +113,7 @@ export class ToolExecutor {
       trustedWorkspace: request.trustedWorkspace,
       sessionId: request.sessionId,
       environmentType: request.environmentType,
+      providerUsageLineage: request.providerUsageLineage,
       signal: request.signal
     });
   }
@@ -247,6 +251,7 @@ export class ToolExecutor {
         result = await tool.run(request.input, {
           toolCallId: request.toolCallId,
           visibleTurnId: request.visibleTurnId,
+          providerUsageLineage: request.providerUsageLineage,
           signal: request.signal,
           environmentType,
           onEvent: request.onEvent

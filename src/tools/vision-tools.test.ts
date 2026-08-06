@@ -161,6 +161,11 @@ describe("vision tools", () => {
         expect(preferences).toEqual(expect.objectContaining({ requireVision: true }));
         expect(executionOptions!.primaryRoute).toEqual(baseRoute);
         expect(executionOptions!.signal).toBeDefined();
+        expect(executionOptions!.usage).toEqual(expect.objectContaining({
+          sourceKind: "auxiliary",
+          auxiliaryKind: "vision",
+          imageInputs: [{ width: 1, height: 1, detail: "auto" }]
+        }));
         expect(request.messages[1].content[1].image_url.url).toMatch(/^data:image\/png;base64,/u);
         expect(result.ok).toBe(true);
         expect(result.metadata).toEqual(expect.objectContaining({
@@ -169,6 +174,95 @@ describe("vision tools", () => {
           width: 1,
           height: 1,
           metadataStripped: true
+        }));
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("carries complete Session and Task lineage into vision spending", async () => {
+      const executor = createMockExecutor();
+      const tmp = createTempPng();
+      try {
+        await analyzeImageWithVision(
+          {
+            workspaceRoot: tmp.dir,
+            visionAuxiliaryRoute: {
+              task: "vision",
+              route: baseRoute,
+              source: "explicit",
+              fallbackToMain: false,
+              diagnostics: []
+            },
+            providerExecutor: executor
+          },
+          { path: "test.png" },
+          undefined,
+          {
+            executionSessionId: "worker-session",
+            sessionBudgetScopeId: "origin-session",
+            visibleTurnId: "visible-turn",
+            taskId: "task-root",
+            rootTaskId: "task-root",
+            planRevisionId: "revision-1",
+            stepId: "step-1",
+            attemptId: "attempt-1"
+          }
+        );
+
+        expect((executor.complete as any).mock.calls[0][2].usage).toEqual(expect.objectContaining({
+          sourceKind: "auxiliary",
+          auxiliaryKind: "vision",
+          executionSessionId: "worker-session",
+          sessionBudgetScopeId: "origin-session",
+          visibleTurnId: "visible-turn",
+          taskId: "task-root",
+          rootTaskId: "task-root",
+          planRevisionId: "revision-1",
+          stepId: "step-1",
+          attemptId: "attempt-1",
+          imageInputs: [{ width: 1, height: 1, detail: "auto" }]
+        }));
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("returns a clear configured-budget pricing denial", async () => {
+      const executor = {
+        complete: vi.fn().mockResolvedValue({
+          ok: false,
+          fallbackUsed: false,
+          attempts: [{
+            provider: "custom",
+            model: "vision-model",
+            state: "preflight",
+            ok: false,
+            errorClass: "spend-denied",
+            content: "pricing unavailable"
+          }],
+          spendDenialReason: "PRICING_UNAVAILABLE",
+          toolCalls: []
+        })
+      } as unknown as ProviderExecutor;
+      const tmp = createTempPng();
+      try {
+        const result = await analyzeImageWithVision({
+          workspaceRoot: tmp.dir,
+          visionAuxiliaryRoute: {
+            task: "vision",
+            route: baseRoute,
+            source: "explicit",
+            fallbackToMain: false,
+            diagnostics: []
+          },
+          providerExecutor: executor
+        }, { path: "test.png" });
+
+        expect(result).toEqual(expect.objectContaining({
+          ok: false,
+          content: expect.stringContaining("no verifiable pricing"),
+          metadata: expect.objectContaining({ errorCode: "PRICING_UNAVAILABLE" })
         }));
       } finally {
         tmp.cleanup();

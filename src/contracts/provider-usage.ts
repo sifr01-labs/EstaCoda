@@ -3,11 +3,7 @@ import type { ProviderPricingSnapshot } from "./provider-spend.js";
 
 export type ProviderUsageEntryId = string;
 
-/** Caller-owned attribution supplied before a logical provider execution begins. */
-export type ProviderUsageContext = {
-  requestKey: string;
-  sourceKind: "main" | "task" | "auxiliary";
-  auxiliaryKind?: string;
+export type ProviderUsageLineage = {
   executionSessionId?: string;
   sessionBudgetScopeId?: string;
   visibleTurnId?: string;
@@ -16,6 +12,20 @@ export type ProviderUsageContext = {
   planRevisionId?: string;
   stepId?: string;
   attemptId?: string;
+};
+
+export type ProviderImageInput = {
+  width: number;
+  height: number;
+  detail?: "low" | "high" | "original" | "auto";
+};
+
+/** Caller-owned attribution supplied before a logical provider execution begins. */
+export type ProviderUsageContext = ProviderUsageLineage & {
+  requestKey: string;
+  sourceKind: "main" | "task" | "auxiliary";
+  auxiliaryKind?: string;
+  imageInputs?: readonly ProviderImageInput[];
   /** Overrides isolated auxiliary fallback execution back to its logical chain identity. */
   routeRole?: ProviderRouteRole;
   routeIndex?: number;

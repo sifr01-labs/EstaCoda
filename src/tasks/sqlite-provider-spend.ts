@@ -490,7 +490,8 @@ export class SQLiteProviderSpendController {
       sessionId: normalized.executionSessionId,
       sessionBudgetScopeId: normalized.sessionBudgetScopeId,
       visibleTurnId: normalized.visibleTurnId,
-      sourceKind: normalized.sourceKind
+      sourceKind: normalized.sourceKind,
+      taskId: normalized.taskId
     })) {
       throw new ProviderSpendIntegrityError("Provider spend Session or visible-turn lineage is invalid.");
     }

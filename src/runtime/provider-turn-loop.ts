@@ -16,7 +16,7 @@ import type {
 } from "../contracts/provider.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision } from "../contracts/security.js";
-import type { ProviderUsageContext } from "../contracts/provider-usage.js";
+import type { ProviderUsageContext, ProviderUsageLineage } from "../contracts/provider-usage.js";
 import type {
   ReplacementSessionMessage,
   SessionContextWindowUsage,
@@ -380,6 +380,7 @@ export class ProviderTurnLoop {
         toolPlans: input.toolPlans,
         trustedWorkspace: input.trustedWorkspace,
         visibleTurnId: input.visibleTurnId,
+        providerUsageLineage: await this.#providerUsageLineage(input.visibleTurnId),
         remainingToolCalls: Math.max(0, this.#budgets.maxProviderToolCalls - providerToolExecutions.length),
         riskBaseline: maxObservedRisk,
         signal: input.signal,
@@ -1156,13 +1157,24 @@ export class ProviderTurnLoop {
   }
 
   async #nextProviderUsageContext(visibleTurnId: string | undefined): Promise<ProviderUsageContext> {
+    const lineage = await this.#providerUsageLineage(visibleTurnId);
+    return {
+      requestKey: [
+        lineage.executionSessionId ?? this.#currentSessionId(),
+        lineage.visibleTurnId ?? "session",
+        String(this.#providerRequestSequence++)
+      ].join("\0"),
+      sourceKind: this.#taskExecution === undefined ? "main" : "task",
+      ...lineage
+    };
+  }
+
+  async #providerUsageLineage(visibleTurnId: string | undefined): Promise<ProviderUsageLineage> {
     const sessionId = this.#currentSessionId();
     const session = await this.#sessionDb.getSession(sessionId);
     const task = this.#taskExecution;
     const effectiveVisibleTurnId = task === undefined ? visibleTurnId : task.originTurnId;
     return {
-      requestKey: [sessionId, effectiveVisibleTurnId ?? "session", String(this.#providerRequestSequence++)].join("\0"),
-      sourceKind: task === undefined ? "main" : "task",
       executionSessionId: sessionId,
       ...(session?.spendingScopeSessionId === undefined
         ? {}

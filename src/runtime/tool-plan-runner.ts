@@ -1,5 +1,6 @@
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
+import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { FileChangePreviewViewModel } from "../contracts/view-model.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
@@ -56,6 +57,7 @@ export class ToolPlanRunner {
     remainingToolCalls: number;
     riskBaseline: ToolRiskClass;
     visibleTurnId?: string;
+    providerUsageLineage?: ProviderUsageLineage;
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
   }): Promise<{
@@ -116,6 +118,7 @@ export class ToolPlanRunner {
             plan,
             trustedWorkspace: input.trustedWorkspace,
             visibleTurnId: input.visibleTurnId,
+            providerUsageLineage: input.providerUsageLineage,
             signal: input.signal,
             onEvent: input.onEvent
           })
@@ -130,6 +133,7 @@ export class ToolPlanRunner {
           plan,
           trustedWorkspace: input.trustedWorkspace,
           visibleTurnId: input.visibleTurnId,
+          providerUsageLineage: input.providerUsageLineage,
           signal: input.signal,
           onEvent: input.onEvent
         });
@@ -149,6 +153,7 @@ export class ToolPlanRunner {
     plan: ToolCallPlan;
     trustedWorkspace: boolean;
     visibleTurnId?: string;
+    providerUsageLineage?: ProviderUsageLineage;
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
   }): Promise<ToolExecutionRecord | undefined> {
@@ -169,6 +174,7 @@ export class ToolPlanRunner {
       sessionId: this.#currentSessionId(),
       toolCallId: plan.id,
       visibleTurnId: input.visibleTurnId,
+      providerUsageLineage: input.providerUsageLineage,
       toolCallName: plan.tool,
       providerNativeToolCall: plan.raw,
       signal: input.signal,

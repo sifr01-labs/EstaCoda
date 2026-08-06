@@ -1,5 +1,6 @@
 import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
+import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
 import type {
   NormalizedVisionImage,
   ResolvedVisionImageSource,
@@ -8,6 +9,7 @@ import type {
 } from "../contracts/vision.js";
 import { executeAuxiliaryTask } from "../providers/auxiliary-executor.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
+import { providerSpendDenialMessage } from "../providers/provider-spend-policy.js";
 import {
   defaultVisionImageNormalizer,
   type VisionImageNormalizer
@@ -56,7 +58,7 @@ export function createVisionTools(options: VisionToolOptions): readonly Register
         options,
         input,
         context?.signal,
-        {
+        context?.providerUsageLineage ?? {
           executionSessionId: options.currentSessionId?.(),
           visibleTurnId: context?.visibleTurnId
         }
@@ -92,7 +94,7 @@ export async function analyzeImageWithVision(
   options: VisionToolOptions,
   input: { path?: string; prompt?: string },
   signal?: AbortSignal,
-  usage: { executionSessionId?: string; visibleTurnId?: string } = {}
+  usage: ProviderUsageLineage = {}
 ): Promise<ToolResult> {
   const maxImageBytes = options.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES;
   const source = await resolveVisionImageSource({
@@ -144,10 +146,8 @@ export async function analyzeImageWithVision(
     mainRoute: options.mainRoute ?? visionAuxiliaryRoute.route,
     providerExecutor: options.providerExecutor,
     usage: {
-      ...(usage.executionSessionId === undefined ? {} : {
-        executionSessionId: usage.executionSessionId,
-      }),
-      ...(usage.visibleTurnId === undefined ? {} : { visibleTurnId: usage.visibleTurnId })
+      ...usage,
+      imageInputs: [{ width: normalized.width, height: normalized.height, detail: "auto" }]
     },
     preferences: {
       ...options.routePreferences,
@@ -213,6 +213,18 @@ export async function analyzeImageWithVision(
         ...imageMetadata,
         provider: auxiliaryResult.response.provider,
         model: auxiliaryResult.response.model,
+        attempts
+      }
+    };
+  }
+
+  if (auxiliaryResult.spendDenialReason !== undefined) {
+    return {
+      ok: false,
+      content: providerSpendDenialMessage(auxiliaryResult.spendDenialReason),
+      metadata: {
+        ...imageMetadata,
+        errorCode: auxiliaryResult.spendDenialReason,
         attempts
       }
     };

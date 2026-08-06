@@ -30,6 +30,8 @@ export type ProviderSpendRequest = {
   providerAttemptIndex: number;
   pricing: ProviderPricingSnapshot;
   estimatedInputTokens: number;
+  estimatedImageInputTokens?: number;
+  imageTokenEstimator?: string;
   boundedMaximumOutputTokens: number;
   boundedMaximumReasoningTokens?: number;
   maximumEstimatedCostUsd: number;
@@ -153,6 +155,15 @@ export function assertProviderSpendRequest(request: ProviderSpendRequest): void 
   requireCount(request.routeIndex, "route index");
   requireCount(request.providerAttemptIndex, "provider Attempt index");
   requireCount(request.estimatedInputTokens, "estimated input tokens");
+  if (request.estimatedImageInputTokens !== undefined) {
+    requireCount(request.estimatedImageInputTokens, "estimated image input tokens");
+    if (request.estimatedImageInputTokens > request.estimatedInputTokens) {
+      throw new Error("Provider spend image input estimate cannot exceed the total input estimate.");
+    }
+    requireText(request.imageTokenEstimator ?? "", "image token estimator", 128);
+  } else if (request.imageTokenEstimator !== undefined) {
+    throw new Error("Provider spend image token estimator requires an image token estimate.");
+  }
   requireCount(request.boundedMaximumOutputTokens, "bounded maximum output tokens");
   if (request.boundedMaximumReasoningTokens !== undefined) {
     requireCount(request.boundedMaximumReasoningTokens, "bounded maximum reasoning tokens");

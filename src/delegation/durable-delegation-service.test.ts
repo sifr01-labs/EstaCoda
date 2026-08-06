@@ -34,6 +34,12 @@ describe("DurableDelegationService", () => {
       role: "user",
       content: "Delegate the Task"
     });
+    await sessionDb.appendMessage({
+      id: "parent-turn",
+      sessionId: "parent",
+      role: "user",
+      content: "Run the parent Task"
+    });
     store = new SQLiteTaskStore({ db: sessionDb.db, profileId: "alpha" });
   });
 
@@ -1519,7 +1525,7 @@ function usageEntry(
     id: `usage-${requestKey}`,
     profileId: attempt.profileId,
     sessionId: "parent",
-    visibleTurnId: "visible-turn-alpha",
+    visibleTurnId: "parent-turn",
     taskId: attempt.taskId,
     rootTaskId,
     planRevisionId: attempt.planRevisionId,

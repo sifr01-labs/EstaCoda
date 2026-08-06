@@ -606,6 +606,7 @@ async function createPostToolNudgeHarness(input: {
   modelFallbackRoutes?: ResolvedModelRoute[];
   maxProviderIterations?: number;
   maxProviderWallClockMs?: number;
+  taskExecution?: ProviderTurnLoopOptions["taskExecution"];
   onExecutePlans?: (input: {
     sessionDb: InMemorySessionDB;
     sessionId: string;
@@ -690,7 +691,8 @@ async function createPostToolNudgeHarness(input: {
       maxProviderToolCalls: 8,
       maxRepeatedToolFailures: 3,
       maxProviderWallClockMs: input.maxProviderWallClockMs ?? 10_000
-    }
+    },
+    taskExecution: input.taskExecution
   });
 
   return {
@@ -704,6 +706,7 @@ async function createPostToolNudgeHarness(input: {
 
 async function createRealToolPlanningHarness(input: {
   response: ProviderExecutionResult;
+  taskExecution?: ProviderTurnLoopOptions["taskExecution"];
 }) {
   const completeSpy = vi.fn<ProviderExecutor["complete"]>(async (_request, _preferences, options) => {
     for (const toolCall of input.response.toolCalls) {
@@ -778,13 +781,15 @@ async function createRealToolPlanningHarness(input: {
       maxProviderToolCalls: 8,
       maxRepeatedToolFailures: 3,
       maxProviderWallClockMs: 10_000
-    }
+    },
+    taskExecution: input.taskExecution
   });
 
   return {
     loop,
     completeSpy,
-    executeTool
+    executeTool,
+    sessionId
   };
 }
 
@@ -1003,6 +1008,65 @@ describe("ProviderTurnLoop streaming callbacks", () => {
     });
 
     expect(result.providerExecution?.response?.content).toContain("done");
+  });
+
+  it("propagates complete Task lineage into provider-planned tool execution", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-task-tool")]),
+        providerExecution("done")
+      ],
+      toolSteps: [{ executions: [toolExecution("call-task-tool")] }],
+      taskExecution: {
+        taskId: "task-leaf",
+        rootTaskId: "task-root",
+        planRevisionId: "revision-1",
+        stepId: "step-1",
+        attemptId: "attempt-1",
+        originSessionId: "origin-session",
+        originTurnId: "origin-turn"
+      }
+    });
+
+    await runBasicProviderTurn(harness.loop, { visibleTurnId: "worker-visible-turn" });
+
+    expect(harness.executePlans.mock.calls[0]?.[0].providerUsageLineage).toEqual({
+      executionSessionId: harness.sessionId,
+      visibleTurnId: "origin-turn",
+      taskId: "task-leaf",
+      rootTaskId: "task-root",
+      planRevisionId: "revision-1",
+      stepId: "step-1",
+      attemptId: "attempt-1"
+    });
+  });
+
+  it("forwards Task lineage through ToolPlanRunner to ToolExecutor", async () => {
+    const harness = await createRealToolPlanningHarness({
+      response: providerExecution("", [providerToolCall("call-task-tool")]),
+      taskExecution: {
+        taskId: "task-leaf",
+        rootTaskId: "task-root",
+        planRevisionId: "revision-1",
+        stepId: "step-1",
+        attemptId: "attempt-1",
+        originTurnId: "origin-turn"
+      }
+    });
+
+    await runBasicProviderTurn(harness.loop, { visibleTurnId: "worker-visible-turn" });
+
+    expect(harness.executeTool).toHaveBeenCalledWith(expect.objectContaining({
+      providerUsageLineage: {
+        executionSessionId: harness.sessionId,
+        visibleTurnId: "origin-turn",
+        taskId: "task-leaf",
+        rootTaskId: "task-root",
+        planRevisionId: "revision-1",
+        stepId: "step-1",
+        attemptId: "attempt-1"
+      }
+    }));
   });
 });
 

@@ -36,7 +36,7 @@ export function insertProviderUsageEntry(db: SQLiteDatabase, entry: ProviderUsag
 
 export function providerUsageLineageIsValid(
   db: SQLiteDatabase,
-  entry: Pick<ProviderUsageEntry, "profileId" | "sessionId" | "sessionBudgetScopeId" | "visibleTurnId" | "sourceKind">
+  entry: Pick<ProviderUsageEntry, "profileId" | "sessionId" | "sessionBudgetScopeId" | "visibleTurnId" | "sourceKind" | "taskId">
 ): boolean {
   const executionSession = entry.sessionId === undefined ? null : db.query<SessionLineageRow>(
     `select id, parent_session_id, end_reason, metadata_json,
@@ -56,9 +56,13 @@ export function providerUsageLineageIsValid(
     return false;
   }
   if (entry.visibleTurnId === undefined) return true;
-  const lineageRoot = entry.sourceKind === "task" && executionSession?.parent_session_id !== null
-    ? executionSession?.parent_session_id
-    : entry.sessionId;
+  const taskOrigin = entry.taskId === undefined ? null : db.query<TaskUsageOriginRow>(
+    "select origin_session_id, origin_turn_id from tasks where profile_id = ? and id = ?"
+  ).get(entry.profileId, entry.taskId);
+  if (entry.taskId !== undefined && (taskOrigin === null || taskOrigin.origin_turn_id !== entry.visibleTurnId)) {
+    return false;
+  }
+  const lineageRoot = taskOrigin?.origin_session_id ?? entry.sessionId;
   if (lineageRoot === undefined) return false;
   const lineage = new Set<string>();
   let currentId = lineageRoot;
@@ -297,4 +301,9 @@ type SessionLineageRow = {
   metadata_json: string | null;
   spending_scope_session_id: string | null;
   spending_limit_json: string | null;
+};
+
+type TaskUsageOriginRow = {
+  origin_session_id: string;
+  origin_turn_id: string;
 };
