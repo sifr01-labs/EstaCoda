@@ -73,6 +73,8 @@ export type ResolvedVisionImageSource = {
 export type VisionInputProvenanceContext = {
   attachmentPaths: readonly string[];
   explicitReferencePaths: readonly string[];
+  browserArtifactPaths?: readonly string[];
+  generatedArtifactPaths?: readonly string[];
 };
 
 export type VisionImageSourceResolution =

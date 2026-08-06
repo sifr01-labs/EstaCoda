@@ -1,8 +1,9 @@
 import { realpath } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextReference } from "../contracts/context.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
+import type { SecurityDataEgressContext } from "../contracts/security.js";
 import type { ToolSecurityResolution } from "../contracts/tool.js";
 import type { ResolvedVisionImageSource, VisionInputProvenanceContext } from "../contracts/vision.js";
 import { providerRouteDestination } from "../providers/provider-route-location.js";
@@ -32,22 +33,39 @@ export async function resolveVisionEgressSecurity(input: {
   source: ResolvedVisionImageSource;
   workspaceRoot: string;
   provenance?: VisionInputProvenanceContext;
+  generatedArtifactRoots?: readonly string[];
   visionRoute: ResolvedAuxiliaryRoute;
   mainRoute?: ResolvedModelRoute;
   additionalRoutes?: readonly ResolvedModelRoute[];
 }): Promise<ToolSecurityResolution | undefined> {
+  const sourceProvenance = await classifySourceProvenance(
+    input.source.canonicalPath,
+    input.workspaceRoot,
+    input.provenance,
+    input.generatedArtifactRoots
+  );
+  return resolveVisionArtifactEgressSecurity({
+    sourceProvenance,
+    sensitivePath: isSensitiveVisionPath(input.source.canonicalPath),
+    visionRoute: input.visionRoute,
+    mainRoute: input.mainRoute,
+    additionalRoutes: input.additionalRoutes
+  });
+}
+
+export function resolveVisionArtifactEgressSecurity(input: {
+  sourceProvenance: SecurityDataEgressContext["sourceProvenance"];
+  sensitivePath: boolean;
+  visionRoute: ResolvedAuxiliaryRoute;
+  mainRoute?: ResolvedModelRoute;
+  additionalRoutes?: readonly ResolvedModelRoute[];
+}): ToolSecurityResolution | undefined {
   const routes = possibleVisionRoutes(input.visionRoute, input.mainRoute, input.additionalRoutes);
   const destinations = [...new Set(routes.map(providerRouteDestination).filter(
     (destination) => destination.inference === "hosted"
   ).map((destination) => destination.key))].sort();
   if (destinations.length === 0) return undefined;
 
-  const sourceProvenance = await classifySourceProvenance(
-    input.source.canonicalPath,
-    input.workspaceRoot,
-    input.provenance
-  );
-  const sensitivePath = isSensitiveVisionPath(input.source.canonicalPath);
   return {
     riskClass: "external-side-effect",
     targetKey: `vision.analyze:hosted-egress:${destinations.map(encodeURIComponent).join(",")}`,
@@ -55,8 +73,8 @@ export async function resolveVisionEgressSecurity(input: {
     dataEgress: {
       kind: "vision-image",
       inference: "hosted",
-      sourceProvenance,
-      sensitivePath,
+      sourceProvenance: input.sourceProvenance,
+      sensitivePath: input.sensitivePath,
       destinations
     }
   };
@@ -82,13 +100,23 @@ function possibleVisionRoutes(
 async function classifySourceProvenance(
   canonicalSource: string,
   workspaceRoot: string,
-  context: VisionInputProvenanceContext | undefined
-): Promise<"current-turn-attachment" | "explicit-reference" | "agent-discovered"> {
+  context: VisionInputProvenanceContext | undefined,
+  generatedArtifactRoots: readonly string[] | undefined
+): Promise<SecurityDataEgressContext["sourceProvenance"]> {
   if (await includesCanonicalPath(context?.attachmentPaths ?? [], canonicalSource, workspaceRoot)) {
     return "current-turn-attachment";
   }
   if (await includesCanonicalPath(context?.explicitReferencePaths ?? [], canonicalSource, workspaceRoot)) {
     return "explicit-reference";
+  }
+  if (await includesCanonicalPath(context?.browserArtifactPaths ?? [], canonicalSource, workspaceRoot)) {
+    return "browser-artifact";
+  }
+  if (await includesCanonicalPath(context?.generatedArtifactPaths ?? [], canonicalSource, workspaceRoot)) {
+    return "generated-artifact";
+  }
+  if (await isWithinCanonicalRoots(generatedArtifactRoots ?? [], canonicalSource)) {
+    return "generated-artifact";
   }
   return "agent-discovered";
 }
@@ -102,6 +130,19 @@ async function includesCanonicalPath(
     const candidate = isAbsolute(path) ? path : resolve(workspaceRoot, path);
     const canonical = await realpath(candidate).catch(() => undefined);
     if (canonical === canonicalSource) return true;
+  }
+  return false;
+}
+
+async function isWithinCanonicalRoots(
+  roots: readonly string[],
+  canonicalSource: string
+): Promise<boolean> {
+  for (const root of roots) {
+    const canonicalRoot = await realpath(root).catch(() => undefined);
+    if (canonicalRoot === undefined) continue;
+    const rel = relative(canonicalRoot, canonicalSource);
+    if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) return true;
   }
   return false;
 }

@@ -1,4 +1,14 @@
-import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
+import { isAbsolute, relative, resolve } from "node:path";
+import type {
+  RegisteredTool,
+  SessionToolProvider,
+  ToolExecutionContext,
+  ToolResult,
+  ToolSecurityResolution,
+  ToolSecurityResolverContext
+} from "../contracts/tool.js";
+import type { ArtifactStore } from "../artifacts/artifact-store.js";
+import type { SecurityDataEgressContext } from "../contracts/security.js";
 import type { ProviderUsage, ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
 import type {
@@ -25,7 +35,10 @@ import {
   type VisionImageNormalizer
 } from "../vision/image-normalizer.js";
 import { resolveVisionImageSource } from "../vision/image-source-resolver.js";
-import { resolveVisionEgressSecurity } from "../vision/vision-egress-policy.js";
+import {
+  resolveVisionArtifactEgressSecurity,
+  resolveVisionEgressSecurity
+} from "../vision/vision-egress-policy.js";
 import { attachEphemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 import { resolveVisionDispatch } from "../vision/vision-dispatch-policy.js";
 
@@ -33,6 +46,8 @@ export type VisionToolOptions = {
   workspaceRoot: string;
   profileId?: string;
   allowedRoots?: string[];
+  imageCacheRoot?: string;
+  artifactStore?: ArtifactStore;
   visionAuxiliaryRoute?: ResolvedAuxiliaryRoute;
   mainRoute?: ResolvedModelRoute;
   mainFallbackRoutes?: ResolvedModelRoute[];
@@ -70,7 +85,86 @@ type ResolvedVisionAnalysis = {
   providerDetail: "low" | "auto" | "high";
 };
 
+export type GovernedVisionArtifactDispatcher = {
+  isAvailable(input?: Pick<VisionAnalysisInput, "mode">, phase?: VisionDispatchPhase): boolean;
+  resolveSecurity(
+    input: VisionAnalysisInput,
+    context: ToolSecurityResolverContext,
+    artifactProvenance?: Extract<
+      SecurityDataEgressContext["sourceProvenance"],
+      "browser-artifact" | "generated-artifact"
+    >
+  ): Promise<ToolSecurityResolution | undefined>;
+  dispatch(
+    input: VisionAnalysisInput,
+    context?: ToolExecutionContext,
+    phase?: VisionDispatchPhase
+  ): Promise<ToolResult>;
+};
+
+export function createGovernedVisionArtifactDispatcher(
+  options: VisionToolOptions
+): GovernedVisionArtifactDispatcher {
+  return {
+    isAvailable: (input = {}, phase = "post-tool") => resolveVisionDispatch({
+      phase,
+      analysisMode: isVisionAnalysisMode(input.mode) ? input.mode : DEFAULT_ANALYSIS_MODE,
+      mainRoute: options.mainRoute,
+      auxiliaryRoute: resolveVisionAuxiliaryRoute(options)
+    }).mode !== "unavailable",
+    resolveSecurity: async (input, context, artifactProvenance) => {
+      const resolvedInput = resolveVisionArtifactInput(options, input);
+      const phase = context.visionDispatchPhase ?? "post-tool";
+      const dispatch = resolveVisionDispatch({
+        phase,
+        analysisMode: isVisionAnalysisMode(resolvedInput.mode) ? resolvedInput.mode : DEFAULT_ANALYSIS_MODE,
+        mainRoute: options.mainRoute,
+        auxiliaryRoute: resolveVisionAuxiliaryRoute(options)
+      });
+      if (dispatch.mode === "unavailable") return undefined;
+      const routeSecurity = {
+        visionRoute: dispatch.egressRoute,
+        mainRoute: dispatch.mode === "auxiliary" ? options.mainRoute : undefined,
+        additionalRoutes: dispatch.mode === "native" ? options.mainFallbackRoutes : undefined
+      };
+      if (artifactProvenance !== undefined) {
+        return resolveVisionArtifactEgressSecurity({
+          sourceProvenance: artifactProvenance,
+          sensitivePath: false,
+          ...routeSecurity
+        });
+      }
+      const source = await resolveVisionImageSource({
+        workspaceRoot: options.workspaceRoot,
+        allowedRoots: visionAllowedRoots(options),
+        path: resolvedInput.path,
+        maxBytes: options.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES
+      });
+      if (!source.ok) return undefined;
+      return await resolveVisionEgressSecurity({
+        source,
+        workspaceRoot: options.workspaceRoot,
+        provenance: runtimeVisionProvenance(options, context.visionInputProvenance),
+        generatedArtifactRoots: options.imageCacheRoot === undefined ? undefined : [options.imageCacheRoot],
+        ...routeSecurity
+      });
+    },
+    dispatch: (input, context, phase = context?.visionDispatchPhase ?? "post-tool") =>
+      dispatchImageWithVision(
+        options,
+        resolveVisionArtifactInput(options, input),
+        context?.signal,
+        context?.providerUsageLineage ?? {
+          executionSessionId: options.currentSessionId?.(),
+          visibleTurnId: context?.visibleTurnId
+        },
+        phase
+      )
+  };
+}
+
 export function createVisionTools(options: VisionToolOptions): readonly RegisteredTool[] {
+  const dispatcher = createGovernedVisionArtifactDispatcher(options);
   return [
     {
       name: "vision.analyze",
@@ -78,7 +172,10 @@ export function createVisionTools(options: VisionToolOptions): readonly Register
       inputSchema: {
         type: "object",
         properties: {
-          path: { type: "string", description: "Workspace or approved media path to the image." },
+          path: {
+            type: "string",
+            description: "Workspace path, approved media path, or generated image artifact reference."
+          },
           prompt: { type: "string", description: "Optional task-specific guidance that augments the selected analysis mode." },
           mode: {
             type: "string",
@@ -102,45 +199,9 @@ export function createVisionTools(options: VisionToolOptions): readonly Register
       toolsets: ["media", "research", "telegram", "core"],
       progressLabel: "analyzing image",
       maxResultSizeChars: 8_000,
-      isAvailable: async () => resolveVisionDispatch({
-        phase: "post-tool",
-        mainRoute: options.mainRoute,
-        auxiliaryRoute: resolveVisionAuxiliaryRoute(options)
-      }).mode !== "unavailable",
-      resolveSecurity: async (input: VisionAnalysisInput, context) => {
-        const dispatch = resolveVisionDispatch({
-          phase: context.visionDispatchPhase ?? "post-tool",
-          analysisMode: isVisionAnalysisMode(input.mode) ? input.mode : DEFAULT_ANALYSIS_MODE,
-          mainRoute: options.mainRoute,
-          auxiliaryRoute: resolveVisionAuxiliaryRoute(options)
-        });
-        if (dispatch.mode === "unavailable") return undefined;
-        const source = await resolveVisionImageSource({
-          workspaceRoot: options.workspaceRoot,
-          allowedRoots: options.allowedRoots,
-          path: input.path,
-          maxBytes: options.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES
-        });
-        if (!source.ok) return undefined;
-        return await resolveVisionEgressSecurity({
-          source,
-          workspaceRoot: options.workspaceRoot,
-          provenance: context.visionInputProvenance,
-          visionRoute: dispatch.egressRoute,
-          mainRoute: dispatch.mode === "auxiliary" ? options.mainRoute : undefined,
-          additionalRoutes: dispatch.mode === "native" ? options.mainFallbackRoutes : undefined
-        });
-      },
-      run: (input: VisionAnalysisInput, context) => dispatchImageWithVision(
-        options,
-        input,
-        context?.signal,
-        context?.providerUsageLineage ?? {
-          executionSessionId: options.currentSessionId?.(),
-          visibleTurnId: context?.visibleTurnId
-        },
-        context?.visionDispatchPhase
-      )
+      isAvailable: () => dispatcher.isAvailable(),
+      resolveSecurity: (input: VisionAnalysisInput, context) => dispatcher.resolveSecurity(input, context),
+      run: (input: VisionAnalysisInput, context) => dispatcher.dispatch(input, context)
     }
   ];
 }
@@ -229,10 +290,16 @@ export const visionToolProvider: SessionToolProvider = {
   name: "vision",
   kind: "session",
   createTools(ctx) {
+    const imageCacheRoot = requireProviderDependency("vision", "imageCacheRoot", ctx.imageCacheRoot);
     return createVisionTools({
       workspaceRoot: ctx.workspaceRoot,
       profileId: ctx.profileId,
-      allowedRoots: [requireProviderDependency("vision", "channelMediaRoot", ctx.channelMediaRoot)],
+      allowedRoots: [
+        requireProviderDependency("vision", "channelMediaRoot", ctx.channelMediaRoot),
+        imageCacheRoot
+      ],
+      imageCacheRoot,
+      artifactStore: requireProviderDependency("vision", "artifactStore", ctx.artifactStore),
       visionAuxiliaryRoute: ctx.visionRoute,
       mainRoute: ctx.mainRoute,
       mainFallbackRoutes: ctx.mainFallbackRoutes,
@@ -306,7 +373,7 @@ async function prepareVisionImage(
   const maxImageBytes = options.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES;
   const source = await resolveVisionImageSource({
     workspaceRoot: options.workspaceRoot,
-    allowedRoots: options.allowedRoots,
+    allowedRoots: visionAllowedRoots(options),
     path,
     maxBytes: maxImageBytes
   });
@@ -330,6 +397,63 @@ async function prepareVisionImage(
         detail
       }
     }
+  };
+}
+
+function visionAllowedRoots(options: VisionToolOptions): string[] | undefined {
+  const roots = [...(options.allowedRoots ?? [])];
+  if (options.imageCacheRoot !== undefined && !roots.includes(options.imageCacheRoot)) {
+    roots.push(options.imageCacheRoot);
+  }
+  return roots.length === 0 ? undefined : roots;
+}
+
+function resolveVisionArtifactInput(
+  options: VisionToolOptions,
+  input: VisionAnalysisInput
+): VisionAnalysisInput {
+  const reference = input.path?.trim();
+  if (
+    reference === undefined ||
+    reference.length === 0 ||
+    options.artifactStore === undefined ||
+    options.imageCacheRoot === undefined
+  ) {
+    return input;
+  }
+  const artifactId = reference.startsWith("artifact://")
+    ? reference.slice("artifact://".length)
+    : reference;
+  const artifact = options.artifactStore.list().find((candidate) =>
+    candidate.id === artifactId || candidate.path === reference
+  );
+  if (artifact?.kind !== "image" || artifact.localPath === undefined) return input;
+  const cacheRoot = resolve(options.imageCacheRoot);
+  const localPath = resolve(artifact.localPath);
+  const rel = relative(cacheRoot, localPath);
+  if (rel !== "" && (rel.startsWith("..") || isAbsolute(rel))) return input;
+  return { ...input, path: localPath };
+}
+
+function runtimeVisionProvenance(
+  options: VisionToolOptions,
+  context: ToolExecutionContext["visionInputProvenance"]
+): ToolExecutionContext["visionInputProvenance"] {
+  const browserArtifactPaths = options.artifactStore?.list()
+    .filter((artifact) =>
+      artifact.kind === "image" &&
+      artifact.localPath !== undefined &&
+      artifact.metadata?.visionProvenance === "browser-artifact"
+    )
+    .map((artifact) => artifact.localPath as string) ?? [];
+  return {
+    attachmentPaths: context?.attachmentPaths ?? [],
+    explicitReferencePaths: context?.explicitReferencePaths ?? [],
+    browserArtifactPaths: [
+      ...(context?.browserArtifactPaths ?? []),
+      ...browserArtifactPaths
+    ],
+    generatedArtifactPaths: context?.generatedArtifactPaths ?? []
   };
 }
 

@@ -2,7 +2,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import type { SecurityApprovalMode, SecurityRequest } from "../contracts/security.js";
+import type {
+  SecurityApprovalMode,
+  SecurityDataEgressContext,
+  SecurityRequest
+} from "../contracts/security.js";
 import { createSecurityPolicyForMode } from "./security-policy-factory.js";
 import { WorkspaceApprovalController, WorkspaceApprovalStore } from "./workspace-approval-controller.js";
 
@@ -16,12 +20,18 @@ describe("hosted vision data egress policy", () => {
   it.each([
     ["strict", "current-turn-attachment", "ask"],
     ["strict", "explicit-reference", "ask"],
+    ["strict", "browser-artifact", "ask"],
+    ["strict", "generated-artifact", "ask"],
     ["strict", "agent-discovered", "ask"],
     ["adaptive", "current-turn-attachment", "allow"],
     ["adaptive", "explicit-reference", "allow"],
+    ["adaptive", "browser-artifact", "allow"],
+    ["adaptive", "generated-artifact", "allow"],
     ["adaptive", "agent-discovered", "ask"],
     ["open", "current-turn-attachment", "allow"],
     ["open", "explicit-reference", "allow"],
+    ["open", "browser-artifact", "allow"],
+    ["open", "generated-artifact", "allow"],
     ["open", "agent-discovered", "allow"]
   ] as const)("uses %s mode for %s images: %s", async (mode, provenance, decision) => {
     const policy = createSecurityPolicyForMode(mode);
@@ -31,10 +41,18 @@ describe("hosted vision data egress policy", () => {
   it("denies sensitive hosted paths in every mode, including after a grant", async () => {
     for (const mode of ["strict", "adaptive", "open"] satisfies SecurityApprovalMode[]) {
       const policy = createSecurityPolicyForMode(mode);
-      await expect(policy.assess!(request("current-turn-attachment", true))).resolves.toMatchObject({
-        decision: "deny",
-        deterministicRule: "sensitive-hosted-data-egress"
-      });
+      for (const provenance of [
+        "current-turn-attachment",
+        "explicit-reference",
+        "browser-artifact",
+        "generated-artifact",
+        "agent-discovered"
+      ] satisfies SecurityDataEgressContext["sourceProvenance"][]) {
+        await expect(policy.assess!(request(provenance, true))).resolves.toMatchObject({
+          decision: "deny",
+          deterministicRule: "sensitive-hosted-data-egress"
+        });
+      }
     }
 
     const root = await temporaryRoot();
@@ -112,7 +130,7 @@ describe("hosted vision data egress policy", () => {
 });
 
 function request(
-  sourceProvenance: "current-turn-attachment" | "explicit-reference" | "agent-discovered",
+  sourceProvenance: SecurityDataEgressContext["sourceProvenance"],
   sensitivePath = false
 ): SecurityRequest {
   return {

@@ -28,6 +28,21 @@ export function attachEphemeralVisionImages<T extends ToolResult>(
   return result;
 }
 
+export function inheritEphemeralVisionImages<T extends ToolResult>(
+  result: T,
+  source: ToolResult
+): T {
+  const images = imagesByResult.get(source);
+  if (images !== undefined) {
+    imagesByResult.set(result, images.map((image) => ({ ...image })));
+  }
+  const handledAttachmentIds = handledAttachmentIdsByResult.get(source);
+  if (handledAttachmentIds !== undefined) {
+    handledAttachmentIdsByResult.set(result, new Set(handledAttachmentIds));
+  }
+  return result;
+}
+
 export function ephemeralVisionImages(
   result: ToolResult | undefined,
   delivery?: EphemeralVisionDelivery

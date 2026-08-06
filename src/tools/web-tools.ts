@@ -1,5 +1,6 @@
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import type { RegisteredTool } from "../contracts/tool.js";
 import type { SessionToolProvider } from "../contracts/tool.js";
 import type { BrowserActionInput, BrowserBackend, BrowserNavigateInput, BrowserSnapshot, WebExtractionResult } from "../contracts/browser.js";
@@ -12,7 +13,11 @@ import { maybeSummarizeSnapshot, truncateSnapshotText } from "../browser/snapsho
 import { isAlwaysBlockedUrl, isSafeUrl, redactUrlForMetadata, scanUrlForSecrets, type ResolveHostnameFn } from "../browser/url-safety.js";
 import { checkWebsiteAccess, loadWebsiteBlocklist } from "../browser/website-policy.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
-import { analyzeImageWithVision } from "./vision-tools.js";
+import {
+  createGovernedVisionArtifactDispatcher,
+  type GovernedVisionArtifactDispatcher
+} from "./vision-tools.js";
+import { inheritEphemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 import { createTimeoutSignal } from "../utils/timeout-signal.js";
 import {
   registerDefaultWebResearchProviders,
@@ -46,15 +51,8 @@ export type WebToolOptions = {
   providerExecutor?: Pick<ProviderExecutor, "complete">;
   securityConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
   resolveHostname?: ResolveHostnameFn;
-  visionAnalyzer?: (
-    input: { path: string; prompt?: string },
-    signal?: AbortSignal,
-    usage?: { executionSessionId?: string; visibleTurnId?: string }
-  ) => Promise<{
-    ok: boolean;
-    content: string;
-    metadata?: Record<string, unknown>;
-  }>;
+  artifactStore?: ArtifactStore;
+  visionDispatcher?: GovernedVisionArtifactDispatcher;
 };
 
 export type FetchLike = (url: string, init?: {
@@ -506,7 +504,11 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             metadata: { backend: browserBackend.kind }
           };
         }
-        const saved = await saveBrowserScreenshot(options.workspaceRoot, screenshot.base64);
+        const saved = await saveBrowserScreenshot(
+          options.workspaceRoot,
+          screenshot.base64,
+          options.artifactStore
+        );
         return {
           ok: true,
           content: [
@@ -514,7 +516,12 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             `MIME: ${screenshot.mimeType}`,
             `Bytes: ${saved.bytes}`
           ].join("\n"),
-          metadata: { backend: browserBackend.kind, path: saved.path, mimeType: screenshot.mimeType, bytes: saved.bytes }
+          metadata: {
+            backend: browserBackend.kind,
+            path: saved.path,
+            mimeType: screenshot.mimeType,
+            bytes: saved.bytes
+          }
         };
       }
     },
@@ -532,12 +539,18 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       toolsets: ["browser", "web", "research", "media"],
       progressLabel: "analyzing browser screenshot",
       maxResultSizeChars: 8_000,
-      isAvailable: () => browserBackend.isAvailable(),
+      isAvailable: async () => await browserBackend.isAvailable() &&
+        options.visionDispatcher?.isAvailable({ mode: "screenshot" }) === true,
+      resolveSecurity: (input: BrowserActionInput & { prompt?: string }, context) =>
+        options.visionDispatcher?.resolveSecurity({
+          prompt: input.prompt,
+          mode: "screenshot"
+        }, context, "browser-artifact"),
       run: async (input: BrowserActionInput & { prompt?: string }, context) => {
         if (browserBackend.screenshot === undefined) {
           return unsupportedBrowserTool(browserBackend, "browser.vision");
         }
-        if (options.visionAnalyzer === undefined) {
+        if (options.visionDispatcher === undefined) {
           return {
             ok: false,
             content: "browser.vision requires a configured vision analyzer route.",
@@ -553,15 +566,17 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             metadata: { backend: browserBackend.kind }
           };
         }
-        const saved = await saveBrowserScreenshot(options.workspaceRoot, screenshot.base64);
-        const analysis = await options.visionAnalyzer({
+        const saved = await saveBrowserScreenshot(
+          options.workspaceRoot,
+          screenshot.base64,
+          options.artifactStore
+        );
+        const analysis = await options.visionDispatcher.dispatch({
           path: saved.path,
-          prompt: input.prompt
-        }, context?.signal, {
-          executionSessionId: options.currentSessionId?.(),
-          visibleTurnId: context?.visibleTurnId
-        });
-        return {
+          prompt: input.prompt,
+          mode: "screenshot"
+        }, context);
+        return inheritEphemeralVisionImages({
           ...analysis,
           content: [
             `Browser screenshot: ${saved.path}`,
@@ -573,7 +588,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             screenshotPath: saved.path,
             screenshotBytes: saved.bytes
           }
-        };
+        }, analysis);
       }
     },
     createBrowserActionTool({
@@ -745,6 +760,19 @@ export const webToolProvider: SessionToolProvider = {
   kind: "session",
   createTools(ctx) {
     const channelMediaRoot = requireProviderDependency("web", "channelMediaRoot", ctx.channelMediaRoot);
+    const imageCacheRoot = ctx.imageCacheRoot;
+    const visionDispatcher = createGovernedVisionArtifactDispatcher({
+      workspaceRoot: ctx.workspaceRoot,
+      profileId: ctx.profileId,
+      allowedRoots: [channelMediaRoot, ...(imageCacheRoot === undefined ? [] : [imageCacheRoot])],
+      imageCacheRoot,
+      visionAuxiliaryRoute: ctx.visionRoute,
+      mainRoute: ctx.mainRoute,
+      mainFallbackRoutes: ctx.mainFallbackRoutes,
+      providerExecutor: ctx.providerExecutor,
+      artifactStore: ctx.artifactStore,
+      currentSessionId: () => ctx.currentSessionId()
+    });
     return createWebTools({
       fetch: ctx.webFetch,
       browserBackend: requireProviderDependency("web", "browserBackend", ctx.browserBackend),
@@ -758,15 +786,9 @@ export const webToolProvider: SessionToolProvider = {
       mainRoute: ctx.mainRoute,
       snapshotAuxiliaryRoute: ctx.compressionRoute,
       providerExecutor: ctx.providerExecutor,
+      artifactStore: ctx.artifactStore,
       securityConfig: ctx.securityConfig,
-      visionAnalyzer: (input, signal, usage) => analyzeImageWithVision({
-        workspaceRoot: ctx.workspaceRoot,
-        profileId: ctx.profileId,
-        allowedRoots: [channelMediaRoot],
-        visionAuxiliaryRoute: ctx.visionRoute,
-        mainRoute: ctx.mainRoute,
-        providerExecutor: ctx.providerExecutor
-      }, input, signal, usage)
+      visionDispatcher
     });
   }
 };
@@ -1213,12 +1235,24 @@ function describeValueShape(value: unknown): Record<string, unknown> {
   return { type: typeof value };
 }
 
-async function saveBrowserScreenshot(workspaceRoot: string | undefined, base64: string): Promise<{ path: string; bytes: number }> {
+async function saveBrowserScreenshot(
+  workspaceRoot: string | undefined,
+  base64: string,
+  artifactStore?: ArtifactStore
+): Promise<{ path: string; bytes: number }> {
   const root = workspaceRoot ?? process.cwd();
   const path = join(root, ".estacoda", "browser", "screenshots", `browser-${Date.now()}.png`);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, Buffer.from(base64, "base64"));
   const file = await stat(path);
+  artifactStore?.record({
+    path,
+    kind: "image",
+    bytes: file.size,
+    mimeType: "image/png",
+    summary: "Browser screenshot captured for governed visual analysis.",
+    metadata: { visionProvenance: "browser-artifact" }
+  });
   return { path, bytes: file.size };
 }
 

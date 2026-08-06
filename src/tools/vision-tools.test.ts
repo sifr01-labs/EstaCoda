@@ -6,6 +6,7 @@ import { analyzeImageWithVision, createVisionTools, dispatchImageWithVision } fr
 import type { ProviderExecutionResult, ProviderExecutor } from "../providers/provider-executor.js";
 import type { ResolvedModelRoute } from "../contracts/provider.js";
 import { ephemeralVisionImages } from "../vision/ephemeral-vision-content.js";
+import { ArtifactStore } from "../artifacts/artifact-store.js";
 
 function createMockExecutor(ok = true, content = "vision result") {
   const fn = vi.fn().mockResolvedValue({
@@ -271,6 +272,70 @@ describe("vision tools", () => {
             sensitivePath: false,
             destinations: ["openai@https://api.openai.com/v1"]
           }
+        });
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("allows generated images from the selected profile cache and classifies their provenance", async () => {
+      const tmp = createTempPng();
+      const executor = createMockExecutor();
+      try {
+        const artifactStore = new ArtifactStore({ id: () => "generated-image" });
+        const artifact = artifactStore.record({
+          path: tmp.path,
+          kind: "image",
+          bytes: 1,
+          mimeType: "image/png"
+        });
+        const [tool] = createVisionTools({
+          workspaceRoot: join(tmp.dir, "workspace"),
+          imageCacheRoot: tmp.dir,
+          artifactStore,
+          mainRoute: textOnlyRoute,
+          visionAuxiliaryRoute: {
+            task: "vision",
+            route: baseRoute,
+            source: "explicit",
+            fallbackToMain: false,
+            diagnostics: []
+          },
+          providerExecutor: executor
+        });
+        const resolution = await tool.resolveSecurity?.({ path: artifact.path }, {
+          trustedWorkspace: true,
+          sessionId: "session-a"
+        });
+        const result = await tool.run({ path: artifact.path });
+
+        expect(resolution).toMatchObject({
+          dataEgress: { sourceProvenance: "generated-artifact" }
+        });
+        expect(result.ok).toBe(true);
+        expect(executor.complete).toHaveBeenCalledTimes(1);
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("ignores model-provided provenance fields", async () => {
+      const tmp = createTempPng();
+      try {
+        const [tool] = createVisionTools({
+          workspaceRoot: tmp.dir,
+          resolvedVisionRoute: baseRoute
+        });
+        const resolution = await tool.resolveSecurity?.({
+          path: "test.png",
+          provenance: "generated-artifact"
+        } as never, {
+          trustedWorkspace: true,
+          sessionId: "session-a"
+        });
+
+        expect(resolution).toMatchObject({
+          dataEgress: { sourceProvenance: "agent-discovered" }
         });
       } finally {
         tmp.cleanup();

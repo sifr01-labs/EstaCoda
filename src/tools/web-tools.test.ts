@@ -9,7 +9,10 @@ import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/pr
 import type { ManagedPythonCapabilityInstallStatus } from "../python-env/capability-manager.js";
 import { DDGS_CAPABILITY_ID } from "../python-env/capability-registry.js";
 import type { ProviderExecutor, ProviderExecutionResult } from "../providers/provider-executor.js";
+import { ArtifactStore } from "../artifacts/artifact-store.js";
 import { createMockBrowserBackend, createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
+import { ephemeralVisionImages } from "../vision/ephemeral-vision-content.js";
+import { createGovernedVisionArtifactDispatcher, createVisionTools } from "./vision-tools.js";
 import { createWebTools, webToolProvider, type FetchLike, type WebToolOptions } from "./web-tools.js";
 import { registerWebResearchProvider, resetWebResearchProvidersForTest } from "./web-research-registry.js";
 import type { WebResearchProvider, WebResearchSubprocess, WebResearchSubprocessSpawn } from "./web-research-provider.js";
@@ -131,6 +134,11 @@ const publicResolver = async (hostname: string) => hostname === "localhost"
   ? ["127.0.0.1"]
   : ["93.184.216.34"];
 
+const VALID_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==",
+  "base64"
+);
+
 const summaryModelProfile = {
   id: "summary-model",
   provider: "openai" as const,
@@ -153,6 +161,36 @@ const snapshotAuxiliaryRoute: ResolvedAuxiliaryRoute = {
   fallbackToMain: false,
   diagnostics: []
 };
+
+const visionRoute: ResolvedModelRoute = {
+  provider: "openai",
+  id: "vision-model",
+  baseUrl: "https://api.openai.com/v1",
+  profile: {
+    ...summaryModelProfile,
+    id: "vision-model",
+    supportsVision: true
+  }
+};
+
+function visionAuxiliaryRoute(
+  source: ResolvedAuxiliaryRoute["source"] = "explicit"
+): ResolvedAuxiliaryRoute {
+  return {
+    task: "vision",
+    route: visionRoute,
+    source,
+    fallbackToMain: false,
+    diagnostics: []
+  };
+}
+
+function createVisionScreenshotBackend(screenshot = vi.fn(async () => ({
+  mimeType: "image/png" as const,
+  base64: VALID_PNG.toString("base64")
+}))): BrowserBackend {
+  return { ...createMockBrowserBackend(), screenshot };
+}
 
 function okProviderResult(content: string): ProviderExecutionResult {
   return {
@@ -1770,7 +1808,11 @@ describe("web and browser tools baselines", () => {
         input: { prompt: "describe" },
         options: {
           workspaceRoot,
-          visionAnalyzer: async () => ({ ok: true, content: "vision ok" })
+          visionDispatcher: {
+            isAvailable: () => true,
+            resolveSecurity: async () => undefined,
+            dispatch: async () => ({ ok: true, content: "vision ok" })
+          }
         }
       },
       { toolName: "browser.dialog", backendMethod: "dialog", input: { action: "accept" } },
@@ -2153,6 +2195,158 @@ describe("web and browser tools baselines", () => {
     expect((path as string).startsWith(join(workspaceRoot, ".estacoda", "browser", "screenshots"))).toBe(true);
     expect(relative(process.cwd(), path as string).startsWith("..")).toBe(true);
     await expect(readFile(path as string)).resolves.toEqual(Buffer.from("iVBORw0KGgo=", "base64"));
+  });
+
+  it("preserves browser provenance when browser.screenshot is followed by vision.analyze", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-browser-artifact-vision-"));
+    tempRoots.push(workspaceRoot);
+    const artifactStore = new ArtifactStore({ id: () => "browser-screenshot" });
+    const screenshot = tool("browser.screenshot", createTestWebTools({
+      browserBackend: createVisionScreenshotBackend(),
+      workspaceRoot,
+      artifactStore
+    }));
+    const screenshotResult = await screenshot.run({});
+    const screenshotPath = screenshotResult.metadata?.path;
+    expect(typeof screenshotPath).toBe("string");
+
+    const [vision] = createVisionTools({
+      workspaceRoot,
+      artifactStore,
+      mainRoute: visionRoute,
+      visionAuxiliaryRoute: visionAuxiliaryRoute("auto-main")
+    });
+    const resolution = await vision.resolveSecurity?.({ path: screenshotPath as string }, {
+      trustedWorkspace: true,
+      sessionId: "session-browser-artifact"
+    });
+    const analysis = await vision.run({ path: screenshotPath as string });
+
+    expect(artifactStore.list()).toContainEqual(expect.objectContaining({
+      id: "browser-screenshot",
+      metadata: { visionProvenance: "browser-artifact" }
+    }));
+    expect(resolution).toMatchObject({
+      dataEgress: { sourceProvenance: "browser-artifact" }
+    });
+    expect(analysis).toMatchObject({ ok: true, metadata: { dispatch: "native" } });
+    expect(ephemeralVisionImages(analysis)).toHaveLength(1);
+  });
+
+  it("dispatches a browser screenshot natively without an auxiliary provider call", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-browser-native-vision-"));
+    tempRoots.push(workspaceRoot);
+    const screenshot = vi.fn(async () => ({
+      mimeType: "image/png" as const,
+      base64: VALID_PNG.toString("base64")
+    }));
+    const executor = createSummaryExecutor("unexpected auxiliary call");
+    const dispatcher = createGovernedVisionArtifactDispatcher({
+      workspaceRoot,
+      mainRoute: visionRoute,
+      visionAuxiliaryRoute: visionAuxiliaryRoute("auto-main"),
+      providerExecutor: executor as ProviderExecutor,
+      currentSessionId: () => "session-native"
+    });
+    const browserVision = tool("browser.vision", createTestWebTools({
+      browserBackend: createVisionScreenshotBackend(screenshot),
+      workspaceRoot,
+      visionDispatcher: dispatcher
+    }));
+
+    const result = await browserVision.run({ prompt: "Inspect the page" }, {
+      visibleTurnId: "turn-native",
+      providerUsageLineage: { executionSessionId: "session-native", visibleTurnId: "turn-native" }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.metadata).toEqual(expect.objectContaining({ dispatch: "native", backend: "mock" }));
+    expect(ephemeralVisionImages(result)).toHaveLength(1);
+    expect(screenshot).toHaveBeenCalledTimes(1);
+    expect(executor.complete).not.toHaveBeenCalled();
+  });
+
+  it("uses exactly one auxiliary analysis call for a browser screenshot with a text-only main route", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-browser-aux-vision-"));
+    tempRoots.push(workspaceRoot);
+    const screenshot = vi.fn(async () => ({
+      mimeType: "image/png" as const,
+      base64: VALID_PNG.toString("base64")
+    }));
+    const executor = createSummaryExecutor("browser vision result");
+    const dispatcher = createGovernedVisionArtifactDispatcher({
+      workspaceRoot,
+      mainRoute: summaryRoute,
+      visionAuxiliaryRoute: visionAuxiliaryRoute(),
+      providerExecutor: executor as ProviderExecutor,
+      currentSessionId: () => "session-aux"
+    });
+    const browserVision = tool("browser.vision", createTestWebTools({
+      browserBackend: createVisionScreenshotBackend(screenshot),
+      workspaceRoot,
+      visionDispatcher: dispatcher
+    }));
+
+    const result = await browserVision.run({ prompt: "Inspect the page" }, {
+      visibleTurnId: "turn-aux",
+      providerUsageLineage: { executionSessionId: "session-aux", visibleTurnId: "turn-aux" }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.metadata).toEqual(expect.objectContaining({ dispatch: "auxiliary", backend: "mock" }));
+    expect(ephemeralVisionImages(result)).toHaveLength(0);
+    expect(screenshot).toHaveBeenCalledTimes(1);
+    expect(executor.complete).toHaveBeenCalledTimes(1);
+    expect(executor.complete).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ requireVision: true }),
+      expect.objectContaining({
+        usage: expect.objectContaining({
+          executionSessionId: "session-aux",
+          visibleTurnId: "turn-aux"
+        })
+      })
+    );
+  });
+
+  it("binds browser artifact egress to every hosted native destination", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-browser-vision-security-"));
+    tempRoots.push(workspaceRoot);
+    const anthropicRoute: ResolvedModelRoute = {
+      ...visionRoute,
+      provider: "anthropic",
+      id: "claude-vision",
+      baseUrl: "https://api.anthropic.com/v1",
+      profile: { ...visionRoute.profile, provider: "anthropic", id: "claude-vision" }
+    };
+    const dispatcher = createGovernedVisionArtifactDispatcher({
+      workspaceRoot,
+      mainRoute: visionRoute,
+      mainFallbackRoutes: [anthropicRoute],
+      visionAuxiliaryRoute: visionAuxiliaryRoute("auto-main")
+    });
+    const browserVision = tool("browser.vision", createTestWebTools({
+      browserBackend: createVisionScreenshotBackend(),
+      workspaceRoot,
+      visionDispatcher: dispatcher
+    }));
+
+    const resolution = await browserVision.resolveSecurity?.({}, {
+      trustedWorkspace: true,
+      sessionId: "session-security"
+    });
+
+    expect(resolution).toMatchObject({
+      riskClass: "external-side-effect",
+      dataEgress: {
+        sourceProvenance: "browser-artifact",
+        sensitivePath: false,
+        destinations: [
+          "anthropic@https://api.anthropic.com/v1",
+          "openai@https://api.openai.com/v1"
+        ]
+      }
+    });
   });
 
   it("returns unavailable for browser.vision without an analyzer", async () => {

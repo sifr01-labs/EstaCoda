@@ -42,9 +42,7 @@ export function assessDataEgress(
     return assessment(
       "allow",
       mode,
-      egress.sourceProvenance === "current-turn-attachment"
-        ? "Adaptive mode allows the current-turn user image attachment to use the configured hosted vision route."
-        : "Adaptive mode allows the image because the user explicitly referenced it in the current turn.",
+      adaptiveExpectedSourceReason(egress),
       "low",
       `adaptive-${egress.sourceProvenance}`
     );
@@ -63,7 +61,24 @@ export function assessDataEgress(
 
 function isExpectedUserSource(egress: SecurityDataEgressContext): boolean {
   return egress.sourceProvenance === "current-turn-attachment" ||
-    egress.sourceProvenance === "explicit-reference";
+    egress.sourceProvenance === "explicit-reference" ||
+    egress.sourceProvenance === "browser-artifact" ||
+    egress.sourceProvenance === "generated-artifact";
+}
+
+function adaptiveExpectedSourceReason(egress: SecurityDataEgressContext): string {
+  switch (egress.sourceProvenance) {
+    case "current-turn-attachment":
+      return "Adaptive mode allows the current-turn user image attachment to use the configured hosted vision route.";
+    case "explicit-reference":
+      return "Adaptive mode allows the image because the user explicitly referenced it in the current turn.";
+    case "browser-artifact":
+      return "Adaptive mode allows the browser screenshot produced by the current tool call to use the configured hosted vision route.";
+    case "generated-artifact":
+      return "Adaptive mode allows the image generated in the selected profile cache to use the configured hosted vision route.";
+    case "agent-discovered":
+      return "Approval is required for an agent-discovered image.";
+  }
 }
 
 function assessment(

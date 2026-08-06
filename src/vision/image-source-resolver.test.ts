@@ -183,6 +183,38 @@ describe("resolveVisionImageSource", () => {
     });
   });
 
+  it("allows selected-profile image-cache files but rejects traversal and symlink escapes", async () => {
+    const { root, workspace } = await createWorkspace();
+    const imageCacheRoot = join(root, "profile", "image-cache");
+    await mkdir(imageCacheRoot, { recursive: true });
+    const generated = join(imageCacheRoot, "generated.png");
+    const outside = join(root, "outside.png");
+    await writeFile(generated, VALID_PNG);
+    await writeFile(outside, VALID_PNG);
+    await symlink(outside, join(imageCacheRoot, "escaped.png"));
+
+    await expect(resolveVisionImageSource({
+      workspaceRoot: workspace,
+      allowedRoots: [imageCacheRoot],
+      path: generated,
+      maxBytes: 1024
+    })).resolves.toMatchObject({ ok: true, displayPath: "generated.png" });
+
+    await expect(resolveVisionImageSource({
+      workspaceRoot: workspace,
+      allowedRoots: [imageCacheRoot],
+      path: join(imageCacheRoot, "..", "..", "outside.png"),
+      maxBytes: 1024
+    })).resolves.toMatchObject({ ok: false, code: "source-outside-allowed-roots" });
+
+    await expect(resolveVisionImageSource({
+      workspaceRoot: workspace,
+      allowedRoots: [imageCacheRoot],
+      path: join(imageCacheRoot, "escaped.png"),
+      maxBytes: 1024
+    })).resolves.toMatchObject({ ok: false, code: "source-outside-allowed-roots" });
+  });
+
   it("stops at the configured byte limit", async () => {
     const { workspace } = await createWorkspace();
     await writeFile(join(workspace, "sample.png"), VALID_PNG);

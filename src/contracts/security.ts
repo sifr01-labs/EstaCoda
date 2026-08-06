@@ -38,7 +38,12 @@ export type SecurityContext = {
 export type SecurityDataEgressContext = {
   kind: "vision-image";
   inference: "hosted";
-  sourceProvenance: "current-turn-attachment" | "explicit-reference" | "agent-discovered";
+  sourceProvenance:
+    | "current-turn-attachment"
+    | "explicit-reference"
+    | "browser-artifact"
+    | "generated-artifact"
+    | "agent-discovered";
   sensitivePath: boolean;
   destinations: readonly string[];
 };
