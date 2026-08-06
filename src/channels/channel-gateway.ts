@@ -1215,6 +1215,18 @@ export class ChannelGateway {
     const normalizedSessionKey = normalizeSessionKey(processedMessage.sessionKey, this.#sessionPolicy);
 
     const policy = this.#busyPolicyResolver?.(processedMessage.channel) ?? { busyPolicy: "reject" as const, queueDepth: 3 };
+    const reapedSettledTurn = this.#reapSettledOrphanTurn(activeTurnKey);
+    if (reapedSettledTurn && this.#sessionMessageQueue.size(activeTurnKey) > 0) {
+      void this.#drainQueuedTurns(activeTurnKey).catch((error) => {
+        try {
+          this.#logWarning?.(
+            `Settled-turn recovery drain failed for session=${sessionKeyHash(activeTurnKey)} (${boundedErrorClass(error)}).`
+          );
+        } catch {
+          // Diagnostics must not interfere with gateway admission.
+        }
+      });
+    }
     const isBusy = this.#activeTurnRegistry !== undefined
       ? this.#activeTurnRegistry.isBusy(activeTurnKey)
       : this.#activeTurns.has(activeTurnKey);
@@ -1303,7 +1315,19 @@ export class ChannelGateway {
     return this.#processTurn(processedMessage, adapter);
   }
 
-  async #processTurn(message: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult> {
+  #processTurn(message: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult> {
+    let settleOwner = (): void => {};
+    const owner = new Promise<void>((resolve) => {
+      settleOwner = resolve;
+    });
+    return this.#processOwnedTurn(message, adapter, owner).finally(settleOwner);
+  }
+
+  async #processOwnedTurn(
+    message: ChannelMessage,
+    adapter: ChannelAdapter,
+    owner: PromiseLike<void>
+  ): Promise<ChannelGatewayResult> {
     const activeTurnKey = stableSessionKey(message.sessionKey, this.#sessionPolicy);
     const normalizedSessionKey = normalizeSessionKey(message.sessionKey, this.#sessionPolicy);
 
@@ -1313,7 +1337,7 @@ export class ChannelGateway {
     let turnStarted = false;
 
     if (this.#activeTurnRegistry !== undefined) {
-      const startResult = this.#activeTurnRegistry.startTurn(activeTurnKey, controller);
+      const startResult = this.#activeTurnRegistry.startTurn(activeTurnKey, controller, undefined, owner);
       if (!startResult.ok) {
         if (this.#activeTurnRegistry.consumeBusyAck(activeTurnKey)) {
           const busyText = "EstaCoda is busy with another request in this chat. Please wait.";
@@ -1644,6 +1668,29 @@ export class ChannelGateway {
         });
       }
     }
+  }
+
+  #reapSettledOrphanTurn(activeTurnKey: string): boolean {
+    if (
+      this.#activeTurnRegistry === undefined ||
+      this.#activeRuntimeByTurnKey.has(activeTurnKey)
+    ) {
+      return false;
+    }
+
+    const turn = this.#activeTurnRegistry.getTurn(activeTurnKey);
+    if (turn === undefined || !this.#activeTurnRegistry.reapSettledTurn(activeTurnKey, turn.turnId)) {
+      return false;
+    }
+
+    try {
+      this.#logWarning?.(
+        `Reaped settled orphan turn ${turn.turnId} for session=${sessionKeyHash(activeTurnKey)}.`
+      );
+    } catch {
+      // Diagnostics must not interfere with gateway admission.
+    }
+    return true;
   }
 
   async #runSessionHygiene(sessionId: string, signal: AbortSignal): Promise<Awaited<ReturnType<SessionHygieneService["run"]>> | undefined> {

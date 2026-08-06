@@ -4287,6 +4287,181 @@ describe("ChannelGateway commands", () => {
       expect(disposed).toBe(false);
     });
 
+    it("reaps a settled turn claim retained by a synchronous lifecycle observer fault", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      const hookRegistry = new HookRegistry();
+      const originalEmit = hookRegistry.emit.bind(hookRegistry);
+      const handle = vi.fn(async () => runtimeResponse({ text: "recovered", securityDecision: "allow" }));
+      const warnings: string[] = [];
+      let injectStartFault = true;
+      const activeTurnKey = stableSessionKey(makeMessage("first").sessionKey, {});
+
+      vi.spyOn(hookRegistry, "emit").mockImplementation(((name, payload) => {
+        if (name === "session:turn:start" && injectStartFault) {
+          injectStartFault = false;
+          throw new Error("injected lifecycle observer fault");
+        }
+        return originalEmit(name, payload);
+      }) as typeof hookRegistry.emit);
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({ ...createMinimalRuntime(), handle }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        activeTurnRegistry: registry,
+        hookRegistry,
+        logWarning: (message) => warnings.push(message)
+      });
+
+      await expect(gateway.receive(makeMessage("first"))).rejects.toThrow("injected lifecycle observer fault");
+      expect(registry.isBusy(activeTurnKey)).toBe(true);
+
+      const recovered = await gateway.receive(makeMessage("second"));
+
+      expect(recovered.replyText).toBe("recovered");
+      expect(handle).toHaveBeenCalledOnce();
+      expect(registry.isBusy(activeTurnKey)).toBe(false);
+      expect(warnings).toEqual([
+        expect.stringMatching(/^Reaped settled orphan turn turn-\d+ for session=[a-f0-9]{16}\.$/u)
+      ]);
+      expect(warnings.join("\n")).not.toContain(activeTurnKey);
+    });
+
+    it("admits only one replacement when concurrent messages encounter a settled orphan", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      const activeTurnKey = stableSessionKey(makeMessage("stale").sessionKey, {});
+      let settleStaleOwner: (() => void) | undefined;
+      const staleOwner = new Promise<void>((resolve) => { settleStaleOwner = resolve; });
+      const staleTurn = registry.startTurn(activeTurnKey, new AbortController(), undefined, staleOwner);
+      expect(staleTurn.ok).toBe(true);
+      settleStaleOwner?.();
+      await staleOwner;
+      await Promise.resolve();
+
+      let releaseReplacement: (() => void) | undefined;
+      const replacementGate = new Promise<void>((resolve) => { releaseReplacement = resolve; });
+      const handle = vi.fn(async () => {
+        await replacementGate;
+        return runtimeResponse({ text: "replacement", securityDecision: "allow" });
+      });
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({ ...createMinimalRuntime(), handle }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        activeTurnRegistry: registry
+      });
+
+      const second = gateway.receive(makeMessage("second", { id: "second" }));
+      const third = gateway.receive(makeMessage("third", { id: "third" }));
+      await waitFor(() => handle.mock.calls.length === 1);
+      releaseReplacement?.();
+      const results = await Promise.all([second, third]);
+
+      expect(handle).toHaveBeenCalledOnce();
+      expect(results.filter((result) => result.replyText === "replacement")).toHaveLength(1);
+      expect(results.filter((result) => result.replyText === "")).toHaveLength(1);
+      expect(registry.isBusy(activeTurnKey)).toBe(false);
+    });
+
+    it("drains existing FIFO work before newly arriving work after reaping an orphan", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      const activeTurnKey = stableSessionKey(makeMessage("stale").sessionKey, {});
+      let settleStaleOwner: (() => void) | undefined;
+      const staleOwner = new Promise<void>((resolve) => { settleStaleOwner = resolve; });
+      registry.startTurn(activeTurnKey, new AbortController(), undefined, staleOwner);
+      const handled: string[] = [];
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async ({ text }: { text: string }) => {
+            handled.push(text);
+            return runtimeResponse({ text: "ok", securityDecision: "allow" });
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+      });
+
+      await gateway.receive(makeMessage("already queued", { id: "queued" }));
+      settleStaleOwner?.();
+      await staleOwner;
+      await Promise.resolve();
+
+      await gateway.receive(makeMessage("new arrival", { id: "new" }));
+      await waitFor(() => !gateway.hasPendingWork(), 2_000);
+
+      expect(handled).toEqual(["already queued", "new arrival"]);
+      expect(registry.isBusy(activeTurnKey)).toBe(false);
+    });
+
+    it("does not let an older owner settling after disposal failure reap a newer turn", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let releaseFirstDispose: (() => void) | undefined;
+      let markFirstDisposeStarted: (() => void) | undefined;
+      const firstDisposeGate = new Promise<void>((resolve) => { releaseFirstDispose = resolve; });
+      const firstDisposeStarted = new Promise<void>((resolve) => { markFirstDisposeStarted = resolve; });
+      let releaseSecondHandle: (() => void) | undefined;
+      let markSecondHandleStarted: (() => void) | undefined;
+      const secondHandleGate = new Promise<void>((resolve) => { releaseSecondHandle = resolve; });
+      const secondHandleStarted = new Promise<void>((resolve) => { markSecondHandleStarted = resolve; });
+      let runtimeCount = 0;
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => {
+          runtimeCount += 1;
+          if (runtimeCount === 1) {
+            return {
+              ...createMinimalRuntime(),
+              handle: async () => runtimeResponse({ text: "first", securityDecision: "allow" }),
+              dispose: async () => {
+                markFirstDisposeStarted?.();
+                await firstDisposeGate;
+                throw new Error("injected disposal failure");
+              }
+            };
+          }
+          return {
+            ...createMinimalRuntime(),
+            handle: async () => {
+              markSecondHandleStarted?.();
+              await secondHandleGate;
+              return runtimeResponse({ text: "second", securityDecision: "allow" });
+            }
+          };
+        },
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        activeTurnRegistry: registry
+      });
+
+      const first = gateway.receive(makeMessage("first", { id: "first" }));
+      await firstDisposeStarted;
+      const second = gateway.receive(makeMessage("second", { id: "second" }));
+      await secondHandleStarted;
+
+      releaseFirstDispose?.();
+      await first;
+      const third = await gateway.receive(makeMessage("third", { id: "third" }));
+
+      expect(third.replyText).toBe("");
+      expect(runtimeCount).toBe(2);
+      expect(registry.isBusy(stableSessionKey(makeMessage("second").sessionKey, {}))).toBe(true);
+
+      releaseSecondHandle?.();
+      await second;
+      expect(registry.stats().activeTurnCount).toBe(0);
+    });
+
     it("runtime acquisition failure cleans fallback active turn", async () => {
       const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
 

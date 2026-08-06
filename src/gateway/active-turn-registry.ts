@@ -48,8 +48,15 @@ export type StuckTurnHistoryEntry = {
   wasAborted: boolean;
 };
 
+type ActiveTurnOwnership = {
+  turnId: string;
+  owner: PromiseLike<void>;
+  settled: boolean;
+};
+
 export class ActiveTurnRegistry {
   #activeTurns: Map<string, ActiveTurn>;
+  #turnOwnership: Map<string, ActiveTurnOwnership>;
   #history: StuckTurnHistoryEntry[];
   #abortedTurnIds: Set<string>;
 
@@ -66,6 +73,7 @@ export class ActiveTurnRegistry {
 
   constructor(options?: ActiveTurnRegistryOptions) {
     this.#activeTurns = new Map();
+    this.#turnOwnership = new Map();
     this.#history = [];
     this.#abortedTurnIds = new Set();
 
@@ -82,7 +90,12 @@ export class ActiveTurnRegistry {
 
   /** Attempt to start a turn for key.
    *  Returns busy if key already has an active turn. */
-  startTurn(key: string, abortController?: AbortController, metadata?: Record<string, unknown>): StartTurnResult {
+  startTurn(
+    key: string,
+    abortController?: AbortController,
+    metadata?: Record<string, unknown>,
+    owner?: PromiseLike<void>
+  ): StartTurnResult {
     const existing = this.#activeTurns.get(key);
     if (existing !== undefined) {
       return { ok: false, reason: "busy", currentTurnId: existing.turnId };
@@ -98,8 +111,38 @@ export class ActiveTurnRegistry {
       metadata,
     };
     this.#activeTurns.set(key, turn);
+    if (owner !== undefined) {
+      const ownership: ActiveTurnOwnership = {
+        turnId,
+        owner,
+        settled: false,
+      };
+      this.#turnOwnership.set(key, ownership);
+      void Promise.resolve(owner).then(
+        () => this.#recordOwnerSettlement(key, turnId, owner),
+        () => this.#recordOwnerSettlement(key, turnId, owner)
+      );
+    }
     this.#totalStarted++;
     return { ok: true, turnId };
+  }
+
+  /** Remove a retained registration only when its exact execution owner settled. */
+  reapSettledTurn(key: string, expectedTurnId: string): boolean {
+    const turn = this.#activeTurns.get(key);
+    const ownership = this.#turnOwnership.get(key);
+    if (
+      turn === undefined ||
+      turn.turnId !== expectedTurnId ||
+      ownership === undefined ||
+      ownership.turnId !== expectedTurnId ||
+      !ownership.settled
+    ) {
+      return false;
+    }
+
+    this.endTurn(key, expectedTurnId);
+    return true;
   }
 
   /** Update metadata for an active turn. No-op if turn not found or turnId mismatched. */
@@ -147,6 +190,7 @@ export class ActiveTurnRegistry {
     }
 
     this.#activeTurns.delete(key);
+    this.#turnOwnership.delete(key);
     this.#abortedTurnIds.delete(turn.turnId);
     this.#totalEnded++;
   }
@@ -287,6 +331,7 @@ export class ActiveTurnRegistry {
   /** Remove all active turns and clear history. For testing / emergency reset. */
   clear(): void {
     this.#activeTurns.clear();
+    this.#turnOwnership.clear();
     this.#history.length = 0;
     this.#abortedTurnIds.clear();
     this.#totalStarted = 0;
@@ -297,5 +342,18 @@ export class ActiveTurnRegistry {
 
   #wasAborted(turnId: string): boolean {
     return this.#abortedTurnIds.has(turnId);
+  }
+
+  #recordOwnerSettlement(key: string, turnId: string, owner: PromiseLike<void>): void {
+    const turn = this.#activeTurns.get(key);
+    const ownership = this.#turnOwnership.get(key);
+    if (
+      turn?.turnId !== turnId ||
+      ownership?.turnId !== turnId ||
+      ownership.owner !== owner
+    ) {
+      return;
+    }
+    ownership.settled = true;
   }
 }

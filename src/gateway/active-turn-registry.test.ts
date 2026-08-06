@@ -587,4 +587,56 @@ describe("ActiveTurnRegistry", () => {
     registry.abortAllTurns("reason-2");
     expect(registry.stats().totalAborted).toBe(2);
   });
+
+  it("reaps a retained registration after its exact owner settles", async () => {
+    let settleOwner: (() => void) | undefined;
+    const owner = new Promise<void>((resolve) => { settleOwner = resolve; });
+    const result = registry.startTurn("k1", new AbortController(), undefined, owner);
+    expect(result.ok).toBe(true);
+
+    settleOwner?.();
+    await owner;
+    await Promise.resolve();
+
+    expect(registry.reapSettledTurn("k1", result.ok ? result.turnId : "")).toBe(true);
+    expect(registry.isBusy("k1")).toBe(false);
+    expect(registry.stats().totalEnded).toBe(1);
+  });
+
+  it("does not reap a slow owner", () => {
+    const owner = new Promise<void>(() => {});
+    const result = registry.startTurn("k1", new AbortController(), undefined, owner);
+
+    expect(registry.reapSettledTurn("k1", result.ok ? result.turnId : "")).toBe(false);
+    expect(registry.isBusy("k1")).toBe(true);
+  });
+
+  it("does not treat an abort request as owner settlement", () => {
+    const owner = new Promise<void>(() => {});
+    const result = registry.startTurn("k1", new AbortController(), undefined, owner);
+    registry.abortTurn("k1", "interrupt");
+
+    expect(registry.reapSettledTurn("k1", result.ok ? result.turnId : "")).toBe(false);
+    expect(registry.isBusy("k1")).toBe(true);
+  });
+
+  it("does not let an old owner settlement mark a newer turn as settled", async () => {
+    let settleOldOwner: (() => void) | undefined;
+    const oldOwner = new Promise<void>((resolve) => { settleOldOwner = resolve; });
+    const oldTurn = registry.startTurn("k1", new AbortController(), undefined, oldOwner);
+    expect(oldTurn.ok).toBe(true);
+    registry.endTurn("k1", oldTurn.ok ? oldTurn.turnId : "");
+
+    const newOwner = new Promise<void>(() => {});
+    const newTurn = registry.startTurn("k1", new AbortController(), undefined, newOwner);
+    expect(newTurn.ok).toBe(true);
+
+    settleOldOwner?.();
+    await oldOwner;
+    await Promise.resolve();
+
+    expect(registry.reapSettledTurn("k1", oldTurn.ok ? oldTurn.turnId : "")).toBe(false);
+    expect(registry.reapSettledTurn("k1", newTurn.ok ? newTurn.turnId : "")).toBe(false);
+    expect(registry.getTurn("k1")?.turnId).toBe(newTurn.ok ? newTurn.turnId : undefined);
+  });
 });
