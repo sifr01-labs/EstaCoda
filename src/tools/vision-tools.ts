@@ -1,9 +1,9 @@
-import { readFile, realpath, stat } from "node:fs/promises";
-import { dirname, extname, resolve } from "node:path";
 import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
+import type { VisionImageSourceError } from "../contracts/vision.js";
 import { executeAuxiliaryTask } from "../providers/auxiliary-executor.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
+import { resolveVisionImageSource } from "../vision/image-source-resolver.js";
 
 export type VisionToolOptions = {
   workspaceRoot: string;
@@ -24,14 +24,7 @@ export type VisionToolOptions = {
 
 const DEFAULT_MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
-type ResolvedPath =
-  | { ok: true; path: string; root?: string }
-  | { ok: false; content: string; metadata?: Record<string, unknown> };
-
 export function createVisionTools(options: VisionToolOptions): readonly RegisteredTool[] {
-  const workspaceRoot = resolve(options.workspaceRoot);
-  const allowedRoots = dedupeRoots([workspaceRoot, ...(options.allowedRoots ?? [])]);
-
   return [
     {
       name: "vision.analyze",
@@ -91,35 +84,15 @@ export async function analyzeImageWithVision(
   signal?: AbortSignal,
   usage: { executionSessionId?: string; visibleTurnId?: string } = {}
 ): Promise<ToolResult> {
-  const workspaceRoot = resolve(options.workspaceRoot);
-  const allowedRoots = dedupeRoots([workspaceRoot, ...(options.allowedRoots ?? [])]);
   const maxImageBytes = options.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES;
-  const resolved = await resolveAllowedPath(allowedRoots, input.path);
-  if (!resolved.ok) {
-    return resolved;
-  }
-
-  const fileStat = await stat(resolved.path);
-  if (fileStat.size > maxImageBytes) {
-    return {
-      ok: false,
-      content: `This image is too large for the current vision workflow. The limit is ${formatBytes(maxImageBytes)}.`,
-      metadata: {
-        bytes: fileStat.size,
-        limitBytes: maxImageBytes
-      }
-    };
-  }
-
-  const mimeType = inferImageMimeType(resolved.path);
-  if (mimeType === undefined) {
-    return {
-      ok: false,
-      content: "This file does not look like a supported image for vision analysis.",
-      metadata: {
-        path: resolved.path
-      }
-    };
+  const source = await resolveVisionImageSource({
+    workspaceRoot: options.workspaceRoot,
+    allowedRoots: options.allowedRoots,
+    path: input.path,
+    maxBytes: maxImageBytes
+  });
+  if (!source.ok) {
+    return imageSourceErrorResult(source);
   }
 
   const visionAuxiliaryRoute = resolveVisionAuxiliaryRoute(options);
@@ -130,10 +103,8 @@ export async function analyzeImageWithVision(
     };
   }
 
-  const imageBytes = await readFile(resolved.path);
-  const dataUrl = `data:${mimeType};base64,${imageBytes.toString("base64")}`;
-  const displayRoot = resolved.root ?? workspaceRoot;
-  const relativePath = makeRelativePath(displayRoot, resolved.path);
+  const dataUrl = `data:${source.mimeType};base64,${Buffer.from(source.bytes).toString("base64")}`;
+  const relativePath = source.displayPath;
 
   if (options.providerExecutor === undefined) {
     return {
@@ -141,8 +112,8 @@ export async function analyzeImageWithVision(
       content: `Vision analysis is unavailable right now. Attempts: ${visionAuxiliaryRoute.route.provider}/${visionAuxiliaryRoute.route.id}:no-executor`,
       metadata: {
         path: relativePath,
-        bytes: fileStat.size,
-        mimeType,
+        bytes: source.byteLength,
+        mimeType: source.mimeType,
         attempts: [`${visionAuxiliaryRoute.route.provider}/${visionAuxiliaryRoute.route.id}:no-executor`]
       }
     };
@@ -205,8 +176,8 @@ export async function analyzeImageWithVision(
         content: `Vision analysis returned no usable content. Attempts: ${attempts.join(", ") || "none"}`,
         metadata: {
           path: relativePath,
-          bytes: fileStat.size,
-          mimeType,
+          bytes: source.byteLength,
+          mimeType: source.mimeType,
           provider: auxiliaryResult.response.provider,
           model: auxiliaryResult.response.model,
           attempts
@@ -222,8 +193,8 @@ export async function analyzeImageWithVision(
       ].filter((line) => line.length > 0).join("\n\n"),
       metadata: {
         path: relativePath,
-        bytes: fileStat.size,
-        mimeType,
+        bytes: source.byteLength,
+        mimeType: source.mimeType,
         provider: auxiliaryResult.response.provider,
         model: auxiliaryResult.response.model,
         attempts
@@ -236,8 +207,8 @@ export async function analyzeImageWithVision(
     content: `Vision analysis is unavailable right now. Attempts: ${attempts.join(", ") || "none"}`,
     metadata: {
       path: relativePath,
-      bytes: fileStat.size,
-      mimeType,
+      bytes: source.byteLength,
+      mimeType: source.mimeType,
       attempts
     }
   };
@@ -304,72 +275,13 @@ function synthesizeLegacyRoute(options: VisionToolOptions): ResolvedAuxiliaryRou
   };
 }
 
-async function resolveAllowedPath(roots: string[], path: string | undefined): Promise<ResolvedPath> {
-  if (typeof path !== "string" || path.length === 0) {
-    return errorResult("path must be a non-empty string");
-  }
-
-  for (const root of roots) {
-    const candidate = resolve(root, path);
-    const canonicalRoot = await realpath(root).catch(() => root);
-    const canonical = await realpath(candidate).catch(() => undefined);
-
-    if (canonical === undefined) {
-      continue;
-    }
-
-    if (canonical === canonicalRoot || canonical.startsWith(`${canonicalRoot}/`)) {
-      return {
-        ok: true,
-        path: canonical,
-        root: canonicalRoot
-      };
-    }
-  }
-
-  return errorResult("path is outside the trusted workspace");
-}
-
-function inferImageMimeType(path: string): string | undefined {
-  switch (extname(path).toLowerCase()) {
-    case ".jpg":
-    case ".jpeg":
-      return "image/jpeg";
-    case ".png":
-      return "image/png";
-    case ".webp":
-      return "image/webp";
-    case ".gif":
-      return "image/gif";
-    default:
-      return undefined;
-  }
-}
-
-function dedupeRoots(roots: string[]): string[] {
-  return [...new Set(roots.map((root) => resolve(root)))];
-}
-
-function makeRelativePath(root: string, path: string): string {
-  const relativePath = path.startsWith(root) ? path.slice(root.length).replace(/^\/+/u, "") : path;
-  return relativePath.length > 0 ? relativePath : path;
-}
-
-function errorResult(content: string): ResolvedPath {
+function imageSourceErrorResult(error: VisionImageSourceError): ToolResult {
   return {
     ok: false,
-    content
+    content: error.message,
+    metadata: {
+      errorCode: error.code,
+      ...error.details
+    }
   };
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-
-  if (bytes >= 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-
-  return `${bytes} B`;
 }

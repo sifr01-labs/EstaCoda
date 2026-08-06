@@ -54,7 +54,10 @@ function successfulExecution(route: ResolvedModelRoute, content: string): Provid
 function createTempPng(): { dir: string; path: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), "estacoda-vision-test-"));
   const path = join(dir, "test.png");
-  writeFileSync(path, Buffer.from("fake-png"));
+  writeFileSync(path, Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nWQAAAAASUVORK5CYII=",
+    "base64"
+  ));
   return { dir, path, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
