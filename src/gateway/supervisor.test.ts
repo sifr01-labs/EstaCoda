@@ -1504,6 +1504,12 @@ describe("runGatewaySupervisor", () => {
     const policy = capturedOpts.busyPolicyResolver("telegram");
     expect(policy.busyPolicy).toBe("reject");
     expect(policy.queueDepth).toBe(3);
+    expect(policy.busyTextCoalescing).toEqual({
+      enabled: false,
+      windowMs: 1_500,
+      maxMessages: 5,
+      maxChars: 8_000
+    });
   });
 
   it("busyPolicyResolver reads per-channel config from loaded config", async () => {
@@ -1518,6 +1524,7 @@ describe("runGatewaySupervisor", () => {
           enabled: false,
           busyPolicy: "queue",
           queueDepth: 5,
+          busyTextCoalescing: { enabled: true, windowMs: 2_000, maxMessages: 4, maxChars: 6_000 },
         },
         discord: {
           enabled: false,
@@ -1543,6 +1550,12 @@ describe("runGatewaySupervisor", () => {
     const telegramPolicy = capturedOpts.busyPolicyResolver("telegram");
     expect(telegramPolicy.busyPolicy).toBe("queue");
     expect(telegramPolicy.queueDepth).toBe(5);
+    expect(telegramPolicy.busyTextCoalescing).toEqual({
+      enabled: true,
+      windowMs: 2_000,
+      maxMessages: 4,
+      maxChars: 6_000
+    });
 
     const discordPolicy = capturedOpts.busyPolicyResolver("discord");
     expect(discordPolicy.busyPolicy).toBe("interrupt");

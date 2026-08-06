@@ -667,7 +667,13 @@ Channel adapter configuration. See [Channel Configuration](../user-guide/channel
         "freshFinalAfterSeconds": 0
       },
       "busyPolicy": "reject",
-      "queueDepth": 3
+      "queueDepth": 3,
+      "busyTextCoalescing": {
+        "enabled": false,
+        "windowMs": 1500,
+        "maxMessages": 5,
+        "maxChars": 8000
+      }
     }
   }
 }
@@ -682,6 +688,15 @@ Ordinary Telegram text is batched by canonical account/chat/topic session and se
 | `channels.telegram.textDebounceMs` | non-negative integer | `1500` | Quiet window in milliseconds. `0` dispatches text immediately. |
 | `channels.telegram.textDebounceMaxMessages` | positive integer | `10` | Flush threshold, capped at `100`. |
 | `channels.telegram.textDebounceMaxChars` | positive integer | `8000` | Flush threshold, capped at `100000`. |
+
+All four channel objects support optional bounded FIFO-tail text coalescing. It is disabled by default and takes effect only with `busyPolicy: "queue"`. Eligible ordinary text combines only with the final queued entry from the same canonical session and sender, without changing its FIFO position. Commands, callbacks, approvals, attachments, and media never combine, and interrupt behavior is unchanged. Reaching a limit creates a new queue entry, subject to the normal queue-depth limit.
+
+| Setting | Type | Default | Notes |
+|---|---|---:|---|
+| `channels.<channel>.busyTextCoalescing.enabled` | `boolean` | `false` | Enables queue-tail coalescing for explicit queue policy. |
+| `channels.<channel>.busyTextCoalescing.windowMs` | non-negative integer | `1500` | Maximum gap between combined queued messages, capped at `60000`. |
+| `channels.<channel>.busyTextCoalescing.maxMessages` | positive integer | `5` | Maximum component messages, capped at `100`. |
+| `channels.<channel>.busyTextCoalescing.maxChars` | positive integer | `8000` | Maximum combined text length, capped at `100000`. |
 
 Telegram streaming is configured under `channels.telegram.streaming`. It defaults to enabled for configured Telegram channels and affects Telegram delivery only. Set `channels.telegram.streaming.enabled` to `false` to opt out. It does not change session state, memory, approvals, tool execution, artifacts, or final `response.text`.
 

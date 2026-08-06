@@ -107,6 +107,10 @@ Operator-facing setup steps:
 
 `ChannelGateway` batches ordinary Telegram text that arrives within `channels.telegram.textDebounceMs` and joins fragments with blank lines. The canonical key includes account, chat/topic session identity, and sender. Threshold and timer flushes are gateway-owned and ingress-nonblocking; graceful drain waits for them. Commands, callbacks, pairing/auth flows, attachments, and media groups bypass this path. Set `textDebounceMs: 0` to disable it. The adapter's `getUpdates` cadence and album batching are unchanged.
 
+**Optional busy-queue tail coalescing:**
+
+Each channel may opt into `busyTextCoalescing` only alongside `busyPolicy: "queue"`. This is a bounded tail operation on `SessionMessageQueue`, not a replacement for FIFO: eligible ordinary text from the same canonical session and sender updates the final queued entry in place. The queue position stays stable, and bounded runtime metadata carries every component message ID and receive timestamp. Commands, callbacks, approvals, attachments, media, and all interrupt paths bypass coalescing. Reaching a window, message, or character limit creates a new FIFO entry and retains normal queue-depth enforcement.
+
 **Experimental streaming path:**
 
 Telegram streaming is a delivery-UX path, not runtime state. It defaults to enabled for configured Telegram channels and can be disabled per profile with `channels.telegram.streaming.enabled: false`. Provider-token events are consumed by the gateway and appended to a per-turn stream handle. Non-token runtime events continue through normal progress delivery.

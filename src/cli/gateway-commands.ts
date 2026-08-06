@@ -885,14 +885,15 @@ function runtimeFieldsForChannel(
   kind: "telegram" | "discord" | "email" | "whatsapp",
   runtimeStatus: ChannelRuntimeStatus,
   locks: Awaited<ReturnType<typeof listAdapterIdentityLocks>>,
-  channel: { busyPolicy?: string; queueDepth?: number }
-): Pick<NonNullable<ChannelsStatusData[typeof kind]>, "runtimeStateNote" | "adapterRuntime" | "identityLock" | "busyPolicy" | "queueDepth"> {
+  channel: { busyPolicy?: string; queueDepth?: number; busyTextCoalescing?: { enabled?: boolean } }
+): Pick<NonNullable<ChannelsStatusData[typeof kind]>, "runtimeStateNote" | "adapterRuntime" | "identityLock" | "busyPolicy" | "queueDepth" | "busyTextCoalescingEnabled"> {
   return {
     runtimeStateNote: runtimeStatus.runtimeStateNote,
     adapterRuntime: runtimeStatus.runtimeState?.adapters.find((a) => a.kind === kind),
     identityLock: selectIdentityLockStatus(locks, kind),
     busyPolicy: channel.busyPolicy ?? "reject",
     queueDepth: channel.queueDepth ?? 3,
+    busyTextCoalescingEnabled: channel.busyTextCoalescing?.enabled === true,
   };
 }
 

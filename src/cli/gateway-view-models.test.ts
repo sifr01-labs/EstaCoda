@@ -140,6 +140,18 @@ describe("buildGatewayStatusViewModel", () => {
     expect(rendered).not.toContain("Adapter Runtime");
   });
 
+  it("shows queued-text coalescing state for enabled channels", () => {
+    const data = baseStatusData();
+    data.channels.telegram.busyTextCoalescing = {
+      enabled: true,
+      windowMs: 1_500,
+      maxMessages: 5,
+      maxChars: 8_000
+    };
+    const rendered = renderPlain(buildGatewayStatusViewModel(data));
+    expect(rendered).toContain("Telegram: ready (reject, depth 3, queued-text coalescing on)");
+  });
+
   it("renders background memory finalization health when available", () => {
     const vm = buildGatewayStatusViewModel({
       ...baseStatusData(),
@@ -343,6 +355,13 @@ describe("buildChannelsStatusViewModel runtime extension", () => {
     const rendered = renderPlain(buildChannelsStatusViewModel(baseChannelsStatusData({ busyPolicy: "queue", queueDepth: 7 })));
     expect(rendered).toContain("Busy policy: queue");
     expect(rendered).toContain("Queue depth: 7");
+  });
+
+  it("renders queued-text coalescing state", () => {
+    const enabled = renderPlain(buildChannelsStatusViewModel(baseChannelsStatusData({ busyTextCoalescingEnabled: true })));
+    const disabled = renderPlain(buildChannelsStatusViewModel(baseChannelsStatusData({ busyTextCoalescingEnabled: false })));
+    expect(enabled).toContain("Queued-text coalescing: enabled");
+    expect(disabled).toContain("Queued-text coalescing: disabled");
   });
 
   it("renders default busy policy and queue depth", () => {

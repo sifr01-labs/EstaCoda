@@ -486,6 +486,7 @@ export type TelegramChannelConfig = {
   maxAttachmentBytes?: number;
   busyPolicy?: ChannelBusyPolicy;
   queueDepth?: number;
+  busyTextCoalescing?: ChannelBusyTextCoalescingConfig;
   textDebounceMs?: number;
   textDebounceMaxMessages?: number;
   textDebounceMaxChars?: number;
@@ -521,6 +522,7 @@ export type DiscordChannelConfig = {
   };
   busyPolicy?: ChannelBusyPolicy;
   queueDepth?: number;
+  busyTextCoalescing?: ChannelBusyTextCoalescingConfig;
 };
 
 export type EmailChannelConfig = {
@@ -539,6 +541,7 @@ export type EmailChannelConfig = {
   maxAttachmentBytes?: number;
   busyPolicy?: ChannelBusyPolicy;
   queueDepth?: number;
+  busyTextCoalescing?: ChannelBusyTextCoalescingConfig;
 };
 
 export type WhatsAppChannelConfig = {
@@ -557,9 +560,17 @@ export type WhatsAppChannelConfig = {
   pairingMode?: "qr";
   busyPolicy?: ChannelBusyPolicy;
   queueDepth?: number;
+  busyTextCoalescing?: ChannelBusyTextCoalescingConfig;
   textDebounceMs?: number;
   textDebounceMaxMessages?: number;
   textDebounceMaxChars?: number;
+};
+
+export type ChannelBusyTextCoalescingConfig = {
+  enabled?: boolean;
+  windowMs?: number;
+  maxMessages?: number;
+  maxChars?: number;
 };
 
 export type LoadedRuntimeConfig = {
@@ -1046,6 +1057,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
         missing: telegramMissing.length === 0 ? undefined : telegramMissing,
         busyPolicy: normalizeChannelBusyPolicy(telegram.busyPolicy, "telegram", warnedInvalidBusyPolicies),
         queueDepth: normalizeQueueDepth(telegram.queueDepth),
+        busyTextCoalescing: normalizeBusyTextCoalescing(telegram.busyTextCoalescing),
         textDebounceMs: normalizeTextDebounceMs(telegram.textDebounceMs, 1_500),
         textDebounceMaxMessages: normalizeTextDebounceMaxMessages(telegram.textDebounceMaxMessages),
         textDebounceMaxChars: normalizeTextDebounceMaxChars(telegram.textDebounceMaxChars),
@@ -1060,14 +1072,16 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
         ready: discord.enabled === true && discordMissing.length === 0,
         missing: discordMissing.length === 0 ? undefined : discordMissing,
         busyPolicy: normalizeChannelBusyPolicy(discord.busyPolicy, "discord", warnedInvalidBusyPolicies),
-        queueDepth: normalizeQueueDepth(discord.queueDepth)
+        queueDepth: normalizeQueueDepth(discord.queueDepth),
+        busyTextCoalescing: normalizeBusyTextCoalescing(discord.busyTextCoalescing)
       },
       email: {
         ...email,
         ready: email.enabled === true && emailMissing.length === 0,
         missing: emailMissing.length === 0 ? undefined : emailMissing,
         busyPolicy: normalizeChannelBusyPolicy(email.busyPolicy, "email", warnedInvalidBusyPolicies),
-        queueDepth: normalizeQueueDepth(email.queueDepth)
+        queueDepth: normalizeQueueDepth(email.queueDepth),
+        busyTextCoalescing: normalizeBusyTextCoalescing(email.busyTextCoalescing)
       },
       whatsapp: {
         ...whatsapp,
@@ -1082,6 +1096,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
         missing: whatsappMissing.length === 0 ? undefined : whatsappMissing,
         busyPolicy: normalizeChannelBusyPolicy(whatsapp.busyPolicy, "whatsapp", warnedInvalidBusyPolicies),
         queueDepth: normalizeQueueDepth(whatsapp.queueDepth),
+        busyTextCoalescing: normalizeBusyTextCoalescing(whatsapp.busyTextCoalescing),
         textDebounceMs: normalizeTextDebounceMs(whatsapp.textDebounceMs, 5_000),
         textDebounceMaxMessages: normalizeTextDebounceMaxMessages(whatsapp.textDebounceMaxMessages),
         textDebounceMaxChars: normalizeTextDebounceMaxChars(whatsapp.textDebounceMaxChars)
@@ -1189,6 +1204,14 @@ function patchConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
       telegram: {
         ...(merged.channels?.telegram ?? {}),
         ...(config.channels?.telegram ?? {}),
+        ...(merged.channels?.telegram?.busyTextCoalescing === undefined && config.channels?.telegram?.busyTextCoalescing === undefined
+          ? {}
+          : {
+              busyTextCoalescing: {
+                ...(merged.channels?.telegram?.busyTextCoalescing ?? {}),
+                ...(config.channels?.telegram?.busyTextCoalescing ?? {})
+              }
+            }),
         ...(merged.channels?.telegram?.streaming === undefined && config.channels?.telegram?.streaming === undefined
           ? {}
           : {
@@ -1200,15 +1223,39 @@ function patchConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
       },
       discord: {
         ...(merged.channels?.discord ?? {}),
-        ...(config.channels?.discord ?? {})
+        ...(config.channels?.discord ?? {}),
+        ...(merged.channels?.discord?.busyTextCoalescing === undefined && config.channels?.discord?.busyTextCoalescing === undefined
+          ? {}
+          : {
+              busyTextCoalescing: {
+                ...(merged.channels?.discord?.busyTextCoalescing ?? {}),
+                ...(config.channels?.discord?.busyTextCoalescing ?? {})
+              }
+            })
       },
       email: {
         ...(merged.channels?.email ?? {}),
-        ...(config.channels?.email ?? {})
+        ...(config.channels?.email ?? {}),
+        ...(merged.channels?.email?.busyTextCoalescing === undefined && config.channels?.email?.busyTextCoalescing === undefined
+          ? {}
+          : {
+              busyTextCoalescing: {
+                ...(merged.channels?.email?.busyTextCoalescing ?? {}),
+                ...(config.channels?.email?.busyTextCoalescing ?? {})
+              }
+            })
       },
       whatsapp: {
         ...(merged.channels?.whatsapp ?? {}),
-        ...(config.channels?.whatsapp ?? {})
+        ...(config.channels?.whatsapp ?? {}),
+        ...(merged.channels?.whatsapp?.busyTextCoalescing === undefined && config.channels?.whatsapp?.busyTextCoalescing === undefined
+          ? {}
+          : {
+              busyTextCoalescing: {
+                ...(merged.channels?.whatsapp?.busyTextCoalescing ?? {}),
+                ...(config.channels?.whatsapp?.busyTextCoalescing ?? {})
+              }
+            })
       }
     }
   }), {}));
@@ -3331,6 +3378,9 @@ export async function setupWhatsAppConfig(options: {
     replyPrefix: options.input.replyPrefix ?? existing.config.channels?.whatsapp?.replyPrefix ?? WHATSAPP_DEFAULT_REPLY_PREFIX,
     pairingMode: options.input.pairingMode ?? "qr"
   };
+  if (existing.config.channels?.whatsapp?.busyTextCoalescing !== undefined) {
+    whatsappPatch.busyTextCoalescing = existing.config.channels.whatsapp.busyTextCoalescing;
+  }
   const config: EstaCodaConfig = {
     ...existing.config,
     channels: {
@@ -3378,6 +3428,7 @@ export async function addWhatsAppAllowedUser(options: {
   if (whatsapp.pairingMode === "qr") whatsappPatch.pairingMode = "qr";
   if (whatsapp.busyPolicy !== undefined) whatsappPatch.busyPolicy = whatsapp.busyPolicy;
   if (whatsapp.queueDepth !== undefined) whatsappPatch.queueDepth = whatsapp.queueDepth;
+  if (whatsapp.busyTextCoalescing !== undefined) whatsappPatch.busyTextCoalescing = whatsapp.busyTextCoalescing;
   if (whatsapp.textDebounceMs !== undefined) whatsappPatch.textDebounceMs = whatsapp.textDebounceMs;
   if (whatsapp.textDebounceMaxMessages !== undefined) whatsappPatch.textDebounceMaxMessages = whatsapp.textDebounceMaxMessages;
   if (whatsapp.textDebounceMaxChars !== undefined) whatsappPatch.textDebounceMaxChars = whatsapp.textDebounceMaxChars;
@@ -4043,6 +4094,15 @@ function normalizeChannelBusyPolicy(
 
 function normalizeQueueDepth(value: unknown): number {
   return coercePositiveInteger(value, { default: 3, max: 10 });
+}
+
+function normalizeBusyTextCoalescing(value: ChannelBusyTextCoalescingConfig | undefined): Required<ChannelBusyTextCoalescingConfig> {
+  return {
+    enabled: value?.enabled === true,
+    windowMs: coerceNonNegativeInteger(value?.windowMs, { default: 1_500, max: 60_000 }),
+    maxMessages: coercePositiveInteger(value?.maxMessages, { default: 5, max: 100 }),
+    maxChars: coercePositiveInteger(value?.maxChars, { default: 8_000, max: 100_000 }),
+  };
 }
 
 function normalizeTextDebounceMs(value: unknown, defaultMs: number): number {

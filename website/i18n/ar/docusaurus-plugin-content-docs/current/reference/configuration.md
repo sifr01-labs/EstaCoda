@@ -667,7 +667,13 @@ STT المستضاف المستقر: OpenAI، Groq، xAI. STT المحلي يد�
         "freshFinalAfterSeconds": 0
       },
       "busyPolicy": "reject",
-      "queueDepth": 3
+      "queueDepth": 3,
+      "busyTextCoalescing": {
+        "enabled": false,
+        "windowMs": 1500,
+        "maxMessages": 5,
+        "maxChars": 8000
+      }
     }
   }
 }
@@ -682,6 +688,15 @@ STT المستضاف المستقر: OpenAI، Groq، xAI. STT المحلي يد�
 | `channels.telegram.textDebounceMs` | عدد صحيح غير سالب | `1500` | نافذة الهدوء بالمللي ثانية. القيمة `0` ترسل النص فورًا. |
 | `channels.telegram.textDebounceMaxMessages` | عدد صحيح موجب | `10` | حد التفريغ، وبحد أقصى `100`. |
 | `channels.telegram.textDebounceMaxChars` | عدد صحيح موجب | `8000` | حد التفريغ، وبحد أقصى `100000`. |
+
+تدعم كائنات القنوات الأربع دمجًا اختياريًا ومحدودًا لنهاية طابور FIFO. تكون الميزة معطلة افتراضيًا، ولا تعمل إلا مع `busyPolicy: "queue"`. يُدمج النص العادي المؤهل فقط مع آخر عنصر في الطابور عندما تتطابق الجلسة الأساسية والمرسل، من دون تغيير موضعه في FIFO. لا تُدمج الأوامر أو callbacks أو الموافقات أو المرفقات أو الوسائط، ولا يتغير سلوك `interrupt`. عند بلوغ أحد الحدود تُضاف الرسالة كعنصر FIFO جديد مع تطبيق حد عمق الطابور المعتاد.
+
+| الإعداد | النوع | الافتراضي | ملاحظات |
+|---|---|---:|---|
+| `channels.<channel>.busyTextCoalescing.enabled` | `boolean` | `false` | يفعّل دمج نهاية الطابور عند استخدام سياسة `queue` صراحةً. |
+| `channels.<channel>.busyTextCoalescing.windowMs` | عدد صحيح غير سالب | `1500` | أقصى فاصل بين الرسائل المدمجة، وبحد أقصى `60000`. |
+| `channels.<channel>.busyTextCoalescing.maxMessages` | عدد صحيح موجب | `5` | أقصى عدد من الرسائل المكوّنة، وبحد أقصى `100`. |
+| `channels.<channel>.busyTextCoalescing.maxChars` | عدد صحيح موجب | `8000` | أقصى طول للنص المدمج، وبحد أقصى `100000`. |
 
 يُضبط بث Telegram تحت `channels.telegram.streaming`. يكون مفعلاً افتراضيًا لقنوات Telegram المُعدّة، ويؤثر في توصيل Telegram فقط. لتعطيله، اضبط `channels.telegram.streaming.enabled` على `false`. لا يغير حالة الجلسة، أو الذاكرة، أو الموافقات، أو تنفيذ الأدوات، أو المنتجات، أو `response.text` النهائي.
 

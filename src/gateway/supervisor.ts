@@ -8,7 +8,7 @@ import type { ProfileStatePaths } from "../config/profile-home.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
 import type { SecurityAssessorRuntimeConfig } from "../security/security-policy-factory.js";
-import type { LoadedRuntimeConfig, ChannelBusyPolicy } from "../config/runtime-config.js";
+import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { ChannelAdapter, ChannelAuthPolicies, ChannelKind, ChannelMessage } from "../contracts/channel.js";
 import type { ResolvedModelRoute } from "../contracts/provider.js";
 import type { SecurityPolicy } from "../contracts/security.js";
@@ -1488,6 +1488,21 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       }
       return undefined;
     };
+    const busyPolicyResolver: NonNullable<
+      ConstructorParameters<typeof ChannelGateway>[0]["busyPolicyResolver"]
+    > = (channelKind) => {
+      const channelConfig = config.channels[channelKind as keyof typeof config.channels];
+      return {
+        busyPolicy: channelConfig?.busyPolicy ?? "reject",
+        queueDepth: channelConfig?.queueDepth ?? 3,
+        busyTextCoalescing: {
+          enabled: channelConfig?.busyTextCoalescing?.enabled === true,
+          windowMs: channelConfig?.busyTextCoalescing?.windowMs ?? 1_500,
+          maxMessages: channelConfig?.busyTextCoalescing?.maxMessages ?? 5,
+          maxChars: channelConfig?.busyTextCoalescing?.maxChars ?? 8_000,
+        },
+      };
+    };
     const gateway = options.factories?.createChannelGateway
       ? options.factories.createChannelGateway({
           adapters: wrappers,
@@ -1518,15 +1533,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           runtimeCache,
           runtimeFingerprint,
           isDraining: () => state.draining,
-          busyPolicyResolver: (channelKind) => {
-            const channelConfig = config.channels[channelKind as keyof typeof config.channels] as
-              | { busyPolicy?: ChannelBusyPolicy; queueDepth?: number }
-              | undefined;
-            return {
-              busyPolicy: channelConfig?.busyPolicy ?? "reject",
-              queueDepth: channelConfig?.queueDepth ?? 3,
-            };
-          },
+          busyPolicyResolver,
           textDebounceResolver,
           telegramStreaming: config.channels.telegram.streaming,
           runtimeForSession: async ({ sessionId, securityPolicy, metadata }) => {
@@ -1590,15 +1597,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           runtimeCache,
           runtimeFingerprint,
           isDraining: () => state.draining,
-          busyPolicyResolver: (channelKind) => {
-            const channelConfig = config.channels[channelKind as keyof typeof config.channels] as
-              | { busyPolicy?: ChannelBusyPolicy; queueDepth?: number }
-              | undefined;
-            return {
-              busyPolicy: channelConfig?.busyPolicy ?? "reject",
-              queueDepth: channelConfig?.queueDepth ?? 3,
-            };
-          },
+          busyPolicyResolver,
           textDebounceResolver,
           telegramStreaming: config.channels.telegram.streaming,
           runtimeForSession: async ({ sessionId, securityPolicy, metadata }) => {

@@ -239,6 +239,10 @@ estacoda channels status telegram
 
 تتجاوز الأوامر وcallbacks ورسائل الربط/التفويض والمرفقات ومجموعات الوسائط التجميع. اضبط `channels.telegram.textDebounceMs` على `0` للرجوع إلى الإرسال الفوري. لا يغير الإعداد إيقاع polling الخاص بـ `getUpdates` أو معالجة مجموعات الوسائط أو ترتيب طابور FIFO عند الانشغال.
 
+## دمج اختياري لنهاية طابور FIFO
+
+اضبط `channels.<channel>.busyTextCoalescing.enabled` على `true` مع `busyPolicy: "queue"` فقط لإلحاق النص العادي المؤهل بآخر عنصر في الطابور. يتطلب الدمج تطابق الجلسة الأساسية والمرسل، وتحدّه قيم `windowMs` و`maxMessages` و`maxChars`. يحافظ على موضع FIFO وعلى معرفات الرسائل المكوّنة وأوقات استلامها. تتجاوز الأوامر وcallbacks والموافقات والمرفقات والوسائط ومسار الاستبدال عبر `interrupt` هذه الميزة. عند بلوغ أحد الحدود يُطبق الإدراج العادي في FIFO وسلوك امتلاء الطابور المعتاد. استخدم `estacoda gateway status` أو `estacoda channels status <channel>` للتحقق من حالة التفعيل.
+
 ## بث Telegram
 
 بث Telegram خيار توصيل تجريبي تحت `channels.telegram.streaming.enabled`. يكون مفعلاً افتراضيًا لقنوات Telegram المُعدّة. لتعطيله، اضبط `channels.telegram.streaming.enabled` على `false`. عند تفعيله، تحرر provider tokens رسائل Telegram أثناء الدور، وتغلق حدود الأدوات رسالة البث الحالية، ويظهر تقدم الأداة تحت تلك الرسالة المغلقة، ثم تبدأ provider tokens اللاحقة رسالة بث جديدة تحت رسالة التقدم.

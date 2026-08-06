@@ -114,6 +114,28 @@ Telegram batches ordinary text fragments for `1500ms` by default, with limits of
 
 Commands, callback queries, pairing/auth flows, attachments, and albums bypass batching. Albums stay one multi-image attachment turn, the album caption remains its prompt, and following text is not merged into the album. Set `channels.telegram.textDebounceMs` to `0` for immediate dispatch. This feature does not change Telegram polling cadence or the FIFO busy queue.
 
+### Optional queued-text coalescing
+
+Every gateway channel can opt into bounded FIFO-tail coalescing with `busyTextCoalescing`, but it runs only with `busyPolicy: "queue"`. It combines adjacent ordinary text only when the canonical session and sender match, keeps the queued entry at its existing position, and preserves component message IDs and receive timestamps. Commands, callbacks, approvals, attachments, voice messages, media, and interrupt replacement stay separate.
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "busyPolicy": "queue",
+      "busyTextCoalescing": {
+        "enabled": true,
+        "windowMs": 1500,
+        "maxMessages": 5,
+        "maxChars": 8000
+      }
+    }
+  }
+}
+```
+
+When a bound is reached, the new message takes the next FIFO position. Normal queue-full behavior is unchanged. Channel and gateway status commands show whether this option is enabled.
+
 ```json
 {
   "channels": {

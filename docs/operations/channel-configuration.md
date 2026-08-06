@@ -16,6 +16,31 @@ Every channel object supports:
 | `enabled` | `boolean` | `false` | Whether the adapter is loaded by `estacoda gateway run` or by an installed service started with `estacoda gateway start`. |
 | `busyPolicy` | `"reject" \| "queue" \| "interrupt"` | `"reject"` | Behavior when a new message arrives during an active turn. |
 | `queueDepth` | `number` | `3` | Maximum buffered messages when `busyPolicy` is `"queue"`. Clamped to `[1, 10]`. |
+| `busyTextCoalescing` | `object` | disabled | Optional bounded coalescing of adjacent ordinary text at the FIFO queue tail. |
+
+### Optional FIFO Tail Coalescing
+
+Queued-text coalescing is disabled by default and applies only when the same channel also has `busyPolicy: "queue"`. When enabled, a new ordinary text message may be appended to the final queued entry only when the canonical session and sender match and the configured time, message-count, and character limits all permit it. The entry keeps its original FIFO position, and runtime metadata retains the component message IDs and receive timestamps.
+
+Commands, callbacks, approvals, attachments, voice messages, and other media never coalesce. Interrupt replacement never uses this path. When a limit is reached, the message becomes a new FIFO entry; if the queue is already full, the existing queue-full behavior applies.
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "busyPolicy": "queue",
+      "busyTextCoalescing": {
+        "enabled": true,
+        "windowMs": 1500,
+        "maxMessages": 5,
+        "maxChars": 8000
+      }
+    }
+  }
+}
+```
+
+`windowMs` is capped at `60000`, `maxMessages` at `100`, and `maxChars` at `100000`. `estacoda gateway status` and `estacoda channels status <channel>` report whether queued-text coalescing is enabled.
 
 ## Telegram
 
@@ -47,7 +72,13 @@ Every channel object supports:
         "freshFinalAfterSeconds": 0
       },
       "busyPolicy": "queue",
-      "queueDepth": 5
+      "queueDepth": 5,
+      "busyTextCoalescing": {
+        "enabled": false,
+        "windowMs": 1500,
+        "maxMessages": 5,
+        "maxChars": 8000
+      }
     }
   }
 }
@@ -247,8 +278,9 @@ For WhatsApp voice bubbles, install `ffmpeg` in the operator environment. Voice-
 
 ## Defaults
 
-If `busyPolicy` or `queueDepth` is omitted for a channel, the runtime uses:
+If `busyPolicy`, `queueDepth`, or `busyTextCoalescing` is omitted for a channel, the runtime uses:
 - `busyPolicy`: `"reject"`
 - `queueDepth`: `3`
+- `busyTextCoalescing.enabled`: `false`
 
-There is no top-level `channels.busyPolicy` or `channels.queueDepth`. Each channel configures its own policy independently.
+There is no top-level `channels.busyPolicy`, `channels.queueDepth`, or `channels.busyTextCoalescing`. Each channel configures its own policy independently.

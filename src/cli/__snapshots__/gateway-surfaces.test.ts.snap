@@ -119,6 +119,7 @@ Thread sessions per user: no
 Session reset policy: none
 Busy policy: reject
 Queue depth: 3
+Queued-text coalescing: disabled
 Identity lock: unlocked
 Runtime state: unavailable (supervisor not running)
 
@@ -156,6 +157,7 @@ Thread sessions per user: no
 Session reset policy: none
 Busy policy: reject
 Queue depth: 3
+Queued-text coalescing: disabled
 Identity lock: unlocked
 Runtime state: unavailable (supervisor not running)
 
@@ -193,6 +195,7 @@ Thread sessions per user: no
 Session reset policy: none
 Busy policy: reject
 Queue depth: 3
+Queued-text coalescing: disabled
 Identity lock: unlocked
 Runtime state: unavailable (supervisor not running)
 
@@ -230,6 +233,7 @@ Thread sessions per user: no
 Session reset policy: none
 Busy policy: reject
 Queue depth: 3
+Queued-text coalescing: disabled
 Identity lock: unlocked
 Runtime state: unavailable (supervisor not running)
 
@@ -267,6 +271,7 @@ Thread sessions per user: no
 Session reset policy: none
 Busy policy: reject
 Queue depth: 3
+Queued-text coalescing: disabled
 Identity lock: unlocked
 Runtime state: unavailable (supervisor not running)
 
@@ -304,6 +309,7 @@ Thread sessions per user: no
 Session reset policy: none
 Busy policy: reject
 Queue depth: 3
+Queued-text coalescing: disabled
 Identity lock: unlocked
 Runtime state: unavailable (supervisor not running)
 

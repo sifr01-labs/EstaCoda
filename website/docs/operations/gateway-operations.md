@@ -241,6 +241,10 @@ The gateway batches ordinary Telegram text from the same canonical account/chat/
 
 Commands, callbacks, pairing/auth messages, attachments, and media groups bypass batching. Set `channels.telegram.textDebounceMs` to `0` to roll back to immediate dispatch. The setting does not change `getUpdates` polling cadence, media-group handling, or FIFO busy-queue ordering.
 
+## Optional FIFO tail coalescing
+
+Set `channels.<channel>.busyTextCoalescing.enabled` to `true` only with `busyPolicy: "queue"` to append eligible ordinary text to the final queued entry. Coalescing requires the same canonical session and sender and is bounded by `windowMs`, `maxMessages`, and `maxChars`. It preserves the entry's FIFO position plus component message IDs and receive timestamps. Commands, callbacks, approvals, attachments, media, and interrupt replacement bypass it. When a bound is reached, normal FIFO enqueue and queue-full behavior apply. Use `estacoda gateway status` or `estacoda channels status <channel>` to verify the enabled state.
+
 ## Telegram streaming
 
 Telegram streaming is an experimental delivery option under `channels.telegram.streaming.enabled`. It defaults to enabled for configured Telegram channels. Set `channels.telegram.streaming.enabled` to `false` to opt out. When enabled, provider tokens edit Telegram messages during a turn, tool boundaries seal the current streamed message, tool progress appears below that sealed message, and later provider tokens start a new streamed message below the progress entry.

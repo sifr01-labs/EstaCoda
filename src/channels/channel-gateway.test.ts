@@ -3945,25 +3945,36 @@ describe("ChannelGateway commands", () => {
         sessionStore: new InMemoryChannelSessionStore(),
         authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
-        busyPolicyResolver: () => ({ busyPolicy: "interrupt", queueDepth: 3 })
+        busyPolicyResolver: () => ({
+          busyPolicy: "interrupt",
+          queueDepth: 3,
+          busyTextCoalescing: { enabled: true, windowMs: 1_500, maxMessages: 5, maxChars: 8_000 }
+        })
       });
 
       const first = gateway.receive(makeMessage("first"));
       await firstStartedPromise;
       const second = await gateway.receive(makeMessage("second"));
+      const third = await gateway.receive(makeMessage("third"));
 
       expect(second.replyText).toBe("");
+      expect(third.replyText).toBe("");
       expect(registry.stats().totalAborted).toBe(0);
       expect(adapter.records).toContainEqual(expect.objectContaining({
         kind: "text",
         text: "Queued (position 1)"
       }));
+      expect(adapter.records).toContainEqual(expect.objectContaining({
+        kind: "text",
+        text: "Queued (position 2)"
+      }));
+      expect(adapter.records.some((record) => record.text?.startsWith("Added to queued message"))).toBe(false);
 
       resolveFirst?.();
       const firstResult = await first;
       expect(firstResult.replyText).toBe("first done");
-      await waitFor(() => handledTexts.includes("second"));
-      expect(handledTexts).toEqual(["first", "second"]);
+      await waitFor(() => handledTexts.includes("third"));
+      expect(handledTexts).toEqual(["first", "second", "third"]);
     });
 
     it("keeps ordinary interrupt behavior when the active turn has no subagents", async () => {
@@ -5496,6 +5507,120 @@ describe("ChannelGateway commands", () => {
       const queuedRecords = adapter.records.filter((r) => r.kind === "text" && r.text?.includes("Queued"));
       expect(queuedRecords.length).toBe(1);
       expect(handleCount).toBe(2); // first + drained queued
+    });
+
+    it("coalesces eligible queued text at the existing position and preserves provenance", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      const handled: Array<{ text: string; inputMetadata?: Record<string, unknown> }> = [];
+      let releaseFirst: (() => void) | undefined;
+      let markFirstStarted: (() => void) | undefined;
+      const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+      const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async (input: Parameters<Runtime["handle"]>[0]) => {
+            handled.push({ text: input.text, inputMetadata: input.inputMetadata });
+            if (input.text === "active") {
+              markFirstStarted?.();
+              await firstBlocked;
+            }
+            return runtimeResponse({ text: "ok", securityDecision: "allow" });
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({
+          busyPolicy: "queue",
+          queueDepth: 3,
+          busyTextCoalescing: { enabled: true, windowMs: 1_500, maxMessages: 5, maxChars: 8_000 }
+        })
+      });
+
+      const first = gateway.receive(makeMessage("active", { id: "active", receivedAt: "2026-08-06T12:00:00.000Z" }));
+      await firstStarted;
+      await gateway.receive(makeMessage("queued one", { id: "queued-1", receivedAt: "2026-08-06T12:00:01.000Z" }));
+      await gateway.receive(makeMessage("queued two", { id: "queued-2", receivedAt: "2026-08-06T12:00:02.000Z" }));
+
+      expect(adapter.records.filter((record) => record.text === "Queued (position 1)")).toHaveLength(1);
+      expect(adapter.records.filter((record) => record.text === "Added to queued message (position 1)")).toHaveLength(1);
+
+      releaseFirst?.();
+      await first;
+      await waitForPendingWork(gateway);
+
+      expect(handled.map((item) => item.text)).toEqual(["active", "queued one\n\nqueued two"]);
+      expect(handled[1]?.inputMetadata).toEqual(expect.objectContaining({
+        busyTextCoalescedMessageIds: ["queued-1", "queued-2"],
+        busyTextCoalescedReceivedAts: [
+          "2026-08-06T12:00:01.000Z",
+          "2026-08-06T12:00:02.000Z"
+        ],
+        busyTextCoalescingSize: 2,
+        busyTextCoalescingWindowMs: 1_500
+      }));
+    });
+
+    it("keeps different senders, commands, and attachments as separate queued entries", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      const handled: string[] = [];
+      let releaseFirst: (() => void) | undefined;
+      let markFirstStarted: (() => void) | undefined;
+      const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+      const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async (input: Parameters<Runtime["handle"]>[0]) => {
+            handled.push(input.text);
+            if (input.text === "active") {
+              markFirstStarted?.();
+              await firstBlocked;
+            }
+            return runtimeResponse({ text: "ok", securityDecision: "allow" });
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1", "user-2"] } },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({
+          busyPolicy: "queue",
+          queueDepth: 5,
+          busyTextCoalescing: { enabled: true, windowMs: 1_500, maxMessages: 5, maxChars: 8_000 }
+        })
+      });
+
+      const first = gateway.receive(makeMessage("active"));
+      await firstStarted;
+      await gateway.receive(makeMessage("normal"));
+      await gateway.receive(makeMessage("other sender", { sender: { id: "user-2" } }));
+      await gateway.receive(makeMessage("/not-a-command"));
+      await gateway.receive(makeTelegramCallbackMessage("unknown-callback"));
+      await gateway.receive(makeMessage("with attachment", {
+        attachments: [{ id: "attachment-1", kind: "file", name: "note.txt" }]
+      }));
+
+      expect(adapter.records.filter((record) => record.text?.startsWith("Added to queued message"))).toHaveLength(0);
+      expect(adapter.records.filter((record) => record.text?.startsWith("Queued (position"))).toHaveLength(5);
+
+      releaseFirst?.();
+      await first;
+      await waitForPendingWork(gateway);
+      expect(handled).toEqual([
+        "active",
+        "normal",
+        "other sender",
+        "/not-a-command",
+        "unknown-callback",
+        "with attachment"
+      ]);
     });
 
     it("queue mode rejects when queue is full", async () => {

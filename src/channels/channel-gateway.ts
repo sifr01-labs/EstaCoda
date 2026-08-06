@@ -12,7 +12,7 @@ import type {
 } from "../contracts/channel.js";
 import type { ChannelKind } from "../contracts/channel.js";
 import type { ChannelBusyPolicy, LoadedRuntimeConfig } from "../config/runtime-config.js";
-import { SessionMessageQueue } from "./session-message-queue.js";
+import { SessionMessageQueue, type BusyTextCoalescingPolicy } from "./session-message-queue.js";
 import { assessSecurityPolicy, type SecurityApprovalMode, type SecurityAssessment, type SecurityDecision, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
 import { runCronCommand } from "../cron/cron-command.js";
 import { originFromSessionKey } from "../cron/cron-runner.js";
@@ -166,6 +166,7 @@ function isVoiceDeliveryArtifact(artifact: ArtifactRecord): boolean {
 export type BusyPolicyConfig = {
   busyPolicy: ChannelBusyPolicy;
   queueDepth: number;
+  busyTextCoalescing?: BusyTextCoalescingPolicy;
 };
 
 export type ChannelTextDebounceConfig = {
@@ -1122,7 +1123,14 @@ export class ChannelGateway {
     if (config.textDebounceMs <= 0) {
       return false;
     }
+    return this.#isEligibleForNormalTextAggregation(message);
+  }
+
+  #isEligibleForNormalTextAggregation(message: ChannelMessage): boolean {
     if (message.attachments !== undefined && message.attachments.length > 0) {
+      return false;
+    }
+    if (typeof message.metadata?.interactionId === "string") {
       return false;
     }
     const telegramMetadata = message.metadata?.telegram;
@@ -1225,17 +1233,28 @@ export class ChannelGateway {
           return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
         }
         case "queue": {
-          const policy = this.#busyPolicyResolver?.(processedMessage.channel) ?? { busyPolicy: "reject" as const, queueDepth: 3 };
-          const enqueueResult = this.#sessionMessageQueue.enqueue(
-            activeTurnKey,
-            processedMessage,
-            policy.busyPolicy,
-            policy.queueDepth
-          );
+          const enqueueResult = policy.busyTextCoalescing?.enabled === true
+            ? this.#sessionMessageQueue.enqueueOrCoalesceText(
+                activeTurnKey,
+                processedMessage,
+                policy.busyPolicy,
+                policy.queueDepth,
+                policy.busyTextCoalescing,
+                this.#isEligibleForNormalTextAggregation(processedMessage)
+              )
+            : this.#sessionMessageQueue.enqueue(
+                activeTurnKey,
+                processedMessage,
+                policy.busyPolicy,
+                policy.queueDepth
+              );
           if (enqueueResult.accepted) {
             const position = enqueueResult.position;
             if (position !== undefined) {
-              await this.#deliverText(adapter, normalizedSessionKey, `Queued (position ${position})`);
+              const queueText = enqueueResult.coalesced === true
+                ? `Added to queued message (position ${position})`
+                : `Queued (position ${position})`;
+              await this.#deliverText(adapter, normalizedSessionKey, queueText);
             }
           } else {
             await this.#deliverText(adapter, normalizedSessionKey, "Queue is full. Please try again later.");
@@ -1380,6 +1399,7 @@ export class ChannelGateway {
         ? await this.#trustedWorkspace(message)
         : this.#trustedWorkspace;
       const debounceMetadata = readDebounceMetadata(message.metadata);
+      const busyTextCoalescingMetadata = readBusyTextCoalescingMetadata(message.metadata);
       streamHandle = this.#startStreamingTextIfEligible(adapter, normalizedSessionKey, controller.signal);
       const streamCallbacksWired = streamHandle !== undefined;
 
@@ -1395,7 +1415,8 @@ export class ChannelGateway {
           chatId: message.sessionKey.chatId,
           userId: message.sender.id,
           origin: message.text.startsWith("/") ? "command" : "message",
-          ...(debounceMetadata === undefined ? {} : debounceMetadata)
+          ...(debounceMetadata === undefined ? {} : debounceMetadata),
+          ...(busyTextCoalescingMetadata === undefined ? {} : busyTextCoalescingMetadata)
         },
         ...(streamCallbacksWired
           ? {
@@ -1798,12 +1819,7 @@ export class ChannelGateway {
 
       // If the turn didn't actually start (busy race), re-enqueue and stop draining
       if (result.sessionId === "") {
-        this.#sessionMessageQueue.unshift(
-          activeTurnKey,
-          queued.message,
-          queued.policyAtArrival,
-          queued.queueDepthAtArrival
-        );
+        this.#sessionMessageQueue.unshiftQueued(activeTurnKey, queued);
         return;
       }
 
@@ -4274,6 +4290,39 @@ function readDebounceMetadata(metadata: Record<string, unknown> | undefined): {
     debouncedMessageIds: ids.slice(0, 100),
     debounceSize: Math.max(0, Math.trunc(size)),
     debounceWindowMs: Math.max(0, Math.trunc(windowMs))
+  };
+}
+
+function readBusyTextCoalescingMetadata(metadata: Record<string, unknown> | undefined): {
+  busyTextCoalescedMessageIds: string[];
+  busyTextCoalescedReceivedAts: string[];
+  busyTextCoalescingSize: number;
+  busyTextCoalescingWindowMs: number;
+} | undefined {
+  const ids = metadata?.busyTextCoalescedMessageIds;
+  const receivedAts = metadata?.busyTextCoalescedReceivedAts;
+  const size = metadata?.busyTextCoalescingSize;
+  const windowMs = metadata?.busyTextCoalescingWindowMs;
+  if (
+    !Array.isArray(ids) ||
+    ids.some((id) => typeof id !== "string") ||
+    !Array.isArray(receivedAts) ||
+    receivedAts.some((receivedAt) => typeof receivedAt !== "string") ||
+    ids.length !== receivedAts.length ||
+    ids.length !== size ||
+    ids.length < 2 ||
+    typeof size !== "number" ||
+    !Number.isFinite(size) ||
+    typeof windowMs !== "number" ||
+    !Number.isFinite(windowMs)
+  ) {
+    return undefined;
+  }
+  return {
+    busyTextCoalescedMessageIds: ids.slice(0, 100),
+    busyTextCoalescedReceivedAts: receivedAts.slice(0, 100),
+    busyTextCoalescingSize: Math.max(0, Math.trunc(size)),
+    busyTextCoalescingWindowMs: Math.max(0, Math.trunc(windowMs))
   };
 }
 

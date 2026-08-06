@@ -1589,6 +1589,12 @@ describe("setupTelegramConfig", () => {
       channels: {
         telegram: {
           enabled: false,
+          busyTextCoalescing: {
+            enabled: true,
+            windowMs: 2_000,
+            maxMessages: 4,
+            maxChars: 6_000
+          },
           textDebounceMs: 2_250,
           textDebounceMaxMessages: 7,
           textDebounceMaxChars: 4_096
@@ -1609,6 +1615,12 @@ describe("setupTelegramConfig", () => {
     expect(result.config.channels?.telegram).toMatchObject({
       enabled: true,
       allowedUserIds: ["42"],
+      busyTextCoalescing: {
+        enabled: true,
+        windowMs: 2_000,
+        maxMessages: 4,
+        maxChars: 6_000
+      },
       textDebounceMs: 2_250,
       textDebounceMaxMessages: 7,
       textDebounceMaxChars: 4_096
@@ -1618,6 +1630,53 @@ describe("setupTelegramConfig", () => {
 });
 
 describe("loadRuntimeConfig channel readiness", () => {
+  it("normalizes queued-text coalescing as disabled for every channel by default", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {}
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    for (const channel of Object.values(loaded.channels)) {
+      expect(channel.busyTextCoalescing).toEqual({
+        enabled: false,
+        windowMs: 1_500,
+        maxMessages: 5,
+        maxChars: 8_000
+      });
+    }
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("normalizes and caps explicit queued-text coalescing config", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {
+        telegram: {
+          busyTextCoalescing: {
+            enabled: true,
+            windowMs: 999_999,
+            maxMessages: 999,
+            maxChars: 999_999
+          }
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.telegram.busyTextCoalescing).toEqual({
+      enabled: true,
+      windowMs: 60_000,
+      maxMessages: 100,
+      maxChars: 100_000
+    });
+    await rm(workspace, { recursive: true, force: true });
+  });
+
   it("normalizes Telegram rapid text debounce defaults", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
@@ -2094,6 +2153,7 @@ describe("loadRuntimeConfig channel readiness", () => {
           mode: "bot",
           dmPolicy: "pairing",
           pairingMode: "qr",
+          busyTextCoalescing: { enabled: true, windowMs: 2_000, maxMessages: 4, maxChars: 6_000 },
           pairingCodePhoneNumber: "+971501234567",
           stalePairingCode: "123456",
           unknownWhatsAppKey: true
@@ -2116,7 +2176,8 @@ describe("loadRuntimeConfig channel readiness", () => {
       allowedGroups: [],
       mode: "bot",
       dmPolicy: "allowlist",
-      pairingMode: "qr"
+      pairingMode: "qr",
+      busyTextCoalescing: { enabled: true, windowMs: 2_000, maxMessages: 4, maxChars: 6_000 }
     });
     const persisted = JSON.parse(await readFile(configPath, "utf8"));
     expect(persisted.channels.whatsapp.pairingCodePhoneNumber).toBeUndefined();
