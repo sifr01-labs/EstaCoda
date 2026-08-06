@@ -230,6 +230,7 @@ export type ResolvedModelRoute = {
 };
 
 export type AuxiliaryModelProvider = ProviderId | "auto" | "main";
+export type VisionHostedProcessingPreference = "allow-with-approval" | "local-only";
 
 export type AuxiliaryModelSlotConfig = {
   provider?: AuxiliaryModelProvider;
@@ -241,6 +242,7 @@ export type AuxiliaryModelSlotConfig = {
   maxConcurrency?: number;
   extraBody?: Record<string, unknown>;
   fallbackToMain?: boolean;
+  hostedProcessing?: VisionHostedProcessingPreference;
   enabled?: boolean;
 };
 

@@ -137,6 +137,39 @@ describe("resolveAuxiliaryModelRoute", () => {
     expect(result.source).toBe("custom");
   });
 
+  it("keeps local Vision Analysis routes usable in local-only mode", () => {
+    const result = resolveAuxiliaryModelRoute("vision", {
+      provider: "local",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      id: "qwen2.5-vl",
+      hostedProcessing: "local-only",
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(),
+    });
+
+    expect(result.route?.id).toBe("qwen2.5-vl");
+    expect(result.source).toBe("custom");
+    expect(result.fallbackToMain).toBe(false);
+  });
+
+  it("rejects hosted Vision Analysis routes in local-only mode", () => {
+    const result = resolveAuxiliaryModelRoute("vision", {
+      provider: "openai",
+      id: "gpt-4o",
+      hostedProcessing: "local-only",
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry([fakeModelProfile({ id: "gpt-4o", supportsVision: true })]),
+    });
+
+    expect(result.route).toBeUndefined();
+    expect(result.fallbackToMain).toBe(false);
+    expect(result.diagnostics).toContain(
+      "Route openai/gpt-4o is hosted, but vision hosted processing is local-only"
+    );
+  });
+
   it("uses main route when provider is main", () => {
     const mainRoute = fakeMainRoute();
     const result = resolveAuxiliaryModelRoute("assessor", { provider: "main" }, {

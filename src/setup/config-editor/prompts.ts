@@ -2,7 +2,11 @@ import type { Prompt } from "../../cli/prompt-contract.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import type { BrowserBackendKind, BrowserCloudProviderKind } from "../../contracts/browser.js";
 import { defaultImageApiKeyEnv, defaultImageBaseUrl, defaultImageModel, IMAGE_MODEL_OPTIONS, resolveImageModel } from "../../contracts/image-generation.js";
-import type { AuxiliaryModelTask } from "../../contracts/provider.js";
+import type {
+  AuxiliaryModelSlotConfig,
+  AuxiliaryModelTask,
+  VisionHostedProcessingPreference,
+} from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import type { PromptCardStatusLine } from "../../contracts/view-model.js";
 import type { BrowserEngineKind, ImageGenerationProvider, SttProvider, TtsProvider } from "../../config/runtime-config.js";
@@ -145,6 +149,7 @@ export type FallbackRouteChoice =
     };
 
 export const SETUP_EDITOR_AUXILIARY_TASKS = [
+  "vision",
   "assessor",
   "compression",
   "session_search",
@@ -153,6 +158,18 @@ export const SETUP_EDITOR_AUXILIARY_TASKS = [
 ] as const satisfies readonly AuxiliaryModelTask[];
 
 export type SetupEditorAuxiliaryTask = typeof SETUP_EDITOR_AUXILIARY_TASKS[number];
+
+export type VisionAnalysisRouteMode = "automatic" | "main" | "dedicated" | "disabled" | "fallback";
+
+export type VisionAnalysisRouteSettings = {
+  readonly hostedProcessing: VisionHostedProcessingPreference;
+  readonly timeoutMs: number;
+  readonly maxConcurrency: number;
+};
+
+export type VisionAnalysisRouteSettingsResult =
+  | { readonly kind: "back" }
+  | { readonly kind: "selected"; readonly value: VisionAnalysisRouteSettings };
 
 export type ConfigEditorPostApplyActionId =
   | "launch"
@@ -302,6 +319,7 @@ async function promptBoundedNumber(
     readonly defaultValue: number;
     readonly minimum: number;
     readonly maximum?: number;
+    readonly integer?: boolean;
   },
   locale: SetupCopyLocale
 ): Promise<BoundedNumberPromptResult> {
@@ -318,6 +336,7 @@ async function promptBoundedNumber(
     const value = Number(raw);
     if (
       Number.isFinite(value) &&
+      (input.integer !== true || Number.isInteger(value)) &&
       value >= input.minimum &&
       (input.maximum === undefined || value <= input.maximum)
     ) {
@@ -913,7 +932,7 @@ export function setupEditorReviewSelectedAreaLabel(
     case "configure-voice":
       return locale === "ar" ? "الصوت" : "Voice";
     case "configure-image-generation":
-      return locale === "ar" ? "توليد الصور" : "Image Generation";
+      return locale === "ar" ? "توليد الصور وتعديلها" : "Image Generation and Editing";
     case "configure-browser":
       return locale === "ar" ? "المتصفح" : "Browser";
     case "edit-language":
@@ -1244,6 +1263,12 @@ export async function promptAuxiliaryModelTask(
     showColumnHeaders: false,
     choices: [
       {
+        id: "vision",
+        label: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.vision"),
+        description: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.vision.description"),
+        value: "vision" as const,
+      },
+      {
         id: "assessor",
         label: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.assessor"),
         description: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.assessor.description"),
@@ -1276,6 +1301,126 @@ export async function promptAuxiliaryModelTask(
     ],
     defaultValue: "assessor" as const,
   }, options);
+}
+
+export async function promptVisionAnalysisRouteMode(
+  prompt: Prompt,
+  current: AuxiliaryModelSlotConfig | undefined,
+  locale: SetupCopyLocale = "en"
+): Promise<SetupChoiceResult<VisionAnalysisRouteMode>> {
+  const currentMode = visionAnalysisRouteMode(current);
+  const choices: SetupChoice<VisionAnalysisRouteMode>[] = [
+    {
+      id: "vision-route-automatic",
+      label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.automatic"),
+      description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.automatic.description"),
+      value: "automatic",
+      current: currentMode === "automatic",
+    },
+    {
+      id: "vision-route-main",
+      label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.main"),
+      description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.main.description"),
+      value: "main",
+      current: currentMode === "main",
+    },
+    {
+      id: "vision-route-dedicated",
+      label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.dedicated"),
+      description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.dedicated.description"),
+      value: "dedicated",
+      current: currentMode === "dedicated",
+    },
+    {
+      id: "vision-route-disabled",
+      label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.disabled"),
+      description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.disabled.description"),
+      value: "disabled",
+      current: currentMode === "disabled",
+    },
+    {
+      id: "vision-route-fallback",
+      label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.fallback"),
+      description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.fallback.description"),
+      value: "fallback",
+      current: currentMode === "fallback",
+    },
+  ];
+  return promptSetupChoiceResult(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.body")}\n`,
+    allowBack: true,
+    choices,
+    defaultValue: currentMode,
+  });
+}
+
+export async function promptVisionAnalysisRouteSettings(
+  prompt: Prompt,
+  current: AuxiliaryModelSlotConfig | undefined,
+  locale: SetupCopyLocale = "en"
+): Promise<VisionAnalysisRouteSettingsResult> {
+  const hostedProcessing = await promptSetupChoiceResult(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.body")}\n`,
+    allowBack: true,
+    choices: [
+      {
+        id: "vision-hosted-approval",
+        label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.allow"),
+        description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.allow.description"),
+        value: "allow-with-approval" as const,
+      },
+      {
+        id: "vision-hosted-local-only",
+        label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.localOnly"),
+        description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.localOnly.description"),
+        value: "local-only" as const,
+      },
+    ],
+    defaultValue: current?.hostedProcessing ?? "allow-with-approval",
+  });
+  if (hostedProcessing.kind === "back") return hostedProcessing;
+
+  const timeoutMs = await promptBoundedNumber(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.limits.title"),
+    question: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.timeout.question"),
+    description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.timeout.description"),
+    invalid: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.timeout.invalid"),
+    defaultValue: current?.timeoutMs ?? 60_000,
+    minimum: 1,
+    integer: true,
+  }, locale);
+  if (timeoutMs.kind === "back") return timeoutMs;
+
+  const maxConcurrency = await promptBoundedNumber(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.limits.title"),
+    question: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.concurrency.question"),
+    description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.concurrency.description"),
+    invalid: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.concurrency.invalid"),
+    defaultValue: current?.maxConcurrency ?? 1,
+    minimum: 1,
+    integer: true,
+  }, locale);
+  if (maxConcurrency.kind === "back") return maxConcurrency;
+
+  return {
+    kind: "selected",
+    value: {
+      hostedProcessing: hostedProcessing.value,
+      timeoutMs: timeoutMs.value,
+      maxConcurrency: maxConcurrency.value,
+    },
+  };
+}
+
+function visionAnalysisRouteMode(slot: AuxiliaryModelSlotConfig | undefined): VisionAnalysisRouteMode {
+  if (slot?.enabled === false) return "disabled";
+  if (slot?.provider === "main") return "main";
+  if (slot?.provider !== undefined && slot.provider !== "auto") {
+    return slot.fallbackToMain === true ? "fallback" : "dedicated";
+  }
+  return "automatic";
 }
 
 export async function promptConfigEditorPostApplyAction(

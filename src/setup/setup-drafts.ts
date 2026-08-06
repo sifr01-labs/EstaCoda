@@ -477,7 +477,9 @@ function draftFromEditorAction(
       riskSurface: "provider-selection",
       scope: ["auxiliaryModels.*"],
       configPath: options.configPath,
-      summaryKey: "setupDrafts.auxiliaryModelRoute.summary",
+      summaryKey: action.reviewValues?.auxiliaryTask === "vision"
+        ? "setupDrafts.visionAnalysisRoute.summary"
+        : "setupDrafts.auxiliaryModelRoute.summary",
       values: action.reviewValues ?? {},
     });
   }

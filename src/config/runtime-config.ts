@@ -13,6 +13,7 @@ import type {
   AuxiliaryModelSlotConfig,
   AuxiliaryModelSlotInput,
   AuxiliaryModelTask,
+  AuxiliaryModelProvider,
   ModelProfile,
   ProviderEndpoint,
   ProviderApiMode,
@@ -815,11 +816,16 @@ export type ModelFallbackSetupInput = {
 
 export type AuxiliaryModelRouteSetupInput = {
   task: AuxiliaryModelTask;
-  provider: ProviderId;
-  id: string;
+  provider: AuxiliaryModelProvider;
+  id?: string;
   baseUrl?: string;
   apiKeyEnv?: string;
   contextWindowTokens?: number;
+  timeoutMs?: number;
+  maxConcurrency?: number;
+  fallbackToMain?: boolean;
+  hostedProcessing?: "allow-with-approval" | "local-only";
+  enabled?: boolean;
 };
 
 export type SkillSetupInput = {
@@ -1280,7 +1286,8 @@ function stripDefaultAuxiliarySlots(
       slot.timeoutMs === undefined &&
       slot.maxConcurrency === undefined &&
       slot.extraBody === undefined &&
-      slot.fallbackToMain === undefined;
+      slot.fallbackToMain === undefined &&
+      slot.hostedProcessing === undefined;
     if (!isDefault) {
       stripped[task as AuxiliaryModelTask | "default"] = slot;
     }
@@ -1353,7 +1360,8 @@ export function normalizeAuxiliaryModels(
       ...(slot?.timeoutMs !== undefined ? { timeoutMs: slot.timeoutMs } : {}),
       ...(slot?.maxConcurrency !== undefined ? { maxConcurrency: slot.maxConcurrency } : {}),
       ...(slot?.extraBody !== undefined ? { extraBody: slot.extraBody } : {}),
-      ...(slot?.fallbackToMain !== undefined ? { fallbackToMain: slot.fallbackToMain } : {})
+      ...(slot?.fallbackToMain !== undefined ? { fallbackToMain: slot.fallbackToMain } : {}),
+      ...(slot?.hostedProcessing !== undefined ? { hostedProcessing: slot.hostedProcessing } : {})
     };
   }
   return normalized;
@@ -1366,6 +1374,13 @@ function normalizeAuxiliarySlotInput(
   if (slot === undefined) return undefined;
   if (typeof slot === "string") {
     return parseAuxiliaryModelShorthand(slot, path);
+  }
+  if (
+    slot.hostedProcessing !== undefined &&
+    slot.hostedProcessing !== "allow-with-approval" &&
+    slot.hostedProcessing !== "local-only"
+  ) {
+    throw new Error(`${path}.hostedProcessing must be allow-with-approval or local-only`);
   }
   return slot;
 }
@@ -2508,20 +2523,32 @@ export async function setupAuxiliaryModelConfig(options: {
     ...(existing.config.auxiliaryModels ?? {}),
     [options.input.task]: {
       provider: options.input.provider,
-      id: options.input.id,
+      ...(options.input.id !== undefined ? { id: options.input.id } : {}),
       ...(options.input.baseUrl !== undefined ? { baseUrl: options.input.baseUrl } : {}),
       ...(options.input.apiKeyEnv !== undefined ? { apiKeyEnv: options.input.apiKeyEnv } : {}),
       ...(options.input.contextWindowTokens !== undefined ? { contextWindowTokens: options.input.contextWindowTokens } : {}),
-      enabled: true
+      ...(options.input.timeoutMs !== undefined ? { timeoutMs: options.input.timeoutMs } : {}),
+      ...(options.input.maxConcurrency !== undefined ? { maxConcurrency: options.input.maxConcurrency } : {}),
+      ...(options.input.fallbackToMain !== undefined ? { fallbackToMain: options.input.fallbackToMain } : {}),
+      ...(options.input.hostedProcessing !== undefined ? { hostedProcessing: options.input.hostedProcessing } : {}),
+      enabled: options.input.enabled ?? true
     }
   };
   const normalized = normalizeAuxiliaryModels(mergedAuxiliaryModels);
-  const config = patchConfig(existing.config, {
+  const normalizedTaskSlot = normalized[options.input.task] as AuxiliaryModelSlotConfig;
+  const patched = patchConfig(existing.config, {
     auxiliaryModels: {
       ...(existing.config.auxiliaryModels ?? {}),
-      [options.input.task]: normalized[options.input.task]
+      [options.input.task]: normalizedTaskSlot
     }
   });
+  const config: EstaCodaConfig = {
+    ...patched,
+    auxiliaryModels: {
+      ...(patched.auxiliaryModels ?? {}),
+      [options.input.task]: normalizedTaskSlot
+    }
+  };
 
   await saveRuntimeConfig(targetPath, config);
 
@@ -3511,11 +3538,27 @@ function validateModelFallbackSetupInput(input: ModelFallbackSetupInput): void {
 function validateAuxiliaryModelRouteSetupInput(input: AuxiliaryModelRouteSetupInput): void {
   requireNonEmpty(input.task, "auxiliary task");
   requireNonEmpty(input.provider, "auxiliary provider");
-  requireNonEmpty(input.id, "auxiliary model id");
+  if (input.provider !== "auto" && input.provider !== "main") {
+    requireNonEmpty(input.id, "auxiliary model id");
+  } else if (input.id !== undefined) {
+    throw new Error("Automatic and main auxiliary routes cannot set a model id");
+  }
   validateOptionalUrl(input.baseUrl, "auxiliary baseUrl");
   validateOptionalEnvName(input.apiKeyEnv, "auxiliary apiKeyEnv");
   if (input.contextWindowTokens !== undefined && (!Number.isInteger(input.contextWindowTokens) || input.contextWindowTokens <= 0)) {
     throw new Error("Expected auxiliary contextWindowTokens to be a positive integer");
+  }
+  if (input.timeoutMs !== undefined && (!Number.isInteger(input.timeoutMs) || input.timeoutMs <= 0)) {
+    throw new Error("Expected auxiliary timeoutMs to be a positive integer");
+  }
+  if (input.maxConcurrency !== undefined && (!Number.isInteger(input.maxConcurrency) || input.maxConcurrency <= 0)) {
+    throw new Error("Expected auxiliary maxConcurrency to be a positive integer");
+  }
+  if (input.hostedProcessing !== undefined && input.task !== "vision") {
+    throw new Error("hostedProcessing is supported only for the vision auxiliary route");
+  }
+  if (input.hostedProcessing !== undefined && input.hostedProcessing !== "allow-with-approval" && input.hostedProcessing !== "local-only") {
+    throw new Error("Expected hostedProcessing to be allow-with-approval or local-only");
   }
 }
 

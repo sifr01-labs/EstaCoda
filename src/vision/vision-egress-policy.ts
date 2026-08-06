@@ -5,7 +5,7 @@ import type { ContextReference } from "../contracts/context.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import type { ToolSecurityResolution } from "../contracts/tool.js";
 import type { ResolvedVisionImageSource, VisionInputProvenanceContext } from "../contracts/vision.js";
-import { getProviderDefaultBaseUrl } from "../providers/provider-metadata.js";
+import { providerRouteDestination } from "../providers/provider-route-location.js";
 
 export function visionInputProvenanceForTurn(input: {
   attachments?: readonly ChannelAttachment[];
@@ -37,8 +37,8 @@ export async function resolveVisionEgressSecurity(input: {
   additionalRoutes?: readonly ResolvedModelRoute[];
 }): Promise<ToolSecurityResolution | undefined> {
   const routes = possibleVisionRoutes(input.visionRoute, input.mainRoute, input.additionalRoutes);
-  const destinations = [...new Set(routes.map(routeDestination).filter(
-    (destination): destination is VisionDestination => destination !== undefined && destination.inference === "hosted"
+  const destinations = [...new Set(routes.map(providerRouteDestination).filter(
+    (destination) => destination.inference === "hosted"
   ).map((destination) => destination.key))].sort();
   if (destinations.length === 0) return undefined;
 
@@ -62,11 +62,6 @@ export async function resolveVisionEgressSecurity(input: {
   };
 }
 
-type VisionDestination = {
-  inference: "local" | "hosted";
-  key: string;
-};
-
 function possibleVisionRoutes(
   visionRoute: ResolvedAuxiliaryRoute,
   mainRoute: ResolvedModelRoute | undefined,
@@ -82,32 +77,6 @@ function possibleVisionRoutes(
     seen.add(key);
     return true;
   });
-}
-
-function routeDestination(route: ResolvedModelRoute): VisionDestination | undefined {
-  const rawBaseUrl = route.baseUrl ?? getProviderDefaultBaseUrl(route.provider);
-  if (rawBaseUrl === undefined) {
-    return route.provider === "local"
-      ? { inference: "local", key: "local@loopback" }
-      : { inference: "hosted", key: `${route.provider}@provider-default` };
-  }
-  try {
-    const url = new URL(rawBaseUrl);
-    const hostname = url.hostname.toLowerCase();
-    const local = hostname === "localhost" || hostname.endsWith(".localhost") ||
-      hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
-    url.username = "";
-    url.password = "";
-    url.search = "";
-    url.hash = "";
-    const path = url.pathname.replace(/\/+$/u, "") || "/";
-    return {
-      inference: local ? "local" : "hosted",
-      key: `${route.provider}@${url.origin}${path}`
-    };
-  } catch {
-    return { inference: "hosted", key: `${route.provider}@custom-endpoint` };
-  }
 }
 
 async function classifySourceProvenance(

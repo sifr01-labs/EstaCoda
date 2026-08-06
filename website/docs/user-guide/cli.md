@@ -69,7 +69,7 @@ New users enter the Onboarding Wizard. The visible flow is setup detection, prof
 
 Setup is reviewed, not autonomous. No wizard step writes or serializes raw secrets; cancellation and blocked apply paths write nothing. Credentials are displayed only as `Not set`, `Existing credential detected`, or `New credential pending`. Reviewed apply execution is the only boundary that persists secrets to the selected profile `.env` with `0600` permissions. Raw secrets are not displayed in review output.
 
-The Onboarding Wizard optional capability menu covers Channels, Voice STT/TTS, Browser, and Skip. Vision/image generation is configured from the Setup Editor, not from the Onboarding Wizard.
+The Onboarding Wizard optional capability menu covers Channels, Voice STT/TTS, Browser, and Skip. Image Generation and Editing is configured from the Setup Editor, not from the Onboarding Wizard. Vision Analysis has a separate reviewed auxiliary-model route with automatic, main, dedicated, disabled, and dedicated-with-main-fallback choices.
 
 Workspace trust is required before EstaCoda can run in a workspace. If trust is deferred, setup may be saved, but launch is blocked with `Setup saved. Workspace trust is still required before EstaCoda can run here.`
 

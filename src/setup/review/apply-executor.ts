@@ -303,6 +303,7 @@ async function applyConfigPatch(
       await applyFallbackRoute(operation, context, options);
       return [];
     case "setupDrafts.auxiliaryModelRoute.summary":
+    case "setupDrafts.visionAnalysisRoute.summary":
       await applyAuxiliaryModelRoute(operation, context, options);
       return [];
     case "setupDrafts.credentialReference.summary":
@@ -483,22 +484,59 @@ async function applyAuxiliaryModelRoute(
   const auxiliaryTask = auxiliaryTaskValue(operation.review.values.auxiliaryTask);
   const provider = providerIdValue(operation.review.values.provider ?? operation.review.values.providerId);
   const model = stringValue(operation.review.values.model ?? operation.review.values.modelId);
-  if (auxiliaryTask === undefined || provider === undefined || model === undefined) {
+  const routeMode = visionAnalysisRouteModeValue(operation.review.values.routeMode);
+  if (auxiliaryTask === undefined) {
     throw new Error("Auxiliary route apply requires auxiliary task, provider, and model review values.");
+  }
+  if (auxiliaryTask !== "vision" && (provider === undefined || model === undefined)) {
+    throw new Error("Auxiliary route apply requires auxiliary task, provider, and model review values.");
+  }
+  if (auxiliaryTask === "vision" && routeMode === undefined) {
+    throw new Error("Vision Analysis route apply requires a supported routeMode review value.");
+  }
+  if (
+    auxiliaryTask === "vision" &&
+    (routeMode === "dedicated" || routeMode === "fallback") &&
+    (provider === undefined || model === undefined)
+  ) {
+    throw new Error("Dedicated Vision Analysis route apply requires provider and model review values.");
   }
   const baseUrl = stringValue(operation.review.values.baseUrl);
   const apiKeyEnv = stringValue(operation.review.values.apiKeyEnv) ?? context.credentialEnv;
   const contextWindowTokens = numberValue(operation.review.values.contextWindowTokens);
+  const timeoutMs = positiveIntegerValue(operation.review.values.timeoutMs);
+  const maxConcurrency = positiveIntegerValue(operation.review.values.maxConcurrency);
+  const hostedProcessing = visionHostedProcessingValue(operation.review.values.hostedProcessing);
+  if (operation.review.values.timeoutMs !== undefined && timeoutMs === undefined) {
+    throw new Error("Vision Analysis timeoutMs must be a positive integer.");
+  }
+  if (operation.review.values.maxConcurrency !== undefined && maxConcurrency === undefined) {
+    throw new Error("Vision Analysis maxConcurrency must be a positive integer.");
+  }
+  if (operation.review.values.hostedProcessing !== undefined && hostedProcessing === undefined) {
+    throw new Error("Vision Analysis hostedProcessing preference is invalid.");
+  }
+  const resolvedProvider = auxiliaryTask === "vision"
+    ? routeMode === "main" ? "main" : routeMode === "automatic" || routeMode === "disabled" ? "auto" : provider
+    : provider;
+  if (resolvedProvider === undefined) {
+    throw new Error("Auxiliary route apply requires a provider review value.");
+  }
   const target = configApplyTarget(operation, options);
   await setupAuxiliaryModelConfig({
     ...target,
     input: {
       task: auxiliaryTask,
-      provider,
-      id: model,
+      provider: resolvedProvider,
+      ...(model !== undefined && resolvedProvider !== "auto" && resolvedProvider !== "main" ? { id: model } : {}),
       ...(baseUrl !== undefined ? { baseUrl } : {}),
       ...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
       ...(contextWindowTokens !== undefined ? { contextWindowTokens } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      ...(maxConcurrency !== undefined ? { maxConcurrency } : {}),
+      ...(auxiliaryTask === "vision" && hostedProcessing !== undefined ? { hostedProcessing } : {}),
+      ...(auxiliaryTask === "vision" ? { fallbackToMain: routeMode === "fallback" } : {}),
+      ...(auxiliaryTask === "vision" ? { enabled: routeMode !== "disabled" } : {}),
     },
   });
 }
@@ -1144,6 +1182,10 @@ function numberValue(value: unknown): number | undefined {
   return typeof value === "number" && !Number.isNaN(value) ? value : undefined;
 }
 
+function positiveIntegerValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
 function providerIdValue(value: unknown): ProviderId | undefined {
   return stringValue(value) as ProviderId | undefined;
 }
@@ -1157,13 +1199,25 @@ function providerAuthMethodValue(value: unknown): ProviderAuthMethod | undefined
 }
 
 function auxiliaryTaskValue(value: unknown): AuxiliaryModelTask | undefined {
-  return value === "assessor" ||
+  return value === "vision" ||
+    value === "assessor" ||
     value === "compression" ||
     value === "session_search" ||
     value === "memory_compaction" ||
     value === "profile_context"
     ? value
     : undefined;
+}
+
+function visionAnalysisRouteModeValue(
+  value: unknown
+): "automatic" | "main" | "dedicated" | "disabled" | "fallback" | undefined {
+  return value === "automatic" || value === "main" || value === "dedicated" ||
+    value === "disabled" || value === "fallback" ? value : undefined;
+}
+
+function visionHostedProcessingValue(value: unknown): "allow-with-approval" | "local-only" | undefined {
+  return value === "allow-with-approval" || value === "local-only" ? value : undefined;
 }
 
 function securityModeValue(value: unknown): SecurityApprovalMode | undefined {

@@ -153,6 +153,29 @@ describe("openai-compatible model probe", () => {
     expect(result.message).toBe("Unauthorized [redacted]");
   });
 
+  it("uses a multimodal request for the benign Vision Analysis route check", async () => {
+    const calls: Array<{ url: string; init: Parameters<FetchLike>[1] }> = [];
+    const imageDataUrl = "data:image/png;base64,iVBORw0KGgo=";
+    const result = await testOpenAICompatibleChatCompletion("http://localhost:11434/v1", "vision-local", {
+      fetch: async (url, init) => {
+        calls.push({ url, init });
+        return response({ ok: true });
+      },
+      visionImageDataUrl: imageDataUrl,
+    });
+    const body = JSON.parse(calls[0]?.init.body ?? "{}") as {
+      messages?: Array<{ content?: Array<{ type?: string; image_url?: { url?: string } }> }>;
+      max_tokens?: number;
+    };
+
+    expect(result).toEqual(expect.objectContaining({ status: "passed", message: "Vision completion passed." }));
+    expect(body.messages?.[0]?.content).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "text" }),
+      expect.objectContaining({ type: "image_url", image_url: { url: imageDataUrl, detail: "low" } }),
+    ]));
+    expect(body.max_tokens).toBe(64);
+  });
+
   it("represents skipped and not-tested chat checks explicitly", async () => {
     await expect(testOpenAICompatibleChatCompletion("http://localhost:11434/v1", "local-model", {
       skip: true

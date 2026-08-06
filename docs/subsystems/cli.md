@@ -397,11 +397,11 @@ The interactive model picker can configure Codex where the nested OpenAI choice 
 
 `estacoda model setup codex` remains the direct CLI setup path. It authenticates through OAuth device code, stores tokens in the selected profile's `auth.json`, and configures the `codex/gpt-5.5` route. Raw OAuth tokens are not printed. Route config remains separate from token storage.
 
-The Setup Editor can configure Codex for primary and fallback model routes through reviewed apply. OAuth tokens from the Setup Editor are written only after review approval; cancelling review after OAuth does not persist tokens. Auxiliary model routes remain unchanged in this pass and do not introduce Codex OAuth setup.
+The Setup Editor can configure Codex for primary and fallback model routes through reviewed apply. OAuth tokens from the Setup Editor are written only after review approval; cancelling review after OAuth does not persist tokens. Auxiliary model routes do not introduce Codex OAuth setup.
 
-Optional capabilities stay separate from the primary LLM route. In the Onboarding Wizard, the menu is limited to Channels, Voice STT/TTS, Browser, and Skip. Vision/image generation is intentionally absent from that menu.
+Optional capabilities stay separate from the primary LLM route. In the Onboarding Wizard, the menu is limited to Channels, Voice STT/TTS, Browser, and Skip. Image Generation and Editing is intentionally absent from that menu.
 
-The Setup Editor is the broader operator surface. It keeps technical review/manifest behavior and exposes capabilities that the Onboarding Wizard does not show, including Vision/image generation. Each Setup Editor capability creates its own single-module draft bundle through an independent action:
+The Setup Editor is the broader operator surface. It keeps technical review/manifest behavior and exposes capabilities that the Onboarding Wizard does not show, including Image Generation and Editing. Vision Analysis is configured separately under auxiliary models, with automatic, main, dedicated, disabled, and dedicated-with-main-fallback modes plus hosted-processing, timeout, and concurrency controls. Each Setup Editor capability creates its own single-module draft bundle through an independent action:
 
 | Action | Setup behavior |
 |--------|----------------|

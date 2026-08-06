@@ -198,6 +198,7 @@ export type OpenAICompatibleEndpointFlowOptions = {
   readonly fetch?: FetchLike;
   readonly timeoutMs?: number;
   readonly initialEnv?: Record<string, string | undefined>;
+  readonly visionVerificationImageDataUrl?: string;
 };
 
 export type OpenAICompatibleEndpointFlowResult =
@@ -535,6 +536,7 @@ async function collectChatCompletionCheck(
     auth: input.authState.probeAuth,
     timeoutMs: options.timeoutMs,
     skip: selection === "skip",
+    visionImageDataUrl: options.visionVerificationImageDataUrl,
   });
 }
 

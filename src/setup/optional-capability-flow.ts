@@ -1066,7 +1066,7 @@ export function optionalCapabilityTitle(moduleId: string, locale: SetupCopyLocal
       case "voice":
         return "Voice";
       case "vision":
-        return "Vision and image generation";
+        return "Image Generation and Editing";
       case "web-search":
         return "Search";
       case "browser":

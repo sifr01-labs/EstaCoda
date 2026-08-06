@@ -2,7 +2,7 @@ import { resolveStateHome } from "../../config/state-home.js";
 import { hasSavedEnvSecret } from "../../config/env-secret-store.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
 import { loadRuntimeConfig } from "../../config/runtime-config.js";
-import type { AuxiliaryModelSlotInput, ProviderId } from "../../contracts/provider.js";
+import type { AuxiliaryModelSlotConfig, AuxiliaryModelSlotInput, ProviderId } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import type { PromptCardStatusLine } from "../../contracts/view-model.js";
 import type { Prompt } from "../../cli/prompt-contract.js";
@@ -55,6 +55,7 @@ import {
   collectOpenAICompatibleEndpointFlow,
   type OpenAICompatibleEndpointFlowResult,
 } from "../openai-compatible-endpoint-flow.js";
+import { loadVisionAnalysisVerificationImageDataUrl } from "../vision-analysis-verification.js";
 import {
   formatSetupCopy,
   promptSetupChoice,
@@ -79,6 +80,8 @@ import {
   promptOptionalCapabilityAction,
   promptSecurityMode,
   promptSpendingLimit,
+  promptVisionAnalysisRouteMode,
+  promptVisionAnalysisRouteSettings,
   promptVoiceCapability,
   promptWorkflowLearning,
   promptWorkspaceTrustConfirmation,
@@ -1401,6 +1404,9 @@ async function collectAndApplyOpenAICompatibleEndpointFlow(
     };
   }
 ): Promise<RunOnceResult> {
+  const visionVerificationImageDataUrl = editorAction.reviewValues?.auxiliaryTask === "vision"
+    ? await loadVisionAnalysisVerificationImageDataUrl()
+    : undefined;
   const flowResult = await collectOpenAICompatibleEndpointFlow({
     providerId: input.providerId,
     defaultBaseUrl: input.defaultBaseUrl,
@@ -1410,6 +1416,7 @@ async function collectAndApplyOpenAICompatibleEndpointFlow(
     ui: createOpenAICompatibleEndpointFlowUi(options.prompt, options.locale),
     fetch: openAICompatibleSetupFetch(options),
     initialEnv: process.env,
+    ...(visionVerificationImageDataUrl === undefined ? {} : { visionVerificationImageDataUrl }),
   });
 
   if (flowResult.kind !== "ready") {
@@ -1558,7 +1565,35 @@ async function handleAuxiliaryRouteAction(
   }
   const auxiliaryTask = auxiliaryTaskResult.value;
   const loaded = await loadRuntimeConfig(options);
-  const currentAuxiliaryRoute = auxiliaryRouteFromSlot(loaded.config.auxiliaryModels?.[auxiliaryTask]);
+  const currentSlot = auxiliarySlotConfig(loaded.config.auxiliaryModels?.[auxiliaryTask]);
+  const currentAuxiliaryRoute = auxiliaryRouteFromSlot(currentSlot);
+  let visionReviewValues: Readonly<Record<string, unknown>> = {};
+  if (auxiliaryTask === "vision") {
+    const routeMode = await promptVisionAnalysisRouteMode(options.prompt, currentSlot, options.locale);
+    if (routeMode.kind === "back") {
+      return menuBackResult(initialDecision, action.id);
+    }
+    const settings = await promptVisionAnalysisRouteSettings(options.prompt, currentSlot, options.locale);
+    if (settings.kind === "back") {
+      return menuBackResult(initialDecision, action.id);
+    }
+    visionReviewValues = {
+      routeMode: routeMode.value,
+      hostedProcessing: settings.value.hostedProcessing,
+      timeoutMs: settings.value.timeoutMs,
+      maxConcurrency: settings.value.maxConcurrency,
+    };
+    if (routeMode.value === "automatic" || routeMode.value === "main" || routeMode.value === "disabled") {
+      return reviewAndApplyAction(options, initialDecision, session, {
+        ...editorAction,
+        reviewValues: {
+          ...editorAction.reviewValues,
+          auxiliaryTask,
+          ...visionReviewValues,
+        },
+      });
+    }
+  }
   const resolved = await selectResolvedProviderRoute(options, "auxiliary", {
     currentProviderId: currentAuxiliaryRoute?.provider,
     currentModelId: currentAuxiliaryRoute?.id,
@@ -1572,6 +1607,7 @@ async function handleAuxiliaryRouteAction(
     reviewValues: {
       ...editorAction.reviewValues,
       auxiliaryTask,
+      ...visionReviewValues,
     },
   };
   if (resolved.selection.credentialAction.kind === "endpoint") {
@@ -1615,6 +1651,17 @@ function auxiliaryRouteFromSlot(
     provider: slot.provider,
     id: slot.id,
     baseUrl: slot.baseUrl,
+  };
+}
+
+function auxiliarySlotConfig(slot: AuxiliaryModelSlotInput | undefined): AuxiliaryModelSlotConfig | undefined {
+  if (slot === undefined) return undefined;
+  if (typeof slot !== "string") return slot;
+  const separator = slot.indexOf("/");
+  if (separator <= 0 || separator === slot.length - 1) return undefined;
+  return {
+    provider: slot.slice(0, separator),
+    id: slot.slice(separator + 1),
   };
 }
 

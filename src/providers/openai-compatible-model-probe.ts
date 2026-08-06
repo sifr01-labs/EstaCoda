@@ -33,6 +33,7 @@ export type OpenAIChatCompletionTestOptions = {
   readonly auth?: OpenAICompatibleProbeAuth;
   readonly timeoutMs?: number;
   readonly skip?: boolean;
+  readonly visionImageDataUrl?: string;
 };
 
 const DEFAULT_TIMEOUT_MS = 3_000;
@@ -113,9 +114,17 @@ export async function testOpenAICompatibleChatCompletion(
       },
       body: JSON.stringify({
         model: modelId,
-        messages: [{ role: "user", content: "Respond with OK." }],
+        messages: [{
+          role: "user",
+          content: options.visionImageDataUrl === undefined
+            ? "Respond with OK."
+            : [
+                { type: "text", text: "Read the benign verification image and identify its English and Arabic text." },
+                { type: "image_url", image_url: { url: options.visionImageDataUrl, detail: "low" } },
+              ],
+        }],
         stream: false,
-        max_tokens: 8
+        max_tokens: options.visionImageDataUrl === undefined ? 8 : 64
       }),
       signal: controller.signal
     });
@@ -135,7 +144,9 @@ export async function testOpenAICompatibleChatCompletion(
       ok: true,
       baseUrl: normalizedBaseUrl,
       modelId,
-      message: "Chat completion passed."
+      message: options.visionImageDataUrl === undefined
+        ? "Chat completion passed."
+        : "Vision completion passed."
     };
   } catch (error) {
     return {

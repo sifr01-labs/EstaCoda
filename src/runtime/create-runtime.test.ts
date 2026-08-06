@@ -1595,6 +1595,9 @@ describe("createRuntime MCP trust gating", () => {
             "requiredConfig": undefined,
             "riskClass": "read-only-local",
             "schemaAliasOrder": [
+              "detail",
+              "mode",
+              "output",
               "path",
               "prompt",
             ],

@@ -687,7 +687,7 @@ describe("runConfigEditor", () => {
       "Configure voice",
       "Voice",
       "Voice",
-      "Vision and Image Generation",
+      "Image Generation and Editing",
       "Image model",
       "Browser",
       "Voice",
@@ -971,7 +971,7 @@ describe("runConfigEditor", () => {
 
     const searchInput = selectInputs.find((input) => input.title === "Search provider");
     const voiceInputs = selectInputs.filter((input) => input.title === "Voice");
-    const visionInput = selectInputs.find((input) => input.title === "Vision and Image Generation");
+    const visionInput = selectInputs.find((input) => input.title === "Image Generation and Editing");
     const browserInput = selectInputs.find((input) => input.title === "Browser");
     const allStatusText = selectInputs.flatMap((input) => input.statusLines ?? []).map((line) => line.text).join("\n");
 
@@ -1795,7 +1795,7 @@ describe("runConfigEditor", () => {
       applyExecutor: { apply },
     });
 
-    const imageProviderInput = selectInputs.find((input) => input.title === "Vision and Image Generation");
+    const imageProviderInput = selectInputs.find((input) => input.title === "Image Generation and Editing");
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("exit");
     expect(result.reviewManifest).toBeUndefined();
@@ -1804,7 +1804,7 @@ describe("runConfigEditor", () => {
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
     expect(imageProviderInput?.options.find((option) => option.label === "Back")?.group).toBe("navigation");
     expect(selectInputs.map((input) => input.title)).toEqual([
-      "Vision and Image Generation",
+      "Image Generation and Editing",
       "Setup editor",
     ]);
   });
@@ -1836,9 +1836,9 @@ describe("runConfigEditor", () => {
     expect(apply).not.toHaveBeenCalled();
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
     expect(selectInputs.map((input) => input.title)).toEqual([
-      "Vision and Image Generation",
+      "Image Generation and Editing",
       "Image model",
-      "Vision and Image Generation",
+      "Image Generation and Editing",
       "Setup editor",
     ]);
   });
@@ -3381,15 +3381,16 @@ describe("runConfigEditor", () => {
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("edit-auxiliary-model-route");
     expect(promptTitles).toEqual(["Choose auxiliary model.", "Auxiliary provider", "Auxiliary model"]);
-    expect(taskOptions[0]?.labels).toEqual(["Assessor", "Compression", "Session search", "Memory compaction", "Profile context", "Back"]);
-    expect(taskOptions[0]?.values.slice(0, 5)).toEqual([
+    expect(taskOptions[0]?.labels).toEqual(["Vision Analysis", "Assessor", "Compression", "Session search", "Memory compaction", "Profile context", "Back"]);
+    expect(taskOptions[0]?.values.slice(0, 6)).toEqual([
+      "vision",
       "assessor",
       "compression",
       "session_search",
       "memory_compaction",
       "profile_context",
     ]);
-    expect(typeof taskOptions[0]?.values[5]).toBe("symbol");
+    expect(typeof taskOptions[0]?.values[6]).toBe("symbol");
     expect(result.reviewManifest?.sections["provider-model-network"][0]?.review).toEqual(expect.objectContaining({
       summaryKey: "setupDrafts.auxiliaryModelRoute.summary",
       values: expect.objectContaining({
@@ -3479,6 +3480,164 @@ describe("runConfigEditor", () => {
       baseUrl: "http://localhost:11434/v1",
       enabled: true,
     }));
+  });
+
+  it("reviews and applies automatic Vision Analysis settings without changing image generation", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      imageGen: {
+        provider: "fal",
+        model: "fal-ai/flux-2/klein/9b",
+        apiKeyEnv: "FAL_KEY",
+      },
+      auxiliaryModels: {
+        vision: { provider: "openai", id: "old-vision", enabled: true },
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["vision", "automatic", "allow-with-approval", "45000", "2", true],
+      }),
+      defaultActionId: "edit-auxiliary-model-route",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      imageGen?: { provider?: string; model?: string; apiKeyEnv?: string };
+      auxiliaryModels?: { vision?: Record<string, unknown> };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review).toEqual(expect.objectContaining({
+      summaryKey: "setupDrafts.visionAnalysisRoute.summary",
+      values: expect.objectContaining({
+        auxiliaryTask: "vision",
+        routeMode: "automatic",
+        hostedProcessing: "allow-with-approval",
+        timeoutMs: 45_000,
+        maxConcurrency: 2,
+      }),
+    }));
+    expect(config.auxiliaryModels?.vision).toEqual({
+      provider: "auto",
+      timeoutMs: 45_000,
+      maxConcurrency: 2,
+      fallbackToMain: false,
+      hostedProcessing: "allow-with-approval",
+      enabled: true,
+    });
+    expect(config.imageGen).toEqual({
+      provider: "fal",
+      model: "fal-ai/flux-2/klein/9b",
+      apiKeyEnv: "FAL_KEY",
+    });
+    expect(rawConfig).not.toContain("old-vision");
+  });
+
+  it("uses the benign bilingual image when verifying a local Vision Analysis route", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const completionBodies: unknown[] = [];
+    const prompt = fakePrompt({
+      values: [
+        "vision",
+        "dedicated",
+        "local-only",
+        "60000",
+        "1",
+        "Local",
+        "",
+        "Check endpoint",
+        "vision-local",
+        "",
+        "No API key",
+        "Run test",
+        "Review changes",
+        true,
+      ],
+    });
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-auxiliary-model-route",
+      flowEngine: flowEngine({ credentialAction: "endpoint", envVarName: "OPENAI_COMPATIBLE_API_KEY", providers: ["local"] }),
+      providerFetch: async (url, init) => {
+        if (url.endsWith("/models")) {
+          return fetchResponse({ data: [{ id: "vision-local" }] });
+        }
+        completionBodies.push(JSON.parse(init.body ?? "{}"));
+        return fetchResponse({ choices: [{ message: { content: "VISION READY / الرؤية جاهزة" } }] });
+      },
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const completionBody = completionBodies[0] as {
+      messages?: Array<{ content?: Array<{ type?: string; image_url?: { url?: string } }> }>;
+    };
+
+    expect(result.completed).toBe(true);
+    expect(completionBody.messages?.[0]?.content).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "text" }),
+      expect.objectContaining({
+        type: "image_url",
+        image_url: expect.objectContaining({ url: expect.stringMatching(/^data:image\/png;base64,/u) }),
+      }),
+    ]));
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
+      auxiliaryTask: "vision",
+      routeMode: "dedicated",
+      hostedProcessing: "local-only",
+      chatCompletionStatus: "passed",
+    }));
+  });
+
+  it("keeps Vision Analysis config and secrets unchanged when dedicated-route review is cancelled", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      auxiliaryModels: {
+        vision: { provider: "auto", enabled: true },
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+    const secret = "sk-vision-cancelled-secret";
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["vision", "dedicated", "allow-with-approval", "60000", "1", "OpenAI", "gpt-5.5", false],
+        secret,
+      }),
+      defaultActionId: "edit-auxiliary-model-route",
+      flowEngine: flowEngine({ credentialAction: "collect", envVarName: "VISION_CANCEL_KEY" }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      auxiliaryModels?: { vision?: Record<string, unknown> };
+    };
+
+    expect(result.completed).toBe(false);
+    expect(result.applyPlanningResult?.kind).toBe("cancelled");
+    expect(config.auxiliaryModels?.vision).toEqual({ provider: "auto", enabled: true });
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
+    expect(rawConfig).not.toContain(secret);
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(JSON.stringify(result.reviewManifest)).not.toContain(secret);
   });
 
   it("does not change assessor route when auxiliary review is cancelled", async () => {

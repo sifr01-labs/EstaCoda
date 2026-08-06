@@ -12,6 +12,7 @@ import type {
 import { ProviderRegistry } from "./provider-registry.js";
 import { matchesPreferences, routeProvider } from "./provider-router.js";
 import { inferModelProfile, resolveModelProfileFromCatalog } from "./model-catalog.js";
+import { isLocalProviderRoute } from "./provider-route-location.js";
 
 const taskCapabilityRequirements: Record<AuxiliaryModelTask, ProviderRoutePreferences> = {
   vision: { requireVision: true },
@@ -83,6 +84,18 @@ export function resolveAuxiliaryModelRoute(
       contextWindowTokens: slot.contextWindowTokens
     };
 
+    const localityFailure = localOnlyVisionFailure(task, slot, route);
+    if (localityFailure !== undefined) {
+      return {
+        task,
+        route: undefined,
+        source: "custom",
+        fallbackToMain: false,
+        ...executionFields,
+        diagnostics: [customRouteDiagnostic(effectiveProvider, slot.baseUrl), localityFailure]
+      };
+    }
+
     const requirementFailure = visionRequirementFailure(task, route);
     if (requirementFailure !== undefined) {
       return {
@@ -107,6 +120,17 @@ export function resolveAuxiliaryModelRoute(
 
   // 3. Main provider
   if (slot.provider === "main") {
+    const localityFailure = localOnlyVisionFailure(task, slot, context.mainRoute);
+    if (localityFailure !== undefined) {
+      return {
+        task,
+        route: undefined,
+        source: "main",
+        fallbackToMain: false,
+        ...executionFields,
+        diagnostics: [localityFailure]
+      };
+    }
     const requirementFailure = visionRequirementFailure(task, context.mainRoute);
     if (requirementFailure !== undefined) {
       return {
@@ -147,6 +171,18 @@ export function resolveAuxiliaryModelRoute(
         contextWindowTokens: slot.contextWindowTokens
       };
 
+      const localityFailure = localOnlyVisionFailure(task, slot, route);
+      if (localityFailure !== undefined) {
+        return {
+          task,
+          route: undefined,
+          source: "explicit",
+          fallbackToMain: false,
+          ...executionFields,
+          diagnostics: [localityFailure]
+        };
+      }
+
       const requirementFailure = visionRequirementFailure(task, route);
       if (requirementFailure !== undefined) {
         return {
@@ -170,7 +206,10 @@ export function resolveAuxiliaryModelRoute(
     }
 
     // Best model on explicit provider
-    const providerModels = models.filter((m) => m.provider === explicitProvider);
+    const providerModels = models.filter((m) =>
+      m.provider === explicitProvider &&
+      !(task === "vision" && slot.hostedProcessing === "local-only" && m.provider !== "local")
+    );
     const chosen = routeProvider(providerModels, requirements);
 
     if (chosen === undefined) {
@@ -204,7 +243,8 @@ export function resolveAuxiliaryModelRoute(
   }
 
   // 6. Auto (slot.provider is "auto" or undefined)
-  const mainSatisfies = matchesPreferences(context.mainRoute.profile, requirements);
+  const mainSatisfies = matchesPreferences(context.mainRoute.profile, requirements) &&
+    localOnlyVisionFailure(task, slot, context.mainRoute) === undefined;
   if (mainSatisfies) {
     return {
       task,
@@ -216,7 +256,9 @@ export function resolveAuxiliaryModelRoute(
     };
   }
 
-  const models = context.providerModels ?? [];
+  const models = (context.providerModels ?? []).filter((model) =>
+    !(task === "vision" && slot.hostedProcessing === "local-only" && model.provider !== "local")
+  );
   const chosen = routeProvider(models, requirements);
 
   if (chosen === undefined) {
@@ -281,6 +323,17 @@ function visionRequirementFailure(
   return `Route ${route.provider}/${route.id} does not satisfy vision task requirements: vision`;
 }
 
+function localOnlyVisionFailure(
+  task: AuxiliaryModelTask,
+  slot: AuxiliaryModelSlotConfig,
+  route: ResolvedModelRoute
+): string | undefined {
+  if (task !== "vision" || slot.hostedProcessing !== "local-only" || isLocalProviderRoute(route)) {
+    return undefined;
+  }
+  return `Route ${route.provider}/${route.id} is hosted, but vision hosted processing is local-only`;
+}
+
 function computeFallbackToMain(options: {
   task: AuxiliaryModelTask;
   slot: AuxiliaryModelSlotConfig;
@@ -288,6 +341,13 @@ function computeFallbackToMain(options: {
   source: ResolvedAuxiliaryRoute["source"];
 }): boolean {
   if (options.task === "vision" && !options.mainRoute.profile.supportsVision) {
+    return false;
+  }
+  if (
+    options.task === "vision" &&
+    options.slot.hostedProcessing === "local-only" &&
+    !isLocalProviderRoute(options.mainRoute)
+  ) {
     return false;
   }
 

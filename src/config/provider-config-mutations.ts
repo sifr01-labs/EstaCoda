@@ -1,5 +1,5 @@
 import type {
-  AuxiliaryModelTask,
+  AuxiliaryModelSlotConfig,
   ProviderId,
   ProviderApiMode,
   ProviderAuthMethod
@@ -58,14 +58,7 @@ export type AddFallbackRouteInput = {
   maxTokens?: number;
 };
 
-export type SetAuxiliaryModelRouteInput = {
-  task: AuxiliaryModelTask;
-  provider: ProviderId;
-  id: string;
-  baseUrl?: string;
-  apiKeyEnv?: string;
-  contextWindowTokens?: number;
-};
+export type SetAuxiliaryModelRouteInput = AuxiliaryModelRouteSetupInput;
 
 // ── Pure config mutators (no I/O) ────────────────────────────────────────────
 
@@ -243,21 +236,33 @@ export function applySetAuxiliaryModelRoute(
     ...(existing.auxiliaryModels ?? {}),
     [input.task]: {
       provider: input.provider,
-      id: input.id,
+      ...(input.id !== undefined ? { id: input.id } : {}),
       ...(input.baseUrl !== undefined ? { baseUrl: input.baseUrl } : {}),
       ...(input.apiKeyEnv !== undefined ? { apiKeyEnv: input.apiKeyEnv } : {}),
       ...(input.contextWindowTokens !== undefined ? { contextWindowTokens: input.contextWindowTokens } : {}),
-      enabled: true
+      ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+      ...(input.maxConcurrency !== undefined ? { maxConcurrency: input.maxConcurrency } : {}),
+      ...(input.fallbackToMain !== undefined ? { fallbackToMain: input.fallbackToMain } : {}),
+      ...(input.hostedProcessing !== undefined ? { hostedProcessing: input.hostedProcessing } : {}),
+      enabled: input.enabled ?? true
     }
   };
   const normalized = normalizeAuxiliaryModels(mergedAuxiliaryModels);
+  const normalizedTaskSlot = normalized[input.task] as AuxiliaryModelSlotConfig;
 
-  return patchConfig(existing, {
+  const patched = patchConfig(existing, {
     auxiliaryModels: {
       ...(existing.auxiliaryModels ?? {}),
-      [input.task]: normalized[input.task]
+      [input.task]: normalizedTaskSlot
     }
   });
+  return {
+    ...patched,
+    auxiliaryModels: {
+      ...(patched.auxiliaryModels ?? {}),
+      [input.task]: normalizedTaskSlot
+    }
+  };
 }
 
 // ── Load/save wrappers ───────────────────────────────────────────────────────
