@@ -105,6 +105,27 @@ describe("Vision Analysis route verification", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it("requires hosted consent when a local native route has a hosted vision fallback", async () => {
+    const config = testConfig({ provider: "local", auxiliaryVision: { provider: "auto" } });
+    const hostedFallback = model("openai", "hosted-fallback");
+    const execute = vi.fn();
+    const report = await runVisionRouteVerification({
+      config: {
+        ...config,
+        modelFallbackRoutes: [{ provider: "openai", id: hostedFallback.id, profile: hostedFallback }],
+      },
+      execute,
+    });
+
+    expect(report).toMatchObject({
+      status: "consent-required",
+      inference: "local",
+      hostedConsent: "missing",
+    });
+    expect(report.hostedDestinations).toHaveLength(1);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("fails before dispatch when the selected route lacks credential readiness", async () => {
     const config = testConfig({
       provider: "openai",

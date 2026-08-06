@@ -2,7 +2,8 @@ import { dirname } from "node:path";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { ProviderUsage, ResolvedModelRoute } from "../contracts/provider.js";
 import type { ToolResult } from "../contracts/tool.js";
-import { ProviderExecutor } from "../providers/provider-executor.js";
+import { ProviderExecutor, type ProviderExecutionResult } from "../providers/provider-executor.js";
+import { providerRouteDestination } from "../providers/provider-route-location.js";
 import { estimateProviderUsage } from "../providers/provider-usage-estimator.js";
 import {
   buildVisionRouteVerificationPlan,
@@ -65,11 +66,12 @@ export type VisionLiveEvaluationAggregate = {
   readonly actualCostUsd?: number;
   readonly normalizedPayloadBytes: number;
   readonly fallbackSuccess: number;
+  readonly fallbackExercised: boolean;
   readonly approvalFrequency: number;
 };
 
 export type VisionLiveEvaluationBaseline = {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly name: string;
   readonly metrics: VisionLiveEvaluationAggregate;
   readonly thresholds: {
@@ -83,10 +85,18 @@ export type VisionLiveEvaluationBaseline = {
     readonly fallbackSuccessDecrease: number;
     readonly approvalFrequencyIncrease: number;
   };
+  readonly caseThresholds: Partial<Record<VisionLiveEvaluationCaseId, {
+    readonly requireExercised?: boolean;
+    readonly requirePassed?: boolean;
+    readonly minimumGroundedFactAccuracy?: number;
+    readonly maximumHallucinationRate?: number;
+    readonly maximumCharacterErrorRate?: number;
+    readonly maximumWordErrorRate?: number;
+  }>>;
 };
 
 export type VisionLiveEvaluationReport = {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly createdAt: string;
   readonly provider: string;
   readonly model: string;
@@ -199,9 +209,12 @@ export async function runVisionLiveEvaluation(
     }
 
     const aggregate = aggregateCases(cases);
-    const regressions = compareVisionEvaluationToBaseline(aggregate, options.baseline);
+    const regressions = [
+      ...compareVisionEvaluationToBaseline(aggregate, options.baseline),
+      ...compareVisionCasesToBaseline(cases, options.baseline)
+    ];
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       createdAt: (options.now?.() ?? new Date()).toISOString(),
       provider: plan.route.provider,
       model: plan.route.id,
@@ -232,19 +245,55 @@ function createLiveExecutor(
   providerExecutor: ProviderExecutor
 ): VisionLiveEvaluationExecutor {
   return async (input) => {
+    if (input.id === "provider-fallback") {
+      const fallbackRoute = configuredVisionFallback(config, plan);
+      if (fallbackRoute === undefined) {
+        return {
+          ok: false,
+          content: "No configured vision-capable fallback route is available to exercise.",
+          metadata: {
+            provider: plan.route.provider,
+            model: plan.route.id,
+            fallback: { configured: false, used: false },
+            providerDispatches: []
+          }
+        };
+      }
+      return analyzeImageWithVision({
+        workspaceRoot: process.cwd(),
+        allowedRoots: [...new Set(input.paths.map((path) => dirname(path)))],
+        profileId: config.profileId,
+        visionAuxiliaryRoute: {
+          ...plan.auxiliaryRoute,
+          route: evaluationRoute(plan.route),
+          source: "explicit",
+          fallbackToMain: true,
+          diagnostics: [...plan.auxiliaryRoute.diagnostics, "Live evaluation injected a pre-dispatch primary failure before the configured fallback."]
+        },
+        mainRoute: evaluationRoute(fallbackRoute),
+        mainFallbackRoutes: [],
+        providerExecutor: fallbackProbeExecutor(providerExecutor, plan.route),
+      }, {
+        path: input.paths[0],
+        mode: "ocr",
+        detail: "high",
+        output: "detailed",
+        prompt: input.prompt,
+      });
+    }
     // Live evaluation must receive a provider response. Native dispatch normally
     // produces an ephemeral continuation for the surrounding main-agent loop.
-    const directMainRoute = plan.dispatch === "native" ? undefined : config.primaryModelRoute;
+    const directMainRoute = plan.dispatch === "native" ? undefined : evaluationRoute(config.primaryModelRoute);
     const directAuxiliaryRoute = plan.dispatch === "native"
-      ? { ...plan.auxiliaryRoute, route: plan.route, fallbackToMain: false }
-      : { ...plan.auxiliaryRoute, route: plan.route };
+      ? { ...plan.auxiliaryRoute, route: evaluationRoute(plan.route), fallbackToMain: false }
+      : { ...plan.auxiliaryRoute, route: evaluationRoute(plan.route) };
     return analyzeImageWithVision({
       workspaceRoot: process.cwd(),
       allowedRoots: [...new Set(input.paths.map((path) => dirname(path)))],
       profileId: config.profileId,
       visionAuxiliaryRoute: directAuxiliaryRoute,
       mainRoute: directMainRoute,
-      mainFallbackRoutes: config.modelFallbackRoutes,
+      mainFallbackRoutes: config.modelFallbackRoutes.map(evaluationRoute),
       providerExecutor,
     }, input.paths.length === 1 ? {
     path: input.paths[0],
@@ -262,6 +311,71 @@ function createLiveExecutor(
   };
 }
 
+function fallbackProbeExecutor(
+  providerExecutor: ProviderExecutor,
+  primaryRoute: ResolvedModelRoute
+): ProviderExecutor {
+  let injected = false;
+  return {
+    complete: async (...args: Parameters<ProviderExecutor["complete"]>): Promise<ProviderExecutionResult> => {
+      if (!injected) {
+        injected = true;
+        return {
+          ok: false,
+          fallbackUsed: false,
+          attempts: [{
+            provider: primaryRoute.provider,
+            model: primaryRoute.id,
+            state: "preflight",
+            ok: false,
+            errorClass: "network",
+            content: "Vision live evaluation injected a pre-dispatch failure."
+          }],
+          toolCalls: []
+        };
+      }
+      return providerExecutor.complete(...args);
+    }
+  } as unknown as ProviderExecutor;
+}
+
+function configuredVisionFallback(
+  config: LoadedRuntimeConfig,
+  plan: VisionRouteVerificationPlan & { readonly route: ResolvedModelRoute }
+): ResolvedModelRoute | undefined {
+  if (
+    plan.dispatch === "auxiliary" &&
+    plan.auxiliaryRoute.fallbackToMain &&
+    config.primaryModelRoute.profile.supportsVision &&
+    !sameRoute(plan.route, config.primaryModelRoute)
+  ) {
+    return config.primaryModelRoute;
+  }
+  if (plan.dispatch === "native") {
+    return config.modelFallbackRoutes.find((route) => route.profile.supportsVision);
+  }
+  return undefined;
+}
+
+function sameRoute(left: ResolvedModelRoute, right: ResolvedModelRoute): boolean {
+  return left.provider === right.provider && left.id === right.id && left.baseUrl === right.baseUrl;
+}
+
+function evaluationRoute(route: ResolvedModelRoute): ResolvedModelRoute {
+  if (providerRouteDestination(route).inference !== "local" || route.profile.cost !== undefined) return route;
+  return {
+    ...route,
+    profile: {
+      ...route.profile,
+      cost: { inputPerMillionTokens: 0, outputPerMillionTokens: 0 }
+    }
+  };
+}
+
+function evaluationCostRoute(route: ResolvedModelRoute | undefined): ResolvedModelRoute | undefined {
+  return route === undefined ? undefined : evaluationRoute(route);
+}
+
 async function runCase(
   definition: CaseDefinition,
   fixtures: readonly VisionLiveEvaluationFixture[],
@@ -270,7 +384,7 @@ async function runCase(
   routes: readonly ResolvedModelRoute[]
 ): Promise<VisionLiveEvaluationCaseResult> {
   if (definition.id === "resource-limits") {
-    return runResourceLimitCase(definition, fixtures, execute, consent);
+    return runResourceLimitCase(definition, fixtures, execute, consent, routes);
   }
   const result = await execute({
     id: definition.id,
@@ -294,9 +408,10 @@ async function runCase(
   const usage = providerUsageFromMetadata(result.metadata?.usage);
   const actualProvider = stringMetadata(result.metadata?.provider);
   const actualModel = stringMetadata(result.metadata?.model);
-  const costRoute = routes.find((route) => route.provider === actualProvider && route.id === actualModel) ?? routes[0];
+  const costRoute = evaluationCostRoute(routes.find((route) => route.provider === actualProvider && route.id === actualModel) ?? routes[0]);
   const cost = estimateProviderUsage(usage, costRoute, 0);
   const actualCostUsd = numericMetadata(result.metadata?.actualCostUsd);
+  const hostedDispatchCount = providerHostedDispatchCount(result.metadata, consent.hosted);
 
   return {
     id: definition.id,
@@ -314,7 +429,7 @@ async function runCase(
     ...(isFallbackCase ? { fallbackSuccess: fallbackConfigured && fallbackUsed && result.ok } : {}),
     fallbackUsed,
     approvalCount: consent.approvalCount,
-    hostedDispatchCount: consent.hosted ? 1 : 0,
+    hostedDispatchCount,
     response: result.content,
     ...(result.ok ? {} : { error: result.content }),
   };
@@ -324,7 +439,8 @@ async function runResourceLimitCase(
   definition: CaseDefinition,
   fixtures: readonly VisionLiveEvaluationFixture[],
   execute: VisionLiveEvaluationExecutor,
-  consent: { readonly hosted: boolean; readonly approvalCount: number }
+  consent: { readonly hosted: boolean; readonly approvalCount: number },
+  routes: readonly ResolvedModelRoute[]
 ): Promise<VisionLiveEvaluationCaseResult> {
   const results = await Promise.all(fixtures.map((fixture) => execute({
     id: definition.id,
@@ -341,8 +457,18 @@ async function runResourceLimitCase(
     spoofed?.ok === true && spoofed.metadata?.sourceMimeType === "image/png",
   ];
   const factualAccuracy = facts.filter(Boolean).length / facts.length;
-  const hostedDispatchCount = consent.hosted ? 1 : 0;
+  const hostedDispatchCount = results.reduce(
+    (sum, result) => sum + providerHostedDispatchCount(result.metadata, consent.hosted),
+    0
+  );
   const actualCostUsd = numericMetadata(spoofed?.metadata?.actualCostUsd);
+  const spoofedUsage = providerUsageFromMetadata(spoofed?.metadata?.usage);
+  const actualProvider = stringMetadata(spoofed?.metadata?.provider);
+  const actualModel = stringMetadata(spoofed?.metadata?.model);
+  const costRoute = evaluationCostRoute(routes.find((route) =>
+    route.provider === actualProvider && route.id === actualModel
+  ) ?? routes[0]);
+  const cost = estimateProviderUsage(spoofedUsage, costRoute, 0);
   return {
     id: definition.id,
     status: factualAccuracy === 1 ? "passed" : "failed",
@@ -352,6 +478,7 @@ async function runResourceLimitCase(
     groundedFactAccuracy: factualAccuracy,
     hallucinationRate: 0,
     latencyMs: results.reduce((sum, result) => sum + (numericMetadata(result.metadata?.latencyMs) ?? 0), 0),
+    ...(cost.usageComplete || cost.estimatedCostUsd > 0 ? { estimatedCostUsd: cost.estimatedCostUsd } : {}),
     ...(actualCostUsd === undefined ? {} : { actualCostUsd }),
     normalizedPayloadBytes: normalizedPayloadBytes(spoofed?.metadata),
     fallbackUsed: false,
@@ -388,9 +515,10 @@ function aggregateCases(cases: readonly VisionLiveEvaluationCaseResult[]): Visio
     ...(actualCosts.length === 0 ? {} : { actualCostUsd: actualCosts.reduce((sum, value) => sum + value, 0) }),
     normalizedPayloadBytes: scored.reduce((sum, result) => sum + result.normalizedPayloadBytes, 0),
     fallbackSuccess: fallbackCases.length === 0
-      ? 1
+      ? 0
       : average(fallbackCases.map((result) => result.fallbackSuccess === true ? 1 : 0)),
-    approvalFrequency: hostedDispatches === 0 ? 0 : approvals / hostedDispatches,
+    fallbackExercised: fallbackCases.length > 0,
+    approvalFrequency: hostedDispatches === 0 ? (approvals > 0 ? 1 : 0) : approvals / hostedDispatches,
   };
 }
 
@@ -409,6 +537,30 @@ export function compareVisionEvaluationToBaseline(
   if (current.estimatedCostAvailable && baseline.metrics.estimatedCostAvailable && costIncrease > threshold.estimatedCostIncreaseUsd && ratioIncrease(current.estimatedCostUsd, baseline.metrics.estimatedCostUsd) > threshold.estimatedCostIncreaseRatio) failures.push("estimated cost regressed");
   if (current.fallbackSuccess < baseline.metrics.fallbackSuccess - threshold.fallbackSuccessDecrease) failures.push("fallback success regressed");
   if (current.approvalFrequency > baseline.metrics.approvalFrequency + threshold.approvalFrequencyIncrease) failures.push("approval frequency regressed");
+  return failures;
+}
+
+export function compareVisionCasesToBaseline(
+  cases: readonly VisionLiveEvaluationCaseResult[],
+  baseline: VisionLiveEvaluationBaseline
+): string[] {
+  const failures: string[] = [];
+  for (const [id, threshold] of Object.entries(baseline.caseThresholds) as Array<[
+    VisionLiveEvaluationCaseId,
+    NonNullable<VisionLiveEvaluationBaseline["caseThresholds"][VisionLiveEvaluationCaseId]>
+  ]>) {
+    const result = cases.find((candidate) => candidate.id === id);
+    if (result === undefined) {
+      failures.push(`${id} case is missing`);
+      continue;
+    }
+    if (threshold.requireExercised === true && result.status === "not-exercised") failures.push(`${id} was not exercised`);
+    if (threshold.requirePassed === true && result.status !== "passed") failures.push(`${id} did not pass`);
+    if (threshold.minimumGroundedFactAccuracy !== undefined && result.groundedFactAccuracy < threshold.minimumGroundedFactAccuracy) failures.push(`${id} grounded fact accuracy regressed`);
+    if (threshold.maximumHallucinationRate !== undefined && result.hallucinationRate > threshold.maximumHallucinationRate) failures.push(`${id} hallucination rate regressed`);
+    if (threshold.maximumCharacterErrorRate !== undefined && (result.characterErrorRate === undefined || result.characterErrorRate > threshold.maximumCharacterErrorRate)) failures.push(`${id} character error rate regressed`);
+    if (threshold.maximumWordErrorRate !== undefined && (result.wordErrorRate === undefined || result.wordErrorRate > threshold.maximumWordErrorRate)) failures.push(`${id} word error rate regressed`);
+  }
   return failures;
 }
 
@@ -452,7 +604,7 @@ export function renderVisionLiveEvaluationMarkdown(report: VisionLiveEvaluationR
     `- Estimated cost: ${report.aggregate.estimatedCostAvailable ? `$${report.aggregate.estimatedCostUsd.toFixed(6)}` : "unavailable or incomplete"}`,
     `- Actual cost: ${report.aggregate.actualCostUsd === undefined ? "unavailable from provider" : `$${report.aggregate.actualCostUsd.toFixed(6)}`}`,
     `- Normalized payload: ${report.aggregate.normalizedPayloadBytes} bytes`,
-    `- Fallback success: ${percent(report.aggregate.fallbackSuccess)}`,
+    `- Fallback success: ${report.aggregate.fallbackExercised ? percent(report.aggregate.fallbackSuccess) : "not exercised"}`,
     `- Approval frequency: ${percent(report.aggregate.approvalFrequency)}`,
     "",
     `## Baseline comparison (${report.baseline.name})`,
@@ -467,7 +619,9 @@ export function renderVisionLiveEvaluationMarkdown(report: VisionLiveEvaluationR
     report.aggregate.estimatedCostAvailable && report.baseline.metrics.estimatedCostAvailable
       ? baselineRow("Estimated cost", report.aggregate.estimatedCostUsd, report.baseline.metrics.estimatedCostUsd, "money")
       : "Estimated cost | unavailable | baseline present | not compared",
-    baselineRow("Fallback success", report.aggregate.fallbackSuccess, report.baseline.metrics.fallbackSuccess, "percent"),
+    report.aggregate.fallbackExercised
+      ? baselineRow("Fallback success", report.aggregate.fallbackSuccess, report.baseline.metrics.fallbackSuccess, "percent")
+      : "Fallback success | not exercised | baseline present | gate failed when required",
     baselineRow("Approval frequency", report.aggregate.approvalFrequency, report.baseline.metrics.approvalFrequency, "percent"),
     "",
     "## Regression gate",
@@ -533,6 +687,20 @@ function normalizedPayloadBytes(metadata: ToolResult["metadata"] | undefined): n
   const aggregateBytes = numericMetadata(aggregate?.normalizedBytes);
   if (aggregateBytes !== undefined) return aggregateBytes;
   return numericMetadata(metadata?.bytes) ?? 0;
+}
+
+function providerHostedDispatchCount(
+  metadata: ToolResult["metadata"] | undefined,
+  hostedDispatchPossible: boolean
+): number {
+  if (Array.isArray(metadata?.providerDispatches)) {
+    return metadata.providerDispatches.filter((value) =>
+      recordValue(value)?.inference === "hosted"
+    ).length;
+  }
+  const explicit = numericMetadata(metadata?.hostedDispatchCount);
+  if (explicit !== undefined) return explicit;
+  return hostedDispatchPossible && typeof metadata?.provider === "string" ? 1 : 0;
 }
 
 function providerUsageFromMetadata(value: unknown): ProviderUsage | undefined {

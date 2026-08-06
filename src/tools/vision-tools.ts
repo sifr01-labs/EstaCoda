@@ -30,6 +30,7 @@ import type {
 } from "../providers/auxiliary-executor.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
 import { providerSpendDenialMessage } from "../providers/provider-spend-policy.js";
+import { providerRouteDestination } from "../providers/provider-route-location.js";
 import { supportsMultipleImageInputs } from "../providers/model-image-capabilities.js";
 import {
   defaultVisionImageNormalizer,
@@ -159,8 +160,7 @@ export function createGovernedVisionArtifactDispatcher(
       return await resolveVisionSourcesEgressSecurity({
         sources: sources as ResolvedVisionImageSource[],
         workspaceRoot: options.workspaceRoot,
-        provenance: runtimeVisionProvenance(options, context.visionInputProvenance),
-        generatedArtifactRoots: options.imageCacheRoot === undefined ? undefined : [options.imageCacheRoot],
+        provenance: runtimeVisionProvenance(options, context),
         ...routeSecurity
       });
     },
@@ -597,23 +597,37 @@ function resolveVisionImageSelection(
 
 function runtimeVisionProvenance(
   options: VisionToolOptions,
-  context: ToolExecutionContext["visionInputProvenance"]
+  context: ToolSecurityResolverContext
 ): ToolExecutionContext["visionInputProvenance"] {
   const browserArtifactPaths = options.artifactStore?.list()
     .filter((artifact) =>
       artifact.kind === "image" &&
       artifact.localPath !== undefined &&
-      artifact.metadata?.visionProvenance === "browser-artifact"
+      artifact.metadata?.visionProvenance === "browser-artifact" &&
+      context?.visibleTurnId !== undefined &&
+      artifact.metadata?.visionTurnId === context.visibleTurnId
+    )
+    .map((artifact) => artifact.localPath as string) ?? [];
+  const generatedArtifactPaths = options.artifactStore?.list()
+    .filter((artifact) =>
+      artifact.kind === "image" &&
+      artifact.localPath !== undefined &&
+      artifact.metadata?.visionProvenance === "generated-artifact" &&
+      context?.visibleTurnId !== undefined &&
+      artifact.metadata?.visionTurnId === context.visibleTurnId
     )
     .map((artifact) => artifact.localPath as string) ?? [];
   return {
-    attachmentPaths: context?.attachmentPaths ?? [],
-    explicitReferencePaths: context?.explicitReferencePaths ?? [],
+    attachmentPaths: context.visionInputProvenance?.attachmentPaths ?? [],
+    explicitReferencePaths: context.visionInputProvenance?.explicitReferencePaths ?? [],
     browserArtifactPaths: [
-      ...(context?.browserArtifactPaths ?? []),
+      ...(context.visionInputProvenance?.browserArtifactPaths ?? []),
       ...browserArtifactPaths
     ],
-    generatedArtifactPaths: context?.generatedArtifactPaths ?? []
+    generatedArtifactPaths: [
+      ...(context.visionInputProvenance?.generatedArtifactPaths ?? []),
+      ...generatedArtifactPaths
+    ]
   };
 }
 
@@ -715,7 +729,17 @@ async function executePreparedAuxiliaryVision(input: {
       images,
       analysis
     ),
-    attempts
+    attempts,
+    providerDispatches: auxiliaryResult.attempts
+      .filter((attempt) => attempt.dispatched)
+      .map((attempt) => ({
+        role: attempt.role,
+        provider: attempt.provider,
+        model: attempt.model,
+        inference: providerRouteDestination(
+          attempt.role === "fallback" ? options.mainRoute ?? configuredRoute : configuredRoute
+        ).inference
+      }))
   };
 
   if (auxiliaryResult.ok && auxiliaryResult.response !== undefined) {

@@ -65,7 +65,7 @@ try {
 
 async function readBaseline(path: string): Promise<VisionLiveEvaluationBaseline> {
   const parsed = JSON.parse(await readFile(path, "utf8")) as VisionLiveEvaluationBaseline;
-  if (parsed.schemaVersion !== 1 || typeof parsed.name !== "string" || parsed.metrics === undefined || parsed.thresholds === undefined) {
+  if (parsed.schemaVersion !== 2 || typeof parsed.name !== "string" || parsed.metrics === undefined || parsed.thresholds === undefined || parsed.caseThresholds === undefined) {
     throw new Error(`Invalid vision evaluation baseline: ${path}`);
   }
   const metrics = [
@@ -85,6 +85,20 @@ async function readBaseline(path: string): Promise<VisionLiveEvaluationBaseline>
   }
   if (typeof parsed.metrics.estimatedCostAvailable !== "boolean") {
     throw new Error(`Invalid estimated cost availability in vision evaluation baseline: ${path}`);
+  }
+  if (typeof parsed.metrics.fallbackExercised !== "boolean") {
+    throw new Error(`Invalid fallback evidence in vision evaluation baseline: ${path}`);
+  }
+  for (const [caseId, caseThresholds] of Object.entries(parsed.caseThresholds)) {
+    if (typeof caseThresholds !== "object" || caseThresholds === null || Array.isArray(caseThresholds)) {
+      throw new Error(`Invalid case threshold for ${caseId} in vision evaluation baseline: ${path}`);
+    }
+    const values = Object.entries(caseThresholds);
+    if (values.some(([key, value]) => (key === "requireExercised" || key === "requirePassed")
+      ? typeof value !== "boolean"
+      : typeof value !== "number" || !Number.isFinite(value) || value < 0)) {
+      throw new Error(`Invalid case threshold for ${caseId} in vision evaluation baseline: ${path}`);
+    }
   }
   return parsed;
 }

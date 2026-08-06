@@ -177,6 +177,56 @@ export type ConfigEditorPostApplyActionId =
   | "repair-again"
   | "exit";
 
+export async function promptVisionVerificationAfterApply(
+  prompt: Prompt,
+  locale: SetupCopyLocale = "en"
+): Promise<boolean> {
+  return promptSetupChoice(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.visionVerification.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.visionVerification.body")}\n`,
+    choices: [
+      setupNavigationChoice({
+        id: "skip-vision-verification",
+        label: setupCopyText(locale, "setupEditor.prompt.visionVerification.skip"),
+        description: setupCopyText(locale, "setupEditor.prompt.visionVerification.skip.description"),
+        value: false,
+      }),
+      setupNavigationChoice({
+        id: "run-vision-verification",
+        label: setupCopyText(locale, "setupEditor.prompt.visionVerification.run"),
+        description: setupCopyText(locale, "setupEditor.prompt.visionVerification.run.description"),
+        value: true,
+      }),
+    ],
+    defaultValue: false,
+  });
+}
+
+export async function promptHostedVisionVerificationConsent(
+  prompt: Prompt,
+  locale: SetupCopyLocale = "en"
+): Promise<boolean> {
+  return promptSetupChoice(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.visionVerification.hosted.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.visionVerification.hosted.body")}\n`,
+    choices: [
+      setupNavigationChoice({
+        id: "deny-hosted-vision-verification",
+        label: setupCopyText(locale, "setupEditor.prompt.visionVerification.hosted.deny"),
+        description: setupCopyText(locale, "setupEditor.prompt.visionVerification.hosted.deny.description"),
+        value: false,
+      }),
+      setupNavigationChoice({
+        id: "consent-hosted-vision-verification",
+        label: setupCopyText(locale, "setupEditor.prompt.visionVerification.hosted.consent"),
+        description: setupCopyText(locale, "setupEditor.prompt.visionVerification.hosted.consent.description"),
+        value: true,
+      }),
+    ],
+    defaultValue: false,
+  });
+}
+
 export type SpendingLimitPromptResult =
   | { readonly kind: "back" }
   | { readonly kind: "selected"; readonly spendingLimit?: SpendingLimit };

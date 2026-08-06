@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { ModelProfile, ProviderAdapter, ProviderResponse } from "../contracts/provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
+import { generateVisionEvaluationFixtures } from "./vision-evaluation-fixtures.js";
 import {
   compareVisionEvaluationToBaseline,
+  compareVisionCasesToBaseline,
   renderVisionLiveEvaluationMarkdown,
   runVisionLiveEvaluation,
   type VisionLiveEvaluationBaseline,
@@ -69,6 +74,8 @@ describe("vision live evaluation", () => {
     expect(report.aggregate.characterErrorRate).toBe(0);
     expect(report.aggregate.wordErrorRate).toBe(0);
     expect(report.aggregate.fallbackSuccess).toBe(1);
+    expect(report.aggregate.fallbackExercised).toBe(true);
+    expect(report.aggregate.estimatedCostAvailable).toBe(true);
     expect(report.aggregate.actualCostUsd).toBeCloseTo(0.1);
     expect(report.consent.maximumEstimatedCostUsd).toBe(1);
     expect(renderVisionLiveEvaluationMarkdown(report)).toContain("# Vision Live Evaluation Release Report");
@@ -123,7 +130,69 @@ describe("vision live evaluation", () => {
       "hallucination rate regressed",
     ]);
   });
+
+  it("fails required case gates when fallback evidence is absent or a safety case regresses", () => {
+    const baseline = permissiveBaseline();
+    const cases = [
+      caseResult("provider-fallback", "not-exercised", 0),
+      caseResult("resource-limits", "failed", 2 / 3),
+    ];
+
+    expect(compareVisionCasesToBaseline(cases, baseline)).toEqual([
+      "provider-fallback was not exercised",
+      "provider-fallback did not pass",
+      "provider-fallback grounded fact accuracy regressed",
+      "resource-limits did not pass",
+      "resource-limits grounded fact accuracy regressed",
+    ]);
+  });
+
+  it("deterministically exercises a configured fallback through a pre-dispatch failure", async () => {
+    const root = await mkdtemp(join(tmpdir(), "estacoda-vision-live-"));
+    try {
+      const manifest = await generateVisionEvaluationFixtures(root);
+      const fallbackConfig = localConfigWithFallback();
+      const report = await runVisionLiveEvaluation({
+        config: fallbackConfig,
+        fixtures: manifest.fixtures.map((fixture) => ({ ...fixture, path: join(root, fixture.file) })),
+        baseline: permissiveBaseline(),
+      });
+      const fallbackCase = report.cases.find((result) => result.id === "provider-fallback");
+
+      expect(fallbackCase).toMatchObject({
+        status: "passed",
+        fallbackUsed: true,
+        fallbackSuccess: true,
+        provider: "local",
+        model: "local-vision-fallback",
+      });
+      expect(report.aggregate.fallbackExercised).toBe(true);
+      expect(report.aggregate.fallbackSuccess).toBe(1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
+
+function caseResult(
+  id: "provider-fallback" | "resource-limits",
+  status: "failed" | "not-exercised",
+  groundedFactAccuracy: number
+) {
+  return {
+    id,
+    status,
+    fixtureHashes: [],
+    groundedFactAccuracy,
+    hallucinationRate: 0,
+    latencyMs: 0,
+    normalizedPayloadBytes: 0,
+    fallbackUsed: false,
+    approvalCount: 0,
+    hostedDispatchCount: 0,
+    response: "",
+  } as const;
+}
 
 function failure(errorCode: string) {
   return { ok: false, content: errorCode, metadata: { errorCode, latencyMs: 1 } };
@@ -147,7 +216,7 @@ function testFixtures(): VisionLiveEvaluationFixture[] {
 
 function permissiveBaseline(): VisionLiveEvaluationBaseline {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     name: "test-baseline",
     metrics: {
       characterErrorRate: 0,
@@ -159,6 +228,7 @@ function permissiveBaseline(): VisionLiveEvaluationBaseline {
       estimatedCostAvailable: true,
       normalizedPayloadBytes: 100_000,
       fallbackSuccess: 1,
+      fallbackExercised: true,
       approvalFrequency: 0,
     },
     thresholds: {
@@ -172,11 +242,71 @@ function permissiveBaseline(): VisionLiveEvaluationBaseline {
       fallbackSuccessDecrease: 0.25,
       approvalFrequencyIncrease: 1,
     },
+    caseThresholds: {
+      "provider-fallback": {
+        requireExercised: true,
+        requirePassed: true,
+        minimumGroundedFactAccuracy: 0.5,
+      },
+      "resource-limits": {
+        requireExercised: true,
+        requirePassed: true,
+        minimumGroundedFactAccuracy: 1,
+      },
+    },
   };
 }
 
 function localConfig(): LoadedRuntimeConfig {
   return config("local", "local-vision", undefined, { provider: "auto" });
+}
+
+function localConfigWithFallback(): LoadedRuntimeConfig {
+  const main = model("local", "local-vision-main");
+  const fallback = model("local", "local-vision-fallback");
+  const registry = new ProviderRegistry();
+  registry.register({
+    id: "local",
+    name: "local",
+    executable: true,
+    health: () => ({ available: true }),
+    listModels: () => [main, fallback],
+    complete: async (): Promise<ProviderResponse> => {
+      return {
+        ok: true,
+        provider: "local",
+        model: fallback.id,
+        content: "ESTACODA VISION CHECK Invoice EC-2048 Total: USD 73.45 Status: PAID",
+        usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+      };
+    },
+  });
+  return {
+    homeDir: "/tmp/vision-live-home",
+    profileId: "default",
+    config: {
+      model: {
+        provider: "local",
+        id: main.id,
+        fallbacks: [{ provider: "local", id: fallback.id }],
+      },
+      providers: {
+        local: {
+          kind: "openai-compatible",
+          baseUrl: "http://localhost:11434/v1",
+          models: [main.id, fallback.id],
+          enableNetwork: true,
+        },
+      },
+      auxiliaryModels: { vision: { provider: "main" } },
+    },
+    sources: [],
+    model: main,
+    primaryModelRoute: { provider: "local", id: main.id, profile: main, baseUrl: "http://localhost:11434/v1" },
+    modelFallbackRoutes: [{ provider: "local", id: fallback.id, profile: fallback, baseUrl: "http://localhost:11434/v1" }],
+    providerRegistry: registry,
+    auxiliaryModels: { vision: { provider: "main" } },
+  } as unknown as LoadedRuntimeConfig;
 }
 
 function hostedConfig(): LoadedRuntimeConfig {

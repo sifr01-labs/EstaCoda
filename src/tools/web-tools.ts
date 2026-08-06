@@ -491,7 +491,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       progressLabel: "capturing browser screenshot",
       maxResultSizeChars: 3000,
       isAvailable: () => browserBackend.isAvailable(),
-      run: async (input: BrowserActionInput) => {
+      run: async (input: BrowserActionInput, context) => {
         if (browserBackend.screenshot === undefined) {
           return unsupportedBrowserTool(browserBackend, "browser.screenshot");
         }
@@ -507,7 +507,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         const saved = await saveBrowserScreenshot(
           options.workspaceRoot,
           screenshot.base64,
-          options.artifactStore
+          options.artifactStore,
+          context?.visibleTurnId
         );
         return {
           ok: true,
@@ -569,7 +570,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         const saved = await saveBrowserScreenshot(
           options.workspaceRoot,
           screenshot.base64,
-          options.artifactStore
+          options.artifactStore,
+          context?.visibleTurnId
         );
         const analysis = await options.visionDispatcher.dispatch({
           path: saved.path,
@@ -1238,7 +1240,8 @@ function describeValueShape(value: unknown): Record<string, unknown> {
 async function saveBrowserScreenshot(
   workspaceRoot: string | undefined,
   base64: string,
-  artifactStore?: ArtifactStore
+  artifactStore?: ArtifactStore,
+  visibleTurnId?: string
 ): Promise<{ path: string; bytes: number }> {
   const root = workspaceRoot ?? process.cwd();
   const path = join(root, ".estacoda", "browser", "screenshots", `browser-${Date.now()}.png`);
@@ -1251,7 +1254,10 @@ async function saveBrowserScreenshot(
     bytes: file.size,
     mimeType: "image/png",
     summary: "Browser screenshot captured for governed visual analysis.",
-    metadata: { visionProvenance: "browser-artifact" }
+    metadata: {
+      visionProvenance: "browser-artifact",
+      ...(visibleTurnId === undefined ? {} : { visionTurnId: visibleTurnId })
+    }
   });
   return { path, bytes: file.size };
 }

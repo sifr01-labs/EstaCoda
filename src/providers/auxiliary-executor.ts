@@ -20,6 +20,7 @@ export type AuxiliaryExecutionAttempt = {
   provider: string;
   model: string;
   ok: boolean;
+  dispatched: boolean;
   errorClass?: ProviderErrorClass | "aborted" | "exception" | "spend-denied";
   content: string;
   finishReason?: ProviderFinishReason;
@@ -554,6 +555,7 @@ function toAuxiliaryAttempts(result: ProviderExecutionResult, role: "primary" | 
     provider: attempt.provider,
     model: attempt.model,
     ok: attempt.ok,
+    dispatched: attempt.state === "dispatched",
     errorClass: attempt.errorClass as ProviderErrorClass | undefined,
     content: attempt.content,
     finishReason: attempt.finishReason,
@@ -582,6 +584,7 @@ function syntheticAttempt(input: {
     provider: route?.provider ?? "none",
     model: route?.id ?? "none",
     ok: false,
+    dispatched: false,
     errorClass: input.errorClass,
     content: input.content
   };

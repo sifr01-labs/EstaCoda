@@ -19,7 +19,15 @@ function createMockExecutor(ok = true, content = "vision result") {
       model: "gpt-4o",
       usage: { inputTokens: 12, outputTokens: 4, totalTokens: 16 }
     } : undefined,
-    attempts: [{ provider: "openai", model: "gpt-4o", ok, content: ok ? "ok" : "failed", errorClass: ok ? undefined : "network" }]
+    attempts: [{
+      provider: "openai",
+      model: "gpt-4o",
+      state: "dispatched",
+      dispatchedAt: "2030-01-01T00:00:00.000Z",
+      ok,
+      content: ok ? "ok" : "failed",
+      errorClass: ok ? undefined : "network"
+    }]
   });
   return {
     complete: fn as unknown as ProviderExecutor["complete"]
@@ -455,7 +463,8 @@ describe("vision tools", () => {
           path: tmp.path,
           kind: "image",
           bytes: 1,
-          mimeType: "image/png"
+          mimeType: "image/png",
+          metadata: { visionProvenance: "generated-artifact", visionTurnId: "turn-a" }
         });
         const [tool] = createVisionTools({
           workspaceRoot: join(tmp.dir, "workspace"),
@@ -473,12 +482,21 @@ describe("vision tools", () => {
         });
         const resolution = await tool.resolveSecurity?.({ path: artifact.path }, {
           trustedWorkspace: true,
-          sessionId: "session-a"
+          sessionId: "session-a",
+          visibleTurnId: "turn-a"
+        });
+        const staleResolution = await tool.resolveSecurity?.({ path: artifact.path }, {
+          trustedWorkspace: true,
+          sessionId: "session-a",
+          visibleTurnId: "turn-b"
         });
         const result = await tool.run({ path: artifact.path });
 
         expect(resolution).toMatchObject({
           dataEgress: { sourceProvenance: "generated-artifact" }
+        });
+        expect(staleResolution).toMatchObject({
+          dataEgress: { sourceProvenance: "agent-discovered" }
         });
         expect(result.ok).toBe(true);
         expect(executor.complete).toHaveBeenCalledTimes(1);
@@ -659,6 +677,12 @@ describe("vision tools", () => {
           dispatch: "auxiliary",
           route: { provider: "openai", model: "gpt-4o", role: "primary" },
           fallback: { configured: false, used: false },
+          providerDispatches: [{
+            role: "primary",
+            provider: "openai",
+            model: "gpt-4o",
+            inference: "hosted"
+          }],
           usage: {
             inputTokens: 12,
             outputTokens: 4,

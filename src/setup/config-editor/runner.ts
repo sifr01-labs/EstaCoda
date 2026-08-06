@@ -57,6 +57,11 @@ import {
 } from "../openai-compatible-endpoint-flow.js";
 import { loadVisionAnalysisVerificationImageDataUrl } from "../vision-analysis-verification.js";
 import {
+  renderVisionRouteVerification,
+  runVisionRouteVerification,
+  type VisionRouteVerificationReport,
+} from "../vision-route-verification.js";
+import {
   formatSetupCopy,
   promptSetupChoice,
   renderSetupApplyEndState,
@@ -82,6 +87,8 @@ import {
   promptSpendingLimit,
   promptVisionAnalysisRouteMode,
   promptVisionAnalysisRouteSettings,
+  promptVisionVerificationAfterApply,
+  promptHostedVisionVerificationConsent,
   promptVoiceCapability,
   promptWorkflowLearning,
   promptWorkspaceTrustConfirmation,
@@ -144,6 +151,7 @@ export type ConfigEditorRunnerOptions = CollectSetupRouteOptions & {
     readonly serviceActions?: GatewayServiceActivationOptions["serviceActions"];
   };
   readonly whatsappSetupDependencies?: WhatsAppSetupDependencies;
+  readonly visionRouteVerification?: typeof runVisionRouteVerification;
 };
 
 export type ConfigEditorRunnerResult = {
@@ -161,6 +169,7 @@ export type ConfigEditorRunnerResult = {
   readonly applyEndState?: SetupApplyEndState;
   readonly gatewayServiceActivationResult?: GatewayServiceActivationResult;
   readonly setupConsoleRenderedOutput?: boolean;
+  readonly visionRouteVerificationReport?: VisionRouteVerificationReport;
 };
 
 type LocalizedConfigEditorRunnerOptions = ConfigEditorRunnerOptions & {
@@ -1476,6 +1485,7 @@ async function reviewAndApplyOpenAICompatibleEndpointResult(
     deferredSecretWrites: flowResult.pendingCredentialWrite === undefined
       ? undefined
       : [flowResult.pendingCredentialWrite],
+    offerVisionVerification: shouldOfferVisionVerification(routeAction),
   });
 }
 
@@ -1703,7 +1713,14 @@ async function reviewAndApplyAction(
     trustStorePath: overrides.trustStorePath ?? options.trustStorePath ?? stateHome.trustJsonPath,
   });
   const reviewManifest = buildSetupReviewManifest([draftBundle]);
-  return reviewAndApplyManifest(options, initialDecision, editorAction.id, reviewManifest);
+  return reviewAndApplyManifest(
+    options,
+    initialDecision,
+    editorAction.id,
+    reviewManifest,
+    {},
+    shouldOfferVisionVerification(editorAction)
+  );
 }
 
 function verificationDraftBundle(
@@ -1744,7 +1761,8 @@ async function reviewAndApplyManifest(
   sideEffects: {
     readonly pendingCredentialWrites?: readonly PendingCredentialWrite[];
     readonly pendingOAuthWrites?: readonly PendingOAuthWrite[];
-  } = {}
+  } = {},
+  offerVisionVerification = false
 ): Promise<ConfigEditorRunnerResult> {
   const reviewAccepted = await promptConfigEditorReviewApproval(options.prompt, {
     selectedActionId,
@@ -1761,6 +1779,7 @@ async function reviewAndApplyManifest(
     applyPlanningResult,
     deferredSecretWrites: sideEffects.pendingCredentialWrites,
     deferredOAuthWrites: sideEffects.pendingOAuthWrites,
+    offerVisionVerification,
   });
 }
 
@@ -1772,6 +1791,7 @@ async function finalizeReviewedApply(input: {
   readonly applyPlanningResult: SetupApplyPlanningResult;
   readonly deferredSecretWrites?: readonly SetupDeferredSecretWrite[];
   readonly deferredOAuthWrites?: readonly SetupDeferredOAuthWrite[];
+  readonly offerVisionVerification?: boolean;
 }): Promise<RunOnceResult> {
   const { options, initialDecision, selectedActionId, reviewManifest, applyPlanningResult } = input;
   const previouslyReadyGatewayChannelIds = applyPlanningResult.kind === "apply-plan-ready" && options.applyExecutor !== undefined
@@ -1813,6 +1833,15 @@ async function finalizeReviewedApply(input: {
     };
   }
 
+  const visionRouteVerificationReport = input.offerVisionVerification === true &&
+    applyEndState.kind !== "cancelled" && applyEndState.kind !== "blocked"
+    ? await maybeRunVisionVerificationAfterApply(options)
+    : undefined;
+  const visionVerificationOutput = visionRouteVerificationReport === undefined
+    ? undefined
+    : renderVisionRouteVerification(visionRouteVerificationReport);
+  if (visionVerificationOutput !== undefined) write(options, `${visionVerificationOutput}\n`);
+
   const postApply = await handlePostApplyHandoff({
     options,
     initialDecision,
@@ -1820,7 +1849,10 @@ async function finalizeReviewedApply(input: {
     reviewManifest,
     applyPlanningResult,
     applyEndState,
-    renderedApplyOutput: output,
+    renderedApplyOutput: [output, visionVerificationOutput]
+      .filter((line): line is string => line !== undefined)
+      .join("\n"),
+    visionRouteVerificationReport,
     previouslyReadyGatewayChannelIds,
   });
   return postApply;
@@ -1834,6 +1866,7 @@ async function handlePostApplyHandoff(input: {
   readonly applyPlanningResult: SetupApplyPlanningResult;
   readonly applyEndState: SetupApplyEndState;
   readonly renderedApplyOutput: string;
+  readonly visionRouteVerificationReport?: VisionRouteVerificationReport;
   readonly previouslyReadyGatewayChannelIds?: readonly GatewayActivationChannelId[];
 }): Promise<RunOnceResult> {
   const {
@@ -1845,6 +1878,7 @@ async function handlePostApplyHandoff(input: {
     applyEndState,
     renderedApplyOutput,
     previouslyReadyGatewayChannelIds,
+    visionRouteVerificationReport,
   } = input;
   const completedWithoutPrompt = applyEndState.kind === "cancelled";
   if (completedWithoutPrompt) {
@@ -1903,7 +1937,26 @@ async function handlePostApplyHandoff(input: {
     applyPlanningResult,
     applyEndState,
     gatewayServiceActivationResult,
+    visionRouteVerificationReport,
   };
+}
+
+async function maybeRunVisionVerificationAfterApply(
+  options: LocalizedConfigEditorRunnerOptions
+): Promise<VisionRouteVerificationReport | undefined> {
+  if (!await promptVisionVerificationAfterApply(options.prompt, options.locale)) return undefined;
+  const config = await loadRuntimeConfig(options);
+  const runVerification = options.visionRouteVerification ?? runVisionRouteVerification;
+  let report = await runVerification({ config, consentHosted: false });
+  if (report.status !== "consent-required") return report;
+  const consentHosted = await promptHostedVisionVerificationConsent(options.prompt, options.locale);
+  if (!consentHosted) return report;
+  report = await runVerification({ config, consentHosted: true });
+  return report;
+}
+
+function shouldOfferVisionVerification(action: SetupEditorActionDraft): boolean {
+  return action.reviewValues?.auxiliaryTask === "vision" && action.reviewValues?.routeMode !== "disabled";
 }
 
 function renderConcreteVerificationWarnings(
@@ -2083,6 +2136,7 @@ async function reviewAndApplyResolvedRoute(
     deferredOAuthWrites: credentialResult.pendingOAuthWrite === undefined
       ? undefined
       : [credentialResult.pendingOAuthWrite],
+    offerVisionVerification: shouldOfferVisionVerification(selectedAction),
   });
 }
 

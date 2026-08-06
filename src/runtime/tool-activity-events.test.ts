@@ -510,4 +510,46 @@ describe("runtime tool activity events", () => {
     expect(outcome.plans[0]?.status).toBe("executed");
     expect(ephemeralVisionImages(outcome.executions[0]?.result, "initial")).toHaveLength(1);
   });
+
+  it("dispatches multiple initial images as one bounded vision batch", async () => {
+    const result = attachEphemeralVisionImages({ ok: true, content: "prepared" }, [{
+      content: { type: "image_url", image_url: { url: "data:image/png;base64,aW1hZ2U=" } },
+      usage: { width: 1, height: 1, detail: "auto" },
+      delivery: "continuation"
+    }]);
+    const executeTool = vi.fn().mockResolvedValue(execution({
+      tool: { ...fileReadTool, name: "vision.analyze" },
+      result
+    }));
+    const executor = new NativeToolExecutor({
+      toolExecutor: {
+        getToolDefinition: () => ({ ...fileReadTool, name: "vision.analyze" }),
+        executeTool
+      } as never,
+      runRecorder: runRecorder() as never,
+      sessionId: "s1"
+    });
+
+    const outcome = await executor.executeDeterministicNativeTools({
+      intent: intent({ labels: ["attachment-analysis"], nativeIntent: "attachment-analysis" }),
+      text: "Compare these images",
+      attachments: ["one.png", "two.png", "three.png"].map((name, index) => ({
+        id: `image-${index + 1}`,
+        kind: "image" as const,
+        status: "ready" as const,
+        localPath: `/media/${name}`,
+        mimeType: "image/png"
+      })),
+      trustedWorkspace: true
+    });
+
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    expect(executeTool).toHaveBeenCalledWith(expect.objectContaining({
+      input: {
+        paths: ["/media/one.png", "/media/two.png", "/media/three.png"],
+        prompt: "Compare these images"
+      }
+    }));
+    expect(outcome.plans).toHaveLength(1);
+  });
 });

@@ -1,5 +1,5 @@
 import { realpath } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextReference } from "../contracts/context.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
@@ -33,7 +33,6 @@ export async function resolveVisionEgressSecurity(input: {
   source: ResolvedVisionImageSource;
   workspaceRoot: string;
   provenance?: VisionInputProvenanceContext;
-  generatedArtifactRoots?: readonly string[];
   visionRoute: ResolvedAuxiliaryRoute;
   mainRoute?: ResolvedModelRoute;
   additionalRoutes?: readonly ResolvedModelRoute[];
@@ -48,7 +47,6 @@ export async function resolveVisionSourcesEgressSecurity(input: {
   sources: readonly ResolvedVisionImageSource[];
   workspaceRoot: string;
   provenance?: VisionInputProvenanceContext;
-  generatedArtifactRoots?: readonly string[];
   visionRoute: ResolvedAuxiliaryRoute;
   mainRoute?: ResolvedModelRoute;
   additionalRoutes?: readonly ResolvedModelRoute[];
@@ -56,8 +54,7 @@ export async function resolveVisionSourcesEgressSecurity(input: {
   const sourceProvenances = await Promise.all(input.sources.map((source) => classifySourceProvenance(
     source.canonicalPath,
     input.workspaceRoot,
-    input.provenance,
-    input.generatedArtifactRoots
+    input.provenance
   )));
   const sourceProvenance = sourceProvenances.includes("agent-discovered")
     ? "agent-discovered"
@@ -124,8 +121,7 @@ function possibleVisionRoutes(
 async function classifySourceProvenance(
   canonicalSource: string,
   workspaceRoot: string,
-  context: VisionInputProvenanceContext | undefined,
-  generatedArtifactRoots: readonly string[] | undefined
+  context: VisionInputProvenanceContext | undefined
 ): Promise<SecurityDataEgressContext["sourceProvenance"]> {
   if (await includesCanonicalPath(context?.attachmentPaths ?? [], canonicalSource, workspaceRoot)) {
     return "current-turn-attachment";
@@ -137,9 +133,6 @@ async function classifySourceProvenance(
     return "browser-artifact";
   }
   if (await includesCanonicalPath(context?.generatedArtifactPaths ?? [], canonicalSource, workspaceRoot)) {
-    return "generated-artifact";
-  }
-  if (await isWithinCanonicalRoots(generatedArtifactRoots ?? [], canonicalSource)) {
     return "generated-artifact";
   }
   return "agent-discovered";
@@ -154,19 +147,6 @@ async function includesCanonicalPath(
     const candidate = isAbsolute(path) ? path : resolve(workspaceRoot, path);
     const canonical = await realpath(candidate).catch(() => undefined);
     if (canonical === canonicalSource) return true;
-  }
-  return false;
-}
-
-async function isWithinCanonicalRoots(
-  roots: readonly string[],
-  canonicalSource: string
-): Promise<boolean> {
-  for (const root of roots) {
-    const canonicalRoot = await realpath(root).catch(() => undefined);
-    if (canonicalRoot === undefined) continue;
-    const rel = relative(canonicalRoot, canonicalSource);
-    if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) return true;
   }
   return false;
 }

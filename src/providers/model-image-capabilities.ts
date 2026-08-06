@@ -1,10 +1,12 @@
 import type { ModelProfile } from "../contracts/provider.js";
 
 /**
- * Vision protocols generally accept repeated image parts. Routes with a known
- * single-image restriction opt out explicitly so comparison fails or reroutes
- * before provider dispatch.
+ * Known provider families and EstaCoda's managed local OpenAI-compatible lane
+ * accept repeated image parts. Other custom routes must opt in explicitly so
+ * comparison fails or reroutes when endpoint capability is unknown.
  */
 export function supportsMultipleImageInputs(profile: ModelProfile): boolean {
-  return profile.supportsVision && profile.supportsMultipleImages !== false;
+  if (!profile.supportsVision) return false;
+  if (profile.supportsMultipleImages !== undefined) return profile.supportsMultipleImages;
+  return ["openai", "anthropic", "google", "openrouter", "local"].includes(profile.provider);
 }

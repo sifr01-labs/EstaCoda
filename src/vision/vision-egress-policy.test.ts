@@ -65,7 +65,7 @@ describe("vision egress security resolution", () => {
     expect((await hostedResolution(imagePath))?.dataEgress?.sourceProvenance).toBe("agent-discovered");
   });
 
-  it("derives browser and generated artifact provenance only from runtime-owned paths and roots", async () => {
+  it("derives browser and generated artifact provenance only from runtime-owned paths", async () => {
     const browserResolution = await hostedResolution(imagePath, {
       attachmentPaths: [],
       explicitReferencePaths: [],
@@ -84,14 +84,13 @@ describe("vision egress security resolution", () => {
     await mkdir(imageCacheRoot);
     const generatedPath = join(imageCacheRoot, "generated.png");
     await writeFile(generatedPath, "image");
-    const generatedRootResolution = await resolveVisionEgressSecurity({
+    const unregisteredCacheResolution = await resolveVisionEgressSecurity({
       source: source(await realpath(generatedPath)),
       workspaceRoot: root,
-      generatedArtifactRoots: [imageCacheRoot],
       visionRoute: auxiliary(route("openai")),
       mainRoute: route("openai")
     });
-    expect(generatedRootResolution?.dataEgress?.sourceProvenance).toBe("generated-artifact");
+    expect(unregisteredCacheResolution?.dataEgress?.sourceProvenance).toBe("agent-discovered");
   });
 
   it("binds a fallback chain to every possible hosted destination", async () => {

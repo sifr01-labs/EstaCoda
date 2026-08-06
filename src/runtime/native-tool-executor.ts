@@ -140,70 +140,73 @@ export class NativeToolExecutor {
     }
 
     const attachments = (input.attachments ?? []).filter(isReadyImageAttachment);
+    if (attachments.length === 0) return { executions: [], plans: [] };
+    const paths = attachments
+      .map((attachment) => attachment.localPath ?? attachment.path)
+      .filter((path): path is string => path !== undefined);
+    if (paths.length === 0) return { executions: [], plans: [] };
     const executions: ToolExecutionRecord[] = [];
     const plans: ToolCallPlan[] = [];
-    for (const [index, attachment] of attachments.entries()) {
-      const path = attachment.localPath ?? attachment.path;
-      if (path === undefined) continue;
-      const plan: ToolCallPlan = {
-        id: `native-vision-${Date.now()}-${index}`,
-        tool: "vision.analyze",
-        input: { path, prompt: input.text },
-        source: "internal",
-        status: "planned"
-      };
-      plans.push(plan);
-      await this.#runRecorder.recordToolPlan(plan);
-      await emit(input.onEvent, {
-        kind: "tool-start",
-        tool: plan.tool,
-        targetSummary: summarizeSecurityTarget(plan.tool, plan.input),
-        displayPreview: buildToolDisplayPreview(plan.tool, plan.input),
-        activityId: plan.id
-      });
+    const plan: ToolCallPlan = {
+      id: `native-vision-${Date.now()}`,
+      tool: "vision.analyze",
+      input: paths.length === 1
+        ? { path: paths[0], prompt: input.text }
+        : { paths, prompt: input.text },
+      source: "internal",
+      status: "planned"
+    };
+    plans.push(plan);
+    await this.#runRecorder.recordToolPlan(plan);
+    await emit(input.onEvent, {
+      kind: "tool-start",
+      tool: plan.tool,
+      targetSummary: summarizeSecurityTarget(plan.tool, plan.input),
+      displayPreview: buildToolDisplayPreview(plan.tool, plan.input),
+      activityId: plan.id
+    });
 
-      const execution = await this.#toolExecutor.executeTool({
-        tool: plan.tool,
-        input: plan.input,
-        trustedWorkspace: input.trustedWorkspace,
-        sessionId: this.#currentSessionId(),
-        visibleTurnId: input.visibleTurnId,
-        providerUsageLineage: input.providerUsageLineage,
-        visionInputProvenance: input.visionInputProvenance,
-        visionDispatchPhase: "initial-attachment",
-        signal: input.signal,
-        onEvent: input.onEvent
-      });
+    const execution = await this.#toolExecutor.executeTool({
+      tool: plan.tool,
+      input: plan.input,
+      trustedWorkspace: input.trustedWorkspace,
+      sessionId: this.#currentSessionId(),
+      visibleTurnId: input.visibleTurnId,
+      providerUsageLineage: input.providerUsageLineage,
+      visionInputProvenance: input.visionInputProvenance,
+      visionDispatchPhase: "initial-attachment",
+      signal: input.signal,
+      onEvent: input.onEvent
+    });
 
-      if (execution === undefined) {
-        plan.status = "unavailable";
-        plan.error = `Tool is unavailable: ${plan.tool}`;
-      } else {
-        plan.status = execution.decision === "allow" && execution.result?.ok !== false
-          ? "executed"
-          : execution.decision === "allow"
-            ? "invalid"
-            : "blocked";
-        plan.result = execution.result;
-        plan.error = execution.result?.ok === false ? execution.result.content : undefined;
-        setEphemeralVisionDelivery(execution.result, "initial");
-        markVisionAttachmentHandled(execution.result, attachment.id);
-        executions.push(execution);
-      }
-
-      await this.#runRecorder.recordToolPlan(plan);
-      await emit(input.onEvent, {
-        kind: "tool-result",
-        tool: execution?.tool.name ?? plan.tool,
-        decision: execution?.decision,
-        riskClass: execution?.riskClass,
-        ok: execution?.result?.ok ?? false,
-        targetSummary: execution?.targetSummary ?? summarizeSecurityTarget(plan.tool, plan.input),
-        displayPreview: buildToolDisplayPreview(plan.tool, plan.input),
-        activityId: plan.id,
-        ...(execution === undefined ? {} : toolResultStats(execution))
-      });
+    if (execution === undefined) {
+      plan.status = "unavailable";
+      plan.error = `Tool is unavailable: ${plan.tool}`;
+    } else {
+      plan.status = execution.decision === "allow" && execution.result?.ok !== false
+        ? "executed"
+        : execution.decision === "allow"
+          ? "invalid"
+          : "blocked";
+      plan.result = execution.result;
+      plan.error = execution.result?.ok === false ? execution.result.content : undefined;
+      setEphemeralVisionDelivery(execution.result, "initial");
+      for (const attachment of attachments) markVisionAttachmentHandled(execution.result, attachment.id);
+      executions.push(execution);
     }
+
+    await this.#runRecorder.recordToolPlan(plan);
+    await emit(input.onEvent, {
+      kind: "tool-result",
+      tool: execution?.tool.name ?? plan.tool,
+      decision: execution?.decision,
+      riskClass: execution?.riskClass,
+      ok: execution?.result?.ok ?? false,
+      targetSummary: execution?.targetSummary ?? summarizeSecurityTarget(plan.tool, plan.input),
+      displayPreview: buildToolDisplayPreview(plan.tool, plan.input),
+      activityId: plan.id,
+      ...(execution === undefined ? {} : toolResultStats(execution))
+    });
 
     return { executions, plans };
   }

@@ -140,7 +140,7 @@ describe("executeAuxiliaryTask", () => {
     });
     expect(result.ok).toBe(true);
     expect(result.attempts).toEqual([
-      { role: "primary", provider: "openai", model: "gpt-4.1-mini", ok: true, errorClass: undefined, content: "primary ok" }
+      { role: "primary", provider: "openai", model: "gpt-4.1-mini", ok: true, dispatched: true, errorClass: undefined, content: "primary ok" }
     ]);
   });
 
@@ -340,7 +340,7 @@ describe("executeAuxiliaryTask", () => {
     expect(result.ok).toBe(false);
     expect(result.status).toBe("exception");
     expect(result.attempts).toEqual([
-      { role: "primary", provider: "openai", model: "gpt-4.1-mini", ok: false, errorClass: "exception", content: "provider exploded" }
+      { role: "primary", provider: "openai", model: "gpt-4.1-mini", ok: false, dispatched: false, errorClass: "exception", content: "provider exploded" }
     ]);
   });
 

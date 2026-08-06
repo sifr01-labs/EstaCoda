@@ -2206,7 +2206,7 @@ describe("web and browser tools baselines", () => {
       workspaceRoot,
       artifactStore
     }));
-    const screenshotResult = await screenshot.run({});
+    const screenshotResult = await screenshot.run({}, { visibleTurnId: "turn-browser-artifact" });
     const screenshotPath = screenshotResult.metadata?.path;
     expect(typeof screenshotPath).toBe("string");
 
@@ -2218,13 +2218,14 @@ describe("web and browser tools baselines", () => {
     });
     const resolution = await vision.resolveSecurity?.({ path: screenshotPath as string }, {
       trustedWorkspace: true,
-      sessionId: "session-browser-artifact"
+      sessionId: "session-browser-artifact",
+      visibleTurnId: "turn-browser-artifact"
     });
     const analysis = await vision.run({ path: screenshotPath as string });
 
     expect(artifactStore.list()).toContainEqual(expect.objectContaining({
       id: "browser-screenshot",
-      metadata: { visionProvenance: "browser-artifact" }
+      metadata: { visionProvenance: "browser-artifact", visionTurnId: "turn-browser-artifact" }
     }));
     expect(resolution).toMatchObject({
       dataEgress: { sourceProvenance: "browser-artifact" }

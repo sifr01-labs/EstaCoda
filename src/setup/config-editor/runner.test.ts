@@ -3541,6 +3541,40 @@ describe("runConfigEditor", () => {
     expect(rawConfig).not.toContain("old-vision");
   });
 
+  it("offers the bilingual route verifier after Vision Analysis apply without implicit hosted consent", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const verify = vi.fn()
+      .mockResolvedValueOnce(visionVerificationReport("consent-required", "missing"))
+      .mockResolvedValueOnce(visionVerificationReport("passed", "granted"));
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: [
+          "vision",
+          "automatic",
+          "allow-with-approval",
+          "45000",
+          "2",
+          true,
+          "Verify now",
+          "Send fixture and verify",
+        ],
+      }),
+      defaultActionId: "edit-auxiliary-model-route",
+      applyExecutor: createReviewedSetupApplyExecutor({ homeDir: tempDir, workspaceRoot }),
+      visionRouteVerification: verify,
+    });
+
+    expect(verify).toHaveBeenCalledTimes(2);
+    expect(verify.mock.calls[0]?.[0]).toMatchObject({ consentHosted: false });
+    expect(verify.mock.calls[1]?.[0]).toMatchObject({ consentHosted: true });
+    expect(result.visionRouteVerificationReport?.status).toBe("passed");
+    expect(result.output).toContain("Vision Analysis verification");
+  });
+
   it("uses the benign bilingual image when verifying a local Vision Analysis route", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
@@ -5979,6 +6013,35 @@ function minimalManifest(sourceBundleIds: readonly string[] = []): SetupReviewMa
       readOnlyCount: 0,
     },
   };
+}
+
+function visionVerificationReport(
+  status: "consent-required" | "passed",
+  hostedConsent: "missing" | "granted"
+) {
+  return {
+    status,
+    provider: "openai",
+    model: "gpt-5.5",
+    routeSource: "main" as const,
+    dispatch: "native" as const,
+    inference: "hosted" as const,
+    hostedDestinations: ["openai@https://api.openai.com/v1"],
+    hostedConsent,
+    credentialReady: true,
+    visionCapable: true,
+    configurationFingerprint: "fingerprint",
+    diagnostics: [],
+    fixtureSha256: "a".repeat(64),
+    expectedEnglishDetected: status === "passed",
+    expectedArabicDetected: status === "passed",
+    latencyMs: status === "passed" ? 25 : 0,
+    pricingComplete: status === "passed",
+    normalizedImage: { width: 320, height: 160, bytes: 1024 },
+    fallbackUsed: false,
+    attempts: status === "passed" ? ["openai/gpt-5.5:ok"] : [],
+    ...(status === "passed" ? {} : { error: "Hosted verification requires consent." }),
+  } as const;
 }
 
 function fakePrompt(options: { readonly values?: readonly unknown[]; readonly secret?: string | readonly string[] } = {}): Prompt {

@@ -88,7 +88,7 @@ describe("vision dispatch policy", () => {
       analysisMode: "compare",
       imageCount: 2,
       mainRoute: singleImageMain,
-      auxiliaryRoute: auxiliary(route("multi-aux", true), "auto-configured")
+      auxiliaryRoute: auxiliary(multiImageRoute("multi-aux"), "auto-configured")
     })).toMatchObject({ mode: "auxiliary", route: { id: "multi-aux" } });
 
     const singleImageAux = route("single-aux", true);
@@ -106,6 +106,18 @@ describe("vision dispatch policy", () => {
     });
   });
 
+  it("does not assume unknown custom routes support multiple images", () => {
+    expect(resolveVisionDispatch({
+      phase: "post-tool",
+      analysisMode: "compare",
+      imageCount: 2,
+      auxiliaryRoute: auxiliary(route("unknown-custom", true), "custom")
+    })).toMatchObject({
+      mode: "unavailable",
+      reason: "No configured vision route supports bounded multi-image comparison."
+    });
+  });
+
   it("removes an incompatible main fallback from auxiliary comparison", () => {
     const main = route("single-main", true);
     main.profile.supportsMultipleImages = false;
@@ -114,7 +126,7 @@ describe("vision dispatch policy", () => {
       analysisMode: "compare",
       imageCount: 2,
       mainRoute: main,
-      auxiliaryRoute: { ...auxiliary(route("multi-aux", true)), fallbackToMain: true }
+      auxiliaryRoute: { ...auxiliary(multiImageRoute("multi-aux")), fallbackToMain: true }
     });
     expect(result).toMatchObject({ mode: "auxiliary", auxiliaryRoute: { fallbackToMain: false } });
   });
@@ -133,6 +145,12 @@ function route(id: string, supportsVision: boolean): ResolvedModelRoute {
       supportsStructuredOutput: true
     }
   };
+}
+
+function multiImageRoute(id: string): ResolvedModelRoute {
+  const modelRoute = route(id, true);
+  modelRoute.profile.supportsMultipleImages = true;
+  return modelRoute;
 }
 
 function auxiliary(

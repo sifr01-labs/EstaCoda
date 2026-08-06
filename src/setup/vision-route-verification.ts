@@ -91,6 +91,9 @@ export async function buildVisionRouteVerificationPlan(
         ...(auxiliaryRoute.fallbackToMain && config.primaryModelRoute.profile.supportsVision
           ? [config.primaryModelRoute]
           : []),
+        ...(dispatch === "native"
+          ? config.modelFallbackRoutes.filter((fallback) => fallback.profile.supportsVision)
+          : []),
       ];
   const hostedDestinations = [...new Set(possibleRoutes
     .map(providerRouteDestination)
