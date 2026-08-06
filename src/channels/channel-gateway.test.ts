@@ -7007,7 +7007,9 @@ describe("ChannelGateway commands", () => {
           runtimeForSession,
           sessionStore: new InMemoryChannelSessionStore(),
           authPolicy: input.authPolicy ?? { whatsapp: { dmPolicy: "open" } },
-          whatsappTextDebounce: input.config ?? debounceConfig,
+          textDebounceResolver: (channelKind) => channelKind === "whatsapp"
+            ? input.config ?? debounceConfig
+            : undefined,
           busyPolicyResolver: input.busyPolicyResolver,
           activeTurnRegistry: input.activeTurnRegistry
         });
@@ -7047,6 +7049,24 @@ describe("ChannelGateway commands", () => {
             debounceWindowMs: 10
           })
         }));
+      });
+
+      it("preserves the deprecated WhatsApp-specific debounce option", async () => {
+        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId, handle }),
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { whatsapp: { dmPolicy: "open" } },
+          whatsappTextDebounce: debounceConfig
+        });
+
+        await gateway.receive(makeWhatsAppMessage("legacy option"));
+        await gateway.flushPendingDebounces();
+
+        expect(handle).toHaveBeenCalledOnce();
+        expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "legacy option" }));
       });
 
       it("resets the quiet timer when another WhatsApp text arrives", async () => {
@@ -7098,6 +7118,102 @@ describe("ChannelGateway commands", () => {
         expect(texts.sort()).toEqual(["chat one", "chat two"]);
       });
 
+      it("isolates WhatsApp debounce buffers by account, thread, and sender", async () => {
+        const texts: string[] = [];
+        const handle = vi.fn(async (input) => {
+          texts.push(input.text);
+          return runtimeResponse({ text: "ok", securityDecision: "allow" });
+        });
+        const { gateway } = createDebounceGateway({
+          handle,
+          authPolicy: {
+            whatsapp: {
+              dmPolicy: "open",
+              groupPolicy: "open"
+            }
+          }
+        });
+
+        await gateway.receive(makeWhatsAppMessage("account one", {
+          id: "account-one",
+          sessionKey: {
+            platform: "whatsapp",
+            accountId: "account-one",
+            chatId: "shared-chat",
+            userId: "shared-sender",
+            chatType: "dm"
+          },
+          sender: { id: "shared-sender", displayName: "Shared sender" }
+        }));
+        await gateway.receive(makeWhatsAppMessage("account two", {
+          id: "account-two",
+          sessionKey: {
+            platform: "whatsapp",
+            accountId: "account-two",
+            chatId: "shared-chat",
+            userId: "shared-sender",
+            chatType: "dm"
+          },
+          sender: { id: "shared-sender", displayName: "Shared sender" }
+        }));
+        await gateway.receive(makeWhatsAppMessage("thread one", {
+          id: "thread-one",
+          sessionKey: {
+            platform: "whatsapp",
+            accountId: "account-one",
+            chatId: "group-chat",
+            threadId: "thread-one",
+            userId: "shared-sender",
+            chatType: "thread"
+          },
+          sender: { id: "shared-sender", displayName: "Shared sender" }
+        }));
+        await gateway.receive(makeWhatsAppMessage("thread two", {
+          id: "thread-two",
+          sessionKey: {
+            platform: "whatsapp",
+            accountId: "account-one",
+            chatId: "group-chat",
+            threadId: "thread-two",
+            userId: "shared-sender",
+            chatType: "thread"
+          },
+          sender: { id: "shared-sender", displayName: "Shared sender" }
+        }));
+        await gateway.receive(makeWhatsAppMessage("sender one", {
+          id: "sender-one",
+          sessionKey: {
+            platform: "whatsapp",
+            accountId: "account-one",
+            chatId: "shared-group",
+            userId: "sender-one",
+            chatType: "group"
+          },
+          sender: { id: "sender-one", displayName: "Sender one" }
+        }));
+        await gateway.receive(makeWhatsAppMessage("sender two", {
+          id: "sender-two",
+          sessionKey: {
+            platform: "whatsapp",
+            accountId: "account-one",
+            chatId: "shared-group",
+            userId: "sender-two",
+            chatType: "group"
+          },
+          sender: { id: "sender-two", displayName: "Sender two" }
+        }));
+        await gateway.flushPendingDebounces();
+
+        expect(texts.sort()).toEqual([
+          "account one",
+          "account two",
+          "sender one",
+          "sender two",
+          "thread one",
+          "thread two"
+        ]);
+      });
+
       it("bypasses debounce for slash and control commands", async () => {
         vi.useFakeTimers();
         const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
@@ -7127,7 +7243,7 @@ describe("ChannelGateway commands", () => {
           sessionStore: new InMemoryChannelSessionStore(),
           authPolicy: { whatsapp: { dmPolicy: "pairing" } },
           pair,
-          whatsappTextDebounce: debounceConfig
+          textDebounceResolver: (channelKind) => channelKind === "whatsapp" ? debounceConfig : undefined
         });
 
         const result = await gateway.receive(makeWhatsAppMessage("12345678"));

@@ -1469,6 +1469,15 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     > = ({ sessionId, reason }) => {
       sessionFinalizationQueue.enqueue({ profileId, sessionId, reason });
     };
+    const textDebounceResolver: NonNullable<
+      ConstructorParameters<typeof ChannelGateway>[0]["textDebounceResolver"]
+    > = (channelKind) => channelKind === "whatsapp"
+      ? {
+          textDebounceMs: whatsapp.textDebounceMs ?? 5_000,
+          textDebounceMaxMessages: whatsapp.textDebounceMaxMessages ?? 10,
+          textDebounceMaxChars: whatsapp.textDebounceMaxChars ?? 8_000
+        }
+      : undefined;
     const gateway = options.factories?.createChannelGateway
       ? options.factories.createChannelGateway({
           adapters: wrappers,
@@ -1508,11 +1517,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
               queueDepth: channelConfig?.queueDepth ?? 3,
             };
           },
-          whatsappTextDebounce: {
-            textDebounceMs: whatsapp.textDebounceMs ?? 5_000,
-            textDebounceMaxMessages: whatsapp.textDebounceMaxMessages ?? 10,
-            textDebounceMaxChars: whatsapp.textDebounceMaxChars ?? 8_000
-          },
+          textDebounceResolver,
           telegramStreaming: config.channels.telegram.streaming,
           runtimeForSession: async ({ sessionId, securityPolicy, metadata }) => {
             const latestConfig = await loadConfig();
@@ -1584,11 +1589,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
               queueDepth: channelConfig?.queueDepth ?? 3,
             };
           },
-          whatsappTextDebounce: {
-            textDebounceMs: whatsapp.textDebounceMs ?? 5_000,
-            textDebounceMaxMessages: whatsapp.textDebounceMaxMessages ?? 10,
-            textDebounceMaxChars: whatsapp.textDebounceMaxChars ?? 8_000
-          },
+          textDebounceResolver,
           telegramStreaming: config.channels.telegram.streaming,
           runtimeForSession: async ({ sessionId, securityPolicy, metadata }) => {
             const latestConfig = await loadConfig();

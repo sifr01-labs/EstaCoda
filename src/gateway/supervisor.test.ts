@@ -1549,6 +1549,46 @@ describe("runGatewaySupervisor", () => {
     expect(discordPolicy.queueDepth).toBe(2);
   });
 
+  it("textDebounceResolver preserves normalized WhatsApp config and disables other channels", async () => {
+    let capturedOpts: any;
+    const gateway = { start: async () => {}, stop: async () => {}, hasPendingWork: () => false };
+
+    const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      channels: {
+        whatsapp: {
+          enabled: false,
+          textDebounceMs: 2750,
+          textDebounceMaxMessages: 4,
+          textDebounceMaxChars: 1200
+        }
+      }
+    }));
+
+    await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: (opts: any) => {
+          capturedOpts = opts;
+          return gateway as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+      },
+    });
+
+    expect(typeof capturedOpts.textDebounceResolver).toBe("function");
+    expect(capturedOpts.textDebounceResolver("whatsapp")).toEqual({
+      textDebounceMs: 2750,
+      textDebounceMaxMessages: 4,
+      textDebounceMaxChars: 1200
+    });
+    expect(capturedOpts.textDebounceResolver("telegram")).toBeUndefined();
+    expect(capturedOpts.textDebounceResolver("discord")).toBeUndefined();
+  });
+
   it("passes normalized Discord voice-channel options and temp root to the adapter", async () => {
     const previousToken = process.env.DISCORD_BOT_TOKEN;
     process.env.DISCORD_BOT_TOKEN = "token";

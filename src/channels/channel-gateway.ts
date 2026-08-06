@@ -160,11 +160,14 @@ export type BusyPolicyConfig = {
   queueDepth: number;
 };
 
-export type WhatsAppTextDebounceConfig = {
+export type ChannelTextDebounceConfig = {
   textDebounceMs: number;
   textDebounceMaxMessages: number;
   textDebounceMaxChars: number;
 };
+
+/** @deprecated Use ChannelTextDebounceConfig with textDebounceResolver. */
+export type WhatsAppTextDebounceConfig = ChannelTextDebounceConfig;
 
 export type ChannelRuntimeFactory = (input: {
   sessionId: string;
@@ -235,6 +238,9 @@ export type ChannelGatewayOptions = {
   autoTtsFetch?: VoiceFetchLike;
   autoTtsNow?: () => number;
   autoTtsId?: () => string;
+  /** Resolve rapid-text debounce settings for a channel. Undefined disables debounce. */
+  textDebounceResolver?: (channelKind: ChannelKind) => ChannelTextDebounceConfig | undefined;
+  /** @deprecated Use textDebounceResolver. Ignored when the resolver is provided. */
   whatsappTextDebounce?: WhatsAppTextDebounceConfig;
   telegramStreaming?: ChannelStreamingTextOptions & { enabled?: boolean };
 };
@@ -246,8 +252,9 @@ type AutoTtsUsageWindow = {
   chars: number;
 };
 
-type WhatsAppTextDebounceBuffer = {
+type ChannelTextDebounceBuffer = {
   adapter: ChannelAdapter;
+  config: ChannelTextDebounceConfig;
   firstMessage: ChannelMessage;
   latestReceivedAt: string;
   textChunks: string[];
@@ -436,8 +443,8 @@ export class ChannelGateway {
   readonly #autoTtsNow: () => number;
   readonly #autoTtsId: (() => string) | undefined;
   readonly #autoTtsUsageByChat = new Map<string, AutoTtsUsageWindow>();
-  readonly #whatsappTextDebounce: WhatsAppTextDebounceConfig | undefined;
-  readonly #whatsappTextDebounceBuffers = new Map<string, WhatsAppTextDebounceBuffer>();
+  readonly #textDebounceResolver: ChannelGatewayOptions["textDebounceResolver"];
+  readonly #textDebounceBuffers = new Map<string, ChannelTextDebounceBuffer>();
   readonly #telegramStreaming: (ChannelStreamingTextOptions & { enabled?: boolean }) | undefined;
   readonly #providerServingStateBySessionKey = new Map<string, ProviderServingState>();
 
@@ -489,7 +496,12 @@ export class ChannelGateway {
     this.#autoTtsFetch = options.autoTtsFetch;
     this.#autoTtsNow = options.autoTtsNow ?? Date.now;
     this.#autoTtsId = options.autoTtsId;
-    this.#whatsappTextDebounce = options.whatsappTextDebounce;
+    const legacyWhatsAppTextDebounce = options.whatsappTextDebounce;
+    this.#textDebounceResolver = options.textDebounceResolver ?? (
+      legacyWhatsAppTextDebounce === undefined
+        ? undefined
+        : (channelKind) => channelKind === "whatsapp" ? legacyWhatsAppTextDebounce : undefined
+    );
     this.#telegramStreaming = options.telegramStreaming;
 
     for (const adapter of options.adapters) {
@@ -504,7 +516,7 @@ export class ChannelGateway {
       : this.#activeTurns.size > 0;
     const hasQueued = this.#sessionMessageQueue.totalSize() > 0;
     const hasDraining = this.#drainingQueue.size > 0;
-    const hasDebouncedText = this.#whatsappTextDebounceBuffers.size > 0;
+    const hasDebouncedText = this.#textDebounceBuffers.size > 0;
     return hasActiveTurns || hasQueued || hasDraining || hasDebouncedText;
   }
 
@@ -922,9 +934,9 @@ export class ChannelGateway {
   }
 
   async flushPendingDebounces(): Promise<void> {
-    const keys = [...this.#whatsappTextDebounceBuffers.keys()];
+    const keys = [...this.#textDebounceBuffers.keys()];
     for (const key of keys) {
-      await this.#flushWhatsAppTextDebounce(key);
+      await this.#flushTextDebounce(key);
     }
   }
 
@@ -1037,7 +1049,7 @@ export class ChannelGateway {
 
     const processedMessage = await this.#preprocessMessage?.(authorizedMessage) ?? authorizedMessage;
 
-    const debounced = await this.#maybeDebounceWhatsAppText(processedMessage, adapter);
+    const debounced = await this.#maybeDebounceText(processedMessage, adapter);
     if (debounced !== undefined) {
       return debounced;
     }
@@ -1045,36 +1057,35 @@ export class ChannelGateway {
     return this.#routeNormalTurn(processedMessage, adapter);
   }
 
-  async #maybeDebounceWhatsAppText(message: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult | undefined> {
-    if (!this.#isEligibleForWhatsAppTextDebounce(message)) {
-      return undefined;
-    }
-    const config = this.#whatsappTextDebounce;
-    if (config === undefined) {
+  async #maybeDebounceText(message: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult | undefined> {
+    const config = this.#textDebounceResolver?.(message.channel);
+    if (config === undefined || !this.#isEligibleForTextDebounce(message, config)) {
       return undefined;
     }
 
-    const key = this.#whatsappTextDebounceKey(message);
+    const key = this.#textDebounceKey(message);
     const text = message.text.trim();
-    const existing = this.#whatsappTextDebounceBuffers.get(key);
+    const existing = this.#textDebounceBuffers.get(key);
     if (existing !== undefined) {
       existing.textChunks.push(text);
       existing.messageIds.push(message.id);
       existing.latestReceivedAt = message.receivedAt;
       existing.totalChars += text.length;
       existing.adapter = adapter;
-      this.#resetWhatsAppTextDebounceTimer(key, existing);
+      existing.config = config;
+      this.#resetTextDebounceTimer(key, existing);
       if (
         existing.textChunks.length >= config.textDebounceMaxMessages ||
         existing.totalChars >= config.textDebounceMaxChars
       ) {
-        return await this.#flushWhatsAppTextDebounce(key) ?? { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+        return await this.#flushTextDebounce(key) ?? { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
       }
       return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
     }
 
-    const buffer: WhatsAppTextDebounceBuffer = {
+    const buffer: ChannelTextDebounceBuffer = {
       adapter,
+      config,
       firstMessage: message,
       latestReceivedAt: message.receivedAt,
       textChunks: [text],
@@ -1082,24 +1093,21 @@ export class ChannelGateway {
       totalChars: text.length,
       timer: undefined
     };
-    this.#whatsappTextDebounceBuffers.set(key, buffer);
-    this.#resetWhatsAppTextDebounceTimer(key, buffer);
+    this.#textDebounceBuffers.set(key, buffer);
+    this.#resetTextDebounceTimer(key, buffer);
 
     if (
       buffer.textChunks.length >= config.textDebounceMaxMessages ||
       buffer.totalChars >= config.textDebounceMaxChars
     ) {
-      return await this.#flushWhatsAppTextDebounce(key) ?? { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+      return await this.#flushTextDebounce(key) ?? { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
     }
 
     return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
   }
 
-  #isEligibleForWhatsAppTextDebounce(message: ChannelMessage): boolean {
-    if (message.channel !== "whatsapp") {
-      return false;
-    }
-    if (this.#whatsappTextDebounce === undefined || this.#whatsappTextDebounce.textDebounceMs <= 0) {
+  #isEligibleForTextDebounce(message: ChannelMessage, config: ChannelTextDebounceConfig): boolean {
+    if (config.textDebounceMs <= 0) {
       return false;
     }
     if (message.attachments !== undefined && message.attachments.length > 0) {
@@ -1112,31 +1120,30 @@ export class ChannelGateway {
     return true;
   }
 
-  #whatsappTextDebounceKey(message: ChannelMessage): string {
-    return [
-      message.channel,
-      message.sessionKey.chatId,
-      message.sessionKey.userId ?? message.sender.id
-    ].join(":");
+  #textDebounceKey(message: ChannelMessage): string {
+    return JSON.stringify([
+      stableSessionKey(message.sessionKey, this.#sessionPolicy),
+      message.sender.id
+    ]);
   }
 
-  #resetWhatsAppTextDebounceTimer(key: string, buffer: WhatsAppTextDebounceBuffer): void {
+  #resetTextDebounceTimer(key: string, buffer: ChannelTextDebounceBuffer): void {
     if (buffer.timer !== undefined) {
       clearTimeout(buffer.timer);
     }
     buffer.timer = setTimeout(() => {
-      void this.#flushWhatsAppTextDebounce(key).catch((error) => {
-        this.#logWarning?.(`WhatsApp text debounce flush failed for ${key}: ${error instanceof Error ? error.message : String(error)}`);
+      void this.#flushTextDebounce(key).catch((error) => {
+        this.#logWarning?.(`Channel text debounce flush failed for ${key}: ${error instanceof Error ? error.message : String(error)}`);
       });
-    }, this.#whatsappTextDebounce?.textDebounceMs ?? 0);
+    }, buffer.config.textDebounceMs);
   }
 
-  async #flushWhatsAppTextDebounce(key: string): Promise<ChannelGatewayResult | undefined> {
-    const buffer = this.#whatsappTextDebounceBuffers.get(key);
+  async #flushTextDebounce(key: string): Promise<ChannelGatewayResult | undefined> {
+    const buffer = this.#textDebounceBuffers.get(key);
     if (buffer === undefined) {
       return undefined;
     }
-    this.#whatsappTextDebounceBuffers.delete(key);
+    this.#textDebounceBuffers.delete(key);
     if (buffer.timer !== undefined) {
       clearTimeout(buffer.timer);
     }
@@ -1150,7 +1157,7 @@ export class ChannelGateway {
         ...(buffer.firstMessage.metadata ?? {}),
         debouncedMessageIds: buffer.messageIds,
         debounceSize: buffer.textChunks.length,
-        debounceWindowMs: this.#whatsappTextDebounce?.textDebounceMs ?? 0
+        debounceWindowMs: buffer.config.textDebounceMs
       }
     };
 
