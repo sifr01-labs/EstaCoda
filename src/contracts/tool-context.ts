@@ -60,6 +60,7 @@ export type SessionToolContext = {
   artifactStore?: import("../artifacts/artifact-store.js").ArtifactStore;
   taskResultService?: import("../tasks/task-result-service.js").TaskResultService;
   taskOperatorService?: import("../tasks/task-operator-service.js").TaskOperatorService;
+  usageInspector?: import("../session/usage-inspector.js").UsageInspector;
   memoryFileCompactionService?: import("../memory/memory-file-compaction-service.js").MemoryFileCompactionService;
   fileStateTracker?: import("../delegation/file-state-tracker.js").FileStateTracker;
   sessionCompressionService?: import("../prompt/session-compression-service.js").SessionCompressionService;

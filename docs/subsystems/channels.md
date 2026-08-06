@@ -480,6 +480,7 @@ estacoda channels status telegram
 Channel-specific commands available in gateway:
 
 - `/status` — show current session and channel status
+- `/usage`, `/usage last`, `/usage task <task-id>` — inspect recorded session, latest-turn, or authorized Task usage without a model call
 - `/sessions` — list recent sessions
 - `/switch <session-id>` — switch to a different session
 - `/attach <code>` — attach to a CLI session via handoff code

@@ -52,6 +52,7 @@ import type { SecurityApprovalMode, SecurityPolicy, SecurityRequest } from "../c
 import type { SessionContextWindowUsage, SessionDB } from "../contracts/session.js";
 import type { SessionCostSummary } from "../contracts/usage-cost.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
+import { createUsageInspector, type UsageInspector } from "../session/usage-inspector.js";
 import { loadSessionContextWindowUsage } from "../session/session-context-window-usage.js";
 import { loadSessionCostUsage } from "../session/session-cost-usage.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
@@ -260,6 +261,7 @@ export type Runtime = {
   latestResumeNote(): Promise<string | undefined>;
   currentContextWindowUsage?(): Promise<SessionContextWindowUsage | undefined>;
   currentSessionCost?(): Promise<SessionCostSummary | undefined>;
+  usageInspector?: UsageInspector;
   inspectMemoryPromotions(): Promise<MemoryPromotionRecord[]>;
   recallSession?(query: string): Promise<SessionRecallResult>;
   compactSession?(input?: {
@@ -388,6 +390,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       spendingScope: (kind, ownerId) => providerSpendController.getScope(kind, ownerId)
     }),
     backgroundContinuation: () => options.taskBackgroundContinuation ?? "unknown"
+  });
+  const usageInspector = createUsageInspector({
+    sessionDb,
+    taskStore,
+    taskOperatorService,
+    profileId,
+    ...(providerSpendController === undefined ? {} : {
+      spendingScope: (ownerId) => providerSpendController.getScope("session", ownerId)
+    })
   });
   const closeSessionDbOnDispose = options.closeSessionDbOnDispose ?? true;
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
@@ -942,6 +953,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       artifactStore,
       taskResultService,
       taskOperatorService,
+      usageInspector,
       trustStore,
       cronStore,
       disableCronTools: options.disableCronTools,
@@ -1086,6 +1098,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     sessionDb,
     taskAgentExecutor,
     taskOperator: taskOperatorService,
+    usageInspector,
     drainTaskSessionCompletions: taskSessionCompletionService === undefined
       ? undefined
       : () => taskSessionCompletionService.deliverPending(sessionRuntimeContext.currentSessionId()),

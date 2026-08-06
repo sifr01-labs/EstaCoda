@@ -334,7 +334,7 @@ Output is redacted, source-labeled, marked as local memory context, and treated 
 | Tool | Risk | State touched |
 |------|------|---------------|
 | `delegate_task` | `shared-state-mutation` | Profile-owned Task graph, creator/parent links, Task journal |
-| `task.status` | `read-only-local` | Bounded status for a Task linked to the active session |
+| `task.status` | `read-only-local` | Bounded status, token usage, and estimated cost for a Task linked to the active session |
 | `terminal.inspect` | `read-only-local` | Bounded command output only |
 
 **Behavior:** Atomically creates a fixed durable Task graph and returns its handle immediately. One task becomes one Step; a batch becomes independent worker Steps plus one terminal synthesis Step whose revision-1 dependencies are every worker. A synthesis object customizes the final-answer objective/model; `synthesis: false` explicitly requests an inspection-only batch. Provider tool-call identity prevents duplicate creation. No synchronous child execution or in-memory persistence fallback remains.
@@ -358,6 +358,14 @@ The immediate successful operator row says **task created** because `delegate_ta
 | `config.compression.status` | `safe` | None |
 
 **Behavior:** Shows normalized compression config, auxiliary route status, and latest session compression state. Does not mutate config or expose credentials.
+
+### Session usage tool
+
+| Tool | Risk | State touched |
+|------|------|---------------|
+| `session.usage` | `read-only-local` | None |
+
+**Behavior:** Reads canonical provider-usage records for `scope: "session"` or `scope: "latest_turn"`. It does not invoke a model. Latest-turn inspection excludes the current tool-calling turn, partitions Main agent, Auxiliary models, and Delegated work, and marks the result provisional while linked Task work remains active. Use `task.status` when the user names a particular Task. Task usage may already be included in its originating turn and session totals.
 
 ### Session search tool
 

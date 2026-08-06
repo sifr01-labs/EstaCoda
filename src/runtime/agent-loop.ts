@@ -10,7 +10,7 @@ import type { ContextEstimateStage, RuntimeEvent, RuntimeEventSink } from "../co
 import type { SecurityDecision, SecurityPolicy } from "../contracts/security.js";
 import { assessSecurityPolicy, capabilityFirstDefaults } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
-import type { TurnUsageSummary, UsageCostSummary } from "../contracts/usage-cost.js";
+import type { TurnUsageSummary } from "../contracts/usage-cost.js";
 import type {
   LoadedSkill,
   SelectedSkillPromptContent,
@@ -65,7 +65,7 @@ import { estimateMessagesTokensRough, estimateTextTokensRough } from "../prompt/
 import { redactSensitiveText } from "../utils/redaction.js";
 import type { MemoryCurationService } from "../memory/memory-curation-service.js";
 import { emitContextEstimate } from "./context-usage-events.js";
-import { unavailableUsageCostSummary, usageCostSummaryFromEntries } from "../providers/provider-usage-projection.js";
+import { projectTurnUsageEntries, unavailableTurnUsage } from "../session/usage-inspector.js";
 import { renderDelegatedAnswerAcknowledgement } from "./delegated-answer-ownership.js";
 import { visionInputProvenanceForTurn } from "../vision/vision-egress-policy.js";
 
@@ -454,6 +454,7 @@ export class AgentLoop {
         content: route.attachmentFailureResponse,
         channel: input.channel,
         metadata: {
+          respondingToTurnId: visibleTurn.id,
           matchedSkills: [],
           intentLabels: route.intent.labels,
           attachmentFailure: summarizeAttachments(attachments)
@@ -752,7 +753,8 @@ export class AgentLoop {
       });
       await this.#runRecorder.appendCancelledAssistantMessage({
         response,
-        channel: input.channel
+        channel: input.channel,
+        respondingToTurnId: visibleTurn.id
       });
 
       return await this.#completeAndReturn(response, {
@@ -926,6 +928,7 @@ export class AgentLoop {
         content: response.text,
         channel: input.channel,
         metadata: {
+          respondingToTurnId: visibleTurn.id,
           matchedSkills: response.matchedSkills,
           intentLabels: intent.labels,
           securityDecision,
@@ -1384,45 +1387,22 @@ export class AgentLoop {
   }
 
   async #withTurnUsage(response: AgentLoopResponse, visibleTurnId: string): Promise<AgentLoopResponse> {
-    let mainAgent: UsageCostSummary;
-    let auxiliaryModels: UsageCostSummary;
-    let delegatedWork: UsageCostSummary;
-    let total: UsageCostSummary;
+    let turnUsage: TurnUsageSummary;
     try {
       const entries = await this.#sessionDb.listProviderUsageEntries(this.#profileId, {
         visibleTurnId
       });
       const dispatchedProviderRequest = response.providerExecution?.attempts.some((attempt) => attempt.state === "dispatched") === true;
-      mainAgent = usageCostSummaryFromEntries(entries.filter((entry) =>
-        entry.taskId === undefined && entry.sourceKind === "main"
-      ), {
-        emptyUsageIsComplete: !dispatchedProviderRequest
-      });
-      auxiliaryModels = usageCostSummaryFromEntries(entries.filter((entry) =>
-        entry.taskId === undefined && entry.sourceKind === "auxiliary"
-      ), { emptyUsageIsComplete: true });
-      delegatedWork = usageCostSummaryFromEntries(entries.filter((entry) => entry.taskId !== undefined), {
-        emptyUsageIsComplete: true
-      });
-      total = usageCostSummaryFromEntries(entries, {
-        emptyUsageIsComplete: !dispatchedProviderRequest
+      turnUsage = projectTurnUsageEntries(entries, {
+        turnId: visibleTurnId,
+        emptyMainUsageIsComplete: !dispatchedProviderRequest
       });
     } catch {
-      mainAgent = unavailableUsageCostSummary("turn-usage-read-failed");
-      auxiliaryModels = unavailableUsageCostSummary("turn-usage-read-failed");
-      delegatedWork = unavailableUsageCostSummary("turn-usage-read-failed");
-      total = unavailableUsageCostSummary("turn-usage-read-failed");
+      turnUsage = unavailableTurnUsage(visibleTurnId, "turn-usage-read-failed");
     }
     return {
       ...response,
-      turnUsage: {
-        turnId: visibleTurnId,
-        mainAgent,
-        auxiliaryModels,
-        delegatedWork,
-        total,
-        provisional: false
-      }
+      turnUsage
     };
   }
 

@@ -91,6 +91,8 @@ import {
 import { createProviderModelSelectionFlow } from "../providers/provider-model-selection-flow.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { saveRuntimeConfig } from "../config/runtime-config.js";
+import { formatUsageInspection } from "../ui/usage-inspection-format.js";
+import type { UsageInspection, UsageInspector } from "../session/usage-inspector.js";
 import type { VoiceStateManager, VoiceMode } from "../gateway/voice-state.js";
 import {
   checkTtsProviderStatus,
@@ -224,6 +226,8 @@ export type ChannelGatewayOptions = {
   approvalQueue?: GatewayApprovalQueue;
   /** Profile-scoped durable queue. Its presence means persistence is required; failures never fall back to memory. */
   pendingTurnStore?: SQLitePendingTurnStore;
+  /** Profile-scoped local accounting reader for model-free usage commands. */
+  usageInspector?: UsageInspector;
 
   // Stage 5D additions (all optional)
   /** Active turn registry for busy protection and abort tracking. */
@@ -437,6 +441,7 @@ export class ChannelGateway {
   readonly #activeRuntimeByTurnKey = new Map<string, Runtime>();
   readonly #logWarning?: (message: string) => void;
   readonly #enqueueSessionFinalization: ChannelGatewayOptions["enqueueSessionFinalization"];
+  readonly #usageInspector: UsageInspector | undefined;
 
   // Stage 6
   readonly #isDraining: (() => boolean) | undefined;
@@ -498,6 +503,7 @@ export class ChannelGateway {
     this.#runtimeFingerprint = options.runtimeFingerprint;
     this.#logWarning = options.logWarning;
     this.#enqueueSessionFinalization = options.enqueueSessionFinalization;
+    this.#usageInspector = options.usageInspector;
 
     // Stage 6
     this.#isDraining = options.isDraining;
@@ -2735,6 +2741,7 @@ export class ChannelGateway {
         "EstaCoda channel commands",
         "/help - show this help",
         "/status - show the active channel session",
+        "/usage [last|task <task-id>] - show recorded tokens and estimated cost",
         "/model - choose a session model",
         "/model <provider>/<model> - set the model for this session",
         "/model clear - clear this session model override",
@@ -2808,6 +2815,41 @@ export class ChannelGateway {
         artifactCount: 0,
         progressCount: 0
       };
+    }
+
+    if (command === "/usage") {
+      const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      const args = parseGatewayCommandArgs(message.text);
+      const valid = args.length === 0 ||
+        (args.length === 1 && args[0]?.toLowerCase() === "last") ||
+        (args.length === 2 && args[0]?.toLowerCase() === "task" && (args[1]?.length ?? 0) > 0);
+      if (!valid) {
+        const text = "Usage: /usage | /usage last | /usage task <task-id>";
+        await this.#deliverText(adapter, message.sessionKey, text);
+        return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+      }
+
+      let inspection: UsageInspection | undefined;
+      try {
+        inspection = this.#usageInspector === undefined
+          ? undefined
+          : args.length === 0
+            ? await this.#usageInspector.inspectSession(sessionId)
+            : args[0]?.toLowerCase() === "last"
+              ? await this.#usageInspector.inspectLatestTurn(sessionId)
+              : await this.#usageInspector.inspectTask(sessionId, args[1]!);
+      } catch {
+        inspection = undefined;
+      }
+      const text = inspection === undefined
+        ? args[0]?.toLowerCase() === "task"
+          ? "Task usage is unavailable for this session."
+          : args[0]?.toLowerCase() === "last"
+            ? "No completed turn usage is available in this session."
+            : "Session usage is unavailable."
+        : formatUsageInspection(inspection);
+      await this.#deliverText(adapter, message.sessionKey, text);
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
 
     if (command === "/yolo") {
@@ -4647,12 +4689,13 @@ function readBusyTextCoalescingMetadata(metadata: Record<string, unknown> | unde
   };
 }
 
-function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/sessions" | "/switch" | "/search" | "/compact" | "/new" | "/reset" | "/reload-mcp" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | "/trust" | "/untrust" | "/workspace.trust.grant" | "/workspace.trust.revoke" | "/workspace.trust.status" | "/yolo" | "/cron" | "/attach" | "/detach" | "/sethome" | "/diagnostics" | undefined {
+function parseGatewayCommand(text: string): "/help" | "/status" | "/usage" | "/memory" | "/sessions" | "/switch" | "/search" | "/compact" | "/new" | "/reset" | "/reload-mcp" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | "/trust" | "/untrust" | "/workspace.trust.grant" | "/workspace.trust.revoke" | "/workspace.trust.status" | "/yolo" | "/cron" | "/attach" | "/detach" | "/sethome" | "/diagnostics" | undefined {
   const token = text.trim().split(/\s+/u)[0]?.toLowerCase();
 
   if (
     token === "/help" ||
     token === "/status" ||
+    token === "/usage" ||
     token === "/memory" ||
     token === "/sessions" ||
     token === "/switch" ||
@@ -4929,6 +4972,7 @@ export function telegramGatewayCommands(): Array<{ command: string; description:
   return [
     { command: "/help", description: "Show Telegram help" },
     { command: "/status", description: "Show current session status" },
+    { command: "/usage", description: "Show tokens and estimated cost" },
     { command: "/model", description: "Choose a session model" },
     { command: "/memory", description: "Inspect and manage memory curation" },
     { command: "/sessions", description: "List recent chat sessions" },

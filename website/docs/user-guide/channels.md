@@ -411,6 +411,9 @@ All gateway channels support a common set of control commands:
 |---|---|
 | `/help` | Show available commands |
 | `/status` | Show current session and channel status |
+| `/usage` | Show recorded usage and estimated cost for the current session |
+| `/usage last` | Show recorded usage for the latest completed visible turn |
+| `/usage task <task-id>` | Show recorded usage for a Task authorized by the current session |
 | `/sessions` | List recent sessions |
 | `/switch <session-id>` | Switch to a different session |
 | `/attach <code>` | Attach to a CLI session via handoff code |

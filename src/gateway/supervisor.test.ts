@@ -1512,6 +1512,30 @@ describe("runGatewaySupervisor", () => {
     });
   });
 
+  it("passes a profile-scoped local usage inspector to ChannelGateway", async () => {
+    let capturedOpts: any;
+
+    await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: (opts: any) => {
+          capturedOpts = opts;
+          return fakeChannelGateway() as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+      },
+    });
+
+    expect(capturedOpts.usageInspector).toMatchObject({
+      inspectSession: expect.any(Function),
+      inspectLatestTurn: expect.any(Function),
+      inspectTurn: expect.any(Function),
+      inspectTask: expect.any(Function)
+    });
+  });
+
   it("injects a profile-scoped durable turn store only when SQLite queue persistence is configured", async () => {
     let capturedOpts: any;
     const configPath = profileConfigPath(tmpDir);

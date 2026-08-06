@@ -572,6 +572,7 @@ export class RunRecorder {
   async appendCancelledAssistantMessage(input: {
     response: { text: string; progress: string[]; toolPlans: ToolCallPlan[] };
     channel: ChannelKind;
+    respondingToTurnId?: string;
   }): Promise<void> {
     await this.#sessionDb.appendMessage({
       sessionId: this.#currentSessionId(),
@@ -579,6 +580,7 @@ export class RunRecorder {
       content: input.response.text,
       channel: input.channel,
       metadata: {
+        ...(input.respondingToTurnId === undefined ? {} : { respondingToTurnId: input.respondingToTurnId }),
         cancelled: true,
         resumeNote: input.response.progress.find((entry) => entry.startsWith("resume:"))?.replace(/^resume:\s*/u, ""),
         toolPlans: input.response.toolPlans.map((plan) => ({

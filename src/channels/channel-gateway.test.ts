@@ -1174,6 +1174,22 @@ function voiceToolExecution(): Awaited<ReturnType<Runtime["handle"]>>["toolExecu
   };
 }
 
+function completeUsage(totalTokens: number, estimatedCostUsd: number) {
+  return {
+    providerCalls: totalTokens === 0 ? 0 : 1,
+    inputTokens: totalTokens,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    totalTokens,
+    estimatedCostUsd,
+    usageComplete: true,
+    costComplete: true,
+    incompleteReasons: []
+  };
+}
+
 async function writeGatewayModelConfig(homeDir: string, config: unknown): Promise<void> {
   const configPath = resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
   await mkdir(dirname(configPath), { recursive: true });
@@ -3426,6 +3442,75 @@ describe("ChannelGateway commands", () => {
     });
   });
 
+  describe("/usage", () => {
+    it("reports session, latest-turn, and authorized Task accounting without handling a model turn", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const inspectSession = vi.fn(async (sessionId: string) => ({
+        scope: "session" as const,
+        sessionId,
+        usage: completeUsage(120, 0.25)
+      }));
+      const inspectLatestTurn = vi.fn(async (sessionId: string) => ({
+        scope: "turn" as const,
+        sessionId,
+        usage: {
+          turnId: "turn-1",
+          mainAgent: completeUsage(120, 0.25),
+          auxiliaryModels: completeUsage(0, 0),
+          delegatedWork: completeUsage(0, 0),
+          total: completeUsage(120, 0.25),
+          provisional: false
+        }
+      }));
+      const inspectTask = vi.fn(async (sessionId: string, taskId: string) => ({
+        scope: "task" as const,
+        sessionId,
+        taskId,
+        status: "completed" as const,
+        usage: completeUsage(240, 0.5),
+        provisional: false
+      }));
+      const handle = vi.fn();
+      const runtimeForSession = vi.fn(async () => ({ ...createMinimalRuntime(), handle }));
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession,
+        sessionStore: { getOrCreateSessionId: async () => "attached-session" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        usageInspector: {
+          inspectSession,
+          inspectLatestTurn,
+          inspectTurn: vi.fn(),
+          inspectTask
+        }
+      });
+
+      expect((await gateway.receive(makeMessage("/usage"))).replyText).toContain("Usage — current session");
+      expect((await gateway.receive(makeMessage("/usage last"))).replyText).toContain("Usage — latest completed turn");
+      expect((await gateway.receive(makeMessage("/usage task task-1"))).replyText).toContain("Usage — Task");
+      expect(inspectSession).toHaveBeenCalledWith("attached-session");
+      expect(inspectLatestTurn).toHaveBeenCalledWith("attached-session");
+      expect(inspectTask).toHaveBeenCalledWith("attached-session", "task-1");
+      expect(handle).not.toHaveBeenCalled();
+      expect(runtimeForSession).not.toHaveBeenCalled();
+    });
+
+    it("rejects invalid syntax before constructing a runtime", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const runtimeForSession = vi.fn(async () => createMinimalRuntime());
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession,
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } }
+      });
+
+      const result = await gateway.receive(makeMessage("/usage something"));
+      expect(result.replyText).toBe("Usage: /usage | /usage last | /usage task <task-id>");
+      expect(runtimeForSession).not.toHaveBeenCalled();
+    });
+  });
+
   describe("channel-triggered run metadata", () => {
     it("passes source metadata to runtime factory", async () => {
       const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
@@ -3487,11 +3572,13 @@ describe("ChannelGateway commands", () => {
   });
 
   describe("telegramGatewayCommands", () => {
-    it("includes /compact, /sethome, and /diagnostics", () => {
+    it("includes /usage, /compact, /sethome, and /diagnostics", () => {
       const commands = telegramGatewayCommands();
+      const usage = commands.find((c) => c.command === "/usage");
       const compact = commands.find((c) => c.command === "/compact");
       const sethome = commands.find((c) => c.command === "/sethome");
       const diagnostics = commands.find((c) => c.command === "/diagnostics");
+      expect(usage).toBeDefined();
       expect(compact).toBeDefined();
       expect(sethome).toBeDefined();
       expect(diagnostics).toBeDefined();

@@ -1064,8 +1064,10 @@ describe("AgentLoop provider availability gating", () => {
       trustedWorkspace: true
     });
 
-    const agentMessages = (await sessionDb.listMessages(sessionId)).filter((message) => message.role === "agent");
+    const messages = await sessionDb.listMessages(sessionId);
+    const agentMessages = messages.filter((message) => message.role === "agent");
     const metadata = agentMessages[0]?.metadata;
+    expect(metadata?.respondingToTurnId).toBe(messages.find((message) => message.role === "user")?.id);
     expect(metadata?.provider).toBe("test-provider/test-model");
     expect(metadata?.providerFallbackUsed).toBe(false);
     expect(metadata?.providerPrimaryFailureClass).toBeUndefined();
