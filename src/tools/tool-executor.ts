@@ -11,7 +11,7 @@ import type { SessionDB } from "../contracts/session.js";
 import type { ToolDefinition, ToolResult, ToolRiskClass, ToolSecurityResolution, ToolsetName } from "../contracts/tool.js";
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
-import type { VisionInputProvenanceContext } from "../contracts/vision.js";
+import type { VisionDispatchPhase, VisionInputProvenanceContext } from "../contracts/vision.js";
 import { assessCommandSafety } from "../security/command-safety.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { ToolRegistry } from "./tool-registry.js";
@@ -41,6 +41,7 @@ export type ToolExecutionRequest = {
   excludedTools?: string[];
   providerUsageLineage?: ProviderUsageLineage;
   visionInputProvenance?: VisionInputProvenanceContext;
+  visionDispatchPhase?: VisionDispatchPhase;
   signal?: AbortSignal;
 };
 
@@ -54,6 +55,7 @@ export type NamedToolExecutionRequest = {
   visibleTurnId?: string;
   providerUsageLineage?: ProviderUsageLineage;
   visionInputProvenance?: VisionInputProvenanceContext;
+  visionDispatchPhase?: VisionDispatchPhase;
   toolCallName?: string;
   providerNativeToolCall?: unknown;
   signal?: AbortSignal;
@@ -118,6 +120,7 @@ export class ToolExecutor {
       environmentType: request.environmentType,
       providerUsageLineage: request.providerUsageLineage,
       visionInputProvenance: request.visionInputProvenance,
+      visionDispatchPhase: request.visionDispatchPhase,
       signal: request.signal
     });
   }
@@ -167,6 +170,7 @@ export class ToolExecutor {
         visibleTurnId: request.visibleTurnId,
         providerUsageLineage: request.providerUsageLineage,
         visionInputProvenance: request.visionInputProvenance,
+        visionDispatchPhase: request.visionDispatchPhase,
         signal: request.signal,
         environmentType,
         onEvent: request.onEvent,
@@ -278,6 +282,7 @@ export class ToolExecutor {
           visibleTurnId: request.visibleTurnId,
           providerUsageLineage: request.providerUsageLineage,
           visionInputProvenance: request.visionInputProvenance,
+          visionDispatchPhase: request.visionDispatchPhase,
           securityResolution,
           signal: request.signal,
           environmentType,

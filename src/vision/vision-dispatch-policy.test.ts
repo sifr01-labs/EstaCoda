@@ -1,0 +1,60 @@
+import { describe, expect, it } from "vitest";
+import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
+import { resolveVisionDispatch } from "./vision-dispatch-policy.js";
+
+describe("vision dispatch policy", () => {
+  it("uses the main route for initial and discovered images when it supports vision", () => {
+    for (const phase of ["initial-attachment", "post-tool"] as const) {
+      expect(resolveVisionDispatch({
+        phase,
+        mainRoute: route("main", true),
+        auxiliaryRoute: auxiliary(route("aux", true))
+      })).toMatchObject({ mode: "native", phase, route: { id: "main" } });
+    }
+  });
+
+  it("uses the auxiliary route when the main route is text-only", () => {
+    expect(resolveVisionDispatch({
+      phase: "initial-attachment",
+      mainRoute: route("main-text", false),
+      auxiliaryRoute: auxiliary(route("aux-vision", true))
+    })).toMatchObject({ mode: "auxiliary", route: { id: "aux-vision" } });
+  });
+
+  it("fails clearly instead of sending images to a text-only fallback", () => {
+    expect(resolveVisionDispatch({
+      phase: "post-tool",
+      mainRoute: route("main-text", false),
+      auxiliaryRoute: auxiliary(undefined)
+    })).toEqual({
+      mode: "unavailable",
+      phase: "post-tool",
+      reason: "The main model is text-only and no vision-capable auxiliary route is configured."
+    });
+  });
+});
+
+function route(id: string, supportsVision: boolean): ResolvedModelRoute {
+  return {
+    provider: "test-provider",
+    id,
+    profile: {
+      id,
+      provider: "test-provider",
+      contextWindowTokens: 32_000,
+      supportsTools: true,
+      supportsVision,
+      supportsStructuredOutput: true
+    }
+  };
+}
+
+function auxiliary(modelRoute: ResolvedModelRoute | undefined): ResolvedAuxiliaryRoute {
+  return {
+    task: "vision",
+    route: modelRoute,
+    source: modelRoute === undefined ? "disabled" : "explicit",
+    fallbackToMain: false,
+    diagnostics: []
+  };
+}

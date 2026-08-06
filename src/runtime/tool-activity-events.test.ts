@@ -8,6 +8,7 @@ import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { NativeToolExecutor } from "./native-tool-executor.js";
 import { SkillPlaybookRunner } from "./skill-playbook-runner.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
+import { attachEphemeralVisionImages, ephemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 
 const fileReadTool: ToolDefinition = {
   name: "file.read",
@@ -460,5 +461,53 @@ describe("runtime tool activity events", () => {
       targetSummary: undefined,
       activityId: expect.stringMatching(/^native-image-/),
     }));
+  });
+
+  it("dispatches ready initial images through vision with runtime-only provenance", async () => {
+    const result = attachEphemeralVisionImages({ ok: true, content: "prepared" }, [{
+      content: { type: "image_url", image_url: { url: "data:image/png;base64,aW1hZ2U=" } },
+      usage: { width: 1, height: 1, detail: "auto" },
+      delivery: "continuation"
+    }]);
+    const executeTool = vi.fn().mockResolvedValue(execution({
+      tool: { ...fileReadTool, name: "vision.analyze" },
+      result
+    }));
+    const executor = new NativeToolExecutor({
+      toolExecutor: {
+        getToolDefinition: () => ({ ...fileReadTool, name: "vision.analyze" }),
+        executeTool
+      } as never,
+      runRecorder: runRecorder() as never,
+      sessionId: "s1"
+    });
+
+    const outcome = await executor.executeDeterministicNativeTools({
+      intent: intent({ labels: ["attachment-analysis"], nativeIntent: "attachment-analysis" }),
+      text: "What is in this image?",
+      attachments: [{
+        id: "image-1",
+        kind: "image",
+        status: "ready",
+        localPath: "/media/browser-screenshot.png",
+        mimeType: "image/png"
+      }],
+      trustedWorkspace: true,
+      visibleTurnId: "turn-1",
+      providerUsageLineage: { executionSessionId: "s1", visibleTurnId: "turn-1" },
+      visionInputProvenance: {
+        attachmentPaths: ["/media/browser-screenshot.png"],
+        explicitReferencePaths: []
+      }
+    });
+
+    expect(executeTool).toHaveBeenCalledWith(expect.objectContaining({
+      tool: "vision.analyze",
+      input: { path: "/media/browser-screenshot.png", prompt: "What is in this image?" },
+      visionDispatchPhase: "initial-attachment",
+      visibleTurnId: "turn-1"
+    }));
+    expect(outcome.plans[0]?.status).toBe("executed");
+    expect(ephemeralVisionImages(outcome.executions[0]?.result, "initial")).toHaveLength(1);
   });
 });

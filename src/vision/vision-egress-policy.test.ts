@@ -78,6 +78,22 @@ describe("vision egress security resolution", () => {
     expect(result?.targetKey).toContain(encodeURIComponent("anthropic@https://api.anthropic.com/v1"));
   });
 
+  it("binds native multimodal fallbacks while ignoring text-only fallbacks", async () => {
+    const textOnlyFallback = route("anthropic");
+    textOnlyFallback.profile = { ...textOnlyFallback.profile, supportsVision: false };
+    const result = await resolveVisionEgressSecurity({
+      source: source(imagePath),
+      workspaceRoot: root,
+      visionRoute: auxiliary(route("openai")),
+      additionalRoutes: [route("anthropic"), textOnlyFallback, route("local", "http://localhost:11434/v1")]
+    });
+
+    expect(result?.dataEgress?.destinations).toEqual([
+      "anthropic@https://api.anthropic.com/v1",
+      "openai@https://api.openai.com/v1"
+    ]);
+  });
+
   it("recognizes sensitive local path families without exposing them in the target summary", async () => {
     const sensitiveDir = join(root, ".ssh");
     await mkdir(sensitiveDir);

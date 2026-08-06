@@ -7,6 +7,7 @@ import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { ToolRegistry } from "./tool-registry.js";
 import { summarizeSecurityTarget, ToolExecutor } from "./tool-executor.js";
+import { attachEphemeralVisionImages, ephemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 
 function createMockPolicy(decision: "allow" | "deny" = "allow"): SecurityPolicy {
   return {
@@ -1085,6 +1086,30 @@ describe("ToolExecutor browser CDP gating", () => {
 });
 
 describe("ToolExecutor dynamic data-egress security", () => {
+  it("keeps ephemeral image bytes out of sessions, trajectories, and exported records", async () => {
+    const encodedPayload = "cGVyc2lzdGVuY2Utc2VudGluZWw=";
+    const tool: RegisteredTool = {
+      ...createEchoTool("vision.analyze"),
+      run: async () => attachEphemeralVisionImages({ ok: true, content: "prepared image" }, [{
+        content: { type: "image_url", image_url: { url: `data:image/png;base64,${encodedPayload}` } },
+        usage: { width: 1, height: 1, detail: "auto" },
+        delivery: "continuation"
+      }])
+    };
+    const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({ tools: [tool] });
+
+    const record = await executor.executeTool({
+      tool: "vision.analyze",
+      input: { path: "image.png" },
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    expect(ephemeralVisionImages(record?.result)).toHaveLength(1);
+    expect(await persistedExecutionState(sessionDb, trajectoryRecorder)).not.toContain(encodedPayload);
+    expect(JSON.stringify(record)).not.toContain(encodedPayload);
+  });
+
   it("uses runtime-derived provenance and the dynamic hosted destination before running", async () => {
     let observedRequest: SecurityRequest | undefined;
     const run = vi.fn(async (_input, context): Promise<ToolResult> => ({

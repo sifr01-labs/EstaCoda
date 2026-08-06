@@ -16,7 +16,7 @@ import type {
 } from "../contracts/provider.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision } from "../contracts/security.js";
-import type { ProviderUsageContext, ProviderUsageLineage } from "../contracts/provider-usage.js";
+import type { ProviderImageInput, ProviderUsageContext, ProviderUsageLineage } from "../contracts/provider-usage.js";
 import type {
   ReplacementSessionMessage,
   SessionContextWindowUsage,
@@ -645,6 +645,7 @@ export class ProviderTurnLoop {
     const execution = await this.#completeProviderRequestWithFinalizationRetries({
       request: providerRequest,
       preferences: providerPreferences,
+      imageInputs: prompt.imageInputs,
       sessionId: this.#currentSessionId(),
       iteration: input.iteration,
       loopStartedAt: input.loopStartedAt,
@@ -779,6 +780,7 @@ export class ProviderTurnLoop {
     const execution = await this.#completeProviderRequestWithFinalizationRetries({
       request: providerRequest,
       preferences: providerPreferences,
+      imageInputs: prompt.imageInputs,
       sessionId: this.#currentSessionId(),
       iteration: input.iteration,
       loopStartedAt: input.loopStartedAt,
@@ -841,6 +843,7 @@ export class ProviderTurnLoop {
   async #completeProviderRequestWithFinalizationRetries(input: {
     request: Omit<ProviderRequest, "model"> & { model?: string };
     preferences: ProviderRoutePreferences;
+    imageInputs: readonly ProviderImageInput[];
     sessionId: string;
     iteration: number;
     loopStartedAt: number;
@@ -860,6 +863,7 @@ export class ProviderTurnLoop {
   async #completeProviderRequestWithTruncatedToolRetry(input: {
     request: Omit<ProviderRequest, "model"> & { model?: string };
     preferences: ProviderRoutePreferences;
+    imageInputs: readonly ProviderImageInput[];
     sessionId: string;
     iteration: number;
     loopStartedAt: number;
@@ -884,7 +888,7 @@ export class ProviderTurnLoop {
       signal: input.signal,
       primaryRoute,
       fallbackChain,
-      usage: await this.#nextProviderUsageContext(input.visibleTurnId),
+      usage: await this.#nextProviderUsageContext(input.visibleTurnId, input.imageInputs),
       onEvent: initialEvents.onEvent
     });
 
@@ -946,7 +950,7 @@ export class ProviderTurnLoop {
       signal: input.signal,
       primaryRoute: retryPrimaryRoute,
       fallbackChain: retryChain.slice(1),
-      usage: await this.#nextProviderUsageContext(input.visibleTurnId),
+      usage: await this.#nextProviderUsageContext(input.visibleTurnId, input.imageInputs),
       onEvent: retryEvents.onEvent
     });
     const retryExecution = rebaseRetryRouteIdentity(retryExecutionRaw, retryChain, originalRouteChain);
@@ -970,6 +974,7 @@ export class ProviderTurnLoop {
     initial: ProviderExecutionResult;
     request: Omit<ProviderRequest, "model"> & { model?: string };
     preferences: ProviderRoutePreferences;
+    imageInputs: readonly ProviderImageInput[];
     sessionId: string;
     iteration: number;
     loopStartedAt: number;
@@ -1161,7 +1166,10 @@ export class ProviderTurnLoop {
     return this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
   }
 
-  async #nextProviderUsageContext(visibleTurnId: string | undefined): Promise<ProviderUsageContext> {
+  async #nextProviderUsageContext(
+    visibleTurnId: string | undefined,
+    imageInputs: readonly ProviderImageInput[]
+  ): Promise<ProviderUsageContext> {
     const lineage = await this.#providerUsageLineage(visibleTurnId);
     return {
       requestKey: [
@@ -1170,6 +1178,7 @@ export class ProviderTurnLoop {
         String(this.#providerRequestSequence++)
       ].join("\0"),
       sourceKind: this.#taskExecution === undefined ? "main" : "task",
+      ...(imageInputs.length === 0 ? {} : { imageInputs }),
       ...lineage
     };
   }

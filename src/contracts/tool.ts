@@ -3,7 +3,7 @@ import type { SecurityDataEgressContext } from "./security.js";
 import type { ProviderUsageLineage } from "./provider-usage.js";
 import type { RuntimeEventSink } from "./runtime-event.js";
 import type { RuntimeToolContext, SessionToolContext } from "./tool-context.js";
-import type { VisionInputProvenanceContext } from "./vision.js";
+import type { VisionDispatchPhase, VisionInputProvenanceContext } from "./vision.js";
 
 export type ToolRiskClass =
   | "read-only-local"
@@ -62,6 +62,8 @@ export type ToolExecutionContext = {
   providerUsageLineage?: ProviderUsageLineage;
   /** Runtime-derived current-turn image sources; model input cannot set this. */
   visionInputProvenance?: VisionInputProvenanceContext;
+  /** Runtime-owned delivery phase for unified vision dispatch. */
+  visionDispatchPhase?: VisionDispatchPhase;
   /** Security resolution supplied by ToolExecutor after policy assessment. */
   securityResolution?: ToolSecurityResolution;
   signal?: AbortSignal;

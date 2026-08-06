@@ -34,8 +34,9 @@ export async function resolveVisionEgressSecurity(input: {
   provenance?: VisionInputProvenanceContext;
   visionRoute: ResolvedAuxiliaryRoute;
   mainRoute?: ResolvedModelRoute;
+  additionalRoutes?: readonly ResolvedModelRoute[];
 }): Promise<ToolSecurityResolution | undefined> {
-  const routes = possibleVisionRoutes(input.visionRoute, input.mainRoute);
+  const routes = possibleVisionRoutes(input.visionRoute, input.mainRoute, input.additionalRoutes);
   const destinations = [...new Set(routes.map(routeDestination).filter(
     (destination): destination is VisionDestination => destination !== undefined && destination.inference === "hosted"
   ).map((destination) => destination.key))].sort();
@@ -68,10 +69,12 @@ type VisionDestination = {
 
 function possibleVisionRoutes(
   visionRoute: ResolvedAuxiliaryRoute,
-  mainRoute: ResolvedModelRoute | undefined
+  mainRoute: ResolvedModelRoute | undefined,
+  additionalRoutes: readonly ResolvedModelRoute[] | undefined
 ): ResolvedModelRoute[] {
   const routes = visionRoute.route === undefined ? [] : [visionRoute.route];
   if (visionRoute.fallbackToMain && mainRoute?.profile.supportsVision === true) routes.push(mainRoute);
+  routes.push(...(additionalRoutes ?? []).filter((route) => route.profile.supportsVision));
   const seen = new Set<string>();
   return routes.filter((route) => {
     const key = `${route.provider}\0${route.id}\0${route.baseUrl ?? ""}`;

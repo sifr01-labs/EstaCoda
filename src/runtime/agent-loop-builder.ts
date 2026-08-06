@@ -335,6 +335,7 @@ export class AgentLoopBuilder {
         browserBackend: substrate.browserBackend,
         browserConfig: substrate.browserConfig,
         mainRoute: routes.mainRoute,
+        mainFallbackRoutes: routes.modelFallbackRoutes,
         visionRoute: routes.visionRoute,
         compressionRoute: routes.compressionRoute,
         providerRegistry: substrate.providerRegistry,
@@ -593,6 +594,7 @@ export class AgentLoopBuilder {
           }),
       skillEvolutionStore: substrate.skillEvolutionStore,
       agentEvolutionPolicy: input.agentEvolutionPolicy,
+      taskExecution: input.taskExecution,
       ui: input.ui,
       agentProfile: input.agentProfile
     });
@@ -729,6 +731,7 @@ function buildPreSkillVisibilityToolContext(input: SessionToolContext): SessionT
     browserBackend: input.browserBackend,
     browserConfig: input.browserConfig,
     mainRoute: input.mainRoute,
+    mainFallbackRoutes: input.mainFallbackRoutes,
     visionRoute: input.visionRoute,
     compressionRoute: input.compressionRoute,
     providerRegistry: input.providerRegistry,

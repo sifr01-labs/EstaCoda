@@ -2,9 +2,10 @@ import { describe, it, expect, vi } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { analyzeImageWithVision, createVisionTools } from "./vision-tools.js";
+import { analyzeImageWithVision, createVisionTools, dispatchImageWithVision } from "./vision-tools.js";
 import type { ProviderExecutionResult, ProviderExecutor } from "../providers/provider-executor.js";
 import type { ResolvedModelRoute } from "../contracts/provider.js";
+import { ephemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 
 function createMockExecutor(ok = true, content = "vision result") {
   const fn = vi.fn().mockResolvedValue({
@@ -87,6 +88,60 @@ const textOnlyRoute: ResolvedModelRoute = {
 };
 
 describe("vision tools", () => {
+  describe("unified dispatch", () => {
+    it("returns a non-serializable ephemeral image for a vision-capable main model", async () => {
+      const executor = createMockExecutor();
+      const tmp = createTempPng();
+      try {
+        const result = await dispatchImageWithVision({
+          workspaceRoot: tmp.dir,
+          mainRoute: baseRoute,
+          visionAuxiliaryRoute: {
+            task: "vision",
+            route: baseRoute,
+            source: "explicit",
+            fallbackToMain: false,
+            diagnostics: []
+          },
+          providerExecutor: executor
+        }, { path: "test.png" });
+
+        expect(result.ok).toBe(true);
+        expect(executor.complete).not.toHaveBeenCalled();
+        expect(ephemeralVisionImages(result)).toHaveLength(1);
+        expect(ephemeralVisionImages(result)[0]?.content.image_url.url).toMatch(/^data:image\/png;base64,/u);
+        expect(JSON.stringify(result)).not.toContain("base64");
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("uses the auxiliary provider for a text-only main model", async () => {
+      const executor = createMockExecutor();
+      const tmp = createTempPng();
+      try {
+        const result = await dispatchImageWithVision({
+          workspaceRoot: tmp.dir,
+          mainRoute: textOnlyRoute,
+          visionAuxiliaryRoute: {
+            task: "vision",
+            route: baseRoute,
+            source: "explicit",
+            fallbackToMain: false,
+            diagnostics: []
+          },
+          providerExecutor: executor
+        }, { path: "test.png" });
+
+        expect(result.ok).toBe(true);
+        expect(executor.complete).toHaveBeenCalledTimes(1);
+        expect(ephemeralVisionImages(result)).toHaveLength(0);
+      } finally {
+        tmp.cleanup();
+      }
+    });
+  });
+
   describe("createVisionTools", () => {
     it("returns vision.analyze tool", () => {
       const tools = createVisionTools({ workspaceRoot: "/tmp" });

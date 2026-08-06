@@ -24,6 +24,7 @@ import { ToolRegistry } from "../tools/tool-registry.js";
 import { RunRecorder } from "./run-recorder.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
 import { ProviderTurnLoop, type ProviderTurnLoopOptions } from "./provider-turn-loop.js";
+import { attachEphemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 
 function createMockAdapter() {
   return {
@@ -336,6 +337,8 @@ async function runBasicProviderTurn(
     onDelta?: (text: string) => void;
     onSegmentBreak?: (reason?: string) => void | Promise<void>;
     attachments?: ChannelAttachment[];
+    toolExecutions?: ToolExecutionRecord[];
+    toolPlans?: ToolCallPlan[];
     context?: ContextExpansionResult;
     visibleTurnId?: string;
   } = {}
@@ -350,14 +353,14 @@ async function runBasicProviderTurn(
     selectedSkillSetup: undefined,
     intent: { labels: ["general"], confidence: 1, nativeIntent: "general", evidence: [], suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, rationale: "" },
     securityDecision: "allow",
-    toolExecutions: [],
+    toolExecutions: callbacks.toolExecutions ?? [],
     context: callbacks.context,
     projectContext: undefined,
     attachments: callbacks.attachments,
     memoryPromptContext: undefined,
     providerTools: [],
     fallbackText: "",
-    toolPlans: [],
+    toolPlans: callbacks.toolPlans ?? [],
     trustedWorkspace: false,
     initialRiskClass: "read-only-local",
     onEvent: callbacks.onEvent,
@@ -659,7 +662,10 @@ async function createPostToolNudgeHarness(input: {
       stepInput.toolPlans.push(plan);
     }
     for (const execution of step.executions ?? []) {
-      stepInput.toolPlans.push(toolPlan(execution.toolCallId ?? execution.tool.name));
+      const plan = toolPlan(execution.toolCallId ?? execution.tool.name);
+      plan.tool = execution.tool.name;
+      plan.result = execution.result;
+      stepInput.toolPlans.push(plan);
     }
     return {
       executions: step.executions ?? [],
@@ -1781,11 +1787,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     }));
   });
 
-  it("requires vision for image-bearing continuation requests", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "estacoda-provider-turn-vision-"));
-    const imagePath = join(dir, "image.png");
-    writeFileSync(imagePath, Buffer.from("fake-png"));
-
+  it("uses initial ephemeral images once and post-tool images on continuation", async () => {
     const visionModel: ModelProfile = {
       ...mockModel,
       supportsVision: true
@@ -1794,40 +1796,46 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       ...primaryRoute,
       profile: visionModel
     };
-    const attachment: ChannelAttachment = {
-      id: "image-1",
-      kind: "image",
-      status: "ready",
-      localPath: imagePath,
-      bytes: 8
-    };
+    const initialExecution = toolExecutionForTool("initial-image", "vision.analyze");
+    initialExecution.result = attachEphemeralVisionImages(initialExecution.result!, [{
+      content: { type: "image_url", image_url: { url: "data:image/png;base64,aW5pdGlhbA==" } },
+      usage: { width: 10, height: 20, detail: "auto" },
+      delivery: "initial"
+    }]);
+    const continuationExecution = toolExecutionForTool("call-image", "vision.analyze");
+    continuationExecution.result = attachEphemeralVisionImages(continuationExecution.result!, [{
+      content: { type: "image_url", image_url: { url: "data:image/png;base64,Y29udGludWF0aW9u" } },
+      usage: { width: 30, height: 40, detail: "auto" },
+      delivery: "continuation"
+    }]);
+    const harness = await createPostToolNudgeHarness({
+      model: visionModel,
+      primaryModelRoute: visionPrimaryRoute,
+      responses: [
+        providerExecution("", [providerToolCall("call-image")]),
+        providerExecution("final answer")
+      ],
+      toolSteps: [{ executions: [continuationExecution] }],
+      maxProviderIterations: 2
+    });
 
-    try {
-      const harness = await createPostToolNudgeHarness({
-        model: visionModel,
-        primaryModelRoute: visionPrimaryRoute,
-        responses: [
-          providerExecution("", [providerToolCall("call-image")]),
-          providerExecution("final answer")
-        ],
-        toolSteps: [
-          {
-            executions: [toolExecution("call-image")]
-          }
-        ],
-        maxProviderIterations: 2
-      });
+    await runBasicProviderTurn(harness.loop, { toolExecutions: [initialExecution] });
 
-      await runBasicProviderTurn(harness.loop, { attachments: [attachment] });
-
-      expect(harness.completeSpy).toHaveBeenCalledTimes(2);
-      const initialPreferences = harness.completeSpy.mock.calls[0]![1] as { requireVision?: boolean };
-      const continuationPreferences = harness.completeSpy.mock.calls[1]![1] as { requireVision?: boolean };
-      expect(initialPreferences.requireVision).toBe(true);
-      expect(continuationPreferences.requireVision).toBe(true);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    const initialRequest = harness.completeSpy.mock.calls[0]![0] as ProviderRequest;
+    const continuationRequest = harness.completeSpy.mock.calls[1]![0] as ProviderRequest;
+    expect(JSON.stringify(initialRequest.messages)).toContain("aW5pdGlhbA==");
+    expect(JSON.stringify(initialRequest.messages)).not.toContain("Y29udGludWF0aW9u");
+    expect(JSON.stringify(continuationRequest.messages)).toContain("Y29udGludWF0aW9u");
+    expect(JSON.stringify(continuationRequest.messages)).not.toContain("aW5pdGlhbA==");
+    expect((harness.completeSpy.mock.calls[0]![1] as { requireVision?: boolean }).requireVision).toBe(true);
+    expect((harness.completeSpy.mock.calls[1]![1] as { requireVision?: boolean }).requireVision).toBe(true);
+    expect(harness.completeSpy.mock.calls[0]![2]?.usage?.imageInputs).toEqual([
+      { width: 10, height: 20, detail: "auto" }
+    ]);
+    expect(harness.completeSpy.mock.calls[1]![2]?.usage?.imageInputs).toEqual([
+      { width: 30, height: 40, detail: "auto" }
+    ]);
   });
 
   it("uses structured native history for supported post-tool continuation", async () => {

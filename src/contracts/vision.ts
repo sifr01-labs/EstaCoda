@@ -4,6 +4,8 @@ export type VisionImageMimeType =
   | "image/png"
   | "image/webp";
 
+export type VisionDispatchPhase = "initial-attachment" | "post-tool";
+
 export type VisionImageSourceErrorCode =
   | "invalid-limit"
   | "invalid-path"

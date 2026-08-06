@@ -35,6 +35,7 @@ export type SessionToolContext = {
   browserBackend?: import("./browser.js").BrowserBackend;
   browserConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["browser"], "summarizeSnapshots" | "snapshotSummarizeThreshold">;
   mainRoute?: import("./provider.js").ResolvedModelRoute;
+  mainFallbackRoutes?: import("./provider.js").ResolvedModelRoute[];
   visionRoute?: import("./provider.js").ResolvedAuxiliaryRoute;
   compressionRoute?: import("./provider.js").ResolvedAuxiliaryRoute;
   providerRegistry?: import("../providers/provider-registry.js").ProviderRegistry;

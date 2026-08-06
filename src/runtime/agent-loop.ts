@@ -5,6 +5,7 @@ import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryConclusion, MemoryFileKind, MemoryProvider, MemoryPromptContext, SkillOutcome } from "../contracts/memory.js";
 import type { PromptBudgetReport, PromptSemanticCompressionReport } from "../contracts/prompt.js";
 import type { ModelProfile, ProviderMessage, ProviderRequest, ProviderRoutePreferences } from "../contracts/provider.js";
+import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
 import type { ContextEstimateStage, RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision, SecurityPolicy } from "../contracts/security.js";
 import { assessSecurityPolicy, capabilityFirstDefaults } from "../contracts/security.js";
@@ -25,6 +26,7 @@ import type { AgentProfileMode, AgentResponseLanguage, SessionCompressionConfig,
 import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { ContextReferenceExpander } from "../context/context-reference-expander.js";
 import type { ProviderExecutionResult, ProviderRuntimeEvent } from "../providers/provider-executor.js";
+import type { ProviderUsageTaskAttribution } from "../providers/provider-usage-ledger.js";
 import { providerSpendDenialMessage } from "../providers/provider-spend-policy.js";
 import type { ToolCallPlanner } from "../tools/tool-call-planner.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
@@ -65,6 +67,7 @@ import type { MemoryCurationService } from "../memory/memory-curation-service.js
 import { emitContextEstimate } from "./context-usage-events.js";
 import { unavailableUsageCostSummary, usageCostSummaryFromEntries } from "../providers/provider-usage-projection.js";
 import { renderDelegatedAnswerAcknowledgement } from "./delegated-answer-ownership.js";
+import { visionInputProvenanceForTurn } from "../vision/vision-egress-policy.js";
 
 export type AgentLoopInput = {
   text: string;
@@ -157,6 +160,7 @@ export type AgentLoopOptions = {
   };
   maxProviderIterations?: number;
   budgets?: Partial<AgentLoopBudgets>;
+  taskExecution?: ProviderUsageTaskAttribution;
 };
 
 export type AgentLoopBudgets = {
@@ -236,6 +240,7 @@ export class AgentLoop {
   readonly #ui: AgentLoopOptions["ui"];
   readonly #agentProfile: AgentLoopOptions["agentProfile"];
   readonly #budgets: AgentLoopBudgets;
+  readonly #taskExecution: ProviderUsageTaskAttribution | undefined;
 
   constructor(options: AgentLoopOptions) {
     this.#responseLabel = options.responseLabel;
@@ -249,6 +254,7 @@ export class AgentLoop {
     this.#sessionId = options.sessionId;
     this.#sessionRuntimeContext = options.sessionRuntimeContext;
     this.#profileId = options.profileId;
+    this.#taskExecution = options.taskExecution;
     this.#toolExecutor = options.toolExecutor;
     this.#toolCallPlanner = options.toolCallPlanner;
     this.#memoryProvider = options.memoryProvider;
@@ -603,7 +609,14 @@ export class AgentLoop {
     const deterministicNativeTools = await this.#nativeToolExecutor.executeDeterministicNativeTools({
       intent,
       text: effectiveText,
+      attachments,
       trustedWorkspace,
+      visibleTurnId: visibleTurn.id,
+      providerUsageLineage: await this.#providerUsageLineage(visibleTurn.id),
+      visionInputProvenance: visionInputProvenanceForTurn({
+        attachments,
+        references: context?.references
+      }),
       signal: input.signal,
       onEvent: input.onEvent
     });
@@ -1332,6 +1345,26 @@ export class AgentLoop {
         diagnostics: [`Reranker threw: ${truncate(redactSensitiveText(errorMessage(error)), 160)}`]
       };
     }
+  }
+
+  async #providerUsageLineage(visibleTurnId: string): Promise<ProviderUsageLineage> {
+    const executionSessionId = this.#currentSessionId();
+    const session = await this.#sessionDb.getSession(executionSessionId);
+    const task = this.#taskExecution;
+    return {
+      executionSessionId,
+      ...(session?.spendingScopeSessionId === undefined
+        ? {}
+        : { sessionBudgetScopeId: session.spendingScopeSessionId }),
+      visibleTurnId: task?.originTurnId ?? visibleTurnId,
+      ...(task === undefined ? {} : {
+        taskId: task.taskId,
+        rootTaskId: task.rootTaskId,
+        planRevisionId: task.planRevisionId,
+        stepId: task.stepId,
+        attemptId: task.attemptId
+      })
+    };
   }
 
   #currentSessionId(): string {

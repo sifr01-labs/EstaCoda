@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
@@ -7,6 +6,7 @@ import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryPromptContext, PromptMemoryBlock } from "../contracts/memory.js";
 import type { PromptBudgetReport, PromptLayerName, PromptLayerReport, PromptSemanticCompressionReport } from "../contracts/prompt.js";
 import type { ModelProfile, ProviderApiMode, ProviderMessage, ProviderMessageContentPart, ProviderReplayEcho, ProviderId } from "../contracts/provider.js";
+import type { ProviderImageInput } from "../contracts/provider-usage.js";
 import type { SecurityDecision } from "../contracts/security.js";
 import type { SessionMessage, StructuredToolHistoryDiagnosticEvent, StructuredToolHistoryDiagnosticReason } from "../contracts/session.js";
 import type {
@@ -20,7 +20,6 @@ import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import { stripInlineReasoning } from "../providers/provider-reasoning.js";
 import { compileSkillPlaybook, renderSkillPlaybookPlan } from "../skills/skill-playbook-planner.js";
-import { inferMimeType } from "../tools/media-tools.js";
 import { packetizeToolExecution, packetizeToolResult, renderToolResultPacket } from "../tools/tool-result-packet.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
@@ -35,6 +34,12 @@ import {
   renderConversationContinuationPrompt,
   type ConversationContinuationState
 } from "../runtime/conversation-continuation-state.js";
+import {
+  ephemeralVisionImages,
+  handledVisionAttachmentIds,
+  type EphemeralVisionDelivery,
+  type EphemeralVisionImage
+} from "../vision/ephemeral-vision-content.js";
 
 type PromptSessionHistoryMessage = Pick<ProviderMessage, "role" | "content"> & {
   metadata?: Record<string, unknown>;
@@ -55,6 +60,7 @@ type NativeHistoryRouteSupport = {
 export type ProviderPromptAssembly = {
   messages: ProviderMessage[];
   budget: PromptBudgetReport;
+  imageInputs: readonly ProviderImageInput[];
   nativeHistoryDiagnostics?: StructuredToolHistoryDiagnosticEvent[];
 };
 
@@ -133,7 +139,8 @@ export function assembleProviderPrompt(input: ProviderPromptInput): ProviderProm
     ? input
     : { ...input, sessionHistory: nativeHistory.unselectedSessionHistory };
   const layers = applyCache(input.cache, fitLayersToBudget(buildBaseLayers(promptInput), budgetTarget));
-  const messages = renderBaseMessages(layers, promptInput, nativeHistory?.messages);
+  const images = visionImagesFromExecutions(promptInput.toolExecutions, "initial");
+  const messages = renderBaseMessages(layers, promptInput, nativeHistory?.messages, images);
   const budget = buildBudgetReport({
     model: input.model?.id ?? "unconfigured",
     contextWindowTokens,
@@ -145,6 +152,7 @@ export function assembleProviderPrompt(input: ProviderPromptInput): ProviderProm
   return {
     messages,
     budget,
+    imageInputs: images.map((image) => image.usage),
     nativeHistoryDiagnostics: nativeHistory?.diagnostics
   };
 }
@@ -160,7 +168,7 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
     buildBaseLayers(promptInput, { includeToolResults: false }),
     Math.floor(budgetTarget * 0.85)
   ));
-  const baseMessages = renderBaseMessages(baseLayers, promptInput, nativeHistory?.messages);
+  const baseMessages = renderBaseMessages(baseLayers, promptInput, nativeHistory?.messages, []);
   const baseBudget = buildBudgetReport({
     model: input.model?.id ?? "unconfigured",
     contextWindowTokens,
@@ -174,6 +182,9 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
   );
   const nativeToolResultIds = nativeSelectedToolResultIds(nativeHistory?.messages ?? []);
   const flatExecutedPlans = executedPlans.filter((plan) => !nativeToolResultIds.has(plan.id));
+  const continuationImages = executedPlans.flatMap((plan) =>
+    ephemeralVisionImages(plan.result, "continuation")
+  );
   const toolResults = flatExecutedPlans
     .map((plan) => [
       `Tool: ${plan.tool}`,
@@ -213,7 +224,8 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
     cacheable: false,
     truncated: false,
     protectedLayer: true,
-    priority: 0
+    priority: 0,
+    estimatedTokens: estimateTokens(continuationContent) + continuationImages.length * IMAGE_TOKEN_ESTIMATE
   });
   const fittedLayers = applyCache(input.cache, fitLayersToBudget([
     ...baseLayers,
@@ -229,7 +241,7 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
     },
     {
       role: "user",
-      content: continuationContent
+      content: providerContentWithVisionImages(continuationContent, continuationImages)
     }
   ];
   const budget = buildBudgetReport({
@@ -243,6 +255,7 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
   return {
     messages,
     budget: mergeBudgetWarnings(budget, baseBudget),
+    imageInputs: continuationImages.map((image) => image.usage),
     nativeHistoryDiagnostics: nativeHistory?.diagnostics
   };
 }
@@ -290,7 +303,10 @@ function buildBaseLayers(
     : input.providerTools
         .map((tool) => `${tool.function.name}: ${tool.function.description}`)
         .join("\n");
-  const attachmentManifest = renderChannelAttachments(input.attachments);
+  const attachmentManifest = renderChannelAttachments(
+    input.attachments,
+    handledAttachmentIdsFromExecutions(input.toolExecutions)
+  );
   const sessionHistory = renderSessionHistory(input.sessionHistory);
   const conversationContinuationPrompt = isAcknowledgementContinuation(input.userText)
     ? renderConversationContinuationPrompt(input.conversationContinuationState)
@@ -408,7 +424,8 @@ function buildBaseLayers(
       protectedLayer: true,
       priority: 1,
       content: channelAttachments,
-      estimatedTokens: estimateTokens(channelAttachments) + estimateNativeImageAttachmentTokens(input.model, input.attachments)
+      estimatedTokens: estimateTokens(channelAttachments) +
+        visionImagesFromExecutions(input.toolExecutions, "initial").length * IMAGE_TOKEN_ESTIMATE
     }),
     layer({
       name: "intent",
@@ -562,7 +579,10 @@ function renderCompactionNotice(notice: string): string {
   return `Compaction notice:\n${withoutDuplicateHeading}`;
 }
 
-function renderChannelAttachments(attachments: ChannelAttachment[] | undefined): string {
+function renderChannelAttachments(
+  attachments: ChannelAttachment[] | undefined,
+  handledImageAttachmentIds: ReadonlySet<string>
+): string {
   if (attachments === undefined || attachments.length === 0) {
     return "No channel attachments were supplied with this turn.";
   }
@@ -570,7 +590,7 @@ function renderChannelAttachments(attachments: ChannelAttachment[] | undefined):
   return attachments.map((attachment) => {
     const suggestedTools = attachment.status !== undefined && attachment.status !== "ready"
       ? []
-      : suggestedToolsForAttachment(attachment);
+      : suggestedToolsForAttachment(attachment, handledImageAttachmentIds);
     const parts = [
       `id=${attachment.id}`,
       `kind=${attachment.kind}`,
@@ -609,9 +629,14 @@ function isTextLikeDocumentAttachment(attachment: ChannelAttachment): boolean {
     /\.(txt|md|markdown|json|xml|csv)$/iu.test(name);
 }
 
-function suggestedToolsForAttachment(attachment: ChannelAttachment): string[] {
-  if (attachment.kind === "image") {
-    return ["vision.analyze", "media.inspect"];
+function suggestedToolsForAttachment(
+  attachment: ChannelAttachment,
+  handledImageAttachmentIds: ReadonlySet<string>
+): string[] {
+  if (attachment.kind === "image" || attachment.mimeType?.toLowerCase().startsWith("image/") === true) {
+    return handledImageAttachmentIds.has(attachment.id)
+      ? ["media.inspect"]
+      : ["vision.analyze", "media.inspect"];
   }
 
   if (attachment.kind === "document") {
@@ -805,7 +830,8 @@ function renderSkillSetup(input: ProviderPromptInput["selectedSkillSetup"]): str
 function renderBaseMessages(
   layers: InternalPromptLayer[],
   input: ProviderPromptInput,
-  nativeHistoryMessages: ProviderMessage[] = []
+  nativeHistoryMessages: ProviderMessage[] = [],
+  images: readonly EphemeralVisionImage[] = []
 ): ProviderMessage[] {
   const identity = layers.find((candidate) => candidate.name === "identity");
   const cachedSystemLayers = layers.filter((candidate) =>
@@ -821,7 +847,6 @@ function renderBaseMessages(
     "§ EPHEMERAL REQUEST CONTEXT",
     ...ephemeralLayers.map((candidate) => candidate.content)
   ].join("\n\n");
-  const nativeVisionContent = buildNativeVisionUserContent(input.model, input.attachments, ephemeralText);
 
   return [
     {
@@ -837,7 +862,7 @@ function renderBaseMessages(
     ...nativeHistoryMessages,
     {
       role: "user",
-      content: nativeVisionContent
+      content: providerContentWithVisionImages(ephemeralText, images)
     }
   ];
 }
@@ -1180,56 +1205,35 @@ function sanitizeNativeHistorySessionMessage(message: SessionMessage): SessionMe
   };
 }
 
-function buildNativeVisionUserContent(
-  model: ModelProfile | undefined,
-  attachments: ChannelAttachment[] | undefined,
-  ephemeralText: string
+function providerContentWithVisionImages(
+  text: string,
+  images: readonly EphemeralVisionImage[]
 ): ProviderMessage["content"] {
-  if (model?.supportsVision !== true) {
-    return ephemeralText;
-  }
-
-  const imageParts = (attachments ?? [])
-    .filter((attachment) => attachment.kind === "image" && (attachment.status === undefined || attachment.status === "ready"))
-    .map((attachment) => attachment.localPath ?? attachment.path)
-    .filter((path): path is string => typeof path === "string" && path.length > 0)
-    .map(toImageContentPart)
-    .filter((part): part is NonNullable<ReturnType<typeof toImageContentPart>> => part !== undefined);
-
-  if (imageParts.length === 0) {
-    return ephemeralText;
-  }
-
+  if (images.length === 0) return text;
   return [
     {
       type: "text",
       text: [
-        ephemeralText,
+        text,
         "",
-        "Native image attachments are included below. Prefer analyzing them directly in-context before resorting to a vision tool."
+        "Ephemeral image content is included below for direct in-context analysis."
       ].join("\n")
     },
-    ...imageParts
+    ...images.map((image) => image.content)
   ];
 }
 
-function toImageContentPart(path: string): ProviderMessageContentPart | undefined {
-  try {
-    const mimeType = inferMimeType(path);
-    if (!mimeType.startsWith("image/")) {
-      return undefined;
-    }
+function visionImagesFromExecutions(
+  executions: readonly ToolExecutionRecord[],
+  delivery: EphemeralVisionDelivery
+): EphemeralVisionImage[] {
+  return executions.flatMap((execution) => ephemeralVisionImages(execution.result, delivery));
+}
 
-    const bytes = readFileSync(path);
-    return {
-      type: "image_url",
-      image_url: {
-        url: `data:${mimeType};base64,${bytes.toString("base64")}`
-      }
-    };
-  } catch {
-    return undefined;
-  }
+function handledAttachmentIdsFromExecutions(
+  executions: readonly ToolExecutionRecord[]
+): ReadonlySet<string> {
+  return new Set(executions.flatMap((execution) => [...handledVisionAttachmentIds(execution.result)]));
 }
 
 function layer(input: {
@@ -1544,38 +1548,6 @@ function estimateSessionHistoryImageTokens(messages: PromptSessionHistoryMessage
   return (messages ?? []).reduce((sum, message) => (
     sum + countImageLikeMetadata(message.metadata) * IMAGE_TOKEN_ESTIMATE
   ), 0);
-}
-
-function estimateNativeImageAttachmentTokens(
-  model: ModelProfile | undefined,
-  attachments: ChannelAttachment[] | undefined
-): number {
-  if (model?.supportsVision !== true) {
-    return 0;
-  }
-
-  return (attachments ?? []).filter(isReadyNativeImageAttachment).length * IMAGE_TOKEN_ESTIMATE;
-}
-
-function isReadyNativeImageAttachment(attachment: ChannelAttachment): boolean {
-  if (attachment.status !== undefined && attachment.status !== "ready") {
-    return false;
-  }
-
-  const path = attachment.localPath ?? attachment.path;
-  if (typeof path !== "string" || path.length === 0) {
-    return false;
-  }
-
-  if (attachment.kind === "image") {
-    return true;
-  }
-
-  if (attachment.mimeType?.toLowerCase().startsWith("image/") === true) {
-    return true;
-  }
-
-  return inferMimeType(path).startsWith("image/");
 }
 
 function stringifyProviderMessageContent(content: ProviderMessage["content"]): string {

@@ -10,6 +10,7 @@ import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-servi
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { assembleProviderContinuationPrompt, assembleProviderPrompt } from "./prompt-assembly.js";
 import { IMAGE_TOKEN_ESTIMATE } from "./token-estimator.js";
+import { attachEphemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 
 const model: ModelProfile = {
   id: "test-model",
@@ -562,19 +563,25 @@ describe("assembleProviderPrompt", () => {
     expect(prompt.budget.compressedLayers).not.toContain("compaction-notice");
   });
 
-  it("adds native image attachment cost to the prompt budget for vision models", async () => {
-    const imagePath = join(await mkdtemp(join(tmpdir(), "estacoda-prompt-image-")), "sample.png");
-    await writeFile(imagePath, Buffer.from("fake-png"));
+  it("adds runtime-only native image cost to the prompt budget", () => {
     const visionModel = { ...model, supportsVision: true };
     const withoutImage = assembleProviderPrompt(basePromptInput({ model: visionModel }));
+    const execution = toolExecution({ content: "prepared image", toolName: "vision.analyze" });
+    execution.result = attachEphemeralVisionImages(execution.result!, [{
+      content: { type: "image_url", image_url: { url: "data:image/png;base64,c2FmZQ==" } },
+      usage: { width: 12, height: 8, detail: "auto" },
+      delivery: "initial",
+      attachmentId: "image-1"
+    }]);
     const withImage = assembleProviderPrompt(basePromptInput({
       model: visionModel,
+      toolExecutions: [execution],
       attachments: [
         {
           id: "image-1",
           kind: "image",
           status: "ready",
-          localPath: imagePath,
+          localPath: "/workspace/sample.png",
           mimeType: "image/png"
         }
       ]
@@ -584,26 +591,25 @@ describe("assembleProviderPrompt", () => {
 
     expect(withLayer.estimatedTokens).toBeGreaterThanOrEqual(withoutLayer.estimatedTokens + IMAGE_TOKEN_ESTIMATE);
     expect(JSON.stringify(withImage.messages)).toContain("image_url");
+    expect(renderMessages(withImage.messages)).not.toContain("suggested_tools=vision.analyze");
   });
 
-  it("does not add native image token cost for non-vision models", async () => {
-    const imagePath = join(await mkdtemp(join(tmpdir(), "estacoda-prompt-nonvision-image-")), "sample.png");
-    await writeFile(imagePath, Buffer.from("fake-png"));
+  it("never reads attachment paths directly into provider messages", () => {
     const attachments = [
       {
         id: "image-1",
         kind: "image" as const,
         status: "ready" as const,
-        localPath: imagePath,
+        localPath: "/workspace/sample.png",
         mimeType: "image/png"
       }
     ];
     const nonVision = assembleProviderPrompt(basePromptInput({ model, attachments }));
     const vision = assembleProviderPrompt(basePromptInput({ model: { ...model, supportsVision: true }, attachments }));
 
-    expect(channelAttachmentLayer(vision).estimatedTokens - channelAttachmentLayer(nonVision).estimatedTokens)
-      .toBe(IMAGE_TOKEN_ESTIMATE);
+    expect(channelAttachmentLayer(vision).estimatedTokens).toBe(channelAttachmentLayer(nonVision).estimatedTokens);
     expect(JSON.stringify(nonVision.messages)).not.toContain("image_url");
+    expect(JSON.stringify(vision.messages)).not.toContain("image_url");
   });
 
   it("includes bounded text-like document previews without injecting binary document text", () => {
@@ -1310,31 +1316,36 @@ describe("assembleProviderContinuationPrompt", () => {
     ]));
   });
 
-  it("preserves current-user image parts with native replay and keeps current user last", async () => {
-    const imagePath = join(await mkdtemp(join(tmpdir(), "estacoda-prompt-native-image-")), "sample.png");
-    await writeFile(imagePath, Buffer.from("fake-png"));
-    const prompt = assembleProviderPrompt(basePromptInput({
+  it("keeps continuation images runtime-only, current, and last with native replay", () => {
+    const result = attachEphemeralVisionImages({ ok: true, content: "prepared" }, [{
+      content: { type: "image_url", image_url: { url: "data:image/png;base64,Y3VycmVudA==" } },
+      usage: { width: 20, height: 30, detail: "auto" },
+      delivery: "continuation"
+    }]);
+    const prompt = assembleProviderContinuationPrompt({
+      ...basePromptInput({
       model: { ...toolModel, supportsVision: true },
       rawSessionHistory: [
         providerToolTurn("tool-turn"),
         sessionMessage("tool-result", "tool", "native tool result", { tool_call_id: "call-1" }),
         sessionMessage("active-user", "user", "Inspect this.")
       ],
-      nativeHistoryRoute: supportedNativeRoute,
-      attachments: [
-        {
-          id: "image-1",
-          kind: "image",
-          status: "ready",
-          localPath: imagePath,
-          mimeType: "image/png"
-        }
-      ]
-    }));
+      nativeHistoryRoute: supportedNativeRoute
+      }),
+      providerExecution: providerExecution("", []),
+      toolPlans: [{
+        id: "call-image",
+        tool: "vision.analyze",
+        input: { path: "sample.png" },
+        source: "provider-tool-call",
+        status: "executed",
+        result
+      }]
+    });
 
     const finalMessage = prompt.messages.at(-1);
     expect(finalMessage?.role).toBe("user");
-    expect(prompt.messages.filter((message) => message.role === "user")).toHaveLength(1);
+    expect(prompt.messages.filter((message) => message.role === "user")).toHaveLength(2);
     expect(prompt.messages).toEqual(expect.arrayContaining([
       expect.objectContaining({
         role: "assistant",

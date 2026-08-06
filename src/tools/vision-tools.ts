@@ -4,6 +4,7 @@ import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
 import type {
   NormalizedVisionImage,
   ResolvedVisionImageSource,
+  VisionDispatchPhase,
   VisionImageNormalizationError,
   VisionImageSourceError
 } from "../contracts/vision.js";
@@ -16,6 +17,8 @@ import {
 } from "../vision/image-normalizer.js";
 import { resolveVisionImageSource } from "../vision/image-source-resolver.js";
 import { resolveVisionEgressSecurity } from "../vision/vision-egress-policy.js";
+import { attachEphemeralVisionImages } from "../vision/ephemeral-vision-content.js";
+import { resolveVisionDispatch } from "../vision/vision-dispatch-policy.js";
 
 export type VisionToolOptions = {
   workspaceRoot: string;
@@ -23,6 +26,7 @@ export type VisionToolOptions = {
   allowedRoots?: string[];
   visionAuxiliaryRoute?: ResolvedAuxiliaryRoute;
   mainRoute?: ResolvedModelRoute;
+  mainFallbackRoutes?: ResolvedModelRoute[];
   providerExecutor?: ProviderExecutor;
   currentSessionId?: () => string;
   maxImageBytes?: number;
@@ -54,10 +58,18 @@ export function createVisionTools(options: VisionToolOptions): readonly Register
       toolsets: ["media", "research", "telegram", "core"],
       progressLabel: "analyzing image",
       maxResultSizeChars: 8_000,
-      isAvailable: async () => resolveVisionAuxiliaryRoute(options).route !== undefined,
+      isAvailable: async () => resolveVisionDispatch({
+        phase: "post-tool",
+        mainRoute: options.mainRoute,
+        auxiliaryRoute: resolveVisionAuxiliaryRoute(options)
+      }).mode !== "unavailable",
       resolveSecurity: async (input: { path?: string }, context) => {
-        const visionRoute = resolveVisionAuxiliaryRoute(options);
-        if (visionRoute.route === undefined) return undefined;
+        const dispatch = resolveVisionDispatch({
+          phase: context.visionDispatchPhase ?? "post-tool",
+          mainRoute: options.mainRoute,
+          auxiliaryRoute: resolveVisionAuxiliaryRoute(options)
+        });
+        if (dispatch.mode === "unavailable") return undefined;
         const source = await resolveVisionImageSource({
           workspaceRoot: options.workspaceRoot,
           allowedRoots: options.allowedRoots,
@@ -69,21 +81,76 @@ export function createVisionTools(options: VisionToolOptions): readonly Register
           source,
           workspaceRoot: options.workspaceRoot,
           provenance: context.visionInputProvenance,
-          visionRoute,
-          mainRoute: options.mainRoute ?? visionRoute.route
+          visionRoute: dispatch.egressRoute,
+          mainRoute: dispatch.mode === "auxiliary" ? options.mainRoute : undefined,
+          additionalRoutes: dispatch.mode === "native" ? options.mainFallbackRoutes : undefined
         });
       },
-      run: (input: { path?: string; prompt?: string }, context) => analyzeImageWithVision(
+      run: (input: { path?: string; prompt?: string }, context) => dispatchImageWithVision(
         options,
         input,
         context?.signal,
         context?.providerUsageLineage ?? {
           executionSessionId: options.currentSessionId?.(),
           visibleTurnId: context?.visibleTurnId
-        }
+        },
+        context?.visionDispatchPhase
       )
     }
   ];
+}
+
+export async function dispatchImageWithVision(
+  options: VisionToolOptions,
+  input: { path?: string; prompt?: string },
+  signal?: AbortSignal,
+  usage: ProviderUsageLineage = {},
+  phase: VisionDispatchPhase = "post-tool"
+): Promise<ToolResult> {
+  const dispatch = resolveVisionDispatch({
+    phase,
+    mainRoute: options.mainRoute,
+    auxiliaryRoute: resolveVisionAuxiliaryRoute(options)
+  });
+  if (dispatch.mode === "unavailable") {
+    return { ok: false, content: dispatch.reason };
+  }
+
+  const prepared = await prepareVisionImage(options, input.path, signal);
+  if ("result" in prepared) return prepared.result;
+
+  if (dispatch.mode === "native") {
+    const result: ToolResult = {
+      ok: true,
+      content: `Image prepared for native analysis: ${prepared.source.displayPath}`,
+      metadata: {
+        ...normalizedImageMetadata(prepared.source, prepared.normalized),
+        dispatch: "native",
+        provider: dispatch.route.provider,
+        model: dispatch.route.id
+      }
+    };
+    return attachEphemeralVisionImages(result, [{
+      content: prepared.content,
+      usage: {
+        width: prepared.normalized.width,
+        height: prepared.normalized.height,
+        detail: "auto"
+      },
+      delivery: "continuation"
+    }]);
+  }
+
+  return await executePreparedAuxiliaryVision({
+    options,
+    input,
+    signal,
+    usage,
+    source: prepared.source,
+    normalized: prepared.normalized,
+    content: prepared.content,
+    visionAuxiliaryRoute: { ...dispatch.auxiliaryRoute, route: dispatch.route }
+  });
 }
 
 export const visionToolProvider: SessionToolProvider = {
@@ -96,6 +163,7 @@ export const visionToolProvider: SessionToolProvider = {
       allowedRoots: [requireProviderDependency("vision", "channelMediaRoot", ctx.channelMediaRoot)],
       visionAuxiliaryRoute: ctx.visionRoute,
       mainRoute: ctx.mainRoute,
+      mainFallbackRoutes: ctx.mainFallbackRoutes,
       providerExecutor: requireProviderDependency("vision", "providerExecutor", ctx.providerExecutor),
       currentSessionId: () => ctx.currentSessionId()
     });
@@ -115,17 +183,6 @@ export async function analyzeImageWithVision(
   signal?: AbortSignal,
   usage: ProviderUsageLineage = {}
 ): Promise<ToolResult> {
-  const maxImageBytes = options.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES;
-  const source = await resolveVisionImageSource({
-    workspaceRoot: options.workspaceRoot,
-    allowedRoots: options.allowedRoots,
-    path: input.path,
-    maxBytes: maxImageBytes
-  });
-  if (!source.ok) {
-    return imageSourceErrorResult(source);
-  }
-
   const visionAuxiliaryRoute = resolveVisionAuxiliaryRoute(options);
   if (visionAuxiliaryRoute.route === undefined) {
     return {
@@ -134,6 +191,75 @@ export async function analyzeImageWithVision(
     };
   }
 
+  const prepared = await prepareVisionImage(options, input.path, signal);
+  if ("result" in prepared) return prepared.result;
+
+  return await executePreparedAuxiliaryVision({
+    options,
+    input,
+    signal,
+    usage,
+    source: prepared.source,
+    normalized: prepared.normalized,
+    content: prepared.content,
+    visionAuxiliaryRoute: { ...visionAuxiliaryRoute, route: visionAuxiliaryRoute.route }
+  });
+}
+
+type PreparedVisionImage = {
+  source: ResolvedVisionImageSource;
+  normalized: NormalizedVisionImage;
+  content: {
+    type: "image_url";
+    image_url: { url: string };
+  };
+};
+
+async function prepareVisionImage(
+  options: VisionToolOptions,
+  path: string | undefined,
+  signal: AbortSignal | undefined
+): Promise<PreparedVisionImage | { result: ToolResult }> {
+  const maxImageBytes = options.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES;
+  const source = await resolveVisionImageSource({
+    workspaceRoot: options.workspaceRoot,
+    allowedRoots: options.allowedRoots,
+    path,
+    maxBytes: maxImageBytes
+  });
+  if (!source.ok) return { result: imageSourceErrorResult(source) };
+
+  const normalized = await (options.imageNormalizer ?? defaultVisionImageNormalizer).normalize(source, {
+    signal,
+    limits: { maxInputBytes: maxImageBytes }
+  });
+  if (!normalized.ok) {
+    return { result: imageNormalizationErrorResult(source.displayPath, normalized) };
+  }
+
+  return {
+    source,
+    normalized,
+    content: {
+      type: "image_url",
+      image_url: {
+        url: `data:${normalized.mimeType};base64,${Buffer.from(normalized.bytes).toString("base64")}`
+      }
+    }
+  };
+}
+
+async function executePreparedAuxiliaryVision(input: {
+  options: VisionToolOptions;
+  input: { path?: string; prompt?: string };
+  signal?: AbortSignal;
+  usage: ProviderUsageLineage;
+  source: ResolvedVisionImageSource;
+  normalized: NormalizedVisionImage;
+  content: PreparedVisionImage["content"];
+  visionAuxiliaryRoute: ResolvedAuxiliaryRoute & { route: ResolvedModelRoute };
+}): Promise<ToolResult> {
+  const { options, source, normalized, visionAuxiliaryRoute } = input;
   const relativePath = source.displayPath;
 
   if (options.providerExecutor === undefined) {
@@ -149,15 +275,6 @@ export async function analyzeImageWithVision(
     };
   }
 
-  const normalized = await (options.imageNormalizer ?? defaultVisionImageNormalizer).normalize(source, {
-    signal,
-    limits: { maxInputBytes: maxImageBytes }
-  });
-  if (!normalized.ok) {
-    return imageNormalizationErrorResult(relativePath, normalized);
-  }
-
-  const dataUrl = `data:${normalized.mimeType};base64,${Buffer.from(normalized.bytes).toString("base64")}`;
   const imageMetadata = normalizedImageMetadata(source, normalized);
 
   const auxiliaryResult = await executeAuxiliaryTask({
@@ -165,7 +282,7 @@ export async function analyzeImageWithVision(
     mainRoute: options.mainRoute ?? visionAuxiliaryRoute.route,
     providerExecutor: options.providerExecutor,
     usage: {
-      ...usage,
+      ...input.usage,
       imageInputs: [{ width: normalized.width, height: normalized.height, detail: "auto" }]
     },
     preferences: {
@@ -185,22 +302,17 @@ export async function analyzeImageWithVision(
           content: [
             {
               type: "text",
-              text: input.prompt?.trim().length
-                ? input.prompt.trim()
+              text: input.input.prompt?.trim().length
+                ? input.input.prompt.trim()
                 : "Describe this image so EstaCoda can help the user."
             },
-            {
-              type: "image_url",
-              image_url: {
-                url: dataUrl
-              }
-            }
+            input.content
           ]
         }
       ] as any,
       maxTokens: 500
     },
-    signal
+    signal: input.signal
   });
 
   const attempts = auxiliaryResult.attempts.map((attempt) =>
