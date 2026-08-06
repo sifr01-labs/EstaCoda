@@ -104,6 +104,14 @@ function sessionKeyHash(sessionId: string): string {
   return createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
 }
 
+function boundedErrorClass(error: unknown): string {
+  const rawClass = error instanceof Error ? error.constructor.name : "UnknownError";
+  const token = rawClass
+    .replace(/[^A-Za-z0-9_.-]/gu, "")
+    .slice(0, 64);
+  return token.length > 0 ? token : "UnknownError";
+}
+
 const DEFAULT_GATEWAY_APPROVAL_TTL_MS = 5 * 60 * 1000;
 
 function formatGatewaySubagentDuration(durationMs: number): string {
@@ -445,6 +453,7 @@ export class ChannelGateway {
   readonly #autoTtsUsageByChat = new Map<string, AutoTtsUsageWindow>();
   readonly #textDebounceResolver: ChannelGatewayOptions["textDebounceResolver"];
   readonly #textDebounceBuffers = new Map<string, ChannelTextDebounceBuffer>();
+  readonly #textDebounceFlushes = new Set<Promise<void>>();
   readonly #telegramStreaming: (ChannelStreamingTextOptions & { enabled?: boolean }) | undefined;
   readonly #providerServingStateBySessionKey = new Map<string, ProviderServingState>();
 
@@ -509,7 +518,7 @@ export class ChannelGateway {
     }
   }
 
-  /** Stage 7: check if there is any pending work (active turns, queued messages, draining). */
+  /** Stage 7: check if there is any pending work, including buffered or owned debounce flushes. */
   hasPendingWork(): boolean {
     const hasActiveTurns = this.#activeTurnRegistry !== undefined
       ? this.#activeTurnRegistry.stats().activeTurnCount > 0
@@ -517,7 +526,8 @@ export class ChannelGateway {
     const hasQueued = this.#sessionMessageQueue.totalSize() > 0;
     const hasDraining = this.#drainingQueue.size > 0;
     const hasDebouncedText = this.#textDebounceBuffers.size > 0;
-    return hasActiveTurns || hasQueued || hasDraining || hasDebouncedText;
+    const hasDebounceFlushes = this.#textDebounceFlushes.size > 0;
+    return hasActiveTurns || hasQueued || hasDraining || hasDebouncedText || hasDebounceFlushes;
   }
 
   async #deliverText(
@@ -934,9 +944,11 @@ export class ChannelGateway {
   }
 
   async flushPendingDebounces(): Promise<void> {
-    const keys = [...this.#textDebounceBuffers.keys()];
-    for (const key of keys) {
-      await this.#flushTextDebounce(key);
+    while (this.#textDebounceBuffers.size > 0 || this.#textDebounceFlushes.size > 0) {
+      for (const key of [...this.#textDebounceBuffers.keys()]) {
+        this.#startTextDebounceFlush(key);
+      }
+      await Promise.all([...this.#textDebounceFlushes]);
     }
   }
 
@@ -1078,7 +1090,7 @@ export class ChannelGateway {
         existing.textChunks.length >= config.textDebounceMaxMessages ||
         existing.totalChars >= config.textDebounceMaxChars
       ) {
-        return await this.#flushTextDebounce(key) ?? { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+        this.#startTextDebounceFlush(key);
       }
       return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
     }
@@ -1100,7 +1112,7 @@ export class ChannelGateway {
       buffer.textChunks.length >= config.textDebounceMaxMessages ||
       buffer.totalChars >= config.textDebounceMaxChars
     ) {
-      return await this.#flushTextDebounce(key) ?? { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+      this.#startTextDebounceFlush(key);
     }
 
     return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
@@ -1132,10 +1144,25 @@ export class ChannelGateway {
       clearTimeout(buffer.timer);
     }
     buffer.timer = setTimeout(() => {
-      void this.#flushTextDebounce(key).catch((error) => {
-        this.#logWarning?.(`Channel text debounce flush failed for ${key}: ${error instanceof Error ? error.message : String(error)}`);
-      });
+      this.#startTextDebounceFlush(key);
     }, buffer.config.textDebounceMs);
+  }
+
+  #startTextDebounceFlush(key: string): void {
+    let ownedFlush: Promise<void>;
+    ownedFlush = this.#flushTextDebounce(key).then(
+      () => undefined,
+      (error) => {
+        try {
+          this.#logWarning?.(`Channel text debounce flush failed (${boundedErrorClass(error)}).`);
+        } catch {
+          // Logging must not turn an observed background failure into an unhandled rejection.
+        }
+      }
+    ).finally(() => {
+      this.#textDebounceFlushes.delete(ownedFlush);
+    });
+    this.#textDebounceFlushes.add(ownedFlush);
   }
 
   async #flushTextDebounce(key: string): Promise<ChannelGatewayResult | undefined> {

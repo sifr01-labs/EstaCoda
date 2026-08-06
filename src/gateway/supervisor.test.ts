@@ -3000,6 +3000,48 @@ describe("supervisor lifecycle hooks", () => {
     }
   });
 
+  it("awaits gateway debounce flush work before completing graceful drain", async () => {
+    const exited = fakeExit();
+    let releaseFlush: (() => void) | undefined;
+    const flushGate = new Promise<void>((resolve) => { releaseFlush = resolve; });
+    let flushStarted = false;
+    let stopped = false;
+    const gateway = {
+      start: async () => {},
+      flushPendingDebounces: async () => {
+        flushStarted = true;
+        await flushGate;
+      },
+      hasPendingWork: () => false,
+      stop: async () => { stopped = true; }
+    };
+    const beforeSigterm = process.listenerCount("SIGTERM");
+
+    const promise = runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: false,
+      factories: {
+        createChannelGateway: () => gateway as any,
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        exit: exited.exit,
+      },
+    });
+
+    await waitForCondition(() => process.listenerCount("SIGTERM") > beforeSigterm);
+    process.emit("SIGTERM");
+    await waitForCondition(() => flushStarted);
+
+    expect(exited.codes()).toEqual([]);
+    expect(stopped).toBe(false);
+
+    releaseFlush?.();
+    await promise;
+
+    expect(exited.codes()).toEqual([0]);
+    expect(stopped).toBe(true);
+  });
+
   it("supervisor:drain:complete with timedOut=true on drain timeout", async () => {
     const captured: Array<{ name: string; payload: unknown }> = [];
     const originalEmit = HookRegistry.prototype.emit;

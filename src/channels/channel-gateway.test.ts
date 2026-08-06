@@ -6998,6 +6998,7 @@ describe("ChannelGateway commands", () => {
         busyPolicyResolver?: ConstructorParameters<typeof ChannelGateway>[0]["busyPolicyResolver"];
         activeTurnRegistry?: ActiveTurnRegistry;
         config?: typeof debounceConfig;
+        logWarning?: (message: string) => void;
       } = {}) {
         const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
         const handle = input.handle ?? vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
@@ -7011,7 +7012,8 @@ describe("ChannelGateway commands", () => {
             ? input.config ?? debounceConfig
             : undefined,
           busyPolicyResolver: input.busyPolicyResolver,
-          activeTurnRegistry: input.activeTurnRegistry
+          activeTurnRegistry: input.activeTurnRegistry,
+          logWarning: input.logWarning
         });
         return { adapter, gateway, handle, runtimeForSession };
       }
@@ -7337,7 +7339,7 @@ describe("ChannelGateway commands", () => {
         expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "summarize @notbot" }));
       });
 
-      it("flushes immediately at max message count and max chars", async () => {
+      it("flushes at max message count and max chars", async () => {
         vi.useFakeTimers();
         const texts: string[] = [];
         const handle = vi.fn(async (input) => {
@@ -7351,6 +7353,7 @@ describe("ChannelGateway commands", () => {
         });
         await byCount.gateway.receive(makeWhatsAppMessage("one"));
         await byCount.gateway.receive(makeWhatsAppMessage("two"));
+        await byCount.gateway.flushPendingDebounces();
         expect(texts).toContain("one\n\ntwo");
 
         const byChars = createDebounceGateway({
@@ -7359,7 +7362,135 @@ describe("ChannelGateway commands", () => {
         });
         await byChars.gateway.receive(makeWhatsAppMessage("abc"));
         await byChars.gateway.receive(makeWhatsAppMessage("def"));
+        await byChars.gateway.flushPendingDebounces();
         expect(texts).toContain("abc\n\ndef");
+      });
+
+      it("starts a maximum-message flush without awaiting the runtime turn", async () => {
+        let releaseTurn: (() => void) | undefined;
+        const turnGate = new Promise<void>((resolve) => { releaseTurn = resolve; });
+        const registry = new ActiveTurnRegistry();
+        const handle = vi.fn(async () => {
+          await turnGate;
+          return runtimeResponse({ text: "ok", securityDecision: "allow" });
+        });
+        const { gateway } = createDebounceGateway({
+          handle,
+          activeTurnRegistry: registry,
+          config: { textDebounceMs: 60_000, textDebounceMaxMessages: 2, textDebounceMaxChars: 8_000 }
+        });
+        const first = makeWhatsAppMessage("one", { id: "count-one" });
+        const second = makeWhatsAppMessage("two", { id: "count-two" });
+        let ingressReturned = false;
+
+        await gateway.receive(first);
+        const ingress = gateway.receive(second).then((result) => {
+          ingressReturned = true;
+          return result;
+        });
+
+        try {
+          await waitFor(() => handle.mock.calls.length === 1);
+          await waitFor(() => ingressReturned);
+          expect(registry.isBusy(stableSessionKey(first.sessionKey, {}))).toBe(true);
+          expect(gateway.hasPendingWork()).toBe(true);
+        } finally {
+          releaseTurn?.();
+        }
+
+        expect(await ingress).toMatchObject({ sessionId: "", replyText: "" });
+        await gateway.flushPendingDebounces();
+        expect(gateway.hasPendingWork()).toBe(false);
+      });
+
+      it("starts a maximum-character flush without blocking ingress polling", async () => {
+        let releaseTurn: (() => void) | undefined;
+        const turnGate = new Promise<void>((resolve) => { releaseTurn = resolve; });
+        const handle = vi.fn(async () => {
+          await turnGate;
+          return runtimeResponse({ text: "ok", securityDecision: "allow" });
+        });
+        const { gateway } = createDebounceGateway({
+          handle,
+          config: { textDebounceMs: 60_000, textDebounceMaxMessages: 10, textDebounceMaxChars: 5 }
+        });
+        let ingressReturned = false;
+
+        await gateway.receive(makeWhatsAppMessage("abc", { id: "chars-one" }));
+        const ingress = gateway.receive(makeWhatsAppMessage("def", { id: "chars-two" })).then((result) => {
+          ingressReturned = true;
+          return result;
+        });
+
+        try {
+          await waitFor(() => handle.mock.calls.length === 1);
+          await waitFor(() => ingressReturned);
+          expect(gateway.hasPendingWork()).toBe(true);
+        } finally {
+          releaseTurn?.();
+        }
+
+        await ingress;
+        await gateway.flushPendingDebounces();
+        expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "abc\n\ndef" }));
+      });
+
+      it("dispatches once when a stale timer races a threshold flush", async () => {
+        const callbacks: Array<() => void> = [];
+        const timeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: TimerHandler) => {
+          callbacks.push(callback as () => void);
+          return callbacks.length as unknown as ReturnType<typeof setTimeout>;
+        }) as unknown as typeof setTimeout);
+        const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout").mockImplementation(() => undefined);
+        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const { gateway } = createDebounceGateway({
+          handle,
+          config: { textDebounceMs: 1000, textDebounceMaxMessages: 2, textDebounceMaxChars: 8_000 }
+        });
+
+        try {
+          await gateway.receive(makeWhatsAppMessage("one", { id: "race-one" }));
+          const staleTimer = callbacks[0];
+          await gateway.receive(makeWhatsAppMessage("two", { id: "race-two" }));
+          staleTimer?.();
+          await gateway.flushPendingDebounces();
+
+          expect(handle).toHaveBeenCalledOnce();
+          expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "one\n\ntwo" }));
+        } finally {
+          timeoutSpy.mockRestore();
+          clearTimeoutSpy.mockRestore();
+        }
+      });
+
+      it("observes flush rejection without logging buffered message content", async () => {
+        const warnings: string[] = [];
+        const registry = new ActiveTurnRegistry();
+        const { adapter, gateway } = createDebounceGateway({
+          activeTurnRegistry: registry,
+          logWarning: (message) => warnings.push(message),
+          config: { textDebounceMs: 60_000, textDebounceMaxMessages: 1, textDebounceMaxChars: 8_000 }
+        });
+        const message = makeWhatsAppMessage("private buffered request", { id: "flush-rejection" });
+        const activeKey = stableSessionKey(message.sessionKey, {});
+        const active = registry.startTurn(activeKey, new AbortController());
+        adapter.delivery!.sendText = async () => {
+          throw new Error(`delivery failed for ${message.text}`);
+        };
+
+        try {
+          await gateway.receive(message);
+          await gateway.flushPendingDebounces();
+
+          expect(warnings).toEqual(["Channel text debounce flush failed (Error)."]);
+          expect(warnings.join("\n")).not.toContain(message.text);
+          expect(gateway.hasPendingWork()).toBe(true);
+        } finally {
+          if (active.ok) {
+            registry.endTurn(activeKey, active.turnId);
+          }
+        }
+        expect(gateway.hasPendingWork()).toBe(false);
       });
 
       it("flushes pending WhatsApp text buffers on graceful gateway shutdown", async () => {
@@ -7373,6 +7504,55 @@ describe("ChannelGateway commands", () => {
         await gateway.flushPendingDebounces();
 
         expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "before shutdown" }));
+      });
+
+      it("waits for buffered and already scheduled flush work before stopping adapters", async () => {
+        let releaseTurns: (() => void) | undefined;
+        const turnGate = new Promise<void>((resolve) => { releaseTurns = resolve; });
+        const seenTexts: string[] = [];
+        const handle = vi.fn(async (input: Parameters<Runtime["handle"]>[0]) => {
+          seenTexts.push(input.text);
+          await turnGate;
+          return runtimeResponse({ text: "ok", securityDecision: "allow" });
+        });
+        const { adapter, gateway } = createDebounceGateway({
+          handle,
+          config: { textDebounceMs: 60_000, textDebounceMaxMessages: 2, textDebounceMaxChars: 8_000 }
+        });
+        const stopAdapter = vi.fn(async () => undefined);
+        adapter.stop = stopAdapter;
+        const otherChat = {
+          sessionKey: {
+            platform: "whatsapp" as const,
+            chatId: "971509999999",
+            userId: "971509999999",
+            chatType: "dm" as const
+          },
+          sender: { id: "971509999999", displayName: "Other chat" }
+        };
+
+        await gateway.receive(makeWhatsAppMessage("scheduled one", { id: "scheduled-one" }));
+        await gateway.receive(makeWhatsAppMessage("scheduled two", { id: "scheduled-two" }));
+        await gateway.receive(makeWhatsAppMessage("buffered", { id: "buffered", ...otherChat }));
+        let stopSettled = false;
+        const stopping = gateway.stop().then(() => { stopSettled = true; });
+
+        try {
+          await waitFor(() => handle.mock.calls.length === 2);
+          expect(stopSettled).toBe(false);
+          expect(stopAdapter).not.toHaveBeenCalled();
+          expect(gateway.hasPendingWork()).toBe(true);
+        } finally {
+          releaseTurns?.();
+        }
+
+        await stopping;
+        expect(stopAdapter).toHaveBeenCalledOnce();
+        expect(gateway.hasPendingWork()).toBe(false);
+        expect(seenTexts.sort()).toEqual([
+          "buffered",
+          "scheduled one\n\nscheduled two"
+        ]);
       });
 
       it("queues one combined busy-session turn for rapid WhatsApp texts", async () => {
