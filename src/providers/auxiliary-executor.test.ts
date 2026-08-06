@@ -447,26 +447,74 @@ describe("executeAuxiliaryTask", () => {
     expect(observedSignal).toBeUndefined();
   });
 
-  it("uses an external AbortSignal and does not create an internal timeout", async () => {
+  it("preserves the configured timeout when an external AbortSignal is present", async () => {
     const route = fakeRoute();
     const controller = new AbortController();
     let observedSignal: AbortSignal | undefined;
-    const complete = vi.fn(async (_request, _preferences, options) => {
+    const complete = vi.fn((_request, _preferences, options) => {
       observedSignal = options.signal;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      return executionResult(route, true, "external signal ok");
+      return new Promise<ProviderExecutionResult>(() => {});
     });
 
     const result = await executeAuxiliaryTask({
-      route: fakeAuxiliaryRoute({ route, timeoutMs: 1 }),
+      route: fakeAuxiliaryRoute({ route, timeoutMs: 5 }),
       mainRoute: fakeRoute({ id: "gpt-4o" }),
       providerExecutor: { complete },
       request,
       signal: controller.signal,
     });
 
-    expect(result.status).toBe("ok");
-    expect(observedSignal).toBe(controller.signal);
+    expect(result.status).toBe("timeout");
+    expect(result.attempts[0]).toMatchObject({ errorClass: "timeout" });
+    expect(observedSignal).not.toBe(controller.signal);
+    expect(observedSignal?.aborted).toBe(true);
+    expect(controller.signal.aborted).toBe(false);
+  });
+
+  it("keeps timeout classification when a provider resolves during abort notification", async () => {
+    const route = fakeRoute();
+    const complete = vi.fn((_request, _preferences, options) => new Promise<ProviderExecutionResult>((resolve) => {
+      options.signal?.addEventListener("abort", () => {
+        resolve(executionResult(route, true, "late success"));
+      }, { once: true });
+    }));
+
+    const result = await executeAuxiliaryTask({
+      route: fakeAuxiliaryRoute({ route, timeoutMs: 5 }),
+      mainRoute: fakeRoute({ id: "gpt-4o" }),
+      providerExecutor: { complete },
+      request,
+      signal: new AbortController().signal,
+    });
+
+    expect(result.status).toBe("timeout");
+    expect(result.attempts[0]).toMatchObject({ errorClass: "timeout" });
+  });
+
+  it("settles as aborted when caller cancellation wins over the timeout", async () => {
+    const route = fakeRoute();
+    const controller = new AbortController();
+    let observedSignal: AbortSignal | undefined;
+    const complete = vi.fn((_request, _preferences, options) => {
+      observedSignal = options.signal;
+      return new Promise<ProviderExecutionResult>(() => {});
+    });
+
+    const run = executeAuxiliaryTask({
+      route: fakeAuxiliaryRoute({ route, timeoutMs: 1000 }),
+      mainRoute: fakeRoute({ id: "gpt-4o" }),
+      providerExecutor: { complete },
+      request,
+      signal: controller.signal,
+    });
+    await flushMicrotasks();
+
+    controller.abort();
+    const result = await run;
+
+    expect(result.status).toBe("aborted");
+    expect(result.attempts[0]).toMatchObject({ errorClass: "aborted" });
+    expect(observedSignal?.aborted).toBe(true);
   });
 
   it("distinguishes external aborts from timeouts and exceptions", async () => {
@@ -631,6 +679,7 @@ describe("executeAuxiliaryTask", () => {
     const scopeKey = "queued-timeout";
     const first = deferred<ProviderExecutionResult>();
     const complete = vi.fn(() => first.promise);
+    const controller = new AbortController();
 
     const firstRun = executeAuxiliaryTask({
       route: fakeAuxiliaryRoute({ route, maxConcurrency: 1 }),
@@ -647,6 +696,7 @@ describe("executeAuxiliaryTask", () => {
       providerExecutor: { complete },
       request,
       scopeKey,
+      signal: controller.signal,
     });
 
     const queuedResult = await queuedRun;
@@ -657,6 +707,7 @@ describe("executeAuxiliaryTask", () => {
       errorClass: "timeout",
     });
     expect(complete).toHaveBeenCalledTimes(1);
+    expect(controller.signal.aborted).toBe(false);
     expect(getAuxiliaryQueued("compression", scopeKey)).toBe(0);
     expect(getAuxiliaryInFlight("compression", scopeKey)).toBe(1);
 

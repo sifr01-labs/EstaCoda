@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { analyzeImageWithVision, createVisionTools } from "./vision-tools.js";
-import type { ProviderExecutor } from "../providers/provider-executor.js";
+import type { ProviderExecutionResult, ProviderExecutor } from "../providers/provider-executor.js";
 import type { ResolvedModelRoute } from "../contracts/provider.js";
 
 function createMockExecutor(ok = true, content = "vision result") {
@@ -19,6 +19,36 @@ function createMockExecutor(ok = true, content = "vision result") {
   return {
     complete: fn as unknown as ProviderExecutor["complete"]
   } as unknown as ProviderExecutor;
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+  return { promise, resolve };
+}
+
+function successfulExecution(route: ResolvedModelRoute, content: string): ProviderExecutionResult {
+  return {
+    ok: true,
+    response: {
+      ok: true,
+      content,
+      provider: route.provider,
+      model: route.id
+    },
+    fallbackUsed: false,
+    attempts: [{
+      provider: route.provider,
+      model: route.id,
+      state: "dispatched",
+      dispatchedAt: "2030-01-01T00:00:00.000Z",
+      ok: true,
+      content
+    }],
+    toolCalls: []
+  };
 }
 
 function createTempPng(): { dir: string; path: string; cleanup: () => void } {
@@ -382,6 +412,131 @@ describe("vision tools", () => {
 
         expect(executor.complete).toHaveBeenCalledTimes(1);
         expect(result.ok).toBe(false);
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("queues concurrent analysis for the same profile and route", async () => {
+      const first = deferred<ProviderExecutionResult>();
+      const second = deferred<ProviderExecutionResult>();
+      const complete = vi.fn()
+        .mockImplementationOnce(() => first.promise)
+        .mockImplementationOnce(() => second.promise);
+      const executor = { complete } as unknown as ProviderExecutor;
+      const tmp = createTempPng();
+      const options = {
+        workspaceRoot: tmp.dir,
+        profileId: "profile-a",
+        visionAuxiliaryRoute: {
+          task: "vision" as const,
+          route: baseRoute,
+          source: "explicit" as const,
+          fallbackToMain: false,
+          maxConcurrency: 1,
+          diagnostics: []
+        },
+        providerExecutor: executor
+      };
+
+      try {
+        const firstRun = analyzeImageWithVision(options, { path: "test.png" });
+        const secondRun = analyzeImageWithVision(options, { path: "test.png" });
+        await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(1));
+        first.resolve(successfulExecution(baseRoute, "first"));
+        await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(2));
+
+        second.resolve(successfulExecution(baseRoute, "second"));
+        await Promise.all([firstRun, secondRun]);
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("isolates vision concurrency across profiles", async () => {
+      const first = deferred<ProviderExecutionResult>();
+      const second = deferred<ProviderExecutionResult>();
+      const complete = vi.fn()
+        .mockImplementationOnce(() => first.promise)
+        .mockImplementationOnce(() => second.promise);
+      const executor = { complete } as unknown as ProviderExecutor;
+      const tmp = createTempPng();
+      const auxiliaryRoute = {
+        task: "vision" as const,
+        route: baseRoute,
+        source: "explicit" as const,
+        fallbackToMain: false,
+        maxConcurrency: 1,
+        diagnostics: []
+      };
+
+      try {
+        const profileA = analyzeImageWithVision({
+          workspaceRoot: tmp.dir,
+          profileId: "profile-a",
+          visionAuxiliaryRoute: auxiliaryRoute,
+          providerExecutor: executor
+        }, { path: "test.png" });
+        const profileB = analyzeImageWithVision({
+          workspaceRoot: tmp.dir,
+          profileId: "profile-b",
+          visionAuxiliaryRoute: auxiliaryRoute,
+          providerExecutor: executor
+        }, { path: "test.png" });
+        await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(2));
+        first.resolve(successfulExecution(baseRoute, "profile a"));
+        second.resolve(successfulExecution(baseRoute, "profile b"));
+        await Promise.all([profileA, profileB]);
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("isolates vision concurrency across routes in the same profile", async () => {
+      const alternateRoute: ResolvedModelRoute = {
+        ...baseRoute,
+        id: "gpt-4o-mini",
+        profile: { ...baseRoute.profile, id: "gpt-4o-mini" }
+      };
+      const first = deferred<ProviderExecutionResult>();
+      const second = deferred<ProviderExecutionResult>();
+      const complete = vi.fn()
+        .mockImplementationOnce(() => first.promise)
+        .mockImplementationOnce(() => second.promise);
+      const executor = { complete } as unknown as ProviderExecutor;
+      const tmp = createTempPng();
+
+      try {
+        const firstRouteRun = analyzeImageWithVision({
+          workspaceRoot: tmp.dir,
+          profileId: "profile-a",
+          visionAuxiliaryRoute: {
+            task: "vision",
+            route: baseRoute,
+            source: "explicit",
+            fallbackToMain: false,
+            maxConcurrency: 1,
+            diagnostics: []
+          },
+          providerExecutor: executor
+        }, { path: "test.png" });
+        const secondRouteRun = analyzeImageWithVision({
+          workspaceRoot: tmp.dir,
+          profileId: "profile-a",
+          visionAuxiliaryRoute: {
+            task: "vision",
+            route: alternateRoute,
+            source: "explicit",
+            fallbackToMain: false,
+            maxConcurrency: 1,
+            diagnostics: []
+          },
+          providerExecutor: executor
+        }, { path: "test.png" });
+        await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(2));
+        first.resolve(successfulExecution(baseRoute, "first route"));
+        second.resolve(successfulExecution(alternateRoute, "second route"));
+        await Promise.all([firstRouteRun, secondRouteRun]);
       } finally {
         tmp.cleanup();
       }

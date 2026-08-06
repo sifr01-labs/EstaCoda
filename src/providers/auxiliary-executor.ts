@@ -463,9 +463,12 @@ function createExecutionAbort(input: {
   signal?: AbortSignal;
   timeoutMs?: number;
 }): ExecutionAbort {
-  if (input.signal !== undefined || input.timeoutMs === undefined || input.timeoutMs <= 0) {
+  const timeoutMs = input.timeoutMs !== undefined && input.timeoutMs > 0
+    ? input.timeoutMs
+    : undefined;
+  if (input.signal === undefined && timeoutMs === undefined) {
     return {
-      signal: input.signal,
+      signal: undefined,
       timedOut: false,
       race: (promise) => promise,
       cleanup: () => {}
@@ -473,27 +476,56 @@ function createExecutionAbort(input: {
   }
 
   const controller = new AbortController();
-  let timedOut = false;
+  let interruption: "aborted" | "timeout" | undefined;
   let timeout: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeout = setTimeout(() => {
-      timedOut = true;
-      controller.abort(new Error(`Timed out after ${input.timeoutMs}ms`));
-      reject(new Error(`Timed out after ${input.timeoutMs}ms`));
-    }, input.timeoutMs);
+  let rejectInterruption!: (error: unknown) => void;
+  const interruptionPromise = new Promise<never>((_, reject) => {
+    rejectInterruption = reject;
   });
-  timeoutPromise.catch(() => {});
+  interruptionPromise.catch(() => {});
+
+  const interrupt = (kind: "aborted" | "timeout", reason: unknown) => {
+    if (interruption !== undefined) return;
+    interruption = kind;
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+      timeout = undefined;
+    }
+
+    const error = reason instanceof Error
+      ? reason
+      : new Error(kind === "timeout" ? `Timed out after ${timeoutMs}ms` : "Auxiliary task was aborted");
+    rejectInterruption(error);
+    controller.abort(error);
+  };
+  const onCallerAbort = () => interrupt("aborted", input.signal?.reason);
+
+  if (input.signal?.aborted === true) {
+    onCallerAbort();
+  } else {
+    input.signal?.addEventListener("abort", onCallerAbort, { once: true });
+  }
+
+  if (interruption === undefined && timeoutMs !== undefined) {
+    timeout = setTimeout(() => {
+      const error = new Error(`Timed out after ${timeoutMs}ms`);
+      error.name = "TimeoutError";
+      interrupt("timeout", error);
+    }, timeoutMs);
+  }
 
   return {
     signal: controller.signal,
     get timedOut() {
-      return timedOut;
+      return interruption === "timeout";
     },
-    timeoutMs: input.timeoutMs,
-    race: (promise) => Promise.race([promise, timeoutPromise]),
+    timeoutMs,
+    race: (promise) => Promise.race([promise, interruptionPromise]),
     cleanup: () => {
+      input.signal?.removeEventListener("abort", onCallerAbort);
       if (timeout !== undefined) {
         clearTimeout(timeout);
+        timeout = undefined;
       }
     }
   };

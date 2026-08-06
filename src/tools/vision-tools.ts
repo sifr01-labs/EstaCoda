@@ -7,6 +7,7 @@ import type { ProviderExecutor } from "../providers/provider-executor.js";
 
 export type VisionToolOptions = {
   workspaceRoot: string;
+  profileId?: string;
   allowedRoots?: string[];
   visionAuxiliaryRoute?: ResolvedAuxiliaryRoute;
   mainRoute?: ResolvedModelRoute;
@@ -67,6 +68,7 @@ export const visionToolProvider: SessionToolProvider = {
   createTools(ctx) {
     return createVisionTools({
       workspaceRoot: ctx.workspaceRoot,
+      profileId: ctx.profileId,
       allowedRoots: [requireProviderDependency("vision", "channelMediaRoot", ctx.channelMediaRoot)],
       visionAuxiliaryRoute: ctx.visionRoute,
       mainRoute: ctx.mainRoute,
@@ -160,6 +162,7 @@ export async function analyzeImageWithVision(
       ...options.routePreferences,
       requireVision: true
     },
+    scopeKey: visionConcurrencyScopeKey(options.profileId, visionAuxiliaryRoute.route),
     request: {
       model: visionAuxiliaryRoute.route.id,
       messages: [
@@ -275,6 +278,18 @@ function resolveVisionAuxiliaryRoute(options: VisionToolOptions): ResolvedAuxili
   }
 
   return resolved;
+}
+
+function visionConcurrencyScopeKey(profileId: string | undefined, route: ResolvedModelRoute): string {
+  return JSON.stringify([
+    "profile",
+    profileId ?? "unscoped",
+    "route",
+    route.provider,
+    route.id,
+    route.baseUrl ?? "",
+    route.apiKeyEnv ?? ""
+  ]);
 }
 
 function synthesizeLegacyRoute(options: VisionToolOptions): ResolvedAuxiliaryRoute {

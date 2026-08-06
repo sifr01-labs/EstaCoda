@@ -761,6 +761,7 @@ export const webToolProvider: SessionToolProvider = {
       securityConfig: ctx.securityConfig,
       visionAnalyzer: (input, signal, usage) => analyzeImageWithVision({
         workspaceRoot: ctx.workspaceRoot,
+        profileId: ctx.profileId,
         allowedRoots: [channelMediaRoot],
         visionAuxiliaryRoute: ctx.visionRoute,
         mainRoute: ctx.mainRoute,
