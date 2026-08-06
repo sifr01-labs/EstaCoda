@@ -420,7 +420,7 @@ describe("openai-responses-provider", () => {
           role: "user",
           content: [
             { type: "text", text: "Read this image." },
-            { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } }
+            { type: "image_url", image_url: { url: "data:image/png;base64,AAAA", detail: "high" } }
           ]
         }]
       };
@@ -434,7 +434,7 @@ describe("openai-responses-provider", () => {
         role: "user",
         content: [
           { type: "input_text", text: "Read this image." },
-          { type: "input_image", image_url: "data:image/png;base64,AAAA" }
+          { type: "input_image", image_url: "data:image/png;base64,AAAA", detail: "high" }
         ]
       }]);
     });

@@ -6,6 +6,38 @@ export type VisionImageMimeType =
 
 export type VisionDispatchPhase = "initial-attachment" | "post-tool";
 
+export type VisionAnalysisMode =
+  | "describe"
+  | "ocr"
+  | "document"
+  | "chart"
+  | "screenshot";
+
+export type VisionAnalysisDetail = "low" | "standard" | "high";
+
+export type VisionAnalysisOutput = "concise" | "standard" | "detailed";
+
+/** Backward-compatible input for vision.analyze. New controls are optional. */
+export type VisionAnalysisInput = {
+  path?: string;
+  prompt?: string;
+  mode?: VisionAnalysisMode;
+  detail?: VisionAnalysisDetail;
+  output?: VisionAnalysisOutput;
+};
+
+export type VisionAnalysisErrorCode =
+  | VisionImageSourceErrorCode
+  | VisionImageNormalizationErrorCode
+  | "vision-invalid-analysis-option"
+  | "vision-route-unavailable"
+  | "vision-executor-unavailable"
+  | "vision-empty-response"
+  | "vision-spend-denied"
+  | "vision-timeout"
+  | "vision-cancelled"
+  | "vision-provider-failed";
+
 export type VisionImageSourceErrorCode =
   | "invalid-limit"
   | "invalid-path"

@@ -82,6 +82,7 @@ export type ProviderMessageContentPart =
       type: "image_url";
       image_url: {
         url: string;
+        detail?: "low" | "auto" | "high";
       };
     };
 

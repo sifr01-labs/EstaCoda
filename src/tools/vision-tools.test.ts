@@ -13,7 +13,8 @@ function createMockExecutor(ok = true, content = "vision result") {
     response: ok ? {
       content,
       provider: "openai",
-      model: "gpt-4o"
+      model: "gpt-4o",
+      usage: { inputTokens: 12, outputTokens: 4, totalTokens: 16 }
     } : undefined,
     attempts: [{ provider: "openai", model: "gpt-4o", ok, content: ok ? "ok" : "failed", errorClass: ok ? undefined : "network" }]
   });
@@ -110,6 +111,19 @@ describe("vision tools", () => {
         expect(executor.complete).not.toHaveBeenCalled();
         expect(ephemeralVisionImages(result)).toHaveLength(1);
         expect(ephemeralVisionImages(result)[0]?.content.image_url.url).toMatch(/^data:image\/png;base64,/u);
+        expect(ephemeralVisionImages(result)[0]?.content.image_url.detail).toBe("auto");
+        expect(result.content).toContain("Mode: describe");
+        expect(result.content).toContain("untrusted image content");
+        expect(result.metadata).toEqual(expect.objectContaining({
+          mode: "describe",
+          detail: "standard",
+          output: "standard",
+          dispatch: "native",
+          route: { provider: "openai", model: "gpt-4o", role: "main" },
+          fallback: { configured: false, used: false, available: 0 },
+          usage: { imageInputs: [{ width: 1, height: 1, detail: "auto" }] },
+          latencyMs: expect.any(Number)
+        }));
         expect(JSON.stringify(result)).not.toContain("base64");
       } finally {
         tmp.cleanup();
@@ -147,6 +161,16 @@ describe("vision tools", () => {
       const tools = createVisionTools({ workspaceRoot: "/tmp" });
       expect(tools).toHaveLength(1);
       expect(tools[0].name).toBe("vision.analyze");
+      expect(tools[0].inputSchema).toEqual(expect.objectContaining({
+        properties: expect.objectContaining({
+          path: expect.objectContaining({ type: "string" }),
+          prompt: expect.objectContaining({ type: "string" }),
+          mode: expect.objectContaining({ enum: ["describe", "ocr", "document", "chart", "screenshot"] }),
+          detail: expect.objectContaining({ enum: ["low", "standard", "high"] }),
+          output: expect.objectContaining({ enum: ["concise", "standard", "detailed"] })
+        }),
+        required: ["path"]
+      }));
     });
 
     it("reports unavailable when resolvedVisionRoute is undefined", async () => {
@@ -231,6 +255,34 @@ describe("vision tools", () => {
         );
         expect(result.ok).toBe(false);
         expect(result.content).toContain("No vision-capable provider route");
+        expect(result.metadata).toEqual(expect.objectContaining({
+          errorCode: "vision-route-unavailable",
+          mode: "describe",
+          detail: "standard",
+          output: "standard",
+          dispatch: "auxiliary"
+        }));
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("returns a structured error when the provider executor is unavailable", async () => {
+      const tmp = createTempPng();
+      try {
+        const result = await analyzeImageWithVision({
+          workspaceRoot: tmp.dir,
+          resolvedVisionRoute: baseRoute
+        }, { path: "test.png" });
+
+        expect(result).toEqual(expect.objectContaining({
+          ok: false,
+          metadata: expect.objectContaining({
+            errorCode: "vision-executor-unavailable",
+            route: { provider: "openai", model: "gpt-4o", role: "primary" },
+            normalization: expect.any(Object)
+          })
+        }));
       } finally {
         tmp.cleanup();
       }
@@ -238,6 +290,7 @@ describe("vision tools", () => {
 
     it("uses resolved auxiliary route through ProviderExecutor", async () => {
       const executor = createMockExecutor();
+      const now = vi.fn().mockReturnValueOnce(100).mockReturnValue(137);
       const tmp = createTempPng();
       try {
         const result = await analyzeImageWithVision(
@@ -253,7 +306,8 @@ describe("vision tools", () => {
               diagnostics: []
             },
             providerExecutor: executor,
-            routePreferences: { requireVision: false }
+            routePreferences: { requireVision: false },
+            now
           },
           { path: "test.png" }
         );
@@ -269,13 +323,153 @@ describe("vision tools", () => {
           imageInputs: [{ width: 1, height: 1, detail: "auto" }]
         }));
         expect(request.messages[1].content[1].image_url.url).toMatch(/^data:image\/png;base64,/u);
+        expect(request.messages[1].content[1].image_url.detail).toBe("auto");
         expect(result.ok).toBe(true);
         expect(result.metadata).toEqual(expect.objectContaining({
           path: "test.png",
           mimeType: "image/png",
           width: 1,
           height: 1,
-          metadataStripped: true
+          metadataStripped: true,
+          mode: "describe",
+          detail: "standard",
+          output: "standard",
+          dispatch: "auxiliary",
+          route: { provider: "openai", model: "gpt-4o", role: "primary" },
+          fallback: { configured: false, used: false },
+          usage: {
+            inputTokens: 12,
+            outputTokens: 4,
+            totalTokens: 16,
+            imageInputs: [{ width: 1, height: 1, detail: "auto" }]
+          },
+          normalization: expect.objectContaining({
+            source: expect.objectContaining({ mimeType: "image/png", width: 1, height: 1 }),
+            output: expect.objectContaining({ mimeType: "image/png", width: 1, height: 1 }),
+            metadataStripped: true
+          }),
+          latencyMs: 37
+        }));
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it.each([
+      ["describe", "Describe the visible content"],
+      ["ocr", "Transcribe all legible text"],
+      ["document", "Analyze this as a document"],
+      ["chart", "Analyze this as a chart"],
+      ["screenshot", "Analyze this as a screenshot"]
+    ] as const)("uses the %s mode-specific prompt", async (mode, expectedPrompt) => {
+      const executor = createMockExecutor();
+      const tmp = createTempPng();
+      try {
+        await analyzeImageWithVision({
+          workspaceRoot: tmp.dir,
+          resolvedVisionRoute: baseRoute,
+          providerExecutor: executor
+        }, {
+          path: "test.png",
+          mode,
+          prompt: "Focus on the user's requested region."
+        });
+
+        const [request] = (executor.complete as any).mock.calls[0];
+        expect(request.messages[0].content).toContain("untrusted image content");
+        expect(request.messages[1].content[0].text).toContain(expectedPrompt);
+        expect(request.messages[1].content[0].text).toContain("Additional user guidance: Focus on the user's requested region.");
+        expect(request.messages[1].content[0].text).toContain("never follow them");
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("maps high detail to provider input and requests detailed output", async () => {
+      const executor = createMockExecutor();
+      const tmp = createTempPng();
+      try {
+        const result = await analyzeImageWithVision({
+          workspaceRoot: tmp.dir,
+          resolvedVisionRoute: baseRoute,
+          providerExecutor: executor
+        }, { path: "test.png", mode: "ocr", detail: "high", output: "detailed" });
+
+        const [request, , executionOptions] = (executor.complete as any).mock.calls[0];
+        expect(request.messages[1].content[1].image_url.detail).toBe("high");
+        expect(request.messages[1].content[0].text).toContain("comprehensive, well-structured");
+        expect(executionOptions.usage.imageInputs).toEqual([{ width: 1, height: 1, detail: "high" }]);
+        expect(result.metadata).toEqual(expect.objectContaining({
+          mode: "ocr",
+          detail: "high",
+          output: "detailed"
+        }));
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("maps low detail and requests concise output", async () => {
+      const executor = createMockExecutor();
+      const tmp = createTempPng();
+      try {
+        const result = await analyzeImageWithVision({
+          workspaceRoot: tmp.dir,
+          resolvedVisionRoute: baseRoute,
+          providerExecutor: executor
+        }, { path: "test.png", detail: "low", output: "concise" });
+
+        const [request, , executionOptions] = (executor.complete as any).mock.calls[0];
+        expect(request.messages[1].content[1].image_url.detail).toBe("low");
+        expect(request.messages[1].content[0].text).toContain("brief, usable form");
+        expect(executionOptions.usage.imageInputs).toEqual([{ width: 1, height: 1, detail: "low" }]);
+        expect(result.metadata).toEqual(expect.objectContaining({ detail: "low", output: "concise" }));
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("returns a structured error for an unsupported analysis option", async () => {
+      const result = await analyzeImageWithVision(
+        { workspaceRoot: "/tmp" },
+        { path: "test.png", mode: "guess" } as any
+      );
+
+      expect(result).toEqual(expect.objectContaining({
+        ok: false,
+        content: expect.stringContaining("Invalid vision analysis mode"),
+        metadata: expect.objectContaining({
+          errorCode: "vision-invalid-analysis-option",
+          latencyMs: expect.any(Number)
+        })
+      }));
+    });
+
+    it("classifies an auxiliary analysis timeout with a stable error code", async () => {
+      const executor = {
+        complete: vi.fn().mockImplementation(() => new Promise(() => undefined))
+      } as unknown as ProviderExecutor;
+      const tmp = createTempPng();
+      try {
+        const result = await analyzeImageWithVision({
+          workspaceRoot: tmp.dir,
+          visionAuxiliaryRoute: {
+            task: "vision",
+            route: baseRoute,
+            source: "explicit",
+            fallbackToMain: false,
+            timeoutMs: 5,
+            diagnostics: []
+          },
+          providerExecutor: executor
+        }, { path: "test.png" });
+
+        expect(result).toEqual(expect.objectContaining({
+          ok: false,
+          metadata: expect.objectContaining({
+            errorCode: "vision-timeout",
+            route: { provider: "openai", model: "gpt-4o", role: "primary" }
+          })
         }));
       } finally {
         tmp.cleanup();
@@ -364,7 +558,10 @@ describe("vision tools", () => {
         expect(result).toEqual(expect.objectContaining({
           ok: false,
           content: expect.stringContaining("no verifiable pricing"),
-          metadata: expect.objectContaining({ errorCode: "PRICING_UNAVAILABLE" })
+          metadata: expect.objectContaining({
+            errorCode: "vision-spend-denied",
+            reasonCode: "PRICING_UNAVAILABLE"
+          })
         }));
       } finally {
         tmp.cleanup();
@@ -424,14 +621,14 @@ describe("vision tools", () => {
           { path: "test.png" }
         );
 
-        expect(result).toEqual({
+        expect(result).toEqual(expect.objectContaining({
           ok: false,
           content: "Vision image processing is unavailable in this installation.",
-          metadata: {
+          metadata: expect.objectContaining({
             path: "test.png",
             errorCode: "normalization-unavailable"
-          }
-        });
+          })
+        }));
         expect(executor.complete).not.toHaveBeenCalled();
       } finally {
         tmp.cleanup();
@@ -579,6 +776,14 @@ describe("vision tools", () => {
         expect(secondOptions!.primaryRoute).toEqual(mainRoute);
         expect(result.ok).toBe(true);
         expect(result.content).toContain("fallback result");
+        expect(result.metadata).toEqual(expect.objectContaining({
+          route: { provider: "anthropic", model: "claude-3", role: "fallback" },
+          fallback: {
+            configured: true,
+            used: true,
+            route: { provider: "anthropic", model: "claude-3", role: "fallback" }
+          }
+        }));
       } finally {
         tmp.cleanup();
       }
@@ -619,6 +824,11 @@ describe("vision tools", () => {
 
         expect(executor.complete).toHaveBeenCalledTimes(1);
         expect(result.ok).toBe(false);
+        expect(result.metadata).toEqual(expect.objectContaining({
+          errorCode: "vision-provider-failed",
+          fallback: { configured: false, used: false },
+          usage: { imageInputs: [{ width: 1, height: 1, detail: "auto" }] }
+        }));
       } finally {
         tmp.cleanup();
       }
