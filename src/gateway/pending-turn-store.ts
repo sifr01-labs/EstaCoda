@@ -44,9 +44,14 @@ export type PendingTurnStoreDiagnostic = {
 export type PendingTurnStoreOperation =
   | "enqueue"
   | "claim"
+  | "release_claim"
   | "complete"
+  | "coalesce"
+  | "replace"
   | "mark_uncertain"
+  | "recover"
   | "clear"
+  | "counts"
   | "list"
   | "retention"
   | "initialize";
@@ -73,6 +78,13 @@ export type PendingTurnEnqueueResult = {
   inserted: boolean;
   turn: PendingTurnRecord;
 };
+
+export type PendingTurnCoalesceResult = {
+  duplicate: boolean;
+  turn: PendingTurnRecord;
+};
+
+export type PendingTurnCounts = Record<PendingTurnStatus, number>;
 
 export type SQLitePendingTurnStoreOptions = {
   db: SQLiteDatabase;
@@ -207,6 +219,95 @@ export class SQLitePendingTurnStore {
     });
   }
 
+  coalescePending(input: {
+    turnId: string;
+    previousMessage: ChannelMessage;
+    incomingMessage: ChannelMessage;
+    combinedMessage: ChannelMessage;
+  }): PendingTurnCoalesceResult {
+    return this.#run("coalesce", () => {
+      requireIdentifier(input.turnId, "coalesce", 128);
+      const previous = this.#validatedMessageJson(input.previousMessage, "coalesce");
+      const incoming = this.#validatedMessageJson(input.incomingMessage, "coalesce");
+      const combined = this.#validatedMessageJson(input.combinedMessage, "coalesce");
+      if (combined.message.id !== previous.message.id || combined.message.channel !== previous.message.channel) {
+        throw storeError("invalid_payload", "coalesce");
+      }
+      return this.#transaction("coalesce", () => {
+        const existingIncoming = this.#rowByPlatformMessage(incoming.message.channel, incoming.message.id);
+        if (existingIncoming !== null) {
+          if (existingIncoming.message_json !== incoming.json) {
+            throw storeError("state_conflict", "coalesce");
+          }
+          const target = this.#rowById(input.turnId);
+          if (target === null || target.status !== "pending" || target.message_json !== previous.json) {
+            throw storeError("state_conflict", "coalesce");
+          }
+          return {
+            duplicate: true,
+            turn: rowToRecord(target, "coalesce", this.#approvedMediaRoots)
+          };
+        }
+
+        const target = this.#rowById(input.turnId);
+        if (target === null || target.status !== "pending" || target.message_json !== previous.json) {
+          throw storeError("state_conflict", "coalesce");
+        }
+        const now = checkedNow(this.#now, "coalesce");
+        const updated = this.#db.query(`
+          update pending_channel_turns set message_json = ?, updated_at = ?
+          where profile_id = ? and turn_id = ? and status = 'pending' and message_json = ?
+        `).run(combined.json, now, this.#profileId, input.turnId, previous.json).changes;
+        if (updated !== 1) {
+          throw storeError("state_conflict", "coalesce");
+        }
+        this.#insertTerminalDedupe(incoming.message, incoming.json, now);
+        this.#trimCompletedRows();
+        const coalesced = this.#rowById(input.turnId);
+        if (coalesced === null) {
+          throw storeError("database_failure", "coalesce", true);
+        }
+        return {
+          duplicate: false,
+          turn: rowToRecord(coalesced, "coalesce", this.#approvedMediaRoots)
+        };
+      });
+    });
+  }
+
+  replacePending(turnIds: string[], message: ChannelMessage): PendingTurnEnqueueResult {
+    return this.#run("replace", () => {
+      const ids = validateTurnIds(turnIds, "replace");
+      const safe = this.#validatedMessageJson(message, "replace");
+      return this.#transaction("replace", () => {
+        const existing = this.#rowByPlatformMessage(safe.message.channel, safe.message.id);
+        if (existing !== null) {
+          if (existing.message_json !== safe.json) {
+            throw storeError("state_conflict", "replace");
+          }
+          return {
+            inserted: false,
+            turn: rowToRecord(existing, "replace", this.#approvedMediaRoots)
+          };
+        }
+        this.#deleteExactPending(ids, "replace");
+        this.#assertCapacity("replace");
+        const inserted = this.#insertPending(safe.message, safe.json, "replace");
+        return {
+          inserted: true,
+          turn: rowToRecord(inserted, "replace", this.#approvedMediaRoots)
+        };
+      });
+    });
+  }
+
+  clearPendingTurns(turnIds: string[]): number {
+    return this.#run("clear", () => {
+      const ids = validateTurnIds(turnIds, "clear");
+      return this.#transaction("clear", () => this.#deleteExactPending(ids, "clear"));
+    });
+  }
+
   claimNext(): PendingTurnRecord | undefined {
     return this.#run("claim", () => this.#transaction("claim", () => {
       const row = this.#db.query<PendingTurnRow>(`
@@ -234,6 +335,36 @@ export class SQLitePendingTurnStore {
       }
       return rowToRecord(claimed, "claim", this.#approvedMediaRoots);
     }));
+  }
+
+  claim(turnId: string): PendingTurnRecord {
+    return this.#run("claim", () => {
+      requireIdentifier(turnId, "claim", 128);
+      return this.#transaction("claim", () => this.#claimRow(turnId));
+    });
+  }
+
+  releaseClaim(turnId: string, claimId: string): PendingTurnRecord {
+    return this.#run("release_claim", () => {
+      requireIdentifier(turnId, "release_claim", 128);
+      requireIdentifier(claimId, "release_claim", 128);
+      return this.#transaction("release_claim", () => {
+        const now = checkedNow(this.#now, "release_claim");
+        const changed = this.#db.query(`
+          update pending_channel_turns
+          set status = 'pending', claim_id = null, claimed_at = null, updated_at = ?
+          where profile_id = ? and turn_id = ? and status = 'claimed' and claim_id = ?
+        `).run(now, this.#profileId, turnId, claimId).changes;
+        if (changed !== 1) {
+          throw storeError("state_conflict", "release_claim");
+        }
+        const released = this.#rowById(turnId);
+        if (released === null) {
+          throw storeError("database_failure", "release_claim", true);
+        }
+        return rowToRecord(released, "release_claim", this.#approvedMediaRoots);
+      });
+    });
   }
 
   complete(turnId: string, claimId: string): PendingTurnRecord {
@@ -277,6 +408,47 @@ export class SQLitePendingTurnStore {
           : [now, now, this.#profileId, turnId] as const;
         return this.#db.query(sql).run(...params).changes;
       });
+    });
+  }
+
+  markPendingAsUncertain(turnId: string): number {
+    return this.#run("recover", () => {
+      requireIdentifier(turnId, "recover", 128);
+      return this.#transaction("recover", () => {
+        const now = checkedNow(this.#now, "recover");
+        const changed = this.#db.query(`
+          update pending_channel_turns
+          set status = 'uncertain', uncertain_at = ?, updated_at = ?
+          where profile_id = ? and turn_id = ? and status = 'pending'
+        `).run(now, now, this.#profileId, turnId).changes;
+        if (changed !== 1) {
+          throw storeError("state_conflict", "recover");
+        }
+        return changed;
+      });
+    });
+  }
+
+  validateForRecovery(message: ChannelMessage): void {
+    this.#run("recover", () => {
+      validateAndSanitizeMessage(message, this.#approvedMediaRoots, "recover", false);
+    });
+  }
+
+  counts(): PendingTurnCounts {
+    return this.#run("counts", () => {
+      const rows = this.#db.query<{ status: PendingTurnStatus; count: number }>(`
+        select status, count(*) as count from pending_channel_turns
+        where profile_id = ? group by status
+      `).all(this.#profileId);
+      const counts: PendingTurnCounts = { pending: 0, claimed: 0, completed: 0, uncertain: 0 };
+      for (const row of rows) {
+        if (!ALL_STATUSES.has(row.status) || !Number.isSafeInteger(row.count) || row.count < 0) {
+          throw storeError("corrupt_record", "counts");
+        }
+        counts[row.status] = row.count;
+      }
+      return counts;
     });
   }
 
@@ -333,6 +505,98 @@ export class SQLitePendingTurnStore {
     `).get(this.#profileId, turnId);
   }
 
+  #rowByPlatformMessage(channel: string, platformMessageId: string): PendingTurnRow | null {
+    return this.#db.query<PendingTurnRow>(`
+      select * from pending_channel_turns
+      where profile_id = ? and channel = ? and platform_message_id = ?
+    `).get(this.#profileId, channel, platformMessageId);
+  }
+
+  #validatedMessageJson(
+    message: ChannelMessage,
+    operation: PendingTurnStoreOperation
+  ): { message: ChannelMessage; json: string } {
+    const safeMessage = validateAndSanitizeMessage(message, this.#approvedMediaRoots, operation, false);
+    const json = JSON.stringify(safeMessage);
+    if (utf8Size(json) > MAX_MESSAGE_JSON_BYTES) {
+      throw storeError("invalid_payload", operation);
+    }
+    return { message: safeMessage, json };
+  }
+
+  #assertCapacity(operation: PendingTurnStoreOperation): void {
+    const activeCount = this.#db.query<{ count: number }>(`
+      select count(*) as count from pending_channel_turns
+      where profile_id = ? and status <> 'completed'
+    `).get(this.#profileId)?.count ?? 0;
+    if (activeCount >= this.#maxPendingPerProfile) {
+      throw storeError("capacity_exceeded", operation);
+    }
+  }
+
+  #insertPending(
+    message: ChannelMessage,
+    messageJson: string,
+    operation: PendingTurnStoreOperation
+  ): PendingTurnRow {
+    const now = checkedNow(this.#now, operation);
+    const turnId = checkedGeneratedId(this.#idFactory, operation);
+    this.#db.query(`
+      insert into pending_channel_turns (
+        turn_id, profile_id, channel, platform_message_id, status, message_json,
+        claim_id, claimed_at, completed_at, uncertain_at, created_at, updated_at
+      ) values (?, ?, ?, ?, 'pending', ?, null, null, null, null, ?, ?)
+    `).run(turnId, this.#profileId, message.channel, message.id, messageJson, now, now);
+    const inserted = this.#rowById(turnId);
+    if (inserted === null) {
+      throw storeError("database_failure", operation, true);
+    }
+    return inserted;
+  }
+
+  #insertTerminalDedupe(message: ChannelMessage, messageJson: string, now: string): void {
+    const turnId = checkedGeneratedId(this.#idFactory, "coalesce");
+    this.#db.query(`
+      insert into pending_channel_turns (
+        turn_id, profile_id, channel, platform_message_id, status, message_json,
+        claim_id, claimed_at, completed_at, uncertain_at, created_at, updated_at
+      ) values (?, ?, ?, ?, 'completed', ?, null, null, ?, null, ?, ?)
+    `).run(turnId, this.#profileId, message.channel, message.id, messageJson, now, now, now);
+  }
+
+  #deleteExactPending(turnIds: string[], operation: PendingTurnStoreOperation): number {
+    if (turnIds.length === 0) {
+      return 0;
+    }
+    const placeholders = turnIds.map(() => "?").join(", ");
+    const changed = this.#db.query(`
+      delete from pending_channel_turns
+      where profile_id = ? and status = 'pending' and turn_id in (${placeholders})
+    `).run(this.#profileId, ...turnIds).changes;
+    if (changed !== turnIds.length) {
+      throw storeError("state_conflict", operation);
+    }
+    return changed;
+  }
+
+  #claimRow(turnId: string): PendingTurnRecord {
+    const claimId = checkedGeneratedId(this.#claimIdFactory, "claim");
+    const now = checkedNow(this.#now, "claim");
+    const changed = this.#db.query(`
+      update pending_channel_turns
+      set status = 'claimed', claim_id = ?, claimed_at = ?, updated_at = ?
+      where profile_id = ? and turn_id = ? and status = 'pending'
+    `).run(claimId, now, now, this.#profileId, turnId).changes;
+    if (changed !== 1) {
+      throw storeError("state_conflict", "claim", true);
+    }
+    const claimed = this.#rowById(turnId);
+    if (claimed === null) {
+      throw storeError("database_failure", "claim", true);
+    }
+    return rowToRecord(claimed, "claim", this.#approvedMediaRoots);
+  }
+
   #trimCompletedRows(): number {
     return this.#db.query(`
       delete from pending_channel_turns
@@ -383,7 +647,8 @@ export class SQLitePendingTurnStore {
 function validateAndSanitizeMessage(
   value: ChannelMessage,
   approvedMediaRoots: string[],
-  operation: PendingTurnStoreOperation
+  operation: PendingTurnStoreOperation,
+  allowMissingFiles = operation !== "enqueue" && operation !== "recover"
 ): ChannelMessage {
   if (!isPlainObject(value)) {
     throw storeError("invalid_payload", operation);
@@ -428,7 +693,7 @@ function validateAndSanitizeMessage(
     ? undefined
     : sanitizeMetadata(value.metadata, operation, MAX_METADATA_JSON_BYTES);
   const attachments = (value.attachments ?? []).map((attachment) =>
-    sanitizeAttachment(attachment, approvedMediaRoots, operation, operation !== "enqueue"));
+    sanitizeAttachment(attachment, approvedMediaRoots, operation, allowMissingFiles));
   if (attachments.length > MAX_ATTACHMENTS ||
       utf8Size(JSON.stringify(attachments)) > MAX_ATTACHMENTS_JSON_BYTES) {
     throw storeError("invalid_payload", operation);
@@ -619,6 +884,20 @@ function validateStatuses(
     throw storeError("invalid_payload", operation);
   }
   return [...new Set(values)];
+}
+
+function validateTurnIds(
+  values: string[],
+  operation: PendingTurnStoreOperation
+): string[] {
+  if (!Array.isArray(values)) {
+    throw storeError("invalid_payload", operation);
+  }
+  const ids = values.map((value) => requireIdentifier(value, operation, 128));
+  if (new Set(ids).size !== ids.length) {
+    throw storeError("invalid_payload", operation);
+  }
+  return ids;
 }
 
 function requireIdentifier(

@@ -143,6 +143,82 @@ describe("SQLitePendingTurnStore", () => {
     }
   });
 
+  it("claims an exact turn, releases a pre-execution race, and exposes durable status counts", async () => {
+    const fixture = await createFixture();
+    try {
+      const store = fixture.store({ claimIdFactory: () => "claim-1" });
+      const first = store.enqueue(message("message-1", "first")).turn;
+      store.enqueue(message("message-2", "second"));
+
+      const claimed = store.claim(first.id);
+      expect(claimed).toMatchObject({ id: first.id, status: "claimed", claimId: "claim-1" });
+      expect(store.counts()).toMatchObject({ pending: 1, claimed: 1, uncertain: 0 });
+      expect(store.releaseClaim(first.id, "claim-1")).toMatchObject({ status: "pending" });
+      expect(store.counts()).toMatchObject({ pending: 2, claimed: 0, uncertain: 0 });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("coalesces a pending FIFO tail transactionally and deduplicates the incoming delivery", async () => {
+    const fixture = await createFixture();
+    let turn = 0;
+    try {
+      const store = fixture.store({ idFactory: () => `turn-${++turn}` });
+      const original = message("message-1", "first");
+      const incoming = message("message-2", "second");
+      const combined = {
+        ...original,
+        text: "first\n\nsecond",
+        metadata: {
+          ...original.metadata,
+          busyTextCoalescedMessageIds: ["message-1", "message-2"],
+          busyTextCoalescedReceivedAts: [original.receivedAt, incoming.receivedAt],
+          busyTextCoalescingSize: 2,
+          busyTextCoalescingWindowMs: 1_500
+        }
+      };
+      const target = store.enqueue(original).turn;
+
+      expect(store.coalescePending({
+        turnId: target.id,
+        previousMessage: original,
+        incomingMessage: incoming,
+        combinedMessage: combined
+      })).toMatchObject({ duplicate: false, turn: { id: target.id, message: combined } });
+      expect(store.enqueue(incoming)).toMatchObject({ inserted: false, turn: { status: "completed" } });
+      expect(store.list({ statuses: ["pending"] })).toMatchObject([{ id: target.id, message: combined }]);
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("replaces and clears an exact pending set atomically", async () => {
+    const fixture = await createFixture();
+    let turn = 0;
+    try {
+      const store = fixture.store({ idFactory: () => `turn-${++turn}` });
+      const first = store.enqueue(message("message-1", "first")).turn;
+      const second = store.enqueue(message("message-2", "second")).turn;
+      const replacement = store.replacePending(
+        [first.id, second.id],
+        message("message-3", "replacement")
+      );
+      expect(replacement.inserted).toBe(true);
+      expect(store.list({ statuses: ["pending"] })).toMatchObject([
+        { id: replacement.turn.id, platformMessageId: "message-3" }
+      ]);
+      expect(() => store.clearPendingTurns([first.id])).toThrowError(
+        expect.objectContaining({ code: "state_conflict" })
+      );
+      expect(store.list({ statuses: ["pending"] })).toHaveLength(1);
+      expect(store.clearPendingTurns([replacement.turn.id])).toBe(1);
+      expect(store.list({ statuses: ["pending"] })).toHaveLength(0);
+    } finally {
+      fixture.close();
+    }
+  });
+
   it("enforces the active-row cap and frees capacity after completion", async () => {
     const fixture = await createFixture();
     try {
@@ -249,6 +325,9 @@ describe("SQLitePendingTurnStore", () => {
       store.enqueue(withAttachment(message("temporary", "file"), { localPath: approvedFile }));
       const claimed = store.claimNext()!;
       await rm(approvedFile);
+      expect(() => store.validateForRecovery(claimed.message)).toThrowError(
+        expect.objectContaining({ code: "invalid_payload", operation: "recover" })
+      );
       expect(store.complete(claimed.id, claimed.claimId!)).toMatchObject({ status: "completed" });
     } finally {
       fixture.close();

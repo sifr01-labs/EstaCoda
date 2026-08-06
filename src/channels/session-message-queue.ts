@@ -34,6 +34,8 @@ export type QueuedMessage = {
   queueDepthAtArrival: number;
   /** Gateway-owned provenance for optional bounded FIFO-tail text coalescing. */
   textCoalescing?: QueuedTextCoalescingState;
+  /** Durable pending-turn identity when SQLite queue persistence is enabled. */
+  durableTurnId?: string;
 };
 
 export type QueueEnqueueResult = {
@@ -41,7 +43,24 @@ export type QueueEnqueueResult = {
   position?: number;
   rejectedBecauseFull?: boolean;
   coalesced?: boolean;
+  duplicate?: boolean;
 };
+
+export type QueueMutation =
+  | { kind: "enqueue"; queuedMessage: QueuedMessage }
+  | {
+      kind: "coalesce";
+      previousQueuedMessage: QueuedMessage;
+      queuedMessage: QueuedMessage;
+      incomingMessage: ChannelMessage;
+    };
+
+export type QueueMutationCommit = {
+  duplicate?: boolean;
+  durableTurnId?: string;
+};
+
+export type BeforeQueueMutation = (mutation: QueueMutation) => QueueMutationCommit | undefined;
 
 export class SessionMessageQueue {
   #queues = new Map<string, QueuedMessage[]>();
@@ -50,13 +69,19 @@ export class SessionMessageQueue {
     key: string,
     message: ChannelMessage,
     policyAtArrival: ChannelBusyPolicy,
-    queueDepthAtArrival: number
+    queueDepthAtArrival: number,
+    beforeCommit?: BeforeQueueMutation
   ): QueueEnqueueResult {
     const queue = this.#queues.get(key) ?? [];
     if (queue.length >= queueDepthAtArrival) {
       return { accepted: false, rejectedBecauseFull: true };
     }
     const queuedMessage = this.#createQueuedMessage(message, policyAtArrival, queueDepthAtArrival);
+    const commit = beforeCommit?.({ kind: "enqueue", queuedMessage });
+    if (commit?.duplicate === true) {
+      return { accepted: false, duplicate: true };
+    }
+    queuedMessage.durableTurnId = commit?.durableTurnId;
     queue.push(queuedMessage);
     this.#queues.set(key, queue);
     return { accepted: true, position: queue.length };
@@ -69,10 +94,11 @@ export class SessionMessageQueue {
     queueDepthAtArrival: number,
     coalescing: BusyTextCoalescingPolicy,
     eligible: boolean,
-    now = Date.now()
+    now = Date.now(),
+    beforeCommit?: BeforeQueueMutation
   ): QueueEnqueueResult {
     if (!coalescing.enabled || policyAtArrival !== "queue") {
-      return this.enqueue(key, message, policyAtArrival, queueDepthAtArrival);
+      return this.enqueue(key, message, policyAtArrival, queueDepthAtArrival, beforeCommit);
     }
 
     const queue = this.#queues.get(key) ?? [];
@@ -90,20 +116,40 @@ export class SessionMessageQueue {
       const withinMessageLimit = tail.textCoalescing.messages.length < coalescing.maxMessages;
       const withinCharacterLimit = combinedChars <= coalescing.maxChars;
       if (withinWindow && withinMessageLimit && withinCharacterLimit) {
-        tail.textCoalescing.messages.push({ id: message.id, receivedAt: message.receivedAt });
-        tail.textCoalescing.lastUpdatedAt = now;
-        tail.textCoalescing.totalChars = combinedChars;
-        tail.message = {
-          ...tail.message,
-          text: `${tail.message.text}${separator}${message.text}`,
-          metadata: {
-            ...(tail.message.metadata ?? {}),
-            busyTextCoalescedMessageIds: tail.textCoalescing.messages.map((item) => item.id),
-            busyTextCoalescedReceivedAts: tail.textCoalescing.messages.map((item) => item.receivedAt),
-            busyTextCoalescingSize: tail.textCoalescing.messages.length,
-            busyTextCoalescingWindowMs: coalescing.windowMs,
+        const messages = [
+          ...tail.textCoalescing.messages,
+          { id: message.id, receivedAt: message.receivedAt }
+        ];
+        const updatedTail: QueuedMessage = {
+          ...tail,
+          textCoalescing: {
+            messages,
+            lastUpdatedAt: now,
+            totalChars: combinedChars
           },
+          message: {
+            ...tail.message,
+            text: `${tail.message.text}${separator}${message.text}`,
+            metadata: {
+              ...(tail.message.metadata ?? {}),
+              busyTextCoalescedMessageIds: messages.map((item) => item.id),
+              busyTextCoalescedReceivedAts: messages.map((item) => item.receivedAt),
+              busyTextCoalescingSize: messages.length,
+              busyTextCoalescingWindowMs: coalescing.windowMs,
+            },
+          }
         };
+        const commit = beforeCommit?.({
+          kind: "coalesce",
+          previousQueuedMessage: tail,
+          queuedMessage: updatedTail,
+          incomingMessage: message
+        });
+        if (commit?.duplicate === true) {
+          return { accepted: false, duplicate: true };
+        }
+        updatedTail.durableTurnId = commit?.durableTurnId ?? tail.durableTurnId;
+        queue[queue.length - 1] = updatedTail;
         return { accepted: true, position: queue.length, coalesced: true };
       }
     }
@@ -124,6 +170,11 @@ export class SessionMessageQueue {
         : undefined,
       now
     );
+    const commit = beforeCommit?.({ kind: "enqueue", queuedMessage });
+    if (commit?.duplicate === true) {
+      return { accepted: false, duplicate: true };
+    }
+    queuedMessage.durableTurnId = commit?.durableTurnId;
     queue.push(queuedMessage);
     this.#queues.set(key, queue);
     return { accepted: true, position: queue.length, coalesced: false };
@@ -162,14 +213,26 @@ export class SessionMessageQueue {
     this.#queues.delete(key);
   }
 
+  list(key: string): QueuedMessage[] {
+    return [...(this.#queues.get(key) ?? [])];
+  }
+
+  enqueueRecovered(key: string, queuedMessage: QueuedMessage): void {
+    const queue = this.#queues.get(key) ?? [];
+    queue.push(queuedMessage);
+    this.#queues.set(key, queue);
+  }
+
   unshift(
     key: string,
     message: ChannelMessage,
     policyAtArrival: ChannelBusyPolicy,
-    queueDepthAtArrival: number
+    queueDepthAtArrival: number,
+    durableTurnId?: string
   ): void {
     const queue = this.#queues.get(key) ?? [];
     const queuedMessage = this.#createQueuedMessage(message, policyAtArrival, queueDepthAtArrival);
+    queuedMessage.durableTurnId = durableTurnId;
     queue.unshift(queuedMessage);
     this.#queues.set(key, queue);
   }

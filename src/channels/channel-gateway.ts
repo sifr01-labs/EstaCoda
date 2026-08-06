@@ -12,7 +12,17 @@ import type {
 } from "../contracts/channel.js";
 import type { ChannelKind } from "../contracts/channel.js";
 import type { ChannelBusyPolicy, LoadedRuntimeConfig } from "../config/runtime-config.js";
-import { SessionMessageQueue, type BusyTextCoalescingPolicy } from "./session-message-queue.js";
+import {
+  SessionMessageQueue,
+  type BeforeQueueMutation,
+  type BusyTextCoalescingPolicy,
+  type QueuedMessage
+} from "./session-message-queue.js";
+import {
+  PendingTurnStoreError,
+  type PendingTurnRecord,
+  type SQLitePendingTurnStore
+} from "../gateway/pending-turn-store.js";
 import { assessSecurityPolicy, type SecurityApprovalMode, type SecurityAssessment, type SecurityDecision, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
 import { runCronCommand } from "../cron/cron-command.js";
 import { originFromSessionKey } from "../cron/cron-runner.js";
@@ -212,6 +222,8 @@ export type ChannelGatewayOptions = {
   homeDir?: string;
   profileId?: string;
   approvalQueue?: GatewayApprovalQueue;
+  /** Profile-scoped durable queue. Its presence means persistence is required; failures never fall back to memory. */
+  pendingTurnStore?: SQLitePendingTurnStore;
 
   // Stage 5D additions (all optional)
   /** Active turn registry for busy protection and abort tracking. */
@@ -411,6 +423,7 @@ export class ChannelGateway {
   readonly #homeDir: string | undefined;
   readonly #profileId: string;
   readonly #approvalQueue: GatewayApprovalQueue | undefined;
+  readonly #pendingTurnStore: SQLitePendingTurnStore | undefined;
   readonly #activeTurns = new Map<string, AbortController>();
   readonly #pendingApprovals = new Map<string, PendingApprovalContinuation>();
   readonly #approvalGrants = new Map<string, ApprovalGrant[]>();
@@ -477,6 +490,7 @@ export class ChannelGateway {
     this.#homeDir = options.homeDir;
     this.#profileId = options.profileId ?? "default";
     this.#approvalQueue = options.approvalQueue;
+    this.#pendingTurnStore = options.pendingTurnStore;
 
     // Stage 5D
     this.#activeTurnRegistry = options.activeTurnRegistry;
@@ -930,9 +944,15 @@ export class ChannelGateway {
   }
 
   async start(): Promise<void> {
+    const recoveredKeys = await this.#recoverDurableQueue();
     for (const adapter of this.#adapters.values()) {
       await adapter.start?.(async (message) => {
         await this.receive(message);
+      });
+    }
+    for (const key of recoveredKeys) {
+      void this.#drainQueuedTurns(key).catch((error) => {
+        this.#warnQueueFailure("recovery drain", error);
       });
     }
   }
@@ -942,6 +962,138 @@ export class ChannelGateway {
     for (const adapter of this.#adapters.values()) {
       await adapter.stop?.();
     }
+  }
+
+  #beforeQueueMutation(): BeforeQueueMutation | undefined {
+    const store = this.#pendingTurnStore;
+    if (store === undefined) return undefined;
+    return (mutation) => {
+      if (mutation.kind === "enqueue") {
+        const result = store.enqueue(mutation.queuedMessage.message);
+        return result.inserted
+          ? { durableTurnId: result.turn.id }
+          : { duplicate: true, durableTurnId: result.turn.id };
+      }
+      const turnId = mutation.previousQueuedMessage.durableTurnId;
+      if (turnId === undefined) {
+        throw new PendingTurnStoreError({ code: "state_conflict", operation: "coalesce" });
+      }
+      const result = store.coalescePending({
+        turnId,
+        previousMessage: mutation.previousQueuedMessage.message,
+        incomingMessage: mutation.incomingMessage,
+        combinedMessage: mutation.queuedMessage.message
+      });
+      return result.duplicate
+        ? { duplicate: true, durableTurnId: result.turn.id }
+        : { durableTurnId: result.turn.id };
+    };
+  }
+
+  async #recoverDurableQueue(): Promise<string[]> {
+    const store = this.#pendingTurnStore;
+    if (store === undefined) return [];
+
+    store.pruneRetention();
+    store.markClaimedAsUncertain();
+    const recoveredKeys = new Set<string>();
+    for (const turn of store.list({ statuses: ["pending"] })) {
+      if (!await this.#isRecoverableTurn(turn)) {
+        store.markPendingAsUncertain(turn.id);
+        continue;
+      }
+      const key = stableSessionKey(turn.message.sessionKey, this.#sessionPolicy);
+      this.#sessionMessageQueue.enqueueRecovered(key, this.#queuedMessageFromRecord(turn));
+      recoveredKeys.add(key);
+    }
+    return [...recoveredKeys];
+  }
+
+  async #isRecoverableTurn(turn: PendingTurnRecord): Promise<boolean> {
+    try {
+      const policies = turn.message.channel === "whatsapp"
+        ? {
+            ...this.#authPolicy,
+            whatsapp: this.#authPolicy.whatsapp === undefined
+              ? undefined
+              : { ...this.#authPolicy.whatsapp, requireMention: false }
+          }
+        : this.#authPolicy;
+      if (!authorizeChannelMessage(turn.message, policies).allowed) return false;
+      if (turn.message.sessionKey.platform !== turn.message.channel) return false;
+      normalizeSessionKey(turn.message.sessionKey, this.#sessionPolicy);
+      this.#adapterFor(turn.message.channel);
+      this.#pendingTurnStore?.validateForRecovery(turn.message);
+      const trusted = typeof this.#trustedWorkspace === "function"
+        ? await this.#trustedWorkspace(turn.message)
+        : this.#trustedWorkspace;
+      return trusted === true;
+    } catch {
+      return false;
+    }
+  }
+
+  #queuedMessageFromRecord(turn: PendingTurnRecord): QueuedMessage {
+    const policy = this.#busyPolicyResolver?.(turn.message.channel) ?? {
+      busyPolicy: "queue" as const,
+      queueDepth: 3
+    };
+    const ids = Array.isArray(turn.message.metadata?.busyTextCoalescedMessageIds)
+      ? turn.message.metadata.busyTextCoalescedMessageIds.filter((value): value is string => typeof value === "string")
+      : [];
+    const receivedAts = Array.isArray(turn.message.metadata?.busyTextCoalescedReceivedAts)
+      ? turn.message.metadata.busyTextCoalescedReceivedAts.filter((value): value is string => typeof value === "string")
+      : [];
+    const messages = ids.length === receivedAts.length
+      ? ids.map((id, index) => ({ id, receivedAt: receivedAts[index]! }))
+      : [];
+    const updatedAt = Date.parse(turn.updatedAt);
+    return {
+      message: turn.message,
+      channelKind: turn.message.channel,
+      enqueuedAt: Date.parse(turn.createdAt),
+      policyAtArrival: policy.busyPolicy,
+      queueDepthAtArrival: policy.queueDepth,
+      durableTurnId: turn.id,
+      ...(messages.length < 2 ? {} : {
+        textCoalescing: {
+          messages,
+          lastUpdatedAt: Number.isFinite(updatedAt) ? updatedAt : Date.now(),
+          totalChars: turn.message.text.length
+        }
+      })
+    };
+  }
+
+  #warnQueueFailure(action: string, error: unknown): void {
+    try {
+      this.#logWarning?.(`Durable channel queue ${action} failed (${boundedErrorClass(error)}).`);
+    } catch {
+      // Diagnostics must not affect queue state.
+    }
+  }
+
+  #quarantineClaim(turnId: string): void {
+    try {
+      this.#pendingTurnStore?.markClaimedAsUncertain(turnId);
+    } catch (error) {
+      this.#warnQueueFailure("quarantine", error);
+    }
+  }
+
+  #durableTurnIds(messages: QueuedMessage[]): string[] {
+    const ids = messages.map((message) => message.durableTurnId);
+    if (ids.some((id) => id === undefined)) {
+      throw new PendingTurnStoreError({ code: "state_conflict", operation: "replace" });
+    }
+    return ids as string[];
+  }
+
+  async #deliverQueuePersistenceFailure(
+    adapter: ChannelAdapter,
+    sessionKey: ChannelSessionKey
+  ): Promise<void> {
+    await this.#deliverText(adapter, sessionKey, "Unable to save this queued request safely. Please try again.");
   }
 
   async flushPendingDebounces(): Promise<void> {
@@ -1245,21 +1397,35 @@ export class ChannelGateway {
           return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
         }
         case "queue": {
-          const enqueueResult = policy.busyTextCoalescing?.enabled === true
-            ? this.#sessionMessageQueue.enqueueOrCoalesceText(
-                activeTurnKey,
-                processedMessage,
-                policy.busyPolicy,
-                policy.queueDepth,
-                policy.busyTextCoalescing,
-                this.#isEligibleForNormalTextAggregation(processedMessage)
-              )
-            : this.#sessionMessageQueue.enqueue(
-                activeTurnKey,
-                processedMessage,
-                policy.busyPolicy,
-                policy.queueDepth
-              );
+          let enqueueResult;
+          try {
+            const beforeCommit = this.#beforeQueueMutation();
+            enqueueResult = policy.busyTextCoalescing?.enabled === true
+              ? this.#sessionMessageQueue.enqueueOrCoalesceText(
+                  activeTurnKey,
+                  processedMessage,
+                  policy.busyPolicy,
+                  policy.queueDepth,
+                  policy.busyTextCoalescing,
+                  this.#isEligibleForNormalTextAggregation(processedMessage),
+                  Date.now(),
+                  beforeCommit
+                )
+              : this.#sessionMessageQueue.enqueue(
+                  activeTurnKey,
+                  processedMessage,
+                  policy.busyPolicy,
+                  policy.queueDepth,
+                  beforeCommit
+                );
+          } catch (error) {
+            this.#warnQueueFailure("enqueue", error);
+            await this.#deliverQueuePersistenceFailure(adapter, normalizedSessionKey);
+            return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+          }
+          if (enqueueResult.duplicate === true) {
+            return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+          }
           if (enqueueResult.accepted) {
             const position = enqueueResult.position;
             if (position !== undefined) {
@@ -1275,12 +1441,23 @@ export class ChannelGateway {
         }
         case "interrupt": {
           if (this.#hasActiveSubagentsForTurn(activeTurnKey)) {
-            const enqueueResult = this.#sessionMessageQueue.enqueue(
-              activeTurnKey,
-              processedMessage,
-              policy.busyPolicy,
-              policy.queueDepth
-            );
+            let enqueueResult;
+            try {
+              enqueueResult = this.#sessionMessageQueue.enqueue(
+                activeTurnKey,
+                processedMessage,
+                policy.busyPolicy,
+                policy.queueDepth,
+                this.#beforeQueueMutation()
+              );
+            } catch (error) {
+              this.#warnQueueFailure("enqueue", error);
+              await this.#deliverQueuePersistenceFailure(adapter, normalizedSessionKey);
+              return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+            }
+            if (enqueueResult.duplicate === true) {
+              return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+            }
             if (enqueueResult.accepted) {
               const position = enqueueResult.position;
               if (position !== undefined) {
@@ -1291,12 +1468,28 @@ export class ChannelGateway {
             }
             return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
           }
+          let durableTurnId: string | undefined;
+          if (this.#pendingTurnStore !== undefined) {
+            try {
+              const turnIds = this.#durableTurnIds(this.#sessionMessageQueue.list(activeTurnKey));
+              const result = this.#pendingTurnStore.replacePending(turnIds, processedMessage);
+              if (!result.inserted) {
+                return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+              }
+              durableTurnId = result.turn.id;
+            } catch (error) {
+              this.#warnQueueFailure("interrupt replacement", error);
+              await this.#deliverQueuePersistenceFailure(adapter, normalizedSessionKey);
+              return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+            }
+          }
           this.#sessionMessageQueue.clear(activeTurnKey);
           this.#sessionMessageQueue.unshift(
             activeTurnKey,
             processedMessage,
             policy.busyPolicy,
-            policy.queueDepth
+            policy.queueDepth,
+            durableTurnId
           );
           // Abort active turn if one exists
           if (this.#activeTurnRegistry !== undefined) {
@@ -1840,11 +2033,37 @@ export class ChannelGateway {
 
       this.#drainingQueue.add(activeTurnKey);
 
+      let durableClaim: PendingTurnRecord | undefined;
+      if (this.#pendingTurnStore !== undefined) {
+        if (queued.durableTurnId === undefined) {
+          this.#warnQueueFailure(
+            "claim",
+            new PendingTurnStoreError({ code: "state_conflict", operation: "claim" })
+          );
+          this.#drainingQueue.delete(activeTurnKey);
+          continue;
+        }
+        try {
+          durableClaim = this.#pendingTurnStore.claim(queued.durableTurnId);
+        } catch (error) {
+          this.#warnQueueFailure("claim", error);
+          this.#drainingQueue.delete(activeTurnKey);
+          if (!(error instanceof PendingTurnStoreError) || error.code !== "state_conflict") {
+            this.#sessionMessageQueue.unshiftQueued(activeTurnKey, queued);
+            return;
+          }
+          continue;
+        }
+      }
+
       let adapter: ChannelAdapter;
       try {
         adapter = this.#adapterFor(queued.channelKind);
       } catch {
-        this.#logWarning?.(`No adapter found for channel kind ${queued.channelKind}; dropping queued message`);
+        if (durableClaim !== undefined) {
+          this.#quarantineClaim(durableClaim.id);
+        }
+        this.#logWarning?.(`No adapter found for queued channel kind; quarantining queued message`);
         this.#drainingQueue.delete(activeTurnKey);
         continue;
       }
@@ -1860,14 +2079,34 @@ export class ChannelGateway {
       try {
         result = await turnPromise;
       } catch (err) {
-        this.#logWarning?.(`Queued turn failed for ${activeTurnKey}: ${err instanceof Error ? err.message : String(err)}`);
+        if (durableClaim !== undefined) {
+          this.#quarantineClaim(durableClaim.id);
+        }
+        this.#warnQueueFailure("execution", err);
         continue;
       }
 
       // If the turn didn't actually start (busy race), re-enqueue and stop draining
       if (result.sessionId === "") {
+        if (durableClaim !== undefined) {
+          try {
+            this.#pendingTurnStore?.releaseClaim(durableClaim.id, durableClaim.claimId!);
+          } catch (error) {
+            this.#warnQueueFailure("claim release", error);
+            return;
+          }
+        }
         this.#sessionMessageQueue.unshiftQueued(activeTurnKey, queued);
         return;
+      }
+
+      if (durableClaim !== undefined) {
+        try {
+          this.#pendingTurnStore?.complete(durableClaim.id, durableClaim.claimId!);
+        } catch (error) {
+          // The turn may have executed. Leave a claimed row so restart recovery quarantines it.
+          this.#warnQueueFailure("completion", error);
+        }
       }
 
       // Turn completed successfully. Loop to drain the next queued message.
@@ -2528,6 +2767,16 @@ export class ChannelGateway {
       const pointer = this.#surfacePointerStore !== undefined
         ? await this.#surfacePointerStore.getPointer(message.sessionKey.platform as SurfaceType, message.sessionKey.chatId)
         : undefined;
+      let durableQueueLine: string | undefined;
+      if (this.#pendingTurnStore !== undefined) {
+        try {
+          const counts = this.#pendingTurnStore.counts();
+          durableQueueLine = `Durable queue: ${counts.pending} pending, ${counts.claimed} claimed, ${counts.uncertain} uncertain`;
+        } catch (error) {
+          this.#warnQueueFailure("status", error);
+          durableQueueLine = "Durable queue: unavailable";
+        }
+      }
       const text = [
         "EstaCoda channel status",
         `Channel: ${message.channel}`,
@@ -2536,6 +2785,7 @@ export class ChannelGateway {
         pointer !== undefined ? `Attached to: ${pointer.sessionId} (since ${pointer.attachedAt})` : "Session: independent",
         pointer?.homeDelivery !== undefined ? `Home delivery: ${pointer.homeDelivery}` : undefined,
         `YOLO mode: ${this.#isYoloEnabled(message.sessionKey, sessionId) ? "on" : "off"}`,
+        durableQueueLine,
         ...this.#activeSubagentStatusLines(message, sessionId)
       ].filter((line) => line !== undefined).join("\n");
       await this.#deliverText(adapter, message.sessionKey, text);
@@ -3238,6 +3488,18 @@ export class ChannelGateway {
       const queueSize = this.#sessionMessageQueue.size(key);
       if (queueSize > 0) {
         // No active turn, but queued messages: clear them
+        if (this.#pendingTurnStore !== undefined) {
+          try {
+            this.#pendingTurnStore.clearPendingTurns(
+              this.#durableTurnIds(this.#sessionMessageQueue.list(key))
+            );
+          } catch (error) {
+            this.#warnQueueFailure("clear", error);
+            const text = "Unable to clear the durable queue safely. Please try again.";
+            await this.#deliverText(adapter, message.sessionKey, text);
+            return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+          }
+        }
         this.#sessionMessageQueue.clear(key);
         const text = `Stopped. Cleared ${queueSize} queued message${queueSize === 1 ? "" : "s"}.`;
         await this.#deliverText(adapter, message.sessionKey, text);

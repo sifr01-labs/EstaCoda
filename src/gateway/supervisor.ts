@@ -84,6 +84,7 @@ import {
 } from "./runtime-cache-state.js";
 import { ActiveTurnRegistry } from "./active-turn-registry.js";
 import { GatewayApprovalQueue } from "./approval-queue.js";
+import { SQLitePendingTurnStore } from "./pending-turn-store.js";
 import { VoiceStateManager } from "./voice-state.js";
 import {
   HookRegistry,
@@ -329,6 +330,7 @@ export type SupervisorInternalState = {
   exit: (code: number) => void;
   activeTurnRegistry?: ActiveTurnRegistry;
   gatewayApprovalQueue?: GatewayApprovalQueue;
+  pendingTurnStore?: SQLitePendingTurnStore;
   runtimeCache?: RuntimeCache;
   runtimeFingerprint?: RuntimeFingerprint;
   pruneTimer?: ReturnType<typeof setInterval>;
@@ -487,6 +489,7 @@ function createInitialState(
     exit: exitFn,
     activeTurnRegistry: undefined,
     gatewayApprovalQueue: undefined,
+    pendingTurnStore: undefined,
     runtimeCache: undefined,
     runtimeFingerprint: undefined,
     pruneTimer: undefined,
@@ -594,6 +597,7 @@ async function cleanupSupervisorStartupResources(state: SupervisorInternalState)
 
   // 5. Close session DB if opened
   if (state.sessionDb !== undefined) {
+    state.pendingTurnStore = undefined;
     const sessionDb = state.sessionDb;
     state.sessionDb = undefined;
     if ((activeFinalization !== undefined && !finalizationSettled) || !taskHostSettled) {
@@ -973,6 +977,26 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       controller: new WorkspaceApprovalController()
     });
     state.gatewayApprovalQueue = gatewayApprovalQueue;
+    const durableMediaRoots = [
+      profilePaths.channelMediaPath,
+      profilePaths.audioCachePath,
+      join(profilePaths.tempPath, "audio")
+    ];
+    let pendingTurnStore: SQLitePendingTurnStore | undefined;
+    if (config.gateway.messageQueue.persistence === "sqlite") {
+      await Promise.all(durableMediaRoots.map((root) => mkdir(root, { recursive: true })));
+      pendingTurnStore = new SQLitePendingTurnStore({
+        db: sessionDb.db,
+        profileId,
+        approvedMediaRoots: durableMediaRoots,
+        maxPendingPerProfile: config.gateway.messageQueue.maxPendingPerProfile,
+        uncertainRetentionDays: config.gateway.messageQueue.uncertainRetentionDays,
+        onDiagnostic: (diagnostic) => {
+          logWarning(`Pending-turn store ${diagnostic.operation} failed (${diagnostic.code}).`);
+        }
+      });
+      state.pendingTurnStore = pendingTurnStore;
+    }
 
     const sessionFinalizationQueue = new SessionFinalizationQueue({ db: sessionDb.db });
     state.sessionFinalizationWorker = new SessionFinalizationWorker({
@@ -1511,7 +1535,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           sessionStore: new PersistentChannelSessionStore({ path: sessionContextPath, policy: sessionPolicy, surfacePointerStore }),
           approvalStore,
           authPolicy: authPolicies,
-          trustedWorkspace: workspaceTrusted,
+          trustedWorkspace: () => trustStore.isTrusted(options.workspaceRoot),
           sessionPolicy,
           handoffStore,
           surfacePointerStore,
@@ -1558,6 +1582,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           enqueueSessionFinalization,
           profileId,
           approvalQueue: gatewayApprovalQueue,
+          pendingTurnStore,
           voiceStateManager,
           voiceAutoTtsDefault: config.voice.autoTts,
           autoTtsConfig: async () => {
@@ -1575,7 +1600,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           sessionStore: new PersistentChannelSessionStore({ path: sessionContextPath, policy: sessionPolicy, surfacePointerStore }),
           approvalStore,
           authPolicy: authPolicies,
-          trustedWorkspace: workspaceTrusted,
+          trustedWorkspace: () => trustStore.isTrusted(options.workspaceRoot),
           sessionPolicy,
           handoffStore,
           surfacePointerStore,
@@ -1622,6 +1647,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           enqueueSessionFinalization,
           profileId,
           approvalQueue: gatewayApprovalQueue,
+          pendingTurnStore,
           voiceStateManager,
           voiceAutoTtsDefault: config.voice.autoTts,
           autoTtsConfig: async () => {
@@ -1874,6 +1900,7 @@ export async function runPrune(state: SupervisorInternalState, guard: { running:
   guard.running = true;
   try {
     await state.runtimeCache!.prune();
+    state.pendingTurnStore?.pruneRetention();
   } catch (err) {
     logWarning(`Runtime cache prune error: ${err instanceof Error ? err.message : String(err)}`);
   } finally {

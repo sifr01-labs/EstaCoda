@@ -1512,6 +1512,37 @@ describe("runGatewaySupervisor", () => {
     });
   });
 
+  it("injects a profile-scoped durable turn store only when SQLite queue persistence is configured", async () => {
+    let capturedOpts: any;
+    const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      gateway: {
+        messageQueue: {
+          persistence: "sqlite",
+          maxPendingPerProfile: 12,
+          uncertainRetentionDays: 3
+        }
+      }
+    }));
+
+    await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: (opts: any) => {
+          capturedOpts = opts;
+          return fakeChannelGateway() as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+      },
+    });
+
+    expect(capturedOpts.pendingTurnStore?.constructor.name).toBe("SQLitePendingTurnStore");
+    expect(typeof capturedOpts.trustedWorkspace).toBe("function");
+  });
+
   it("busyPolicyResolver reads per-channel config from loaded config", async () => {
     let capturedOpts: any;
     const gateway = { start: async () => {}, stop: async () => {}, hasPendingWork: () => false };
