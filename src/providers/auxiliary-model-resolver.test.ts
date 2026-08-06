@@ -106,6 +106,37 @@ describe("resolveAuxiliaryModelRoute", () => {
     expect(result.diagnostics.some((d) => d.includes("slot.id is missing"))).toBe(true);
   });
 
+  it("rejects a custom vision route whose model is not vision-capable", () => {
+    const result = resolveAuxiliaryModelRoute("vision", {
+      baseUrl: "http://localhost:11434/v1",
+      id: "qwen2.5:3b",
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(),
+    });
+
+    expect(result.route).toBeUndefined();
+    expect(result.source).toBe("custom");
+    expect(result.fallbackToMain).toBe(false);
+    expect(result.diagnostics).toContain(
+      "Route openai-compatible/qwen2.5:3b does not satisfy vision task requirements: vision"
+    );
+  });
+
+  it("keeps a vision-capable custom route available", () => {
+    const result = resolveAuxiliaryModelRoute("vision", {
+      baseUrl: "http://localhost:11434/v1",
+      id: "qwen2.5-vl",
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(),
+    });
+
+    expect(result.route?.id).toBe("qwen2.5-vl");
+    expect(result.route?.profile.supportsVision).toBe(true);
+    expect(result.source).toBe("custom");
+  });
+
   it("uses main route when provider is main", () => {
     const mainRoute = fakeMainRoute();
     const result = resolveAuxiliaryModelRoute("assessor", { provider: "main" }, {
@@ -115,6 +146,23 @@ describe("resolveAuxiliaryModelRoute", () => {
     expect(result.source).toBe("main");
     expect(result.route).toBe(mainRoute);
     expect(result.fallbackToMain).toBe(false);
+  });
+
+  it("rejects provider main for vision when the main model lacks vision", () => {
+    const mainRoute = fakeMainRoute({
+      profile: { ...fakeMainRoute().profile, supportsVision: false },
+    });
+    const result = resolveAuxiliaryModelRoute("vision", { provider: "main" }, {
+      mainRoute,
+      providerRegistry: fakeRegistry(),
+    });
+
+    expect(result.route).toBeUndefined();
+    expect(result.source).toBe("main");
+    expect(result.fallbackToMain).toBe(false);
+    expect(result.diagnostics).toContain(
+      "Route openai/gpt-4o does not satisfy vision task requirements: vision"
+    );
   });
 
   it("resolves explicit provider+id to exact route", () => {
@@ -129,6 +177,27 @@ describe("resolveAuxiliaryModelRoute", () => {
     expect(result.route?.provider).toBe("openai");
     expect(result.route?.id).toBe("gpt-4o-mini");
     expect(result.fallbackToMain).toBe(false);
+  });
+
+  it("rejects an exact explicit vision route without vision capability", () => {
+    const models = [
+      fakeModelProfile({ provider: "openai", id: "text-only", supportsVision: false }),
+    ];
+    const result = resolveAuxiliaryModelRoute("vision", {
+      provider: "openai",
+      id: "text-only",
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(models),
+      providerModels: models,
+    });
+
+    expect(result.route).toBeUndefined();
+    expect(result.source).toBe("explicit");
+    expect(result.fallbackToMain).toBe(false);
+    expect(result.diagnostics).toContain(
+      "Route openai/text-only does not satisfy vision task requirements: vision"
+    );
   });
 
   it("propagates slot timeoutMs and maxConcurrency", () => {
@@ -374,6 +443,27 @@ describe("resolveAuxiliaryModelRoute", () => {
       providerRegistry: fakeRegistry(),
     });
     expect(result.fallbackToMain).toBe(true);
+  });
+
+  it("does not allow fallbackToMain to bypass vision capability requirements", () => {
+    const mainRoute = fakeMainRoute({
+      profile: { ...fakeMainRoute().profile, supportsVision: false },
+    });
+    const models = [
+      fakeModelProfile({ provider: "openai", id: "gpt-4o-mini", supportsVision: true }),
+    ];
+    const result = resolveAuxiliaryModelRoute("vision", {
+      provider: "openai",
+      id: "gpt-4o-mini",
+      fallbackToMain: true,
+    }, {
+      mainRoute,
+      providerRegistry: fakeRegistry(models),
+      providerModels: models,
+    });
+
+    expect(result.route?.id).toBe("gpt-4o-mini");
+    expect(result.fallbackToMain).toBe(false);
   });
 
   it("defaults fallbackToMain for vision to true when main supports vision", () => {

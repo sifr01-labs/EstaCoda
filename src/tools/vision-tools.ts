@@ -156,7 +156,10 @@ export async function analyzeImageWithVision(
       }),
       ...(usage.visibleTurnId === undefined ? {} : { visibleTurnId: usage.visibleTurnId })
     },
-    preferences: options.routePreferences,
+    preferences: {
+      ...options.routePreferences,
+      requireVision: true
+    },
     request: {
       model: visionAuxiliaryRoute.route.id,
       messages: [
@@ -238,10 +241,40 @@ export async function analyzeImageWithVision(
 }
 
 function resolveVisionAuxiliaryRoute(options: VisionToolOptions): ResolvedAuxiliaryRoute {
-  if (options.visionAuxiliaryRoute !== undefined) {
-    return options.visionAuxiliaryRoute;
+  const resolved = options.visionAuxiliaryRoute ?? synthesizeLegacyRoute(options);
+  if (resolved.task !== "vision") {
+    return {
+      ...resolved,
+      route: undefined,
+      fallbackToMain: false,
+      diagnostics: [...resolved.diagnostics, `Expected a vision auxiliary route, received ${resolved.task}`]
+    };
   }
-  return synthesizeLegacyRoute(options);
+
+  if (resolved.route !== undefined && !resolved.route.profile.supportsVision) {
+    return {
+      ...resolved,
+      route: undefined,
+      fallbackToMain: false,
+      diagnostics: [
+        ...resolved.diagnostics,
+        `Route ${resolved.route.provider}/${resolved.route.id} does not support vision`
+      ]
+    };
+  }
+
+  if (
+    resolved.fallbackToMain === true &&
+    options.mainRoute?.profile.supportsVision !== true
+  ) {
+    return {
+      ...resolved,
+      fallbackToMain: false,
+      diagnostics: [...resolved.diagnostics, "Main model route does not support vision fallback"]
+    };
+  }
+
+  return resolved;
 }
 
 function synthesizeLegacyRoute(options: VisionToolOptions): ResolvedAuxiliaryRoute {

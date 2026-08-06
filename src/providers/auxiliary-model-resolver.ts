@@ -10,7 +10,7 @@ import type {
   ResolvedModelRoute
 } from "../contracts/provider.js";
 import { ProviderRegistry } from "./provider-registry.js";
-import { routeProvider } from "./provider-router.js";
+import { matchesPreferences, routeProvider } from "./provider-router.js";
 import { inferModelProfile, resolveModelProfileFromCatalog } from "./model-catalog.js";
 
 const taskCapabilityRequirements: Record<AuxiliaryModelTask, ProviderRoutePreferences> = {
@@ -83,11 +83,23 @@ export function resolveAuxiliaryModelRoute(
       contextWindowTokens: slot.contextWindowTokens
     };
 
+    const requirementFailure = visionRequirementFailure(task, route);
+    if (requirementFailure !== undefined) {
+      return {
+        task,
+        route: undefined,
+        source: "custom",
+        fallbackToMain: false,
+        ...executionFields,
+        diagnostics: [customRouteDiagnostic(effectiveProvider, slot.baseUrl), requirementFailure]
+      };
+    }
+
     return {
       task,
       route,
       source: "custom",
-      fallbackToMain: slot.fallbackToMain ?? false,
+      fallbackToMain: computeFallbackToMain({ task, slot, mainRoute: context.mainRoute, source: "custom" }),
       ...executionFields,
       diagnostics: [customRouteDiagnostic(effectiveProvider, slot.baseUrl)]
     };
@@ -95,6 +107,18 @@ export function resolveAuxiliaryModelRoute(
 
   // 3. Main provider
   if (slot.provider === "main") {
+    const requirementFailure = visionRequirementFailure(task, context.mainRoute);
+    if (requirementFailure !== undefined) {
+      return {
+        task,
+        route: undefined,
+        source: "main",
+        fallbackToMain: false,
+        ...executionFields,
+        diagnostics: [requirementFailure]
+      };
+    }
+
     return {
       task,
       route: context.mainRoute,
@@ -123,11 +147,23 @@ export function resolveAuxiliaryModelRoute(
         contextWindowTokens: slot.contextWindowTokens
       };
 
+      const requirementFailure = visionRequirementFailure(task, route);
+      if (requirementFailure !== undefined) {
+        return {
+          task,
+          route: undefined,
+          source: "explicit",
+          fallbackToMain: false,
+          ...executionFields,
+          diagnostics: [requirementFailure]
+        };
+      }
+
       return {
         task,
         route,
         source: "explicit",
-        fallbackToMain: slot.fallbackToMain ?? false,
+        fallbackToMain: computeFallbackToMain({ task, slot, mainRoute: context.mainRoute, source: "explicit" }),
         ...executionFields,
         diagnostics: [`Explicit route ${explicitProvider}/${slot.id}`]
       };
@@ -161,7 +197,7 @@ export function resolveAuxiliaryModelRoute(
       task,
       route,
       source: "explicit",
-      fallbackToMain: slot.fallbackToMain ?? false,
+      fallbackToMain: computeFallbackToMain({ task, slot, mainRoute: context.mainRoute, source: "explicit" }),
       ...executionFields,
       diagnostics: [`Best model on ${explicitProvider}: ${chosen.primary.id}`]
     };
@@ -234,12 +270,15 @@ function resolvedExecutionFields(slot: AuxiliaryModelSlotConfig): Pick<ResolvedA
   };
 }
 
-function matchesPreferences(model: ModelProfile, preferences: ProviderRoutePreferences): boolean {
-  if (preferences.requireTools === true && !model.supportsTools) return false;
-  if (preferences.requireVision === true && !model.supportsVision) return false;
-  if (preferences.requireStructuredOutput === true && !model.supportsStructuredOutput) return false;
-  if (preferences.requireReasoning === true && model.supportsReasoning !== true) return false;
-  return true;
+function visionRequirementFailure(
+  task: AuxiliaryModelTask,
+  route: ResolvedModelRoute
+): string | undefined {
+  if (task !== "vision" || route.profile.supportsVision) {
+    return undefined;
+  }
+
+  return `Route ${route.provider}/${route.id} does not satisfy vision task requirements: vision`;
 }
 
 function computeFallbackToMain(options: {
@@ -248,6 +287,10 @@ function computeFallbackToMain(options: {
   mainRoute: ResolvedModelRoute;
   source: ResolvedAuxiliaryRoute["source"];
 }): boolean {
+  if (options.task === "vision" && !options.mainRoute.profile.supportsVision) {
+    return false;
+  }
+
   if (options.slot.fallbackToMain !== undefined) {
     return options.slot.fallbackToMain;
   }
@@ -256,11 +299,7 @@ function computeFallbackToMain(options: {
     return false;
   }
 
-  if (options.task === "vision") {
-    return options.mainRoute.profile.supportsVision;
-  }
-
-  return false;
+  return options.task === "vision";
 }
 
 export async function resolveAllAuxiliaryRoutes(

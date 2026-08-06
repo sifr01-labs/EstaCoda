@@ -43,6 +43,16 @@ const baseRoute: ResolvedModelRoute = {
   apiKeyEnv: "OPENAI_API_KEY"
 };
 
+const textOnlyRoute: ResolvedModelRoute = {
+  ...baseRoute,
+  id: "text-only",
+  profile: {
+    ...baseRoute.profile,
+    id: "text-only",
+    supportsVision: false
+  }
+};
+
 describe("vision tools", () => {
   describe("createVisionTools", () => {
     it("returns vision.analyze tool", () => {
@@ -64,6 +74,15 @@ describe("vision tools", () => {
       });
       const available = await tools[0].isAvailable?.();
       expect(available).toBe(true);
+    });
+
+    it("reports unavailable when a configured route lacks vision capability", async () => {
+      const tools = createVisionTools({
+        workspaceRoot: "/tmp",
+        resolvedVisionRoute: textOnlyRoute
+      });
+      const available = await tools[0].isAvailable?.();
+      expect(available).toBe(false);
     });
   });
 
@@ -98,16 +117,45 @@ describe("vision tools", () => {
               maxConcurrency: 2,
               diagnostics: []
             },
-            providerExecutor: executor
+            providerExecutor: executor,
+            routePreferences: { requireVision: false }
           },
           { path: "test.png" }
         );
 
         expect(executor.complete).toHaveBeenCalledTimes(1);
-        const [, , executionOptions] = (executor.complete as any).mock.calls[0];
+        const [, preferences, executionOptions] = (executor.complete as any).mock.calls[0];
+        expect(preferences).toEqual(expect.objectContaining({ requireVision: true }));
         expect(executionOptions!.primaryRoute).toEqual(baseRoute);
         expect(executionOptions!.signal).toBeDefined();
         expect(result.ok).toBe(true);
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("rejects a non-vision auxiliary route before provider execution", async () => {
+      const executor = createMockExecutor();
+      const tmp = createTempPng();
+      try {
+        const result = await analyzeImageWithVision(
+          {
+            workspaceRoot: tmp.dir,
+            visionAuxiliaryRoute: {
+              task: "vision",
+              route: textOnlyRoute,
+              source: "explicit",
+              fallbackToMain: false,
+              diagnostics: []
+            },
+            providerExecutor: executor
+          },
+          { path: "test.png" }
+        );
+
+        expect(result.ok).toBe(false);
+        expect(result.content).toContain("No vision-capable provider route");
+        expect(executor.complete).not.toHaveBeenCalled();
       } finally {
         tmp.cleanup();
       }
