@@ -1599,6 +1599,7 @@ describe("createRuntime MCP trust gating", () => {
               "mode",
               "output",
               "path",
+              "paths",
               "prompt",
             ],
             "toolsets": [

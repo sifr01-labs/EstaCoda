@@ -59,7 +59,7 @@ pnpm run eval:fixtures
 
 ### Vision reliability lane
 
-`pnpm run eval:fixtures` includes a deterministic, offline vision-security fixture covering valid image generation, magic-byte extension spoofing, corrupt input, and the 8 MiB source boundary. Generate the complete deterministic visual corpus with:
+`pnpm run eval:fixtures` includes a deterministic, offline vision-security fixture covering valid image generation, magic-byte extension spoofing, corrupt input, and a configured 8 MiB source-read boundary. Generate the complete deterministic visual corpus with:
 
 ```bash
 pnpm run eval:vision:fixtures

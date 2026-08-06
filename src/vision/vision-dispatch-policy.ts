@@ -1,5 +1,6 @@
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import type { VisionAnalysisMode, VisionDispatchPhase } from "../contracts/vision.js";
+import { supportsMultipleImageInputs } from "../providers/model-image-capabilities.js";
 
 export type { VisionDispatchPhase } from "../contracts/vision.js";
 
@@ -28,9 +29,15 @@ export function resolveVisionDispatch(input: {
   analysisMode?: VisionAnalysisMode;
   mainRoute?: ResolvedModelRoute;
   auxiliaryRoute: ResolvedAuxiliaryRoute;
+  imageCount?: number;
 }): VisionDispatchDecision {
   const dedicatedAnalysis = shouldUseDedicatedVisionRoute(input);
-  if (input.mainRoute?.profile.supportsVision === true && !dedicatedAnalysis) {
+  const requiresMultipleImages = (input.imageCount ?? 1) > 1;
+  if (
+    input.mainRoute?.profile.supportsVision === true &&
+    (!requiresMultipleImages || supportsMultipleImageInputs(input.mainRoute.profile)) &&
+    !dedicatedAnalysis
+  ) {
     const nativeRoute: ResolvedAuxiliaryRoute = {
       task: "vision",
       route: input.mainRoute,
@@ -46,20 +53,31 @@ export function resolveVisionDispatch(input: {
     };
   }
 
-  if (input.auxiliaryRoute.route?.profile.supportsVision === true) {
+  if (
+    input.auxiliaryRoute.route?.profile.supportsVision === true &&
+    (!requiresMultipleImages || supportsMultipleImageInputs(input.auxiliaryRoute.route.profile))
+  ) {
+    const auxiliaryRoute = requiresMultipleImages &&
+      input.auxiliaryRoute.fallbackToMain &&
+      input.mainRoute !== undefined &&
+      !supportsMultipleImageInputs(input.mainRoute.profile)
+      ? { ...input.auxiliaryRoute, fallbackToMain: false }
+      : input.auxiliaryRoute;
     return {
       mode: "auxiliary",
       phase: input.phase,
       route: input.auxiliaryRoute.route,
-      auxiliaryRoute: input.auxiliaryRoute,
-      egressRoute: input.auxiliaryRoute
+      auxiliaryRoute,
+      egressRoute: auxiliaryRoute
     };
   }
 
   return {
     mode: "unavailable",
     phase: input.phase,
-    reason: dedicatedAnalysis
+    reason: requiresMultipleImages
+      ? "No configured vision route supports bounded multi-image comparison."
+      : dedicatedAnalysis
       ? "The configured dedicated vision route is unavailable for this specialized analysis."
       : input.mainRoute === undefined
         ? "No main model route or vision auxiliary route is configured."

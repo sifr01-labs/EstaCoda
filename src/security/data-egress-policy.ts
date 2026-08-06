@@ -60,10 +60,13 @@ export function assessDataEgress(
 }
 
 function isExpectedUserSource(egress: SecurityDataEgressContext): boolean {
-  return egress.sourceProvenance === "current-turn-attachment" ||
-    egress.sourceProvenance === "explicit-reference" ||
-    egress.sourceProvenance === "browser-artifact" ||
-    egress.sourceProvenance === "generated-artifact";
+  const sources = egress.sourceProvenances ?? [egress.sourceProvenance];
+  return sources.length > 0 && sources.every((source) =>
+    source === "current-turn-attachment" ||
+    source === "explicit-reference" ||
+    source === "browser-artifact" ||
+    source === "generated-artifact"
+  );
 }
 
 function adaptiveExpectedSourceReason(egress: SecurityDataEgressContext): string {

@@ -638,6 +638,7 @@ export class ProviderTurnLoop {
     const providerPreferences = {
       requireTools: input.providerTools.length > 0,
       requireVision: providerRequestContainsImageParts(providerRequest),
+      requireMultipleImages: providerRequestImagePartCount(providerRequest) > 1,
       requireStructuredOutput: false,
       providerOrder: [this.#model.provider],
       ...this.#providerPreferences
@@ -773,6 +774,7 @@ export class ProviderTurnLoop {
     const providerPreferences = {
       requireTools: input.providerTools.length > 0,
       requireVision: providerRequestContainsImageParts(providerRequest),
+      requireMultipleImages: providerRequestImagePartCount(providerRequest) > 1,
       requireStructuredOutput: false,
       providerOrder: [this.#model.provider],
       ...this.#providerPreferences
@@ -1528,16 +1530,23 @@ export function compressionReportFromResult(result: CompactResult): PromptSemant
 }
 
 function providerRequestContainsImageParts(request: Pick<ProviderRequest, "messages">): boolean {
-  return request.messages.some((message) => providerContentContainsImagePart(message.content));
+  return providerRequestImagePartCount(request) > 0;
 }
 
-function providerContentContainsImagePart(content: ProviderMessage["content"]): boolean {
-  return Array.isArray(content) && content.some((part) =>
+function providerRequestImagePartCount(request: Pick<ProviderRequest, "messages">): number {
+  return request.messages.reduce(
+    (count, message) => count + providerContentImagePartCount(message.content),
+    0
+  );
+}
+
+function providerContentImagePartCount(content: ProviderMessage["content"]): number {
+  return Array.isArray(content) ? content.filter((part) =>
     part !== null &&
     typeof part === "object" &&
     !Array.isArray(part) &&
     (part as { type?: unknown }).type === "image_url"
-  );
+  ).length : 0;
 }
 
 function isDeterministicCompressionFallback(reason: string | undefined): boolean {

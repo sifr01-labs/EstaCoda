@@ -11,7 +11,8 @@ export type VisionAnalysisMode =
   | "ocr"
   | "document"
   | "chart"
-  | "screenshot";
+  | "screenshot"
+  | "compare";
 
 export type VisionAnalysisDetail = "low" | "standard" | "high";
 
@@ -20,6 +21,8 @@ export type VisionAnalysisOutput = "concise" | "standard" | "detailed";
 /** Backward-compatible input for vision.analyze. New controls are optional. */
 export type VisionAnalysisInput = {
   path?: string;
+  /** Two to four images. When mode is omitted, `paths` selects compare mode. */
+  paths?: readonly string[];
   prompt?: string;
   mode?: VisionAnalysisMode;
   detail?: VisionAnalysisDetail;
@@ -30,6 +33,7 @@ export type VisionAnalysisErrorCode =
   | VisionImageSourceErrorCode
   | VisionImageNormalizationErrorCode
   | "vision-invalid-analysis-option"
+  | "vision-invalid-image-selection"
   | "vision-route-unavailable"
   | "vision-executor-unavailable"
   | "vision-empty-response"
@@ -82,22 +86,26 @@ export type VisionImageSourceResolution =
   | VisionImageSourceError;
 
 export type VisionImageNormalizationLimits = {
-  maxInputBytes: number;
+  maxSourceBytes: number;
   maxInputDimension: number;
   maxInputPixels: number;
   maxDecodedBytes: number;
   maxAnimationFrames: number;
+  maxAnimationPixels: number;
   maxOutputDimension: number;
-  maxOutputBytes: number;
+  maxNormalizedBytes: number;
   maxConcurrency: number;
 };
 
 export type VisionImageNormalizationErrorCode =
   | "normalization-animation-limit"
+  | "normalization-animation-pixel-limit"
+  | "normalization-aggregate-animation-pixel-limit"
+  | "normalization-aggregate-output-byte-limit"
   | "normalization-cancelled"
   | "normalization-decoded-memory-limit"
   | "normalization-dimension-limit"
-  | "normalization-input-byte-limit"
+  | "normalization-source-byte-limit"
   | "normalization-invalid-image"
   | "normalization-output-byte-limit"
   | "normalization-pixel-limit"

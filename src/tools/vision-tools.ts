@@ -30,14 +30,16 @@ import type {
 } from "../providers/auxiliary-executor.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
 import { providerSpendDenialMessage } from "../providers/provider-spend-policy.js";
+import { supportsMultipleImageInputs } from "../providers/model-image-capabilities.js";
 import {
   defaultVisionImageNormalizer,
+  DEFAULT_VISION_IMAGE_NORMALIZATION_LIMITS,
   type VisionImageNormalizer
 } from "../vision/image-normalizer.js";
 import { resolveVisionImageSource } from "../vision/image-source-resolver.js";
 import {
   resolveVisionArtifactEgressSecurity,
-  resolveVisionEgressSecurity
+  resolveVisionSourcesEgressSecurity
 } from "../vision/vision-egress-policy.js";
 import { attachEphemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 import { resolveVisionDispatch } from "../vision/vision-dispatch-policy.js";
@@ -54,6 +56,8 @@ export type VisionToolOptions = {
   providerExecutor?: ProviderExecutor;
   currentSessionId?: () => string;
   maxImageBytes?: number;
+  maxAggregateNormalizedBytes?: number;
+  maxAggregateAnimationPixels?: number;
   imageNormalizer?: VisionImageNormalizer;
   now?: () => number;
   /** @deprecated Use visionAuxiliaryRoute. */
@@ -64,11 +68,14 @@ export type VisionToolOptions = {
   routePreferences?: Parameters<typeof executeAuxiliaryTask>[0]["preferences"];
 };
 
-const DEFAULT_MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const DEFAULT_MAX_IMAGE_BYTES = DEFAULT_VISION_IMAGE_NORMALIZATION_LIMITS.maxSourceBytes;
+const DEFAULT_MAX_AGGREGATE_NORMALIZED_BYTES = 16 * 1024 * 1024;
+const DEFAULT_MAX_AGGREGATE_ANIMATION_PIXELS = 100_000_000;
+const MAX_VISION_IMAGES = 4;
 const DEFAULT_ANALYSIS_MODE: VisionAnalysisMode = "describe";
 const DEFAULT_ANALYSIS_DETAIL: VisionAnalysisDetail = "standard";
 const DEFAULT_ANALYSIS_OUTPUT: VisionAnalysisOutput = "standard";
-const ANALYSIS_MODES = ["describe", "ocr", "document", "chart", "screenshot"] as const;
+const ANALYSIS_MODES = ["describe", "ocr", "document", "chart", "screenshot", "compare"] as const;
 const ANALYSIS_DETAILS = ["low", "standard", "high"] as const;
 const ANALYSIS_OUTPUTS = ["concise", "standard", "detailed"] as const;
 const ANALYSIS_OUTPUT_MAX_TOKENS: Record<VisionAnalysisOutput, number> = {
@@ -86,7 +93,7 @@ type ResolvedVisionAnalysis = {
 };
 
 export type GovernedVisionArtifactDispatcher = {
-  isAvailable(input?: Pick<VisionAnalysisInput, "mode">, phase?: VisionDispatchPhase): boolean;
+  isAvailable(input?: Pick<VisionAnalysisInput, "mode" | "paths">, phase?: VisionDispatchPhase): boolean;
   resolveSecurity(
     input: VisionAnalysisInput,
     context: ToolSecurityResolverContext,
@@ -108,7 +115,8 @@ export function createGovernedVisionArtifactDispatcher(
   return {
     isAvailable: (input = {}, phase = "post-tool") => resolveVisionDispatch({
       phase,
-      analysisMode: isVisionAnalysisMode(input.mode) ? input.mode : DEFAULT_ANALYSIS_MODE,
+      analysisMode: requestedAnalysisMode(input),
+      imageCount: requestedImageCount(input),
       mainRoute: options.mainRoute,
       auxiliaryRoute: resolveVisionAuxiliaryRoute(options)
     }).mode !== "unavailable",
@@ -117,7 +125,8 @@ export function createGovernedVisionArtifactDispatcher(
       const phase = context.visionDispatchPhase ?? "post-tool";
       const dispatch = resolveVisionDispatch({
         phase,
-        analysisMode: isVisionAnalysisMode(resolvedInput.mode) ? resolvedInput.mode : DEFAULT_ANALYSIS_MODE,
+        analysisMode: requestedAnalysisMode(resolvedInput),
+        imageCount: requestedImageCount(resolvedInput),
         mainRoute: options.mainRoute,
         auxiliaryRoute: resolveVisionAuxiliaryRoute(options)
       });
@@ -125,7 +134,11 @@ export function createGovernedVisionArtifactDispatcher(
       const routeSecurity = {
         visionRoute: dispatch.egressRoute,
         mainRoute: dispatch.mode === "auxiliary" ? options.mainRoute : undefined,
-        additionalRoutes: dispatch.mode === "native" ? options.mainFallbackRoutes : undefined
+        additionalRoutes: dispatch.mode === "native"
+          ? (options.mainFallbackRoutes ?? []).filter((route) =>
+              requestedImageCount(resolvedInput) <= 1 || supportsMultipleImageInputs(route.profile)
+            )
+          : undefined
       };
       if (artifactProvenance !== undefined) {
         return resolveVisionArtifactEgressSecurity({
@@ -134,15 +147,17 @@ export function createGovernedVisionArtifactDispatcher(
           ...routeSecurity
         });
       }
-      const source = await resolveVisionImageSource({
+      const selection = resolveVisionImageSelection(resolvedInput);
+      if ("result" in selection) return undefined;
+      const sources = await Promise.all(selection.paths.map((path) => resolveVisionImageSource({
         workspaceRoot: options.workspaceRoot,
         allowedRoots: visionAllowedRoots(options),
-        path: resolvedInput.path,
+        path,
         maxBytes: options.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES
-      });
-      if (!source.ok) return undefined;
-      return await resolveVisionEgressSecurity({
-        source,
+      })));
+      if (sources.some((source) => !source.ok)) return undefined;
+      return await resolveVisionSourcesEgressSecurity({
+        sources: sources as ResolvedVisionImageSource[],
         workspaceRoot: options.workspaceRoot,
         provenance: runtimeVisionProvenance(options, context.visionInputProvenance),
         generatedArtifactRoots: options.imageCacheRoot === undefined ? undefined : [options.imageCacheRoot],
@@ -176,6 +191,13 @@ export function createVisionTools(options: VisionToolOptions): readonly Register
             type: "string",
             description: "Workspace path, approved media path, or generated image artifact reference."
           },
+          paths: {
+            type: "array",
+            items: { type: "string" },
+            minItems: 2,
+            maxItems: MAX_VISION_IMAGES,
+            description: "Two to four images to compare. Selects compare mode when mode is omitted."
+          },
           prompt: { type: "string", description: "Optional task-specific guidance that augments the selected analysis mode." },
           mode: {
             type: "string",
@@ -193,7 +215,7 @@ export function createVisionTools(options: VisionToolOptions): readonly Register
             description: "Response depth: concise, standard (default), or detailed."
           }
         },
-        required: ["path"]
+        oneOf: [{ required: ["path"] }, { required: ["paths"] }]
       },
       riskClass: "read-only-local",
       toolsets: ["media", "research", "telegram", "core"],
@@ -214,13 +236,21 @@ export async function dispatchImageWithVision(
   phase: VisionDispatchPhase = "post-tool"
 ): Promise<ToolResult> {
   const startedAt = visionNow(options);
-  const analysis = resolveVisionAnalysis(input);
+  const selection = resolveVisionImageSelection(input);
+  if ("result" in selection) {
+    return withVisionInvocationMetadata(selection.result, undefined, startedAt, options);
+  }
+  const analysis = resolveVisionAnalysis({
+    ...input,
+    mode: input.mode ?? (selection.paths.length > 1 ? "compare" : undefined)
+  });
   if ("result" in analysis) {
     return withVisionInvocationMetadata(analysis.result, undefined, startedAt, options);
   }
   const dispatch = resolveVisionDispatch({
     phase,
     analysisMode: analysis.mode,
+    imageCount: selection.paths.length,
     mainRoute: options.mainRoute,
     auxiliaryRoute: resolveVisionAuxiliaryRoute(options)
   });
@@ -235,41 +265,45 @@ export async function dispatchImageWithVision(
     }, analysis, startedAt, options);
   }
 
-  const prepared = await prepareVisionImage(options, input.path, analysis.providerDetail, signal);
+  const prepared = await prepareVisionImages(options, selection.paths, analysis.providerDetail, signal);
   if ("result" in prepared) {
     return withVisionInvocationMetadata(prepared.result, analysis, startedAt, options, dispatch.mode);
   }
 
   if (dispatch.mode === "native") {
+    const usageMetadata = visionUsageMetadata(undefined, prepared.images, analysis);
+    const fallbackRoutes = visionCapableFallbacks(options, prepared.images.length);
     const result: ToolResult = {
       ok: true,
       content: [
-        `Image prepared for native analysis: ${prepared.source.displayPath}`,
+        prepared.images.length === 1
+          ? `Image prepared for native analysis: ${prepared.images[0]!.source.displayPath}`
+          : `Images prepared for native comparison: ${prepared.images.map((image) => image.source.displayPath).join(", ")}`,
         visionAnalysisPrompt(analysis, input.prompt)
       ].join("\n\n"),
       metadata: {
-        ...normalizedImageMetadata(prepared.source, prepared.normalized),
+        ...preparedImagesMetadata(prepared.images),
         dispatch: "native",
         provider: dispatch.route.provider,
         model: dispatch.route.id,
         route: routeMetadata(dispatch.route, "main"),
         fallback: {
-          configured: (options.mainFallbackRoutes ?? []).some((route) => route.profile.supportsVision),
+          configured: fallbackRoutes.length > 0,
           used: false,
-          available: (options.mainFallbackRoutes ?? []).filter((route) => route.profile.supportsVision).length
+          available: fallbackRoutes.length
         },
-        usage: visionUsageMetadata(undefined, prepared.normalized, analysis)
+        usage: usageMetadata
       }
     };
-    return attachEphemeralVisionImages(withVisionInvocationMetadata(result, analysis, startedAt, options), [{
-      content: prepared.content,
+    return attachEphemeralVisionImages(withVisionInvocationMetadata(result, analysis, startedAt, options), prepared.images.map((image) => ({
+      content: image.content,
       usage: {
-        width: prepared.normalized.width,
-        height: prepared.normalized.height,
+        width: image.normalized.width,
+        height: image.normalized.height,
         detail: analysis.providerDetail
       },
       delivery: "continuation"
-    }]);
+    })));
   }
 
   return await executePreparedAuxiliaryVision({
@@ -277,9 +311,7 @@ export async function dispatchImageWithVision(
     input,
     signal,
     usage,
-    source: prepared.source,
-    normalized: prepared.normalized,
-    content: prepared.content,
+    images: prepared.images,
     visionAuxiliaryRoute: { ...dispatch.auxiliaryRoute, route: dispatch.route },
     analysis,
     startedAt
@@ -323,20 +355,36 @@ export async function analyzeImageWithVision(
   usage: ProviderUsageLineage = {}
 ): Promise<ToolResult> {
   const startedAt = visionNow(options);
-  const analysis = resolveVisionAnalysis(input);
+  const selection = resolveVisionImageSelection(input);
+  if ("result" in selection) {
+    return withVisionInvocationMetadata(selection.result, undefined, startedAt, options, "auxiliary");
+  }
+  const analysis = resolveVisionAnalysis({
+    ...input,
+    mode: input.mode ?? (selection.paths.length > 1 ? "compare" : undefined)
+  });
   if ("result" in analysis) {
     return withVisionInvocationMetadata(analysis.result, undefined, startedAt, options);
   }
-  const visionAuxiliaryRoute = resolveVisionAuxiliaryRoute(options);
-  if (visionAuxiliaryRoute.route === undefined) {
+  const dispatch = resolveVisionDispatch({
+    phase: "post-tool",
+    analysisMode: analysis.mode,
+    imageCount: selection.paths.length,
+    auxiliaryRoute: resolveVisionAuxiliaryRoute(options)
+  });
+  if (dispatch.mode !== "auxiliary") {
     return withVisionInvocationMetadata({
       ok: false,
-      content: "No vision-capable provider route is configured and available in this runtime yet.",
+      content: dispatch.mode === "unavailable"
+        ? selection.paths.length > 1
+          ? dispatch.reason
+          : "No vision-capable provider route is configured and available in this runtime yet."
+        : "No vision-capable auxiliary route is configured and available in this runtime yet.",
       metadata: { errorCode: "vision-route-unavailable" satisfies VisionAnalysisErrorCode }
     }, analysis, startedAt, options, "auxiliary");
   }
 
-  const prepared = await prepareVisionImage(options, input.path, analysis.providerDetail, signal);
+  const prepared = await prepareVisionImages(options, selection.paths, analysis.providerDetail, signal);
   if ("result" in prepared) {
     return withVisionInvocationMetadata(prepared.result, analysis, startedAt, options, "auxiliary");
   }
@@ -346,10 +394,8 @@ export async function analyzeImageWithVision(
     input,
     signal,
     usage,
-    source: prepared.source,
-    normalized: prepared.normalized,
-    content: prepared.content,
-    visionAuxiliaryRoute: { ...visionAuxiliaryRoute, route: visionAuxiliaryRoute.route },
+    images: prepared.images,
+    visionAuxiliaryRoute: { ...dispatch.auxiliaryRoute, route: dispatch.route },
     analysis,
     startedAt
   });
@@ -364,39 +410,95 @@ type PreparedVisionImage = {
   };
 };
 
-async function prepareVisionImage(
+async function prepareVisionImages(
   options: VisionToolOptions,
-  path: string | undefined,
+  paths: readonly string[],
   detail: "low" | "auto" | "high",
   signal: AbortSignal | undefined
-): Promise<PreparedVisionImage | { result: ToolResult }> {
+): Promise<{ images: PreparedVisionImage[] } | { result: ToolResult }> {
   const maxImageBytes = options.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES;
-  const source = await resolveVisionImageSource({
+  const sources = await Promise.all(paths.map((path) => resolveVisionImageSource({
     workspaceRoot: options.workspaceRoot,
     allowedRoots: visionAllowedRoots(options),
     path,
     maxBytes: maxImageBytes
-  });
-  if (!source.ok) return { result: imageSourceErrorResult(source) };
+  })));
+  const sourceError = sources.find((source) => !source.ok);
+  if (sourceError !== undefined && !sourceError.ok) {
+    return { result: imageSourceErrorResult(sourceError) };
+  }
 
-  const normalized = await (options.imageNormalizer ?? defaultVisionImageNormalizer).normalize(source, {
+  const resolvedSources = sources as ResolvedVisionImageSource[];
+  const normalizer = options.imageNormalizer ?? defaultVisionImageNormalizer;
+  const normalizedResults = await Promise.all(resolvedSources.map((source) => normalizer.normalize(source, {
     signal,
-    limits: { maxInputBytes: maxImageBytes }
-  });
-  if (!normalized.ok) {
-    return { result: imageNormalizationErrorResult(source.displayPath, normalized) };
+    limits: { maxSourceBytes: maxImageBytes }
+  })));
+  const failedIndex = normalizedResults.findIndex((normalized) => !normalized.ok);
+  if (failedIndex >= 0) {
+    const failed = normalizedResults[failedIndex]!;
+    if (!failed.ok) {
+      return { result: imageNormalizationErrorResult(resolvedSources[failedIndex]!.displayPath, failed) };
+    }
+  }
+
+  const normalizedImages = normalizedResults as NormalizedVisionImage[];
+  const aggregateNormalizedBytes = normalizedImages.reduce((total, image) => total + image.byteLength, 0);
+  const maxAggregateNormalizedBytes = options.maxAggregateNormalizedBytes ?? DEFAULT_MAX_AGGREGATE_NORMALIZED_BYTES;
+  if (!Number.isSafeInteger(aggregateNormalizedBytes) || aggregateNormalizedBytes > maxAggregateNormalizedBytes) {
+    return { result: imageNormalizationErrorResult("image set", aggregateLimitError(
+      "normalization-aggregate-output-byte-limit",
+      "These images exceed the safe aggregate hosted payload size.",
+      aggregateNormalizedBytes,
+      maxAggregateNormalizedBytes,
+      "bytes"
+    )) };
+  }
+  const aggregateAnimationPixels = normalizedImages.reduce(
+    (total, image) => total + image.sourceWidth * image.sourceHeight * image.sourceFrames,
+    0
+  );
+  const maxAggregateAnimationPixels = options.maxAggregateAnimationPixels ?? DEFAULT_MAX_AGGREGATE_ANIMATION_PIXELS;
+  if (!Number.isSafeInteger(aggregateAnimationPixels) || aggregateAnimationPixels > maxAggregateAnimationPixels) {
+    return { result: imageNormalizationErrorResult("image set", aggregateLimitError(
+      "normalization-aggregate-animation-pixel-limit",
+      "These images contain too many aggregate animation pixels for safe comparison.",
+      aggregateAnimationPixels,
+      maxAggregateAnimationPixels,
+      "pixels"
+    )) };
   }
 
   return {
-    source,
-    normalized,
-    content: {
-      type: "image_url",
-      image_url: {
-        url: `data:${normalized.mimeType};base64,${Buffer.from(normalized.bytes).toString("base64")}`,
-        detail
-      }
-    }
+    images: resolvedSources.map((source, index) => {
+      const normalized = normalizedImages[index]!;
+      return {
+        source,
+        normalized,
+        content: {
+          type: "image_url",
+          image_url: {
+            url: `data:${normalized.mimeType};base64,${Buffer.from(normalized.bytes).toString("base64")}`,
+            detail
+          }
+        }
+      };
+    })
+  };
+}
+
+function aggregateLimitError(
+  code: Extract<VisionImageNormalizationError["code"], "normalization-aggregate-output-byte-limit" | "normalization-aggregate-animation-pixel-limit">,
+  message: string,
+  actual: number,
+  limit: number,
+  unit: "bytes" | "pixels"
+): VisionImageNormalizationError {
+  return {
+    ok: false,
+    code,
+    message,
+    details: { actual, limit, unit }
   };
 }
 
@@ -408,18 +510,30 @@ function visionAllowedRoots(options: VisionToolOptions): string[] | undefined {
   return roots.length === 0 ? undefined : roots;
 }
 
+function visionCapableFallbacks(options: VisionToolOptions, imageCount: number): ResolvedModelRoute[] {
+  return (options.mainFallbackRoutes ?? []).filter((route) =>
+    route.profile.supportsVision && (imageCount <= 1 || supportsMultipleImageInputs(route.profile))
+  );
+}
+
 function resolveVisionArtifactInput(
   options: VisionToolOptions,
   input: VisionAnalysisInput
 ): VisionAnalysisInput {
-  const reference = input.path?.trim();
-  if (
-    reference === undefined ||
-    reference.length === 0 ||
-    options.artifactStore === undefined ||
-    options.imageCacheRoot === undefined
-  ) {
-    return input;
+  if (options.artifactStore === undefined || options.imageCacheRoot === undefined) return input;
+  return {
+    ...input,
+    ...(typeof input.path !== "string" ? {} : { path: resolveVisionArtifactReference(options, input.path) }),
+    ...(!Array.isArray(input.paths) || input.paths.some((path) => typeof path !== "string") ? {} : {
+      paths: input.paths.map((path) => resolveVisionArtifactReference(options, path))
+    })
+  };
+}
+
+function resolveVisionArtifactReference(options: VisionToolOptions, rawReference: string): string {
+  const reference = rawReference.trim();
+  if (reference.length === 0 || options.artifactStore === undefined || options.imageCacheRoot === undefined) {
+    return rawReference;
   }
   const artifactId = reference.startsWith("artifact://")
     ? reference.slice("artifact://".length)
@@ -427,12 +541,58 @@ function resolveVisionArtifactInput(
   const artifact = options.artifactStore.list().find((candidate) =>
     candidate.id === artifactId || candidate.path === reference
   );
-  if (artifact?.kind !== "image" || artifact.localPath === undefined) return input;
+  if (artifact?.kind !== "image" || artifact.localPath === undefined) return rawReference;
   const cacheRoot = resolve(options.imageCacheRoot);
   const localPath = resolve(artifact.localPath);
   const rel = relative(cacheRoot, localPath);
-  if (rel !== "" && (rel.startsWith("..") || isAbsolute(rel))) return input;
-  return { ...input, path: localPath };
+  if (rel !== "" && (rel.startsWith("..") || isAbsolute(rel))) return rawReference;
+  return localPath;
+}
+
+function requestedImageCount(input: Pick<VisionAnalysisInput, "paths">): number {
+  return Array.isArray(input.paths) ? input.paths.length : 1;
+}
+
+function requestedAnalysisMode(input: Pick<VisionAnalysisInput, "mode" | "paths">): VisionAnalysisMode {
+  if (isVisionAnalysisMode(input.mode)) return input.mode;
+  return Array.isArray(input.paths) && input.paths.length > 1 ? "compare" : DEFAULT_ANALYSIS_MODE;
+}
+
+function resolveVisionImageSelection(
+  input: VisionAnalysisInput
+): { paths: string[] } | { result: ToolResult } {
+  const hasPath = input.path !== undefined;
+  const hasPaths = input.paths !== undefined;
+  const invalid = (
+    message: string,
+    errorCode: VisionAnalysisErrorCode = "vision-invalid-image-selection"
+  ): { result: ToolResult } => ({
+    result: {
+      ok: false,
+      content: message,
+      metadata: { errorCode }
+    }
+  });
+
+  if (hasPath && hasPaths) return invalid("Use either path or paths for vision analysis, not both.");
+  if (!hasPath && !hasPaths) return invalid("path must be a non-empty string", "invalid-path");
+  if (hasPath) {
+    if (typeof input.path !== "string" || input.path.trim().length === 0) {
+      return invalid("path must be a non-empty string", "invalid-path");
+    }
+    if (input.mode === "compare") return invalid("Compare mode requires paths with two to four images.");
+    return { paths: [input.path] };
+  }
+  if (!Array.isArray(input.paths) || input.paths.length < 2 || input.paths.length > MAX_VISION_IMAGES) {
+    return invalid(`Vision comparison requires between 2 and ${MAX_VISION_IMAGES} paths.`);
+  }
+  if (input.paths.some((path) => typeof path !== "string" || path.trim().length === 0)) {
+    return invalid("Every vision comparison path must be a non-empty string.");
+  }
+  if (input.mode !== undefined && input.mode !== "compare") {
+    return invalid("Multiple paths can only be used with compare mode.");
+  }
+  return { paths: [...input.paths] };
 }
 
 function runtimeVisionProvenance(
@@ -462,16 +622,14 @@ async function executePreparedAuxiliaryVision(input: {
   input: VisionAnalysisInput;
   signal?: AbortSignal;
   usage: ProviderUsageLineage;
-  source: ResolvedVisionImageSource;
-  normalized: NormalizedVisionImage;
-  content: PreparedVisionImage["content"];
+  images: readonly PreparedVisionImage[];
   visionAuxiliaryRoute: ResolvedAuxiliaryRoute & { route: ResolvedModelRoute };
   analysis: ResolvedVisionAnalysis;
   startedAt: number;
 }): Promise<ToolResult> {
-  const { options, source, normalized, visionAuxiliaryRoute, analysis, startedAt } = input;
-  const relativePath = source.displayPath;
-  const imageMetadata = normalizedImageMetadata(source, normalized);
+  const { options, images, visionAuxiliaryRoute, analysis, startedAt } = input;
+  const relativePaths = images.map((image) => image.source.displayPath);
+  const imageMetadata = preparedImagesMetadata(images);
   const configuredRoute = visionAuxiliaryRoute.route;
 
   if (options.providerExecutor === undefined) {
@@ -486,7 +644,7 @@ async function executePreparedAuxiliaryVision(input: {
         model: configuredRoute.id,
         route: routeMetadata(configuredRoute, "primary"),
         fallback: fallbackMetadata(visionAuxiliaryRoute, options.mainRoute, false),
-        usage: visionUsageMetadata(undefined, normalized, analysis),
+        usage: visionUsageMetadata(undefined, images, analysis),
         attempts: [`${configuredRoute.provider}/${configuredRoute.id}:no-executor`]
       }
     }, analysis, startedAt, options);
@@ -498,11 +656,16 @@ async function executePreparedAuxiliaryVision(input: {
     providerExecutor: options.providerExecutor,
     usage: {
       ...input.usage,
-      imageInputs: [{ width: normalized.width, height: normalized.height, detail: analysis.providerDetail }]
+      imageInputs: images.map((image) => ({
+        width: image.normalized.width,
+        height: image.normalized.height,
+        detail: analysis.providerDetail
+      }))
     },
     preferences: {
       ...options.routePreferences,
-      requireVision: true
+      requireVision: true,
+      requireMultipleImages: images.length > 1
     },
     scopeKey: visionConcurrencyScopeKey(options.profileId, visionAuxiliaryRoute.route),
     request: {
@@ -519,7 +682,7 @@ async function executePreparedAuxiliaryVision(input: {
               type: "text",
               text: visionAnalysisPrompt(analysis, input.input.prompt)
             },
-            input.content
+            ...images.map((image) => image.content)
           ]
         }
       ] as any,
@@ -549,7 +712,7 @@ async function executePreparedAuxiliaryVision(input: {
     fallback: fallbackMetadata(visionAuxiliaryRoute, options.mainRoute, auxiliaryResult.fallbackUsed),
     usage: visionUsageMetadata(
       resolvedVisionUsage(auxiliaryResult.response?.usage, auxiliaryResult.attempts),
-      normalized,
+      images,
       analysis
     ),
     attempts
@@ -571,7 +734,7 @@ async function executePreparedAuxiliaryVision(input: {
     return withVisionInvocationMetadata({
       ok: true,
       content: [
-        `Vision analysis: ${relativePath}`,
+        `${images.length > 1 ? "Vision comparison" : "Vision analysis"}: ${relativePaths.join(", ")}`,
         analysisText
       ].filter((line) => line.length > 0).join("\n\n"),
       metadata: executionMetadata
@@ -660,7 +823,8 @@ function visionAnalysisPrompt(
     ocr: "Transcribe all legible text in reading order. Preserve languages, line breaks, labels, and meaningful formatting; mark uncertain text instead of guessing.",
     document: "Analyze this as a document. Preserve reading order and identify headings, sections, fields, tables, and key content faithfully.",
     chart: "Analyze this as a chart. Identify the title, axes, units, legend, series, visible values, trends, and anomalies; do not invent unreadable values.",
-    screenshot: "Analyze this as a screenshot. Describe the interface hierarchy, current state, controls, messages, errors, and relevant spatial relationships."
+    screenshot: "Analyze this as a screenshot. Describe the interface hierarchy, current state, controls, messages, errors, and relevant spatial relationships.",
+    compare: "Compare the images directly. Identify important similarities, differences, changes, and image-specific evidence without merging details across images."
   };
   const detailPrompt: Record<VisionAnalysisDetail, string> = {
     low: "Prioritize salient high-level information and avoid claims about tiny or unclear details.",
@@ -737,12 +901,16 @@ function resolvedVisionUsage(
 
 function visionUsageMetadata(
   providerUsage: ProviderUsage | undefined,
-  image: NormalizedVisionImage,
+  images: readonly PreparedVisionImage[],
   analysis: ResolvedVisionAnalysis
 ): Record<string, unknown> {
   return {
     ...providerUsage,
-    imageInputs: [{ width: image.width, height: image.height, detail: analysis.providerDetail }]
+    imageInputs: images.map((image) => ({
+      width: image.normalized.width,
+      height: image.normalized.height,
+      detail: analysis.providerDetail
+    }))
   };
 }
 
@@ -880,6 +1048,26 @@ function normalizedImageMetadata(
       resized: normalized.resized,
       orientationApplied: normalized.orientationApplied,
       metadataStripped: normalized.metadataStripped
+    }
+  };
+}
+
+function preparedImagesMetadata(images: readonly PreparedVisionImage[]): Record<string, unknown> {
+  if (images.length === 1) {
+    const image = images[0]!;
+    return normalizedImageMetadata(image.source, image.normalized);
+  }
+  return {
+    imageCount: images.length,
+    paths: images.map((image) => image.source.displayPath),
+    images: images.map((image) => normalizedImageMetadata(image.source, image.normalized)),
+    aggregate: {
+      sourceBytes: images.reduce((total, image) => total + image.source.byteLength, 0),
+      normalizedBytes: images.reduce((total, image) => total + image.normalized.byteLength, 0),
+      animationPixels: images.reduce(
+        (total, image) => total + image.normalized.sourceWidth * image.normalized.sourceHeight * image.normalized.sourceFrames,
+        0
+      )
     }
   };
 }

@@ -705,6 +705,51 @@ describe("ProviderExecutor route-based execution", () => {
     expect(result.response?.provider).toBe("vision");
   });
 
+  it("skips known single-image fallbacks for multi-image requests", async () => {
+    const primaryAdapter = createMockAdapter({
+      id: "primary",
+      completeResponse: {
+        ok: false,
+        content: "Rate limited",
+        model: "primary-model",
+        provider: "primary",
+        errorClass: "rate-limit"
+      }
+    });
+    const singleAdapter = createMockAdapter({ id: "single" });
+    const multiAdapter = createMockAdapter({ id: "multi" });
+    registry.register(primaryAdapter);
+    registry.register(singleAdapter);
+    registry.register(multiAdapter);
+
+    const singleRoute = createDefaultRoute({ provider: "single", id: "single-model" });
+    singleRoute.profile = {
+      ...singleRoute.profile,
+      supportsVision: true,
+      supportsMultipleImages: false
+    };
+    const multiRoute = createDefaultRoute({ provider: "multi", id: "multi-model" });
+    multiRoute.profile = { ...multiRoute.profile, supportsVision: true };
+
+    const result = await executor.complete(
+      { messages: [] },
+      { requireVision: true, requireMultipleImages: true },
+      {
+        primaryRoute: createDefaultRoute({ provider: "primary", id: "primary-model" }),
+        fallbackChain: [singleRoute, multiRoute]
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(singleAdapter.calls).toHaveLength(0);
+    expect(multiAdapter.calls).toHaveLength(1);
+    expect(result.attempts[1]).toEqual(expect.objectContaining({
+      provider: "single",
+      errorClass: "unsupported",
+      content: expect.stringContaining("does not support multiple image inputs")
+    }));
+  });
+
   it("captures cancelled streaming diagnostics without counting the aborted token as visible", async () => {
     const controller = new AbortController();
     const calls: MockCall[] = [];

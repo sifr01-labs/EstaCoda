@@ -136,7 +136,7 @@ export async function generateVisionEvaluationFixtures(
     Buffer.alloc(VISION_EVALUATION_FIXTURE_MAX_BYTES - english.byteLength + 1, 0)
   ]);
   await writeFile(join(outputDir, oversizedName), oversized);
-  fixtures.push(manifestEntry(oversizedName, oversized, ["rejected as source-too-large at the 8 MiB default"]));
+  fixtures.push(manifestEntry(oversizedName, oversized, ["rejected as source-too-large at the configured 8 MiB ceiling"]));
 
   const manifest: VisionEvaluationFixtureManifest = {
     version: 1,

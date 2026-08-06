@@ -152,3 +152,9 @@ fi
 
 HOME="$TMP_HOME" "$BIN" --version
 HOME="$TMP_HOME" "$BIN" --help
+
+PACKAGE_ROOT="$TMP_PREFIX/lib/node_modules/estacoda"
+node "$ROOT/scripts/verify-packed-vision-normalizer.mjs" \
+  "$PACKAGE_ROOT" \
+  "${ESTACODA_EXPECTED_PLATFORM:-$(node -p 'process.platform')}" \
+  "${ESTACODA_EXPECTED_ARCH:-$(node -p 'process.arch')}"

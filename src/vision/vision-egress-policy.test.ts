@@ -7,6 +7,7 @@ import type { ResolvedVisionImageSource } from "../contracts/vision.js";
 import {
   isSensitiveVisionPath,
   resolveVisionEgressSecurity,
+  resolveVisionSourcesEgressSecurity,
   visionInputProvenanceForTurn
 } from "./vision-egress-policy.js";
 
@@ -133,6 +134,30 @@ describe("vision egress security resolution", () => {
     expect(result?.dataEgress?.sensitivePath).toBe(true);
     expect(result?.targetSummary).not.toContain(sensitivePath);
     expect(result?.targetKey).not.toContain(sensitivePath);
+  });
+
+  it("classifies every comparison source and uses the most restrictive provenance", async () => {
+    const secondPath = join(root, "second.png");
+    await writeFile(secondPath, "image");
+    const result = await resolveVisionSourcesEgressSecurity({
+      sources: [source(await realpath(imagePath)), source(await realpath(secondPath))],
+      workspaceRoot: root,
+      provenance: {
+        attachmentPaths: [imagePath],
+        explicitReferencePaths: []
+      },
+      visionRoute: auxiliary(route("openai")),
+      mainRoute: route("openai")
+    });
+
+    expect(result).toMatchObject({
+      targetSummary: expect.stringContaining("send 2 images"),
+      dataEgress: {
+        sourceProvenance: "agent-discovered",
+        sourceProvenances: ["current-turn-attachment", "agent-discovered"],
+        sourceCount: 2
+      }
+    });
   });
 
   async function hostedResolution(

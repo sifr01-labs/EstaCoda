@@ -33,6 +33,7 @@ import { loadOAuthStore } from "./oauth/oauth-store.js";
 import { refreshOAuthToken } from "./oauth/oauth-refresh.js";
 import { providerUsageEntryFromAttempt } from "./provider-usage-ledger.js";
 import { prepareProviderSpend, providerSpendDenialMessage } from "./provider-spend-policy.js";
+import { supportsMultipleImageInputs } from "./model-image-capabilities.js";
 
 export type ProviderAttempt = ProviderAttemptState & {
   provider: string;
@@ -1223,6 +1224,10 @@ function routePreferenceFailure(
 
   if (preferences.requireVision === true && !route.profile.supportsVision) {
     return `Provider route ${route.provider}/${route.id} does not support vision required for this request.`;
+  }
+
+  if (preferences.requireMultipleImages === true && !supportsMultipleImageInputs(route.profile)) {
+    return `Provider route ${route.provider}/${route.id} does not support multiple image inputs required for this request.`;
   }
 
   if (preferences.requireStructuredOutput === true && !route.profile.supportsStructuredOutput) {

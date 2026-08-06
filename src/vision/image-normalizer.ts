@@ -44,13 +44,14 @@ type HostedVisionImageFormat = "jpeg" | "png" | "webp";
 
 export const DEFAULT_VISION_IMAGE_NORMALIZATION_LIMITS: Readonly<VisionImageNormalizationLimits> =
   Object.freeze({
-    maxInputBytes: 8 * 1024 * 1024,
+    maxSourceBytes: 32 * 1024 * 1024,
     maxInputDimension: 20_000,
     maxInputPixels: 50_000_000,
     maxDecodedBytes: 256 * 1024 * 1024,
     maxAnimationFrames: 100,
+    maxAnimationPixels: 100_000_000,
     maxOutputDimension: 7_680,
-    maxOutputBytes: 4 * 1024 * 1024,
+    maxNormalizedBytes: 4 * 1024 * 1024,
     maxConcurrency: 2
   });
 
@@ -170,12 +171,12 @@ async function normalizeWithSharp(
   limits: VisionImageNormalizationLimits
 ): Promise<VisionImageNormalizationResult> {
   const input = Buffer.from(source.bytes);
-  if (input.byteLength > limits.maxInputBytes) {
+  if (input.byteLength > limits.maxSourceBytes) {
     return limitError(
-      "normalization-input-byte-limit",
+      "normalization-source-byte-limit",
       "This image exceeds the safe input size for vision processing.",
       input.byteLength,
-      limits.maxInputBytes,
+      limits.maxSourceBytes,
       "bytes"
     );
   }
@@ -255,6 +256,17 @@ async function normalizeWithSharp(
     );
   }
 
+  const animationPixels = safeProduct(sourceWidth, sourceHeight, sourceFrames);
+  if (animationPixels === undefined || animationPixels > limits.maxAnimationPixels) {
+    return limitError(
+      "normalization-animation-pixel-limit",
+      "This animated image contains too many aggregate pixels for safe vision analysis.",
+      animationPixels ?? Number.MAX_SAFE_INTEGER,
+      limits.maxAnimationPixels,
+      "pixels"
+    );
+  }
+
   const decodedBytes = safeProduct(
     inputPixels,
     Number(metadata.channels),
@@ -298,7 +310,7 @@ async function normalizeWithSharp(
     }
     lastOutputBytes = encoded.data.byteLength;
 
-    if (encoded.data.byteLength <= limits.maxOutputBytes) {
+    if (encoded.data.byteLength <= limits.maxNormalizedBytes) {
       return {
         ok: true,
         bytes: encoded.data,
@@ -325,7 +337,7 @@ async function normalizeWithSharp(
     if (longestOutputEdge <= 1) {
       break;
     }
-    const scale = Math.min(0.9, Math.sqrt(limits.maxOutputBytes / encoded.data.byteLength) * 0.92);
+    const scale = Math.min(0.9, Math.sqrt(limits.maxNormalizedBytes / encoded.data.byteLength) * 0.92);
     targetDimension = Math.max(1, Math.min(targetDimension - 1, Math.floor(longestOutputEdge * scale)));
   }
 
@@ -333,7 +345,7 @@ async function normalizeWithSharp(
     "normalization-output-byte-limit",
     "This image could not be reduced to a safe hosted payload size.",
     lastOutputBytes,
-    limits.maxOutputBytes,
+    limits.maxNormalizedBytes,
     "bytes"
   );
 }

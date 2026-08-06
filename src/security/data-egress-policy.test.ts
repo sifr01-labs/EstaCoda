@@ -83,6 +83,19 @@ describe("hosted vision data egress policy", () => {
     expect(decisions.every((result) => result.deterministicRule === "adaptive-current-turn-attachment")).toBe(true);
   });
 
+  it("requires approval when any comparison source was agent-discovered", async () => {
+    const mixed = request("agent-discovered");
+    mixed.context.dataEgress = {
+      ...mixed.context.dataEgress!,
+      sourceProvenances: ["current-turn-attachment", "agent-discovered"],
+      sourceCount: 2
+    };
+    await expect(createSecurityPolicyForMode("adaptive").assess!(mixed)).resolves.toMatchObject({
+      decision: "ask",
+      deterministicRule: "adaptive-agent-discovered-egress"
+    });
+  });
+
   it("binds persistent grants to the exact provider destination and workspace", async () => {
     const root = await temporaryRoot();
     const workspaceA = join(root, "workspace-a");

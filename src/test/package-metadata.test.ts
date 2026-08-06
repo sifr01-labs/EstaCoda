@@ -21,6 +21,7 @@ type PackageJson = {
   engines?: Record<string, string>;
   files?: string[];
   dependencies?: Record<string, string>;
+  scripts?: Record<string, string>;
 };
 
 describe("package installability metadata", () => {
@@ -71,5 +72,8 @@ describe("package installability metadata", () => {
     const sharp = await import("sharp");
     expect(sharp.default.versions.sharp).toMatch(/^\d+\.\d+\.\d+$/u);
     expect(sharp.default.versions.vips).toBeDefined();
+    expect(pkg.scripts?.preinstall).toBeUndefined();
+    expect(pkg.scripts?.install).toBeUndefined();
+    expect(pkg.scripts?.postinstall).toBeUndefined();
   });
 });

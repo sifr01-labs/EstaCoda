@@ -20,6 +20,8 @@ export type ModelProfile = {
   status?: "stable" | "alpha" | "beta" | "deprecated" | "unknown";
   supportsTools: boolean;
   supportsVision: boolean;
+  /** Defaults to supported for vision routes; set false for known single-image routes. */
+  supportsMultipleImages?: boolean;
   supportsStructuredOutput: boolean;
   supportsReasoning?: boolean;
   supportsStreaming?: boolean;
@@ -358,6 +360,7 @@ export type ProviderErrorClass =
 export type ProviderRoutePreferences = {
   requireTools?: boolean;
   requireVision?: boolean;
+  requireMultipleImages?: boolean;
   requireStructuredOutput?: boolean;
   requireReasoning?: boolean;
   preferFreeOrOpenWeights?: boolean;

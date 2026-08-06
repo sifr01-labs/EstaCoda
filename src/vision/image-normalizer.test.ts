@@ -124,7 +124,7 @@ describe("vision image normalizer", () => {
     }).png().toBuffer();
 
     const result = await createVisionImageNormalizer({
-      limits: { maxOutputBytes: 20_000 }
+      limits: { maxNormalizedBytes: 20_000 }
     }).normalize(source(png));
 
     expect(result.ok).toBe(true);
@@ -140,7 +140,7 @@ describe("vision image normalizer", () => {
     const png = await createPng(20, 10);
 
     const inputBytes = await createVisionImageNormalizer({
-      limits: { maxInputBytes: png.byteLength - 1 }
+      limits: { maxSourceBytes: png.byteLength - 1 }
     }).normalize(source(png));
     const dimension = await createVisionImageNormalizer({
       limits: { maxInputDimension: 19 }
@@ -154,7 +154,7 @@ describe("vision image normalizer", () => {
 
     expect(inputBytes).toMatchObject({
       ok: false,
-      code: "normalization-input-byte-limit"
+      code: "normalization-source-byte-limit"
     });
     expect(dimension).toMatchObject({
       ok: false,
@@ -179,15 +179,15 @@ describe("vision image normalizer", () => {
     input.byteLength = 1;
 
     const inputLimit = await createVisionImageNormalizer({
-      limits: { maxInputBytes: png.byteLength - 1 }
+      limits: { maxSourceBytes: png.byteLength - 1 }
     }).normalize(input);
     const outputLimit = await createVisionImageNormalizer({
-      limits: { maxOutputBytes: 1 }
+      limits: { maxNormalizedBytes: 1 }
     }).normalize(source(png));
 
     expect(inputLimit).toMatchObject({
       ok: false,
-      code: "normalization-input-byte-limit",
+      code: "normalization-source-byte-limit",
       details: { actual: png.byteLength, limit: png.byteLength - 1, unit: "bytes" }
     });
     expect(outputLimit).toMatchObject({
@@ -216,6 +216,25 @@ describe("vision image normalizer", () => {
       ok: false,
       code: "normalization-animation-limit",
       details: { actual: 2, limit: 1, unit: "frames" }
+    });
+  });
+
+  it("rejects animations beyond the aggregate animation pixel limit", async () => {
+    const firstFrame = await createPng(4, 4, { r: 255, g: 0, b: 0, alpha: 1 });
+    const secondFrame = await createPng(4, 4, { r: 0, g: 0, b: 0, alpha: 1 });
+    const animatedGif = await sharp(
+      [firstFrame, secondFrame],
+      { join: { animated: true } }
+    ).gif({ delay: [20, 20], loop: 0 }).toBuffer();
+
+    const result = await createVisionImageNormalizer({
+      limits: { maxAnimationPixels: 31 }
+    }).normalize(source(animatedGif, "image/gif"));
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: "normalization-animation-pixel-limit",
+      details: { actual: 32, limit: 31, unit: "pixels" }
     });
   });
 
@@ -369,13 +388,14 @@ describe("vision image normalizer", () => {
 
   it("uses conservative non-zero production limits", () => {
     expect(DEFAULT_VISION_IMAGE_NORMALIZATION_LIMITS).toEqual({
-      maxInputBytes: 8 * 1024 * 1024,
+      maxSourceBytes: 32 * 1024 * 1024,
       maxInputDimension: 20_000,
       maxInputPixels: 50_000_000,
       maxDecodedBytes: 256 * 1024 * 1024,
       maxAnimationFrames: 100,
+      maxAnimationPixels: 100_000_000,
       maxOutputDimension: 7_680,
-      maxOutputBytes: 4 * 1024 * 1024,
+      maxNormalizedBytes: 4 * 1024 * 1024,
       maxConcurrency: 2
     });
   });

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { analyzeImageWithVision, createVisionTools, dispatchImageWithVision } from "./vision-tools.js";
@@ -7,6 +7,8 @@ import type { ProviderExecutionResult, ProviderExecutor } from "../providers/pro
 import type { ResolvedModelRoute } from "../contracts/provider.js";
 import { ephemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
+import { createVisionImageNormalizer } from "../vision/image-normalizer.js";
+import type { NormalizedVisionImage } from "../contracts/vision.js";
 
 function createMockExecutor(ok = true, content = "vision result") {
   const fn = vi.fn().mockResolvedValue({
@@ -62,6 +64,23 @@ function createTempPng(): { dir: string; path: string; cleanup: () => void } {
     "base64"
   ));
   return { dir, path, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+function normalizedImage(byteLength = 1): NormalizedVisionImage {
+  return {
+    ok: true,
+    bytes: new Uint8Array(byteLength),
+    byteLength,
+    mimeType: "image/png",
+    width: 1,
+    height: 1,
+    sourceWidth: 1,
+    sourceHeight: 1,
+    sourceFrames: 1,
+    resized: false,
+    orientationApplied: false,
+    metadataStripped: true
+  };
 }
 
 const baseRoute: ResolvedModelRoute = {
@@ -207,6 +226,154 @@ describe("vision tools", () => {
         tmp.cleanup();
       }
     });
+
+    it.each([2, 3, 4])("compares %i images through one bounded auxiliary request", async (imageCount) => {
+      const executor = createMockExecutor();
+      const tmp = createTempPng();
+      try {
+        const paths = Array.from({ length: imageCount }, () => "test.png");
+        const result = await dispatchImageWithVision({
+          workspaceRoot: tmp.dir,
+          mainRoute: textOnlyRoute,
+          visionAuxiliaryRoute: {
+            task: "vision",
+            route: baseRoute,
+            source: "explicit",
+            fallbackToMain: false,
+            diagnostics: []
+          },
+          providerExecutor: executor
+        }, { paths });
+
+        const [request, preferences, executionOptions] = (executor.complete as any).mock.calls[0];
+        expect(result).toEqual(expect.objectContaining({
+          ok: true,
+          metadata: expect.objectContaining({ mode: "compare", imageCount })
+        }));
+        expect(request.messages[1].content.filter((part: any) => part.type === "image_url")).toHaveLength(imageCount);
+        expect(preferences).toEqual(expect.objectContaining({ requireVision: true, requireMultipleImages: true }));
+        expect(executionOptions.usage.imageInputs).toHaveLength(imageCount);
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("uses native comparison only when the main route supports multiple images", async () => {
+      const tmp = createTempPng();
+      try {
+        const result = await dispatchImageWithVision({
+          workspaceRoot: tmp.dir,
+          mainRoute: baseRoute,
+          visionAuxiliaryRoute: {
+            task: "vision",
+            route: baseRoute,
+            source: "auto-configured",
+            fallbackToMain: false,
+            diagnostics: []
+          }
+        }, { paths: ["test.png", "test.png"] });
+        expect(result).toEqual(expect.objectContaining({
+          ok: true,
+          metadata: expect.objectContaining({ dispatch: "native", imageCount: 2, mode: "compare" })
+        }));
+        expect(ephemeralVisionImages(result)).toHaveLength(2);
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("rejects ambiguous and oversized comparison selections before reading files", async () => {
+      const ambiguous = await dispatchImageWithVision({ workspaceRoot: "/tmp", mainRoute: baseRoute }, {
+        path: "one.png",
+        paths: ["one.png", "two.png"]
+      });
+      const tooMany = await dispatchImageWithVision({ workspaceRoot: "/tmp", mainRoute: baseRoute }, {
+        paths: ["1.png", "2.png", "3.png", "4.png", "5.png"]
+      });
+      expect(ambiguous.metadata).toEqual(expect.objectContaining({ errorCode: "vision-invalid-image-selection" }));
+      expect(tooMany.metadata).toEqual(expect.objectContaining({ errorCode: "vision-invalid-image-selection" }));
+    });
+
+    it("fails the whole comparison safely when one source is corrupt", async () => {
+      const tmp = createTempPng();
+      writeFileSync(join(tmp.dir, "corrupt.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      try {
+        const result = await dispatchImageWithVision({ workspaceRoot: tmp.dir, mainRoute: baseRoute }, {
+          paths: ["test.png", "corrupt.png"]
+        });
+        expect(result).toEqual(expect.objectContaining({
+          ok: false,
+          metadata: expect.objectContaining({ errorCode: "source-corrupt" })
+        }));
+        expect(ephemeralVisionImages(result)).toHaveLength(0);
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("enforces aggregate normalized bytes and animation pixels before dispatch", async () => {
+      const tmp = createTempPng();
+      try {
+        const bytes = await dispatchImageWithVision({
+          workspaceRoot: tmp.dir,
+          mainRoute: baseRoute,
+          maxAggregateNormalizedBytes: 1
+        }, { paths: ["test.png", "test.png"] });
+        const pixels = await dispatchImageWithVision({
+          workspaceRoot: tmp.dir,
+          mainRoute: baseRoute,
+          maxAggregateAnimationPixels: 1
+        }, { paths: ["test.png", "test.png"] });
+        expect(bytes.metadata).toEqual(expect.objectContaining({ errorCode: "normalization-aggregate-output-byte-limit" }));
+        expect(pixels.metadata).toEqual(expect.objectContaining({ errorCode: "normalization-aggregate-animation-pixel-limit" }));
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("reads moderately oversized compatible sources and resizes instead of rejecting at 8 MiB", async () => {
+      const tmp = createTempPng();
+      const largePath = join(tmp.dir, "large.png");
+      const original = readFileSync(tmp.path);
+      writeFileSync(largePath, Buffer.concat([original, Buffer.alloc(9 * 1024 * 1024)]));
+      const normalize = vi.fn().mockResolvedValue(normalizedImage());
+      try {
+        const result = await dispatchImageWithVision({
+          workspaceRoot: tmp.dir,
+          mainRoute: baseRoute,
+          imageNormalizer: { normalize }
+        }, { path: "large.png" });
+        expect(result.ok).toBe(true);
+        expect(normalize.mock.calls[0]![0].byteLength).toBeGreaterThan(8 * 1024 * 1024);
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("cancels queued multi-image normalization without dispatch or temp files", async () => {
+      const tmp = createTempPng();
+      const active = deferred<NormalizedVisionImage>();
+      const processor = vi.fn().mockImplementation(() => active.promise);
+      const normalizer = createVisionImageNormalizer({ limits: { maxConcurrency: 1 }, processor });
+      const controller = new AbortController();
+      const before = readdirSync(tmp.dir).sort();
+      try {
+        const pending = dispatchImageWithVision({
+          workspaceRoot: tmp.dir,
+          mainRoute: baseRoute,
+          imageNormalizer: normalizer
+        }, { paths: ["test.png", "test.png"] }, controller.signal);
+        await vi.waitFor(() => expect(processor).toHaveBeenCalledTimes(1));
+        controller.abort();
+        active.resolve(normalizedImage());
+        const result = await pending;
+        expect(result.metadata).toEqual(expect.objectContaining({ errorCode: "normalization-cancelled" }));
+        expect(processor).toHaveBeenCalledTimes(1);
+        expect(readdirSync(tmp.dir).sort()).toEqual(before);
+      } finally {
+        tmp.cleanup();
+      }
+    });
   });
 
   describe("createVisionTools", () => {
@@ -217,12 +384,13 @@ describe("vision tools", () => {
       expect(tools[0].inputSchema).toEqual(expect.objectContaining({
         properties: expect.objectContaining({
           path: expect.objectContaining({ type: "string" }),
+          paths: expect.objectContaining({ type: "array", minItems: 2, maxItems: 4 }),
           prompt: expect.objectContaining({ type: "string" }),
-          mode: expect.objectContaining({ enum: ["describe", "ocr", "document", "chart", "screenshot"] }),
+          mode: expect.objectContaining({ enum: ["describe", "ocr", "document", "chart", "screenshot", "compare"] }),
           detail: expect.objectContaining({ enum: ["low", "standard", "high"] }),
           output: expect.objectContaining({ enum: ["concise", "standard", "detailed"] })
         }),
-        required: ["path"]
+        oneOf: [{ required: ["path"] }, { required: ["paths"] }]
       }));
     });
 

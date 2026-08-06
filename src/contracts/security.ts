@@ -44,6 +44,9 @@ export type SecurityDataEgressContext = {
     | "browser-artifact"
     | "generated-artifact"
     | "agent-discovered";
+  /** Full source set for multi-image egress; the singular field is the most restrictive value. */
+  sourceProvenances?: readonly SecurityDataEgressContext["sourceProvenance"][];
+  sourceCount?: number;
   sensitivePath: boolean;
   destinations: readonly string[];
 };

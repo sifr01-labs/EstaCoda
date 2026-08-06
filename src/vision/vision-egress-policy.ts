@@ -38,15 +38,35 @@ export async function resolveVisionEgressSecurity(input: {
   mainRoute?: ResolvedModelRoute;
   additionalRoutes?: readonly ResolvedModelRoute[];
 }): Promise<ToolSecurityResolution | undefined> {
-  const sourceProvenance = await classifySourceProvenance(
-    input.source.canonicalPath,
+  return resolveVisionSourcesEgressSecurity({
+    ...input,
+    sources: [input.source]
+  });
+}
+
+export async function resolveVisionSourcesEgressSecurity(input: {
+  sources: readonly ResolvedVisionImageSource[];
+  workspaceRoot: string;
+  provenance?: VisionInputProvenanceContext;
+  generatedArtifactRoots?: readonly string[];
+  visionRoute: ResolvedAuxiliaryRoute;
+  mainRoute?: ResolvedModelRoute;
+  additionalRoutes?: readonly ResolvedModelRoute[];
+}): Promise<ToolSecurityResolution | undefined> {
+  const sourceProvenances = await Promise.all(input.sources.map((source) => classifySourceProvenance(
+    source.canonicalPath,
     input.workspaceRoot,
     input.provenance,
     input.generatedArtifactRoots
-  );
+  )));
+  const sourceProvenance = sourceProvenances.includes("agent-discovered")
+    ? "agent-discovered"
+    : sourceProvenances[0] ?? "agent-discovered";
   return resolveVisionArtifactEgressSecurity({
     sourceProvenance,
-    sensitivePath: isSensitiveVisionPath(input.source.canonicalPath),
+    sourceProvenances,
+    sourceCount: input.sources.length,
+    sensitivePath: input.sources.some((source) => isSensitiveVisionPath(source.canonicalPath)),
     visionRoute: input.visionRoute,
     mainRoute: input.mainRoute,
     additionalRoutes: input.additionalRoutes
@@ -55,6 +75,8 @@ export async function resolveVisionEgressSecurity(input: {
 
 export function resolveVisionArtifactEgressSecurity(input: {
   sourceProvenance: SecurityDataEgressContext["sourceProvenance"];
+  sourceProvenances?: readonly SecurityDataEgressContext["sourceProvenance"][];
+  sourceCount?: number;
   sensitivePath: boolean;
   visionRoute: ResolvedAuxiliaryRoute;
   mainRoute?: ResolvedModelRoute;
@@ -69,11 +91,13 @@ export function resolveVisionArtifactEgressSecurity(input: {
   return {
     riskClass: "external-side-effect",
     targetKey: `vision.analyze:hosted-egress:${destinations.map(encodeURIComponent).join(",")}`,
-    targetSummary: `send an image to hosted vision destination${destinations.length === 1 ? "" : "s"}: ${destinations.join(", ")}`,
+    targetSummary: `send ${input.sourceCount !== undefined && input.sourceCount > 1 ? `${input.sourceCount} images` : "an image"} to hosted vision destination${destinations.length === 1 ? "" : "s"}: ${destinations.join(", ")}`,
     dataEgress: {
       kind: "vision-image",
       inference: "hosted",
       sourceProvenance: input.sourceProvenance,
+      ...(input.sourceProvenances === undefined ? {} : { sourceProvenances: input.sourceProvenances }),
+      ...(input.sourceCount === undefined ? {} : { sourceCount: input.sourceCount }),
       sensitivePath: input.sensitivePath,
       destinations
     }
