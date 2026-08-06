@@ -8,9 +8,10 @@ import {
   type SecurityPolicy
 } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
-import type { ToolDefinition, ToolResult, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
+import type { ToolDefinition, ToolResult, ToolRiskClass, ToolSecurityResolution, ToolsetName } from "../contracts/tool.js";
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
+import type { VisionInputProvenanceContext } from "../contracts/vision.js";
 import { assessCommandSafety } from "../security/command-safety.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { ToolRegistry } from "./tool-registry.js";
@@ -39,6 +40,7 @@ export type ToolExecutionRequest = {
   environmentType?: EnvironmentType;
   excludedTools?: string[];
   providerUsageLineage?: ProviderUsageLineage;
+  visionInputProvenance?: VisionInputProvenanceContext;
   signal?: AbortSignal;
 };
 
@@ -51,6 +53,7 @@ export type NamedToolExecutionRequest = {
   toolCallId?: string;
   visibleTurnId?: string;
   providerUsageLineage?: ProviderUsageLineage;
+  visionInputProvenance?: VisionInputProvenanceContext;
   toolCallName?: string;
   providerNativeToolCall?: unknown;
   signal?: AbortSignal;
@@ -114,6 +117,7 @@ export class ToolExecutor {
       sessionId: request.sessionId,
       environmentType: request.environmentType,
       providerUsageLineage: request.providerUsageLineage,
+      visionInputProvenance: request.visionInputProvenance,
       signal: request.signal
     });
   }
@@ -126,7 +130,7 @@ export class ToolExecutor {
     }
 
     const environmentType = request.environmentType ?? DEFAULT_ENVIRONMENT_TYPE;
-    const riskClass = classifyEffectiveRisk(tool, request.input, environmentType);
+    const baseRiskClass = classifyEffectiveRisk(tool, request.input, environmentType);
     const persistedCall = redactToolCallForPersistence(tool.name, request.input, request.providerNativeToolCall);
     const validationError = validateToolInput(tool, request.input);
     if (validationError !== undefined) {
@@ -148,13 +152,31 @@ export class ToolExecutor {
         tool: toDefinition(tool),
         input: request.input,
         decision: "deny",
-        riskClass,
+        riskClass: baseRiskClass,
         result,
         toolCallId: request.toolCallId,
         toolCallName: request.toolCallName,
         providerNativeToolCall: request.providerNativeToolCall
       };
     }
+
+    let securityResolution: ToolSecurityResolution | undefined;
+    try {
+      securityResolution = await tool.resolveSecurity?.(request.input, {
+        toolCallId: request.toolCallId,
+        visibleTurnId: request.visibleTurnId,
+        providerUsageLineage: request.providerUsageLineage,
+        visionInputProvenance: request.visionInputProvenance,
+        signal: request.signal,
+        environmentType,
+        onEvent: request.onEvent,
+        trustedWorkspace: request.trustedWorkspace,
+        sessionId: request.sessionId
+      });
+    } catch {
+      return await this.#blockedSecurityResolution(request, tool, baseRiskClass);
+    }
+    const riskClass = moreRestrictiveRiskClass(baseRiskClass, securityResolution?.riskClass);
     if (tool.name === "delegate_task" && request.delegateCallBudget !== undefined) {
       const budget = request.delegateCallBudget.tryConsume();
       if (budget.allowed === false) {
@@ -162,8 +184,8 @@ export class ToolExecutor {
       }
     }
 
-    const targetKey = await this.#buildSecurityTargetKey(tool.name, request.input);
-    const targetSummary = summarizeSecurityTarget(tool.name, request.input);
+    const targetKey = securityResolution?.targetKey ?? await this.#buildSecurityTargetKey(tool.name, request.input);
+    const targetSummary = securityResolution?.targetSummary ?? summarizeSecurityTarget(tool.name, request.input);
     const persistedTargetKey = redactPersistedString(targetKey);
     const persistedTargetSummary = redactPersistedString(targetSummary);
     const securityRequest = {
@@ -176,7 +198,10 @@ export class ToolExecutor {
       description: `run tool ${tool.name}`,
       context: {
         trustedWorkspace: request.trustedWorkspace,
-        targetConversationIsActive: true
+        targetConversationIsActive: true,
+        ...(securityResolution?.dataEgress === undefined
+          ? {}
+          : { dataEgress: securityResolution.dataEgress })
       }
     };
     const assessment = await assessSecurityPolicy(this.#securityPolicy, securityRequest);
@@ -252,6 +277,8 @@ export class ToolExecutor {
           toolCallId: request.toolCallId,
           visibleTurnId: request.visibleTurnId,
           providerUsageLineage: request.providerUsageLineage,
+          visionInputProvenance: request.visionInputProvenance,
+          securityResolution,
           signal: request.signal,
           environmentType,
           onEvent: request.onEvent
@@ -433,6 +460,50 @@ export class ToolExecutor {
       providerNativeToolCall: request.providerNativeToolCall
     };
   }
+
+  async #blockedSecurityResolution(
+    request: NamedToolExecutionRequest,
+    tool: import("../contracts/tool.js").RegisteredTool,
+    riskClass: ToolRiskClass
+  ): Promise<ToolExecutionRecord> {
+    const targetSummary = "dynamic tool security preflight failed";
+    const assessment = {
+      decision: "deny" as const,
+      mode: "strict" as const,
+      reason: "Tool security preflight failed closed before execution.",
+      risk: "high" as const,
+      deterministicRule: "tool-security-preflight-failed",
+      assessor: { used: false as const, status: "disabled" as const }
+    };
+    await this.#sessionDb.appendEvent(request.sessionId, {
+      kind: "security-assessed",
+      tool: tool.name,
+      riskClass,
+      targetSummary,
+      assessment
+    });
+    await this.#sessionDb.appendEvent(request.sessionId, {
+      kind: "tool-gated",
+      tool: tool.name,
+      decision: "deny",
+      riskClass
+    });
+    this.#trajectoryRecorder.record("tool-gated", {
+      tool: tool.name,
+      decision: "deny",
+      riskClass
+    });
+    return {
+      tool: toDefinition(tool),
+      input: request.input,
+      decision: "deny",
+      riskClass,
+      targetSummary,
+      toolCallId: request.toolCallId,
+      toolCallName: request.toolCallName,
+      providerNativeToolCall: request.providerNativeToolCall
+    };
+  }
 }
 
 function classifyEffectiveRisk(
@@ -448,6 +519,28 @@ function classifyEffectiveRisk(
   }
 
   return tool.riskClass;
+}
+
+function moreRestrictiveRiskClass(
+  base: ToolRiskClass,
+  dynamic: ToolRiskClass | undefined
+): ToolRiskClass {
+  if (dynamic === undefined) return base;
+  return toolRiskRank(dynamic) > toolRiskRank(base) ? dynamic : base;
+}
+
+function toolRiskRank(value: ToolRiskClass): number {
+  switch (value) {
+    case "read-only-local": return 0;
+    case "read-only-network": return 1;
+    case "workspace-write": return 2;
+    case "shared-state-mutation": return 3;
+    case "external-side-effect": return 4;
+    case "credential-access": return 5;
+    case "destructive-local": return 6;
+    case "spend-money": return 7;
+    case "sandbox-escape": return 8;
+  }
 }
 
 function validateToolInput(tool: ToolDefinition, input: Record<string, unknown>): string | undefined {

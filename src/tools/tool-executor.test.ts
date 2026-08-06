@@ -1083,3 +1083,83 @@ describe("ToolExecutor browser CDP gating", () => {
     expect(run).not.toHaveBeenCalled();
   });
 });
+
+describe("ToolExecutor dynamic data-egress security", () => {
+  it("uses runtime-derived provenance and the dynamic hosted destination before running", async () => {
+    let observedRequest: SecurityRequest | undefined;
+    const run = vi.fn(async (_input, context): Promise<ToolResult> => ({
+      ok: true,
+      content: context?.securityResolution?.dataEgress?.sourceProvenance ?? "missing"
+    }));
+    const tool: RegisteredTool = {
+      ...createEchoTool("vision.analyze"),
+      resolveSecurity: vi.fn((_input, context) => ({
+        riskClass: "external-side-effect" as const,
+        targetKey: "vision.analyze:hosted-egress:openai",
+        targetSummary: "send image to openai",
+        dataEgress: {
+          kind: "vision-image" as const,
+          inference: "hosted" as const,
+          sourceProvenance: context.visionInputProvenance?.attachmentPaths.includes("/media/image.png")
+            ? "current-turn-attachment" as const
+            : "agent-discovered" as const,
+          sensitivePath: false,
+          destinations: ["openai@https://api.openai.com/v1"]
+        }
+      })),
+      run
+    };
+    const policy: SecurityPolicy = {
+      decide: () => "allow",
+      assess(request) {
+        observedRequest = request;
+        return { decision: "allow", mode: "adaptive", reason: "test", risk: "low" };
+      }
+    };
+    const { executor } = await setupExecutor({ policy, tools: [tool] });
+
+    const record = await executor.executeTool({
+      tool: "vision.analyze",
+      input: { path: "/media/image.png" },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      visionInputProvenance: {
+        attachmentPaths: ["/media/image.png"],
+        explicitReferencePaths: []
+      }
+    });
+
+    expect(observedRequest).toMatchObject({
+      riskClass: "external-side-effect",
+      targetKey: "vision.analyze:hosted-egress:openai",
+      context: {
+        dataEgress: { sourceProvenance: "current-turn-attachment" }
+      }
+    });
+    expect(record).toMatchObject({
+      decision: "allow",
+      riskClass: "external-side-effect",
+      result: { content: "current-turn-attachment" }
+    });
+  });
+
+  it("fails closed when dynamic security resolution throws", async () => {
+    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "unsafe" }));
+    const tool: RegisteredTool = {
+      ...createEchoTool("vision.analyze"),
+      resolveSecurity: () => {
+        throw new Error("provenance unavailable");
+      },
+      run
+    };
+    const { executor } = await setupExecutor({ tools: [tool] });
+    const record = await executor.executeTool({
+      tool: "vision.analyze",
+      input: {},
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+    expect(record).toMatchObject({ decision: "deny", targetSummary: "dynamic tool security preflight failed" });
+    expect(run).not.toHaveBeenCalled();
+  });
+});

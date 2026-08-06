@@ -16,6 +16,7 @@ function source(
 ): ResolvedVisionImageSource {
   return {
     ok: true,
+    canonicalPath: "/workspace/image.test",
     displayPath: "image.test",
     bytes,
     byteLength: bytes.byteLength,

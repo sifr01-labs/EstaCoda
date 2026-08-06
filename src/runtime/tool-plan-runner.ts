@@ -1,6 +1,7 @@
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
 import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
+import type { VisionInputProvenanceContext } from "../contracts/vision.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { FileChangePreviewViewModel } from "../contracts/view-model.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
@@ -58,6 +59,7 @@ export class ToolPlanRunner {
     riskBaseline: ToolRiskClass;
     visibleTurnId?: string;
     providerUsageLineage?: ProviderUsageLineage;
+    visionInputProvenance?: VisionInputProvenanceContext;
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
   }): Promise<{
@@ -119,12 +121,23 @@ export class ToolPlanRunner {
             trustedWorkspace: input.trustedWorkspace,
             visibleTurnId: input.visibleTurnId,
             providerUsageLineage: input.providerUsageLineage,
+            visionInputProvenance: input.visionInputProvenance,
             signal: input.signal,
             onEvent: input.onEvent
           })
         ));
 
-        executions.push(...groupExecutions.filter((execution) => execution !== undefined));
+        const completed = groupExecutions.filter((execution) => execution !== undefined);
+        executions.push(...completed);
+        const dynamicRisk = maxRiskClass(completed.map((execution) => execution.riskClass));
+        if (riskRank(dynamicRisk) > riskRank(maxObservedRisk)) {
+          await this.#runRecorder.recordSecurityRiskEscalation({
+            from: maxObservedRisk,
+            to: dynamicRisk,
+            onEvent: input.onEvent
+          });
+          maxObservedRisk = dynamicRisk;
+        }
         continue;
       }
 
@@ -134,11 +147,20 @@ export class ToolPlanRunner {
           trustedWorkspace: input.trustedWorkspace,
           visibleTurnId: input.visibleTurnId,
           providerUsageLineage: input.providerUsageLineage,
+          visionInputProvenance: input.visionInputProvenance,
           signal: input.signal,
           onEvent: input.onEvent
         });
         if (execution !== undefined) {
           executions.push(execution);
+          if (riskRank(execution.riskClass) > riskRank(maxObservedRisk)) {
+            await this.#runRecorder.recordSecurityRiskEscalation({
+              from: maxObservedRisk,
+              to: execution.riskClass,
+              onEvent: input.onEvent
+            });
+            maxObservedRisk = execution.riskClass;
+          }
         }
       }
     }
@@ -154,6 +176,7 @@ export class ToolPlanRunner {
     trustedWorkspace: boolean;
     visibleTurnId?: string;
     providerUsageLineage?: ProviderUsageLineage;
+    visionInputProvenance?: VisionInputProvenanceContext;
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
   }): Promise<ToolExecutionRecord | undefined> {
@@ -175,6 +198,7 @@ export class ToolPlanRunner {
       toolCallId: plan.id,
       visibleTurnId: input.visibleTurnId,
       providerUsageLineage: input.providerUsageLineage,
+      visionInputProvenance: input.visionInputProvenance,
       toolCallName: plan.tool,
       providerNativeToolCall: plan.raw,
       signal: input.signal,

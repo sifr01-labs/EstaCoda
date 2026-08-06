@@ -1,7 +1,9 @@
 import type { EnvironmentType } from "./security.js";
+import type { SecurityDataEgressContext } from "./security.js";
 import type { ProviderUsageLineage } from "./provider-usage.js";
 import type { RuntimeEventSink } from "./runtime-event.js";
 import type { RuntimeToolContext, SessionToolContext } from "./tool-context.js";
+import type { VisionInputProvenanceContext } from "./vision.js";
 
 export type ToolRiskClass =
   | "read-only-local"
@@ -58,15 +60,32 @@ export type ToolExecutionContext = {
   visibleTurnId?: string;
   /** Immutable Session and Task lineage for provider calls initiated by this tool. */
   providerUsageLineage?: ProviderUsageLineage;
+  /** Runtime-derived current-turn image sources; model input cannot set this. */
+  visionInputProvenance?: VisionInputProvenanceContext;
+  /** Security resolution supplied by ToolExecutor after policy assessment. */
+  securityResolution?: ToolSecurityResolution;
   signal?: AbortSignal;
   environmentType?: EnvironmentType;
   onEvent?: RuntimeEventSink;
+};
+
+export type ToolSecurityResolution = {
+  riskClass: ToolRiskClass;
+  targetKey?: string;
+  targetSummary?: string;
+  dataEgress?: SecurityDataEgressContext;
+};
+
+export type ToolSecurityResolverContext = Omit<ToolExecutionContext, "securityResolution"> & {
+  trustedWorkspace: boolean;
+  sessionId: string;
 };
 
 export type ToolHandler<TInput = unknown> = (input: TInput, context?: ToolExecutionContext) => Promise<ToolResult>;
 
 export type RegisteredTool<TInput = any> = ToolDefinition & {
   isAvailable(): Promise<boolean> | boolean;
+  resolveSecurity?(input: TInput, context: ToolSecurityResolverContext): Promise<ToolSecurityResolution | undefined> | ToolSecurityResolution | undefined;
   run: ToolHandler<TInput>;
 };
 

@@ -7,6 +7,7 @@ import type { ToolRiskClass } from "../contracts/tool.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
 import { assessCommandSafety, assessHardlineFloor } from "./command-safety.js";
 import { assessCommandRisk, type SmartApprovalDecision } from "./smart-approval-assessor.js";
+import { dataEgressHardBlock } from "./data-egress-policy.js";
 
 export type ApprovalScope = "once" | "session" | "always";
 
@@ -360,6 +361,8 @@ function hardlineBlockFor(request: SecurityRequest): {
   code: string;
   reason: string;
 } | undefined {
+  const dataEgressBlock = dataEgressHardBlock(request);
+  if (dataEgressBlock !== undefined) return dataEgressBlock;
   const command = request.command ?? request.targetSummary ?? "";
   const hardBlock = assessHardlineFloor(command, {
     environmentType: request.environmentType ?? DEFAULT_ENVIRONMENT_TYPE

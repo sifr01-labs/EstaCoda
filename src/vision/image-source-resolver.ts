@@ -89,6 +89,7 @@ export async function resolveVisionImageSource(
 
     return {
       ok: true,
+      canonicalPath,
       displayPath: displayPath(containingRoot.canonicalPath, canonicalPath),
       bytes: source.bytes,
       byteLength: source.bytes.byteLength,

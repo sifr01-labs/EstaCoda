@@ -58,6 +58,7 @@ import type { ToolPlanRunner } from "./tool-plan-runner.js";
 import type { SkillSetupContext } from "./agent-loop.js";
 import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { emit, isAborted } from "../utils/runtime-helpers.js";
+import { visionInputProvenanceForTurn } from "../vision/vision-egress-policy.js";
 import { emitContextEstimate, emitContextWindowUsage } from "./context-usage-events.js";
 import { normalizeSessionContextWindowUsage } from "../session/session-context-window-usage.js";
 import {
@@ -381,6 +382,10 @@ export class ProviderTurnLoop {
         trustedWorkspace: input.trustedWorkspace,
         visibleTurnId: input.visibleTurnId,
         providerUsageLineage: await this.#providerUsageLineage(input.visibleTurnId),
+        visionInputProvenance: visionInputProvenanceForTurn({
+          attachments: input.attachments,
+          references: input.context?.references
+        }),
         remainingToolCalls: Math.max(0, this.#budgets.maxProviderToolCalls - providerToolExecutions.length),
         riskBaseline: maxObservedRisk,
         signal: input.signal,

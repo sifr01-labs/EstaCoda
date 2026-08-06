@@ -117,6 +117,53 @@ describe("vision tools", () => {
       const available = await tools[0].isAvailable?.();
       expect(available).toBe(false);
     });
+
+    it("derives hosted egress security from current-turn attachment provenance", async () => {
+      const tmp = createTempPng();
+      try {
+        const [tool] = createVisionTools({
+          workspaceRoot: tmp.dir,
+          resolvedVisionRoute: baseRoute
+        });
+        const resolution = await tool.resolveSecurity?.({ path: "test.png" }, {
+          trustedWorkspace: true,
+          sessionId: "session-a",
+          visionInputProvenance: {
+            attachmentPaths: [tmp.path],
+            explicitReferencePaths: []
+          }
+        });
+        expect(resolution).toMatchObject({
+          riskClass: "external-side-effect",
+          dataEgress: {
+            sourceProvenance: "current-turn-attachment",
+            sensitivePath: false,
+            destinations: ["openai@https://api.openai.com/v1"]
+          }
+        });
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("does not request hosted-egress approval for loopback inference", async () => {
+      const tmp = createTempPng();
+      const localRoute: ResolvedModelRoute = {
+        ...baseRoute,
+        provider: "local",
+        baseUrl: "http://127.0.0.1:11434/v1",
+        profile: { ...baseRoute.profile, provider: "local" }
+      };
+      try {
+        const [tool] = createVisionTools({ workspaceRoot: tmp.dir, resolvedVisionRoute: localRoute });
+        await expect(tool.resolveSecurity?.({ path: "test.png" }, {
+          trustedWorkspace: true,
+          sessionId: "session-a"
+        })).resolves.toBeUndefined();
+      } finally {
+        tmp.cleanup();
+      }
+    });
   });
 
   describe("analyzeImageWithVision", () => {

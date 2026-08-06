@@ -15,6 +15,7 @@ import {
   type VisionImageNormalizer
 } from "../vision/image-normalizer.js";
 import { resolveVisionImageSource } from "../vision/image-source-resolver.js";
+import { resolveVisionEgressSecurity } from "../vision/vision-egress-policy.js";
 
 export type VisionToolOptions = {
   workspaceRoot: string;
@@ -54,6 +55,24 @@ export function createVisionTools(options: VisionToolOptions): readonly Register
       progressLabel: "analyzing image",
       maxResultSizeChars: 8_000,
       isAvailable: async () => resolveVisionAuxiliaryRoute(options).route !== undefined,
+      resolveSecurity: async (input: { path?: string }, context) => {
+        const visionRoute = resolveVisionAuxiliaryRoute(options);
+        if (visionRoute.route === undefined) return undefined;
+        const source = await resolveVisionImageSource({
+          workspaceRoot: options.workspaceRoot,
+          allowedRoots: options.allowedRoots,
+          path: input.path,
+          maxBytes: options.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES
+        });
+        if (!source.ok) return undefined;
+        return await resolveVisionEgressSecurity({
+          source,
+          workspaceRoot: options.workspaceRoot,
+          provenance: context.visionInputProvenance,
+          visionRoute,
+          mainRoute: options.mainRoute ?? visionRoute.route
+        });
+      },
       run: (input: { path?: string; prompt?: string }, context) => analyzeImageWithVision(
         options,
         input,

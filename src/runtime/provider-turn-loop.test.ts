@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { normalizeSessionCompressionConfig } from "../config/runtime-config.js";
 import type { ChannelAttachment } from "../contracts/channel.js";
+import type { ContextExpansionResult } from "../contracts/context.js";
 import type { ModelProfile, ResolvedModelRoute, ProviderRequest, ProviderResponse, ProviderStreamDiagnostics } from "../contracts/provider.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { ReplacementSessionMessage, SessionDB, SessionEvent } from "../contracts/session.js";
@@ -335,6 +336,7 @@ async function runBasicProviderTurn(
     onDelta?: (text: string) => void;
     onSegmentBreak?: (reason?: string) => void | Promise<void>;
     attachments?: ChannelAttachment[];
+    context?: ContextExpansionResult;
     visibleTurnId?: string;
   } = {}
 ): Promise<Awaited<ReturnType<ProviderTurnLoop["run"]>>> {
@@ -349,7 +351,7 @@ async function runBasicProviderTurn(
     intent: { labels: ["general"], confidence: 1, nativeIntent: "general", evidence: [], suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, rationale: "" },
     securityDecision: "allow",
     toolExecutions: [],
-    context: undefined,
+    context: callbacks.context,
     projectContext: undefined,
     attachments: callbacks.attachments,
     memoryPromptContext: undefined,
@@ -1065,6 +1067,39 @@ describe("ProviderTurnLoop streaming callbacks", () => {
         planRevisionId: "revision-1",
         stepId: "step-1",
         attemptId: "attempt-1"
+      }
+    }));
+  });
+
+  it("forwards current-turn image attachment provenance through ToolPlanRunner", async () => {
+    const harness = await createRealToolPlanningHarness({
+      response: providerExecution("", [providerToolCall("call-vision-tool")])
+    });
+
+    await runBasicProviderTurn(harness.loop, {
+      attachments: [{
+        id: "image-current-turn",
+        kind: "image",
+        status: "ready",
+        localPath: "/profile/channel-media/inbound/image.png"
+      }],
+      context: {
+        originalText: "inspect @file:workspace-reference.png",
+        expandedText: "inspect @file:workspace-reference.png",
+        references: [{
+          raw: "@file:workspace-reference.png",
+          kind: "file",
+          target: "workspace-reference.png"
+        }],
+        blocks: [],
+        warnings: []
+      }
+    });
+
+    expect(harness.executeTool).toHaveBeenCalledWith(expect.objectContaining({
+      visionInputProvenance: {
+        attachmentPaths: ["/profile/channel-media/inbound/image.png"],
+        explicitReferencePaths: ["workspace-reference.png"]
       }
     }));
   });

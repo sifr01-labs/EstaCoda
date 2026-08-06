@@ -27,10 +27,18 @@ export type VisionImageSourceError = {
 
 export type ResolvedVisionImageSource = {
   ok: true;
+  /** Canonical runtime-only identity. Never render or persist this path. */
+  canonicalPath: string;
   displayPath: string;
   bytes: Uint8Array;
   byteLength: number;
   mimeType: VisionImageMimeType;
+};
+
+/** Current-turn sources derived by the runtime, never accepted from model tool input. */
+export type VisionInputProvenanceContext = {
+  attachmentPaths: readonly string[];
+  explicitReferencePaths: readonly string[];
 };
 
 export type VisionImageSourceResolution =
