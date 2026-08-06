@@ -21,6 +21,53 @@ describe("vision dispatch policy", () => {
     })).toMatchObject({ mode: "auxiliary", route: { id: "aux-vision" } });
   });
 
+  it("uses an explicitly dedicated route for specialized post-tool analysis", () => {
+    for (const analysisMode of ["ocr", "document", "chart", "screenshot"] as const) {
+      expect(resolveVisionDispatch({
+        phase: "post-tool",
+        analysisMode,
+        mainRoute: route("main-vision", true),
+        auxiliaryRoute: auxiliary(route("specialized-vision", true))
+      })).toMatchObject({ mode: "auxiliary", route: { id: "specialized-vision" } });
+    }
+  });
+
+  it("keeps describe, initial attachments, and automatic routes native", () => {
+    expect(resolveVisionDispatch({
+      phase: "post-tool",
+      analysisMode: "describe",
+      mainRoute: route("main-vision", true),
+      auxiliaryRoute: auxiliary(route("specialized-vision", true))
+    })).toMatchObject({ mode: "native", route: { id: "main-vision" } });
+
+    expect(resolveVisionDispatch({
+      phase: "initial-attachment",
+      analysisMode: "ocr",
+      mainRoute: route("main-vision", true),
+      auxiliaryRoute: auxiliary(route("specialized-vision", true))
+    })).toMatchObject({ mode: "native", route: { id: "main-vision" } });
+
+    expect(resolveVisionDispatch({
+      phase: "post-tool",
+      analysisMode: "ocr",
+      mainRoute: route("main-vision", true),
+      auxiliaryRoute: auxiliary(route("automatic-vision", true), "auto-configured")
+    })).toMatchObject({ mode: "native", route: { id: "main-vision" } });
+  });
+
+  it("fails specialized analysis when its configured dedicated route is unavailable", () => {
+    expect(resolveVisionDispatch({
+      phase: "post-tool",
+      analysisMode: "ocr",
+      mainRoute: route("main-vision", true),
+      auxiliaryRoute: auxiliary(undefined)
+    })).toEqual({
+      mode: "unavailable",
+      phase: "post-tool",
+      reason: "The configured dedicated vision route is unavailable for this specialized analysis."
+    });
+  });
+
   it("fails clearly instead of sending images to a text-only fallback", () => {
     expect(resolveVisionDispatch({
       phase: "post-tool",
@@ -49,11 +96,14 @@ function route(id: string, supportsVision: boolean): ResolvedModelRoute {
   };
 }
 
-function auxiliary(modelRoute: ResolvedModelRoute | undefined): ResolvedAuxiliaryRoute {
+function auxiliary(
+  modelRoute: ResolvedModelRoute | undefined,
+  source: ResolvedAuxiliaryRoute["source"] = "explicit"
+): ResolvedAuxiliaryRoute {
   return {
     task: "vision",
     route: modelRoute,
-    source: modelRoute === undefined ? "disabled" : "explicit",
+    source,
     fallbackToMain: false,
     diagnostics: []
   };

@@ -198,7 +198,7 @@ Vision example (auxiliary route model names use `id`, not `model`):
 }
 ```
 
-`hostedProcessing: "local-only"` prevents hosted image egress. `allow-with-approval` delegates the decision to strict/adaptive/open runtime policy; it is not blanket consent. Vision candidates must be runnable and advertise vision, and budgeted hosted calls fail closed when their provider/image cost cannot be priced safely.
+`hostedProcessing: "local-only"` prevents hosted image egress. `allow-with-approval` delegates the decision to strict/adaptive/open runtime policy; it is not blanket consent. Vision candidates must have a registered executable adapter, runnable provider metadata, and vision capability. `contextWindowTokens`, `timeoutMs`, and `maxConcurrency` must be positive integers when set. `fallbackToMain: true` requires a vision-capable main route that also satisfies `hostedProcessing`; incompatible fallback configuration is reported instead of silently disabled. The retired `extraBody` field is ignored and stripped during normalization. Budgeted hosted calls fail closed when their provider/image cost cannot be priced safely.
 
 ### budgets
 

@@ -154,6 +154,58 @@ describe("vision tools", () => {
         tmp.cleanup();
       }
     });
+
+    it("uses an explicitly dedicated route for specialized post-tool analysis", async () => {
+      const executor = createMockExecutor();
+      const tmp = createTempPng();
+      try {
+        const result = await dispatchImageWithVision({
+          workspaceRoot: tmp.dir,
+          mainRoute: baseRoute,
+          visionAuxiliaryRoute: {
+            task: "vision",
+            route: baseRoute,
+            source: "explicit",
+            fallbackToMain: false,
+            diagnostics: []
+          },
+          providerExecutor: executor
+        }, { path: "test.png", mode: "ocr" });
+
+        expect(result.ok).toBe(true);
+        expect(result.metadata).toEqual(expect.objectContaining({ dispatch: "auxiliary", mode: "ocr" }));
+        expect(executor.complete).toHaveBeenCalledTimes(1);
+        expect(ephemeralVisionImages(result)).toHaveLength(0);
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("keeps specialized initial attachments native", async () => {
+      const executor = createMockExecutor();
+      const tmp = createTempPng();
+      try {
+        const result = await dispatchImageWithVision({
+          workspaceRoot: tmp.dir,
+          mainRoute: baseRoute,
+          visionAuxiliaryRoute: {
+            task: "vision",
+            route: baseRoute,
+            source: "explicit",
+            fallbackToMain: false,
+            diagnostics: []
+          },
+          providerExecutor: executor
+        }, { path: "test.png", mode: "ocr" }, undefined, {}, "initial-attachment");
+
+        expect(result.ok).toBe(true);
+        expect(result.metadata).toEqual(expect.objectContaining({ dispatch: "native", mode: "ocr" }));
+        expect(executor.complete).not.toHaveBeenCalled();
+        expect(ephemeralVisionImages(result)).toHaveLength(1);
+      } finally {
+        tmp.cleanup();
+      }
+    });
   });
 
   describe("createVisionTools", () => {
@@ -218,6 +270,42 @@ describe("vision tools", () => {
             sourceProvenance: "current-turn-attachment",
             sensitivePath: false,
             destinations: ["openai@https://api.openai.com/v1"]
+          }
+        });
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("binds specialized analysis egress to its explicit dedicated route", async () => {
+      const tmp = createTempPng();
+      const dedicatedRoute: ResolvedModelRoute = {
+        ...baseRoute,
+        provider: "google",
+        id: "gemini-vision",
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+        profile: { ...baseRoute.profile, provider: "google", id: "gemini-vision" }
+      };
+      try {
+        const [tool] = createVisionTools({
+          workspaceRoot: tmp.dir,
+          mainRoute: baseRoute,
+          visionAuxiliaryRoute: {
+            task: "vision",
+            route: dedicatedRoute,
+            source: "explicit",
+            fallbackToMain: false,
+            diagnostics: []
+          }
+        });
+        const resolution = await tool.resolveSecurity?.({ path: "test.png", mode: "ocr" }, {
+          trustedWorkspace: true,
+          sessionId: "session-a"
+        });
+
+        expect(resolution).toMatchObject({
+          dataEgress: {
+            destinations: ["google@https://generativelanguage.googleapis.com/v1beta/openai"]
           }
         });
       } finally {
@@ -314,6 +402,7 @@ describe("vision tools", () => {
 
         expect(executor.complete).toHaveBeenCalledTimes(1);
         const [request, preferences, executionOptions] = (executor.complete as any).mock.calls[0];
+        expect(request.maxTokens).toBe(1_024);
         expect(preferences).toEqual(expect.objectContaining({ requireVision: true }));
         expect(executionOptions!.primaryRoute).toEqual(baseRoute);
         expect(executionOptions!.signal).toBeDefined();
@@ -396,6 +485,7 @@ describe("vision tools", () => {
         }, { path: "test.png", mode: "ocr", detail: "high", output: "detailed" });
 
         const [request, , executionOptions] = (executor.complete as any).mock.calls[0];
+        expect(request.maxTokens).toBe(2_048);
         expect(request.messages[1].content[1].image_url.detail).toBe("high");
         expect(request.messages[1].content[0].text).toContain("comprehensive, well-structured");
         expect(executionOptions.usage.imageInputs).toEqual([{ width: 1, height: 1, detail: "high" }]);
@@ -420,6 +510,7 @@ describe("vision tools", () => {
         }, { path: "test.png", detail: "low", output: "concise" });
 
         const [request, , executionOptions] = (executor.complete as any).mock.calls[0];
+        expect(request.maxTokens).toBe(512);
         expect(request.messages[1].content[1].image_url.detail).toBe("low");
         expect(request.messages[1].content[0].text).toContain("brief, usable form");
         expect(executionOptions.usage.imageInputs).toEqual([{ width: 1, height: 1, detail: "low" }]);

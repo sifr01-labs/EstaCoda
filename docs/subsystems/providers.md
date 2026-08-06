@@ -312,7 +312,7 @@ Security smart approval uses `auxiliaryModels.assessor`. The route key is exactl
 
 ### Vision routing and governance
 
-The main route receives initial images natively when it is runnable and advertises vision. A text-only main route uses `auxiliaryModels.vision`; post-tool images use the same dispatch policy and are delivered only as ephemeral continuation content. Auto, explicit, custom, main, and fallback candidates must all be runnable and vision-capable. The tool fails with a structured unavailable error when no candidate qualifies.
+The main route receives initial images natively when it is runnable and advertises vision. A text-only main route uses `auxiliaryModels.vision`; post-tool images use the same dispatch policy and are delivered only as ephemeral continuation content. Ordinary `describe` work stays native on a vision-capable main route, while an explicitly configured dedicated route handles specialized `ocr`, `document`, `chart`, and `screenshot` modes. Automatic routes do not force an extra auxiliary call. Auto, explicit, custom, main, and fallback candidates must all have registered executable adapters, runnable provider metadata, and vision capability. The tool fails with a structured unavailable error when no candidate qualifies.
 
 Auxiliary config uses `id`, not `model`:
 
@@ -332,6 +332,8 @@ Auxiliary config uses `id`, not `model`:
 ```
 
 Hosted dispatch is data egress. Current-turn attachments and explicit references avoid approval fatigue in adaptive mode, while agent-discovered workspace files ask before unexpected hosted egress; strict mode still asks and `local-only` rejects hosted routes. Grants bind to the provider destination and workspace. Cost is reserved before primary and fallback dispatch using normalized dimensions, then settled against actual usage with session and Task lineage. Unknown pricing fails closed when an active budget cannot safely price the call.
+
+`contextWindowTokens`, `timeoutMs`, and `maxConcurrency` must be positive integers when set. `fallbackToMain: true` is valid for vision only when the main route supports vision and satisfies the selected hosted-processing policy; incompatible fallback configuration resolves unavailable with a diagnostic instead of being silently disabled. The retired `extraBody` auxiliary field is ignored and removed during normalization.
 
 Config should not use legacy auxiliary names such as `models.auxiliary`, `auxiliary.default`, or `auxiliary.contextualize`. Profile-context CLI/documentation should use `--profile-context`, not `--contextualize`.
 

@@ -1285,7 +1285,6 @@ function stripDefaultAuxiliarySlots(
       slot.contextWindowTokens === undefined &&
       slot.timeoutMs === undefined &&
       slot.maxConcurrency === undefined &&
-      slot.extraBody === undefined &&
       slot.fallbackToMain === undefined &&
       slot.hostedProcessing === undefined;
     if (!isDefault) {
@@ -1359,7 +1358,6 @@ export function normalizeAuxiliaryModels(
       ...(slot?.contextWindowTokens !== undefined ? { contextWindowTokens: slot.contextWindowTokens } : {}),
       ...(slot?.timeoutMs !== undefined ? { timeoutMs: slot.timeoutMs } : {}),
       ...(slot?.maxConcurrency !== undefined ? { maxConcurrency: slot.maxConcurrency } : {}),
-      ...(slot?.extraBody !== undefined ? { extraBody: slot.extraBody } : {}),
       ...(slot?.fallbackToMain !== undefined ? { fallbackToMain: slot.fallbackToMain } : {}),
       ...(slot?.hostedProcessing !== undefined ? { hostedProcessing: slot.hostedProcessing } : {})
     };
@@ -1382,7 +1380,16 @@ function normalizeAuxiliarySlotInput(
   ) {
     throw new Error(`${path}.hostedProcessing must be allow-with-approval or local-only`);
   }
+  validateAuxiliaryPositiveInteger(slot.contextWindowTokens, `${path}.contextWindowTokens`);
+  validateAuxiliaryPositiveInteger(slot.timeoutMs, `${path}.timeoutMs`);
+  validateAuxiliaryPositiveInteger(slot.maxConcurrency, `${path}.maxConcurrency`);
   return slot;
+}
+
+function validateAuxiliaryPositiveInteger(value: number | undefined, path: string): void {
+  if (value !== undefined && (!Number.isInteger(value) || value <= 0)) {
+    throw new Error(`${path} must be a positive integer when set`);
+  }
 }
 
 function parseAuxiliaryModelShorthand(value: string, path: string): AuxiliaryModelSlotConfig {

@@ -218,6 +218,35 @@ describe("normalizeAuxiliaryModels", () => {
     expect(() => normalizeAuxiliaryModels({ vision: "openai/" })).toThrow("auxiliaryModels.vision shorthand is missing model id after /");
   });
 
+  it.each([
+    ["contextWindowTokens", 0],
+    ["contextWindowTokens", -1],
+    ["contextWindowTokens", 1.5],
+    ["timeoutMs", 0],
+    ["timeoutMs", -1],
+    ["timeoutMs", Number.POSITIVE_INFINITY],
+    ["maxConcurrency", 0],
+    ["maxConcurrency", -1],
+    ["maxConcurrency", 1.5]
+  ] as const)("rejects invalid auxiliary %s values", (field, value) => {
+    expect(() => normalizeAuxiliaryModels({
+      vision: { provider: "openai", id: "gpt-4o", [field]: value }
+    })).toThrow(`auxiliaryModels.vision.${field} must be a positive integer when set`);
+  });
+
+  it("strips the retired extraBody field from legacy auxiliary config", () => {
+    const result = normalizeAuxiliaryModels({
+      vision: {
+        provider: "openai",
+        id: "gpt-4o",
+        extraBody: { unsafeLegacyOption: true }
+      }
+    } as any);
+
+    expect(result.vision).toEqual({ provider: "openai", enabled: true, id: "gpt-4o" });
+    expect(result.vision).not.toHaveProperty("extraBody");
+  });
+
   it("rejects approval as an auxiliary route", () => {
     expect(() => normalizeAuxiliaryModels({
       approval: { provider: "openai", id: "gpt-4.1-mini" },

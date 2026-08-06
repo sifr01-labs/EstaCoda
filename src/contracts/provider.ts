@@ -240,7 +240,6 @@ export type AuxiliaryModelSlotConfig = {
   contextWindowTokens?: number;
   timeoutMs?: number;
   maxConcurrency?: number;
-  extraBody?: Record<string, unknown>;
   fallbackToMain?: boolean;
   hostedProcessing?: VisionHostedProcessingPreference;
   enabled?: boolean;
