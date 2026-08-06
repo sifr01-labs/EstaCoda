@@ -71,6 +71,8 @@ Setup is reviewed, not autonomous. No wizard step writes or serializes raw secre
 
 The Onboarding Wizard optional capability menu covers Channels, Voice STT/TTS, Browser, and Skip. Image Generation and Editing is configured from the Setup Editor, not from the Onboarding Wizard. Vision Analysis has a separate reviewed auxiliary-model route with automatic, main, dedicated, disabled, and dedicated-with-main-fallback choices.
 
+Vision Analysis review also shows hosted-processing preference, request timeout, and concurrency. `local-only` blocks hosted image processing; `allow-with-approval` keeps contextual runtime approval in force. Cancelling review writes no route or credential changes, and post-apply verification uses a bundled benign English/Arabic image without exposing raw image bytes.
+
 Workspace trust is required before EstaCoda can run in a workspace. If trust is deferred, setup may be saved, but launch is blocked with `Setup saved. Workspace trust is still required before EstaCoda can run here.`
 
 `Start EstaCoda now?` is a post-success prompt after apply and verification. A yes answer reloads the selected profile config, reloads trust state, verifies workspace trust, rebuilds runtime from fresh config, and enters the normal interactive launcher.

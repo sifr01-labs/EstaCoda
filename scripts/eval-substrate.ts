@@ -1,19 +1,10 @@
 import { spawnSync } from "node:child_process";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-
-type EvalTask = {
-  id: string;
-  title: string;
-  channel: "cli" | "telegram" | "provider" | "cross-cutting";
-  evidence: "live-proven" | "smoke-tested" | "implemented but not live-proven" | "intended but not implemented";
-  goal: string;
-  prompt?: string;
-  prerequisites?: string[];
-  steps: string[];
-  assertions: string[];
-  notes?: string[];
-};
+import {
+  loadEvaluationTasks,
+  type EvaluationTask
+} from "../src/eval/evaluation-task.js";
 
 const workspaceRoot = process.cwd();
 const timestamp = formatTimestamp(new Date());
@@ -27,10 +18,7 @@ const commandsPath = join(runRoot, "commands.md");
 const manifestPath = join(runRoot, "manifest.json");
 const resultsPath = join(runRoot, "results.json");
 
-const taskFiles = (await readdir(tasksDir))
-  .filter((file) => file.endsWith(".json"))
-  .sort();
-const tasks = await Promise.all(taskFiles.map(async (file) => parseTask(await readFile(join(tasksDir, file), "utf8"), file)));
+const { taskFiles, tasks } = await loadEvaluationTasks(tasksDir);
 
 await mkdir(logsDir, { recursive: true });
 await mkdir(artifactsDir, { recursive: true });
@@ -53,9 +41,11 @@ const results = {
     id: task.id,
     title: task.title,
     status: "pending",
+    enabled: !task.optIn,
     observed: "",
     evidence: task.evidence,
-    artifacts: [] as string[]
+    artifacts: [] as string[],
+    metrics: Object.fromEntries(task.metrics.map((metric) => [metric, null]))
   }))
 };
 
@@ -91,34 +81,6 @@ async function git(args: string): Promise<string> {
   return (result.stdout ?? "").trim();
 }
 
-function parseTask(raw: string, file: string): EvalTask {
-  const parsed = JSON.parse(raw) as Partial<EvalTask>;
-  if (
-    typeof parsed.id !== "string" ||
-    typeof parsed.title !== "string" ||
-    typeof parsed.channel !== "string" ||
-    typeof parsed.evidence !== "string" ||
-    typeof parsed.goal !== "string" ||
-    !Array.isArray(parsed.steps) ||
-    !Array.isArray(parsed.assertions)
-  ) {
-    throw new Error(`Invalid eval task schema in ${file}`);
-  }
-
-  return {
-    id: parsed.id,
-    title: parsed.title,
-    channel: parsed.channel as EvalTask["channel"],
-    evidence: parsed.evidence as EvalTask["evidence"],
-    goal: parsed.goal,
-    prompt: parsed.prompt,
-    prerequisites: parsed.prerequisites ?? [],
-    steps: parsed.steps,
-    assertions: parsed.assertions,
-    notes: parsed.notes ?? []
-  };
-}
-
 function renderNotes(
   environment: {
     createdAt: string;
@@ -127,7 +89,7 @@ function renderNotes(
     branch: string;
     commit: string;
   },
-  tasks: EvalTask[]
+  tasks: EvaluationTask[]
 ): string {
   return [
     "# EstaCoda Evaluation Run",
@@ -145,7 +107,7 @@ function renderNotes(
     "",
     "## Tasks",
     "",
-    ...tasks.map((task) => `- [ ] ${task.id} — ${task.title} (${task.channel}, ${task.evidence})`),
+    ...tasks.map((task) => `- [ ] ${task.id} — ${task.title} (${task.channel}, ${task.evidence}${task.optIn ? ", opt-in live" : ""})`),
     "",
     "## Observations",
     "",
@@ -170,7 +132,7 @@ function renderCommands(
     branch: string;
     commit: string;
   },
-  tasks: EvalTask[]
+  tasks: EvaluationTask[]
 ): string {
   const lines = [
     "# EstaCoda Evaluation Commands",
@@ -191,6 +153,9 @@ function renderCommands(
 
   for (const task of tasks) {
     lines.push(`## ${task.id} — ${task.title}`, "");
+    if (task.optIn) {
+      lines.push("Opt-in live task: do not run unless the operator explicitly enables provider calls and accepts their data egress and cost.", "");
+    }
     lines.push(`Goal: ${task.goal}`, "");
     if (task.prerequisites !== undefined && task.prerequisites.length > 0) {
       lines.push("Prerequisites:");
@@ -207,6 +172,13 @@ function renderCommands(
       lines.push("```");
       lines.push("");
     }
+    if (task.fixtures.length > 0) {
+      lines.push("Fixtures:");
+      for (const fixture of task.fixtures) {
+        lines.push(`- ${fixture}`);
+      }
+      lines.push("");
+    }
     lines.push("Steps:");
     for (const step of task.steps) {
       lines.push(`- ${step}`);
@@ -221,6 +193,13 @@ function renderCommands(
       lines.push("Notes:");
       for (const note of task.notes) {
         lines.push(`- ${note}`);
+      }
+    }
+    if (task.metrics.length > 0) {
+      lines.push("");
+      lines.push("Metrics:");
+      for (const metric of task.metrics) {
+        lines.push(`- ${metric}`);
       }
     }
     lines.push("");

@@ -1,0 +1,37 @@
+{
+  "id": "vision-screenshot",
+  "title": "Vision screenshot understanding reliability",
+  "channel": "provider",
+  "evidence": "implemented but not live-proven",
+  "optIn": true,
+  "metrics": [
+    "accuracy_percent",
+    "hallucination_count",
+    "latency_ms",
+    "cost_usd",
+    "fallback_count",
+    "approval_frequency_percent"
+  ],
+  "goal": "Measure screenshot structure, state, and actionable-control recognition.",
+  "prompt": "Use vision.analyze with mode screenshot, detail standard, and output detailed. Describe visible status, queue state, deployment version/time, and actionable controls.",
+  "prerequisites": [
+    "Run pnpm run eval:vision:fixtures.",
+    "Configure and explicitly enable a vision-capable live route."
+  ],
+  "fixtures": [
+    ".estacoda/eval-fixtures/vision/screenshot.png"
+  ],
+  "steps": [
+    "Run the screenshot prompt against the deterministic dashboard fixture.",
+    "Score the five expected facts from manifest.json.",
+    "Record invented UI controls or states as hallucinations."
+  ],
+  "assertions": [
+    "API health and worker queue state are correct.",
+    "Version and time are copied exactly.",
+    "View logs is identified as a visible control without claiming it was clicked."
+  ],
+  "notes": [
+    "Accuracy percent uses the five expected manifest items."
+  ]
+}

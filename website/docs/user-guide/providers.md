@@ -272,8 +272,8 @@ Config example:
 ```json
 {
   "auxiliaryModels": {
-    "assessor": { "provider": "openai", "model": "gpt-4o-mini", "apiKeyEnv": "OPENAI_API_KEY" },
-    "vision": { "provider": "openai", "model": "gpt-4o", "apiKeyEnv": "OPENAI_API_KEY" }
+    "assessor": { "provider": "openai", "id": "gpt-4o-mini", "apiKeyEnv": "OPENAI_API_KEY" },
+    "vision": { "provider": "openai", "id": "gpt-4o", "apiKeyEnv": "OPENAI_API_KEY", "hostedProcessing": "allow-with-approval" }
   }
 }
 ```
@@ -281,6 +281,10 @@ Config example:
 The `assessor` route drives smart approval classification. It requires a working provider executor and a runnable model. If the assessor route is missing, malformed, or fails, the system falls back to manual approval. There is no `auxiliaryModels.approval` route. The assessor route is configurable through the Setup Editor (`edit-auxiliary-model-route`) in addition to direct config edits.
 
 Missing auxiliary routes fail closed or fall back as documented by the calling subsystem. They do not crash the session.
+
+For images, a vision-capable main route handles initial attachments natively. A text-only main route uses the configured `vision` auxiliary route, and images discovered later are delivered ephemerally through the same policy. Every primary or fallback candidate must be runnable and vision-capable. Hosted image processing is contextual data egress: explicit current-turn images avoid repeated prompts in adaptive mode, agent-discovered files ask, strict mode asks, and `hostedProcessing: "local-only"` blocks hosted dispatch.
+
+Vision calls normalize and bound image resources before dispatch, reserve configured session/Task budget for primary and fallback attempts, and return route, latency, usage, normalization, and fallback metadata. A missing route, unsafe source, resource-limit failure, unpriceable budgeted route, timeout, cancellation, or exhausted provider chain returns a structured failure instead of silently degrading to metadata-only analysis.
 
 Auxiliary route management is available through the Setup Editor (`edit-auxiliary-model-route`).
 

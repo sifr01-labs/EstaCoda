@@ -1,0 +1,40 @@
+{
+  "id": "vision-image-security-limits",
+  "title": "Vision oversized, corrupt, and spoofed-image behavior",
+  "channel": "cross-cutting",
+  "evidence": "eval-tested",
+  "optIn": true,
+  "metrics": [
+    "accuracy_percent",
+    "hallucination_count",
+    "latency_ms",
+    "cost_usd",
+    "fallback_count",
+    "approval_frequency_percent"
+  ],
+  "goal": "Verify deterministic image boundary failures occur before provider dispatch and extension spoofing uses magic bytes.",
+  "prompt": "Analyze each fixture with vision.analyze and report the structured result.",
+  "prerequisites": [
+    "Run pnpm run eval:vision:fixtures.",
+    "Provider calls are optional for this task because corrupt and oversized inputs must fail before dispatch."
+  ],
+  "fixtures": [
+    ".estacoda/eval-fixtures/vision/oversized.png",
+    ".estacoda/eval-fixtures/vision/corrupt.png",
+    ".estacoda/eval-fixtures/vision/extension-spoof.jpg"
+  ],
+  "steps": [
+    "Analyze the oversized fixture and record the structured error.",
+    "Analyze the corrupt fixture and record the structured error.",
+    "Analyze the extension-spoof fixture only after explicitly enabling any required live provider call."
+  ],
+  "assertions": [
+    "Oversized input returns source-too-large without provider dispatch or cost.",
+    "Corrupt input returns source-corrupt without provider dispatch or cost.",
+    "The .jpg spoof is detected and normalized as PNG from magic bytes."
+  ],
+  "notes": [
+    "The deterministic eval fixture also covers these boundaries without network access.",
+    "Accuracy percent is the percentage of the three expected boundary outcomes."
+  ]
+}

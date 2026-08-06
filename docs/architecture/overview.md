@@ -38,7 +38,7 @@ Key composition rules:
 
 - Official skills load first. Profile-installed and configured external skills load next.
 - Visible skill catalog is filtered per session using runtime conditions.
-- `vision.analyze` is registered as a real tool and uses auxiliary `vision` provider route preferences.
+- Vision dispatch is one policy boundary. Initial attachments stay native when the main route supports vision; text-only main routes use a runnable vision-capable auxiliary route. Images discovered after the initial prompt are attached ephemerally to a continuation and raw/base64 image content is excluded from session, trajectory, log, and export persistence.
 - Channel media directory is treated as an additional allowed root for relevant tools.
 - Configured MCP servers are loaded during runtime creation and stopped during runtime disposal.
 

@@ -57,6 +57,18 @@ Creates under `.estacoda/eval-runs/<timestamp>/`:
 pnpm run eval:fixtures
 ```
 
+### Vision reliability lane
+
+`pnpm run eval:fixtures` includes a deterministic, offline vision-security fixture covering valid image generation, magic-byte extension spoofing, corrupt input, and the 8 MiB source boundary. Generate the complete deterministic visual corpus with:
+
+```bash
+pnpm run eval:vision:fixtures
+```
+
+The output lives under `.estacoda/eval-fixtures/vision/` and includes English OCR, Arabic/mixed-direction OCR, chart, screenshot, dense-document, rotated, prompt-injection, corrupt, oversized, and extension-spoofed inputs plus expected outcomes and SHA-256 hashes in `manifest.json`.
+
+The matching task files under `evals/tasks/vision-*.json` are opt-in because they can dispatch image data to a hosted provider and incur cost. `pnpm run eval:substrate` marks them disabled until an operator explicitly enables a run. Results track accuracy percentage, hallucination count, latency, cost, fallback count, and approval frequency. Live results are evidence, not an automatic release gate or permission to change provider/privacy policy.
+
 ## Evidence Levels
 
 | Label | Meaning |

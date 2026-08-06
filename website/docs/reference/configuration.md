@@ -180,6 +180,26 @@ Specialized routes for non-primary tasks. Unsupported auxiliary names throw duri
 | `memory_compaction` | Memory file compaction |
 | `profile_context` | Profile context generation |
 
+Vision example (auxiliary route model names use `id`, not `model`):
+
+```json
+{
+  "auxiliaryModels": {
+    "vision": {
+      "provider": "openai",
+      "id": "gpt-4o",
+      "apiKeyEnv": "OPENAI_API_KEY",
+      "hostedProcessing": "allow-with-approval",
+      "timeoutMs": 120000,
+      "maxConcurrency": 2,
+      "fallbackToMain": true
+    }
+  }
+}
+```
+
+`hostedProcessing: "local-only"` prevents hosted image egress. `allow-with-approval` delegates the decision to strict/adaptive/open runtime policy; it is not blanket consent. Vision candidates must be runnable and advertise vision, and budgeted hosted calls fail closed when their provider/image cost cannot be priced safely.
+
 ### budgets
 
 Optional monetary limits on estimated model-provider spending. Budgets are disabled by default. You can configure them interactively with:

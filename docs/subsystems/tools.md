@@ -53,6 +53,7 @@ The runtime assembles tools from provider modules at startup. Treat this table a
 | `image.generate` | `external-side-effect` | `live-proven` |
 | `voice.speak` | `external-side-effect` | `smoke-tested` |
 | `voice.transcribe` | `safe` | `smoke-tested` |
+| `vision.analyze` | `read-only-local` or contextual hosted egress | `eval-tested` |
 | `execute_code` | `caution` | `smoke-tested` |
 | `memory.curate` | `workspace-write` | `smoke-tested` |
 | `memory.read` | `read-only-local` | `smoke-tested` |
@@ -64,6 +65,14 @@ The runtime assembles tools from provider modules at startup. Treat this table a
 | `task.status` | `read-only-local` | `smoke-tested` |
 | `workspace.trust.*` | `read-only-local` / `shared-state-mutation` | `smoke-tested` |
 | `cronjob` | `caution` | `smoke-tested` |
+
+## Vision Analysis
+
+`vision.analyze` keeps the compatible `path` and optional `prompt` inputs and adds `mode` (`describe`, `ocr`, `document`, `chart`, `screenshot`), `detail` (`low`, `standard`, `high`), and `output` (`concise`, `standard`, `detailed`). Text inside an image is untrusted content: prompts explicitly require transcription or reporting where relevant, never obedience to image-borne commands or policy claims.
+
+Source resolution accepts regular files only, canonicalizes workspace and channel-media containment, detects MIME from magic bytes, and returns relative display paths. Normalization corrects orientation, strips metadata, bounds encoded bytes, dimensions, pixels, decoded memory, frames, output size, and concurrency, and emits only JPEG/PNG/WebP payloads for hosted routes. Defaults include an 8 MiB source limit, 20,000-pixel input dimension, 50 megapixels, 256 MiB decoded memory, 100 frames, 7,680-pixel output dimension, 4 MiB output, and normalization concurrency of two.
+
+Results expose structured error codes plus dispatch route, latency, normalized dimensions, usage, and fallback metadata. Image bytes and data URLs are runtime-only and must not enter sessions, trajectories, logs, or exports. Native initial attachments avoid a redundant tool suggestion; text-only main routes and post-tool discoveries use the governed auxiliary dispatch path.
 
 ## Workspace File Tools
 

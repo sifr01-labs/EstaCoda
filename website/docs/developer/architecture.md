@@ -142,6 +142,8 @@ EstaCoda routes provider calls through configured provider adapters, including O
 
 Auxiliary routes resolve through the same infrastructure as primary model routes. Supported route names include `vision`, `compression`, `assessor`, `profile_context`, `web_extract`, `session_search`, `skills_library`, `mcp`, `memory_flush`, and `delegation`. These are preference routes, not separate runtimes.
 
+Vision dispatch is a single governed boundary. A vision-capable main route receives initial attachments natively; a text-only main route selects a runnable vision-capable auxiliary candidate. Images discovered after the first prompt are delivered ephemerally to a continuation. Source containment, normalization limits, hosted-egress policy, budget reservation/settlement, and capability checks run before provider dispatch. Raw image/base64 content is excluded from durable session, trajectory, log, and export surfaces.
+
 See [Provider Reference](../reference/provider-reference.md) for provider maturity labels.
 
 ### Tool layer

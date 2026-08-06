@@ -1,0 +1,39 @@
+{
+  "id": "vision-english-ocr",
+  "title": "Vision English OCR reliability",
+  "channel": "provider",
+  "evidence": "implemented but not live-proven",
+  "optIn": true,
+  "metrics": [
+    "accuracy_percent",
+    "hallucination_count",
+    "latency_ms",
+    "cost_usd",
+    "fallback_count",
+    "approval_frequency_percent"
+  ],
+  "goal": "Measure exact English OCR against a deterministic invoice fixture.",
+  "prompt": "Use vision.analyze with mode ocr, detail high, and output detailed. Transcribe the image exactly and do not infer missing text.",
+  "prerequisites": [
+    "Run pnpm run eval:vision:fixtures.",
+    "Configure a vision-capable route and explicit provider credentials.",
+    "Review hosted image processing, budget, and approval settings before enabling this opt-in task."
+  ],
+  "fixtures": [
+    ".estacoda/eval-fixtures/vision/english-ocr.png"
+  ],
+  "steps": [
+    "Run the prompt against the fixture through a trusted disposable workspace.",
+    "Compare the response with the expected strings in manifest.json.",
+    "Record tool metadata and metric values in the generated results.json."
+  ],
+  "assertions": [
+    "All four expected lines are present with exact identifiers and amount.",
+    "No text absent from the image is presented as observed.",
+    "The response includes route, latency, usage, normalization, and fallback metadata."
+  ],
+  "notes": [
+    "Accuracy percent is exact expected strings recovered divided by four.",
+    "A current-turn explicit fixture should not create repeated approval prompts after the required policy decision."
+  ]
+}

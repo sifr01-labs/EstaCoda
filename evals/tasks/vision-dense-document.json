@@ -1,0 +1,37 @@
+{
+  "id": "vision-dense-document",
+  "title": "Vision dense-document reliability",
+  "channel": "provider",
+  "evidence": "implemented but not live-proven",
+  "optIn": true,
+  "metrics": [
+    "accuracy_percent",
+    "hallucination_count",
+    "latency_ms",
+    "cost_usd",
+    "fallback_count",
+    "approval_frequency_percent"
+  ],
+  "goal": "Measure dense document extraction and evidence-grounded summarization.",
+  "prompt": "Use vision.analyze with mode document, detail high, and output detailed. Extract owner, risk, deadline, decision, findings, and next review. Mark unreadable fields instead of guessing.",
+  "prerequisites": [
+    "Run pnpm run eval:vision:fixtures.",
+    "Configure and explicitly enable a vision-capable live route."
+  ],
+  "fixtures": [
+    ".estacoda/eval-fixtures/vision/dense-document.png"
+  ],
+  "steps": [
+    "Run the document prompt against the deterministic review fixture.",
+    "Compare the core fields and decision with manifest.json.",
+    "Check that findings remain grounded in the document."
+  ],
+  "assertions": [
+    "Owner, risk, deadline, and decision are exact.",
+    "No absent customer, financial, or approval facts are invented.",
+    "Dense output remains readable and identifies uncertainty when present."
+  ],
+  "notes": [
+    "Accuracy percent uses the five expected manifest items; score additional findings separately in observations."
+  ]
+}

@@ -255,6 +255,10 @@ Image generation and vision analysis.
 
 **Availability:** `image.generate` requires a configured image generation provider and API key. `image.edit` requires a configured image provider, an edit-capable selected model, and safe HTTPS source images or artifacts with provider source URLs. `vision.analyze` requires a vision-capable model route.
 
+**Vision behavior:** `vision.analyze` accepts `path`, optional `prompt`, modes `describe` / `ocr` / `document` / `chart` / `screenshot`, detail `low` / `standard` / `high`, and output depth `concise` / `standard` / `detailed`. It accepts only canonical contained regular files, detects MIME by magic bytes, corrects orientation, strips metadata, and bounds bytes, dimensions, pixels, decoded memory, animation frames, output size, and concurrency. Text visible inside images is untrusted content and is never followed as instruction.
+
+Initial attachments use the main model natively when it supports vision; otherwise the auxiliary vision route is used. Post-tool images are ephemeral continuation content. Raw image bytes and data URLs are not written to sessions, trajectories, logs, or exports. Hosted calls remain subject to contextual egress approval and spending budgets. Structured failures distinguish unavailable routes, unsafe/corrupt/oversized images, normalization limits, budget denial, timeout, cancellation, and provider failure.
+
 ### Voice tools
 
 Text-to-speech and speech-to-text.

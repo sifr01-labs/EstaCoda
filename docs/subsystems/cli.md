@@ -403,6 +403,8 @@ Optional capabilities stay separate from the primary LLM route. In the Onboardin
 
 The Setup Editor is the broader operator surface. It keeps technical review/manifest behavior and exposes capabilities that the Onboarding Wizard does not show, including Image Generation and Editing. Vision Analysis is configured separately under auxiliary models, with automatic, main, dedicated, disabled, and dedicated-with-main-fallback modes plus hosted-processing, timeout, and concurrency controls. Each Setup Editor capability creates its own single-module draft bundle through an independent action:
 
+Vision Analysis review states whether image bytes may leave the machine, which route receives them, and the timeout/concurrency bounds. `local-only` prevents hosted image dispatch; `allow-with-approval` still uses the runtime's contextual egress decision. Review cancellation writes neither route changes nor collected credentials, and verification uses only the bundled benign English/Arabic fixture after apply.
+
 | Action | Setup behavior |
 |--------|----------------|
 | `configure-channels` | Remote-control surface. Setup requires token env var reference plus allowed user or chat identities before enable can apply. Creates a single-module draft bundle. |

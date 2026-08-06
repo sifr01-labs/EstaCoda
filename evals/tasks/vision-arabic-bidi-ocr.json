@@ -1,0 +1,39 @@
+{
+  "id": "vision-arabic-bidi-ocr",
+  "title": "Vision Arabic and mixed-direction OCR reliability",
+  "channel": "provider",
+  "evidence": "implemented but not live-proven",
+  "optIn": true,
+  "metrics": [
+    "accuracy_percent",
+    "hallucination_count",
+    "latency_ms",
+    "cost_usd",
+    "fallback_count",
+    "approval_frequency_percent"
+  ],
+  "goal": "Measure Arabic OCR and preservation of mixed RTL/LTR identifiers.",
+  "prompt": "Use vision.analyze with mode ocr, detail high, and output detailed. Preserve Arabic text and the exact LTR tokens EC-2048, USD 73.45, and PAID.",
+  "prerequisites": [
+    "Run pnpm run eval:vision:fixtures.",
+    "Configure a vision-capable route and explicit provider credentials.",
+    "Review hosted image processing, budget, and approval settings before enabling this opt-in task."
+  ],
+  "fixtures": [
+    ".estacoda/eval-fixtures/vision/arabic-mixed-ocr.png"
+  ],
+  "steps": [
+    "Run the prompt against the mixed-direction fixture.",
+    "Compare logical text order and technical tokens with manifest.json.",
+    "Record rendering defects separately from OCR-content defects."
+  ],
+  "assertions": [
+    "Arabic words remain readable in logical order.",
+    "EC-2048, USD 73.45, and PAID are copied exactly.",
+    "The model does not translate or reorder technical tokens."
+  ],
+  "notes": [
+    "Accuracy percent uses the five expected manifest items.",
+    "Inspect both semantic OCR accuracy and displayed bidirectional order."
+  ]
+}

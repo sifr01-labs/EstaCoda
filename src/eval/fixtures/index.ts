@@ -17,6 +17,7 @@ import { toolDescriptionProposalCase } from "./tool-description-proposal.js";
 import { routingMetadataProposalCase } from "./routing-metadata-proposal.js";
 import { routingEvolutionBaselineCase } from "./routing-evolution-baseline.js";
 import { evolutionExportShapeCase } from "./evolution-export-shape.js";
+import { visionImageSecurityCase } from "./vision-image-security.js";
 
 export const defaultEvalFixtures = [
   providerTextResponseCase,
@@ -37,5 +38,6 @@ export const defaultEvalFixtures = [
   toolDescriptionProposalCase,
   routingMetadataProposalCase,
   routingEvolutionBaselineCase,
-  evolutionExportShapeCase
+  evolutionExportShapeCase,
+  visionImageSecurityCase
 ];

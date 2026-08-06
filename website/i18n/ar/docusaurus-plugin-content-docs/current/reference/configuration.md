@@ -180,6 +180,26 @@ model.staleTimeoutMs / model.fallbacks[].staleTimeoutMs
 | `memory_compaction` | ضغط ملف الذاكرة |
 | `profile_context` | توليد سياق الملف الشخصي |
 
+مثال للرؤية (تستخدم أسماء نماذج المسارات المساعدة `id`، وليس `model`):
+
+```json
+{
+  "auxiliaryModels": {
+    "vision": {
+      "provider": "openai",
+      "id": "gpt-4o",
+      "apiKeyEnv": "OPENAI_API_KEY",
+      "hostedProcessing": "allow-with-approval",
+      "timeoutMs": 120000,
+      "maxConcurrency": 2,
+      "fallbackToMain": true
+    }
+  }
+}
+```
+
+يمنع `hostedProcessing: "local-only"` خروج الصورة إلى مزوّد مستضاف. أما `allow-with-approval` فيفوّض القرار إلى سياسة وقت التشغيل الصارمة/التكيفية/المفتوحة، ولا يمثل موافقة شاملة. يجب أن تكون مسارات الرؤية قابلة للتشغيل وداعمة للرؤية، وتفشل الاستدعاءات المستضافة الخاضعة لميزانية بصورة مغلقة إذا تعذر تسعير تكلفة المزوّد/الصورة بأمان.
+
 ### budgets
 
 حدود مالية اختيارية للإنفاق التقديري على مزوّدي النماذج. تكون الميزانيات متوقفة افتراضيًا. يمكن ضبطها تفاعليًا عبر:

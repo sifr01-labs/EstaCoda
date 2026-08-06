@@ -792,10 +792,21 @@ HOME=/tmp/estacoda-qa-ready pnpm run dev -- setup --interactive
 
 **Verify:**
 - `edit-auxiliary-model-route` is available from configured-ready state.
-- The task prompt shows the approved tasks: assessor, compression, session_search, memory_compaction, and profile_context.
+- The task prompt shows Vision Analysis plus assessor, compression, session_search, memory_compaction, and profile_context.
 - Assessor is explicitly described as approval-assessment in the prompt copy.
 - Review is explicit about which auxiliary task is being configured.
 - Applying sets the correct `auxiliaryModels.<task>` route.
+
+### 10.14.1 Vision Analysis Review And Reliability
+
+From a configured disposable setup, choose `edit-auxiliary-model-route` and then `Vision Analysis`.
+
+**Verify:**
+- Automatic, main, dedicated, disabled, and dedicated-with-main-fallback are all reviewable choices.
+- Review shows hosted-processing preference, timeout, and concurrency; the saved route uses `id`, never `model`.
+- `local-only` cannot dispatch an image to a hosted route. `allow-with-approval` still asks for unexpected agent-discovered workspace images, while an explicitly referenced current-turn image does not repeatedly prompt in adaptive mode.
+- Cancelling review leaves the existing route and secrets unchanged. Approved verification uses the benign English/Arabic fixture and does not print raw image bytes or secrets.
+- `pnpm run eval:vision:fixtures` creates the declared manifest and fixtures. Corrupt and oversized inputs fail before provider dispatch; live quality tasks are run only after explicit opt-in and record accuracy, hallucinations, latency, cost, fallback, and approval frequency.
 
 ### 10.15 Review, Cancel, And Raw Secret Safety
 
