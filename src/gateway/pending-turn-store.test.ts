@@ -1,0 +1,339 @@
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { afterEach, describe, expect, it } from "vitest";
+import type { ChannelMessage } from "../contracts/channel.js";
+import type { SQLiteDatabase } from "../storage/sqlite.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
+import { PENDING_TURN_SCHEMA_VERSION } from "../session/pending-turn-schema.js";
+import {
+  PendingTurnStoreError,
+  SQLitePendingTurnStore,
+  type PendingTurnStoreDiagnostic
+} from "./pending-turn-store.js";
+
+const tempPaths: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(tempPaths.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+});
+
+describe("pending turn schema", () => {
+  it("migrates an existing v28 session database to the profile-scoped v29 schema", async () => {
+    const root = await tempRoot();
+    const dbPath = join(root, "sessions.sqlite");
+    const initial = await createSQLiteSessionDB({ path: dbPath });
+    initial.db.exec("drop table pending_channel_turns; delete from schema_version where version = 29;");
+    initial.close();
+
+    const migrated = await createSQLiteSessionDB({ path: dbPath });
+    try {
+      expect(migrated.db.query<{ version: number }>("select max(version) as version from schema_version").get())
+        .toEqual({ version: PENDING_TURN_SCHEMA_VERSION });
+      expect(migrated.db.query<{ name: string }>(`
+        select name from sqlite_master where type = 'table' and name = 'pending_channel_turns'
+      `).get()).toEqual({ name: "pending_channel_turns" });
+      expect(migrated.db.query<{ name: string }>(`
+        select name from sqlite_master
+        where type = 'index' and name = 'idx_pending_channel_turns_profile_status_fifo'
+      `).get()).toEqual({ name: "idx_pending_channel_turns_profile_status_fifo" });
+    } finally {
+      migrated.close();
+    }
+  });
+});
+
+describe("SQLitePendingTurnStore", () => {
+  it("isolates profiles and inserts duplicate platform deliveries idempotently", async () => {
+    const fixture = await createFixture();
+    try {
+      const alpha = fixture.store({ profileId: "alpha", idFactory: () => "shared-turn-id" });
+      const beta = fixture.store({ profileId: "beta", idFactory: () => "shared-turn-id" });
+      const input = message("message-1", "first");
+
+      expect(alpha.enqueue(input).inserted).toBe(true);
+      expect(alpha.enqueue(input)).toMatchObject({ inserted: false, turn: { id: "shared-turn-id" } });
+      expect(beta.enqueue(input).inserted).toBe(true);
+      expect(alpha.list()).toHaveLength(1);
+      expect(beta.list()).toHaveLength(1);
+      expect(beta.clear()).toBe(1);
+      expect(alpha.list()).toHaveLength(1);
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("rejects reuse of a platform message id with different content", async () => {
+    const fixture = await createFixture();
+    try {
+      const store = fixture.store();
+      store.enqueue(message("same-id", "first"));
+      expect(() => store.enqueue(message("same-id", "changed"))).toThrowError(
+        expect.objectContaining({ code: "state_conflict" })
+      );
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("claims exact FIFO order and requires the matching claim to complete", async () => {
+    const fixture = await createFixture();
+    let turn = 0;
+    let claim = 0;
+    try {
+      const store = fixture.store({
+        idFactory: () => `turn-${++turn}`,
+        claimIdFactory: () => `claim-${++claim}`
+      });
+      store.enqueue(message("message-1", "first"));
+      store.enqueue(message("message-2", "second"));
+
+      const first = store.claimNext();
+      const second = store.claimNext();
+      expect([first?.platformMessageId, second?.platformMessageId]).toEqual(["message-1", "message-2"]);
+      expect(store.claimNext()).toBeUndefined();
+      expect(() => store.complete(first!.id, "wrong-claim")).toThrowError(
+        expect.objectContaining({ code: "state_conflict" })
+      );
+      expect(store.complete(first!.id, first!.claimId!)).toMatchObject({ status: "completed" });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("serializes claims across independent SQLite connections", async () => {
+    const root = await tempRoot();
+    const dbPath = join(root, "sessions.sqlite");
+    const firstDb = await createSQLiteSessionDB({ path: dbPath });
+    const secondDb = await createSQLiteSessionDB({ path: dbPath });
+    try {
+      let turn = 0;
+      const writer = new SQLitePendingTurnStore({
+        db: firstDb.db,
+        profileId: "default",
+        idFactory: () => `turn-${++turn}`
+      });
+      writer.enqueue(message("message-1", "first"));
+      writer.enqueue(message("message-2", "second"));
+      const claimantA = new SQLitePendingTurnStore({ db: firstDb.db, profileId: "default" });
+      const claimantB = new SQLitePendingTurnStore({ db: secondDb.db, profileId: "default" });
+
+      const claims = [claimantA.claimNext(), claimantB.claimNext()];
+      expect(claims.map((entry) => entry?.platformMessageId)).toEqual(["message-1", "message-2"]);
+      expect(new Set(claims.map((entry) => entry?.id)).size).toBe(2);
+    } finally {
+      firstDb.close();
+      secondDb.close();
+    }
+  });
+
+  it("moves crash-left claims to uncertain without replaying them", async () => {
+    const fixture = await createFixture();
+    try {
+      const store = fixture.store();
+      store.enqueue(message("message-1", "first"));
+      const claimed = store.claimNext()!;
+      expect(store.markClaimedAsUncertain(claimed.id)).toBe(1);
+      expect(store.claimNext()).toBeUndefined();
+      expect(store.list({ statuses: ["uncertain"] })).toMatchObject([
+        { id: claimed.id, status: "uncertain" }
+      ]);
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("enforces the active-row cap and frees capacity after completion", async () => {
+    const fixture = await createFixture();
+    try {
+      let turn = 0;
+      const store = fixture.store({ maxPendingPerProfile: 2, idFactory: () => `turn-${++turn}` });
+      store.enqueue(message("message-1", "first"));
+      store.enqueue(message("message-2", "second"));
+      expect(() => store.enqueue(message("message-3", "third"))).toThrowError(
+        expect.objectContaining({ code: "capacity_exceeded" })
+      );
+      const claimed = store.claimNext()!;
+      store.complete(claimed.id, claimed.claimId!);
+      expect(store.enqueue(message("message-3", "third")).inserted).toBe(true);
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("prunes completed and uncertain rows after bounded retention", async () => {
+    const fixture = await createFixture();
+    let now = new Date("2026-01-01T00:00:00.000Z");
+    try {
+      let turn = 0;
+      const store = fixture.store({
+        now: () => now,
+        uncertainRetentionDays: 1,
+        idFactory: () => `turn-${++turn}`
+      });
+      store.enqueue(message("completed", "done"));
+      const completed = store.claimNext()!;
+      store.complete(completed.id, completed.claimId!);
+      store.enqueue(message("uncertain", "maybe"));
+      store.markClaimedAsUncertain(store.claimNext()!.id);
+
+      now = new Date("2026-01-03T00:00:00.000Z");
+      expect(store.pruneRetention()).toBe(2);
+      expect(store.list()).toEqual([]);
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("rejects invalid payloads, secret-shaped content, and sensitive metadata", async () => {
+    const fixture = await createFixture();
+    try {
+      const store = fixture.store();
+      expect(() => store.enqueue({ ...message("bad-date", "text"), receivedAt: "yesterday" }))
+        .toThrowError(expect.objectContaining({ code: "invalid_payload" }));
+      expect(() => store.enqueue(message("secret", "use sk-1234567890abcdefghijklmnop")))
+        .toThrowError(expect.objectContaining({ code: "invalid_payload" }));
+      expect(() => store.enqueue({
+        ...message("metadata", "text"),
+        metadata: { access_token: "not-even-a-real-secret" }
+      })).toThrowError(expect.objectContaining({ code: "invalid_payload" }));
+      expect(() => store.enqueue(message("oversized-text", "x".repeat(100_001))))
+        .toThrowError(expect.objectContaining({ code: "invalid_payload" }));
+      expect(() => store.enqueue({
+        ...message("oversized-metadata", "text"),
+        metadata: { note: "x".repeat(32_769) }
+      })).toThrowError(expect.objectContaining({ code: "invalid_payload" }));
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("canonicalizes approved attachments and rejects traversal, remote URLs, and escaping symlinks", async () => {
+    const fixture = await createFixture();
+    const mediaRoot = join(fixture.root, "media");
+    const outsideRoot = join(fixture.root, "outside");
+    await mkdir(mediaRoot);
+    await mkdir(outsideRoot);
+    const approvedFile = join(mediaRoot, "approved.txt");
+    const outsideFile = join(outsideRoot, "private.txt");
+    const escapeLink = join(mediaRoot, "escape.txt");
+    await writeFile(approvedFile, "approved");
+    await writeFile(outsideFile, "private");
+    await symlink(outsideFile, escapeLink);
+    try {
+      let turn = 0;
+      const store = fixture.store({ approvedMediaRoots: [mediaRoot], idFactory: () => `turn-${++turn}` });
+      const accepted = store.enqueue(withAttachment(message("valid", "file"), { localPath: approvedFile }));
+      expect(accepted.turn.message.attachments?.[0]?.localPath).toBe(await realpath(approvedFile));
+      expect(() => store.enqueue(withAttachment(message("outside", "file"), { localPath: outsideFile })))
+        .toThrowError(expect.objectContaining({ code: "invalid_payload" }));
+      expect(() => store.enqueue(withAttachment(message("relative", "file"), { localPath: "../private.txt" })))
+        .toThrowError(expect.objectContaining({ code: "invalid_payload" }));
+      expect(() => store.enqueue(withAttachment(message("symlink", "file"), { localPath: escapeLink })))
+        .toThrowError(expect.objectContaining({ code: "invalid_payload" }));
+      expect(() => store.enqueue(withAttachment(message("remote", "file"), { remoteUrl: "https://example.test/a" })))
+        .toThrowError(expect.objectContaining({ code: "invalid_payload" }));
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("can complete a claimed turn after its approved attachment is removed", async () => {
+    const fixture = await createFixture();
+    const mediaRoot = join(fixture.root, "media");
+    await mkdir(mediaRoot);
+    const approvedFile = join(mediaRoot, "temporary.txt");
+    await writeFile(approvedFile, "temporary");
+    try {
+      const store = fixture.store({ approvedMediaRoots: [mediaRoot] });
+      store.enqueue(withAttachment(message("temporary", "file"), { localPath: approvedFile }));
+      const claimed = store.claimNext()!;
+      await rm(approvedFile);
+      expect(store.complete(claimed.id, claimed.claimId!)).toMatchObject({ status: "completed" });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("returns structured database errors and emits content-free diagnostics", () => {
+    const diagnostics: PendingTurnStoreDiagnostic[] = [];
+    const failingDb: SQLiteDatabase = {
+      exec: () => undefined,
+      query: () => {
+        throw new Error("database failed while storing raw-private-message sk-1234567890abcdefghijklmnop");
+      },
+      close: () => undefined
+    };
+    const store = new SQLitePendingTurnStore({
+      db: failingDb,
+      profileId: "default",
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic)
+    });
+
+    let thrown: unknown;
+    try {
+      store.list();
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(PendingTurnStoreError);
+    expect(thrown).toMatchObject({ code: "database_failure", operation: "list", retryable: true });
+    expect((thrown as Error).message).not.toContain("raw-private-message");
+    expect(JSON.stringify(diagnostics)).not.toContain("raw-private-message");
+    expect(diagnostics).toEqual([{ operation: "list", code: "database_failure", retryable: true }]);
+  });
+
+  it("fails closed when persisted message data no longer matches its indexed identity", async () => {
+    const fixture = await createFixture();
+    try {
+      const store = fixture.store();
+      store.enqueue(message("message-1", "first"));
+      fixture.db.db.query("update pending_channel_turns set message_json = ? where profile_id = ?")
+        .run(JSON.stringify({ id: "different", channel: "telegram" }), "default");
+      expect(() => store.list()).toThrowError(expect.objectContaining({ code: "corrupt_record" }));
+    } finally {
+      fixture.close();
+    }
+  });
+});
+
+async function createFixture() {
+  const root = await tempRoot();
+  const db = await createSQLiteSessionDB({ path: join(root, "sessions.sqlite") });
+  return {
+    root,
+    db,
+    store: (options: Partial<ConstructorParameters<typeof SQLitePendingTurnStore>[0]> = {}) =>
+      new SQLitePendingTurnStore({ db: db.db, profileId: "default", ...options }),
+    close: () => db.close()
+  };
+}
+
+async function tempRoot(): Promise<string> {
+  const path = await mkdtemp(join(tmpdir(), "estacoda-pending-turn-"));
+  tempPaths.push(path);
+  return path;
+}
+
+function message(id: string, text: string): ChannelMessage {
+  return {
+    id,
+    channel: "telegram",
+    sessionKey: { platform: "telegram", chatId: "chat-1", accountId: "account-1", userId: "user-1" },
+    text,
+    sender: { id: "user-1", displayName: "Test User" },
+    attachments: [],
+    receivedAt: "2026-01-01T00:00:00.000Z",
+    metadata: { updateId: 42 }
+  };
+}
+
+function withAttachment(
+  input: ChannelMessage,
+  attachment: { localPath?: string; remoteUrl?: string }
+): ChannelMessage {
+  return {
+    ...input,
+    attachments: [{ id: `${input.id}-attachment`, kind: "document", status: "ready", ...attachment }]
+  };
+}

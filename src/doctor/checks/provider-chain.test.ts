@@ -104,7 +104,10 @@ function loadedConfig(overrides: {
     budgets: {},
     browser: { backend: "unconfigured", autoLaunch: false, supervised: false },
     imageGen: { provider: "fal", model: "test", useGateway: false },
-    gateway: { lifecycleNotifications: { enabled: false } },
+    gateway: {
+      lifecycleNotifications: { enabled: false },
+      messageQueue: { persistence: "memory", maxPendingPerProfile: 1_000, uncertainRetentionDays: 7 }
+    },
     tts: { provider: "edge", speed: 1 },
     stt: { provider: "local" },
     voice: { autoTts: false },

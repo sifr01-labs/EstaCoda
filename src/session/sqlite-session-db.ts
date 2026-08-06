@@ -44,6 +44,7 @@ import {
   migrateTaskSchemaV10
 } from "../tasks/task-schema.js";
 import { insertProviderUsageEntry, selectProviderUsageEntries } from "../tasks/sqlite-provider-usage.js";
+import { migratePendingTurnSchemaV29, PENDING_TURN_SCHEMA_VERSION } from "./pending-turn-schema.js";
 import { assertSpendingLimit, cloneSpendingLimit, type SpendingLimit } from "../contracts/budget.js";
 import {
   DEFAULT_SESSION_TITLE,
@@ -962,6 +963,8 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       migrateProviderSpendExecutionLeaseSchemaV27(this.#db));
     this.#runMigrationStep(28, "v0.10-schema-v28-provider-spending-warnings", () =>
       migrateProviderSpendingWarningSchemaV28(this.#db));
+    this.#runMigrationStep(PENDING_TURN_SCHEMA_VERSION, "v0.10-schema-v29-pending-channel-turns", () =>
+      migratePendingTurnSchemaV29(this.#db));
   }
 
   #withMigrationLock(migrate: () => void): void {

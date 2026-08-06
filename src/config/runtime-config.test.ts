@@ -573,6 +573,47 @@ describe("loadRuntimeConfig gateway lifecycle notifications", () => {
   });
 });
 
+describe("loadRuntimeConfig gateway message queue", () => {
+  it("keeps in-memory persistence as the bounded default", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.gateway.messageQueue).toEqual({
+      persistence: "memory",
+      maxPendingPerProfile: 1_000,
+      uncertainRetentionDays: 7
+    });
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("normalizes opt-in SQLite persistence and clamps queue bounds", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      gateway: {
+        messageQueue: {
+          persistence: "sqlite",
+          maxPendingPerProfile: 100_001,
+          uncertainRetentionDays: 1_000
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.gateway.messageQueue).toEqual({
+      persistence: "sqlite",
+      maxPendingPerProfile: 10_000,
+      uncertainRetentionDays: 365
+    });
+    await rm(workspace, { recursive: true, force: true });
+  });
+});
+
 describe("loadRuntimeConfig auxiliaryModels", () => {
   it("normalizes missing tasks to auto/enabled at load time", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
@@ -1586,6 +1627,13 @@ describe("setupTelegramConfig", () => {
     await mkdir(dirname(configPath), { recursive: true });
     await writeFile(configPath, JSON.stringify({
       model: { provider: "openai", id: "gpt-4o" },
+      gateway: {
+        messageQueue: {
+          persistence: "sqlite",
+          maxPendingPerProfile: 250,
+          uncertainRetentionDays: 14
+        }
+      },
       channels: {
         telegram: {
           enabled: false,
@@ -1624,6 +1672,11 @@ describe("setupTelegramConfig", () => {
       textDebounceMs: 2_250,
       textDebounceMaxMessages: 7,
       textDebounceMaxChars: 4_096
+    });
+    expect(result.config.gateway?.messageQueue).toEqual({
+      persistence: "sqlite",
+      maxPendingPerProfile: 250,
+      uncertainRetentionDays: 14
     });
     await rm(workspace, { recursive: true, force: true });
   });

@@ -310,8 +310,17 @@ export type GatewayLifecycleNotificationsConfig = {
   enabled?: boolean;
 };
 
+export type GatewayMessageQueuePersistence = "memory" | "sqlite";
+
+export type GatewayMessageQueueConfig = {
+  persistence?: GatewayMessageQueuePersistence;
+  maxPendingPerProfile?: number;
+  uncertainRetentionDays?: number;
+};
+
 export type GatewayConfig = {
   lifecycleNotifications?: GatewayLifecycleNotificationsConfig;
+  messageQueue?: GatewayMessageQueueConfig;
 };
 
 export type MCPServerToolsConfig = {
@@ -625,6 +634,7 @@ export type LoadedRuntimeConfig = {
     lifecycleNotifications: {
       enabled: boolean;
     };
+    messageQueue: Required<GatewayMessageQueueConfig>;
   };
   tts: Required<Pick<TtsConfig, "provider" | "speed">> & TtsConfig;
   stt: Required<Pick<SttConfig, "provider">> & SttConfig;
@@ -1152,6 +1162,10 @@ function patchConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
       lifecycleNotifications: {
         ...(merged.gateway?.lifecycleNotifications ?? {}),
         ...(config.gateway?.lifecycleNotifications ?? {})
+      },
+      messageQueue: {
+        ...(merged.gateway?.messageQueue ?? {}),
+        ...(config.gateway?.messageQueue ?? {})
       }
     },
     tts: mergeTtsConfig(merged.tts, config.tts),
@@ -2118,6 +2132,17 @@ function normalizeGatewayConfig(value: EstaCodaConfig["gateway"]): LoadedRuntime
   return {
     lifecycleNotifications: {
       enabled: value?.lifecycleNotifications?.enabled === true
+    },
+    messageQueue: {
+      persistence: value?.messageQueue?.persistence === "sqlite" ? "sqlite" : "memory",
+      maxPendingPerProfile: coercePositiveInteger(value?.messageQueue?.maxPendingPerProfile, {
+        default: 1_000,
+        max: 10_000
+      }),
+      uncertainRetentionDays: coerceNonNegativeInteger(value?.messageQueue?.uncertainRetentionDays, {
+        default: 7,
+        max: 365
+      })
     }
   };
 }
