@@ -263,6 +263,8 @@ The canonical busy queue is FIFO in both modes. The default `memory` mode keeps 
 
 SQLite mode has no silent memory fallback. An accepted busy message is persisted before the gateway sends `Queued (position N)`. The gateway claims the exact row before execution and completes it after a terminal result is handled. Queue clearing, interrupt replacement, and enabled FIFO-tail coalescing update SQLite before changing the in-memory FIFO.
 
+The store also keeps a bounded, profile-scoped delivery-identity index for each durable turn. Rapid-text batches register every original platform message ID, not only the composite turn ID. Before an authorized normal message enters batching or immediate execution, the gateway checks this index and silently ignores a previously recorded delivery. Clearing a pending turn or pruning its completed retention row removes its delivery identities with it.
+
 ### Recovery and delivery guarantees
 
 On startup, the selected profile follows this recovery sequence:
@@ -280,7 +282,7 @@ Graceful shutdown remains the primary path: it stops new ingress and waits for a
 
 Durable rows are stored in the global `sessions.sqlite` database with a profile ID. A gateway loads only the selected profile; profiles do not share pending work. Each row includes:
 
-- channel and platform message identifiers;
+- channel and platform message identifiers, including bounded aliases for rapid-text batch members;
 - canonical account/chat/topic session routing and sender identity;
 - user message text and receive time;
 - bounded metadata and attachment descriptors;

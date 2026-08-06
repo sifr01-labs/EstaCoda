@@ -127,6 +127,8 @@ This boundary is intentionally conservative. A process can crash after a provide
 
 SQLite rows include validated channel message JSON with ordinary user text retained, plus routing/sender identifiers, bounded metadata, and canonical local attachment paths. They exclude channel credentials, secret-shaped payloads, remote attachment URLs, and file bytes. Treat `sessions.sqlite` and its backups as sensitive. Switching to `memory` stops new durable writes and recovery but does not delete existing rows; drain or clear pending chat queues first, because re-enabling SQLite later will reconsider surviving pending rows.
 
+Each durable turn also owns bounded delivery-identity rows. The primary platform message ID and every original ID retained by rapid-text batching share the turn's profile/channel scope and retention lifecycle. Authorized normal ingress checks this index before debounce or immediate execution, while pending-turn deletion and terminal-row pruning remove the aliases by cascade. Recovery decodes pending rows individually: malformed message JSON or an attachment path that now escapes an approved root quarantines only that row as uncertain and does not block valid FIFO recovery.
+
 **Experimental streaming path:**
 
 Telegram streaming is a delivery-UX path, not runtime state. It defaults to enabled for configured Telegram channels and can be disabled per profile with `channels.telegram.streaming.enabled: false`. Provider-token events are consumed by the gateway and appended to a per-turn stream handle. Non-token runtime events continue through normal progress delivery.

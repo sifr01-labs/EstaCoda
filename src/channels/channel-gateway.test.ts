@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -5738,6 +5738,7 @@ describe("ChannelGateway commands", () => {
         authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
         pendingTurnStore: {
+          hasDeliveryIdentity: () => false,
           enqueue: () => { throw new Error("database unavailable"); }
         } as unknown as SQLitePendingTurnStore,
         busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
@@ -5753,6 +5754,395 @@ describe("ChannelGateway commands", () => {
       releaseFirst?.();
       await first;
       expect(gateway.hasPendingWork()).toBe(false);
+    });
+
+    it("deduplicates completed immediate redelivery for every original rapid-text message id", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "estacoda-durable-dedupe-"));
+      const sessionDb = await createSQLiteSessionDB({ path: join(directory, "sessions.sqlite") });
+      try {
+        const store = new SQLitePendingTurnStore({ db: sessionDb.db, profileId: "default" });
+        const batched = makeMessage("first\n\nsecond", {
+          id: "telegram-1",
+          metadata: {
+            debouncedMessageIds: ["telegram-1", "telegram-2"],
+            debounceSize: 2,
+            debounceWindowMs: 1_500
+          }
+        });
+        store.enqueue(batched);
+        const claimed = store.claimNext()!;
+        store.complete(claimed.id, claimed.claimId!);
+        const handled: string[] = [];
+        const gateway = new ChannelGateway({
+          adapters: [createFakeTelegramAdapter()],
+          runtimeForSession: async () => ({
+            ...createMinimalRuntime(),
+            handle: async ({ text }: { text: string }) => {
+              handled.push(text);
+              return runtimeResponse({ text: "ok", securityDecision: "allow" });
+            }
+          }),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          pendingTurnStore: store,
+          busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+        });
+
+        await gateway.receive(makeMessage("first", { id: "telegram-1" }));
+        await gateway.receive(makeMessage("second", { id: "telegram-2" }));
+        await gateway.receive(makeMessage("new", { id: "telegram-3" }));
+
+        expect(handled).toEqual(["new"]);
+      } finally {
+        sessionDb.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    it("quarantines untrusted and escaping-attachment recovery rows while continuing valid work", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "estacoda-durable-revalidation-"));
+      const mediaRoot = join(directory, "media");
+      const outsideRoot = join(directory, "outside");
+      await mkdir(mediaRoot);
+      await mkdir(outsideRoot);
+      const replacedFile = join(mediaRoot, "replaced.txt");
+      const outsideFile = join(outsideRoot, "private.txt");
+      await writeFile(replacedFile, "safe");
+      await writeFile(outsideFile, "private");
+      const sessionDb = await createSQLiteSessionDB({ path: join(directory, "sessions.sqlite") });
+      try {
+        let turn = 0;
+        const store = new SQLitePendingTurnStore({
+          db: sessionDb.db,
+          profileId: "default",
+          approvedMediaRoots: [mediaRoot],
+          idFactory: () => `turn-${++turn}`
+        });
+        store.enqueue(makeMessage("untrusted", { id: "untrusted" }));
+        store.enqueue(makeMessage("invalid attachment", {
+          id: "invalid-attachment",
+          attachments: [{
+            id: "attachment-1",
+            kind: "document",
+            status: "ready",
+            localPath: replacedFile
+          }]
+        }));
+        store.enqueue(makeMessage("valid", {
+          id: "valid",
+          sessionKey: { platform: "telegram", chatId: "trusted-chat", userId: "user-1" }
+        }));
+        await rm(replacedFile);
+        await symlink(outsideFile, replacedFile);
+        const handled: string[] = [];
+        const gateway = new ChannelGateway({
+          adapters: [createFakeTelegramAdapter()],
+          runtimeForSession: async () => ({
+            ...createMinimalRuntime(),
+            handle: async ({ text }: { text: string }) => {
+              handled.push(text);
+              return runtimeResponse({ text: "ok", securityDecision: "allow" });
+            }
+          }),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          trustedWorkspace: (message) => message.sessionKey.chatId === "trusted-chat",
+          pendingTurnStore: store,
+          busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+        });
+
+        await gateway.start();
+        await waitForPendingWork(gateway);
+
+        expect(handled).toEqual(["valid"]);
+        expect(store.counts()).toMatchObject({ pending: 0, claimed: 0, completed: 1, uncertain: 2 });
+      } finally {
+        sessionDb.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    it("keeps durable FIFO capacity and transactional tail coalescing aligned with memory", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "estacoda-durable-coalescing-"));
+      const sessionDb = await createSQLiteSessionDB({ path: join(directory, "sessions.sqlite") });
+      try {
+        let turn = 0;
+        const store = new SQLitePendingTurnStore({
+          db: sessionDb.db,
+          profileId: "default",
+          idFactory: () => `turn-${++turn}`
+        });
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const registry = new ActiveTurnRegistry();
+        let releaseActive: (() => void) | undefined;
+        let markActiveStarted: (() => void) | undefined;
+        const activeStarted = new Promise<void>((resolve) => { markActiveStarted = resolve; });
+        const handled: string[] = [];
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async () => ({
+            ...createMinimalRuntime(),
+            handle: async ({ text }: { text: string }) => {
+              handled.push(text);
+              if (text === "active") {
+                markActiveStarted?.();
+                await new Promise<void>((resolve) => { releaseActive = resolve; });
+              }
+              return runtimeResponse({ text: "ok", securityDecision: "allow" });
+            }
+          }),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          activeTurnRegistry: registry,
+          pendingTurnStore: store,
+          busyPolicyResolver: () => ({
+            busyPolicy: "queue",
+            queueDepth: 1,
+            busyTextCoalescing: { enabled: true, windowMs: 1_500, maxMessages: 2, maxChars: 8_000 }
+          })
+        });
+
+        const active = gateway.receive(makeMessage("active", { id: "active" }));
+        await activeStarted;
+        await gateway.receive(makeMessage("queued one", { id: "queued-1" }));
+        await gateway.receive(makeMessage("queued two", { id: "queued-2" }));
+        await gateway.receive(makeMessage("queue full", { id: "queued-3" }));
+
+        expect(store.counts()).toMatchObject({ pending: 1, completed: 1 });
+        expect(store.hasDeliveryIdentity("telegram", "queued-1")).toBe(true);
+        expect(store.hasDeliveryIdentity("telegram", "queued-2")).toBe(true);
+        expect(store.hasDeliveryIdentity("telegram", "queued-3")).toBe(false);
+        expect(adapter.records.filter((record) => record.text?.includes("Queue is full"))).toHaveLength(1);
+
+        releaseActive?.();
+        await active;
+        await waitForPendingWork(gateway);
+        expect(handled).toEqual(["active", "queued one\n\nqueued two"]);
+        expect(store.counts()).toMatchObject({ pending: 0, claimed: 0, completed: 2 });
+      } finally {
+        sessionDb.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    it("clears the exact durable chat queue before mutating memory on /stop", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "estacoda-durable-stop-"));
+      const sessionDb = await createSQLiteSessionDB({ path: join(directory, "sessions.sqlite") });
+      try {
+        const store = new SQLitePendingTurnStore({ db: sessionDb.db, profileId: "default" });
+        const registry = new ActiveTurnRegistry();
+        let handleResolved = false;
+        let releaseDispose: (() => void) | undefined;
+        const gateway = new ChannelGateway({
+          adapters: [createFakeTelegramAdapter()],
+          runtimeForSession: async () => ({
+            ...createMinimalRuntime(),
+            handle: async () => {
+              await new Promise((resolve) => setTimeout(resolve, 20));
+              handleResolved = true;
+              return runtimeResponse({ text: "ok", securityDecision: "allow" });
+            },
+            dispose: async () => new Promise<void>((resolve) => { releaseDispose = resolve; })
+          }),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          activeTurnRegistry: registry,
+          pendingTurnStore: store,
+          busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+        });
+
+        const active = gateway.receive(makeMessage("active", { id: "active" }));
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await gateway.receive(makeMessage("queued", { id: "queued" }));
+        await waitFor(() => handleResolved && registry.stats().activeTurnCount === 0);
+
+        const stopped = await gateway.receive(makeMessage("/stop", { id: "stop" }));
+        expect(stopped.replyText).toContain("Cleared 1 queued message");
+        expect(store.counts()).toMatchObject({ pending: 0, claimed: 0 });
+        expect(store.hasDeliveryIdentity("telegram", "queued")).toBe(false);
+
+        releaseDispose?.();
+        await active;
+        expect(gateway.hasPendingWork()).toBe(false);
+      } finally {
+        sessionDb.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    it("transactionally replaces durable FIFO work when queue policy changes to interrupt", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "estacoda-durable-interrupt-"));
+      const sessionDb = await createSQLiteSessionDB({ path: join(directory, "sessions.sqlite") });
+      try {
+        let turn = 0;
+        const store = new SQLitePendingTurnStore({
+          db: sessionDb.db,
+          profileId: "default",
+          idFactory: () => `turn-${++turn}`
+        });
+        const registry = new ActiveTurnRegistry();
+        let policy: "queue" | "interrupt" = "queue";
+        let markActiveStarted: (() => void) | undefined;
+        const activeStarted = new Promise<void>((resolve) => { markActiveStarted = resolve; });
+        const handled: string[] = [];
+        const gateway = new ChannelGateway({
+          adapters: [createFakeTelegramAdapter()],
+          runtimeForSession: async () => ({
+            ...createMinimalRuntime(),
+            handle: async ({ text, signal }: { text: string; signal?: AbortSignal }) => {
+              handled.push(text);
+              if (text === "active") {
+                markActiveStarted?.();
+                await new Promise<void>((_resolve, reject) => {
+                  signal?.addEventListener("abort", () => reject(new Error("interrupted")));
+                });
+              }
+              return runtimeResponse({ text: "ok", securityDecision: "allow" });
+            }
+          }),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          activeTurnRegistry: registry,
+          pendingTurnStore: store,
+          busyPolicyResolver: () => ({ busyPolicy: policy, queueDepth: 3 })
+        });
+
+        const active = gateway.receive(makeMessage("active", { id: "active" }));
+        await activeStarted;
+        await gateway.receive(makeMessage("old one", { id: "old-1" }));
+        await gateway.receive(makeMessage("old two", { id: "old-2" }));
+        policy = "interrupt";
+        await gateway.receive(makeMessage("replacement", { id: "replacement" }));
+        await active;
+        await waitForPendingWork(gateway);
+
+        expect(handled).toEqual(["active", "replacement"]);
+        expect(store.hasDeliveryIdentity("telegram", "old-1")).toBe(false);
+        expect(store.hasDeliveryIdentity("telegram", "old-2")).toBe(false);
+        expect(store.hasDeliveryIdentity("telegram", "replacement")).toBe(true);
+        expect(store.counts()).toMatchObject({ pending: 0, claimed: 0, completed: 1 });
+      } finally {
+        sessionDb.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    it("recovers only the selected profile while isolating chats and topics", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "estacoda-durable-scope-"));
+      const sessionDb = await createSQLiteSessionDB({ path: join(directory, "sessions.sqlite") });
+      try {
+        let alphaTurn = 0;
+        const alpha = new SQLitePendingTurnStore({
+          db: sessionDb.db,
+          profileId: "alpha",
+          idFactory: () => `alpha-${++alphaTurn}`
+        });
+        const beta = new SQLitePendingTurnStore({ db: sessionDb.db, profileId: "beta" });
+        alpha.enqueue(makeMessage("chat one", {
+          id: "shared-id",
+          sessionKey: { platform: "telegram", chatId: "chat-1", userId: "user-1" }
+        }));
+        alpha.enqueue(makeMessage("topic one", {
+          id: "topic-1",
+          sessionKey: {
+            platform: "telegram",
+            chatId: "group-1",
+            threadId: "topic-1",
+            chatType: "thread",
+            userId: "user-1"
+          }
+        }));
+        alpha.enqueue(makeMessage("topic two", {
+          id: "topic-2",
+          sessionKey: {
+            platform: "telegram",
+            chatId: "group-1",
+            threadId: "topic-2",
+            chatType: "thread",
+            userId: "user-1"
+          }
+        }));
+        beta.enqueue(makeMessage("beta", { id: "shared-id" }));
+        const handled: string[] = [];
+        const gateway = new ChannelGateway({
+          adapters: [createFakeTelegramAdapter()],
+          runtimeForSession: async () => ({
+            ...createMinimalRuntime(),
+            handle: async ({ text }: { text: string }) => {
+              handled.push(text);
+              return runtimeResponse({ text: "ok", securityDecision: "allow" });
+            }
+          }),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          trustedWorkspace: true,
+          pendingTurnStore: alpha,
+          busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+        });
+
+        await gateway.start();
+        await waitForPendingWork(gateway);
+
+        expect(handled.sort()).toEqual(["chat one", "topic one", "topic two"]);
+        expect(alpha.counts()).toMatchObject({ pending: 0, completed: 3 });
+        expect(beta.counts()).toMatchObject({ pending: 1, completed: 0 });
+      } finally {
+        sessionDb.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    it("quarantines an in-flight claim after a simulated drain-timeout restart and replays only pending work", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "estacoda-durable-timeout-"));
+      const sessionDb = await createSQLiteSessionDB({ path: join(directory, "sessions.sqlite") });
+      try {
+        let turn = 0;
+        const store = new SQLitePendingTurnStore({
+          db: sessionDb.db,
+          profileId: "default",
+          idFactory: () => `turn-${++turn}`
+        });
+        store.enqueue(makeMessage("in flight", { id: "in-flight" }));
+        let releaseInFlight: (() => void) | undefined;
+        const firstGateway = new ChannelGateway({
+          adapters: [createFakeTelegramAdapter()],
+          runtimeForSession: async () => ({
+            ...createMinimalRuntime(),
+            handle: async () => new Promise<Awaited<ReturnType<Runtime["handle"]>>>((resolve) => {
+              releaseInFlight = () => resolve(runtimeResponse({ text: "late", securityDecision: "allow" }));
+            })
+          }),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          trustedWorkspace: true,
+          pendingTurnStore: store,
+          busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+        });
+        await firstGateway.start();
+        await waitFor(() => store.counts().claimed === 1);
+        store.enqueue(makeMessage("still pending", { id: "still-pending" }));
+
+        const recovered: string[] = [];
+        const restartedGateway = new ChannelGateway({
+          adapters: [createFakeTelegramAdapter()],
+          runtimeForSession: async () => ({
+            ...createMinimalRuntime(),
+            handle: async ({ text }: { text: string }) => {
+              recovered.push(text);
+              return runtimeResponse({ text: "ok", securityDecision: "allow" });
+            }
+          }),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          trustedWorkspace: true,
+          pendingTurnStore: store,
+          busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+        });
+        await restartedGateway.start();
+        await waitForPendingWork(restartedGateway);
+
+        expect(recovered).toEqual(["still pending"]);
+        expect(store.counts()).toMatchObject({ pending: 0, claimed: 0, completed: 1, uncertain: 1 });
+
+        releaseInFlight?.();
+        await waitFor(() => !firstGateway.hasPendingWork());
+        expect(store.counts()).toMatchObject({ completed: 1, uncertain: 1 });
+      } finally {
+        sessionDb.close();
+        await rm(directory, { recursive: true, force: true });
+      }
     });
 
     it("queue mode enqueues message and delivers position", async () => {

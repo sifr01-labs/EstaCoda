@@ -19,11 +19,15 @@ afterEach(async () => {
 });
 
 describe("pending turn schema", () => {
-  it("migrates an existing v28 session database to the profile-scoped v29 schema", async () => {
+  it("migrates an existing v28 session database through the profile-scoped v30 schema", async () => {
     const root = await tempRoot();
     const dbPath = join(root, "sessions.sqlite");
     const initial = await createSQLiteSessionDB({ path: dbPath });
-    initial.db.exec("drop table pending_channel_turns; delete from schema_version where version = 29;");
+    initial.db.exec(`
+      drop table pending_channel_turn_delivery_ids;
+      drop table pending_channel_turns;
+      delete from schema_version where version in (29, 30);
+    `);
     initial.close();
 
     const migrated = await createSQLiteSessionDB({ path: dbPath });
@@ -37,6 +41,40 @@ describe("pending turn schema", () => {
         select name from sqlite_master
         where type = 'index' and name = 'idx_pending_channel_turns_profile_status_fifo'
       `).get()).toEqual({ name: "idx_pending_channel_turns_profile_status_fifo" });
+      expect(migrated.db.query<{ name: string }>(`
+        select name from sqlite_master
+        where type = 'table' and name = 'pending_channel_turn_delivery_ids'
+      `).get()).toEqual({ name: "pending_channel_turn_delivery_ids" });
+    } finally {
+      migrated.close();
+    }
+  });
+
+  it("migrates v29 rows into the delivery-identity index", async () => {
+    const root = await tempRoot();
+    const dbPath = join(root, "sessions.sqlite");
+    const initial = await createSQLiteSessionDB({ path: dbPath });
+    new SQLitePendingTurnStore({ db: initial.db, profileId: "default" })
+      .enqueue({
+        ...message("legacy-message", "legacy\n\nfragment"),
+        metadata: {
+          updateId: 42,
+          debouncedMessageIds: ["legacy-message", "legacy-fragment"],
+          debounceSize: 2,
+          debounceWindowMs: 1_500
+        }
+      });
+    initial.db.exec(`
+      drop table pending_channel_turn_delivery_ids;
+      delete from schema_version where version = 30;
+    `);
+    initial.close();
+
+    const migrated = await createSQLiteSessionDB({ path: dbPath });
+    try {
+      const store = new SQLitePendingTurnStore({ db: migrated.db, profileId: "default" });
+      expect(store.hasDeliveryIdentity("telegram", "legacy-message")).toBe(true);
+      expect(store.hasDeliveryIdentity("telegram", "legacy-fragment")).toBe(true);
     } finally {
       migrated.close();
     }
@@ -58,6 +96,38 @@ describe("SQLitePendingTurnStore", () => {
       expect(beta.list()).toHaveLength(1);
       expect(beta.clear()).toBe(1);
       expect(alpha.list()).toHaveLength(1);
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("indexes every bounded rapid-text delivery id and removes aliases with the owning turn", async () => {
+    const fixture = await createFixture();
+    try {
+      const store = fixture.store({ idFactory: () => "batched-turn" });
+      const batched = {
+        ...message("message-1", "first\n\nsecond\n\nthird"),
+        metadata: {
+          updateId: 42,
+          debouncedMessageIds: ["message-1", "message-2", "message-3"],
+          debounceSize: 3,
+          debounceWindowMs: 1_500
+        }
+      };
+      const inserted = store.enqueue(batched);
+
+      expect(store.hasDeliveryIdentity("telegram", "message-1")).toBe(true);
+      expect(store.hasDeliveryIdentity("telegram", "message-2")).toBe(true);
+      expect(store.hasDeliveryIdentity("telegram", "message-3")).toBe(true);
+      expect(store.enqueue(message("message-2", "second"))).toMatchObject({
+        inserted: false,
+        turn: { id: inserted.turn.id }
+      });
+
+      expect(store.clearPendingTurns([inserted.turn.id])).toBe(1);
+      expect(store.hasDeliveryIdentity("telegram", "message-1")).toBe(false);
+      expect(store.hasDeliveryIdentity("telegram", "message-2")).toBe(false);
+      expect(store.hasDeliveryIdentity("telegram", "message-3")).toBe(false);
     } finally {
       fixture.close();
     }
@@ -187,6 +257,7 @@ describe("SQLitePendingTurnStore", () => {
         combinedMessage: combined
       })).toMatchObject({ duplicate: false, turn: { id: target.id, message: combined } });
       expect(store.enqueue(incoming)).toMatchObject({ inserted: false, turn: { status: "completed" } });
+      expect(store.enqueue(combined)).toMatchObject({ inserted: false, turn: { id: target.id } });
       expect(store.list({ statuses: ["pending"] })).toMatchObject([{ id: target.id, message: combined }]);
     } finally {
       fixture.close();
@@ -329,6 +400,40 @@ describe("SQLitePendingTurnStore", () => {
         expect.objectContaining({ code: "invalid_payload", operation: "recover" })
       );
       expect(store.complete(claimed.id, claimed.claimId!)).toMatchObject({ status: "completed" });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("quarantines a recovery row whose attachment became an escaping symlink without blocking other rows", async () => {
+    const fixture = await createFixture();
+    const mediaRoot = join(fixture.root, "media");
+    const outsideRoot = join(fixture.root, "outside");
+    await mkdir(mediaRoot);
+    await mkdir(outsideRoot);
+    const replacedFile = join(mediaRoot, "replace-me.txt");
+    const outsideFile = join(outsideRoot, "private.txt");
+    await writeFile(replacedFile, "safe");
+    await writeFile(outsideFile, "private");
+    try {
+      let turn = 0;
+      const store = fixture.store({
+        approvedMediaRoots: [mediaRoot],
+        idFactory: () => `turn-${++turn}`
+      });
+      store.enqueue(withAttachment(message("invalid-attachment", "file"), { localPath: replacedFile }));
+      store.enqueue(message("still-valid", "continue"));
+      await rm(replacedFile);
+      await symlink(outsideFile, replacedFile);
+
+      expect(store.listPendingForRecovery()).toMatchObject([
+        { platformMessageId: "still-valid", status: "pending" }
+      ]);
+      expect(store.counts()).toMatchObject({ pending: 1, uncertain: 1 });
+      expect(fixture.db.db.query<{ status: string }>(`
+        select status from pending_channel_turns
+        where profile_id = ? and platform_message_id = ?
+      `).get("default", "invalid-attachment")).toEqual({ status: "uncertain" });
     } finally {
       fixture.close();
     }

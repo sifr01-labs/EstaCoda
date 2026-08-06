@@ -997,7 +997,7 @@ export class ChannelGateway {
     store.pruneRetention();
     store.markClaimedAsUncertain();
     const recoveredKeys = new Set<string>();
-    for (const turn of store.list({ statuses: ["pending"] })) {
+    for (const turn of store.listPendingForRecovery()) {
       if (!await this.#isRecoverableTurn(turn)) {
         store.markPendingAsUncertain(turn.id);
         continue;
@@ -1210,6 +1210,18 @@ export class ChannelGateway {
       const drainText = "Gateway is restarting, please try again shortly.";
       await this.#deliverText(adapter, authorizedMessage.sessionKey, drainText);
       return { sessionId: "", replyText: drainText, artifactCount: 0, progressCount: 0 };
+    }
+
+    if (this.#pendingTurnStore !== undefined) {
+      try {
+        if (this.#pendingTurnStore.hasDeliveryIdentity(authorizedMessage.channel, authorizedMessage.id)) {
+          return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+        }
+      } catch (error) {
+        this.#warnQueueFailure("deduplication", error);
+        await this.#deliverQueuePersistenceFailure(adapter, authorizedMessage.sessionKey);
+        return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+      }
     }
 
     const processedMessage = await this.#preprocessMessage?.(authorizedMessage) ?? authorizedMessage;
