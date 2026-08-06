@@ -42,6 +42,34 @@ Commands, callbacks, approvals, attachments, voice messages, and other media nev
 
 `windowMs` is capped at `60000`, `maxMessages` at `100`, and `maxChars` at `100000`. `estacoda gateway status` and `estacoda channels status <channel>` report whether queued-text coalescing is enabled.
 
+## Gateway Queue Persistence
+
+The busy-message FIFO is in memory by default. Queue persistence is a profile-scoped gateway option, not a per-channel setting:
+
+```json
+{
+  "gateway": {
+    "messageQueue": {
+      "persistence": "sqlite",
+      "maxPendingPerProfile": 1000,
+      "uncertainRetentionDays": 7
+    }
+  }
+}
+```
+
+| Field | Type | Default | Bounds | Description |
+|---|---|---:|---:|---|
+| `gateway.messageQueue.persistence` | `"memory" \| "sqlite"` | `"memory"` | — | Selects process-local FIFO state or durable queued-turn recovery. |
+| `gateway.messageQueue.maxPendingPerProfile` | positive integer | `1000` | `1..10000` | Caps non-completed durable rows for the selected profile. Pending, claimed, and uncertain rows consume capacity. |
+| `gateway.messageQueue.uncertainRetentionDays` | non-negative integer | `7` | `0..365` | Retains completed and uncertain rows for deduplication and quarantine before periodic pruning. |
+
+SQLite mode writes an accepted busy message before sending its `Queued` acknowledgement, claims it before execution, and marks a terminally handled claim completed. Pending rows recover in FIFO order after restart. A claim left by a crash becomes `uncertain` and is never replayed automatically because the gateway cannot prove whether its external effects occurred.
+
+Rows live in the global `sessions.sqlite` database but carry the selected profile ID; recovery reads only that profile. The durable message contains user text and routing identity, sender data, receive time, bounded metadata, and attachment descriptors. It does not store channel credentials, authorization headers, or attachment file bytes. Attachment paths must remain canonical files beneath approved profile media/cache roots at recovery time.
+
+This mode does not provide exactly-once execution. It also deliberately gives up automatic at-least-once replay once execution is uncertain. Protect and back up the state directory as sensitive user data. See the public [gateway operations guide](../../website/docs/operations/gateway-operations.md#durable-busy-queue) for inspection, clearing, shutdown, and rollback behavior.
+
 ## Telegram
 
 ```json

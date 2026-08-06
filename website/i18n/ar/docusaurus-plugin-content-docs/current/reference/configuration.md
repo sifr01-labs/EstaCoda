@@ -643,6 +643,30 @@ STT المستضاف المستقر: OpenAI، Groq، xAI. STT المحلي يد�
 
 الأوضاع: `strict`، `adaptive`، `open`. الافتراضي هو `adaptive`.
 
+### gateway
+
+سلوك البوابة العام، بما فيه حفظ طابور الانشغال اختياريًا.
+
+```json
+{
+  "gateway": {
+    "messageQueue": {
+      "persistence": "memory",
+      "maxPendingPerProfile": 1000,
+      "uncertainRetentionDays": 7
+    }
+  }
+}
+```
+
+| الإعداد | النوع / القيم المسموحة | الافتراضي | ملاحظات |
+|---|---|---:|---|
+| `gateway.messageQueue.persistence` | `"memory"` أو `"sqlite"` | `"memory"` | يفقد `memory` رسائل الانشغال المنتظرة عند خروج العملية. يفعّل `sqlite` استردادًا محدودًا بالملف الشخصي. |
+| `gateway.messageQueue.maxPendingPerProfile` | عدد صحيح موجب | `1000` | يحد صفوف `pending` و`claimed` و`uncertain` لكل ملف شخصي؛ ويُقيّد إلى `1..10000`. |
+| `gateway.messageQueue.uncertainRetentionDays` | عدد صحيح غير سالب | `7` | يحتفظ بصفوف `completed` و`uncertain` قبل التنظيف؛ ويُقيّد إلى `0..365`. |
+
+يحفظ وضع SQLite محتوى رسالة المستخدم وبيانات التوجيه ووصف المرفقات في `sessions.sqlite`، لكنه لا يحفظ بيانات اعتماد القنوات أو بايتات ملفات المرفقات. يمكن استرداد صفوف `pending` بعد إعادة التشغيل، بينما تتحول صفوف `claimed` التي تركها الانهيار إلى `uncertain` ولا تُعاد تلقائيًا. راجع [عمليات البوابة](../operations/gateway-operations.md#طابور-الانشغال-الدائم) قبل تفعيل هذا الخيار الحساس أمنيًا.
+
 ### channels
 
 إعدادات محول القنوات. راجع [إعدادات القنوات](../user-guide/channels.md) للمخطط الكامل.

@@ -58,7 +58,7 @@ graph TB
 | Active profile pointer | Profile home helpers | `~/.estacoda/active-profile.json` |
 | Runtime config | Selected profile | `~/.estacoda/profiles/<id>/config.json` |
 | Provider secrets | Selected profile secret store / OAuth store | `~/.estacoda/profiles/<id>/.env`, `auth.json` |
-| Sessions, gateway approvals, trajectories, Task metadata | Global SQLite DB with profile scoping | `~/.estacoda/sessions.sqlite` |
+| Sessions, durable pending channel turns, gateway approvals, trajectories, Task metadata | Global SQLite DB with profile scoping | `~/.estacoda/sessions.sqlite` |
 | Durable Task result bodies | Selected profile | `~/.estacoda/profiles/<id>/tasks/results/` |
 | Workspace trust and approvals | Global workspace state | `~/.estacoda/trust.json`, `workspace-approvals.json` |
 | Memory files | Selected profile plus explicit shared memory | `USER.md`, `SOUL.md`, `MEMORY.md`, `memory/shared/` |

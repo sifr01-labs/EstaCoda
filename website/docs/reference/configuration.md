@@ -643,6 +643,30 @@ Security mode and policy overrides.
 
 Modes: `strict`, `adaptive`, `open`. Default is `adaptive`.
 
+### gateway
+
+Gateway-wide behavior, including opt-in busy-queue persistence.
+
+```json
+{
+  "gateway": {
+    "messageQueue": {
+      "persistence": "memory",
+      "maxPendingPerProfile": 1000,
+      "uncertainRetentionDays": 7
+    }
+  }
+}
+```
+
+| Setting | Type / allowed values | Default | Notes |
+|---|---|---:|---|
+| `gateway.messageQueue.persistence` | `"memory"` or `"sqlite"` | `"memory"` | `memory` loses queued busy messages when the process exits. `sqlite` enables profile-scoped recovery. |
+| `gateway.messageQueue.maxPendingPerProfile` | positive integer | `1000` | Caps pending, claimed, and uncertain rows per profile; clamped to `1..10000`. |
+| `gateway.messageQueue.uncertainRetentionDays` | non-negative integer | `7` | Retains completed and uncertain rows before pruning; clamped to `0..365`. |
+
+SQLite mode persists user message content and routing/attachment descriptors in `sessions.sqlite`; it does not persist channel credentials or attachment bytes. Pending rows can recover after restart, while crash-left claimed rows become uncertain and are not replayed automatically. See [Gateway Operations](../operations/gateway-operations.md#durable-busy-queue) before enabling this security-sensitive option.
+
 ### channels
 
 Channel adapter configuration. See [Channel Configuration](../user-guide/channels.md) for full schema.

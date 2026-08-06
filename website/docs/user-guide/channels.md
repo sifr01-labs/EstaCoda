@@ -371,6 +371,16 @@ Queue depth is clamped to `[1, 10]`, default `3`. Configure independently per ch
 
 ---
 
+## Durable Busy Queue
+
+Busy queues are process-local by default. To recover accepted queued messages after restart, set `gateway.messageQueue.persistence` to `"sqlite"` for the selected profile. The gateway persists before acknowledging, then claims before execution. Pending work can recover in FIFO order; work left claimed by a crash becomes uncertain and is not replayed automatically.
+
+Durable rows include user text, channel/session/sender routing, receive time, bounded metadata, and local attachment descriptors. They do not include channel credentials or attachment bytes. Current authorization, workspace trust, session scope, and attachment files are checked again before recovery.
+
+Use `/status` in an authorized channel to inspect profile-wide pending/claimed/uncertain counts. `/stop` clears that chat's queued rows only when no turn is active; an active `/stop` cancels the turn and preserves its queue. SQLite mode is security-sensitive and does not promise exactly-once or unconditional at-least-once execution. Read [Gateway Operations](../operations/gateway-operations.md#durable-busy-queue) before enabling it.
+
+---
+
 ## Cross-Surface Sessions
 
 Sessions are separate by default. A CLI session and a Telegram session for the same user do not share context automatically.

@@ -17,7 +17,7 @@ Default root: `~/.estacoda/`
 | `active-profile.json` | Active profile pointer | First-run onboarding, `estacoda profile switch` |
 | `trust.json` | Workspace trust grants | `estacoda workspace trust` |
 | `workspace-approvals.json` | Workspace approval grants | Approval commands |
-| `sessions.sqlite` | Global session database with `profile_id` scoping; includes durable session-finalization jobs and leases | Runtime initialization and gateway finalization worker |
+| `sessions.sqlite` | Global session database with `profile_id` scoping; includes sessions, pending channel turns, approvals, Tasks, and session-finalization jobs | Runtime initialization and managed gateway workers |
 | `cli-sessions.json` | Version 2 CLI continuation pointers keyed by profile and normalized workspace root; contains no transcript data | CLI runtime launch, `/new`, `/switch`, and session picker/open handoffs |
 | `update-cache.json` | Update check cache (global, 6-hour TTL) | Startup prefetch, update command |
 | `packs/registry.jsonl` | Global pack cache | Pack operations |
@@ -94,6 +94,8 @@ Profile root: `~/.estacoda/profiles/<id>/`
 Delegation writes profile-owned Task graphs, journal events, Attempts, session links, and bounded result metadata to `sessions.sqlite`. Worker sessions are created only after a Step lease and link back to the Task and Attempt. Full result bodies remain in the profile-owned result store rather than canonical prompt memory.
 
 Session-finalization jobs also live in `sessions.sqlite`. They store profile/session identifiers, an immutable message cutoff, reason, status, attempts, leases, timestamps, and bounded outcome/error codes. They do not store a transcript copy. The managed gateway processes jobs for its selected profile using the originating session workspace. The worker retains the latest 1,000 terminal rows per profile; local CLI commands can inspect, retry, or prune the metadata.
+
+When `gateway.messageQueue.persistence` is `"sqlite"`, pending channel turns also live in `sessions.sqlite`. Unlike finalization jobs, these rows contain validated but otherwise unredacted ordinary user message text plus routing/sender identifiers, bounded metadata, and local attachment descriptors so a pending FIFO turn can be reconstructed. Credentials and attachment bytes are not copied into the row. The selected profile owns the row even though the database file is global. See [Gateway Operations](../operations/gateway-operations.md#durable-busy-queue) for recovery and privacy boundaries.
 
 `cli-sessions.json` is a convenience pointer index for explicit `estacoda --continue`. Version 2 entries contain only `profileId`, normalized `workspaceRoot`, `sessionId`, and `updatedAt`. The file is atomically replaced with `0600` permissions. Legacy version 1 and malformed data fail closed, and the referenced SQLite session is always revalidated before launch.
 

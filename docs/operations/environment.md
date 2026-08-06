@@ -145,7 +145,7 @@ Generated service environment:
 | `active-profile.json` | Active profile pointer |
 | `trust.json` | Workspace trust grants |
 | `workspace-approvals.json` | Workspace approval grants |
-| `sessions.sqlite` | Global session database with `profile_id` scoping |
+| `sessions.sqlite` | Global session database with `profile_id` scoping; may contain durable queued channel message text when SQLite queue persistence is enabled |
 | `memory/shared/` | Global shared memory |
 | `packs/` | Global pack cache |
 

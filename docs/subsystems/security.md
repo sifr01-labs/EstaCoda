@@ -19,6 +19,7 @@ EstaCoda uses a capability-first security model where tool risk classes, approva
 | `src/contracts/security.ts` | Security types and defaults |
 | `src/channels/channel-approval-store.ts` | Approval persistence per channel |
 | `src/gateway/approval-queue.ts` | Durable gateway pending approval queue |
+| `src/gateway/pending-turn-store.ts` | Profile-scoped durable busy-message recovery store |
 | `src/channels/handoff-store.ts` | Short-lived handoff codes |
 
 ## Approval Modes
@@ -164,6 +165,8 @@ All channels share the **same runtime security policy**. There is no channel-spe
 Gateway approvals use a durable `pending_approvals` table in the session database. Rows are profile-scoped by `profile_id`; list and resolve operations are also scoped by profile and may be scoped by session. Pending approvals are ask-only: deterministic `deny` results and hardline results never become approvable queue rows. Command payloads are transient and are redacted after approval, denial, or expiry; list and history surfaces use command preview/hash rather than raw payload.
 
 Managed Python capability setup approvals use the same durable queue but a distinct `managed_python_capability_install` kind. They carry only a registered capability ID, selected groups, registered package summary, and bounded replay context. On approval, `ChannelGateway` calls the managed Python capability installer directly, invalidates the cached runtime for that session, and replays the original channel message. On denial or expiry, no installation happens.
+
+Gateway busy-message durability is a separate opt-in queue under `gateway.messageQueue.persistence: "sqlite"`. It stores validated but otherwise unredacted ordinary remote user text and routing/attachment metadata, so it expands the local data-retention and replay surface even though credentials and attachment bytes are excluded. Recovery revalidates channel authorization, workspace trust, session scope, adapter availability, and attachment roots. A crash-left claim becomes uncertain and is not replayed: authorization checks cannot prove whether an already-started external side effect occurred. Operators must treat `sessions.sqlite` and backups as sensitive and must not bypass uncertainty by editing the database.
 
 ### Channel Allowlists
 

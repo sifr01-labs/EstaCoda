@@ -111,6 +111,22 @@ Operator-facing setup steps:
 
 Each channel may opt into `busyTextCoalescing` only alongside `busyPolicy: "queue"`. This is a bounded tail operation on `SessionMessageQueue`, not a replacement for FIFO: eligible ordinary text from the same canonical session and sender updates the final queued entry in place. The queue position stays stable, and bounded runtime metadata carries every component message ID and receive timestamp. Commands, callbacks, approvals, attachments, media, and all interrupt paths bypass coalescing. Reaching a window, message, or character limit creates a new FIFO entry and retains normal queue-depth enforcement.
 
+The canonical queue remains `SessionMessageQueue`. When `gateway.messageQueue.persistence` is `sqlite`, `SQLitePendingTurnStore` is a fail-closed write-ahead recovery layer for that FIFO. Admission persists before acknowledgement; coalescing, interrupt replacement, and `/stop` clearing commit in SQLite before the corresponding memory mutation. Dequeue claims the exact durable turn before runtime execution. A handled terminal result completes the row and preserves its platform-message identity for bounded deduplication.
+
+Durable state is profile-scoped inside the global session database:
+
+```text
+pending -> claimed -> completed
+             |
+             +-> uncertain
+```
+
+Startup converts every crash-left `claimed` row for the selected profile to `uncertain`, then considers only `pending` rows for recovery. Before rebuilding the in-memory FIFO it rechecks current channel authorization, workspace trust, canonical session scope, adapter availability, and attachment roots/existence. Any pending row that no longer passes those checks becomes uncertain. Uncertain rows are never model-visible and never replay automatically.
+
+This boundary is intentionally conservative. A process can crash after a provider or tool side effect but before durable completion, so the store cannot prove exactly-once execution. Replaying a claimed row would risk duplicating messages, writes, purchases, or commands; quarantining it can instead leave work unfinished. Operators see profile-wide pending/claimed/uncertain counts through channel `/status`. `/stop` clears the current chat's queued rows only when no turn is active; with an active turn it aborts that turn and leaves queued rows intact. There is no supported command to force-replay uncertain rows.
+
+SQLite rows include validated channel message JSON with ordinary user text retained, plus routing/sender identifiers, bounded metadata, and canonical local attachment paths. They exclude channel credentials, secret-shaped payloads, remote attachment URLs, and file bytes. Treat `sessions.sqlite` and its backups as sensitive. Switching to `memory` stops new durable writes and recovery but does not delete existing rows; drain or clear pending chat queues first, because re-enabling SQLite later will reconsider surviving pending rows.
+
 **Experimental streaming path:**
 
 Telegram streaming is a delivery-UX path, not runtime state. It defaults to enabled for configured Telegram channels and can be disabled per profile with `channels.telegram.streaming.enabled: false`. Provider-token events are consumed by the gateway and appended to a per-turn stream handle. Non-token runtime events continue through normal progress delivery.
