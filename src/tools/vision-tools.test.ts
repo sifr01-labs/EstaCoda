@@ -55,7 +55,7 @@ function createTempPng(): { dir: string; path: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), "estacoda-vision-test-"));
   const path = join(dir, "test.png");
   writeFileSync(path, Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nWQAAAAASUVORK5CYII=",
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==",
     "base64"
   ));
   return { dir, path, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
@@ -157,11 +157,19 @@ describe("vision tools", () => {
         );
 
         expect(executor.complete).toHaveBeenCalledTimes(1);
-        const [, preferences, executionOptions] = (executor.complete as any).mock.calls[0];
+        const [request, preferences, executionOptions] = (executor.complete as any).mock.calls[0];
         expect(preferences).toEqual(expect.objectContaining({ requireVision: true }));
         expect(executionOptions!.primaryRoute).toEqual(baseRoute);
         expect(executionOptions!.signal).toBeDefined();
+        expect(request.messages[1].content[1].image_url.url).toMatch(/^data:image\/png;base64,/u);
         expect(result.ok).toBe(true);
+        expect(result.metadata).toEqual(expect.objectContaining({
+          path: "test.png",
+          mimeType: "image/png",
+          width: 1,
+          height: 1,
+          metadataStripped: true
+        }));
       } finally {
         tmp.cleanup();
       }
@@ -188,6 +196,46 @@ describe("vision tools", () => {
 
         expect(result.ok).toBe(false);
         expect(result.content).toContain("No vision-capable provider route");
+        expect(executor.complete).not.toHaveBeenCalled();
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("returns a structured degraded result when image normalization is unavailable", async () => {
+      const executor = createMockExecutor();
+      const tmp = createTempPng();
+      try {
+        const result = await analyzeImageWithVision(
+          {
+            workspaceRoot: tmp.dir,
+            visionAuxiliaryRoute: {
+              task: "vision",
+              route: baseRoute,
+              source: "explicit",
+              fallbackToMain: false,
+              diagnostics: []
+            },
+            providerExecutor: executor,
+            imageNormalizer: {
+              normalize: vi.fn().mockResolvedValue({
+                ok: false,
+                code: "normalization-unavailable",
+                message: "Vision image processing is unavailable in this installation."
+              })
+            }
+          },
+          { path: "test.png" }
+        );
+
+        expect(result).toEqual({
+          ok: false,
+          content: "Vision image processing is unavailable in this installation.",
+          metadata: {
+            path: "test.png",
+            errorCode: "normalization-unavailable"
+          }
+        });
         expect(executor.complete).not.toHaveBeenCalled();
       } finally {
         tmp.cleanup();

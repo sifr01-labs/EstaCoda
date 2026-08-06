@@ -4044,7 +4044,10 @@ describe("createRuntime auxiliary consumer wiring", () => {
   it("passes visionAuxiliaryRoute into the vision tool", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-runtime-vision-"));
     const imagePath = join(workspaceRoot, "image.png");
-    await writeFile(imagePath, Buffer.from("fake-png"));
+    await writeFile(imagePath, Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==",
+      "base64"
+    ));
     const visionModel: ModelProfile = {
       id: "vision-model",
       provider: "local",

@@ -1,8 +1,17 @@
 import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
-import type { VisionImageSourceError } from "../contracts/vision.js";
+import type {
+  NormalizedVisionImage,
+  ResolvedVisionImageSource,
+  VisionImageNormalizationError,
+  VisionImageSourceError
+} from "../contracts/vision.js";
 import { executeAuxiliaryTask } from "../providers/auxiliary-executor.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
+import {
+  defaultVisionImageNormalizer,
+  type VisionImageNormalizer
+} from "../vision/image-normalizer.js";
 import { resolveVisionImageSource } from "../vision/image-source-resolver.js";
 
 export type VisionToolOptions = {
@@ -14,6 +23,7 @@ export type VisionToolOptions = {
   providerExecutor?: ProviderExecutor;
   currentSessionId?: () => string;
   maxImageBytes?: number;
+  imageNormalizer?: VisionImageNormalizer;
   /** @deprecated Use visionAuxiliaryRoute. */
   resolvedVisionRoute?: ResolvedModelRoute;
   /** @deprecated Use visionAuxiliaryRoute.fallbackToMain. */
@@ -103,7 +113,6 @@ export async function analyzeImageWithVision(
     };
   }
 
-  const dataUrl = `data:${source.mimeType};base64,${Buffer.from(source.bytes).toString("base64")}`;
   const relativePath = source.displayPath;
 
   if (options.providerExecutor === undefined) {
@@ -118,6 +127,17 @@ export async function analyzeImageWithVision(
       }
     };
   }
+
+  const normalized = await (options.imageNormalizer ?? defaultVisionImageNormalizer).normalize(source, {
+    signal,
+    limits: { maxInputBytes: maxImageBytes }
+  });
+  if (!normalized.ok) {
+    return imageNormalizationErrorResult(relativePath, normalized);
+  }
+
+  const dataUrl = `data:${normalized.mimeType};base64,${Buffer.from(normalized.bytes).toString("base64")}`;
+  const imageMetadata = normalizedImageMetadata(source, normalized);
 
   const auxiliaryResult = await executeAuxiliaryTask({
     route: visionAuxiliaryRoute,
@@ -175,9 +195,7 @@ export async function analyzeImageWithVision(
         ok: false,
         content: `Vision analysis returned no usable content. Attempts: ${attempts.join(", ") || "none"}`,
         metadata: {
-          path: relativePath,
-          bytes: source.byteLength,
-          mimeType: source.mimeType,
+          ...imageMetadata,
           provider: auxiliaryResult.response.provider,
           model: auxiliaryResult.response.model,
           attempts
@@ -192,9 +210,7 @@ export async function analyzeImageWithVision(
         analysis
       ].filter((line) => line.length > 0).join("\n\n"),
       metadata: {
-        path: relativePath,
-        bytes: source.byteLength,
-        mimeType: source.mimeType,
+        ...imageMetadata,
         provider: auxiliaryResult.response.provider,
         model: auxiliaryResult.response.model,
         attempts
@@ -206,9 +222,7 @@ export async function analyzeImageWithVision(
     ok: false,
     content: `Vision analysis is unavailable right now. Attempts: ${attempts.join(", ") || "none"}`,
     metadata: {
-      path: relativePath,
-      bytes: source.byteLength,
-      mimeType: source.mimeType,
+      ...imageMetadata,
       attempts
     }
   };
@@ -283,5 +297,41 @@ function imageSourceErrorResult(error: VisionImageSourceError): ToolResult {
       errorCode: error.code,
       ...error.details
     }
+  };
+}
+
+function imageNormalizationErrorResult(
+  path: string,
+  error: VisionImageNormalizationError
+): ToolResult {
+  return {
+    ok: false,
+    content: error.message,
+    metadata: {
+      path,
+      errorCode: error.code,
+      ...error.details
+    }
+  };
+}
+
+function normalizedImageMetadata(
+  source: ResolvedVisionImageSource,
+  normalized: NormalizedVisionImage
+): Record<string, unknown> {
+  return {
+    path: source.displayPath,
+    bytes: normalized.byteLength,
+    mimeType: normalized.mimeType,
+    width: normalized.width,
+    height: normalized.height,
+    sourceBytes: source.byteLength,
+    sourceMimeType: source.mimeType,
+    sourceWidth: normalized.sourceWidth,
+    sourceHeight: normalized.sourceHeight,
+    sourceFrames: normalized.sourceFrames,
+    resized: normalized.resized,
+    orientationApplied: normalized.orientationApplied,
+    metadataStripped: normalized.metadataStripped
   };
 }
