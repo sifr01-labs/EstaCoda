@@ -50,10 +50,10 @@ These channels and providers exist in code but lack live validation evidence for
 - MCP workspace-trust ergonomics are coarse-grained.
 - Query-selective memory rendering and lexical memory retrieval are ranked. Freshness/staleness handling remains narrow: stale derived indexes can be detected, but there is no general age- or TTL-based memory policy.
 - Image turns require a configured vision-capable route. Text-only primary or fallback routes are skipped for image-bearing provider requests, and `vision.analyze` fails loudly when no usable vision route is available.
-- Live vision quality is provider-dependent. Deterministic security fixtures are automated, while OCR, chart, screenshot, dense-document, rotation, injection, and fallback quality tasks remain opt-in and are not a release threshold yet.
+- Live vision quality is provider-dependent. The opt-in scored lane covers OCR, chart, screenshot, dense-document, rotation, injection, comparison, resource limits, and fallback observation with stored regression thresholds. A normal successful primary call cannot force a safe deterministic provider failure, so fallback is labeled `not-exercised` unless it is actually observed.
 - Gateway status probes PID and service-manager liveness and suppresses untrustworthy runtime/cache state. Its persisted supervisor summary can still reflect stale lifecycle state.
 - Full runtime CLI localization is incomplete. Arabic terminal rendering supports shaped, bidirectional Arabic, including mixed-direction Papyrus prompt and steer editing, but not every CLI string is localized.
-- Deterministic automated benchmark lanes collect metrics, evidence, and history, but there is no single scored benchmark or release threshold.
+- Deterministic automated benchmark lanes collect metrics, evidence, and history. Vision now has a scored threshold gate; other capability areas do not yet share one repository-wide release score.
 - Internal alpha harness is manual and not yet a strict release gate.
 - Provider message content supports structured image/text parts on the tested vision paths. New provider adapters and prompt-processing paths still need explicit coverage before they are treated as image-safe.
 - Some channel adapters still combine transport behavior, attachment processing, response formatting, and delivery orchestration.

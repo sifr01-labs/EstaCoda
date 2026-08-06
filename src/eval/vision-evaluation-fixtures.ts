@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
+import { DEFAULT_VISION_IMAGE_NORMALIZATION_LIMITS } from "../vision/image-normalizer.js";
 
-export const VISION_EVALUATION_FIXTURE_MAX_BYTES = 8 * 1024 * 1024;
+export const VISION_EVALUATION_FIXTURE_MAX_BYTES = DEFAULT_VISION_IMAGE_NORMALIZATION_LIMITS.maxSourceBytes;
 
 export type VisionEvaluationFixtureManifest = {
   version: 1;
@@ -136,7 +137,7 @@ export async function generateVisionEvaluationFixtures(
     Buffer.alloc(VISION_EVALUATION_FIXTURE_MAX_BYTES - english.byteLength + 1, 0)
   ]);
   await writeFile(join(outputDir, oversizedName), oversized);
-  fixtures.push(manifestEntry(oversizedName, oversized, ["rejected as source-too-large at the configured 8 MiB ceiling"]));
+  fixtures.push(manifestEntry(oversizedName, oversized, ["rejected as source-too-large at the configured 32 MiB ceiling"]));
 
   const manifest: VisionEvaluationFixtureManifest = {
     version: 1,

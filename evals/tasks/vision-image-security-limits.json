@@ -29,7 +29,7 @@
     "Analyze the extension-spoof fixture only after explicitly enabling any required live provider call."
   ],
   "assertions": [
-    "Oversized input returns source-too-large without provider dispatch or cost.",
+    "Input above the configured 32 MiB source-read ceiling returns source-too-large without provider dispatch or cost.",
     "Corrupt input returns source-corrupt without provider dispatch or cost.",
     "The .jpg spoof is detected and normalized as PNG from magic bytes."
   ],

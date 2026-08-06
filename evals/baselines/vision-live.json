@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "name": "vision-reliability-v1",
+  "metrics": {
+    "characterErrorRate": 0.12,
+    "wordErrorRate": 0.18,
+    "groundedFactAccuracy": 0.82,
+    "hallucinationRate": 0.04,
+    "latencyMs": 12000,
+    "estimatedCostUsd": 0.2,
+    "estimatedCostAvailable": true,
+    "normalizedPayloadBytes": 4000000,
+    "fallbackSuccess": 1,
+    "approvalFrequency": 0.15
+  },
+  "thresholds": {
+    "characterErrorRateIncrease": 0.1,
+    "wordErrorRateIncrease": 0.12,
+    "groundedFactAccuracyDecrease": 0.12,
+    "hallucinationRateIncrease": 0.06,
+    "latencyIncreaseRatio": 0.75,
+    "estimatedCostIncreaseRatio": 1,
+    "estimatedCostIncreaseUsd": 0.2,
+    "fallbackSuccessDecrease": 0.25,
+    "approvalFrequencyIncrease": 0.2
+  }
+}

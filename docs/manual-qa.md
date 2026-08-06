@@ -805,8 +805,8 @@ From a configured disposable setup, choose `edit-auxiliary-model-route` and then
 - Automatic, main, dedicated, disabled, and dedicated-with-main-fallback are all reviewable choices.
 - Review shows hosted-processing preference, timeout, and concurrency; the saved route uses `id`, never `model`.
 - `local-only` cannot dispatch an image to a hosted route. `allow-with-approval` still asks for unexpected agent-discovered workspace images, while an explicitly referenced current-turn image does not repeatedly prompt in adaptive mode.
-- Cancelling review leaves the existing route and secrets unchanged. Approved verification uses the benign English/Arabic fixture and does not print raw image bytes or secrets.
-- `pnpm run eval:vision:fixtures` creates the declared manifest and fixtures. Corrupt and oversized inputs fail before provider dispatch; live quality tasks are run only after explicit opt-in and record accuracy, hallucinations, latency, cost, fallback, and approval frequency.
+- Cancelling review leaves the existing route and secrets unchanged. After apply, `estacoda verify vision` uses the benign English/Arabic fixture and does not print raw image bytes or secrets. A hosted selected route or possible hosted fallback is not called without `--consent-hosted`; an expiring OAuth credential is not refreshed during this read-only check.
+- `pnpm run eval:vision:fixtures` creates the declared manifest and fixtures. Corrupt and inputs above the 32 MiB source ceiling fail before provider dispatch. `pnpm run eval:vision:live` produces JSON and Markdown release reports; any route chain with a possible hosted destination refuses to run without `--consent-hosted`, and only stored regression thresholds fail the command.
 
 ### 10.15 Review, Cancel, And Raw Secret Safety
 

@@ -59,7 +59,7 @@ pnpm run eval:fixtures
 
 ### Vision reliability lane
 
-`pnpm run eval:fixtures` includes a deterministic, offline vision-security fixture covering valid image generation, magic-byte extension spoofing, corrupt input, and a configured 8 MiB source-read boundary. Generate the complete deterministic visual corpus with:
+`pnpm run eval:fixtures` includes a deterministic, offline vision-security fixture covering valid image generation, magic-byte extension spoofing, corrupt input, and the configured 32 MiB source-read boundary. Generate the complete deterministic visual corpus with:
 
 ```bash
 pnpm run eval:vision:fixtures
@@ -67,7 +67,13 @@ pnpm run eval:vision:fixtures
 
 The output lives under `.estacoda/eval-fixtures/vision/` and includes English OCR, Arabic/mixed-direction OCR, chart, screenshot, dense-document, rotated, prompt-injection, corrupt, oversized, and extension-spoofed inputs plus expected outcomes and SHA-256 hashes in `manifest.json`.
 
-The matching task files under `evals/tasks/vision-*.json` are opt-in because they can dispatch image data to a hosted provider and incur cost. `pnpm run eval:substrate` marks them disabled until an operator explicitly enables a run. Results track accuracy percentage, hallucination count, latency, cost, fallback count, and approval frequency. Live results are evidence, not an automatic release gate or permission to change provider/privacy policy.
+The matching task files under `evals/tasks/vision-*.json` remain operator-readable runbooks. The executable scored lane is:
+
+```bash
+pnpm run eval:vision:live
+```
+
+Fully local route chains can run directly. A selected route or possible fallback that is hosted refuses to dispatch until `--consent-hosted` is supplied for that invocation and enforces a `$1.00` maximum estimated exposure by default; `--max-cost-usd <amount>` changes that run-local cap. Missing pricing or an unsafe bound blocks hosted dispatch. Each run records provider/model, a non-secret configuration fingerprint, fixture hashes, OCR character and word error rates, grounded-fact accuracy, hallucination rate, latency, estimated and provider-reported actual cost where available, normalized payload size, fallback status, and approval frequency. JSON and Markdown release reports are written under `.estacoda/eval-runs/` and compared with `evals/baselines/vision-live.json`. Only named tolerances fail the gate. It never changes provider, privacy, approval, credential, or baseline state.
 
 ## Evidence Levels
 
@@ -79,9 +85,10 @@ The matching task files under `evals/tasks/vision-*.json` are opt-in because the
 | `implemented but not live-proven` | Code exists, no fresh proof assumed |
 | `intended but not implemented` | Design target only |
 
+See [Vision Analysis](./vision.md) for dispatch rules, consent, resource limits, platform behavior, known limitations, and troubleshooting.
+
 ## Future Direction
 
-- Scored automated benchmark, not only pass/fail fixture assertions
 - Broader historical regression tracking across runs
 - Richer eval-linked skill evolution proposals
 - Stronger constraint-gate integration with manifest promotion

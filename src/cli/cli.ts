@@ -53,6 +53,10 @@ import { createReviewedSetupApplyExecutor } from "../setup/review/apply-executor
 import { collectSetupRoute } from "../setup/setup-router.js";
 import { renderSetupRouteSummary } from "../setup/setup-state-renderer.js";
 import { runSetupVerification } from "../setup/verification.js";
+import {
+  renderVisionRouteVerification,
+  runVisionRouteVerification,
+} from "../setup/vision-route-verification.js";
 import { checkSttProviderStatus, checkTtsProviderStatusWithCapabilities, type VoiceProviderStatus } from "../tools/voice-tools.js";
 import type { ToolDefinition } from "../contracts/tool.js";
 import type { FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
@@ -332,7 +336,7 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
     case "doctor":
       return runDoctor(options, args);
     case "verify":
-      return verify(options);
+      return verify(options, args);
     case "settings":
       return settings(options, args);
     case "profile":
@@ -560,7 +564,26 @@ function interactiveSetupConsole(options: CliOptions): SetupConsolePromptAdapter
       };
 }
 
-async function verify(options: CliOptions): Promise<CliCommandResult> {
+async function verify(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  if (args[0] === "vision") {
+    const config = await loadRuntimeConfig(options);
+    const report = await runVisionRouteVerification({
+      config,
+      consentHosted: hasFlag(args, "--consent-hosted"),
+    });
+    return {
+      handled: true,
+      exitCode: report.status === "passed" ? 0 : 1,
+      output: renderVisionRouteVerification(report),
+    };
+  }
+  if (args.length > 0) {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: `Unknown verification target: ${args[0]}. Available: vision`,
+    };
+  }
   const result = await runSetupVerification({
     ...options,
     runtime: options.runtime

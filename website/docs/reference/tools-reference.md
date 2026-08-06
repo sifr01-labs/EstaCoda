@@ -259,6 +259,8 @@ Image generation and vision analysis.
 
 Initial attachments use the main model natively when it supports vision; otherwise the auxiliary vision route is used. Comparison uses native multi-image input only on a capable selected route and otherwise uses a capable governed auxiliary route or returns a capability error. Post-tool images are ephemeral continuation content. Raw image bytes, normalized intermediates, and data URLs are not written to sessions, trajectories, logs, or exports. Every source is subject to contextual egress policy and every image is included in spending estimates. Structured failures distinguish unavailable routes, unsafe/corrupt/oversized images, normalization limits, budget denial, timeout, cancellation, and provider failure.
 
+**Verification:** `estacoda verify vision` checks the selected profile's effective route with a benign bilingual fixture. It reports configuration and fixture fingerprints, readiness, dispatch, normalized payload, latency, text detection, fallback, and cost availability. A hosted selected route or possible hosted fallback requires the separate `--consent-hosted` flag, and credential inspection does not refresh OAuth state.
+
 ### Voice tools
 
 Text-to-speech and speech-to-text.

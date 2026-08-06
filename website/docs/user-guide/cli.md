@@ -58,6 +58,7 @@ The `--continue` / `-c` flag also works with a one-shot prompt or slash command.
 ```bash
 estacoda setup              # Canonical setup entrypoint
 estacoda verify             # Verify configuration
+estacoda verify vision      # Prove the configured local vision route
 estacoda settings           # Show current settings
 estacoda doctor             # Health report and required fixes
 estacoda doctor --live      # Live provider check
@@ -71,7 +72,7 @@ Setup is reviewed, not autonomous. No wizard step writes or serializes raw secre
 
 The Onboarding Wizard optional capability menu covers Channels, Voice STT/TTS, Browser, and Skip. Image Generation and Editing is configured from the Setup Editor, not from the Onboarding Wizard. Vision Analysis has a separate reviewed auxiliary-model route with automatic, main, dedicated, disabled, and dedicated-with-main-fallback choices.
 
-Vision Analysis review also shows hosted-processing preference, request timeout, and concurrency. `local-only` blocks hosted image processing; `allow-with-approval` keeps contextual runtime approval in force. Cancelling review writes no route or credential changes, and post-apply verification uses a bundled benign English/Arabic image without exposing raw image bytes.
+Vision Analysis review also shows hosted-processing preference, request timeout, and concurrency. `local-only` blocks hosted image processing; `allow-with-approval` keeps contextual runtime approval in force. Cancelling review writes no route or credential changes. After apply, `estacoda verify vision` uses a bundled benign English/Arabic image and reports the selected route, dispatch, credential and vision readiness, text detection, normalized size, latency, approximate cost, fallback, and non-secret fingerprints. Verification is skipped when the selected route or a possible fallback is hosted unless the operator explicitly runs `estacoda verify vision --consent-hosted`; verification does not rewrite config, secrets, or expiring OAuth state.
 
 Workspace trust is required before EstaCoda can run in a workspace. If trust is deferred, setup may be saved, but launch is blocked with `Setup saved. Workspace trust is still required before EstaCoda can run here.`
 

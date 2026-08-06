@@ -70,6 +70,8 @@ Checks:
 
 **Exit code:** 0 if ready, 1 if warnings exist.
 
+Use `estacoda verify vision` for the selected profile's bilingual vision route proof. Fully local route chains run directly; a hosted selected route or possible hosted fallback requires `--consent-hosted`. The command is read-only and exits 0 only when the configured route returns a successful result.
+
 ---
 
 ## Python environments

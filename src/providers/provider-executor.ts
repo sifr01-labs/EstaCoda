@@ -156,6 +156,8 @@ export type ProviderExecutorOptions = {
   spendController?: ProviderSpendController;
   /** Test-only compatibility for non-durable in-memory runtimes. Never enable for production SQLite execution. */
   allowUnenforcedAttributedSpend?: boolean;
+  /** Prevent credential refresh writes during diagnostic or evaluation execution. */
+  readOnlyCredentials?: boolean;
 };
 
 export type ProviderSpendController = {
@@ -191,6 +193,7 @@ export class ProviderExecutor {
   readonly #usageRecorder: ProviderExecutorOptions["usageRecorder"];
   readonly #spendController: ProviderSpendController | undefined;
   readonly #allowUnenforcedAttributedSpend: boolean;
+  readonly #readOnlyCredentials: boolean;
 
   constructor(options: ProviderExecutorOptions) {
     this.#registry = options.registry;
@@ -199,6 +202,7 @@ export class ProviderExecutor {
     this.#usageRecorder = options.usageRecorder;
     this.#spendController = options.spendController;
     this.#allowUnenforcedAttributedSpend = options.allowUnenforcedAttributedSpend === true;
+    this.#readOnlyCredentials = options.readOnlyCredentials === true;
   }
 
   async dispose(): Promise<void> {
@@ -377,7 +381,8 @@ export class ProviderExecutor {
         route: { apiKeyEnv: route.apiKeyEnv, authMethod: route.authMethod },
         metadata: getProviderMetadata(route.provider),
         homeDir: this.#homeDir,
-        profileId: this.#profileId
+        profileId: this.#profileId,
+        readOnly: this.#readOnlyCredentials
       });
 
       if (!resolution.diagnostic.ok) {
@@ -580,6 +585,7 @@ export class ProviderExecutor {
         }
 
         const canRetry =
+          !this.#readOnlyCredentials &&
           callResponse.errorClass === "auth" &&
           routeAttemptCount < maxRouteAttempts &&
           effectiveAuthMethod !== undefined &&
