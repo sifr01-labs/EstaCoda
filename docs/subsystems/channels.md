@@ -78,6 +78,7 @@ Adapters only render or normalize channel-specific transport events. They must n
 - Chunk suffixes such as `(1/3)` count inside Telegram's payload limit
 - Inline actions are attached only to the final text chunk
 - Experimental response streaming defaults on for configured Telegram channels and edits Telegram messages during a turn; final `response.text` remains authoritative
+- Bounded rapid-text batching defaults to `1500ms`, `10` messages, and `8000` characters per canonical session and sender
 - Activity labels localized (`en`, `ar`)
 - Group sessions per-user by default
 - Thread sessions shared by default
@@ -101,6 +102,10 @@ Operator-facing setup steps:
 2. Use `@userinfobot` and `/start` to retrieve allowed Telegram user IDs.
 3. For group chats, add the EstaCoda bot plus `@getidsbot` or `@chatIDrobot` to the group. The ID bot replies with the group chat ID.
 4. Group chat IDs are usually long negative numbers.
+
+**Rapid-text ingress batching:**
+
+`ChannelGateway` batches ordinary Telegram text that arrives within `channels.telegram.textDebounceMs` and joins fragments with blank lines. The canonical key includes account, chat/topic session identity, and sender. Threshold and timer flushes are gateway-owned and ingress-nonblocking; graceful drain waits for them. Commands, callbacks, pairing/auth flows, attachments, and media groups bypass this path. Set `textDebounceMs: 0` to disable it. The adapter's `getUpdates` cadence and album batching are unchanged.
 
 **Experimental streaming path:**
 

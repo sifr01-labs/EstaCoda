@@ -11,6 +11,7 @@ import {
 } from "./channel-gateway.js";
 import { ChannelApprovalStore } from "./channel-approval-store.js";
 import { createFakeTelegramAdapter } from "../test/fakes/fake-telegram-adapter.js";
+import { TelegramAdapter } from "./telegram-adapter.js";
 import { InMemorySurfacePointerStore } from "./surface-pointer-store.js";
 import type {
   ChannelAdapter,
@@ -6970,7 +6971,7 @@ describe("ChannelGateway commands", () => {
       expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "@EstaCoda summarize this" }));
     });
 
-    describe("WhatsApp rapid text debounce", () => {
+    describe("rapid text debounce", () => {
       const debounceConfig = {
         textDebounceMs: 100,
         textDebounceMaxMessages: 10,
@@ -6992,6 +6993,73 @@ describe("ChannelGateway commands", () => {
         });
       }
 
+      function makeTelegramMessage(text: string, overrides: Partial<ChannelMessage> = {}): ChannelMessage {
+        return makeMessage(text, {
+          id: `telegram-${text}`,
+          channel: "telegram",
+          sessionKey: {
+            platform: "telegram",
+            accountId: "telegram",
+            chatId: "telegram-chat",
+            userId: "telegram-user",
+            chatType: "dm"
+          },
+          sender: { id: "telegram-user", displayName: "Telegram user" },
+          metadata: { telegram: { updateId: 1, messageId: 1, chatType: "private" } },
+          ...overrides
+        });
+      }
+
+      function telegramTextUpdate(updateId: number, messageId: number, text: string) {
+        return {
+          update_id: updateId,
+          message: {
+            message_id: messageId,
+            date: 1_700_000_000 + messageId,
+            text,
+            chat: { id: "telegram-chat", type: "private" },
+            from: { id: "telegram-user", first_name: "Ada" }
+          }
+        };
+      }
+
+      function createTelegramPollingGateway(polls: unknown[][]) {
+        let pollIndex = 0;
+        const apiMethods: string[] = [];
+        const fetch = vi.fn(async (url: string) => {
+          const method = url.split("/").at(-1) ?? "";
+          apiMethods.push(method);
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              ok: true,
+              result: method === "getUpdates"
+                ? polls[pollIndex++] ?? []
+                : method === "sendMessage"
+                  ? { message_id: 1 }
+                  : true
+            })
+          };
+        });
+        const adapter = new TelegramAdapter({ botToken: "test-token", fetch });
+        const handled: Array<Parameters<Runtime["handle"]>[0]> = [];
+        const handle = vi.fn(async (input: Parameters<Runtime["handle"]>[0]) => {
+          handled.push(input);
+          return runtimeResponse({ text: "ok", securityDecision: "allow" });
+        });
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId, handle }),
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { telegram: { allowedUserIds: ["telegram-user"] } },
+          textDebounceResolver: (channelKind) => channelKind === "telegram"
+            ? { textDebounceMs: 1_500, textDebounceMaxMessages: 10, textDebounceMaxChars: 8_000 }
+            : undefined
+        });
+        return { adapter, apiMethods, gateway, handle, handled };
+      }
+
       function createDebounceGateway(input: {
         handle?: Runtime["handle"];
         authPolicy?: ConstructorParameters<typeof ChannelGateway>[0]["authPolicy"];
@@ -6999,7 +7067,10 @@ describe("ChannelGateway commands", () => {
         activeTurnRegistry?: ActiveTurnRegistry;
         config?: typeof debounceConfig;
         logWarning?: (message: string) => void;
+        channel?: "telegram" | "whatsapp";
+        pair?: ConstructorParameters<typeof ChannelGateway>[0]["pair"];
       } = {}) {
+        const channel = input.channel ?? "whatsapp";
         const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
         const handle = input.handle ?? vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
         const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId, handle }));
@@ -7007,13 +7078,16 @@ describe("ChannelGateway commands", () => {
           adapters: [adapter],
           runtimeForSession,
           sessionStore: new InMemoryChannelSessionStore(),
-          authPolicy: input.authPolicy ?? { whatsapp: { dmPolicy: "open" } },
-          textDebounceResolver: (channelKind) => channelKind === "whatsapp"
+          authPolicy: input.authPolicy ?? (channel === "telegram"
+            ? { telegram: { allowedUserIds: ["telegram-user"] } }
+            : { whatsapp: { dmPolicy: "open" } }),
+          textDebounceResolver: (channelKind) => channelKind === channel
             ? input.config ?? debounceConfig
             : undefined,
           busyPolicyResolver: input.busyPolicyResolver,
           activeTurnRegistry: input.activeTurnRegistry,
-          logWarning: input.logWarning
+          logWarning: input.logWarning,
+          pair: input.pair
         });
         return { adapter, gateway, handle, runtimeForSession };
       }
@@ -7051,6 +7125,71 @@ describe("ChannelGateway commands", () => {
             debounceWindowMs: 10
           })
         }));
+      });
+
+      it("combines Telegram fragments from one getUpdates response", async () => {
+        const { adapter, gateway, handled } = createTelegramPollingGateway([[
+          telegramTextUpdate(1, 11, "first"),
+          telegramTextUpdate(2, 12, "second")
+        ]]);
+
+        await gateway.start();
+        expect(await adapter.pollOnce()).toBe(2);
+        expect(handled).toEqual([]);
+
+        await gateway.flushPendingDebounces();
+
+        expect(handled).toHaveLength(1);
+        expect(handled[0]).toMatchObject({
+          text: "first\n\nsecond",
+          inputMetadata: {
+            debouncedMessageIds: ["telegram-1-11", "telegram-2-12"],
+            debounceSize: 2,
+            debounceWindowMs: 1_500
+          }
+        });
+        await gateway.stop();
+      });
+
+      it("combines Telegram fragments across consecutive polling passes", async () => {
+        const { adapter, gateway, handled } = createTelegramPollingGateway([
+          [telegramTextUpdate(3, 13, "first poll")],
+          [telegramTextUpdate(4, 14, "second poll")]
+        ]);
+
+        await gateway.start();
+        expect(await adapter.pollOnce()).toBe(1);
+        expect(await adapter.pollOnce()).toBe(1);
+        expect(handled).toEqual([]);
+
+        await gateway.flushPendingDebounces();
+
+        expect(handled.map((input) => input.text)).toEqual(["first poll\n\nsecond poll"]);
+        await gateway.stop();
+      });
+
+      it("keeps Telegram callbacks out of batching and acknowledges them", async () => {
+        const callbackUpdate = {
+          update_id: 5,
+          callback_query: {
+            id: "callback-5",
+            data: "unrecognized-callback",
+            from: { id: "telegram-user", first_name: "Ada" },
+            message: {
+              message_id: 15,
+              date: 1_700_000_015,
+              chat: { id: "telegram-chat", type: "private" }
+            }
+          }
+        };
+        const { adapter, apiMethods, gateway, handled } = createTelegramPollingGateway([[callbackUpdate]]);
+
+        await gateway.start();
+        expect(await adapter.pollOnce()).toBe(1);
+
+        expect(handled.map((input) => input.text)).toEqual(["unrecognized-callback"]);
+        expect(apiMethods).toContain("answerCallbackQuery");
+        await gateway.stop();
       });
 
       it("preserves the deprecated WhatsApp-specific debounce option", async () => {
@@ -7214,6 +7353,160 @@ describe("ChannelGateway commands", () => {
           "thread one",
           "thread two"
         ]);
+      });
+
+      it("isolates Telegram buffers by account, chat, topic, and sender", async () => {
+        const texts: string[] = [];
+        const handle = vi.fn(async (input: Parameters<Runtime["handle"]>[0]) => {
+          texts.push(input.text);
+          return runtimeResponse({ text: "ok", securityDecision: "allow" });
+        });
+        const { gateway } = createDebounceGateway({
+          channel: "telegram",
+          handle,
+          authPolicy: {
+            telegram: {
+              allowedUserIds: ["shared-sender", "sender-one", "sender-two"]
+            }
+          }
+        });
+        const variants: Array<[string, Partial<ChannelMessage>]> = [
+          ["account one", {
+            sessionKey: { platform: "telegram", accountId: "account-one", chatId: "shared-chat", userId: "shared-sender", chatType: "dm" },
+            sender: { id: "shared-sender", displayName: "Shared sender" }
+          }],
+          ["account two", {
+            sessionKey: { platform: "telegram", accountId: "account-two", chatId: "shared-chat", userId: "shared-sender", chatType: "dm" },
+            sender: { id: "shared-sender", displayName: "Shared sender" }
+          }],
+          ["chat one", {
+            sessionKey: { platform: "telegram", accountId: "account-one", chatId: "chat-one", userId: "shared-sender", chatType: "dm" },
+            sender: { id: "shared-sender", displayName: "Shared sender" }
+          }],
+          ["chat two", {
+            sessionKey: { platform: "telegram", accountId: "account-one", chatId: "chat-two", userId: "shared-sender", chatType: "dm" },
+            sender: { id: "shared-sender", displayName: "Shared sender" }
+          }],
+          ["topic one", {
+            sessionKey: { platform: "telegram", accountId: "account-one", chatId: "group-chat", threadId: "topic-one", userId: "shared-sender", chatType: "thread" },
+            sender: { id: "shared-sender", displayName: "Shared sender" }
+          }],
+          ["topic two", {
+            sessionKey: { platform: "telegram", accountId: "account-one", chatId: "group-chat", threadId: "topic-two", userId: "shared-sender", chatType: "thread" },
+            sender: { id: "shared-sender", displayName: "Shared sender" }
+          }],
+          ["sender one", {
+            sessionKey: { platform: "telegram", accountId: "account-one", chatId: "shared-group", userId: "sender-one", chatType: "group" },
+            sender: { id: "sender-one", displayName: "Sender one" }
+          }],
+          ["sender two", {
+            sessionKey: { platform: "telegram", accountId: "account-one", chatId: "shared-group", userId: "sender-two", chatType: "group" },
+            sender: { id: "sender-two", displayName: "Sender two" }
+          }]
+        ];
+
+        for (const [text, overrides] of variants) {
+          await gateway.receive(makeTelegramMessage(text, { id: `isolation-${text}`, ...overrides }));
+        }
+        await gateway.flushPendingDebounces();
+
+        expect(texts.sort()).toEqual(variants.map(([text]) => text).sort());
+      });
+
+      it("keeps Telegram control commands outside rapid-text batching", async () => {
+        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const { gateway } = createDebounceGateway({ channel: "telegram", handle });
+
+        const status = await gateway.receive(makeTelegramMessage("/status"));
+        const stop = await gateway.receive(makeTelegramMessage("/stop"));
+        const approve = await gateway.receive(makeTelegramMessage("/approve"));
+        const deny = await gateway.receive(makeTelegramMessage("/deny"));
+
+        expect(status.replyText).toContain("EstaCoda channel status");
+        expect(stop.replyText).toContain("Stopping the EstaCoda gateway");
+        expect(approve.replyText).toContain("no pending approval");
+        expect(deny.replyText).toContain("no pending approval");
+        expect(handle).not.toHaveBeenCalled();
+        expect(gateway.hasPendingWork()).toBe(false);
+      });
+
+      it("keeps Telegram pairing flows outside rapid-text batching", async () => {
+        const pair = vi.fn(async (message: ChannelMessage) => message.text === "PAIR42" ? "paired" : undefined);
+        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const { gateway } = createDebounceGateway({
+          channel: "telegram",
+          handle,
+          authPolicy: { telegram: { allowedUserIds: [] } },
+          pair
+        });
+
+        const result = await gateway.receive(makeTelegramMessage("PAIR42"));
+
+        expect(result.replyText).toBe("paired");
+        expect(pair).toHaveBeenCalledOnce();
+        expect(handle).not.toHaveBeenCalled();
+        expect(gateway.hasPendingWork()).toBe(false);
+      });
+
+      it("keeps Telegram albums and following text in separate turns", async () => {
+        const handled: Array<Parameters<Runtime["handle"]>[0]> = [];
+        const handle = vi.fn(async (input: Parameters<Runtime["handle"]>[0]) => {
+          handled.push(input);
+          return runtimeResponse({ text: "ok", securityDecision: "allow" });
+        });
+        const { gateway } = createDebounceGateway({ channel: "telegram", handle });
+
+        await gateway.receive(makeTelegramMessage("album caption", {
+          id: "telegram-album",
+          attachments: [
+            { id: "photo-one", kind: "image", status: "ready", localPath: "/profile/channel-media/telegram/one.jpg", bytes: 100 },
+            { id: "photo-two", kind: "image", status: "ready", localPath: "/profile/channel-media/telegram/two.jpg", bytes: 100 }
+          ],
+          metadata: {
+            telegram: {
+              updateId: 10,
+              messageId: 20,
+              mediaGroupId: "album-one",
+              mediaGroupMessageIds: [20, 21],
+              mediaGroupSize: 2
+            }
+          }
+        }));
+        await gateway.receive(makeTelegramMessage("following text", { id: "telegram-following" }));
+        await gateway.flushPendingDebounces();
+
+        expect(handled).toHaveLength(2);
+        expect(handled[0]).toMatchObject({
+          text: "album caption",
+          attachments: [
+            expect.objectContaining({ id: "photo-one" }),
+            expect.objectContaining({ id: "photo-two" })
+          ]
+        });
+        expect(handled[1]).toMatchObject({ text: "following text", attachments: undefined });
+      });
+
+      it("dispatches a standalone Telegram attachment without waiting for the text window", async () => {
+        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const { gateway } = createDebounceGateway({ channel: "telegram", handle });
+
+        await gateway.receive(makeTelegramMessage("document caption", {
+          id: "telegram-document",
+          attachments: [{
+            id: "document-one",
+            kind: "document",
+            status: "ready",
+            localPath: "/profile/channel-media/telegram/document.pdf",
+            bytes: 200
+          }]
+        }));
+
+        expect(handle).toHaveBeenCalledOnce();
+        expect(handle).toHaveBeenCalledWith(expect.objectContaining({
+          text: "document caption",
+          attachments: [expect.objectContaining({ id: "document-one" })]
+        }));
+        expect(gateway.hasPendingWork()).toBe(false);
       });
 
       it("bypasses debounce for slash and control commands", async () => {
@@ -7588,6 +7881,52 @@ describe("ChannelGateway commands", () => {
         await waitFor(() => seenTexts.includes("one\n\ntwo"));
 
         expect(seenTexts).toEqual(["active", "one\n\ntwo"]);
+      });
+
+      it("flushes Telegram limits without awaiting the runtime turn", async () => {
+        let releaseTurn: (() => void) | undefined;
+        const turnGate = new Promise<void>((resolve) => { releaseTurn = resolve; });
+        const handle = vi.fn(async () => {
+          await turnGate;
+          return runtimeResponse({ text: "ok", securityDecision: "allow" });
+        });
+        const { gateway } = createDebounceGateway({
+          channel: "telegram",
+          handle,
+          config: { textDebounceMs: 60_000, textDebounceMaxMessages: 2, textDebounceMaxChars: 8_000 }
+        });
+        let ingressReturned = false;
+
+        await gateway.receive(makeTelegramMessage("one", { id: "telegram-limit-one" }));
+        const ingress = gateway.receive(makeTelegramMessage("two", { id: "telegram-limit-two" })).then(() => {
+          ingressReturned = true;
+        });
+
+        try {
+          await waitFor(() => handle.mock.calls.length === 1);
+          await waitFor(() => ingressReturned);
+          expect(gateway.hasPendingWork()).toBe(true);
+        } finally {
+          releaseTurn?.();
+        }
+
+        await ingress;
+        await gateway.flushPendingDebounces();
+        expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "one\n\ntwo" }));
+      });
+
+      it("dispatches Telegram text immediately when textDebounceMs is zero", async () => {
+        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const { gateway } = createDebounceGateway({
+          channel: "telegram",
+          handle,
+          config: { textDebounceMs: 0, textDebounceMaxMessages: 10, textDebounceMaxChars: 8_000 }
+        });
+
+        await gateway.receive(makeTelegramMessage("immediate"));
+
+        expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "immediate" }));
+        expect(gateway.hasPendingWork()).toBe(false);
       });
 
       it("disables debounce when textDebounceMs is zero", async () => {

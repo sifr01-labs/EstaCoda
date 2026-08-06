@@ -486,6 +486,9 @@ export type TelegramChannelConfig = {
   maxAttachmentBytes?: number;
   busyPolicy?: ChannelBusyPolicy;
   queueDepth?: number;
+  textDebounceMs?: number;
+  textDebounceMaxMessages?: number;
+  textDebounceMaxChars?: number;
   streaming?: TelegramStreamingConfig;
   pairing?: {
     code?: string;
@@ -1043,6 +1046,9 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
         missing: telegramMissing.length === 0 ? undefined : telegramMissing,
         busyPolicy: normalizeChannelBusyPolicy(telegram.busyPolicy, "telegram", warnedInvalidBusyPolicies),
         queueDepth: normalizeQueueDepth(telegram.queueDepth),
+        textDebounceMs: normalizeTextDebounceMs(telegram.textDebounceMs, 1_500),
+        textDebounceMaxMessages: normalizeTextDebounceMaxMessages(telegram.textDebounceMaxMessages),
+        textDebounceMaxChars: normalizeTextDebounceMaxChars(telegram.textDebounceMaxChars),
         streaming: normalizeTelegramStreamingConfig(telegram.streaming)
       },
       discord: {
@@ -1076,9 +1082,9 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
         missing: whatsappMissing.length === 0 ? undefined : whatsappMissing,
         busyPolicy: normalizeChannelBusyPolicy(whatsapp.busyPolicy, "whatsapp", warnedInvalidBusyPolicies),
         queueDepth: normalizeQueueDepth(whatsapp.queueDepth),
-        textDebounceMs: normalizeWhatsAppTextDebounceMs(whatsapp.textDebounceMs),
-        textDebounceMaxMessages: normalizeWhatsAppTextDebounceMaxMessages(whatsapp.textDebounceMaxMessages),
-        textDebounceMaxChars: normalizeWhatsAppTextDebounceMaxChars(whatsapp.textDebounceMaxChars)
+        textDebounceMs: normalizeTextDebounceMs(whatsapp.textDebounceMs, 5_000),
+        textDebounceMaxMessages: normalizeTextDebounceMaxMessages(whatsapp.textDebounceMaxMessages),
+        textDebounceMaxChars: normalizeTextDebounceMaxChars(whatsapp.textDebounceMaxChars)
       }
     }
   };
@@ -4039,14 +4045,14 @@ function normalizeQueueDepth(value: unknown): number {
   return coercePositiveInteger(value, { default: 3, max: 10 });
 }
 
-function normalizeWhatsAppTextDebounceMs(value: unknown): number {
-  return coerceNonNegativeInteger(value, { default: 5_000, max: 60_000 });
+function normalizeTextDebounceMs(value: unknown, defaultMs: number): number {
+  return coerceNonNegativeInteger(value, { default: defaultMs, max: 60_000 });
 }
 
-function normalizeWhatsAppTextDebounceMaxMessages(value: unknown): number {
+function normalizeTextDebounceMaxMessages(value: unknown): number {
   return coercePositiveInteger(value, { default: 10, max: 100 });
 }
 
-function normalizeWhatsAppTextDebounceMaxChars(value: unknown): number {
+function normalizeTextDebounceMaxChars(value: unknown): number {
   return coercePositiveInteger(value, { default: 8_000, max: 100_000 });
 }

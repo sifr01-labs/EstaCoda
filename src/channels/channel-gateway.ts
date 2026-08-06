@@ -1125,6 +1125,17 @@ export class ChannelGateway {
     if (message.attachments !== undefined && message.attachments.length > 0) {
       return false;
     }
+    const telegramMetadata = message.metadata?.telegram;
+    if (
+      typeof telegramMetadata === "object" &&
+      telegramMetadata !== null &&
+      (
+        typeof (telegramMetadata as { callbackQueryId?: unknown }).callbackQueryId === "string" ||
+        typeof (telegramMetadata as { mediaGroupId?: unknown }).mediaGroupId === "string"
+      )
+    ) {
+      return false;
+    }
     const text = message.text.trim();
     if (text.length === 0 || text.startsWith("/")) {
       return false;

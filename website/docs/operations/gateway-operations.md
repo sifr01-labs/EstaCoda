@@ -235,6 +235,12 @@ Telegram uses bot-token-based pairing. The bot token must be present in the prof
 estacoda channels status telegram
 ```
 
+## Telegram rapid-text batching
+
+The gateway batches ordinary Telegram text from the same canonical account/chat/topic session and sender for `1500ms` by default. It joins fragments with blank lines and preserves their original message IDs in bounded runtime metadata. Limits default to `10` messages and `8000` characters; either threshold triggers an ingress-nonblocking flush.
+
+Commands, callbacks, pairing/auth messages, attachments, and media groups bypass batching. Set `channels.telegram.textDebounceMs` to `0` to roll back to immediate dispatch. The setting does not change `getUpdates` polling cadence, media-group handling, or FIFO busy-queue ordering.
+
 ## Telegram streaming
 
 Telegram streaming is an experimental delivery option under `channels.telegram.streaming.enabled`. It defaults to enabled for configured Telegram channels. Set `channels.telegram.streaming.enabled` to `false` to opt out. When enabled, provider tokens edit Telegram messages during a turn, tool boundaries seal the current streamed message, tool progress appears below that sealed message, and later provider tokens start a new streamed message below the progress entry.

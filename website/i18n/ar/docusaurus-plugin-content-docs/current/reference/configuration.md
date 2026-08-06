@@ -653,6 +653,9 @@ STT المستضاف المستقر: OpenAI، Groq، xAI. STT المحلي يد�
     "telegram": {
       "enabled": true,
       "botTokenEnv": "ESTACODA_TELEGRAM_BOT_TOKEN",
+      "textDebounceMs": 1500,
+      "textDebounceMaxMessages": 10,
+      "textDebounceMaxChars": 8000,
       "streaming": {
         "enabled": true,
         "editIntervalMs": 750,
@@ -671,6 +674,14 @@ STT المستضاف المستقر: OpenAI، Groq، xAI. STT المحلي يد�
 ```
 
 الإعداد الموجّه لـ Telegram يخزن رمز البوت في `.env` الخاص بالملف الشخصي المحدد تحت `ESTACODA_TELEGRAM_BOT_TOKEN`، ويكتب `botTokenEnv: "ESTACODA_TELEGRAM_BOT_TOKEN"` في الإعدادات. يجب ألا يظهر رمز بوت Telegram الخام في مراجعة الإعدادات أو مخرجات الإعداد.
+
+تُجمع رسائل Telegram النصية العادية حسب هوية الحساب/المحادثة/الموضوع والمرسل. تُفصل الأجزاء بسطر فارغ. تتجاوز الأوامر وcallback queries ومسارات الربط/التفويض والمرفقات والألبومات هذا التجميع. تضبط القيمة `textDebounceMs: 0` الإرسال الفوري، ولا يغير التجميع إيقاع polling أو طابور FIFO عند الانشغال.
+
+| الإعداد | النوع | الافتراضي | ملاحظات |
+|---|---|---:|---|
+| `channels.telegram.textDebounceMs` | عدد صحيح غير سالب | `1500` | نافذة الهدوء بالمللي ثانية. القيمة `0` ترسل النص فورًا. |
+| `channels.telegram.textDebounceMaxMessages` | عدد صحيح موجب | `10` | حد التفريغ، وبحد أقصى `100`. |
+| `channels.telegram.textDebounceMaxChars` | عدد صحيح موجب | `8000` | حد التفريغ، وبحد أقصى `100000`. |
 
 يُضبط بث Telegram تحت `channels.telegram.streaming`. يكون مفعلاً افتراضيًا لقنوات Telegram المُعدّة، ويؤثر في توصيل Telegram فقط. لتعطيله، اضبط `channels.telegram.streaming.enabled` على `false`. لا يغير حالة الجلسة، أو الذاكرة، أو الموافقات، أو تنفيذ الأدوات، أو المنتجات، أو `response.text` النهائي.
 

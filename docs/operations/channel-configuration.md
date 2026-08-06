@@ -33,6 +33,9 @@ Every channel object supports:
       "sessionIdleResetMinutes": 30,
       "pollTimeoutSeconds": 30,
       "maxAttachmentBytes": 10485760,
+      "textDebounceMs": 1500,
+      "textDebounceMaxMessages": 10,
+      "textDebounceMaxChars": 8000,
       "streaming": {
         "enabled": false,
         "editIntervalMs": 750,
@@ -59,6 +62,12 @@ Guided setup asks for:
 Guided setup does not ask for the bot-token env-var name. The token is written to the selected profile `.env` as `ESTACODA_TELEGRAM_BOT_TOKEN`, and the profile config uses `botTokenEnv: "ESTACODA_TELEGRAM_BOT_TOKEN"`. Config review and setup output must redact the raw token.
 
 Use `@BotFather` and `/newbot` to get the bot API token. Use `@userinfobot` and `/start` to get Telegram user IDs. For group chats, add the EstaCoda bot and either `@getidsbot` or `@chatIDrobot` to the group; the ID bot replies with the group chat ID, usually a long negative number.
+
+### Telegram Rapid-Text Batching
+
+Telegram batches ordinary text fragments from the same account, chat or topic, and sender when they arrive within `textDebounceMs`. Fragments are joined with a blank line and retain their original message IDs in bounded runtime metadata. The defaults are `1500ms`, `10` messages, and `8000` characters. Set `textDebounceMs` to `0` to preserve immediate one-message-per-turn dispatch.
+
+Commands, callback queries, pairing/auth messages, attachments, and media groups bypass batching. Telegram albums remain one attachment turn, their caption remains the vision prompt, and following text starts a separate text batch. These settings affect ingress only; they do not change polling cadence or the FIFO busy queue.
 
 ### Telegram Streaming
 

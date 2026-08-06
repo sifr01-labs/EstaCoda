@@ -653,6 +653,9 @@ Channel adapter configuration. See [Channel Configuration](../user-guide/channel
     "telegram": {
       "enabled": true,
       "botTokenEnv": "ESTACODA_TELEGRAM_BOT_TOKEN",
+      "textDebounceMs": 1500,
+      "textDebounceMaxMessages": 10,
+      "textDebounceMaxChars": 8000,
       "streaming": {
         "enabled": true,
         "editIntervalMs": 750,
@@ -671,6 +674,14 @@ Channel adapter configuration. See [Channel Configuration](../user-guide/channel
 ```
 
 Guided Telegram setup stores the bot token in the selected profile `.env` under `ESTACODA_TELEGRAM_BOT_TOKEN` and writes `botTokenEnv: "ESTACODA_TELEGRAM_BOT_TOKEN"` to config. The raw Telegram bot token must not appear in config review or setup output.
+
+Ordinary Telegram text is batched by canonical account/chat/topic session and sender. Fragments are joined with blank lines. Commands, callbacks, pairing/auth flows, attachments, and albums bypass batching. `textDebounceMs: 0` disables it, and batching does not change Telegram polling cadence or the FIFO busy queue.
+
+| Setting | Type | Default | Notes |
+|---|---|---:|---|
+| `channels.telegram.textDebounceMs` | non-negative integer | `1500` | Quiet window in milliseconds. `0` dispatches text immediately. |
+| `channels.telegram.textDebounceMaxMessages` | positive integer | `10` | Flush threshold, capped at `100`. |
+| `channels.telegram.textDebounceMaxChars` | positive integer | `8000` | Flush threshold, capped at `100000`. |
 
 Telegram streaming is configured under `channels.telegram.streaming`. It defaults to enabled for configured Telegram channels and affects Telegram delivery only. Set `channels.telegram.streaming.enabled` to `false` to opt out. It does not change session state, memory, approvals, tool execution, artifacts, or final `response.text`.
 

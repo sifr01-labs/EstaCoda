@@ -62,6 +62,7 @@ Telegram is the live-proven first-party remote channel for v0.1.0.
 | Pairing codes | `implemented` |
 | Handoff codes | `implemented` |
 | Progress compaction | `implemented` |
+| Rapid inbound text batching | `default-on, bounded` |
 | Experimental text streaming | `default-on when Telegram is configured` |
 | Spoken replies with `/voice` | `implemented when TTS is configured` |
 
@@ -80,6 +81,7 @@ Telegram is the live-proven first-party remote channel for v0.1.0.
 - Group sessions are per-user by default
 - Thread sessions are shared by default
 - Active chat → session mapping persists across gateway restarts
+- Rapid ordinary text from the same account, chat/topic, and sender is joined with blank lines before one turn
 
 **Setup:**
 
@@ -105,6 +107,24 @@ Use `@BotFather` and `/newbot` to create a bot and copy the API token. Use `@use
 - `enabled: true`
 - `botTokenEnv` set
 - Referenced environment variable present
+
+### Telegram Rapid-Text Batching
+
+Telegram batches ordinary text fragments for `1500ms` by default, with limits of `10` messages and `8000` characters. Threshold flushes return control to polling before the runtime turn finishes, while graceful gateway shutdown waits for owned flush work.
+
+Commands, callback queries, pairing/auth flows, attachments, and albums bypass batching. Albums stay one multi-image attachment turn, the album caption remains its prompt, and following text is not merged into the album. Set `channels.telegram.textDebounceMs` to `0` for immediate dispatch. This feature does not change Telegram polling cadence or the FIFO busy queue.
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "textDebounceMs": 1500,
+      "textDebounceMaxMessages": 10,
+      "textDebounceMaxChars": 8000
+    }
+  }
+}
+```
 
 ### Telegram Streaming (Experimental)
 

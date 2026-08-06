@@ -233,6 +233,12 @@ estacoda gateway approvals deny <id>
 estacoda channels status telegram
 ```
 
+## تجميع النص السريع في Telegram
+
+تجمع البوابة نص Telegram العادي من جلسة الحساب/المحادثة/الموضوع والمرسل نفسها لمدة `1500ms` افتراضيًا. تفصل الأجزاء بسطر فارغ وتحفظ معرفات الرسائل الأصلية في metadata محدودة. الحدود الافتراضية هي `10` رسائل و`8000` حرف؛ يؤدي بلوغ أي حد إلى تفريغ لا يحجب ingress.
+
+تتجاوز الأوامر وcallbacks ورسائل الربط/التفويض والمرفقات ومجموعات الوسائط التجميع. اضبط `channels.telegram.textDebounceMs` على `0` للرجوع إلى الإرسال الفوري. لا يغير الإعداد إيقاع polling الخاص بـ `getUpdates` أو معالجة مجموعات الوسائط أو ترتيب طابور FIFO عند الانشغال.
+
 ## بث Telegram
 
 بث Telegram خيار توصيل تجريبي تحت `channels.telegram.streaming.enabled`. يكون مفعلاً افتراضيًا لقنوات Telegram المُعدّة. لتعطيله، اضبط `channels.telegram.streaming.enabled` على `false`. عند تفعيله، تحرر provider tokens رسائل Telegram أثناء الدور، وتغلق حدود الأدوات رسالة البث الحالية، ويظهر تقدم الأداة تحت تلك الرسالة المغلقة، ثم تبدأ provider tokens اللاحقة رسالة بث جديدة تحت رسالة التقدم.

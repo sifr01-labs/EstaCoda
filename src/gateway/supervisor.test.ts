@@ -1549,7 +1549,7 @@ describe("runGatewaySupervisor", () => {
     expect(discordPolicy.queueDepth).toBe(2);
   });
 
-  it("textDebounceResolver preserves normalized WhatsApp config and disables other channels", async () => {
+  it("textDebounceResolver preserves normalized Telegram and WhatsApp config", async () => {
     let capturedOpts: any;
     const gateway = { start: async () => {}, stop: async () => {}, hasPendingWork: () => false };
 
@@ -1557,6 +1557,12 @@ describe("runGatewaySupervisor", () => {
     await mkdir(dirname(configPath), { recursive: true });
     await writeFile(configPath, JSON.stringify({
       channels: {
+        telegram: {
+          enabled: false,
+          textDebounceMs: 1_750,
+          textDebounceMaxMessages: 6,
+          textDebounceMaxChars: 2_400
+        },
         whatsapp: {
           enabled: false,
           textDebounceMs: 2750,
@@ -1580,12 +1586,16 @@ describe("runGatewaySupervisor", () => {
     });
 
     expect(typeof capturedOpts.textDebounceResolver).toBe("function");
+    expect(capturedOpts.textDebounceResolver("telegram")).toEqual({
+      textDebounceMs: 1_750,
+      textDebounceMaxMessages: 6,
+      textDebounceMaxChars: 2_400
+    });
     expect(capturedOpts.textDebounceResolver("whatsapp")).toEqual({
       textDebounceMs: 2750,
       textDebounceMaxMessages: 4,
       textDebounceMaxChars: 1200
     });
-    expect(capturedOpts.textDebounceResolver("telegram")).toBeUndefined();
     expect(capturedOpts.textDebounceResolver("discord")).toBeUndefined();
   });
 

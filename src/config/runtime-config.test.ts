@@ -18,7 +18,8 @@ import {
   setupImageGenerationConfig,
   setupWebConfig,
   setupVoiceConfig,
-  setupBudgetConfig
+  setupBudgetConfig,
+  setupTelegramConfig
 } from "./runtime-config.js";
 import { DEFAULT_DELEGATION_CONFIG } from "./delegation-defaults.js";
 import { DEFAULT_MEMORY_CONFIG } from "./memory-config.js";
@@ -1578,7 +1579,104 @@ describe("setupWebConfig", () => {
   });
 });
 
+describe("setupTelegramConfig", () => {
+  it("preserves rapid text debounce settings during guided setup mutations", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-telegram-config-"));
+    const configPath = profileConfigPath(workspace);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {
+        telegram: {
+          enabled: false,
+          textDebounceMs: 2_250,
+          textDebounceMaxMessages: 7,
+          textDebounceMaxChars: 4_096
+        }
+      }
+    }));
+
+    const result = await setupTelegramConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace,
+      input: {
+        enabled: true,
+        botTokenEnv: "ESTACODA_TELEGRAM_BOT_TOKEN",
+        allowedUserIds: ["42"]
+      }
+    });
+
+    expect(result.config.channels?.telegram).toMatchObject({
+      enabled: true,
+      allowedUserIds: ["42"],
+      textDebounceMs: 2_250,
+      textDebounceMaxMessages: 7,
+      textDebounceMaxChars: 4_096
+    });
+    await rm(workspace, { recursive: true, force: true });
+  });
+});
+
 describe("loadRuntimeConfig channel readiness", () => {
+  it("normalizes Telegram rapid text debounce defaults", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: { telegram: { enabled: false } }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.telegram.textDebounceMs).toBe(1_500);
+    expect(loaded.channels.telegram.textDebounceMaxMessages).toBe(10);
+    expect(loaded.channels.telegram.textDebounceMaxChars).toBe(8_000);
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("normalizes explicit Telegram rapid text debounce config", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {
+        telegram: {
+          enabled: false,
+          textDebounceMs: 0,
+          textDebounceMaxMessages: 4,
+          textDebounceMaxChars: 1_200
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.telegram.textDebounceMs).toBe(0);
+    expect(loaded.channels.telegram.textDebounceMaxMessages).toBe(4);
+    expect(loaded.channels.telegram.textDebounceMaxChars).toBe(1_200);
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("caps Telegram rapid text debounce limits", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {
+        telegram: {
+          enabled: false,
+          textDebounceMs: 999_999,
+          textDebounceMaxMessages: 999,
+          textDebounceMaxChars: 999_999
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.telegram.textDebounceMs).toBe(60_000);
+    expect(loaded.channels.telegram.textDebounceMaxMessages).toBe(100);
+    expect(loaded.channels.telegram.textDebounceMaxChars).toBe(100_000);
+    await rm(workspace, { recursive: true, force: true });
+  });
+
   it("normalizes Telegram streaming config as enabled with auto transport by default", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });

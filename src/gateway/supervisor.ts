@@ -1471,13 +1471,23 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     };
     const textDebounceResolver: NonNullable<
       ConstructorParameters<typeof ChannelGateway>[0]["textDebounceResolver"]
-    > = (channelKind) => channelKind === "whatsapp"
-      ? {
+    > = (channelKind) => {
+      if (channelKind === "telegram") {
+        return {
+          textDebounceMs: telegram.textDebounceMs ?? 1_500,
+          textDebounceMaxMessages: telegram.textDebounceMaxMessages ?? 10,
+          textDebounceMaxChars: telegram.textDebounceMaxChars ?? 8_000
+        };
+      }
+      if (channelKind === "whatsapp") {
+        return {
           textDebounceMs: whatsapp.textDebounceMs ?? 5_000,
           textDebounceMaxMessages: whatsapp.textDebounceMaxMessages ?? 10,
           textDebounceMaxChars: whatsapp.textDebounceMaxChars ?? 8_000
-        }
-      : undefined;
+        };
+      }
+      return undefined;
+    };
     const gateway = options.factories?.createChannelGateway
       ? options.factories.createChannelGateway({
           adapters: wrappers,

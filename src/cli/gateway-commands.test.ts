@@ -1951,10 +1951,21 @@ describe("gateway commands", () => {
       expect(parsed.channels.telegram.customFlag).toBe(true);
     });
 
-    it("preserves busyPolicy and queueDepth", async () => {
+    it("preserves busyPolicy, queueDepth, and Telegram debounce settings", async () => {
       const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });
-      await writeFile(configPath, JSON.stringify({ channels: { telegram: { busyPolicy: "queue", queueDepth: 7, enabled: false } } }), "utf8");
+      await writeFile(configPath, JSON.stringify({
+        channels: {
+          telegram: {
+            busyPolicy: "queue",
+            queueDepth: 7,
+            textDebounceMs: 2_000,
+            textDebounceMaxMessages: 8,
+            textDebounceMaxChars: 4_000,
+            enabled: false
+          }
+        }
+      }), "utf8");
 
       const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
       expect(result.ok).toBe(true);
@@ -1962,6 +1973,9 @@ describe("gateway commands", () => {
       const parsed = JSON.parse(await readFile(configPath, "utf8"));
       expect(parsed.channels.telegram.busyPolicy).toBe("queue");
       expect(parsed.channels.telegram.queueDepth).toBe(7);
+      expect(parsed.channels.telegram.textDebounceMs).toBe(2_000);
+      expect(parsed.channels.telegram.textDebounceMaxMessages).toBe(8);
+      expect(parsed.channels.telegram.textDebounceMaxChars).toBe(4_000);
     });
 
     it("creates config file if missing", async () => {
