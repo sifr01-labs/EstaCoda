@@ -407,8 +407,9 @@ describe("TelegramAdapter", () => {
   it("delivery.sendText sends short messages once", async () => {
     const { adapter, bodies } = createTelegramTextHarness();
 
-    await adapter.delivery.sendText({ platform: "telegram", chatId: "123" }, "short reply");
+    const receipt = await adapter.delivery.sendText({ platform: "telegram", chatId: "123" }, "short reply");
 
+    expect(receipt).toEqual({ messageIds: ["1"] });
     expect(bodies).toHaveLength(1);
     expect(sentText(bodies[0])).toBe("short reply");
     expect(bodies[0]?.parse_mode).toBe("HTML");
@@ -948,7 +949,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: true,
       fallbackRequired: false,
-      deliveredText: "<>&".repeat(1_500)
+      deliveredText: "<>&".repeat(1_500),
+      messageIds: ["1", "2", "3", "4", "5"]
     });
     expect(callsFor(calls, "sendRichMessageDraft")).toHaveLength(1);
     expect(callsFor(calls, "sendMessageDraft")).toHaveLength(0);
@@ -976,7 +978,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: true,
       fallbackRequired: false,
-      deliveredText: "final"
+      deliveredText: "final",
+      messageIds: ["2"]
     });
     expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["first", "final"]);
     expect(callsFor(calls, "deleteMessage").map((call) => call.body.message_id)).toEqual([1]);
@@ -1009,7 +1012,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: true,
       fallbackRequired: false,
-      deliveredText: "fallback"
+      deliveredText: "fallback",
+      messageIds: ["1"]
     });
   });
 
@@ -1036,6 +1040,28 @@ describe("TelegramAdapter", () => {
     expect(callsFor(calls, "sendMessage")).toHaveLength(1);
     expect(callsFor(calls, "editMessageText")).toHaveLength(0);
     expect(callsFor(calls, "deleteMessage")).toHaveLength(0);
+  });
+
+  it("delivery.startStreamingText draft fallback reports final chunks sent before a later chunk fails", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness({
+      failMethods: { sendMessage: [2] }
+    });
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "dm" }, {
+      minInitialChars: 1,
+      transport: "draft"
+    });
+
+    handle.append("draft");
+    await flushTelegramStreamingTimers();
+    const result = await handle.finish("<>&".repeat(1_500));
+
+    expect(result).toEqual({
+      delivered: false,
+      fallbackRequired: true,
+      messageIds: ["1"]
+    });
+    expect(callsFor(calls, "sendMessage")).toHaveLength(2);
   });
 
   it("delivery.startStreamingText segmentBreak with drafts materializes the segment and rotates draft IDs", async () => {
@@ -1098,7 +1124,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: true,
       fallbackRequired: false,
-      deliveredText: "**final** <raw>"
+      deliveredText: "**final** <raw>",
+      messageIds: ["2"]
     });
     expect(callsFor(calls, "sendRichMessage")[0]?.body).toMatchObject({
       chat_id: "123",
@@ -1206,7 +1233,8 @@ describe("TelegramAdapter", () => {
 
     expect(result).toEqual({
       delivered: false,
-      fallbackRequired: true
+      fallbackRequired: true,
+      messageIds: ["1"]
     });
     expect(callsFor(calls, "sendRichMessage")).toHaveLength(1);
     expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["preview▌"]);
@@ -1677,7 +1705,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: true,
       fallbackRequired: false,
-      deliveredText: "final <answer>"
+      deliveredText: "final <answer>",
+      messageIds: ["2"]
     });
     expect(callsFor(calls, "sendRichMessage").at(-1)?.body).toMatchObject({
       rich_message: {
@@ -1728,7 +1757,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: true,
       fallbackRequired: false,
-      deliveredText: "final <answer>"
+      deliveredText: "final <answer>",
+      messageIds: ["2"]
     });
     expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["draft▌"]);
     expect(callsFor(calls, "sendRichMessage").at(-1)?.body).toMatchObject({
@@ -1759,7 +1789,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: true,
       fallbackRequired: false,
-      deliveredText: "final"
+      deliveredText: "final",
+      messageIds: ["3"]
     });
     expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["first|", "second|"]);
     expect(callsFor(calls, "sendRichMessage").at(-1)?.body).toMatchObject({
@@ -1790,7 +1821,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: true,
       fallbackRequired: false,
-      deliveredText: "final"
+      deliveredText: "final",
+      messageIds: ["2", "1"]
     });
     expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["draft▌"]);
     expect(callsFor(calls, "sendRichMessage").at(-1)?.body).toMatchObject({
@@ -1930,7 +1962,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: false,
       fallbackRequired: true,
-      fallbackText: " pending final"
+      fallbackText: " pending final",
+      messageIds: ["1"]
     });
     expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["draft|"]);
   });
@@ -1958,7 +1991,8 @@ describe("TelegramAdapter", () => {
 
     expect(result).toEqual({
       delivered: false,
-      fallbackRequired: true
+      fallbackRequired: true,
+      messageIds: ["1"]
     });
   });
 
@@ -1987,7 +2021,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: true,
       fallbackRequired: false,
-      deliveredText: "fallback"
+      deliveredText: "fallback",
+      messageIds: ["3"]
     });
   });
 
@@ -2327,7 +2362,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: true,
       fallbackRequired: false,
-      deliveredText: "final"
+      deliveredText: "final",
+      messageIds: ["4"]
     });
     expect(callsFor(calls, "sendRichMessage").at(-1)?.body).toMatchObject({
       rich_message: {
@@ -2700,6 +2736,24 @@ describe("TelegramAdapter", () => {
       mediaGroupId: "album-1",
       messageId: 10,
       updateId: 45
+    }));
+  });
+
+  it("preserves the replied Telegram message id as bounded adapter metadata", () => {
+    const message = updateToChannelMessage({
+      update_id: 46,
+      message: {
+        message_id: 11,
+        date: 1700000000,
+        text: "what did this cost?",
+        chat: { id: "chat-1", type: "private" },
+        reply_to_message: { message_id: 7 }
+      }
+    });
+
+    expect(message?.metadata?.telegram).toEqual(expect.objectContaining({
+      messageId: 11,
+      replyToMessageId: 7
     }));
   });
 

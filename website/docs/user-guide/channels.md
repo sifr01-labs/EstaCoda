@@ -433,6 +433,8 @@ All gateway channels support a common set of control commands:
 | `/cron` | List cron jobs |
 | `/diagnostics` | Run gateway diagnostics |
 
+On Telegram, reply to an EstaCoda answer with `/usage` to inspect that specific answer without a model call. You can also reply in normal language—for example, “How much did this cost?”—and the agent can use the read-only replied-turn usage scope. EstaCoda maps every final-answer chunk, so replying to any chunk works. The mapping is profile-, chat-, topic-, and Session-authorized; replies to unmapped or unrelated messages fail closed.
+
 Model control commands bypass busy-session queues so the operator can change model state while a conversation is active.
 
 Telegram `/memory ...` uses the same shared curation path as `estacoda memory ...`: the same mode, profile-local files, curation history, scanner, and budget gates. Chat output is compact, but memory policy is not separate for Telegram.

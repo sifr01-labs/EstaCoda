@@ -11,6 +11,7 @@ import type {
   ChannelSessionKey
 } from "../contracts/channel.js";
 import type { ChannelKind } from "../contracts/channel.js";
+import type { ChannelTextDeliveryReceipt } from "../contracts/channel.js";
 import type { ChannelBusyPolicy, LoadedRuntimeConfig } from "../config/runtime-config.js";
 import {
   SessionMessageQueue,
@@ -93,6 +94,7 @@ import { resolveProfileStateHome } from "../config/profile-home.js";
 import { saveRuntimeConfig } from "../config/runtime-config.js";
 import { formatUsageInspection } from "../ui/usage-inspection-format.js";
 import type { UsageInspection, UsageInspector } from "../session/usage-inspector.js";
+import type { ChannelMessageTurnStore } from "./channel-message-turn-store.js";
 import type { VoiceStateManager, VoiceMode } from "../gateway/voice-state.js";
 import {
   checkTtsProviderStatus,
@@ -228,6 +230,8 @@ export type ChannelGatewayOptions = {
   pendingTurnStore?: SQLitePendingTurnStore;
   /** Profile-scoped local accounting reader for model-free usage commands. */
   usageInspector?: UsageInspector;
+  /** Profile-scoped outbound-message attribution used by reply-to usage inspection. */
+  channelMessageTurnStore?: ChannelMessageTurnStore;
 
   // Stage 5D additions (all optional)
   /** Active turn registry for busy protection and abort tracking. */
@@ -442,6 +446,7 @@ export class ChannelGateway {
   readonly #logWarning?: (message: string) => void;
   readonly #enqueueSessionFinalization: ChannelGatewayOptions["enqueueSessionFinalization"];
   readonly #usageInspector: UsageInspector | undefined;
+  readonly #channelMessageTurnStore: ChannelMessageTurnStore | undefined;
 
   // Stage 6
   readonly #isDraining: (() => boolean) | undefined;
@@ -504,6 +509,7 @@ export class ChannelGateway {
     this.#logWarning = options.logWarning;
     this.#enqueueSessionFinalization = options.enqueueSessionFinalization;
     this.#usageInspector = options.usageInspector;
+    this.#channelMessageTurnStore = options.channelMessageTurnStore;
 
     // Stage 6
     this.#isDraining = options.isDraining;
@@ -556,12 +562,18 @@ export class ChannelGateway {
     sessionKey: ChannelSessionKey,
     text: string,
     options?: import("../contracts/channel.js").ChannelTextOptions
-  ): Promise<void> {
+  ): Promise<ChannelTextDeliveryReceipt | undefined> {
     if (this.#deliveryRouter) {
-      await this.#deliveryRouter.deliverText([{ kind: "origin", originalSessionKey: sessionKey }], text, options);
-    } else {
-      await adapter.delivery?.sendText(sessionKey, text, options);
+      const results = await this.#deliveryRouter.deliverText(
+        [{ kind: "origin", originalSessionKey: sessionKey }],
+        text,
+        options
+      );
+      if (!(results instanceof Map)) return undefined;
+      const result = results.values().next().value;
+      return result?.success === true ? result.receipt : undefined;
     }
+    return await adapter.delivery?.sendText(sessionKey, text, options) ?? undefined;
   }
 
   async #deliverProgress(
@@ -573,6 +585,58 @@ export class ChannelGateway {
       await this.#deliveryRouter.deliverProgress({ kind: "origin", originalSessionKey: sessionKey }, event);
     } else {
       await adapter.delivery?.sendProgress?.(sessionKey, event);
+    }
+  }
+
+  async #authorizedUsageReplyToTurnId(
+    message: ChannelMessage,
+    sessionId: string
+  ): Promise<string | undefined> {
+    const platformMessageId = telegramReplyToMessageId(message);
+    if (
+      platformMessageId === undefined ||
+      this.#channelMessageTurnStore === undefined ||
+      this.#usageInspector === undefined
+    ) {
+      return undefined;
+    }
+    try {
+      const binding = await this.#channelMessageTurnStore.resolve({
+        sessionKey: normalizeSessionKey(message.sessionKey, this.#sessionPolicy),
+        platformMessageId
+      });
+      if (binding === undefined) return undefined;
+      const inspection = await this.#usageInspector.inspectTurn(sessionId, binding.turnId);
+      return inspection?.usage.turnId;
+    } catch (error) {
+      this.#logWarning?.(`Channel reply attribution lookup failed (${boundedErrorClass(error)}).`);
+      return undefined;
+    }
+  }
+
+  async #recordChannelMessageTurnBindings(input: {
+    sessionKey: ChannelSessionKey;
+    platformMessageIds: readonly string[] | undefined;
+    sessionId: string;
+    turnId: string | undefined;
+  }): Promise<void> {
+    if (
+      this.#channelMessageTurnStore === undefined ||
+      input.turnId === undefined ||
+      input.platformMessageIds === undefined ||
+      input.platformMessageIds.length === 0
+    ) {
+      return;
+    }
+    try {
+      await this.#channelMessageTurnStore.record({
+        sessionKey: input.sessionKey,
+        platformMessageIds: input.platformMessageIds,
+        sessionId: input.sessionId,
+        turnId: input.turnId
+      });
+    } catch (error) {
+      this.#logWarning?.(`Channel reply attribution write failed (${boundedErrorClass(error)}).`);
     }
   }
 
@@ -1309,7 +1373,8 @@ export class ChannelGateway {
       telegramMetadata !== null &&
       (
         typeof (telegramMetadata as { callbackQueryId?: unknown }).callbackQueryId === "string" ||
-        typeof (telegramMetadata as { mediaGroupId?: unknown }).mediaGroupId === "string"
+        typeof (telegramMetadata as { mediaGroupId?: unknown }).mediaGroupId === "string" ||
+        telegramReplyToMessageId(message) !== undefined
       )
     ) {
       return false;
@@ -1620,6 +1685,8 @@ export class ChannelGateway {
         }
       }
 
+      const usageReplyToTurnId = await this.#authorizedUsageReplyToTurnId(message, sessionId);
+
       const securityPolicy = this.#securityPolicyFor(
         normalizedSessionKey,
         sessionId,
@@ -1651,7 +1718,8 @@ export class ChannelGateway {
           userId: message.sender.id,
           origin: message.text.startsWith("/") ? "command" : "message",
           ...(debounceMetadata === undefined ? {} : debounceMetadata),
-          ...(busyTextCoalescingMetadata === undefined ? {} : busyTextCoalescingMetadata)
+          ...(busyTextCoalescingMetadata === undefined ? {} : busyTextCoalescingMetadata),
+          ...(usageReplyToTurnId === undefined ? {} : { usageReplyToTurnId })
         },
         ...(streamCallbacksWired
           ? {
@@ -1713,14 +1781,25 @@ export class ChannelGateway {
         !approvalBoundary &&
         !artifactBoundary;
 
+      let finalMessageIds = streamingDeliveredFinalText ? streamResult?.messageIds : undefined;
       if (!streamingDeliveredFinalText) {
-        await this.#deliverText(
+        const receipt = await this.#deliverText(
           adapter,
           normalizedSessionKey,
           streamResult?.fallbackText ?? response.text,
           message.channel === "whatsapp" ? { replyTo: message.id } : undefined
         );
+        finalMessageIds = [...new Set([
+          ...(streamResult?.messageIds ?? []),
+          ...(receipt?.messageIds ?? [])
+        ])];
       }
+      await this.#recordChannelMessageTurnBindings({
+        sessionKey: normalizedSessionKey,
+        platformMessageIds: finalMessageIds,
+        sessionId,
+        turnId: response.turnUsage?.turnId
+      });
       await adapter.send?.({
         conversationId: message.sessionKey.chatId,
         sessionKey: normalizedSessionKey,
@@ -2741,7 +2820,7 @@ export class ChannelGateway {
         "EstaCoda channel commands",
         "/help - show this help",
         "/status - show the active channel session",
-        "/usage [last|task <task-id>] - show recorded tokens and estimated cost",
+        "/usage [last|task <task-id>] - show recorded tokens and estimated cost; reply with /usage for one answer",
         "/model - choose a session model",
         "/model <provider>/<model> - set the model for this session",
         "/model clear - clear this session model override",
@@ -2820,6 +2899,7 @@ export class ChannelGateway {
     if (command === "/usage") {
       const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
       const args = parseGatewayCommandArgs(message.text);
+      const replyRequested = args.length === 0 && telegramReplyToMessageId(message) !== undefined;
       const valid = args.length === 0 ||
         (args.length === 1 && args[0]?.toLowerCase() === "last") ||
         (args.length === 2 && args[0]?.toLowerCase() === "task" && (args[1]?.length ?? 0) > 0);
@@ -2831,10 +2911,20 @@ export class ChannelGateway {
 
       let inspection: UsageInspection | undefined;
       try {
+        const replyToTurnId = replyRequested
+          ? await this.#authorizedUsageReplyToTurnId(message, sessionId)
+          : undefined;
+        const repliedInspection = this.#usageInspector === undefined || replyToTurnId === undefined
+          ? undefined
+          : await this.#usageInspector.inspectTurn(sessionId, replyToTurnId);
         inspection = this.#usageInspector === undefined
           ? undefined
-          : args.length === 0
-            ? await this.#usageInspector.inspectSession(sessionId)
+          : replyRequested
+            ? repliedInspection === undefined
+              ? undefined
+              : { ...repliedInspection, selection: "replied" }
+            : args.length === 0
+              ? await this.#usageInspector.inspectSession(sessionId)
             : args[0]?.toLowerCase() === "last"
               ? await this.#usageInspector.inspectLatestTurn(sessionId)
               : await this.#usageInspector.inspectTask(sessionId, args[1]!);
@@ -2842,7 +2932,9 @@ export class ChannelGateway {
         inspection = undefined;
       }
       const text = inspection === undefined
-        ? args[0]?.toLowerCase() === "task"
+        ? replyRequested
+          ? "No usage attribution is available for the replied message in this session."
+          : args[0]?.toLowerCase() === "task"
           ? "Task usage is unavailable for this session."
           : args[0]?.toLowerCase() === "last"
             ? "No completed turn usage is available in this session."
@@ -4727,6 +4819,16 @@ function parseGatewayCommand(text: string): "/help" | "/status" | "/usage" | "/m
   }
 
   return undefined;
+}
+
+function telegramReplyToMessageId(message: ChannelMessage): string | undefined {
+  if (message.channel !== "telegram") return undefined;
+  const telegram = message.metadata?.telegram;
+  if (telegram === null || typeof telegram !== "object" || Array.isArray(telegram)) return undefined;
+  const value = (telegram as { replyToMessageId?: unknown }).replyToMessageId;
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? String(value)
+    : undefined;
 }
 
 function parseGatewayCommandArgs(text: string): string[] {

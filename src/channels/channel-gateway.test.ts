@@ -138,6 +138,7 @@ function runtimeResponse(input: {
   toolExecutions?: Awaited<ReturnType<Runtime["handle"]>>["toolExecutions"];
   artifacts?: Awaited<ReturnType<Runtime["handle"]>>["artifacts"];
   setupApprovals?: Awaited<ReturnType<Runtime["handle"]>>["setupApprovals"];
+  turnUsage?: Awaited<ReturnType<Runtime["handle"]>>["turnUsage"];
 }): Awaited<ReturnType<Runtime["handle"]>> {
   return {
     label: "test",
@@ -152,6 +153,7 @@ function runtimeResponse(input: {
     context: undefined,
     projectContext: undefined,
     setupApprovals: input.setupApprovals,
+    ...(input.turnUsage === undefined ? {} : { turnUsage: input.turnUsage }),
     progress: []
   };
 }
@@ -256,6 +258,7 @@ function createStreamingGatewayHarness(input: {
     | { kind: "segmentBreak"; reason?: string }
   >;
   deliveryRouter?: ChannelGatewayOptions["deliveryRouter"];
+  channelMessageTurnStore?: ChannelGatewayOptions["channelMessageTurnStore"];
   telegramStreaming?: ChannelGatewayOptions["telegramStreaming"];
 } = {}): StreamingGatewayHarness {
   const handle = input.handle ?? createStreamingHandleSpy();
@@ -294,7 +297,8 @@ function createStreamingGatewayHarness(input: {
       maxFloodStrikes: 3,
       cleanupFailedAttempts: false
     },
-    deliveryRouter: input.deliveryRouter
+    deliveryRouter: input.deliveryRouter,
+    channelMessageTurnStore: input.channelMessageTurnStore
   });
 
   return { adapter: adapter as StreamingGatewayHarness["adapter"], handle, gateway, runtime };
@@ -701,6 +705,34 @@ describe("ChannelGateway Telegram streaming", () => {
     await gateway.receive(makeMessage("hello"));
 
     expect(adapter.records.filter((record) => record.kind === "text").map((record) => record.text)).toEqual([" answer"]);
+  });
+
+  it("attributes visible streaming previews and fallback delivery to the same turn", async () => {
+    const record = vi.fn();
+    const { adapter, gateway } = createStreamingGatewayHarness({
+      handle: createStreamingHandleSpy({
+        finishResult: {
+          delivered: false,
+          fallbackRequired: true,
+          fallbackText: " continuation",
+          messageIds: ["preview-1"]
+        }
+      }),
+      runtimeResponse: runtimeResponse({
+        text: "complete answer",
+        securityDecision: "allow",
+        turnUsage: turnUsage("turn-1", 120, 0.25)
+      }),
+      channelMessageTurnStore: { record, resolve: vi.fn() }
+    });
+    adapter.delivery!.sendText = vi.fn(async () => ({ messageIds: ["fallback-2"] }));
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({
+      platformMessageIds: ["preview-1", "fallback-2"],
+      turnId: "turn-1"
+    }));
   });
 
   it("stream finish failure falls back through DeliveryRouter", async () => {
@@ -1187,6 +1219,17 @@ function completeUsage(totalTokens: number, estimatedCostUsd: number) {
     usageComplete: true,
     costComplete: true,
     incompleteReasons: []
+  };
+}
+
+function turnUsage(turnId: string, totalTokens: number, estimatedCostUsd: number) {
+  return {
+    turnId,
+    mainAgent: completeUsage(totalTokens, estimatedCostUsd),
+    auxiliaryModels: completeUsage(0, 0),
+    delegatedWork: completeUsage(0, 0),
+    total: completeUsage(totalTokens, estimatedCostUsd),
+    provisional: false
   };
 }
 
@@ -3452,6 +3495,7 @@ describe("ChannelGateway commands", () => {
       }));
       const inspectLatestTurn = vi.fn(async (sessionId: string) => ({
         scope: "turn" as const,
+        selection: "latest" as const,
         sessionId,
         usage: {
           turnId: "turn-1",
@@ -3480,6 +3524,7 @@ describe("ChannelGateway commands", () => {
         usageInspector: {
           inspectSession,
           inspectLatestTurn,
+          inspectRepliedTurn: vi.fn(),
           inspectTurn: vi.fn(),
           inspectTask
         }
@@ -3508,6 +3553,141 @@ describe("ChannelGateway commands", () => {
       const result = await gateway.receive(makeMessage("/usage something"));
       expect(result.replyText).toBe("Usage: /usage | /usage last | /usage task <task-id>");
       expect(runtimeForSession).not.toHaveBeenCalled();
+    });
+
+    it("uses a replied Telegram answer as the turn scope without invoking a model", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const inspectTurn = vi.fn(async (sessionId: string, turnId: string) => ({
+        scope: "turn" as const,
+        selection: "specific" as const,
+        sessionId,
+        usage: turnUsage(turnId, 120, 0.25)
+      }));
+      const runtimeForSession = vi.fn(async () => createMinimalRuntime());
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession,
+        sessionStore: { getOrCreateSessionId: async () => "attached-session" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        channelMessageTurnStore: {
+          record: vi.fn(),
+          resolve: vi.fn(async () => ({
+            sessionId: "attached-session",
+            turnId: "turn-1",
+            createdAt: "2030-01-01T00:00:00.000Z"
+          }))
+        },
+        usageInspector: {
+          inspectSession: vi.fn(),
+          inspectLatestTurn: vi.fn(),
+          inspectRepliedTurn: vi.fn(),
+          inspectTurn,
+          inspectTask: vi.fn()
+        }
+      });
+
+      const result = await gateway.receive(makeMessage("/usage", {
+        metadata: { telegram: { messageId: 600, replyToMessageId: 501 } }
+      }));
+
+      expect(result.replyText).toContain("Usage — replied message");
+      expect(inspectTurn).toHaveBeenCalledWith("attached-session", "turn-1");
+      expect(runtimeForSession).not.toHaveBeenCalled();
+    });
+
+    it("fails closed when a replied Telegram message is not attributed to the current session", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const runtimeForSession = vi.fn(async () => createMinimalRuntime());
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession,
+        sessionStore: { getOrCreateSessionId: async () => "attached-session" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        channelMessageTurnStore: { record: vi.fn(), resolve: vi.fn(async () => undefined) },
+        usageInspector: {
+          inspectSession: vi.fn(),
+          inspectLatestTurn: vi.fn(),
+          inspectRepliedTurn: vi.fn(),
+          inspectTurn: vi.fn(),
+          inspectTask: vi.fn()
+        }
+      });
+
+      const result = await gateway.receive(makeMessage("/usage", {
+        metadata: { telegram: { messageId: 600, replyToMessageId: 999 } }
+      }));
+
+      expect(result.replyText).toBe("No usage attribution is available for the replied message in this session.");
+      expect(runtimeForSession).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Telegram reply usage attribution", () => {
+    it("records every final-answer message id and passes an authorized reply target into the next turn", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      let nextMessageId = 500;
+      adapter.delivery!.sendText = vi.fn(async () => ({ messageIds: [String(++nextMessageId)] }));
+      const bindings = new Map<string, { sessionId: string; turnId: string; createdAt: string }>();
+      const record = vi.fn((input: {
+        platformMessageIds: readonly string[];
+        sessionId: string;
+        turnId: string;
+      }) => {
+        for (const messageId of input.platformMessageIds) {
+          bindings.set(messageId, {
+            sessionId: input.sessionId,
+            turnId: input.turnId,
+            createdAt: "2030-01-01T00:00:00.000Z"
+          });
+        }
+      });
+      const resolve = vi.fn((input: { platformMessageId: string }) => bindings.get(input.platformMessageId));
+      const inspectTurn = vi.fn(async (sessionId: string, turnId: string) => ({
+        scope: "turn" as const,
+        selection: "specific" as const,
+        sessionId,
+        usage: turnUsage(turnId, 120, 0.25)
+      }));
+      const handled: Array<{ inputMetadata?: Record<string, unknown> }> = [];
+      let handledTurns = 0;
+      const handle = vi.fn(async (input: { inputMetadata?: Record<string, unknown> }) => {
+        handled.push(input);
+        handledTurns += 1;
+        const id = `turn-${handledTurns}`;
+        return runtimeResponse({
+          text: `answer ${handledTurns}`,
+          securityDecision: "allow",
+          turnUsage: turnUsage(id, 120, 0.25)
+        });
+      });
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({ ...createMinimalRuntime(), handle }),
+        sessionStore: { getOrCreateSessionId: async () => "attached-session" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        channelMessageTurnStore: { record, resolve },
+        usageInspector: {
+          inspectSession: vi.fn(),
+          inspectLatestTurn: vi.fn(),
+          inspectRepliedTurn: vi.fn(),
+          inspectTurn,
+          inspectTask: vi.fn()
+        }
+      });
+
+      await gateway.receive(makeMessage("do work", { id: "incoming-1" }));
+      await gateway.receive(makeMessage("how much did this cost?", {
+        id: "incoming-2",
+        metadata: { telegram: { messageId: 700, replyToMessageId: 501 } }
+      }));
+
+      expect(record).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        platformMessageIds: ["501"],
+        sessionId: "attached-session",
+        turnId: "turn-1"
+      }));
+      expect(resolve).toHaveBeenCalledWith(expect.objectContaining({ platformMessageId: "501" }));
+      expect(handled[1]?.inputMetadata).toEqual(expect.objectContaining({ usageReplyToTurnId: "turn-1" }));
     });
   });
 

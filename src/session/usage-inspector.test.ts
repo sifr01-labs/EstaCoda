@@ -46,6 +46,7 @@ describe("UsageInspector", () => {
     const inspection = await inspector.inspectLatestTurn("session-1", { excludeTurnId: "turn-2" });
     expect(inspection).toMatchObject({
       scope: "turn",
+      selection: "latest",
       usage: {
         turnId: "turn-1",
         mainAgent: { providerCalls: 1, estimatedCostUsd: 0.2 },
@@ -56,6 +57,38 @@ describe("UsageInspector", () => {
       }
     });
     expect(inspection?.usage.total.estimatedCostUsd).toBeCloseTo(0.6);
+  });
+
+  it("resolves a runtime-owned replied turn only within the current session lineage", async () => {
+    const db = new InMemorySessionDB();
+    await db.createSession({ id: "session-1", profileId: "alpha" });
+    await db.appendMessage({ id: "turn-1", sessionId: "session-1", role: "user", content: "original" });
+    await db.appendMessage({
+      id: "turn-2",
+      sessionId: "session-1",
+      role: "user",
+      content: "what did this cost?",
+      metadata: { usageReplyToTurnId: "turn-1" }
+    });
+    await db.recordProviderUsageEntries([usageEntry("turn-1", "main-1", "main", 0.25)]);
+    const inspector = createUsageInspector({ sessionDb: db, profileId: "alpha" });
+
+    await expect(inspector.inspectRepliedTurn("session-1", "turn-2")).resolves.toMatchObject({
+      scope: "turn",
+      selection: "replied",
+      usage: { turnId: "turn-1", total: { estimatedCostUsd: 0.25 } }
+    });
+
+    await db.createSession({ id: "other-session", profileId: "alpha" });
+    await db.appendMessage({ id: "other-turn", sessionId: "other-session", role: "user", content: "private" });
+    await db.appendMessage({
+      id: "turn-3",
+      sessionId: "session-1",
+      role: "user",
+      content: "cross-session",
+      metadata: { usageReplyToTurnId: "other-turn" }
+    });
+    await expect(inspector.inspectRepliedTurn("session-1", "turn-3")).resolves.toBeUndefined();
   });
 
   it("ignores a dangling completion link and finds the preceding valid completed turn", async () => {

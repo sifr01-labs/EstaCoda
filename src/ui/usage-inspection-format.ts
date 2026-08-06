@@ -35,7 +35,11 @@ function formatSessionUsageInspection(inspection: SessionUsageInspection): strin
 function formatTurnUsageInspection(inspection: TurnUsageInspection): string {
   const { usage } = inspection;
   return [
-    "Usage — latest completed turn",
+    inspection.selection === "replied"
+      ? "Usage — replied message"
+      : inspection.selection === "specific"
+        ? "Usage — selected turn"
+        : "Usage — latest completed turn",
     usageLine("Total", usage.total, usage.provisional),
     usageLine("Main agent", usage.mainAgent, false),
     usageLine("Auxiliary models", usage.auxiliaryModels, false),

@@ -15,7 +15,7 @@ import type {
 import { TASK_TOOL_RISK_CLASSES } from "../contracts/task.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
-import { PENDING_TURN_SCHEMA_VERSION } from "../session/pending-turn-schema.js";
+import { CHANNEL_MESSAGE_TURN_SCHEMA_VERSION } from "../session/channel-message-turn-schema.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 import { SQLiteTaskStore, TaskStoreIntegrityError, TaskStoreProfileError } from "./sqlite-task-store.js";
 import { taskListCursor } from "./task-store.js";
@@ -75,7 +75,7 @@ describe("SQLiteTaskStore", () => {
       "select name from sqlite_master where type = 'index'"
     ).all().map((row) => row.name));
 
-    expect(version).toBe(PENDING_TURN_SCHEMA_VERSION);
+    expect(version).toBe(CHANNEL_MESSAGE_TURN_SCHEMA_VERSION);
     expect(foreignKeys).toBe(1);
     expect([...TASK_TABLES].every((table) => tables.has(table))).toBe(true);
     expect([...OBSOLETE_EXECUTION_TABLES].every((table) => !tables.has(table))).toBe(true);
@@ -786,7 +786,7 @@ describe("Task schema migrations", () => {
       ).get()).toEqual({ name: "tasks" });
       expect(migrated.db.query<{ version: number }>(
         "select max(version) as version from schema_version"
-      ).get()?.version).toBe(PENDING_TURN_SCHEMA_VERSION);
+      ).get()?.version).toBe(CHANNEL_MESSAGE_TURN_SCHEMA_VERSION);
     } finally {
       migrated.close();
       rmSync(tempDir, { recursive: true, force: true });

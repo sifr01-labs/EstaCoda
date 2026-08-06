@@ -10,7 +10,7 @@ describe("session.usage", () => {
       contextWindow: { usedTokens: 4_000, totalTokens: 16_000, provider: "openai", model: "gpt-test" }
     }));
     const [tool] = createSessionUsageTool({
-      inspector: { inspectSession, inspectLatestTurn: vi.fn(), inspectTurn: vi.fn(), inspectTask: vi.fn() },
+      inspector: { inspectSession, inspectLatestTurn: vi.fn(), inspectRepliedTurn: vi.fn(), inspectTurn: vi.fn(), inspectTask: vi.fn() },
       currentSessionId: () => "session-1"
     });
 
@@ -26,6 +26,7 @@ describe("session.usage", () => {
   it("excludes the current tool-calling turn when inspecting the latest completed turn", async () => {
     const inspectLatestTurn = vi.fn(async () => ({
       scope: "turn" as const,
+      selection: "latest" as const,
       sessionId: "session-1",
       usage: {
         turnId: "prior-turn",
@@ -37,7 +38,7 @@ describe("session.usage", () => {
       }
     }));
     const [tool] = createSessionUsageTool({
-      inspector: { inspectSession: vi.fn(), inspectLatestTurn, inspectTurn: vi.fn(), inspectTask: vi.fn() },
+      inspector: { inspectSession: vi.fn(), inspectLatestTurn, inspectRepliedTurn: vi.fn(), inspectTurn: vi.fn(), inspectTask: vi.fn() },
       currentSessionId: () => "session-1"
     });
 
@@ -47,10 +48,40 @@ describe("session.usage", () => {
     expect(result.content).toContain("Delegated Task usage is included");
   });
 
+  it("uses runtime-owned reply attribution for the current channel turn", async () => {
+    const inspectRepliedTurn = vi.fn(async () => ({
+      scope: "turn" as const,
+      selection: "replied" as const,
+      sessionId: "session-1",
+      usage: {
+        turnId: "replied-turn",
+        mainAgent: usage(100, 0.2),
+        auxiliaryModels: usage(0, 0),
+        delegatedWork: usage(0, 0),
+        total: usage(100, 0.2),
+        provisional: false
+      }
+    }));
+    const [tool] = createSessionUsageTool({
+      inspector: {
+        inspectSession: vi.fn(),
+        inspectLatestTurn: vi.fn(),
+        inspectRepliedTurn,
+        inspectTurn: vi.fn(),
+        inspectTask: vi.fn()
+      },
+      currentSessionId: () => "session-1"
+    });
+
+    const result = await tool!.run({ scope: "replied_turn" }, { visibleTurnId: "current-turn" });
+    expect(inspectRepliedTurn).toHaveBeenCalledWith("session-1", "current-turn");
+    expect(result.content).toContain("Usage — replied message");
+  });
+
   it("rejects malformed scopes and reports an empty history deterministically", async () => {
     const inspectLatestTurn = vi.fn(async () => undefined);
     const [tool] = createSessionUsageTool({
-      inspector: { inspectSession: vi.fn(), inspectLatestTurn, inspectTurn: vi.fn(), inspectTask: vi.fn() },
+      inspector: { inspectSession: vi.fn(), inspectLatestTurn, inspectRepliedTurn: vi.fn(), inspectTurn: vi.fn(), inspectTask: vi.fn() },
       currentSessionId: () => "session-1"
     });
 
@@ -66,6 +97,7 @@ describe("session.usage", () => {
       inspector: {
         inspectSession: vi.fn(async () => { throw new Error("private database path"); }),
         inspectLatestTurn: vi.fn(),
+        inspectRepliedTurn: vi.fn(),
         inspectTurn: vi.fn(),
         inspectTask: vi.fn()
       },

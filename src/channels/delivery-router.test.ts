@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, rm, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -117,6 +117,20 @@ describe("DeliveryRouter", () => {
       expect(telegram.records).toHaveLength(1);
       expect(telegram.records[0].text).toBe("Hello");
       expect(telegram.records[0].sessionKey.chatId).toBe("123");
+    });
+
+    it("preserves platform message receipts for the origin delivery", async () => {
+      const router = new DeliveryRouter({ homeDir: tmpDir });
+      const telegram = createFakeTelegramAdapter() as FakeAdapter;
+      telegram.delivery!.sendText = vi.fn(async () => ({ messageIds: ["501", "502"] }));
+      router.registerAdapter(telegram);
+
+      const results = await router.deliverText([{ kind: "origin", originalSessionKey: baseSessionKey }], "Hello");
+
+      expect([...results.values()][0]).toEqual({
+        success: true,
+        receipt: { messageIds: ["501", "502"] }
+      });
     });
 
     it("preserves reply metadata when routing text to channel adapters", async () => {

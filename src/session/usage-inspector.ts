@@ -1,5 +1,5 @@
 import type { ProviderUsageEntry } from "../contracts/provider-usage.js";
-import type { SessionContextWindowUsage, SessionDB } from "../contracts/session.js";
+import type { SessionContextWindowUsage, SessionDB, SessionMessage } from "../contracts/session.js";
 import type { TaskStatus } from "../contracts/task.js";
 import type { SessionCostSummary, TurnUsageSummary, UsageCostSummary } from "../contracts/usage-cost.js";
 import type { ProviderSpendingScope } from "../contracts/provider-spend.js";
@@ -27,6 +27,7 @@ export type SessionUsageInspection = {
 
 export type TurnUsageInspection = {
   scope: "turn";
+  selection: "latest" | "replied" | "specific";
   sessionId: string;
   usage: TurnUsageSummary;
 };
@@ -45,6 +46,7 @@ export type UsageInspection = SessionUsageInspection | TurnUsageInspection | Tas
 export type UsageInspector = {
   inspectSession(sessionId: string): Promise<SessionUsageInspection | undefined>;
   inspectLatestTurn(sessionId: string, options?: { excludeTurnId?: string }): Promise<TurnUsageInspection | undefined>;
+  inspectRepliedTurn(sessionId: string, currentTurnId: string): Promise<TurnUsageInspection | undefined>;
   inspectTurn(sessionId: string, turnId: string): Promise<TurnUsageInspection | undefined>;
   inspectTask(sessionId: string, taskId: string): Promise<TaskUsageInspection | undefined>;
 };
@@ -87,7 +89,24 @@ export function createUsageInspector(input: {
         sessionId,
         options.excludeTurnId
       );
-      return turnId === undefined ? undefined : inspector.inspectTurn(sessionId, turnId);
+      const inspection = turnId === undefined ? undefined : await inspector.inspectTurn(sessionId, turnId);
+      return inspection === undefined ? undefined : { ...inspection, selection: "latest" };
+    },
+
+    async inspectRepliedTurn(sessionId, currentTurnId) {
+      const lineage = await verifiedCompressionLineage(input.sessionDb, sessionId, input.profileId);
+      if (lineage === undefined) return undefined;
+      const currentTurn = await userTurnInLineage(
+        input.sessionDb,
+        lineage.map((item) => item.id),
+        currentTurnId
+      );
+      const repliedTurnId = currentTurn?.metadata?.usageReplyToTurnId;
+      if (typeof repliedTurnId !== "string" || repliedTurnId.length === 0 || repliedTurnId.length > 512) {
+        return undefined;
+      }
+      const inspection = await inspector.inspectTurn(sessionId, repliedTurnId);
+      return inspection === undefined ? undefined : { ...inspection, selection: "replied" };
     },
 
     async inspectTurn(sessionId, turnId) {
@@ -103,7 +122,7 @@ export function createUsageInspector(input: {
         taskScanTruncated: taskState.truncated,
         turnId
       });
-      return { scope: "turn", sessionId, usage };
+      return { scope: "turn", selection: "specific", sessionId, usage };
     },
 
     async inspectTask(sessionId, taskId) {
@@ -223,6 +242,19 @@ async function lineageContainsUserTurn(
     if (messages.some((message) => message.id === turnId && message.role === "user")) return true;
   }
   return false;
+}
+
+async function userTurnInLineage(
+  sessionDb: SessionDB,
+  sessionIds: readonly string[],
+  turnId: string
+): Promise<SessionMessage | undefined> {
+  for (const sessionId of sessionIds) {
+    const message = (await sessionDb.listMessages(sessionId))
+      .find((candidate) => candidate.id === turnId && candidate.role === "user");
+    if (message !== undefined) return message;
+  }
+  return undefined;
 }
 
 function inspectTurnTaskState(

@@ -365,7 +365,7 @@ The immediate successful operator row says **task created** because `delegate_ta
 |------|------|---------------|
 | `session.usage` | `read-only-local` | None |
 
-**Behavior:** Reads canonical provider-usage records for `scope: "session"` or `scope: "latest_turn"`. It does not invoke a model. Latest-turn inspection excludes the current tool-calling turn, partitions Main agent, Auxiliary models, and Delegated work, and marks the result provisional while linked Task work remains active. Use `task.status` when the user names a particular Task. Task usage may already be included in its originating turn and session totals.
+**Behavior:** Reads canonical provider-usage records for `scope: "session"`, `scope: "latest_turn"`, or `scope: "replied_turn"`. It does not invoke another model. Latest-turn inspection excludes the current tool-calling turn. On Telegram, replied-turn inspection uses a runtime-owned delivered-message mapping rather than a model-supplied turn ID, then re-authorizes the target against the current Session lineage. Turn output partitions Main agent, Auxiliary models, and Delegated work, and remains provisional while linked Task work is active. Use `task.status` when the user names a particular Task. Task usage may already be included in its originating turn and session totals.
 
 ### Session search tool
 

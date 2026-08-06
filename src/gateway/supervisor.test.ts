@@ -1531,8 +1531,13 @@ describe("runGatewaySupervisor", () => {
     expect(capturedOpts.usageInspector).toMatchObject({
       inspectSession: expect.any(Function),
       inspectLatestTurn: expect.any(Function),
+      inspectRepliedTurn: expect.any(Function),
       inspectTurn: expect.any(Function),
       inspectTask: expect.any(Function)
+    });
+    expect(capturedOpts.channelMessageTurnStore).toMatchObject({
+      record: expect.any(Function),
+      resolve: expect.any(Function)
     });
   });
 

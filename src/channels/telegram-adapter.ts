@@ -155,6 +155,9 @@ type TelegramMessage = {
   video?: TelegramFile;
   audio?: TelegramFile;
   voice?: TelegramFile;
+  reply_to_message?: {
+    message_id: number;
+  };
 };
 
 type TelegramFile = {
@@ -335,19 +338,22 @@ export class TelegramAdapter implements ChannelAdapter {
             ...options,
             format: formatted.format
           });
-          return;
+          return { messageIds: [String(editMessageId)] };
         } catch {
           // Stale or deleted callback messages should not break delivery; send a fresh card instead.
         }
       }
 
+      const messageIds: string[] = [];
       for (const [index, chunk] of chunks.entries()) {
-        await this.#sendMessage(address, chunk, {
+        const sent = await this.#sendMessage(address, chunk, {
           ...options,
           actions: index === chunks.length - 1 ? options?.actions : undefined,
           format: formatted.format
         });
+        messageIds.push(String(sent.message_id));
       }
+      return { messageIds };
     },
     sendProgress: async (sessionKey: ChannelSessionKey, event: RuntimeEvent) => {
       const address = telegramDeliveryAddress(sessionKey);
@@ -1517,7 +1523,8 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         await this.#input.editMessageText(segment.messageId, firstChunk, { format: formatted.format });
 
         for (const chunk of remainingChunks) {
-          await this.#input.sendMessage(chunk, { format: formatted.format });
+          const message = await this.#input.sendMessage(chunk, { format: formatted.format });
+          this.#recordPreviewMessage(message.message_id);
         }
 
         this.#clearTimers();
@@ -1525,7 +1532,8 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         return {
           delivered: true,
           fallbackRequired: false,
-          deliveredText: finalText
+          deliveredText: finalText,
+          messageIds: [...this.#previewMessageIds].map(String)
         };
       } catch (error) {
         this.#captureError(error);
@@ -1831,15 +1839,17 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
   }
 
   async #finishWithFreshFinal(finalText: string): Promise<ChannelStreamingTextResult> {
+    const messageIds: string[] = [];
     try {
       const richMessage = await this.#input.trySendRich?.(finalText);
       if (richMessage !== undefined) {
-        await this.#deleteResponsePreviewMessages();
+        const retainedPreviewIds = await this.#deleteResponsePreviewMessages();
         this.#clearTimers();
         return {
           delivered: true,
           fallbackRequired: false,
-          deliveredText: finalText
+          deliveredText: finalText,
+          messageIds: [String(richMessage.message_id), ...retainedPreviewIds.map(String)]
         };
       }
 
@@ -1851,23 +1861,26 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       }
 
       for (const chunk of chunks) {
-        await this.#input.sendMessage(chunk, { format: formatted.format });
+        const message = await this.#input.sendMessage(chunk, { format: formatted.format });
+        messageIds.push(String(message.message_id));
       }
 
-      await this.#deleteResponsePreviewMessages();
+      const retainedPreviewIds = await this.#deleteResponsePreviewMessages();
       this.#clearTimers();
       return {
         delivered: true,
         fallbackRequired: false,
-        deliveredText: finalText
+        deliveredText: finalText,
+        messageIds: [...messageIds, ...retainedPreviewIds.map(String)]
       };
     } catch (error) {
       this.#captureError(error);
-      return this.#fallbackResult(finalText);
+      return this.#fallbackResult(finalText, messageIds);
     }
   }
 
   async #finishDraft(finalText: string): Promise<ChannelStreamingTextResult> {
+    const messageIds: string[] = [];
     try {
       const formatted = this.#input.formatFinalText(finalText);
       const chunks = formatted.chunks.flatMap((chunk) => splitStreamingTelegramText(chunk, TELEGRAM_MAX_TEXT_UTF16));
@@ -1877,19 +1890,21 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       }
 
       for (const chunk of chunks) {
-        await this.#input.sendMessage(chunk, { format: formatted.format });
+        const message = await this.#input.sendMessage(chunk, { format: formatted.format });
+        messageIds.push(String(message.message_id));
       }
 
-      await this.#deleteResponsePreviewMessages();
+      const retainedPreviewIds = await this.#deleteResponsePreviewMessages();
       this.#clearTimers();
       return {
         delivered: true,
         fallbackRequired: false,
-        deliveredText: finalText
+        deliveredText: finalText,
+        messageIds: [...messageIds, ...retainedPreviewIds.map(String)]
       };
     } catch (error) {
       this.#captureError(error);
-      return this.#fallbackResult(finalText);
+      return this.#fallbackResult(finalText, messageIds);
     }
   }
 
@@ -1969,18 +1984,21 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
     segment.deliveredVisibleText = "";
   }
 
-  async #deleteResponsePreviewMessages(): Promise<void> {
+  async #deleteResponsePreviewMessages(): Promise<number[]> {
     const messageIds = Array.from(this.#previewMessageIds);
+    const retainedMessageIds: number[] = [];
 
     for (const messageId of messageIds) {
       try {
         await this.#input.deleteMessage(messageId);
       } catch (error) {
         this.#captureError(error);
+        retainedMessageIds.push(messageId);
       } finally {
         this.#previewMessageIds.delete(messageId);
       }
     }
+    return retainedMessageIds;
   }
 
   #segmentPreviewMessageIds(segment: TelegramStreamingTextSegment): number[] {
@@ -2017,11 +2035,16 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
     return continuation.length === 0 ? {} : { fallbackText: continuation };
   }
 
-  #fallbackResult(finalText: string): ChannelStreamingTextResult {
+  #fallbackResult(finalText: string, additionalMessageIds: readonly string[] = []): ChannelStreamingTextResult {
+    const messageIds = [...new Set([
+      ...Array.from(this.#previewMessageIds, String),
+      ...additionalMessageIds
+    ])];
     return {
       delivered: false,
       fallbackRequired: true,
-      ...this.#fallbackTextPayload(finalText)
+      ...this.#fallbackTextPayload(finalText),
+      ...(messageIds.length === 0 ? {} : { messageIds })
     };
   }
 
@@ -2297,6 +2320,9 @@ export function updateToChannelMessage(update: TelegramUpdate, now: () => Date =
         updateId: update.update_id,
         messageId: message.message_id,
         chatType: message.chat.type,
+        ...(message.reply_to_message === undefined
+          ? {}
+          : { replyToMessageId: message.reply_to_message.message_id }),
         ...(message.media_group_id === undefined ? {} : { mediaGroupId: message.media_group_id })
       }
     }

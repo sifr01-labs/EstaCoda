@@ -5,6 +5,7 @@ describe("formatUsageInspection", () => {
   it("does not present unknown provisional cost as recorded zero", () => {
     const text = formatUsageInspection({
       scope: "turn",
+      selection: "latest",
       sessionId: "session-1",
       usage: {
         turnId: "turn-1",
@@ -19,6 +20,24 @@ describe("formatUsageInspection", () => {
     expect(text).toContain("Total: at least 0 tokens · unavailable");
     expect(text).not.toContain("Total: at least 0 tokens · $0.00");
     expect(text).toContain("do not add it again");
+  });
+
+  it("labels reply-attributed turn usage distinctly", () => {
+    const text = formatUsageInspection({
+      scope: "turn",
+      selection: "replied",
+      sessionId: "session-1",
+      usage: {
+        turnId: "turn-1",
+        mainAgent: usage(10, 0.01, true),
+        auxiliaryModels: usage(0, 0, true),
+        delegatedWork: usage(0, 0, true),
+        total: usage(10, 0.01, true),
+        provisional: false
+      }
+    });
+
+    expect(text).toContain("Usage — replied message");
   });
 
   it("renders recorded zero exactly for a settled Task", () => {

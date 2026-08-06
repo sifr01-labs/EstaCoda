@@ -21,6 +21,7 @@ import { createProviderUsageRecorder } from "../providers/provider-usage-ledger.
 import { SQLiteProviderSpendController } from "../tasks/sqlite-provider-spend.js";
 import { TaskOperatorService } from "../tasks/task-operator-service.js";
 import { createUsageInspector } from "../session/usage-inspector.js";
+import { SQLiteChannelMessageTurnStore } from "../channels/channel-message-turn-store.js";
 import type { MemoryCurationCheckpointResult } from "../memory/memory-curation-service.js";
 import { curateSessionFinalizationJob } from "../memory/session-finalization-curator.js";
 import {
@@ -1353,6 +1354,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       }),
       spendingScope: (ownerId) => usageSpendController.getScope("session", ownerId)
     });
+    const channelMessageTurnStore = new SQLiteChannelMessageTurnStore({ db: sessionDb.db, profileId });
     const taskResultService = new TaskResultService({
       store: taskStore,
       profileId,
@@ -1598,6 +1600,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           approvalQueue: gatewayApprovalQueue,
           pendingTurnStore,
           usageInspector: gatewayUsageInspector,
+          channelMessageTurnStore,
           voiceStateManager,
           voiceAutoTtsDefault: config.voice.autoTts,
           autoTtsConfig: async () => {
@@ -1664,6 +1667,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           approvalQueue: gatewayApprovalQueue,
           pendingTurnStore,
           usageInspector: gatewayUsageInspector,
+          channelMessageTurnStore,
           voiceStateManager,
           voiceAutoTtsDefault: config.voice.autoTts,
           autoTtsConfig: async () => {
