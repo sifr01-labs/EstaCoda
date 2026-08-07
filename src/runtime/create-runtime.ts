@@ -53,8 +53,6 @@ import type { SessionContextWindowUsage, SessionDB } from "../contracts/session.
 import type { SessionCostSummary } from "../contracts/usage-cost.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { createUsageInspector, type UsageInspector } from "../session/usage-inspector.js";
-import { loadSessionContextWindowUsage } from "../session/session-context-window-usage.js";
-import { loadSessionCostUsage } from "../session/session-cost-usage.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import {
   SessionFinalizationQueue,
@@ -1178,22 +1176,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return cancelled?.kind === "agent-cancelled" ? cancelled.resumeNote : undefined;
     },
     async currentContextWindowUsage() {
-      return await loadSessionContextWindowUsage({
-        sessionDb,
-        sessionId: sessionRuntimeContext.currentSessionId(),
-        profileId
-      });
+      return (await usageInspector.inspectSession(sessionRuntimeContext.currentSessionId()))?.contextWindow;
     },
     async currentSessionCost() {
-      return await loadSessionCostUsage({
-        sessionDb,
-        taskStore,
-        sessionId: sessionRuntimeContext.currentSessionId(),
-        profileId,
-        ...(providerSpendController === undefined ? {} : {
-          spendingScope: (ownerId) => providerSpendController.getScope("session", ownerId)
-        })
-      });
+      return (await usageInspector.inspectSession(sessionRuntimeContext.currentSessionId()))?.usage;
     },
     async inspectMemoryPromotions() {
       return await memoryProvider.inspectPromotions?.() ?? [];

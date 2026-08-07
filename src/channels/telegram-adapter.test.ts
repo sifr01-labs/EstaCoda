@@ -2757,6 +2757,49 @@ describe("TelegramAdapter", () => {
     }));
   });
 
+  it("omits missing or malformed replied Telegram message ids from adapter metadata", () => {
+    const missing = updateToChannelMessage({
+      update_id: 47,
+      message: {
+        message_id: 12,
+        text: "standalone",
+        chat: { id: "chat-1", type: "private" }
+      }
+    });
+    const malformed = updateToChannelMessage({
+      update_id: 48,
+      message: {
+        message_id: 13,
+        text: "bad reply",
+        chat: { id: "chat-1", type: "private" },
+        reply_to_message: { message_id: "7" as never }
+      }
+    });
+
+    expect(missing?.metadata?.telegram).not.toHaveProperty("replyToMessageId");
+    expect(malformed?.metadata?.telegram).not.toHaveProperty("replyToMessageId");
+  });
+
+  it("preserves a bounded reply id for edited messages in Telegram topics", () => {
+    const message = updateToChannelMessage({
+      update_id: 49,
+      edited_message: {
+        message_id: 14,
+        message_thread_id: 99,
+        text: "edited reply",
+        chat: { id: "group-1", type: "supergroup" },
+        from: { id: "user-1" },
+        reply_to_message: { message_id: 8 }
+      }
+    });
+
+    expect(message?.sessionKey).toMatchObject({ chatType: "thread", threadId: "99" });
+    expect(message?.metadata?.telegram).toEqual(expect.objectContaining({
+      messageId: 14,
+      replyToMessageId: 8
+    }));
+  });
+
   it("batches Telegram album photos into one channel message", async () => {
     vi.useFakeTimers();
     const fetch = vi.fn(async (url: string) => {

@@ -56,7 +56,7 @@ export function createSessionUsageTool(options: {
           input.scope === "latest_turn"
             ? "No completed turn usage is available in this session."
             : input.scope === "replied_turn"
-              ? "No authorized usage attribution is available for the replied message."
+              ? "No referenced turn is available. Reply to the Telegram message you want to inspect, then ask again or send /usage."
               : "Session usage is unavailable."
         );
       }

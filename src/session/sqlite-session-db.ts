@@ -50,8 +50,10 @@ import {
   PENDING_TURN_SCHEMA_VERSION
 } from "./pending-turn-schema.js";
 import {
+  CHANNEL_MESSAGE_TURN_SCHEMA_V31,
   CHANNEL_MESSAGE_TURN_SCHEMA_VERSION,
-  migrateChannelMessageTurnSchemaV31
+  migrateChannelMessageTurnSchemaV31,
+  migrateChannelMessageTurnSchemaV32
 } from "./channel-message-turn-schema.js";
 import { assertSpendingLimit, cloneSpendingLimit, type SpendingLimit } from "../contracts/budget.js";
 import {
@@ -975,8 +977,10 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       migratePendingTurnSchemaV29(this.#db));
     this.#runMigrationStep(PENDING_TURN_SCHEMA_VERSION, "v0.10-schema-v30-pending-turn-delivery-identities", () =>
       migratePendingTurnDeliveryIdentitySchemaV30(this.#db));
-    this.#runMigrationStep(CHANNEL_MESSAGE_TURN_SCHEMA_VERSION, "v0.10-schema-v31-channel-message-turn-bindings", () =>
+    this.#runMigrationStep(CHANNEL_MESSAGE_TURN_SCHEMA_V31, "v0.10-schema-v31-channel-message-turn-bindings", () =>
       migrateChannelMessageTurnSchemaV31(this.#db));
+    this.#runMigrationStep(CHANNEL_MESSAGE_TURN_SCHEMA_VERSION, "v0.10-schema-v32-bounded-channel-message-turn-bindings", () =>
+      migrateChannelMessageTurnSchemaV32(this.#db));
   }
 
   #withMigrationLock(migrate: () => void): void {

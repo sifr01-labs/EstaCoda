@@ -7,10 +7,11 @@ describe("session.usage", () => {
       scope: "session" as const,
       sessionId: "session-1",
       usage: usage(120, 0.25),
-      contextWindow: { usedTokens: 4_000, totalTokens: 16_000, provider: "openai", model: "gpt-test" }
+      contextWindow: { usedTokens: 4_000, totalTokens: 16_000, provider: "openai", model: "gpt-test" },
+      asOf: "latest-settled-provider-call" as const
     }));
     const [tool] = createSessionUsageTool({
-      inspector: { inspectSession, inspectLatestTurn: vi.fn(), inspectRepliedTurn: vi.fn(), inspectTurn: vi.fn(), inspectTask: vi.fn() },
+      inspector: { inspectSession, inspectLatestTurn: vi.fn(), inspectRepliedTurn: vi.fn(), inspectLinkedTurn: vi.fn(), inspectTurn: vi.fn(), inspectTask: vi.fn() },
       currentSessionId: () => "session-1"
     });
 
@@ -35,10 +36,12 @@ describe("session.usage", () => {
         delegatedWork: usage(0, 0),
         total: usage(120, 0.25),
         provisional: false
-      }
+      },
+      originatingTasks: { active: 0, settled: 0, scanTruncated: false },
+      asOf: "latest-settled-provider-call" as const
     }));
     const [tool] = createSessionUsageTool({
-      inspector: { inspectSession: vi.fn(), inspectLatestTurn, inspectRepliedTurn: vi.fn(), inspectTurn: vi.fn(), inspectTask: vi.fn() },
+      inspector: { inspectSession: vi.fn(), inspectLatestTurn, inspectRepliedTurn: vi.fn(), inspectLinkedTurn: vi.fn(), inspectTurn: vi.fn(), inspectTask: vi.fn() },
       currentSessionId: () => "session-1"
     });
 
@@ -60,13 +63,16 @@ describe("session.usage", () => {
         delegatedWork: usage(0, 0),
         total: usage(100, 0.2),
         provisional: false
-      }
+      },
+      originatingTasks: { active: 0, settled: 0, scanTruncated: false },
+      asOf: "latest-settled-provider-call" as const
     }));
     const [tool] = createSessionUsageTool({
       inspector: {
         inspectSession: vi.fn(),
         inspectLatestTurn: vi.fn(),
         inspectRepliedTurn,
+        inspectLinkedTurn: vi.fn(),
         inspectTurn: vi.fn(),
         inspectTask: vi.fn()
       },
@@ -81,7 +87,7 @@ describe("session.usage", () => {
   it("rejects malformed scopes and reports an empty history deterministically", async () => {
     const inspectLatestTurn = vi.fn(async () => undefined);
     const [tool] = createSessionUsageTool({
-      inspector: { inspectSession: vi.fn(), inspectLatestTurn, inspectRepliedTurn: vi.fn(), inspectTurn: vi.fn(), inspectTask: vi.fn() },
+      inspector: { inspectSession: vi.fn(), inspectLatestTurn, inspectRepliedTurn: vi.fn(), inspectLinkedTurn: vi.fn(), inspectTurn: vi.fn(), inspectTask: vi.fn() },
       currentSessionId: () => "session-1"
     });
 
@@ -98,6 +104,7 @@ describe("session.usage", () => {
         inspectSession: vi.fn(async () => { throw new Error("private database path"); }),
         inspectLatestTurn: vi.fn(),
         inspectRepliedTurn: vi.fn(),
+        inspectLinkedTurn: vi.fn(),
         inspectTurn: vi.fn(),
         inspectTask: vi.fn()
       },

@@ -20,6 +20,7 @@ describe("UsageInspector", () => {
     const inspector = createUsageInspector({ sessionDb: db, profileId: "alpha" });
     await expect(inspector.inspectSession("session-1")).resolves.toMatchObject({
       scope: "session",
+      asOf: "latest-settled-provider-call",
       usage: { totalTokens: 120, estimatedCostUsd: 0.25, costComplete: true },
       contextWindow: { usedTokens: 4_000, totalTokens: 16_000 }
     });
@@ -47,6 +48,8 @@ describe("UsageInspector", () => {
     expect(inspection).toMatchObject({
       scope: "turn",
       selection: "latest",
+      asOf: "latest-settled-provider-call",
+      originatingTasks: { active: 0, settled: 0, scanTruncated: false },
       usage: {
         turnId: "turn-1",
         mainAgent: { providerCalls: 1, estimatedCostUsd: 0.2 },
@@ -89,6 +92,32 @@ describe("UsageInspector", () => {
       metadata: { usageReplyToTurnId: "other-turn" }
     });
     await expect(inspector.inspectRepliedTurn("session-1", "turn-3")).resolves.toBeUndefined();
+  });
+
+  it("authorizes linked turns only when the mapped session is in the active compression lineage", async () => {
+    const db = new InMemorySessionDB();
+    await db.createSession({ id: "parent", profileId: "alpha", endReason: "compression" });
+    await db.appendMessage({ id: "parent-turn", sessionId: "parent", role: "user", content: "original" });
+    await db.createSession({
+      id: "child",
+      profileId: "alpha",
+      parentSessionId: "parent",
+      metadata: { compactedFromSessionId: "parent" }
+    });
+    await db.appendMessage({ id: "child-turn", sessionId: "child", role: "user", content: "continued" });
+    await db.createSession({ id: "reset", profileId: "alpha" });
+    await db.recordProviderUsageEntries([usageEntry("parent-turn", "main-1", "main", 0.25, {
+      sessionId: "parent"
+    })]);
+    const inspector = createUsageInspector({ sessionDb: db, profileId: "alpha" });
+
+    await expect(inspector.inspectLinkedTurn("child", "parent", "parent-turn")).resolves.toMatchObject({
+      usage: { turnId: "parent-turn", total: { estimatedCostUsd: 0.25 } }
+    });
+    await expect(inspector.inspectLinkedTurn("child", "child", "child-turn")).resolves.toBeDefined();
+    await expect(inspector.inspectLinkedTurn("child", "child", "parent-turn")).resolves.toBeUndefined();
+    await expect(inspector.inspectLinkedTurn("reset", "parent", "parent-turn")).resolves.toBeUndefined();
+    await expect(inspector.inspectLinkedTurn("child", "reset", "parent-turn")).resolves.toBeUndefined();
   });
 
   it("ignores a dangling completion link and finds the preceding valid completed turn", async () => {
@@ -134,6 +163,14 @@ describe("UsageInspector", () => {
           usageComplete: true,
           pricingComplete: true,
           incompleteReasons: []
+        },
+        spending: {
+          spentCostUsd: 0.25,
+          reservedCostUsd: 0.1,
+          remainingCostUsd: 0.65,
+          maxEstimatedCostUsd: 1,
+          warningThresholdPercent: 80,
+          state: "available" as const
         }
       };
     });
@@ -147,7 +184,9 @@ describe("UsageInspector", () => {
       scope: "task",
       status: "running",
       provisional: true,
-      usage: { totalTokens: 120, estimatedCostUsd: 0.25 }
+      usage: { totalTokens: 120, estimatedCostUsd: 0.25 },
+      budget: { spentCostUsd: 0.25, reservedCostUsd: 0.1, remainingCostUsd: 0.65 },
+      asOf: "latest-settled-provider-call"
     });
     await expect(inspector.inspectTask("session-1", "other")).resolves.toBeUndefined();
   });
@@ -170,7 +209,8 @@ describe("UsageInspector", () => {
     });
 
     await expect(inspector.inspectTurn("session-1", "turn-1")).resolves.toMatchObject({
-      usage: { provisional: true }
+      usage: { provisional: true },
+      originatingTasks: { active: 1, settled: 0, scanTruncated: false }
     });
     expect(listTasks).toHaveBeenCalledWith(expect.not.objectContaining({ rootOnly: true }));
   });

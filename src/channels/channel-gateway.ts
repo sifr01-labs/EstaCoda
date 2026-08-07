@@ -93,8 +93,12 @@ import { createProviderModelSelectionFlow } from "../providers/provider-model-se
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { saveRuntimeConfig } from "../config/runtime-config.js";
 import { formatUsageInspection } from "../ui/usage-inspection-format.js";
-import type { UsageInspection, UsageInspector } from "../session/usage-inspector.js";
+import type { TurnUsageInspection, UsageInspection, UsageInspector } from "../session/usage-inspector.js";
 import type { ChannelMessageTurnStore } from "./channel-message-turn-store.js";
+import {
+  mergedTelegramAttributionMetadata,
+  telegramAttributionMessageIds
+} from "./telegram-message-attribution.js";
 import type { VoiceStateManager, VoiceMode } from "../gateway/voice-state.js";
 import {
   checkTtsProviderStatus,
@@ -288,6 +292,7 @@ type ChannelTextDebounceBuffer = {
   latestReceivedAt: string;
   textChunks: string[];
   messageIds: string[];
+  telegramMessageIds: string[];
   totalChars: number;
   timer: ReturnType<typeof setTimeout> | undefined;
 };
@@ -588,10 +593,10 @@ export class ChannelGateway {
     }
   }
 
-  async #authorizedUsageReplyToTurnId(
+  async #authorizedUsageReplyInspection(
     message: ChannelMessage,
     sessionId: string
-  ): Promise<string | undefined> {
+  ): Promise<TurnUsageInspection | undefined> {
     const platformMessageId = telegramReplyToMessageId(message);
     if (
       platformMessageId === undefined ||
@@ -606,8 +611,11 @@ export class ChannelGateway {
         platformMessageId
       });
       if (binding === undefined) return undefined;
-      const inspection = await this.#usageInspector.inspectTurn(sessionId, binding.turnId);
-      return inspection?.usage.turnId;
+      return await this.#usageInspector.inspectLinkedTurn(
+        sessionId,
+        binding.sessionId,
+        binding.turnId
+      );
     } catch (error) {
       this.#logWarning?.(`Channel reply attribution lookup failed (${boundedErrorClass(error)}).`);
       return undefined;
@@ -617,10 +625,12 @@ export class ChannelGateway {
   async #recordChannelMessageTurnBindings(input: {
     sessionKey: ChannelSessionKey;
     platformMessageIds: readonly string[] | undefined;
+    direction: "inbound" | "outbound";
     sessionId: string;
     turnId: string | undefined;
   }): Promise<void> {
     if (
+      input.sessionKey.platform !== "telegram" ||
       this.#channelMessageTurnStore === undefined ||
       input.turnId === undefined ||
       input.platformMessageIds === undefined ||
@@ -632,6 +642,7 @@ export class ChannelGateway {
       await this.#channelMessageTurnStore.record({
         sessionKey: input.sessionKey,
         platformMessageIds: input.platformMessageIds,
+        direction: input.direction,
         sessionId: input.sessionId,
         turnId: input.turnId
       });
@@ -1316,6 +1327,10 @@ export class ChannelGateway {
     if (existing !== undefined) {
       existing.textChunks.push(text);
       existing.messageIds.push(message.id);
+      existing.telegramMessageIds = [...new Set([
+        ...existing.telegramMessageIds,
+        ...telegramAttributionMessageIds(message)
+      ])].slice(0, 256);
       existing.latestReceivedAt = message.receivedAt;
       existing.totalChars += text.length;
       existing.adapter = adapter;
@@ -1337,6 +1352,7 @@ export class ChannelGateway {
       latestReceivedAt: message.receivedAt,
       textChunks: [text],
       messageIds: [message.id],
+      telegramMessageIds: telegramAttributionMessageIds(message),
       totalChars: text.length,
       timer: undefined
     };
@@ -1436,6 +1452,7 @@ export class ChannelGateway {
       receivedAt: buffer.latestReceivedAt,
       metadata: {
         ...(buffer.firstMessage.metadata ?? {}),
+        ...mergedTelegramAttributionMetadata(buffer.firstMessage, buffer.telegramMessageIds),
         debouncedMessageIds: buffer.messageIds,
         debounceSize: buffer.textChunks.length,
         debounceWindowMs: buffer.config.textDebounceMs
@@ -1685,7 +1702,7 @@ export class ChannelGateway {
         }
       }
 
-      const usageReplyToTurnId = await this.#authorizedUsageReplyToTurnId(message, sessionId);
+      const usageReplyToTurnId = (await this.#authorizedUsageReplyInspection(message, sessionId))?.usage.turnId;
 
       const securityPolicy = this.#securityPolicyFor(
         normalizedSessionKey,
@@ -1794,11 +1811,20 @@ export class ChannelGateway {
           ...(receipt?.messageIds ?? [])
         ])];
       }
+      const responseTurnId = response.turnUsage?.turnId;
+      await this.#recordChannelMessageTurnBindings({
+        sessionKey: normalizedSessionKey,
+        platformMessageIds: telegramAttributionMessageIds(message),
+        direction: "inbound",
+        sessionId,
+        turnId: responseTurnId
+      });
       await this.#recordChannelMessageTurnBindings({
         sessionKey: normalizedSessionKey,
         platformMessageIds: finalMessageIds,
+        direction: "outbound",
         sessionId,
-        turnId: response.turnUsage?.turnId
+        turnId: responseTurnId
       });
       await adapter.send?.({
         conversationId: message.sessionKey.chatId,
@@ -1823,7 +1849,7 @@ export class ChannelGateway {
 
       if (pendingApproval !== undefined) {
         const approvalPrompt = renderApprovalPrompt(pendingApproval, adapter.kind === "telegram" ? "html" : "plain");
-        await this.#deliverText(adapter,
+        const approvalReceipt = await this.#deliverText(adapter,
           normalizedSessionKey,
           approvalPrompt,
           pendingApproval.approvalId === undefined
@@ -1835,6 +1861,13 @@ export class ChannelGateway {
                 actions: renderPendingApprovalActions(pendingApproval)
               }
         );
+        await this.#recordChannelMessageTurnBindings({
+          sessionKey: normalizedSessionKey,
+          platformMessageIds: approvalReceipt?.messageIds,
+          direction: "outbound",
+          sessionId,
+          turnId: responseTurnId
+        });
         await adapter.send?.({
           conversationId: message.sessionKey.chatId,
           sessionKey: normalizedSessionKey,
@@ -2911,12 +2944,9 @@ export class ChannelGateway {
 
       let inspection: UsageInspection | undefined;
       try {
-        const replyToTurnId = replyRequested
-          ? await this.#authorizedUsageReplyToTurnId(message, sessionId)
+        const repliedInspection = replyRequested
+          ? await this.#authorizedUsageReplyInspection(message, sessionId)
           : undefined;
-        const repliedInspection = this.#usageInspector === undefined || replyToTurnId === undefined
-          ? undefined
-          : await this.#usageInspector.inspectTurn(sessionId, replyToTurnId);
         inspection = this.#usageInspector === undefined
           ? undefined
           : replyRequested
@@ -2933,7 +2963,7 @@ export class ChannelGateway {
       }
       const text = inspection === undefined
         ? replyRequested
-          ? "No usage attribution is available for the replied message in this session."
+          ? "No referenced turn is available in this session. Reply to an attributed Telegram message and send /usage again."
           : args[0]?.toLowerCase() === "task"
           ? "Task usage is unavailable for this session."
           : args[0]?.toLowerCase() === "last"

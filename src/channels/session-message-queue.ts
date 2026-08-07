@@ -1,5 +1,9 @@
 import type { ChannelKind } from "../contracts/channel.js";
 import type { ChannelMessage } from "../contracts/channel.js";
+import {
+  mergedTelegramAttributionMetadata,
+  telegramAttributionMessageIds
+} from "./telegram-message-attribution.js";
 
 export type ChannelBusyPolicy = "reject" | "queue" | "interrupt";
 
@@ -132,6 +136,7 @@ export class SessionMessageQueue {
             text: `${tail.message.text}${separator}${message.text}`,
             metadata: {
               ...(tail.message.metadata ?? {}),
+              ...mergedTelegramAttributionMetadata(tail.message, telegramAttributionMessageIds(message)),
               busyTextCoalescedMessageIds: messages.map((item) => item.id),
               busyTextCoalescedReceivedAts: messages.map((item) => item.receivedAt),
               busyTextCoalescingSize: messages.length,

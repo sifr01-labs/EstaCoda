@@ -44,22 +44,45 @@ function formatTurnUsageInspection(inspection: TurnUsageInspection): string {
     usageLine("Main agent", usage.mainAgent, false),
     usageLine("Auxiliary models", usage.auxiliaryModels, false),
     usageLine("Delegated work", usage.delegatedWork, usage.provisional),
-    `Status: ${usage.provisional ? "provisional — linked Task work is still active" : "settled"}`,
+    turnTaskStatusLine(inspection),
+    "As of: latest settled provider call",
     formatUsageCostNotice(usage.total),
     "Delegated Task usage is included in the total; do not add it again."
   ].filter((line): line is string => line !== undefined).join("\n");
 }
 
 function formatTaskUsageInspection(inspection: TaskUsageInspection): string {
+  const budget = inspection.budget;
   return [
     "Usage — Task",
     `Task: ${inspection.taskId}`,
     `Status: ${inspection.status}`,
     usageLine("Total", inspection.usage, inspection.provisional),
     `Accounting: ${inspection.provisional ? "provisional" : "settled"}`,
+    "As of: latest settled provider call",
+    ...(budget === undefined ? [] : [
+      `Task budget: ${formatUsdAmount(budget.spentCostUsd)} spent · ${formatUsdAmount(budget.reservedCostUsd)} reserved · ${formatUsdAmount(budget.remainingCostUsd)} remaining`
+    ]),
     formatUsageCostNotice(inspection.usage),
     "This Task may already be included in its originating turn and session totals."
   ].filter((line): line is string => line !== undefined).join("\n");
+}
+
+function turnTaskStatusLine(inspection: TurnUsageInspection): string {
+  const tasks = inspection.originatingTasks;
+  if (tasks.scanTruncated && tasks.active === 0) {
+    return "Status: provisional — originating Task scan was truncated; additional active work may exist";
+  }
+  if (!inspection.usage.provisional) {
+    return tasks.settled === 0
+      ? "Status: settled"
+      : `Status: settled — ${formatCount(tasks.settled)} originating ${tasks.settled === 1 ? "Task" : "Tasks"} settled`;
+  }
+  const qualifier = tasks.scanTruncated ? "at least " : "";
+  const settled = tasks.settled === 0
+    ? ""
+    : `; ${formatCount(tasks.settled)} ${tasks.settled === 1 ? "is" : "are"} settled`;
+  return `Status: provisional — ${qualifier}${formatCount(tasks.active)} originating ${tasks.active === 1 ? "Task is" : "Tasks are"} still active${settled}`;
 }
 
 function usageLine(

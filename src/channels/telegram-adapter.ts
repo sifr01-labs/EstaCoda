@@ -2295,6 +2295,7 @@ export function updateToChannelMessage(update: TelegramUpdate, now: () => Date =
   const chatId = String(message.chat.id);
   const senderId = String(message.from?.id ?? message.chat.id);
   const displayName = [message.from?.first_name, message.from?.last_name].filter(Boolean).join(" ");
+  const replyToMessageId = validTelegramMessageId(message.reply_to_message?.message_id);
 
   return {
     id: `telegram-${update.update_id}-${message.message_id}`,
@@ -2320,13 +2321,15 @@ export function updateToChannelMessage(update: TelegramUpdate, now: () => Date =
         updateId: update.update_id,
         messageId: message.message_id,
         chatType: message.chat.type,
-        ...(message.reply_to_message === undefined
-          ? {}
-          : { replyToMessageId: message.reply_to_message.message_id }),
+        ...(replyToMessageId === undefined ? {} : { replyToMessageId }),
         ...(message.media_group_id === undefined ? {} : { mediaGroupId: message.media_group_id })
       }
     }
   };
+}
+
+function validTelegramMessageId(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
 function callbackQueryToChannelMessage(update: TelegramUpdate, now: () => Date): ChannelMessage | undefined {

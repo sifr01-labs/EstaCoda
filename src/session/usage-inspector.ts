@@ -1,7 +1,12 @@
 import type { ProviderUsageEntry } from "../contracts/provider-usage.js";
 import type { SessionContextWindowUsage, SessionDB, SessionMessage } from "../contracts/session.js";
 import type { TaskStatus } from "../contracts/task.js";
-import type { SessionCostSummary, TurnUsageSummary, UsageCostSummary } from "../contracts/usage-cost.js";
+import type {
+  SessionCostSummary,
+  SpendingBudgetSummary,
+  TurnUsageSummary,
+  UsageCostSummary
+} from "../contracts/usage-cost.js";
 import type { ProviderSpendingScope } from "../contracts/provider-spend.js";
 import {
   unavailableUsageCostSummary,
@@ -23,6 +28,7 @@ export type SessionUsageInspection = {
   sessionId: string;
   usage: SessionCostSummary;
   contextWindow?: SessionContextWindowUsage;
+  asOf: "latest-settled-provider-call";
 };
 
 export type TurnUsageInspection = {
@@ -30,6 +36,12 @@ export type TurnUsageInspection = {
   selection: "latest" | "replied" | "specific";
   sessionId: string;
   usage: TurnUsageSummary;
+  originatingTasks: {
+    active: number;
+    settled: number;
+    scanTruncated: boolean;
+  };
+  asOf: "latest-settled-provider-call";
 };
 
 export type TaskUsageInspection = {
@@ -38,7 +50,9 @@ export type TaskUsageInspection = {
   taskId: string;
   status: TaskStatus;
   usage: UsageCostSummary;
+  budget?: SpendingBudgetSummary;
   provisional: boolean;
+  asOf: "latest-settled-provider-call";
 };
 
 export type UsageInspection = SessionUsageInspection | TurnUsageInspection | TaskUsageInspection;
@@ -47,6 +61,7 @@ export type UsageInspector = {
   inspectSession(sessionId: string): Promise<SessionUsageInspection | undefined>;
   inspectLatestTurn(sessionId: string, options?: { excludeTurnId?: string }): Promise<TurnUsageInspection | undefined>;
   inspectRepliedTurn(sessionId: string, currentTurnId: string): Promise<TurnUsageInspection | undefined>;
+  inspectLinkedTurn(sessionId: string, linkedSessionId: string, turnId: string): Promise<TurnUsageInspection | undefined>;
   inspectTurn(sessionId: string, turnId: string): Promise<TurnUsageInspection | undefined>;
   inspectTask(sessionId: string, taskId: string): Promise<TaskUsageInspection | undefined>;
 };
@@ -78,7 +93,8 @@ export function createUsageInspector(input: {
         scope: "session",
         sessionId,
         usage,
-        ...(contextWindow === undefined ? {} : { contextWindow })
+        ...(contextWindow === undefined ? {} : { contextWindow }),
+        asOf: "latest-settled-provider-call"
       };
     },
 
@@ -109,6 +125,15 @@ export function createUsageInspector(input: {
       return inspection === undefined ? undefined : { ...inspection, selection: "replied" };
     },
 
+    async inspectLinkedTurn(sessionId, linkedSessionId, turnId) {
+      const lineage = await verifiedCompressionLineage(input.sessionDb, sessionId, input.profileId);
+      if (lineage === undefined || !lineage.some((session) => session.id === linkedSessionId)) return undefined;
+      const linkedTurn = (await input.sessionDb.listMessages(linkedSessionId))
+        .some((message) => message.id === turnId && message.role === "user");
+      if (!linkedTurn) return undefined;
+      return await inspector.inspectTurn(sessionId, turnId);
+    },
+
     async inspectTurn(sessionId, turnId) {
       const lineage = await verifiedCompressionLineage(input.sessionDb, sessionId, input.profileId);
       if (lineage === undefined || !await lineageContainsUserTurn(input.sessionDb, lineage.map((item) => item.id), turnId)) {
@@ -122,7 +147,18 @@ export function createUsageInspector(input: {
         taskScanTruncated: taskState.truncated,
         turnId
       });
-      return { scope: "turn", selection: "specific", sessionId, usage };
+      return {
+        scope: "turn",
+        selection: "specific",
+        sessionId,
+        usage,
+        originatingTasks: {
+          active: taskState.active,
+          settled: taskState.settled,
+          scanTruncated: taskState.truncated
+        },
+        asOf: "latest-settled-provider-call"
+      };
     },
 
     async inspectTask(sessionId, taskId) {
@@ -143,7 +179,9 @@ export function createUsageInspector(input: {
           cacheReadTokens: status.usage.cacheReadTokens ?? 0,
           cacheWriteTokens: status.usage.cacheWriteTokens ?? 0
         }),
-        provisional: !TERMINAL_TASK_STATUSES.has(status.status)
+        ...(status.spending === undefined ? {} : { budget: status.spending }),
+        provisional: !TERMINAL_TASK_STATUSES.has(status.status),
+        asOf: "latest-settled-provider-call"
       };
     }
   };
@@ -261,10 +299,12 @@ function inspectTurnTaskState(
   taskStore: TaskStore | undefined,
   sessionIds: readonly string[],
   turnId: string
-): { provisional: boolean; truncated: boolean } {
-  if (taskStore === undefined) return { provisional: false, truncated: false };
+): { provisional: boolean; truncated: boolean; active: number; settled: number } {
+  if (taskStore === undefined) return { provisional: false, truncated: false, active: 0, settled: 0 };
   let cursor: ReturnType<typeof taskListCursor> | undefined;
   let provisional = false;
+  let active = 0;
+  let settled = 0;
   for (let pageIndex = 0; pageIndex < MAX_TURN_TASK_PAGES; pageIndex++) {
     const tasks = taskStore.listTasks({
       originSessionIds: sessionIds,
@@ -273,12 +313,18 @@ function inspectTurnTaskState(
       limit: MAX_TURN_TASKS
     });
     for (const task of tasks) {
-      if (task.originTurnId === turnId && !TERMINAL_TASK_STATUSES.has(task.status)) provisional = true;
+      if (task.originTurnId !== turnId) continue;
+      if (TERMINAL_TASK_STATUSES.has(task.status)) {
+        settled += 1;
+      } else {
+        active += 1;
+        provisional = true;
+      }
     }
-    if (tasks.length < MAX_TURN_TASKS) return { provisional, truncated: false };
+    if (tasks.length < MAX_TURN_TASKS) return { provisional, truncated: false, active, settled };
     cursor = taskListCursor(tasks[tasks.length - 1]!, "created_asc");
   }
-  return { provisional, truncated: true };
+  return { provisional, truncated: true, active, settled };
 }
 
 function markIncomplete(usage: UsageCostSummary, reason: string): UsageCostSummary {

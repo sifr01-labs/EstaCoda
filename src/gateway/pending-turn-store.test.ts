@@ -27,7 +27,7 @@ describe("pending turn schema", () => {
       drop table channel_message_turn_bindings;
       drop table pending_channel_turn_delivery_ids;
       drop table pending_channel_turns;
-      delete from schema_version where version in (29, 30, 31);
+      delete from schema_version where version in (29, 30, 31, 32);
     `);
     initial.close();
 
@@ -68,7 +68,7 @@ describe("pending turn schema", () => {
     initial.db.exec(`
       drop table channel_message_turn_bindings;
       drop table pending_channel_turn_delivery_ids;
-      delete from schema_version where version in (30, 31);
+      delete from schema_version where version in (30, 31, 32);
     `);
     initial.close();
 

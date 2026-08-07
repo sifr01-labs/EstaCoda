@@ -40,9 +40,9 @@ Task and session limits are monetary controls; token counts remain read-only usa
 
 `$0.00` always means a recorded zero. A complete estimate appears as `$0.42`; a known lower bound appears as `at least $0.42` with a pricing-availability explanation; and `unavailable` means EstaCoda cannot show a trustworthy monetary estimate. Compact status rails use `≥ $0.42` for the same lower-bound state.
 
-Authorized gateway chats can inspect the same ledger on demand without adding automatic cost footers: `/usage` shows the current session, `/usage last` shows the latest completed visible turn, and `/usage task <task-id>` shows an authorized durable Task. These commands do not call a model. On Telegram, replying to an EstaCoda answer with `/usage` scopes the command to that answer. In normal conversation, the agent can use the read-only `session.usage` tool for session, latest-turn, or replied-answer questions and the existing `task.status` tool for a particular Task.
+Authorized gateway chats can inspect the same ledger on demand without adding automatic cost footers: `/usage` shows the current session, `/usage last` shows the latest completed visible turn, and `/usage task <task-id>` shows an authorized durable Task, including its spending limit, spent amount, reserved amount, and remaining capacity when configured. These commands do not call a model. On Telegram, replying with `/usage` to the original prompt, any final-answer chunk, or an approval prompt scopes the command to the originating turn. In normal conversation, the agent can use the read-only `session.usage` tool for session, latest-turn, or replied-message questions and the existing `task.status` tool for a particular Task.
 
-Turn totals already include linked delegated work. A Task amount can therefore overlap its originating turn and session totals; do not add those figures together. Turn results remain provisional while linked Task work can still record provider usage.
+Turn totals already include linked delegated work. A Task amount can therefore overlap its originating turn and session totals; do not add those figures together. Results are explicitly as of the latest settled provider call. Turn results report how many originating Tasks are active or settled and remain provisional while linked Task work can still record provider usage.
 
 ---
 

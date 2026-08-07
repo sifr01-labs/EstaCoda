@@ -123,10 +123,13 @@ describe("SessionMessageQueue", () => {
 
   it("coalesces eligible adjacent text into the FIFO tail with bounded provenance", () => {
     const q = new SessionMessageQueue();
-    q.enqueueOrCoalesceText("key1", makeMessage("m1", { text: "first" }), "queue", 3, coalescing, true, 1_000);
+    q.enqueueOrCoalesceText("key1", makeMessage("m1", {
+      text: "first",
+      metadata: { telegram: { messageId: 101 } }
+    }), "queue", 3, coalescing, true, 1_000);
     const result = q.enqueueOrCoalesceText(
       "key1",
-      makeMessage("m2", { text: "second" }),
+      makeMessage("m2", { text: "second", metadata: { telegram: { messageId: 102 } } }),
       "queue",
       3,
       coalescing,
@@ -141,6 +144,7 @@ describe("SessionMessageQueue", () => {
       receivedAt: "2026-08-06T12:00:01.000Z",
       text: "first\n\nsecond",
       metadata: {
+        telegram: expect.objectContaining({ attributionMessageIds: [101, 102] }),
         busyTextCoalescedMessageIds: ["m1", "m2"],
         busyTextCoalescedReceivedAts: [
           "2026-08-06T12:00:01.000Z",
