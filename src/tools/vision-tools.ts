@@ -21,6 +21,7 @@ import type {
   VisionAnalysisOutput,
   VisionDispatchPhase,
   VisionImageNormalizationError,
+  VisionImageSourceResolution,
   VisionImageSourceError
 } from "../contracts/vision.js";
 import { executeAuxiliaryTask } from "../providers/auxiliary-executor.js";
@@ -70,9 +71,10 @@ export type VisionToolOptions = {
 };
 
 const DEFAULT_MAX_IMAGE_BYTES = DEFAULT_VISION_IMAGE_NORMALIZATION_LIMITS.maxSourceBytes;
-const DEFAULT_MAX_AGGREGATE_NORMALIZED_BYTES = 16 * 1024 * 1024;
-const DEFAULT_MAX_AGGREGATE_ANIMATION_PIXELS = 100_000_000;
-const MAX_VISION_IMAGES = 4;
+const MAX_VISION_IMAGES_PER_REQUEST = 4;
+const MAX_VISION_IMAGES = 20;
+const DEFAULT_MAX_AGGREGATE_NORMALIZED_BYTES = MAX_VISION_IMAGES * DEFAULT_VISION_IMAGE_NORMALIZATION_LIMITS.maxNormalizedBytes;
+const DEFAULT_MAX_AGGREGATE_ANIMATION_PIXELS = 500_000_000;
 const DEFAULT_ANALYSIS_MODE: VisionAnalysisMode = "describe";
 const DEFAULT_ANALYSIS_DETAIL: VisionAnalysisDetail = "standard";
 const DEFAULT_ANALYSIS_OUTPUT: VisionAnalysisOutput = "standard";
@@ -118,6 +120,7 @@ export function createGovernedVisionArtifactDispatcher(
       phase,
       analysisMode: requestedAnalysisMode(input),
       imageCount: requestedImageCount(input),
+      allowBatching: requestedImageCount(input) > 1,
       mainRoute: options.mainRoute,
       auxiliaryRoute: resolveVisionAuxiliaryRoute(options)
     }).mode !== "unavailable",
@@ -128,6 +131,7 @@ export function createGovernedVisionArtifactDispatcher(
         phase,
         analysisMode: requestedAnalysisMode(resolvedInput),
         imageCount: requestedImageCount(resolvedInput),
+        allowBatching: requestedImageCount(resolvedInput) > 1,
         mainRoute: options.mainRoute,
         auxiliaryRoute: resolveVisionAuxiliaryRoute(options)
       });
@@ -136,9 +140,7 @@ export function createGovernedVisionArtifactDispatcher(
         visionRoute: dispatch.egressRoute,
         mainRoute: dispatch.mode === "auxiliary" ? options.mainRoute : undefined,
         additionalRoutes: dispatch.mode === "native"
-          ? (options.mainFallbackRoutes ?? []).filter((route) =>
-              requestedImageCount(resolvedInput) <= 1 || supportsMultipleImageInputs(route.profile)
-            )
+          ? (options.mainFallbackRoutes ?? []).filter((route) => route.profile.supportsVision === true)
           : undefined
       };
       if (artifactProvenance !== undefined) {
@@ -150,12 +152,17 @@ export function createGovernedVisionArtifactDispatcher(
       }
       const selection = resolveVisionImageSelection(resolvedInput);
       if ("result" in selection) return undefined;
-      const sources = await Promise.all(selection.paths.map((path) => resolveVisionImageSource({
-        workspaceRoot: options.workspaceRoot,
-        allowedRoots: visionAllowedRoots(options),
-        path,
-        maxBytes: options.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES
-      })));
+      const sources: VisionImageSourceResolution[] = [];
+      for (const path of selection.paths) {
+        const source = await resolveVisionImageSource({
+          workspaceRoot: options.workspaceRoot,
+          allowedRoots: visionAllowedRoots(options),
+          path,
+          maxBytes: options.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES
+        });
+        sources.push(source.ok ? { ...source, bytes: new Uint8Array() } : source);
+        if (!source.ok) break;
+      }
       if (sources.some((source) => !source.ok)) return undefined;
       return await resolveVisionSourcesEgressSecurity({
         sources: sources as ResolvedVisionImageSource[],
@@ -196,7 +203,7 @@ export function createVisionTools(options: VisionToolOptions): readonly Register
             items: { type: "string" },
             minItems: 2,
             maxItems: MAX_VISION_IMAGES,
-            description: "Two to four images to compare. Selects compare mode when mode is omitted."
+            description: "Two to twenty images to analyze or compare. EstaCoda batches provider requests safely when needed."
           },
           prompt: { type: "string", description: "Optional task-specific guidance that augments the selected analysis mode." },
           mode: {
@@ -251,6 +258,7 @@ export async function dispatchImageWithVision(
     phase,
     analysisMode: analysis.mode,
     imageCount: selection.paths.length,
+    allowBatching: selection.paths.length > 1,
     mainRoute: options.mainRoute,
     auxiliaryRoute: resolveVisionAuxiliaryRoute(options)
   });
@@ -265,9 +273,30 @@ export async function dispatchImageWithVision(
     }, analysis, startedAt, options);
   }
 
-  const prepared = await prepareVisionImages(options, selection.paths, analysis.providerDetail, signal);
+  const prepared = await prepareVisionImages(options, selection.paths, signal);
   if ("result" in prepared) {
     return withVisionInvocationMetadata(prepared.result, analysis, startedAt, options, dispatch.mode);
+  }
+
+  if (requiresVisionBatching(prepared.images.length, dispatch.route, dispatch.mode === "auxiliary" ? dispatch.auxiliaryRoute : undefined, options.mainRoute)) {
+    return executePreparedVisionBatches({
+      options,
+      input,
+      signal,
+      usage,
+      images: prepared.images,
+      visionAuxiliaryRoute: dispatch.mode === "native"
+        ? {
+            task: "vision",
+            route: dispatch.route,
+            source: "main",
+            fallbackToMain: false,
+            diagnostics: []
+          }
+        : { ...dispatch.auxiliaryRoute, route: dispatch.route },
+      analysis,
+      startedAt
+    });
   }
 
   if (dispatch.mode === "native") {
@@ -296,7 +325,7 @@ export async function dispatchImageWithVision(
       }
     };
     return attachEphemeralVisionImages(withVisionInvocationMetadata(result, analysis, startedAt, options), prepared.images.map((image) => ({
-      content: image.content,
+      content: visionImageContent(image, analysis.providerDetail),
       usage: {
         width: image.normalized.width,
         height: image.normalized.height,
@@ -370,6 +399,7 @@ export async function analyzeImageWithVision(
     phase: "post-tool",
     analysisMode: analysis.mode,
     imageCount: selection.paths.length,
+    allowBatching: selection.paths.length > 1,
     auxiliaryRoute: resolveVisionAuxiliaryRoute(options)
   });
   if (dispatch.mode !== "auxiliary") {
@@ -384,9 +414,22 @@ export async function analyzeImageWithVision(
     }, analysis, startedAt, options, "auxiliary");
   }
 
-  const prepared = await prepareVisionImages(options, selection.paths, analysis.providerDetail, signal);
+  const prepared = await prepareVisionImages(options, selection.paths, signal);
   if ("result" in prepared) {
     return withVisionInvocationMetadata(prepared.result, analysis, startedAt, options, "auxiliary");
+  }
+
+  if (requiresVisionBatching(prepared.images.length, dispatch.route, dispatch.auxiliaryRoute, options.mainRoute)) {
+    return executePreparedVisionBatches({
+      options,
+      input,
+      signal,
+      usage,
+      images: prepared.images,
+      visionAuxiliaryRoute: { ...dispatch.auxiliaryRoute, route: dispatch.route },
+      analysis,
+      startedAt
+    });
   }
 
   return await executePreparedAuxiliaryVision({
@@ -404,46 +447,62 @@ export async function analyzeImageWithVision(
 type PreparedVisionImage = {
   source: ResolvedVisionImageSource;
   normalized: NormalizedVisionImage;
-  content: {
-    type: "image_url";
-    image_url: { url: string; detail: "low" | "auto" | "high" };
-  };
 };
+
+function visionImageContent(
+  image: PreparedVisionImage,
+  detail: "low" | "auto" | "high"
+): {
+  type: "image_url";
+  image_url: { url: string; detail: "low" | "auto" | "high" };
+} {
+  return {
+    type: "image_url",
+    image_url: {
+      url: `data:${image.normalized.mimeType};base64,${Buffer.from(image.normalized.bytes).toString("base64")}`,
+      detail
+    }
+  };
+}
 
 async function prepareVisionImages(
   options: VisionToolOptions,
   paths: readonly string[],
-  detail: "low" | "auto" | "high",
   signal: AbortSignal | undefined
 ): Promise<{ images: PreparedVisionImage[] } | { result: ToolResult }> {
   const maxImageBytes = options.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES;
-  const sources = await Promise.all(paths.map((path) => resolveVisionImageSource({
-    workspaceRoot: options.workspaceRoot,
-    allowedRoots: visionAllowedRoots(options),
-    path,
-    maxBytes: maxImageBytes
-  })));
-  const sourceError = sources.find((source) => !source.ok);
-  if (sourceError !== undefined && !sourceError.ok) {
-    return { result: imageSourceErrorResult(sourceError) };
-  }
-
-  const resolvedSources = sources as ResolvedVisionImageSource[];
   const normalizer = options.imageNormalizer ?? defaultVisionImageNormalizer;
-  const normalizedResults = await Promise.all(resolvedSources.map((source) => normalizer.normalize(source, {
-    signal,
-    limits: { maxSourceBytes: maxImageBytes }
-  })));
-  const failedIndex = normalizedResults.findIndex((normalized) => !normalized.ok);
-  if (failedIndex >= 0) {
-    const failed = normalizedResults[failedIndex]!;
-    if (!failed.ok) {
-      return { result: imageNormalizationErrorResult(resolvedSources[failedIndex]!.displayPath, failed) };
+  const images: PreparedVisionImage[] = [];
+  for (let offset = 0; offset < paths.length; offset += MAX_VISION_IMAGES_PER_REQUEST) {
+    const pathBatch = paths.slice(offset, offset + MAX_VISION_IMAGES_PER_REQUEST);
+    const sourceResults = await Promise.all(pathBatch.map((path) => resolveVisionImageSource({
+      workspaceRoot: options.workspaceRoot,
+      allowedRoots: visionAllowedRoots(options),
+      path,
+      maxBytes: maxImageBytes
+    })));
+    const sourceError = sourceResults.find((source) => !source.ok);
+    if (sourceError !== undefined && !sourceError.ok) {
+      return { result: imageSourceErrorResult(sourceError) };
     }
+    const sourceBatch = sourceResults as ResolvedVisionImageSource[];
+    const normalizedBatch = await Promise.all(sourceBatch.map((source) => normalizer.normalize(source, {
+      signal,
+      limits: { maxSourceBytes: maxImageBytes }
+    })));
+    const failedIndex = normalizedBatch.findIndex((normalized) => !normalized.ok);
+    if (failedIndex >= 0) {
+      const failed = normalizedBatch[failedIndex]!;
+      if (!failed.ok) {
+        return { result: imageNormalizationErrorResult(sourceBatch[failedIndex]!.displayPath, failed) };
+      }
+    }
+    images.push(...sourceBatch.map((source, index) => ({
+      source: { ...source, bytes: new Uint8Array() },
+      normalized: (normalizedBatch as NormalizedVisionImage[])[index]!
+    })));
   }
-
-  const normalizedImages = normalizedResults as NormalizedVisionImage[];
-  const aggregateNormalizedBytes = normalizedImages.reduce((total, image) => total + image.byteLength, 0);
+  const aggregateNormalizedBytes = images.reduce((total, image) => total + image.normalized.byteLength, 0);
   const maxAggregateNormalizedBytes = options.maxAggregateNormalizedBytes ?? DEFAULT_MAX_AGGREGATE_NORMALIZED_BYTES;
   if (!Number.isSafeInteger(aggregateNormalizedBytes) || aggregateNormalizedBytes > maxAggregateNormalizedBytes) {
     return { result: imageNormalizationErrorResult("image set", aggregateLimitError(
@@ -454,8 +513,8 @@ async function prepareVisionImages(
       "bytes"
     )) };
   }
-  const aggregateAnimationPixels = normalizedImages.reduce(
-    (total, image) => total + image.sourceWidth * image.sourceHeight * image.sourceFrames,
+  const aggregateAnimationPixels = images.reduce(
+    (total, image) => total + image.normalized.sourceWidth * image.normalized.sourceHeight * image.normalized.sourceFrames,
     0
   );
   const maxAggregateAnimationPixels = options.maxAggregateAnimationPixels ?? DEFAULT_MAX_AGGREGATE_ANIMATION_PIXELS;
@@ -469,22 +528,7 @@ async function prepareVisionImages(
     )) };
   }
 
-  return {
-    images: resolvedSources.map((source, index) => {
-      const normalized = normalizedImages[index]!;
-      return {
-        source,
-        normalized,
-        content: {
-          type: "image_url",
-          image_url: {
-            url: `data:${normalized.mimeType};base64,${Buffer.from(normalized.bytes).toString("base64")}`,
-            detail
-          }
-        }
-      };
-    })
-  };
+  return { images };
 }
 
 function aggregateLimitError(
@@ -580,7 +624,7 @@ function resolveVisionImageSelection(
     if (typeof input.path !== "string" || input.path.trim().length === 0) {
       return invalid("path must be a non-empty string", "invalid-path");
     }
-    if (input.mode === "compare") return invalid("Compare mode requires paths with two to four images.");
+    if (input.mode === "compare") return invalid(`Compare mode requires paths with two to ${MAX_VISION_IMAGES} images.`);
     return { paths: [input.path] };
   }
   if (!Array.isArray(input.paths) || input.paths.length < 2 || input.paths.length > MAX_VISION_IMAGES) {
@@ -628,6 +672,214 @@ function runtimeVisionProvenance(
       ...(context.visionInputProvenance?.generatedArtifactPaths ?? []),
       ...generatedArtifactPaths
     ]
+  };
+}
+
+async function executePreparedVisionBatches(input: {
+  options: VisionToolOptions;
+  input: VisionAnalysisInput;
+  signal?: AbortSignal;
+  usage: ProviderUsageLineage;
+  images: readonly PreparedVisionImage[];
+  visionAuxiliaryRoute: ResolvedAuxiliaryRoute & { route: ResolvedModelRoute };
+  analysis: ResolvedVisionAnalysis;
+  startedAt: number;
+}): Promise<ToolResult> {
+  const { options, images, visionAuxiliaryRoute, analysis, startedAt } = input;
+  const fallbackSupportsMultipleImages = visionAuxiliaryRoute.fallbackToMain !== true ||
+    options.mainRoute === undefined ||
+    supportsMultipleImageInputs(options.mainRoute.profile);
+  const routeBatchSize = supportsMultipleImageInputs(visionAuxiliaryRoute.route.profile) && fallbackSupportsMultipleImages
+    ? MAX_VISION_IMAGES_PER_REQUEST
+    : 1;
+  const batches = chunkVisionImages(images, routeBatchSize);
+  const completed: ToolResult[] = [];
+  let completedImageCount = 0;
+
+  for (const [index, batch] of batches.entries()) {
+    if (input.signal?.aborted === true) {
+      clearPreparedVisionBytes(images);
+      return batchedVisionFailure(input, completed, index, batches.length, {
+        ok: false,
+        content: "Vision analysis was cancelled before every image could be analyzed.",
+        metadata: { errorCode: "vision-cancelled" satisfies VisionAnalysisErrorCode }
+      });
+    }
+    const batchAnalysis: ResolvedVisionAnalysis = batch.length === 1 && analysis.mode === "compare"
+      ? { ...analysis, mode: "describe" }
+      : analysis;
+    const result = await executePreparedAuxiliaryVision({
+      options,
+      input: {
+        ...input.input,
+        prompt: batchedVisionPrompt(
+          input.input.prompt,
+          index,
+          batches.length,
+          completedImageCount + 1,
+          completedImageCount + batch.length
+        )
+      },
+      signal: input.signal,
+      usage: input.usage,
+      images: batch,
+      visionAuxiliaryRoute,
+      analysis: batchAnalysis,
+      startedAt
+    });
+    for (const image of batch) image.normalized.bytes = new Uint8Array();
+    if (!result.ok) {
+      clearPreparedVisionBytes(images);
+      return batchedVisionFailure(input, completed, index, batches.length, result);
+    }
+    completed.push(result);
+    completedImageCount += batch.length;
+  }
+
+  const terminalMetadata = completed[completed.length - 1]?.metadata;
+  return withVisionInvocationMetadata({
+    ok: true,
+    content: [
+      `Analyzed all ${images.length} images in ${batches.length} bounded ${batches.length === 1 ? "batch" : "batches"}.`,
+      "Use the batch findings below to answer the user's original request across the complete image set.",
+      ...completed.map((result, index) => `Batch ${index + 1} of ${batches.length}\n${result.content}`)
+    ].join("\n\n"),
+    metadata: {
+      ...preparedImagesMetadata(images),
+      dispatch: "auxiliary",
+      batched: true,
+      batchCount: batches.length,
+      completedBatches: batches.length,
+      provider: terminalMetadata?.provider,
+      model: terminalMetadata?.model,
+      route: terminalMetadata?.route,
+      fallback: {
+        configured: completed.some((result) => recordBoolean(result.metadata?.fallback, "configured")),
+        used: completed.some((result) => recordBoolean(result.metadata?.fallback, "used"))
+      },
+      usage: aggregateVisionBatchUsage(completed, images, analysis),
+      attempts: completed.flatMap((result) => Array.isArray(result.metadata?.attempts) ? result.metadata.attempts : []),
+      providerDispatches: completed.flatMap((result) =>
+        Array.isArray(result.metadata?.providerDispatches) ? result.metadata.providerDispatches : []
+      ),
+      batches: completed.map((result, index) => ({
+        index: index + 1,
+        imageCount: batches[index]?.length ?? 0,
+        provider: result.metadata?.provider,
+        model: result.metadata?.model,
+        fallbackUsed: recordBoolean(result.metadata?.fallback, "used")
+      }))
+    }
+  }, analysis, startedAt, options, "auxiliary");
+}
+
+function requiresVisionBatching(
+  imageCount: number,
+  route: ResolvedModelRoute,
+  auxiliaryRoute: ResolvedAuxiliaryRoute | undefined,
+  mainRoute: ResolvedModelRoute | undefined
+): boolean {
+  if (imageCount <= 1) return false;
+  if (imageCount > MAX_VISION_IMAGES_PER_REQUEST) return true;
+  if (!supportsMultipleImageInputs(route.profile)) return true;
+  return auxiliaryRoute?.fallbackToMain === true &&
+    mainRoute !== undefined &&
+    !supportsMultipleImageInputs(mainRoute.profile);
+}
+
+function clearPreparedVisionBytes(images: readonly PreparedVisionImage[]): void {
+  for (const image of images) image.normalized.bytes = new Uint8Array();
+}
+
+function batchedVisionFailure(
+  input: Parameters<typeof executePreparedVisionBatches>[0],
+  completed: readonly ToolResult[],
+  failedBatchIndex: number,
+  batchCount: number,
+  failure: ToolResult
+): ToolResult {
+  return withVisionInvocationMetadata({
+    ok: false,
+    content: [
+      `Vision Analysis could not complete the full ${input.images.length}-image request.`,
+      `${completed.length} of ${batchCount} batches completed; batch ${failedBatchIndex + 1} failed. No remaining images were silently skipped or reported as analyzed.`,
+      failure.content
+    ].join("\n\n"),
+    metadata: {
+      ...failure.metadata,
+      ...preparedImagesMetadata(input.images),
+      dispatch: "auxiliary",
+      batched: true,
+      batchCount,
+      completedBatches: completed.length,
+      failedBatch: failedBatchIndex + 1,
+      usage: aggregateVisionBatchUsage([...completed, failure], input.images, input.analysis),
+      attempts: [
+        ...completed.flatMap((result) => Array.isArray(result.metadata?.attempts) ? result.metadata.attempts : []),
+        ...(Array.isArray(failure.metadata?.attempts) ? failure.metadata.attempts : [])
+      ],
+      providerDispatches: [
+        ...completed.flatMap((result) => Array.isArray(result.metadata?.providerDispatches) ? result.metadata.providerDispatches : []),
+        ...(Array.isArray(failure.metadata?.providerDispatches) ? failure.metadata.providerDispatches : [])
+      ]
+    }
+  }, input.analysis, input.startedAt, input.options, "auxiliary");
+}
+
+function chunkVisionImages(
+  images: readonly PreparedVisionImage[],
+  size: number
+): PreparedVisionImage[][] {
+  const batches: PreparedVisionImage[][] = [];
+  for (let index = 0; index < images.length; index += size) {
+    batches.push(images.slice(index, index + size));
+  }
+  return batches;
+}
+
+function batchedVisionPrompt(
+  prompt: string | undefined,
+  batchIndex: number,
+  batchCount: number,
+  firstImageNumber: number,
+  lastImageNumber: number
+): string {
+  const imageRange = firstImageNumber === lastImageNumber
+    ? `image ${firstImageNumber}`
+    : `images ${firstImageNumber}-${lastImageNumber}`;
+  return [
+    `This is batch ${batchIndex + 1} of ${batchCount}, containing ${imageRange} from the complete request.`,
+    "Analyze every image in this batch. Label observations with the original image numbers and preserve concrete details needed for a later cross-batch synthesis.",
+    prompt?.trim().length ? `Original user request: ${prompt.trim()}` : undefined
+  ].filter((line): line is string => line !== undefined).join("\n");
+}
+
+function recordBoolean(value: unknown, key: string): boolean {
+  return typeof value === "object" && value !== null && (value as Record<string, unknown>)[key] === true;
+}
+
+function aggregateVisionBatchUsage(
+  results: readonly ToolResult[],
+  images: readonly PreparedVisionImage[],
+  analysis: ResolvedVisionAnalysis
+): Record<string, unknown> {
+  const totals = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+  let sawTokens = false;
+  for (const result of results) {
+    const usage = typeof result.metadata?.usage === "object" && result.metadata.usage !== null
+      ? result.metadata.usage as Record<string, unknown>
+      : undefined;
+    for (const key of ["inputTokens", "outputTokens", "totalTokens"] as const) {
+      const value = usage?.[key];
+      if (typeof value === "number" && Number.isFinite(value)) {
+        totals[key] += value;
+        sawTokens = true;
+      }
+    }
+  }
+  return {
+    ...(sawTokens ? totals : {}),
+    ...visionUsageMetadata(undefined, images, analysis)
   };
 }
 
@@ -696,7 +948,7 @@ async function executePreparedAuxiliaryVision(input: {
               type: "text",
               text: visionAnalysisPrompt(analysis, input.input.prompt)
             },
-            ...images.map((image) => image.content)
+            ...images.map((image) => visionImageContent(image, analysis.providerDetail))
           ]
         }
       ] as any,
@@ -1003,7 +1255,7 @@ function synthesizeLegacyRoute(options: VisionToolOptions): ResolvedAuxiliaryRou
   return {
     task: "vision",
     route: options.resolvedVisionRoute,
-    source: options.resolvedVisionRoute === undefined ? "disabled" : "explicit",
+    source: options.resolvedVisionRoute === undefined ? "auto-main" : "explicit",
     fallbackToMain: options.fallbackToMain === true &&
       options.mainRoute !== undefined &&
       options.mainRoute.profile.supportsVision,

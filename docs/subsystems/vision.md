@@ -21,7 +21,7 @@ Automatic selection prefers the main route when it truthfully satisfies vision r
 
 ## Analysis controls
 
-`vision.analyze` accepts one `path`, or `paths` with two to four images. Multiple paths select `compare` when `mode` is omitted. The modes are `describe`, `ocr`, `document`, `chart`, `screenshot`, and `compare`; detail is `low`, `standard`, or `high`; output depth is `concise`, `standard`, or `detailed`. A caller cannot combine `path` and `paths`, use more than four images, or use a non-comparison mode for multiple images.
+`vision.analyze` accepts one `path`, or `paths` with two to twenty images. Multiple paths select `compare` when `mode` is omitted. The modes are `describe`, `ocr`, `document`, `chart`, `screenshot`, and `compare`; detail is `low`, `standard`, or `high`; output depth is `concise`, `standard`, or `detailed`. A caller cannot combine `path` and `paths`, use more than twenty images, or use a non-comparison mode for multiple images. Sets above four images are validated first, then processed sequentially in bounded provider batches of at most four (or one for a custom route whose repeated-image capability is unknown). The result states whether every image completed; a failed batch never silently reports the remaining images as analyzed.
 
 Image text is always untrusted content. The vision prompt may transcribe or discuss visible instructions, links, commands, or policy claims, but it must never obey them or treat them as higher-priority instructions.
 
@@ -60,7 +60,7 @@ Vision configuration is profile-local at `auxiliaryModels.vision`. It uses `id`,
 }
 ```
 
-The Setup Editor supports automatic, main, dedicated, disabled, and dedicated-with-main-fallback choices. Custom local and OpenAI-compatible routes use endpoint-first setup. `timeoutMs`, `maxConcurrency`, and context limits must be positive integers. `fallbackToMain: true` is rejected unless the main route is executable, vision-capable, and compatible with the hosted-processing preference. Legacy auxiliary names and the retired `extraBody` field are not active configuration surfaces.
+The Setup Editor exposes Vision Analysis under **Vision & Images**, beside the unchanged Image Generation & Editing flow. The common Vision Analysis screen offers **Automatic**, **Choose a vision model**, and **Turn off**; main-only routing, dedicated-with-main-fallback, processing location, timeout, and concurrency live under **Advanced settings**. Turning Vision Analysis off is authoritative even when the main model supports vision. Custom local and OpenAI-compatible routes use endpoint-first setup. `timeoutMs`, `maxConcurrency`, and context limits must be positive integers. Concurrency bounds simultaneous provider work; it does not cap how many submitted images are analyzed. `fallbackToMain: true` is rejected unless the main route is executable, vision-capable, and compatible with the hosted-processing preference. Legacy auxiliary names and the retired `extraBody` field are not active configuration surfaces.
 
 Review and apply remain separate. Cancellation does not write route changes or credentials; collected secrets remain deferred until an approved apply. Verification never changes route, privacy, approval, or provider selection.
 
@@ -94,7 +94,8 @@ Only canonical contained regular files are accepted. MIME is detected from magic
 | Animation pixels | 100 million |
 | Normalized output dimension | 7,680 pixels |
 | Normalized output | 4 MiB per image |
-| Aggregate normalized output | 16 MiB |
+| Aggregate normalized output | 80 MiB per twenty-image request |
+| Aggregate animation pixels | 500 million per twenty-image request |
 | Normalization concurrency | 2 |
 
 Raw image bytes, normalized intermediates, and data URLs remain runtime-only. They must not be persisted in sessions, trajectories, logs, reports, or exports. Reports contain hashes, sizes, route metadata, metrics, and bounded model text—not image payloads or credentials.

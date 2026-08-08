@@ -149,7 +149,6 @@ export type FallbackRouteChoice =
     };
 
 export const SETUP_EDITOR_AUXILIARY_TASKS = [
-  "vision",
   "assessor",
   "compression",
   "session_search",
@@ -159,7 +158,11 @@ export const SETUP_EDITOR_AUXILIARY_TASKS = [
 
 export type SetupEditorAuxiliaryTask = typeof SETUP_EDITOR_AUXILIARY_TASKS[number];
 
+export type VisionAndImagesCapability = "vision-analysis" | "image-generation";
+
 export type VisionAnalysisRouteMode = "automatic" | "main" | "dedicated" | "disabled" | "fallback";
+export type VisionAnalysisRouteChoice = "automatic" | "dedicated" | "disabled" | "advanced";
+export type VisionAnalysisAdvancedChoice = "main" | "fallback" | "settings";
 
 export type VisionAnalysisRouteSettings = {
   readonly hostedProcessing: VisionHostedProcessingPreference;
@@ -1313,12 +1316,6 @@ export async function promptAuxiliaryModelTask(
     showColumnHeaders: false,
     choices: [
       {
-        id: "vision",
-        label: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.vision"),
-        description: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.vision.description"),
-        value: "vision" as const,
-      },
-      {
         id: "assessor",
         label: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.assessor"),
         description: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.assessor.description"),
@@ -1353,26 +1350,45 @@ export async function promptAuxiliaryModelTask(
   }, options);
 }
 
+export async function promptVisionAndImagesCapability(
+  prompt: Prompt,
+  locale: SetupCopyLocale = "en"
+): Promise<SetupChoiceResult<VisionAndImagesCapability>> {
+  return promptSetupChoiceResult(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.visionAndImages.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.visionAndImages.body")}\n`,
+    allowBack: true,
+    choices: [
+      {
+        id: "vision-and-images-analysis",
+        label: setupCopyText(locale, "setupEditor.prompt.visionAndImages.analysis"),
+        description: setupCopyText(locale, "setupEditor.prompt.visionAndImages.analysis.description"),
+        value: "vision-analysis",
+      },
+      {
+        id: "vision-and-images-generation",
+        label: setupCopyText(locale, "setupEditor.prompt.visionAndImages.generation"),
+        description: setupCopyText(locale, "setupEditor.prompt.visionAndImages.generation.description"),
+        value: "image-generation",
+      },
+    ],
+    defaultValue: "vision-analysis",
+  });
+}
+
 export async function promptVisionAnalysisRouteMode(
   prompt: Prompt,
   current: AuxiliaryModelSlotConfig | undefined,
   locale: SetupCopyLocale = "en"
-): Promise<SetupChoiceResult<VisionAnalysisRouteMode>> {
+): Promise<SetupChoiceResult<VisionAnalysisRouteChoice>> {
   const currentMode = visionAnalysisRouteMode(current);
-  const choices: SetupChoice<VisionAnalysisRouteMode>[] = [
+  const choices: SetupChoice<VisionAnalysisRouteChoice>[] = [
     {
       id: "vision-route-automatic",
       label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.automatic"),
       description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.automatic.description"),
       value: "automatic",
       current: currentMode === "automatic",
-    },
-    {
-      id: "vision-route-main",
-      label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.main"),
-      description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.main.description"),
-      value: "main",
-      current: currentMode === "main",
     },
     {
       id: "vision-route-dedicated",
@@ -1389,19 +1405,55 @@ export async function promptVisionAnalysisRouteMode(
       current: currentMode === "disabled",
     },
     {
-      id: "vision-route-fallback",
-      label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.fallback"),
-      description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.fallback.description"),
-      value: "fallback",
-      current: currentMode === "fallback",
-    },
+      id: "vision-route-advanced",
+      label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.advanced"),
+      description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.advanced.description"),
+      value: "advanced",
+      current: currentMode === "main" || currentMode === "fallback",
+    }
   ];
   return promptSetupChoiceResult(prompt, {
     title: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.body")}\n`,
     allowBack: true,
     choices,
-    defaultValue: currentMode,
+    defaultValue: currentMode === "main" || currentMode === "fallback" ? "advanced" : currentMode,
+  });
+}
+
+export async function promptVisionAnalysisAdvancedChoice(
+  prompt: Prompt,
+  current: AuxiliaryModelSlotConfig | undefined,
+  locale: SetupCopyLocale = "en"
+): Promise<SetupChoiceResult<VisionAnalysisAdvancedChoice>> {
+  const currentMode = visionAnalysisRouteMode(current);
+  return promptSetupChoiceResult(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.advanced.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.visionAnalysis.advanced.body")}\n`,
+    allowBack: true,
+    choices: [
+      {
+        id: "vision-advanced-main",
+        label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.main"),
+        description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.main.description"),
+        value: "main",
+        current: currentMode === "main",
+      },
+      {
+        id: "vision-advanced-fallback",
+        label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.fallback"),
+        description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.fallback.description"),
+        value: "fallback",
+        current: currentMode === "fallback",
+      },
+      {
+        id: "vision-advanced-settings",
+        label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.advanced.settings"),
+        description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.advanced.settings.description"),
+        value: "settings",
+      },
+    ],
+    defaultValue: currentMode === "fallback" ? "fallback" : currentMode === "main" ? "main" : "settings",
   });
 }
 
@@ -1464,7 +1516,7 @@ export async function promptVisionAnalysisRouteSettings(
   };
 }
 
-function visionAnalysisRouteMode(slot: AuxiliaryModelSlotConfig | undefined): VisionAnalysisRouteMode {
+export function visionAnalysisRouteMode(slot: AuxiliaryModelSlotConfig | undefined): VisionAnalysisRouteMode {
   if (slot?.enabled === false) return "disabled";
   if (slot?.provider === "main") return "main";
   if (slot?.provider !== undefined && slot.provider !== "auto") {

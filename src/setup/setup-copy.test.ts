@@ -1141,8 +1141,8 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.actions.configureChannels.description")).toBe("Remote-control channels such as Telegram and WhatsApp.");
     expect(rawSetupCopy("en", "setupEditor.actions.configureVoice")).toBe("Voice");
     expect(rawSetupCopy("en", "setupEditor.actions.configureVoice.description")).toBe("Speech-to-text and text-to-speech providers.");
-    expect(rawSetupCopy("en", "setupEditor.actions.configureImageGeneration")).toBe("Image Generation and Editing");
-    expect(rawSetupCopy("en", "setupEditor.actions.configureImageGeneration.description")).toBe("Image generation and editing provider and model.");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureImageGeneration")).toBe("Vision & Images");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureImageGeneration.description")).toBe("Understand, generate, and edit images.");
     expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.vision")).toBe("Vision Analysis");
     expect(rawSetupCopy("en", "setupEditor.prompt.visionAnalysis.mode.automatic")).toBe("Automatic (recommended)");
     expect(rawSetupCopy("en", "setupEditor.prompt.visionAnalysis.hosted.allow")).toBe("Allow hosted processing with normal approvals");
@@ -1230,8 +1230,8 @@ describe("setup copy", () => {
     expect(rawSetupCopy("ar", "setupEditor.actions.configureChannels.description")).toBe("قنوات تحكم عن بُعد مثل Telegram وWhatsApp.");
     expect(rawSetupCopy("ar", "setupEditor.actions.configureVoice")).toBe("الصوت");
     expect(rawSetupCopy("ar", "setupEditor.actions.configureVoice.description")).toBe("مزودو تحويل الكلام إلى نص وتحويل النص إلى كلام.");
-    expect(rawSetupCopy("ar", "setupEditor.actions.configureImageGeneration")).toBe("توليد الصور وتعديلها");
-    expect(rawSetupCopy("ar", "setupEditor.actions.configureImageGeneration.description")).toBe("مزوّد ونموذج توليد الصور وتعديلها.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.configureImageGeneration")).toBe("الصور والرؤية");
+    expect(rawSetupCopy("ar", "setupEditor.actions.configureImageGeneration.description")).toBe("افهم الصور وأنشئها وعدّلها.");
     expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.vision")).toBe("تحليل الصور");
     expect(rawSetupCopy("ar", "setupEditor.prompt.visionAnalysis.mode.automatic")).toBe("تلقائي (موصى به)");
     expect(rawSetupCopy("ar", "setupEditor.prompt.visionAnalysis.hosted.allow")).toBe("السماح بالمعالجة المستضافة مع الموافقات المعتادة");

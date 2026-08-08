@@ -85,6 +85,8 @@ import {
   promptOptionalCapabilityAction,
   promptSecurityMode,
   promptSpendingLimit,
+  promptVisionAndImagesCapability,
+  promptVisionAnalysisAdvancedChoice,
   promptVisionAnalysisRouteMode,
   promptVisionAnalysisRouteSettings,
   promptVisionVerificationAfterApply,
@@ -92,7 +94,9 @@ import {
   promptVoiceCapability,
   promptWorkflowLearning,
   promptWorkspaceTrustConfirmation,
+  visionAnalysisRouteMode,
   type ConfigEditorPostApplyActionId,
+  type SetupEditorAuxiliaryTask,
 } from "./prompts.js";
 import {
   preserveSetupConsoleOnPromptClose,
@@ -588,10 +592,11 @@ async function handleAction(
       return handleCredentialAction(options, initialDecision, session, action);
     case "configure-channels":
     case "configure-voice":
-    case "configure-image-generation":
     case "configure-web-search":
     case "configure-browser":
       return handleOptionalCapabilityAction(options, initialDecision, session, action);
+    case "configure-image-generation":
+      return handleVisionAndImagesAction(options, initialDecision, session, action);
     default: {
       const output = formatSetupCopy(options.locale, "setupEditor.result.unimplementedAction", {
         actionId: action.id,
@@ -910,6 +915,40 @@ async function handleLanguageAction(
       activityLabels: preferences.activityLabels,
     },
   });
+}
+
+async function handleVisionAndImagesAction(
+  options: LocalizedConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
+  action: ConfigEditorRenderedAction
+): Promise<ConfigEditorRunnerResult> {
+  const selection = await promptVisionAndImagesCapability(options.prompt, options.locale);
+  if (selection.kind === "back") return menuBackResult(initialDecision, action.id);
+  if (selection.value === "image-generation") {
+    return handleOptionalCapabilityAction(options, initialDecision, session, action);
+  }
+
+  const source = requireEditorAction(action);
+  const visionAction: ConfigEditorRenderedAction = {
+    id: "edit-auxiliary-model-route",
+    label: setupCopyText(options.locale, "setupEditor.prompt.visionAndImages.analysis"),
+    description: setupCopyText(options.locale, "setupEditor.prompt.visionAndImages.analysis.description"),
+    readOnly: false,
+    source: "synthetic",
+    editorAction: {
+      ...source,
+      id: "edit-auxiliary-model-route",
+      copyKey: "setupEditor.actions.editAuxiliaryModelRoute",
+      sectionId: "model-route",
+      patch: {
+        kind: "scoped-config-patch-intent",
+        fields: ["auxiliaryModels.*"],
+        preserveUnrelatedConfig: true,
+      },
+    },
+  };
+  return handleSelectedAuxiliaryRouteAction(options, initialDecision, session, visionAction, "vision");
 }
 
 async function handleOptionalCapabilityAction(
@@ -1568,32 +1607,87 @@ async function handleAuxiliaryRouteAction(
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   action: ConfigEditorRenderedAction
 ): Promise<RunOnceResult> {
-  const editorAction = requireEditorAction(action);
+  requireEditorAction(action);
   const auxiliaryTaskResult = await promptAuxiliaryModelTask(options.prompt, options.locale, { allowBack: true });
   if (auxiliaryTaskResult.kind === "back") {
     return menuBackResult(initialDecision, action.id);
   }
-  const auxiliaryTask = auxiliaryTaskResult.value;
+  return handleSelectedAuxiliaryRouteAction(
+    options,
+    initialDecision,
+    session,
+    action,
+    auxiliaryTaskResult.value
+  );
+}
+
+async function handleSelectedAuxiliaryRouteAction(
+  options: LocalizedConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
+  action: ConfigEditorRenderedAction,
+  auxiliaryTask: SetupEditorAuxiliaryTask | "vision"
+): Promise<RunOnceResult> {
+  const editorAction = requireEditorAction(action);
   const loaded = await loadRuntimeConfig(options);
   const currentSlot = auxiliarySlotConfig(loaded.config.auxiliaryModels?.[auxiliaryTask]);
   const currentAuxiliaryRoute = auxiliaryRouteFromSlot(currentSlot);
   let visionReviewValues: Readonly<Record<string, unknown>> = {};
   if (auxiliaryTask === "vision") {
-    const routeMode = await promptVisionAnalysisRouteMode(options.prompt, currentSlot, options.locale);
-    if (routeMode.kind === "back") {
+    const routeChoice = await promptVisionAnalysisRouteMode(options.prompt, currentSlot, options.locale);
+    if (routeChoice.kind === "back") {
       return menuBackResult(initialDecision, action.id);
     }
-    const settings = await promptVisionAnalysisRouteSettings(options.prompt, currentSlot, options.locale);
-    if (settings.kind === "back") {
-      return menuBackResult(initialDecision, action.id);
+    let routeMode = routeChoice.value === "advanced" ? visionAnalysisRouteMode(currentSlot) : routeChoice.value;
+    let settings = {
+      hostedProcessing: currentSlot?.hostedProcessing ?? "allow-with-approval" as const,
+      timeoutMs: currentSlot?.timeoutMs ?? 60_000,
+      maxConcurrency: currentSlot?.maxConcurrency ?? 1,
+    };
+    let advancedSettingsOnly = false;
+    if (routeChoice.value === "advanced") {
+      const advanced = await promptVisionAnalysisAdvancedChoice(options.prompt, currentSlot, options.locale);
+      if (advanced.kind === "back") return menuBackResult(initialDecision, action.id);
+      if (advanced.value === "settings") {
+        advancedSettingsOnly = true;
+        const advancedSettings = await promptVisionAnalysisRouteSettings(options.prompt, currentSlot, options.locale);
+        if (advancedSettings.kind === "back") return menuBackResult(initialDecision, action.id);
+        settings = advancedSettings.value;
+      } else {
+        routeMode = advanced.value;
+      }
     }
     visionReviewValues = {
-      routeMode: routeMode.value,
-      hostedProcessing: settings.value.hostedProcessing,
-      timeoutMs: settings.value.timeoutMs,
-      maxConcurrency: settings.value.maxConcurrency,
+      routeMode,
+      advancedSettings: routeChoice.value === "advanced",
+      hostedProcessing: settings.hostedProcessing,
+      timeoutMs: settings.timeoutMs,
+      maxConcurrency: settings.maxConcurrency,
     };
-    if (routeMode.value === "automatic" || routeMode.value === "main" || routeMode.value === "disabled") {
+    const routeNeedsProvider = routeMode === "dedicated" || routeMode === "fallback";
+    const canReuseCurrentProvider = currentAuxiliaryRoute !== undefined &&
+      (advancedSettingsOnly || routeMode === "fallback");
+    if (routeChoice.value === "advanced" && (!routeNeedsProvider || canReuseCurrentProvider)) {
+      const currentRouteValues = (routeMode === "dedicated" || routeMode === "fallback") && currentAuxiliaryRoute !== undefined
+        ? {
+            provider: currentAuxiliaryRoute.provider,
+            model: currentAuxiliaryRoute.id,
+            ...(currentAuxiliaryRoute.baseUrl === undefined ? {} : { baseUrl: currentAuxiliaryRoute.baseUrl }),
+            ...(currentSlot?.apiKeyEnv === undefined ? {} : { apiKeyEnv: currentSlot.apiKeyEnv }),
+            ...(currentSlot?.contextWindowTokens === undefined ? {} : { contextWindowTokens: currentSlot.contextWindowTokens }),
+          }
+        : {};
+      return reviewAndApplyAction(options, initialDecision, session, {
+        ...editorAction,
+        reviewValues: {
+          ...editorAction.reviewValues,
+          auxiliaryTask,
+          ...visionReviewValues,
+          ...currentRouteValues,
+        },
+      });
+    }
+    if (routeMode === "automatic" || routeMode === "main" || routeMode === "disabled") {
       return reviewAndApplyAction(options, initialDecision, session, {
         ...editorAction,
         reviewValues: {

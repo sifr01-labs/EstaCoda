@@ -478,7 +478,9 @@ function draftFromEditorAction(
       scope: ["auxiliaryModels.*"],
       configPath: options.configPath,
       summaryKey: action.reviewValues?.auxiliaryTask === "vision"
-        ? "setupDrafts.visionAnalysisRoute.summary"
+        ? action.reviewValues.advancedSettings === true
+          ? "setupDrafts.visionAnalysisRoute.summary"
+          : "setupDrafts.visionAnalysisRoute.basic.summary"
         : "setupDrafts.auxiliaryModelRoute.summary",
       values: action.reviewValues ?? {},
     });

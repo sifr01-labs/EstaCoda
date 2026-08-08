@@ -304,6 +304,7 @@ async function applyConfigPatch(
       return [];
     case "setupDrafts.auxiliaryModelRoute.summary":
     case "setupDrafts.visionAnalysisRoute.summary":
+    case "setupDrafts.visionAnalysisRoute.basic.summary":
       await applyAuxiliaryModelRoute(operation, context, options);
       return [];
     case "setupDrafts.credentialReference.summary":

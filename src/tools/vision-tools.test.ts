@@ -266,6 +266,133 @@ describe("vision tools", () => {
       }
     });
 
+    it("analyzes 10 images as three bounded batches without dropping any image", async () => {
+      const executor = createMockExecutor();
+      const tmp = createTempPng();
+      try {
+        const result = await dispatchImageWithVision({
+          workspaceRoot: tmp.dir,
+          mainRoute: textOnlyRoute,
+          visionAuxiliaryRoute: {
+            task: "vision",
+            route: baseRoute,
+            source: "explicit",
+            fallbackToMain: false,
+            diagnostics: []
+          },
+          providerExecutor: executor
+        }, { paths: Array.from({ length: 10 }, () => "test.png") });
+
+        const imageCounts = (executor.complete as any).mock.calls.map(([request]: any[]) =>
+          request.messages[1].content.filter((part: any) => part.type === "image_url").length
+        );
+        expect(imageCounts).toEqual([4, 4, 2]);
+        expect(result).toEqual(expect.objectContaining({
+          ok: true,
+          content: expect.stringContaining("Analyzed all 10 images in 3 bounded batches."),
+          metadata: expect.objectContaining({
+            imageCount: 10,
+            batched: true,
+            batchCount: 3,
+            completedBatches: 3
+          })
+        }));
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("safely batches one image at a time when a custom route has unknown multi-image support", async () => {
+      const executor = createMockExecutor();
+      const customRoute: ResolvedModelRoute = {
+        ...baseRoute,
+        provider: "custom-provider",
+        id: "custom-vision",
+        profile: {
+          ...baseRoute.profile,
+          provider: "custom-provider",
+          id: "custom-vision",
+          supportsMultipleImages: undefined
+        }
+      };
+      const tmp = createTempPng();
+      try {
+        const result = await dispatchImageWithVision({
+          workspaceRoot: tmp.dir,
+          mainRoute: textOnlyRoute,
+          visionAuxiliaryRoute: {
+            task: "vision",
+            route: customRoute,
+            source: "custom",
+            fallbackToMain: false,
+            diagnostics: []
+          },
+          providerExecutor: executor
+        }, { paths: ["test.png", "test.png", "test.png"] });
+
+        const imageCounts = (executor.complete as any).mock.calls.map(([request]: any[]) =>
+          request.messages[1].content.filter((part: any) => part.type === "image_url").length
+        );
+        expect(imageCounts).toEqual([1, 1, 1]);
+        expect(result.metadata).toEqual(expect.objectContaining({
+          imageCount: 3,
+          batched: true,
+          batchCount: 3,
+          completedBatches: 3
+        }));
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("fails explicitly when a later image batch fails", async () => {
+      const executor = createMockExecutor();
+      (executor.complete as any)
+        .mockResolvedValueOnce(successfulExecution(baseRoute, "first batch"))
+        .mockResolvedValueOnce({
+          ok: false,
+          attempts: [{
+            provider: "openai",
+            model: "gpt-4o",
+            state: "dispatched",
+            dispatchedAt: "2030-01-01T00:00:00.000Z",
+            ok: false,
+            content: "failed",
+            errorClass: "network"
+          }]
+        });
+      const tmp = createTempPng();
+      try {
+        const result = await dispatchImageWithVision({
+          workspaceRoot: tmp.dir,
+          mainRoute: textOnlyRoute,
+          visionAuxiliaryRoute: {
+            task: "vision",
+            route: baseRoute,
+            source: "explicit",
+            fallbackToMain: false,
+            diagnostics: []
+          },
+          providerExecutor: executor
+        }, { paths: Array.from({ length: 6 }, () => "test.png") });
+
+        expect(executor.complete).toHaveBeenCalledTimes(2);
+        expect(result).toEqual(expect.objectContaining({
+          ok: false,
+          content: expect.stringContaining("No remaining images were silently skipped or reported as analyzed."),
+          metadata: expect.objectContaining({
+            imageCount: 6,
+            batched: true,
+            batchCount: 2,
+            completedBatches: 1,
+            failedBatch: 2
+          })
+        }));
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
     it("uses native comparison only when the main route supports multiple images", async () => {
       const tmp = createTempPng();
       try {
@@ -296,7 +423,7 @@ describe("vision tools", () => {
         paths: ["one.png", "two.png"]
       });
       const tooMany = await dispatchImageWithVision({ workspaceRoot: "/tmp", mainRoute: baseRoute }, {
-        paths: ["1.png", "2.png", "3.png", "4.png", "5.png"]
+        paths: Array.from({ length: 21 }, (_, index) => `${index + 1}.png`)
       });
       expect(ambiguous.metadata).toEqual(expect.objectContaining({ errorCode: "vision-invalid-image-selection" }));
       expect(tooMany.metadata).toEqual(expect.objectContaining({ errorCode: "vision-invalid-image-selection" }));
@@ -392,7 +519,7 @@ describe("vision tools", () => {
       expect(tools[0].inputSchema).toEqual(expect.objectContaining({
         properties: expect.objectContaining({
           path: expect.objectContaining({ type: "string" }),
-          paths: expect.objectContaining({ type: "array", minItems: 2, maxItems: 4 }),
+          paths: expect.objectContaining({ type: "array", minItems: 2, maxItems: 20 }),
           prompt: expect.objectContaining({ type: "string" }),
           mode: expect.objectContaining({ enum: ["describe", "ocr", "document", "chart", "screenshot", "compare"] }),
           detail: expect.objectContaining({ enum: ["low", "standard", "high"] }),

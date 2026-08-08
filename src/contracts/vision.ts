@@ -21,7 +21,7 @@ export type VisionAnalysisOutput = "concise" | "standard" | "detailed";
 /** Backward-compatible input for vision.analyze. New controls are optional. */
 export type VisionAnalysisInput = {
   path?: string;
-  /** Two to four images. When mode is omitted, `paths` selects compare mode. */
+  /** Two to twenty images. The runtime safely batches provider requests when needed. */
   paths?: readonly string[];
   prompt?: string;
   mode?: VisionAnalysisMode;

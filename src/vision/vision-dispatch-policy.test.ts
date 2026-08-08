@@ -3,6 +3,21 @@ import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/pr
 import { resolveVisionDispatch } from "./vision-dispatch-policy.js";
 
 describe("vision dispatch policy", () => {
+  it("keeps an explicitly disabled vision slot off even when the main model supports vision", () => {
+    expect(resolveVisionDispatch({
+      phase: "initial-attachment",
+      mainRoute: route("main-vision", true),
+      auxiliaryRoute: {
+        ...auxiliary(undefined),
+        source: "disabled"
+      }
+    })).toEqual({
+      mode: "unavailable",
+      phase: "initial-attachment",
+      reason: "Vision Analysis is turned off in the selected profile."
+    });
+  });
+
   it("uses the main route for initial and discovered images when it supports vision", () => {
     for (const phase of ["initial-attachment", "post-tool"] as const) {
       expect(resolveVisionDispatch({
@@ -116,6 +131,16 @@ describe("vision dispatch policy", () => {
       mode: "unavailable",
       reason: "No configured vision route supports bounded multi-image comparison."
     });
+  });
+
+  it("allows a caller to handle an unknown custom multi-image request through safe batching", () => {
+    expect(resolveVisionDispatch({
+      phase: "post-tool",
+      analysisMode: "compare",
+      imageCount: 2,
+      allowBatching: true,
+      auxiliaryRoute: auxiliary(route("unknown-custom", true), "custom")
+    })).toMatchObject({ mode: "auxiliary" });
   });
 
   it("removes an incompatible main fallback from auxiliary comparison", () => {

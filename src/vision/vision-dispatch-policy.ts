@@ -30,12 +30,22 @@ export function resolveVisionDispatch(input: {
   mainRoute?: ResolvedModelRoute;
   auxiliaryRoute: ResolvedAuxiliaryRoute;
   imageCount?: number;
+  allowBatching?: boolean;
 }): VisionDispatchDecision {
+  if (input.auxiliaryRoute.source === "disabled") {
+    return {
+      mode: "unavailable",
+      phase: input.phase,
+      reason: "Vision Analysis is turned off in the selected profile."
+    };
+  }
   const dedicatedAnalysis = shouldUseDedicatedVisionRoute(input);
   const requiresMultipleImages = (input.imageCount ?? 1) > 1;
+  const routeCanServeRequest = (route: ResolvedModelRoute): boolean =>
+    !requiresMultipleImages || supportsMultipleImageInputs(route.profile) || input.allowBatching === true;
   if (
     input.mainRoute?.profile.supportsVision === true &&
-    (!requiresMultipleImages || supportsMultipleImageInputs(input.mainRoute.profile)) &&
+    routeCanServeRequest(input.mainRoute) &&
     !dedicatedAnalysis
   ) {
     const nativeRoute: ResolvedAuxiliaryRoute = {
@@ -55,12 +65,12 @@ export function resolveVisionDispatch(input: {
 
   if (
     input.auxiliaryRoute.route?.profile.supportsVision === true &&
-    (!requiresMultipleImages || supportsMultipleImageInputs(input.auxiliaryRoute.route.profile))
+    routeCanServeRequest(input.auxiliaryRoute.route)
   ) {
     const auxiliaryRoute = requiresMultipleImages &&
       input.auxiliaryRoute.fallbackToMain &&
       input.mainRoute !== undefined &&
-      !supportsMultipleImageInputs(input.mainRoute.profile)
+      !supportsMultipleImageInputs(input.mainRoute.profile) && input.allowBatching !== true
       ? { ...input.auxiliaryRoute, fallbackToMain: false }
       : input.auxiliaryRoute;
     return {

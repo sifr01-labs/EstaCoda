@@ -792,18 +792,20 @@ HOME=/tmp/estacoda-qa-ready pnpm run dev -- setup --interactive
 
 **Verify:**
 - `edit-auxiliary-model-route` is available from configured-ready state.
-- The task prompt shows Vision Analysis plus assessor, compression, session_search, memory_compaction, and profile_context.
+- The task prompt shows assessor, compression, session_search, memory_compaction, and profile_context; Vision Analysis is not listed here.
 - Assessor is explicitly described as approval-assessment in the prompt copy.
 - Review is explicit about which auxiliary task is being configured.
 - Applying sets the correct `auxiliaryModels.<task>` route.
 
 ### 10.14.1 Vision Analysis Review And Reliability
 
-From a configured disposable setup, choose `edit-auxiliary-model-route` and then `Vision Analysis`.
+From a configured disposable setup, choose `Vision & Images` and then `Vision Analysis`.
 
 **Verify:**
-- Automatic, main, dedicated, disabled, and dedicated-with-main-fallback are all reviewable choices.
-- Review shows hosted-processing preference, timeout, and concurrency; the saved route uses `id`, never `model`.
+- The common screen shows Automatic, Choose a vision model, Turn off Vision Analysis, Advanced, and Back.
+- Main-only, dedicated-with-main-fallback, hosted-processing preference, timeout, and concurrency remain reviewable under Advanced; ordinary route changes do not prompt for them. The saved route uses `id`, never `model`.
+- Turning Vision Analysis off blocks analysis even when the main model supports images and does not change Image Generation & Editing.
+- A ten-image comparison analyzes every image in three bounded provider batches (4 + 4 + 2), and a failed batch reports partial completion without silently skipping the rest.
 - `local-only` cannot dispatch an image to a hosted route. `allow-with-approval` still asks for unexpected agent-discovered workspace images, while an explicitly referenced current-turn image does not repeatedly prompt in adaptive mode.
 - Cancelling review leaves the existing route and secrets unchanged. After apply, `estacoda verify vision` uses the benign English/Arabic fixture and does not print raw image bytes or secrets. A hosted selected route or possible hosted fallback is not called without `--consent-hosted`; an expiring OAuth credential is not refreshed during this read-only check.
 - `pnpm run eval:vision:fixtures` creates the declared manifest and fixtures. Corrupt and inputs above the 32 MiB source ceiling fail before provider dispatch. `pnpm run eval:vision:live` produces JSON and Markdown release reports; any route chain with a possible hosted destination refuses to run without `--consent-hosted`, and only stored regression thresholds fail the command.
