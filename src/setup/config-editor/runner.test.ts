@@ -3555,6 +3555,71 @@ describe("runConfigEditor", () => {
     expect(rawConfig).not.toContain("old-vision");
   });
 
+  it("unwinds Vision Analysis Back actions through each parent screen", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompt = fakePrompt({
+      values: ["vision-analysis", "advanced", "settings", "Back", "Back", "Back", "Back", "exit"],
+    });
+    const selectInputs = captureSelectInputs(prompt);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-image-generation",
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.reviewManifest).toBeUndefined();
+    expect(selectInputs.map((input) => input.title).filter((title) => [
+      "Vision & Images",
+      "Vision Analysis route",
+      "Advanced Vision Analysis",
+      "Vision processing location",
+      "Setup editor",
+    ].includes(title))).toEqual([
+      "Vision & Images",
+      "Vision Analysis route",
+      "Advanced Vision Analysis",
+      "Vision processing location",
+      "Advanced Vision Analysis",
+      "Vision Analysis route",
+      "Vision & Images",
+      "Setup editor",
+    ]);
+  });
+
+  it("hides local-only processing when no local model or loopback endpoint is configured", async () => {
+    await writeUserConfig(tempDir, {
+      model: { provider: "openai", id: "gpt-5.5" },
+      providers: {
+        openai: {
+          kind: "openai-compatible",
+          baseUrl: "https://api.openai.com/v1",
+          authMethod: "none",
+          models: ["gpt-5.5"],
+          enableNetwork: true,
+        },
+      },
+      auxiliaryModels: { vision: { provider: "auto", enabled: true } },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompt = fakePrompt({
+      values: ["vision-analysis", "advanced", "settings", "60000", "1", false],
+    });
+    const selectInputs = captureSelectInputs(prompt);
+
+    await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-image-generation",
+    });
+
+    expect(selectInputs.some((input) => input.title === "Vision processing location")).toBe(false);
+  });
+
   it("keeps privacy and performance controls behind Advanced settings", async () => {
     await writeUserConfig(tempDir, {
       ...localReadyConfig(),

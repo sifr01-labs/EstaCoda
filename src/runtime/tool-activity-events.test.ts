@@ -545,6 +545,7 @@ describe("runtime tool activity events", () => {
 
     expect(executeTool).toHaveBeenCalledTimes(1);
     expect(executeTool).toHaveBeenCalledWith(expect.objectContaining({
+      toolCallId: expect.stringMatching(/^native-vision-/u),
       input: {
         paths: ["/media/one.png", "/media/two.png", "/media/three.png"],
         prompt: "Compare these images"

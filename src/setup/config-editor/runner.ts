@@ -1,7 +1,7 @@
 import { resolveStateHome } from "../../config/state-home.js";
 import { hasSavedEnvSecret } from "../../config/env-secret-store.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
-import { loadRuntimeConfig } from "../../config/runtime-config.js";
+import { loadRuntimeConfig, type EstaCodaConfig } from "../../config/runtime-config.js";
 import type { AuxiliaryModelSlotConfig, AuxiliaryModelSlotInput, ProviderId } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import type { PromptCardStatusLine } from "../../contracts/view-model.js";
@@ -22,6 +22,7 @@ import {
   type ProviderModelRoutePromptMode,
 } from "../provider-model-route-prompt.js";
 import { getProviderMetadata } from "../../providers/provider-metadata.js";
+import { isLocalProviderEndpoint } from "../../providers/provider-route-location.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
 import type {
   SetupApplyEndState,
@@ -186,6 +187,7 @@ type PendingOAuthWrite = SetupDeferredOAuthWrite;
 type RunOnceResult = ConfigEditorRunnerResult & {
   readonly repairAgainDecision?: SetupRouteDecision;
   readonly menuBackRequested?: boolean;
+  readonly visionParentBackRequested?: boolean;
 };
 
 type ConfigEditorLoopState = {
@@ -923,32 +925,43 @@ async function handleVisionAndImagesAction(
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   action: ConfigEditorRenderedAction
 ): Promise<ConfigEditorRunnerResult> {
-  const selection = await promptVisionAndImagesCapability(options.prompt, options.locale);
-  if (selection.kind === "back") return menuBackResult(initialDecision, action.id);
-  if (selection.value === "image-generation") {
-    return handleOptionalCapabilityAction(options, initialDecision, session, action);
-  }
+  while (true) {
+    const selection = await promptVisionAndImagesCapability(options.prompt, options.locale);
+    if (selection.kind === "back") return menuBackResult(initialDecision, action.id);
+    if (selection.value === "image-generation") {
+      return handleOptionalCapabilityAction(options, initialDecision, session, action);
+    }
 
-  const source = requireEditorAction(action);
-  const visionAction: ConfigEditorRenderedAction = {
-    id: "edit-auxiliary-model-route",
-    label: setupCopyText(options.locale, "setupEditor.prompt.visionAndImages.analysis"),
-    description: setupCopyText(options.locale, "setupEditor.prompt.visionAndImages.analysis.description"),
-    readOnly: false,
-    source: "synthetic",
-    editorAction: {
-      ...source,
+    const source = requireEditorAction(action);
+    const visionAction: ConfigEditorRenderedAction = {
       id: "edit-auxiliary-model-route",
-      copyKey: "setupEditor.actions.editAuxiliaryModelRoute",
-      sectionId: "model-route",
-      patch: {
-        kind: "scoped-config-patch-intent",
-        fields: ["auxiliaryModels.*"],
-        preserveUnrelatedConfig: true,
+      label: setupCopyText(options.locale, "setupEditor.prompt.visionAndImages.analysis"),
+      description: setupCopyText(options.locale, "setupEditor.prompt.visionAndImages.analysis.description"),
+      readOnly: false,
+      source: "synthetic",
+      editorAction: {
+        ...source,
+        id: "edit-auxiliary-model-route",
+        copyKey: "setupEditor.actions.editAuxiliaryModelRoute",
+        sectionId: "model-route",
+        patch: {
+          kind: "scoped-config-patch-intent",
+          fields: ["auxiliaryModels.*"],
+          preserveUnrelatedConfig: true,
+        },
       },
-    },
-  };
-  return handleSelectedAuxiliaryRouteAction(options, initialDecision, session, visionAction, "vision");
+    };
+    const result = await handleSelectedAuxiliaryRouteAction(
+      options,
+      initialDecision,
+      session,
+      visionAction,
+      "vision",
+      true
+    );
+    if (result.visionParentBackRequested === true) continue;
+    return result;
+  }
 }
 
 async function handleOptionalCapabilityAction(
@@ -1626,110 +1639,153 @@ async function handleSelectedAuxiliaryRouteAction(
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   action: ConfigEditorRenderedAction,
-  auxiliaryTask: SetupEditorAuxiliaryTask | "vision"
+  auxiliaryTask: SetupEditorAuxiliaryTask | "vision",
+  returnToVisionParent = false
 ): Promise<RunOnceResult> {
   const editorAction = requireEditorAction(action);
   const loaded = await loadRuntimeConfig(options);
   const currentSlot = auxiliarySlotConfig(loaded.config.auxiliaryModels?.[auxiliaryTask]);
   const currentAuxiliaryRoute = auxiliaryRouteFromSlot(currentSlot);
-  let visionReviewValues: Readonly<Record<string, unknown>> = {};
-  if (auxiliaryTask === "vision") {
-    const routeChoice = await promptVisionAnalysisRouteMode(options.prompt, currentSlot, options.locale);
-    if (routeChoice.kind === "back") {
-      return menuBackResult(initialDecision, action.id);
-    }
-    let routeMode = routeChoice.value === "advanced" ? visionAnalysisRouteMode(currentSlot) : routeChoice.value;
-    let settings = {
-      hostedProcessing: currentSlot?.hostedProcessing ?? "allow-with-approval" as const,
-      timeoutMs: currentSlot?.timeoutMs ?? 60_000,
-      maxConcurrency: currentSlot?.maxConcurrency ?? 1,
-    };
-    let advancedSettingsOnly = false;
-    if (routeChoice.value === "advanced") {
-      const advanced = await promptVisionAnalysisAdvancedChoice(options.prompt, currentSlot, options.locale);
-      if (advanced.kind === "back") return menuBackResult(initialDecision, action.id);
-      if (advanced.value === "settings") {
-        advancedSettingsOnly = true;
-        const advancedSettings = await promptVisionAnalysisRouteSettings(options.prompt, currentSlot, options.locale);
-        if (advancedSettings.kind === "back") return menuBackResult(initialDecision, action.id);
-        settings = advancedSettings.value;
-      } else {
-        routeMode = advanced.value;
+  while (true) {
+    let visionReviewValues: Readonly<Record<string, unknown>> = {};
+    if (auxiliaryTask === "vision") {
+      const routeChoice = await promptVisionAnalysisRouteMode(options.prompt, currentSlot, options.locale);
+      if (routeChoice.kind === "back") {
+        return returnToVisionParent
+          ? visionParentBackResult(initialDecision, action.id)
+          : menuBackResult(initialDecision, action.id);
+      }
+      let routeMode = routeChoice.value === "advanced" ? visionAnalysisRouteMode(currentSlot) : routeChoice.value;
+      let settings = {
+        hostedProcessing: currentSlot?.hostedProcessing ?? "allow-with-approval" as const,
+        timeoutMs: currentSlot?.timeoutMs ?? 60_000,
+        maxConcurrency: currentSlot?.maxConcurrency ?? 1,
+      };
+      let advancedSettingsOnly = false;
+      if (routeChoice.value === "advanced") {
+        let returnToRoute = false;
+        while (true) {
+          const advanced = await promptVisionAnalysisAdvancedChoice(options.prompt, currentSlot, options.locale);
+          if (advanced.kind === "back") {
+            returnToRoute = true;
+            break;
+          }
+          if (advanced.value === "settings") {
+            const advancedSettings = await promptVisionAnalysisRouteSettings(
+              options.prompt,
+              currentSlot,
+              options.locale,
+              { localProcessingAvailable: hasConfiguredLocalModel(loaded.config) }
+            );
+            if (advancedSettings.kind === "back") continue;
+            advancedSettingsOnly = true;
+            settings = advancedSettings.value;
+          } else {
+            routeMode = advanced.value;
+          }
+          break;
+        }
+        if (returnToRoute) continue;
+      }
+      visionReviewValues = {
+        routeMode,
+        advancedSettings: routeChoice.value === "advanced",
+        hostedProcessing: settings.hostedProcessing,
+        timeoutMs: settings.timeoutMs,
+        maxConcurrency: settings.maxConcurrency,
+      };
+      const routeNeedsProvider = routeMode === "dedicated" || routeMode === "fallback";
+      const canReuseCurrentProvider = currentAuxiliaryRoute !== undefined &&
+        (advancedSettingsOnly || routeMode === "fallback");
+      if (routeChoice.value === "advanced" && (!routeNeedsProvider || canReuseCurrentProvider)) {
+        const currentRouteValues = (routeMode === "dedicated" || routeMode === "fallback") && currentAuxiliaryRoute !== undefined
+          ? {
+              provider: currentAuxiliaryRoute.provider,
+              model: currentAuxiliaryRoute.id,
+              ...(currentAuxiliaryRoute.baseUrl === undefined ? {} : { baseUrl: currentAuxiliaryRoute.baseUrl }),
+              ...(currentSlot?.apiKeyEnv === undefined ? {} : { apiKeyEnv: currentSlot.apiKeyEnv }),
+              ...(currentSlot?.contextWindowTokens === undefined ? {} : { contextWindowTokens: currentSlot.contextWindowTokens }),
+            }
+          : {};
+        return reviewAndApplyAction(options, initialDecision, session, {
+          ...editorAction,
+          reviewValues: {
+            ...editorAction.reviewValues,
+            auxiliaryTask,
+            ...visionReviewValues,
+            ...currentRouteValues,
+          },
+        });
+      }
+      if (routeMode === "automatic" || routeMode === "main" || routeMode === "disabled") {
+        return reviewAndApplyAction(options, initialDecision, session, {
+          ...editorAction,
+          reviewValues: {
+            ...editorAction.reviewValues,
+            auxiliaryTask,
+            ...visionReviewValues,
+          },
+        });
       }
     }
-    visionReviewValues = {
-      routeMode,
-      advancedSettings: routeChoice.value === "advanced",
-      hostedProcessing: settings.hostedProcessing,
-      timeoutMs: settings.timeoutMs,
-      maxConcurrency: settings.maxConcurrency,
-    };
-    const routeNeedsProvider = routeMode === "dedicated" || routeMode === "fallback";
-    const canReuseCurrentProvider = currentAuxiliaryRoute !== undefined &&
-      (advancedSettingsOnly || routeMode === "fallback");
-    if (routeChoice.value === "advanced" && (!routeNeedsProvider || canReuseCurrentProvider)) {
-      const currentRouteValues = (routeMode === "dedicated" || routeMode === "fallback") && currentAuxiliaryRoute !== undefined
-        ? {
-            provider: currentAuxiliaryRoute.provider,
-            model: currentAuxiliaryRoute.id,
-            ...(currentAuxiliaryRoute.baseUrl === undefined ? {} : { baseUrl: currentAuxiliaryRoute.baseUrl }),
-            ...(currentSlot?.apiKeyEnv === undefined ? {} : { apiKeyEnv: currentSlot.apiKeyEnv }),
-            ...(currentSlot?.contextWindowTokens === undefined ? {} : { contextWindowTokens: currentSlot.contextWindowTokens }),
-          }
-        : {};
-      return reviewAndApplyAction(options, initialDecision, session, {
-        ...editorAction,
-        reviewValues: {
-          ...editorAction.reviewValues,
-          auxiliaryTask,
-          ...visionReviewValues,
-          ...currentRouteValues,
-        },
-      });
-    }
-    if (routeMode === "automatic" || routeMode === "main" || routeMode === "disabled") {
-      return reviewAndApplyAction(options, initialDecision, session, {
-        ...editorAction,
-        reviewValues: {
-          ...editorAction.reviewValues,
-          auxiliaryTask,
-          ...visionReviewValues,
-        },
-      });
-    }
-  }
-  const resolved = await selectResolvedProviderRoute(options, "auxiliary", {
-    currentProviderId: currentAuxiliaryRoute?.provider,
-    currentModelId: currentAuxiliaryRoute?.id,
-  });
-  if (resolved.kind !== "selected") {
-    return handleProviderRoutePromptExit(options, initialDecision, action.id, resolved);
-  }
-
-  const selectedAction: SetupEditorActionDraft = {
-    ...editorAction,
-    reviewValues: {
-      ...editorAction.reviewValues,
-      auxiliaryTask,
-      ...visionReviewValues,
-    },
-  };
-  if (resolved.selection.credentialAction.kind === "endpoint") {
-    return collectAndApplyOpenAICompatibleEndpointFlow(options, initialDecision, session, selectedAction, {
-      providerId: resolved.selection.provider,
-      defaultBaseUrl: resolved.selection.credentialAction.baseUrl ?? resolved.selection.baseUrl ?? "http://localhost:11434/v1",
-      defaultApiKeyEnv: resolved.selection.credentialAction.apiKeyEnv,
-      currentRoute: currentAuxiliaryRoute === undefined
-        ? undefined
-        : {
-            providerId: currentAuxiliaryRoute.provider,
-            modelId: currentAuxiliaryRoute.id,
-            baseUrl: currentAuxiliaryRoute.baseUrl,
-          },
+    const resolved = await selectResolvedProviderRoute(options, "auxiliary", {
+      currentProviderId: currentAuxiliaryRoute?.provider,
+      currentModelId: currentAuxiliaryRoute?.id,
     });
-  }
+    if (resolved.kind === "back" && auxiliaryTask === "vision") continue;
+    if (resolved.kind !== "selected") {
+      return handleProviderRoutePromptExit(options, initialDecision, action.id, resolved);
+    }
 
-  return reviewAndApplyResolvedRoute(options, initialDecision, session, selectedAction, resolved.selection);
+    const selectedAction: SetupEditorActionDraft = {
+      ...editorAction,
+      reviewValues: {
+        ...editorAction.reviewValues,
+        auxiliaryTask,
+        ...visionReviewValues,
+      },
+    };
+    if (resolved.selection.credentialAction.kind === "endpoint") {
+      const result = await collectAndApplyOpenAICompatibleEndpointFlow(options, initialDecision, session, selectedAction, {
+        providerId: resolved.selection.provider,
+        defaultBaseUrl: resolved.selection.credentialAction.baseUrl ?? resolved.selection.baseUrl ?? "http://localhost:11434/v1",
+        defaultApiKeyEnv: resolved.selection.credentialAction.apiKeyEnv,
+        currentRoute: currentAuxiliaryRoute === undefined
+          ? undefined
+          : {
+              providerId: currentAuxiliaryRoute.provider,
+              modelId: currentAuxiliaryRoute.id,
+              baseUrl: currentAuxiliaryRoute.baseUrl,
+            },
+      });
+      if (result.menuBackRequested === true && auxiliaryTask === "vision") continue;
+      return result;
+    }
+
+    return reviewAndApplyResolvedRoute(options, initialDecision, session, selectedAction, resolved.selection);
+  }
+}
+
+function hasConfiguredLocalModel(config: EstaCodaConfig): boolean {
+  const providerBaseUrl = (provider: ProviderId | undefined): string | undefined =>
+    provider === undefined ? undefined : config.providers?.[provider]?.baseUrl;
+  const routes: Array<{ readonly provider: ProviderId; readonly baseUrl?: string }> = [];
+  if (config.model?.provider !== undefined) {
+    routes.push({ provider: config.model.provider, baseUrl: providerBaseUrl(config.model.provider) });
+  }
+  for (const fallback of config.model?.fallbacks ?? []) {
+    routes.push({ provider: fallback.provider, baseUrl: fallback.baseUrl ?? providerBaseUrl(fallback.provider) });
+  }
+  const visionRoute = auxiliaryRouteFromSlot(config.auxiliaryModels?.vision);
+  if (visionRoute !== undefined) {
+    routes.push({ provider: visionRoute.provider, baseUrl: visionRoute.baseUrl ?? providerBaseUrl(visionRoute.provider) });
+  }
+  for (const [provider, providerConfig] of Object.entries(config.providers ?? {})) {
+    if ((providerConfig.models?.length ?? 0) > 0) {
+      routes.push({ provider, baseUrl: providerConfig.baseUrl });
+    }
+  }
+  return routes.some(isLocalProviderEndpoint);
 }
 
 function auxiliaryRouteFromSlot(
@@ -2736,6 +2792,20 @@ function menuBackResult(
     initialDecision,
     selectedActionId,
     menuBackRequested: true,
+  };
+}
+
+function visionParentBackResult(
+  initialDecision: SetupRouteDecision,
+  selectedActionId: string
+): RunOnceResult {
+  return {
+    completed: false,
+    exitCode: 0,
+    output: "",
+    initialDecision,
+    selectedActionId,
+    visionParentBackRequested: true,
   };
 }
 

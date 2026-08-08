@@ -1460,29 +1460,35 @@ export async function promptVisionAnalysisAdvancedChoice(
 export async function promptVisionAnalysisRouteSettings(
   prompt: Prompt,
   current: AuxiliaryModelSlotConfig | undefined,
-  locale: SetupCopyLocale = "en"
+  locale: SetupCopyLocale = "en",
+  options: { readonly localProcessingAvailable?: boolean } = {}
 ): Promise<VisionAnalysisRouteSettingsResult> {
-  const hostedProcessing = await promptSetupChoiceResult(prompt, {
-    title: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.title"),
-    message: `${setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.body")}\n`,
-    allowBack: true,
-    choices: [
-      {
-        id: "vision-hosted-approval",
-        label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.allow"),
-        description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.allow.description"),
-        value: "allow-with-approval" as const,
-      },
-      {
-        id: "vision-hosted-local-only",
-        label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.localOnly"),
-        description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.localOnly.description"),
-        value: "local-only" as const,
-      },
-    ],
-    defaultValue: current?.hostedProcessing ?? "allow-with-approval",
-  });
-  if (hostedProcessing.kind === "back") return hostedProcessing;
+  const showLocalOnly = options.localProcessingAvailable === true || current?.hostedProcessing === "local-only";
+  let hostedProcessing: "allow-with-approval" | "local-only" = "allow-with-approval";
+  if (showLocalOnly) {
+    const result = await promptSetupChoiceResult(prompt, {
+      title: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.title"),
+      message: `${setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.body")}\n`,
+      allowBack: true,
+      choices: [
+        {
+          id: "vision-hosted-approval",
+          label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.allow"),
+          description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.allow.description"),
+          value: "allow-with-approval" as const,
+        },
+        {
+          id: "vision-hosted-local-only",
+          label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.localOnly"),
+          description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.localOnly.description"),
+          value: "local-only" as const,
+        },
+      ],
+      defaultValue: current?.hostedProcessing ?? "allow-with-approval",
+    });
+    if (result.kind === "back") return result;
+    hostedProcessing = result.value;
+  }
 
   const timeoutMs = await promptBoundedNumber(prompt, {
     title: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.limits.title"),
@@ -1509,7 +1515,7 @@ export async function promptVisionAnalysisRouteSettings(
   return {
     kind: "selected",
     value: {
-      hostedProcessing: hostedProcessing.value,
+      hostedProcessing,
       timeoutMs: timeoutMs.value,
       maxConcurrency: maxConcurrency.value,
     },

@@ -235,7 +235,7 @@ describe("vision tools", () => {
       }
     });
 
-    it.each([2, 3, 4])("compares %i images through one bounded auxiliary request", async (imageCount) => {
+    it.each([2, 3, 4, 10])("compares %i images through one bounded auxiliary request", async (imageCount) => {
       const executor = createMockExecutor();
       const tmp = createTempPng();
       try {
@@ -266,10 +266,13 @@ describe("vision tools", () => {
       }
     });
 
-    it("analyzes 10 images as three bounded batches without dropping any image", async () => {
+    it("analyzes 20 images as two 10-image batches and synthesizes the complete result", async () => {
       const executor = createMockExecutor();
       const tmp = createTempPng();
       try {
+        const paths = Array.from({ length: 20 }, (_, index) => `image-${index + 1}.png`);
+        const source = readFileSync(tmp.path);
+        for (const path of paths) writeFileSync(join(tmp.dir, path), source);
         const result = await dispatchImageWithVision({
           workspaceRoot: tmp.dir,
           mainRoute: textOnlyRoute,
@@ -281,20 +284,25 @@ describe("vision tools", () => {
             diagnostics: []
           },
           providerExecutor: executor
-        }, { paths: Array.from({ length: 10 }, () => "test.png") });
+        }, { paths, prompt: "Compare every image" });
 
-        const imageCounts = (executor.complete as any).mock.calls.map(([request]: any[]) =>
-          request.messages[1].content.filter((part: any) => part.type === "image_url").length
-        );
-        expect(imageCounts).toEqual([4, 4, 2]);
+        const requests = (executor.complete as any).mock.calls.map(([request]: any[]) => request);
+        const imageCounts = requests
+          .filter((request: any) => Array.isArray(request.messages[1].content))
+          .map((request: any) => request.messages[1].content.filter((part: any) => part.type === "image_url").length);
+        expect(imageCounts).toEqual([10, 10]);
+        expect(requests).toHaveLength(3);
+        expect(requests[2].messages[1].content).toContain("Original user request: Compare every image");
         expect(result).toEqual(expect.objectContaining({
           ok: true,
-          content: expect.stringContaining("Analyzed all 10 images in 3 bounded batches."),
+          content: expect.stringContaining("Analyzed all 20 images in 2 bounded batches."),
           metadata: expect.objectContaining({
-            imageCount: 10,
+            imageCount: 20,
+            paths,
             batched: true,
-            batchCount: 3,
-            completedBatches: 3
+            batchCount: 2,
+            completedBatches: 2,
+            synthesis: expect.objectContaining({ attempted: true, ok: true })
           })
         }));
       } finally {
@@ -330,10 +338,12 @@ describe("vision tools", () => {
           providerExecutor: executor
         }, { paths: ["test.png", "test.png", "test.png"] });
 
-        const imageCounts = (executor.complete as any).mock.calls.map(([request]: any[]) =>
-          request.messages[1].content.filter((part: any) => part.type === "image_url").length
-        );
+        const imageCounts = (executor.complete as any).mock.calls
+          .map(([request]: any[]) => request)
+          .filter((request: any) => Array.isArray(request.messages[1].content))
+          .map((request: any) => request.messages[1].content.filter((part: any) => part.type === "image_url").length);
         expect(imageCounts).toEqual([1, 1, 1]);
+        expect(executor.complete).toHaveBeenCalledTimes(4);
         expect(result.metadata).toEqual(expect.objectContaining({
           imageCount: 3,
           batched: true,
@@ -374,20 +384,115 @@ describe("vision tools", () => {
             diagnostics: []
           },
           providerExecutor: executor
-        }, { paths: Array.from({ length: 6 }, () => "test.png") });
+        }, { paths: Array.from({ length: 11 }, () => "test.png") });
 
         expect(executor.complete).toHaveBeenCalledTimes(2);
         expect(result).toEqual(expect.objectContaining({
           ok: false,
           content: expect.stringContaining("No remaining images were silently skipped or reported as analyzed."),
           metadata: expect.objectContaining({
-            imageCount: 6,
+            imageCount: 11,
             batched: true,
             batchCount: 2,
             completedBatches: 1,
             failedBatch: 2
           })
         }));
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("returns every batch finding without opening a new fallback route when synthesis fails", async () => {
+      const executor = createMockExecutor();
+      (executor.complete as any)
+        .mockResolvedValueOnce(successfulExecution(baseRoute, "images 1-10 findings"))
+        .mockResolvedValueOnce(successfulExecution(baseRoute, "images 11-20 findings"))
+        .mockResolvedValueOnce({
+          ok: false,
+          fallbackUsed: false,
+          attempts: [{
+            provider: "openai",
+            model: "gpt-4o",
+            state: "dispatched",
+            dispatchedAt: "2030-01-01T00:00:00.000Z",
+            ok: false,
+            content: "failed",
+            errorClass: "network"
+          }]
+        });
+      const tmp = createTempPng();
+      try {
+        const result = await dispatchImageWithVision({
+          workspaceRoot: tmp.dir,
+          mainRoute: textOnlyRoute,
+          visionAuxiliaryRoute: {
+            task: "vision",
+            route: baseRoute,
+            source: "explicit",
+            fallbackToMain: true,
+            diagnostics: []
+          },
+          providerExecutor: executor
+        }, { paths: Array.from({ length: 20 }, () => "test.png") });
+
+        expect(result).toEqual(expect.objectContaining({
+          ok: true,
+          content: expect.stringContaining("Cross-batch synthesis was unavailable")
+        }));
+        expect(result.content).toContain("images 1-10 findings");
+        expect(result.content).toContain("images 11-20 findings");
+        expect(result.metadata?.synthesis).toEqual(expect.objectContaining({ attempted: true, ok: false }));
+        expect(executor.complete).toHaveBeenCalledTimes(3);
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("emits ordered progress for every provider batch and final synthesis", async () => {
+      const executor = createMockExecutor();
+      const tmp = createTempPng();
+      const events: Array<{ kind: string; displayPreview?: string; activityId?: string }> = [];
+      try {
+        const tool = createVisionTools({
+          workspaceRoot: tmp.dir,
+          mainRoute: textOnlyRoute,
+          visionAuxiliaryRoute: {
+            task: "vision",
+            route: baseRoute,
+            source: "explicit",
+            fallbackToMain: false,
+            diagnostics: []
+          },
+          providerExecutor: executor
+        })[0]!;
+        await tool.run(
+          { paths: Array.from({ length: 20 }, () => "test.png") },
+          {
+            toolCallId: "vision-progress",
+            onEvent: (event) => {
+              events.push(event);
+            }
+          }
+        );
+
+        expect(events).toEqual([
+          expect.objectContaining({
+            kind: "tool-start",
+            displayPreview: "Analyzing images 1-10 of 20",
+            activityId: "vision-progress"
+          }),
+          expect.objectContaining({
+            kind: "tool-start",
+            displayPreview: "Analyzing images 11-20 of 20",
+            activityId: "vision-progress"
+          }),
+          expect.objectContaining({
+            kind: "tool-start",
+            displayPreview: "Synthesizing findings across 20 images",
+            activityId: "vision-progress"
+          })
+        ]);
       } finally {
         tmp.cleanup();
       }

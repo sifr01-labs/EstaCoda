@@ -171,6 +171,7 @@ export class NativeToolExecutor {
       input: plan.input,
       trustedWorkspace: input.trustedWorkspace,
       sessionId: this.#currentSessionId(),
+      toolCallId: plan.id,
       visibleTurnId: input.visibleTurnId,
       providerUsageLineage: input.providerUsageLineage,
       visionInputProvenance: input.visionInputProvenance,

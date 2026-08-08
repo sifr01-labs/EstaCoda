@@ -1,4 +1,4 @@
-import type { ResolvedModelRoute } from "../contracts/provider.js";
+import type { ProviderId, ResolvedModelRoute } from "../contracts/provider.js";
 import { getProviderDefaultBaseUrl } from "./provider-metadata.js";
 
 export type ProviderRouteDestination = {
@@ -7,6 +7,12 @@ export type ProviderRouteDestination = {
 };
 
 export function providerRouteDestination(route: ResolvedModelRoute): ProviderRouteDestination {
+  return providerEndpointDestination(route);
+}
+
+export function providerEndpointDestination(
+  route: { readonly provider: ProviderId; readonly baseUrl?: string }
+): ProviderRouteDestination {
   const rawBaseUrl = route.baseUrl ?? getProviderDefaultBaseUrl(route.provider);
   if (rawBaseUrl === undefined) {
     return route.provider === "local"
@@ -30,6 +36,12 @@ export function providerRouteDestination(route: ResolvedModelRoute): ProviderRou
   } catch {
     return { inference: "hosted", key: `${route.provider}@custom-endpoint` };
   }
+}
+
+export function isLocalProviderEndpoint(
+  route: { readonly provider: ProviderId; readonly baseUrl?: string }
+): boolean {
+  return providerEndpointDestination(route).inference === "local";
 }
 
 export function isLocalProviderRoute(route: ResolvedModelRoute): boolean {
