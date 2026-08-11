@@ -316,6 +316,49 @@ describe("supervised local CDP backend", () => {
     await expect(unavailable.isAvailable()).resolves.toBe(false);
   });
 
+  it("reports lazy auto-launch as available without launching Chrome during readiness checks", async () => {
+    const findChromiumExecutable = vi.fn(async () => ({
+      executablePath: "/usr/bin/chromium",
+      source: "launchExecutable" as const
+    }));
+    const launchChrome = vi.fn(async () => createLaunchedChrome());
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      autoLaunch: true,
+      launchExecutable: "/usr/bin/chromium",
+      findChromiumExecutable,
+      launchChrome
+    });
+
+    await expect(backend.isAvailable()).resolves.toBe(true);
+    await expect(backend.status()).resolves.toEqual({
+      backend: "local-cdp",
+      available: true,
+      reason: "Chrome/Chromium auto-launch is ready and will start on the first browser action."
+    });
+    expect(findChromiumExecutable).toHaveBeenCalledWith({
+      launchExecutable: "/usr/bin/chromium",
+      launchCommand: undefined
+    });
+    expect(launchChrome).not.toHaveBeenCalled();
+  });
+
+  it("reports lazy auto-launch as unavailable when Chrome cannot be discovered", async () => {
+    const launchChrome = vi.fn(async () => createLaunchedChrome());
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      autoLaunch: true,
+      findChromiumExecutable: vi.fn(async () => ({ executablePath: undefined })),
+      launchChrome
+    });
+
+    await expect(backend.isAvailable()).resolves.toBe(false);
+    await expect(backend.status()).resolves.toEqual({
+      backend: "local-cdp",
+      available: false,
+      reason: "CDP URL is not configured and Chrome/Chromium auto-launch is unavailable because no executable was found."
+    });
+    expect(launchChrome).not.toHaveBeenCalled();
+  });
+
   it("navigate() creates a session and returns the supervisor snapshot", async () => {
     const socket = new FakeCdpSocket();
     const fetch = createFetch();

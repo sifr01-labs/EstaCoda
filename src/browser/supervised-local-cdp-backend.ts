@@ -238,6 +238,45 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     };
   };
 
+  const resolveAvailabilityStatus = async (): Promise<BrowserBackendStatus> => {
+    if (closed) {
+      return {
+        backend: "local-cdp",
+        available: false,
+        reason: "Browser backend is closed."
+      };
+    }
+
+    const endpoint = launchedStack?.endpoint ?? launchedChrome?.endpoint ?? configuredEndpoint;
+    const currentStatus = await checkLocalCdpStatus(endpoint, options.fetch);
+    if (currentStatus.available || options.autoLaunch !== true) {
+      return currentStatus;
+    }
+
+    const finder = options.findChromiumExecutable ?? findChromiumExecutable;
+    const found = await finder({
+      launchExecutable: options.launchExecutable,
+      launchCommand: options.launchCommand
+    });
+    if (found.executablePath === undefined) {
+      return {
+        ...currentStatus,
+        reason: endpoint === undefined
+          ? "CDP URL is not configured and Chrome/Chromium auto-launch is unavailable because no executable was found."
+          : `${currentStatus.reason ?? "Configured CDP endpoint is unavailable."} Chrome/Chromium auto-launch fallback is unavailable because no executable was found.`
+      };
+    }
+
+    return {
+      backend: "local-cdp",
+      available: true,
+      ...(endpoint === undefined ? {} : { endpoint }),
+      reason: endpoint === undefined
+        ? "Chrome/Chromium auto-launch is ready and will start on the first browser action."
+        : "Configured CDP endpoint is unavailable; Chrome/Chromium auto-launch fallback is ready and will start on the first browser action."
+    };
+  };
+
   const closeStack = async (stack: BrowserSessionStack | undefined): Promise<void> => {
     if (stack === undefined) {
       return;
@@ -341,8 +380,8 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     close(): Promise<void>;
   } = {
     kind: "local-cdp",
-    isAvailable: async () => (await checkLocalCdpStatus(launchedStack?.endpoint ?? launchedChrome?.endpoint ?? configuredEndpoint, options.fetch)).available,
-    status: () => checkLocalCdpStatus(launchedStack?.endpoint ?? launchedChrome?.endpoint ?? configuredEndpoint, options.fetch),
+    isAvailable: async () => (await resolveAvailabilityStatus()).available,
+    status: resolveAvailabilityStatus,
     async navigate(input: BrowserNavigateInput): Promise<BrowserNavigateResult> {
       if (closed) {
         throw new Error("Browser backend is closed.");
