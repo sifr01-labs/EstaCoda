@@ -5,7 +5,11 @@ import type { IntentRoute, SkillRouteCandidate } from "../contracts/intent.js";
 import type { SkillOutcome } from "../contracts/memory.js";
 import type { PromptBudgetReport } from "../contracts/prompt.js";
 import type { SecurityDecision } from "../contracts/security.js";
-import type { SessionDB, StructuredToolHistoryDiagnosticEvent } from "../contracts/session.js";
+import type {
+  AgentCancellationSource,
+  SessionDB,
+  StructuredToolHistoryDiagnosticEvent
+} from "../contracts/session.js";
 import type {
   LoadedSkill,
   SkillDefinition,
@@ -159,6 +163,7 @@ export class RunRecorder {
 
   async recordCancellation(input: {
     reason: string;
+    abortSource?: AgentCancellationSource;
     resumeNote?: string;
     activeSkill?: string;
     activeToolPlans?: ToolCallPlan[];
@@ -166,6 +171,7 @@ export class RunRecorder {
     await this.#sessionDb.appendEvent(this.#currentSessionId(), {
       kind: "agent-cancelled",
       reason: input.reason,
+      ...(input.abortSource === undefined ? {} : { abortSource: input.abortSource }),
       resumeNote: input.resumeNote,
       activeSkill: input.activeSkill,
       activeToolPlans: input.activeToolPlans?.map((plan) => ({
@@ -176,6 +182,7 @@ export class RunRecorder {
     });
     this.#trajectoryRecorder.record("agent-cancelled", {
       reason: input.reason,
+      ...(input.abortSource === undefined ? {} : { abortSource: input.abortSource }),
       resumeNote: input.resumeNote,
       activeSkill: input.activeSkill,
       activeToolPlans: input.activeToolPlans?.map((plan) => ({
@@ -187,6 +194,7 @@ export class RunRecorder {
     await emit(sink, {
       kind: "agent-cancelled",
       reason: input.reason,
+      ...(input.abortSource === undefined ? {} : { abortSource: input.abortSource }),
       resumeNote: input.resumeNote
     });
   }

@@ -752,6 +752,7 @@ describe("ProviderExecutor route-based execution", () => {
 
   it("captures cancelled streaming diagnostics without counting the aborted token as visible", async () => {
     const controller = new AbortController();
+    const events: ProviderRuntimeEvent[] = [];
     const calls: MockCall[] = [];
     const adapter: ProviderAdapter & { calls: MockCall[] } = {
       id: "test-provider",
@@ -776,16 +777,93 @@ describe("ProviderExecutor route-based execution", () => {
     const result = await executor.complete({ messages: [] }, {}, {
       primaryRoute: createDefaultRoute({ provider: "test-provider" }),
       stream: true,
-      signal: controller.signal
+      signal: controller.signal,
+      onEvent: (event) => {
+        events.push(event);
+      }
     });
 
     expect(result.ok).toBe(false);
     expect(result.attempts[0]?.streamDiagnostics).toEqual(expect.objectContaining({
       finish: "cancelled",
-      errorClass: "timeout",
       tokenChunks: 0,
       visibleChars: 0
     }));
+    expect(result.attempts[0]?.errorClass).toBeUndefined();
+    expect(result.attempts[0]?.streamDiagnostics).not.toHaveProperty("errorClass");
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "provider-attempt-end",
+      ok: false,
+      willFallback: false
+    }));
+  });
+
+  it("classifies a provider timeout independently from parent cancellation", async () => {
+    const adapter = createMockAdapter({
+      id: "test-provider",
+      streamEvents: [{
+        kind: "error",
+        provider: "test-provider",
+        model: "gpt-4o",
+        response: {
+          ok: false,
+          content: "Timed out after 1000ms",
+          model: "gpt-4o",
+          provider: "test-provider",
+          errorClass: "timeout"
+        }
+      }]
+    });
+    registry.register(adapter);
+
+    const result = await executor.complete({ messages: [] }, {}, {
+      primaryRoute: createDefaultRoute({ provider: "test-provider" }),
+      stream: true
+    });
+
+    expect(result.attempts[0]).toEqual(expect.objectContaining({
+      errorClass: "timeout",
+      streamDiagnostics: expect.objectContaining({
+        finish: "error",
+        errorClass: "timeout"
+      })
+    }));
+  });
+
+  it("records cancellation when an aborted stream returns without another event", async () => {
+    const controller = new AbortController();
+    const adapter: ProviderAdapter = {
+      id: "test-provider",
+      name: "test-provider mock",
+      executable: true,
+      health: () => ({ available: true }),
+      listModels: () => [],
+      complete: async (request) => ({
+        ok: true,
+        content: "unused",
+        model: request.model,
+        provider: "test-provider"
+      }),
+      stream: async function* (request) {
+        yield { kind: "start", provider: "test-provider", model: request.model };
+        controller.abort("interrupt");
+      }
+    };
+    registry.register(adapter);
+
+    const result = await executor.complete({ messages: [] }, {}, {
+      primaryRoute: createDefaultRoute({ provider: "test-provider" }),
+      stream: true,
+      signal: controller.signal
+    });
+
+    expect(result.attempts[0]).toEqual(expect.objectContaining({
+      errorClass: undefined,
+      streamDiagnostics: expect.objectContaining({
+        finish: "cancelled"
+      })
+    }));
+    expect(result.attempts[0]?.streamDiagnostics).not.toHaveProperty("errorClass");
   });
 
   it("openai_responses route executes without runnable=false rejection after metadata flip", async () => {

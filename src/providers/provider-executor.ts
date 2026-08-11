@@ -515,7 +515,10 @@ export class ProviderExecutor {
         const callResponse = callResult.response;
 
         const nextRoute = chain[index + 1];
-        const callWillFallback = !callResponse.ok && shouldFallback(callResponse, route, nextRoute);
+        const callWillFallback =
+          !isSignalAborted(options.signal) &&
+          !callResponse.ok &&
+          shouldFallback(callResponse, route, nextRoute);
 
         const dispatchedAttempt: ProviderAttempt & { state: "dispatched"; dispatchedAt: string } = {
           provider: route.provider,
@@ -636,7 +639,10 @@ export class ProviderExecutor {
       }
 
       const nextRoute = chain[index + 1];
-      const willFallback = !response.ok && shouldFallback(response, route, nextRoute);
+      const willFallback =
+        !isSignalAborted(options.signal) &&
+        !response.ok &&
+        shouldFallback(response, route, nextRoute);
 
       if (response.ok) {
         const extractedToolCalls = extractToolCallsFromProviderResponse(response.raw);
@@ -929,6 +935,10 @@ function routeRoleForIndex(index: number): ProviderRouteRole {
   return index === 0 ? "primary" : "fallback";
 }
 
+function isSignalAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
 function buildRouteProviderRequest(
   request: Omit<ProviderRequest, "model"> & { model?: string },
   route: ResolvedModelRoute,
@@ -1019,8 +1029,7 @@ async function collectProviderStream(input: {
         ok: false,
         content: "Provider stream cancelled.",
         model: input.model,
-        provider: input.provider,
-        errorClass: "timeout"
+        provider: input.provider
       };
       return {
         response,
@@ -1065,6 +1074,20 @@ async function collectProviderStream(input: {
         sawTransportDone = true;
         break;
     }
+  }
+
+  if (input.signal?.aborted === true) {
+    const response: ProviderResponse = {
+      ok: false,
+      content: "Provider stream cancelled.",
+      model: input.model,
+      provider: input.provider
+    };
+    return {
+      response,
+      toolCalls: [],
+      streamDiagnostics: finishDiagnostics("cancelled", response)
+    };
   }
 
   if (errorResponse !== undefined) {

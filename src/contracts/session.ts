@@ -35,6 +35,13 @@ import type {
 
 export type SessionRole = "user" | "agent" | "system" | "tool";
 
+export type AgentCancellationSource =
+  | "interrupt"
+  | "stop"
+  | "drain-timeout"
+  | "stuck-loop"
+  | "unknown";
+
 export type SessionRecord = {
   id: string;
   profileId: string;
@@ -513,6 +520,7 @@ export type SessionEvent =
   | {
       kind: "agent-cancelled";
       reason: string;
+      abortSource?: AgentCancellationSource;
       resumeNote?: string;
       activeSkill?: string;
       activeToolPlans?: Array<{

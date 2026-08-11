@@ -57,7 +57,7 @@ import {
   updateConversationContinuationState,
   type ConversationContinuationState
 } from "./conversation-continuation-state.js";
-import { emit, isAborted } from "../utils/runtime-helpers.js";
+import { abortSourceFromSignal, emit, isAborted } from "../utils/runtime-helpers.js";
 import { appendArtifactSummary, renderArtifactProgress } from "../utils/artifact-formatting.js";
 import { summarizeProviderFailure } from "../providers/provider-diagnostics.js";
 import type { SessionCompressionService } from "../prompt/session-compression-service.js";
@@ -314,6 +314,7 @@ export class AgentLoop {
       });
       await this.#runRecorder.recordCancellation({
         reason: "cancelled before start",
+        abortSource: abortSourceFromSignal(input.signal),
         resumeNote
       }, input.onEvent);
 
@@ -400,6 +401,7 @@ export class AgentLoop {
       });
       await this.#runRecorder.recordCancellation({
         reason: "cancelled before routing",
+        abortSource: abortSourceFromSignal(input.signal),
         resumeNote
       }, input.onEvent);
 
@@ -733,6 +735,7 @@ export class AgentLoop {
       });
       await this.#runRecorder.recordCancellation({
         reason: "cancelled during provider/tool loop",
+        abortSource: abortSourceFromSignal(input.signal),
         resumeNote,
         activeSkill: selectedSkill?.name,
         activeToolPlans: toolPlans

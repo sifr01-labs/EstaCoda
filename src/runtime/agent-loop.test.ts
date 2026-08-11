@@ -300,6 +300,7 @@ async function createAgentLoop(input: {
   skillLearningManager?: SkillLearningManager;
   skillRouteShadowReranker?: SkillRouteShadowReranker;
   agentEvolutionPolicy?: ReturnType<typeof deriveAgentEvolutionPolicy>;
+  onProviderTurnRun?: () => void;
 }) {
   const sessionDb = new InMemorySessionDB();
   const sessionId = `agent-loop-test-${Date.now()}-${Math.random()}`;
@@ -363,6 +364,7 @@ async function createAgentLoop(input: {
     lastPromptTokens: vi.fn(() => 77),
     lastActualPromptTokens: vi.fn(() => 88),
     run: vi.fn(async () => {
+      input.onProviderTurnRun?.();
       if (input.providerUsageCostUsd !== undefined) {
         const currentSessionId = sessionRuntimeContext.currentSessionId();
         const visibleTurn = [...await sessionDb.listMessages(currentSessionId)].reverse()
@@ -457,6 +459,45 @@ async function createAgentLoop(input: {
 }
 
 describe("AgentLoop provider availability gating", () => {
+  it("persists the bounded parent abort source for provider-loop cancellation", async () => {
+    const controller = new AbortController();
+    const liveEvents: RuntimeEvent[] = [];
+    const { loop, sessionDb, sessionId, trajectoryRecorder } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("late response"),
+      onProviderTurnRun: () => controller.abort("stuck-loop")
+    });
+
+    await loop.handle({
+      text: "long-running request",
+      channel: "cli",
+      trustedWorkspace: true,
+      signal: controller.signal,
+      onEvent: (event) => {
+        liveEvents.push(event);
+      }
+    });
+
+    expect(await sessionDb.listEvents(sessionId)).toContainEqual(expect.objectContaining({
+      kind: "agent-cancelled",
+      reason: "cancelled during provider/tool loop",
+      abortSource: "stuck-loop"
+    }));
+    expect(liveEvents).toContainEqual(expect.objectContaining({
+      kind: "agent-cancelled",
+      reason: "cancelled during provider/tool loop",
+      abortSource: "stuck-loop"
+    }));
+    expect(trajectoryRecorder.snapshot().events).toContainEqual(expect.objectContaining({
+      kind: "agent-cancelled",
+      data: expect.objectContaining({
+        reason: "cancelled during provider/tool loop",
+        abortSource: "stuck-loop"
+      })
+    }));
+  });
+
   it("persists and returns only the deterministic acknowledgement for delegated answer ownership", async () => {
     const delegatedExecution: ToolExecutionRecord = {
       ...execution,

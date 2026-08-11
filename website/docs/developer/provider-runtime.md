@@ -208,6 +208,8 @@ For echo-required providers, valid matching `providerReplayEcho.value` is serial
 
 ## Diagnostics
 
+Parent-turn cancellation and provider timeout are separate outcomes. If the parent `AbortSignal` cancels an active stream, stream diagnostics use `finish: "cancelled"` and do not assign `errorClass: "timeout"`; the corresponding `agent-cancelled` session event carries the bounded parent `abortSource`. Genuine provider total or stale timeouts continue to use `errorClass: "timeout"` and an error stream finish. A parent cancellation also suppresses fallback reporting because the turn is no longer allowed to dispatch another route.
+
 Native replay diagnostics are persistent `SessionEvent` records:
 
 | Event | Purpose |

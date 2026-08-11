@@ -1,5 +1,9 @@
 import type { FileChangePreviewViewModel } from "./view-model.js";
-import type { SessionCompressionTrigger, SessionContextWindowUsage } from "./session.js";
+import type {
+  AgentCancellationSource,
+  SessionCompressionTrigger,
+  SessionContextWindowUsage
+} from "./session.js";
 import type {
   ProviderFinishReason,
   ProviderReasoningMetadata,
@@ -199,6 +203,7 @@ export type RuntimeEvent =
   | {
       kind: "agent-cancelled";
       reason: string;
+      abortSource?: AgentCancellationSource;
       resumeNote?: string;
     }
   | {
