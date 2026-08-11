@@ -34,6 +34,8 @@ export type BrowserSnapshot = {
   url: string;
   title?: string;
   text?: string;
+  tab?: BrowserTab;
+  openedTabs?: BrowserTab[];
   elements?: Array<{
     ref: string;
     role?: string;
@@ -60,6 +62,30 @@ export type BrowserSnapshot = {
     text: string;
     timestamp?: string;
   }>;
+};
+
+export type BrowserTab = {
+  ref: string;
+  url: string;
+  title?: string;
+  controlled: boolean;
+};
+
+export type BrowserTabList = {
+  sessionId: string;
+  tabs: BrowserTab[];
+  blockedCount: number;
+};
+
+export type BrowserSwitchTabInput = {
+  sessionId?: string;
+  tabRef: string;
+  signal?: AbortSignal;
+};
+
+export type BrowserSwitchTabResult = {
+  tab: BrowserTab;
+  snapshot: BrowserSnapshot;
 };
 
 export type BrowserActionInput = {
@@ -132,6 +158,8 @@ export type BrowserBackend = {
     alt?: string;
   }>>;
   console?(input?: BrowserActionInput): Promise<BrowserConsoleEntry[]>;
+  tabs?(input?: BrowserActionInput): Promise<BrowserTabList>;
+  switchTab?(input: BrowserSwitchTabInput): Promise<BrowserSwitchTabResult>;
   cdp?(input: BrowserActionInput): Promise<unknown>;
   screenshot?(input?: BrowserActionInput): Promise<BrowserScreenshotResult>;
   dialog?(input?: BrowserActionInput): Promise<BrowserSnapshot>;

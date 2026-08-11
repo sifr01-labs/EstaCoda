@@ -1,4 +1,14 @@
-import type { BrowserActionInput, BrowserBackend, BrowserBackendStatus, BrowserConsoleEntry, BrowserNavigateInput, BrowserNavigateResult, BrowserScreenshotResult, BrowserSnapshot } from "../contracts/browser.js";
+import type {
+  BrowserActionInput,
+  BrowserBackend,
+  BrowserBackendStatus,
+  BrowserConsoleEntry,
+  BrowserNavigateInput,
+  BrowserNavigateResult,
+  BrowserScreenshotResult,
+  BrowserSnapshot,
+  BrowserSwitchTabInput
+} from "../contracts/browser.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { connectCdp, type CdpClient, type CdpFetchLike, type CdpWebSocketFactory } from "./cdp-client.js";
 import { evaluateCdpSnapshot } from "./cdp-supervisor.js";
@@ -803,6 +813,32 @@ export function createHybridBrowserBackend(options: HybridBrowserBackendOptions)
         throw new Error(`Hybrid browser ${route.route} backend does not support console.`);
       }
       return method(actionInputForRoute(input, route));
+    },
+    tabs: async (input = {}) => {
+      const route = resolveActionRoute(input);
+      const method = backendForRoute(route.route).tabs;
+      if (method === undefined) {
+        throw new Error(`Hybrid browser ${route.route} backend does not support tabs.`);
+      }
+      const browserKey = browserKeyForInput(input.sessionId);
+      const result = await method(actionInputForRoute(input, route));
+      return {
+        ...result,
+        sessionId: browserKey
+      };
+    },
+    switchTab: async (input: BrowserSwitchTabInput) => {
+      const route = resolveActionRoute(input);
+      const method = backendForRoute(route.route).switchTab;
+      if (method === undefined) {
+        throw new Error(`Hybrid browser ${route.route} backend does not support switchTab.`);
+      }
+      const browserKey = browserKeyForInput(input.sessionId);
+      const result = await method(actionInputForRoute(input, route));
+      return {
+        ...result,
+        snapshot: rewriteSnapshotSession(result.snapshot, browserKey)
+      };
     },
     cdp: async (input) => {
       const route = resolveActionRoute(input);

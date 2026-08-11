@@ -3,7 +3,14 @@ import { dirname, join } from "node:path";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import type { RegisteredTool } from "../contracts/tool.js";
 import type { SessionToolProvider } from "../contracts/tool.js";
-import type { BrowserActionInput, BrowserBackend, BrowserNavigateInput, BrowserSnapshot, WebExtractionResult } from "../contracts/browser.js";
+import type {
+  BrowserActionInput,
+  BrowserBackend,
+  BrowserNavigateInput,
+  BrowserSnapshot,
+  BrowserTab,
+  WebExtractionResult
+} from "../contracts/browser.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import { resolveGlobalStateHome } from "../config/profile-home.js";
 import { createBrowserDebugSession, type BrowserDebugSession } from "../browser/browser-debug.js";
@@ -411,6 +418,87 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             ? "No captured browser console entries."
             : entries.map((entry) => `${entry.timestamp ?? ""} [${entry.level}] ${entry.text}`.trim()).join("\n"),
           metadata: { backend: browserBackend.kind, entries }
+        };
+      }
+    },
+    {
+      name: "browser.tabs",
+      description: "List safe page tabs in the current browser session. The controlled tab is the one EstaCoda will inspect and operate.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sessionId: { type: "string" }
+        }
+      },
+      riskClass: "read-only-network",
+      toolsets: ["browser", "web", "research"],
+      progressLabel: "listing browser tabs",
+      maxResultSizeChars: 5000,
+      isAvailable: async () => browserBackend.tabs !== undefined && await browserBackend.isAvailable(),
+      run: async (input: BrowserActionInput) => {
+        if (browserBackend.tabs === undefined) {
+          return unsupportedBrowserTool(browserBackend, "browser.tabs");
+        }
+        const browserInput = deriveBrowserInput(input);
+        const result = await browserBackend.tabs(browserInput).catch((error: unknown) => ({ error }));
+        if ("error" in result) {
+          return {
+            ok: false,
+            content: result.error instanceof Error ? result.error.message : "Browser tab listing failed.",
+            metadata: { backend: browserBackend.kind }
+          };
+        }
+        return {
+          ok: true,
+          content: [
+            result.tabs.length === 0 ? "No safe page tabs are available." : result.tabs.map(renderBrowserTab).join("\n"),
+            result.blockedCount === 0 ? undefined : `${result.blockedCount} tab(s) hidden by browser URL policy.`
+          ].filter((line) => line !== undefined).join("\n"),
+          metadata: { backend: browserBackend.kind, ...result }
+        };
+      }
+    },
+    {
+      name: "browser.switch_tab",
+      description: "Switch EstaCoda's controlled browser page to a safe tab ref returned by browser.tabs and focus it in the visible browser.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tabRef: { type: "string" },
+          sessionId: { type: "string" }
+        },
+        required: ["tabRef"]
+      },
+      riskClass: "read-only-network",
+      toolsets: ["browser", "web", "research"],
+      progressLabel: "switching browser tab",
+      maxResultSizeChars: 8000,
+      isAvailable: async () => browserBackend.switchTab !== undefined && await browserBackend.isAvailable(),
+      run: async (input: BrowserActionInput & { tabRef?: string }) => {
+        if (browserBackend.switchTab === undefined) {
+          return unsupportedBrowserTool(browserBackend, "browser.switch_tab");
+        }
+        const browserInput = deriveBrowserInput(input);
+        const result = await browserBackend.switchTab({
+          sessionId: browserInput.sessionId,
+          tabRef: input.tabRef ?? "",
+          signal: browserInput.signal
+        }).catch((error: unknown) => ({ error }));
+        if ("error" in result) {
+          return {
+            ok: false,
+            content: result.error instanceof Error ? result.error.message : "Browser tab switch failed.",
+            metadata: { backend: browserBackend.kind }
+          };
+        }
+        return {
+          ok: true,
+          content: [
+            `Controlled tab: ${renderBrowserTab(result.tab)}`,
+            "",
+            renderBrowserSnapshot(result.snapshot, { maxChars: 7500 })
+          ].join("\n"),
+          metadata: { backend: browserBackend.kind, tab: result.tab, snapshot: result.snapshot }
         };
       }
     },
@@ -1274,6 +1362,8 @@ function renderBrowserSnapshot(snapshot: BrowserSnapshot, options: BrowserSnapsh
   const consoleHistory = snapshot.consoleHistory ?? [];
   const content = [
     options.full === true ? "[Full page snapshot]" : "[Compact viewport snapshot]",
+    snapshot.tab === undefined ? undefined : `Controlled tab: ${renderBrowserTab(snapshot.tab)}`,
+    snapshot.openedTabs === undefined || snapshot.openedTabs.length === 0 ? undefined : `Opened tabs: ${snapshot.openedTabs.map((tab) => tab.ref).join(", ")}`,
     "",
     snapshot.text,
     pendingDialogs.length === 0 ? undefined : "",
@@ -1300,6 +1390,11 @@ function renderBrowserSnapshot(snapshot: BrowserSnapshot, options: BrowserSnapsh
     ...elements.map((element) => renderBrowserSnapshotElement(element))
   ].filter((line) => line !== undefined).join("\n");
   return truncateRenderedBrowserSnapshot(content, options.maxChars);
+}
+
+function renderBrowserTab(tab: BrowserTab): string {
+  const title = tab.title?.trim() === "" || tab.title === undefined ? "Untitled" : tab.title;
+  return `${tab.ref}${tab.controlled ? " [controlled]" : ""} ${title} — ${tab.url}`;
 }
 
 function renderBrowserSnapshotElement(element: NonNullable<BrowserSnapshot["elements"]>[number]): string {

@@ -83,6 +83,17 @@ class FakeCdpSocket implements CdpWebSocketLike {
     if (method === "Target.createTarget") {
       return { targetId: `target-${++this.#targetCounter}` };
     }
+    if (method === "Target.getTargets") {
+      return {
+        targetInfos: Array.from({ length: 20 }, (_, index) => ({
+          targetId: `target-${index + 1}`,
+          type: "page",
+          title: `target-${index + 1}`,
+          url: index === 0 ? "https://example.com/final" : `https://example.com/target-${index + 1}`,
+          browserContextId: `context-${index + 1}`
+        }))
+      };
+    }
     if (method === "Runtime.evaluate") {
       return { result: { value: JSON.stringify(this.snapshot) } };
     }
@@ -151,7 +162,14 @@ function createFetch(overrides?: {
         statusText: overrides?.targetOk === false ? "No Target" : "OK",
         payload: Array.from({ length: 20 }, (_, index) => {
           const id = `target-${index + 1}`;
-          return { id, type: "page", webSocketDebuggerUrl: `ws://cdp/${id}` };
+          return {
+            id,
+            type: "page",
+            title: id,
+            url: index === 0 ? "https://example.com/final" : `https://example.com/${id}`,
+            browserContextId: `context-${index + 1}`,
+            webSocketDebuggerUrl: `ws://cdp/${id}`
+          };
         })
       });
     }
@@ -204,7 +222,14 @@ function createSwitchableCdpHarness(input: {
         statusText: "OK",
         payload: Array.from({ length: 20 }, (_, index) => {
           const id = `target-${index + 1}`;
-          return { id, type: "page", webSocketDebuggerUrl: `ws://${endpoint}/${id}` };
+          return {
+            id,
+            type: "page",
+            title: id,
+            url: `https://${endpoint}.example/${id}`,
+            browserContextId: `context-${index + 1}`,
+            webSocketDebuggerUrl: `ws://${endpoint}/${id}`
+          };
         })
       });
     }
@@ -704,6 +729,187 @@ describe("supervised local CDP backend", () => {
         })
       })
     ]));
+  });
+
+  it("click() follows one newly opened safe tab and focuses its snapshot", async () => {
+    const mainSnapshot = {
+      sessionId: "session-1",
+      url: "https://example.com/apps",
+      title: "Apps",
+      text: "Apps",
+      elements: [{ ref: "@e1", role: "link", name: "Loans" }]
+    };
+    const detailSnapshot = {
+      sessionId: "session-1",
+      url: "https://example.com/products/loans",
+      title: "Loans",
+      text: "Loan API",
+      elements: []
+    };
+    const mainSupervisor = {
+      send: vi.fn(async () => ({})),
+      waitFor: vi.fn(async () => undefined),
+      getSnapshot: vi.fn(async () => mainSnapshot),
+      consoleHistory: vi.fn(() => []),
+      respondToDialog: vi.fn(async () => undefined),
+      close: vi.fn()
+    };
+    const detailSupervisor = {
+      ...mainSupervisor,
+      send: vi.fn(async () => ({})),
+      getSnapshot: vi.fn(async () => detailSnapshot),
+      close: vi.fn()
+    };
+    const session = {
+      key: "session-1",
+      browserContextId: "context-1",
+      targetId: "target-1",
+      tabRef: "@t1",
+      pageWebSocketDebuggerUrl: "ws://target-1",
+      supervisor: mainSupervisor,
+      lastActiveAt: 1,
+      touch: vi.fn(),
+      close: vi.fn(async () => undefined)
+    };
+    let tabListCalls = 0;
+    const sessionManager = {
+      acquire: vi.fn(async () => session),
+      close: vi.fn(async () => undefined),
+      closeAll: vi.fn(async () => undefined),
+      has: vi.fn(() => true),
+      listTabs: vi.fn(async () => {
+        tabListCalls += 1;
+        return [
+          { browserContextId: "context-1", targetId: "target-1", pageWebSocketDebuggerUrl: "ws://target-1", url: mainSnapshot.url, title: mainSnapshot.title, ref: "@t1", controlled: session.targetId === "target-1" },
+          ...(tabListCalls === 1 ? [] : [{ browserContextId: "context-1", targetId: "target-2", pageWebSocketDebuggerUrl: "ws://target-2", url: detailSnapshot.url, title: detailSnapshot.title, ref: "@t2", controlled: session.targetId === "target-2" }])
+        ];
+      }),
+      switchTab: vi.fn(async () => {
+        session.targetId = "target-2";
+        session.tabRef = "@t2";
+        session.pageWebSocketDebuggerUrl = "ws://target-2";
+        session.supervisor = detailSupervisor;
+        return session;
+      })
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      resolveHostname: () => ["93.184.216.34"],
+      createTargetManager: () => ({
+        createTarget: vi.fn(async () => { throw new Error("unused"); }),
+        close: vi.fn(async () => undefined)
+      }),
+      createSessionManager: () => sessionManager
+    });
+
+    await backend.navigate({ url: mainSnapshot.url, sessionId: "session-1" });
+    const result = await backend.click?.({ sessionId: "session-1", ref: "@e1" });
+
+    expect(sessionManager.switchTab).toHaveBeenCalledWith("session-1", "@t2");
+    expect(result).toMatchObject({
+      url: detailSnapshot.url,
+      title: "Loans",
+      tab: { ref: "@t2", controlled: true },
+      openedTabs: [{ ref: "@t2", controlled: true }]
+    });
+  });
+
+  it("lists and switches only same-session tabs allowed by browser URL policy", async () => {
+    const snapshot = {
+      sessionId: "session-1",
+      url: "https://example.com/apps",
+      title: "Apps",
+      text: "Apps",
+      elements: []
+    };
+    const supervisor = {
+      send: vi.fn(async () => ({})),
+      waitFor: vi.fn(async () => undefined),
+      getSnapshot: vi.fn(async () => snapshot),
+      consoleHistory: vi.fn(() => []),
+      respondToDialog: vi.fn(async () => undefined),
+      close: vi.fn()
+    };
+    const unsafeSupervisor = {
+      ...supervisor,
+      getSnapshot: vi.fn(async () => ({
+        ...snapshot,
+        url: "http://169.254.169.254/latest",
+        title: "Metadata"
+      }))
+    };
+    const session = {
+      key: "session-1",
+      browserContextId: "context-1",
+      targetId: "target-1",
+      tabRef: "@t1",
+      pageWebSocketDebuggerUrl: "ws://target-1",
+      supervisor,
+      lastActiveAt: 1,
+      touch: vi.fn(),
+      close: vi.fn(async () => undefined)
+    };
+    const switchTab = vi.fn(async (_sessionId: string, tabRef: string) => {
+      if (tabRef === "@t4") {
+        session.targetId = "target-4";
+        session.tabRef = "@t4";
+        session.supervisor = unsafeSupervisor;
+      } else if (tabRef === "@t1") {
+        session.targetId = "target-1";
+        session.tabRef = "@t1";
+        session.supervisor = supervisor;
+      }
+      return session;
+    });
+    const sessionManager = {
+      acquire: vi.fn(async () => session),
+      close: vi.fn(async () => undefined),
+      closeAll: vi.fn(async () => undefined),
+      has: vi.fn(() => true),
+      listTabs: vi.fn(async () => [
+        { browserContextId: "context-1", targetId: "target-1", pageWebSocketDebuggerUrl: "ws://target-1", url: snapshot.url, title: snapshot.title, ref: "@t1", controlled: true },
+        { browserContextId: "context-1", targetId: "target-2", pageWebSocketDebuggerUrl: "ws://target-2", url: "http://169.254.169.254/latest", title: "Metadata", ref: "@t2", controlled: false },
+        { browserContextId: "context-1", targetId: "target-3", pageWebSocketDebuggerUrl: "ws://target-3", url: "https://example.com/?token=do-not-render", title: "Secret", ref: "@t3", controlled: false },
+        { browserContextId: "context-1", targetId: "target-4", pageWebSocketDebuggerUrl: "ws://target-4", url: "https://example.com/racy", title: "Racy", ref: "@t4", controlled: false },
+        { browserContextId: "context-1", targetId: "target-5", pageWebSocketDebuggerUrl: "ws://target-5", url: "https://tab-user:do-not-render@example.com/private", title: "Credentials", ref: "@t5", controlled: false }
+      ]),
+      switchTab
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      resolveHostname: () => ["93.184.216.34"],
+      createTargetManager: () => ({
+        createTarget: vi.fn(async () => { throw new Error("unused"); }),
+        close: vi.fn(async () => undefined)
+      }),
+      createSessionManager: () => sessionManager
+    });
+
+    await backend.navigate({ url: snapshot.url, sessionId: "session-1" });
+    const tabs = await backend.tabs?.({ sessionId: "session-1" });
+
+    expect(tabs).toEqual({
+      sessionId: "session-1",
+      tabs: [
+        { ref: "@t1", url: snapshot.url, title: snapshot.title, controlled: true },
+        { ref: "@t4", url: "https://example.com/racy", title: "Racy", controlled: false }
+      ],
+      blockedCount: 3
+    });
+    expect(JSON.stringify(tabs)).not.toContain("do-not-render");
+    expect(JSON.stringify(tabs)).not.toContain("tab-user");
+    await expect(backend.switchTab?.({ sessionId: "session-1", tabRef: "@t2" })).rejects.toThrow(
+      "Browser tab is unavailable under the current session or URL policy: @t2"
+    );
+    expect(switchTab).not.toHaveBeenCalled();
+    await expect(backend.switchTab?.({ sessionId: "session-1", tabRef: "@t4" })).rejects.toThrow(
+      "Browser tab changed to a URL blocked by browser policy before it could be controlled."
+    );
+    expect(switchTab).toHaveBeenNthCalledWith(1, "session-1", "@t4");
+    expect(switchTab).toHaveBeenNthCalledWith(2, "session-1", "@t1");
+    expect(session).toMatchObject({ targetId: "target-1", tabRef: "@t1", supervisor });
   });
 
   it("type() can use AX-derived textbox refs bound to DOM nodes", async () => {

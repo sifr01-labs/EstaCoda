@@ -226,11 +226,13 @@ sidebar_position: 6
 |------|------|---------------|
 | `browser.*` | `external-side-effect` | حالة جلسة المتصفح |
 
-تشمل أدوات المتصفح المُنفذة `browser.status` و`browser.navigate` و`browser.snapshot` و`browser.click` و`browser.type` و`browser.scroll` و`browser.press` و`browser.back` و`browser.get_images` و`browser.console` و`browser.cdp` و`browser.screenshot` و`browser.vision` و`browser.dialog`.
+تشمل أدوات المتصفح المُنفذة `browser.status` و`browser.navigate` و`browser.snapshot` و`browser.click` و`browser.type` و`browser.scroll` و`browser.press` و`browser.back` و`browser.get_images` و`browser.console` و`browser.tabs` و`browser.switch_tab` و`browser.cdp` و`browser.screenshot` و`browser.vision` و`browser.dialog`.
 
 **التوفر:** يتطلب backend متصفح مُهيّأ. يدعم `local-cdp` اتصال CDP اليدوي والتشغيل التلقائي المُشرف عليه. Browserbase مُنفّذ عبر خلفية المتصفح ويبقى محظورًا حتى تكون `browser.cloudSpendApproved === true`. تبقى browser-use وFirecrawl browser وCamofox مزودات مؤجلة مسجلة.
 
 **اللقطات:** تُرجع `browser.snapshot` إخراجًا مضغوطًا افتراضيًا. الإخراج المضغوط هو مجموعة AX محدودة من العناصر القابلة للتنفيذ مع مراجع مثل `@e1`؛ وليس ترشيحًا حقيقيًا للعناصر المرئية في منفذ العرض بعد. تمرير `full: true` يطلب مسار اللقطة الكاملة الأكبر. يوسم الإخراج المعروض اللقطات المضغوطة والكاملة، ويقص النص الضخم، وقد يلخص النتائج الكبيرة عندما يسمح `browser.summarizeSnapshots` و`browser.snapshotSummarizeThreshold` بذلك.
+
+**علامات التبويب:** تُرجع `browser.tabs` علامات تبويب الصفحات الآمنة التابعة للجلسة نفسها باستخدام مراجع مبهمة مثل `@t1`. تركّز `browser.switch_tab` على أحد هذه المراجع وتجعله تحت تحكم EstaCoda. يتبع النقر علامة تبويب آمنة جديدة واحدة تلقائيًا؛ أما النتائج الملتبسة التي تفتح عدة علامات فتتطلب تبديلًا صريحًا. لا تُعرض سياقات المتصفح الأخرى ولا علامات التبويب المحظورة بالسياسة.
 
 **تنقل Browserbase:** يمكن لتنقل HTTP(S) العام إنشاء جلسة Browserbase فقط عندما يكون Browserbase مُعدًا، وتتوفر `BROWSERBASE_API_KEY` و`BROWSERBASE_PROJECT_ID`، وتكون موافقة إنفاق السحابة مفعّلة. بيانات الاعتماد والإعداد وحدهما لا ينشئان جلسات. الموافقة المفقودة تُرجع خطأ بوابة الإنفاق ولا ترجع إلى المحلي. إخفاقات Browserbase المؤهلة قد ترجع إلى المحلي فقط عندما تكون `browser.cloudFallback === true`.
 

@@ -94,6 +94,8 @@ Supervised local CDP owns one session manager per endpoint stack. Configured CDP
 
 Each supervised session is created in its own CDP Browser Context through `Target.createBrowserContext`, then a page target is created with that `browserContextId`. Cleanup closes the target and disposes the Browser Context, so cookies and other browser-context state are isolated per browser session key.
 
+Tab discovery is also scoped to that Browser Context. `browser.tabs` returns stable opaque refs such as `@t1`, and `browser.switch_tab` changes the page EstaCoda controls without exposing raw CDP target IDs. Discovery joins `Target.getTargets` context metadata with the page connection data from `/json/list`; tabs from other contexts and tabs rejected by URL, website, metadata, or secret policy are not exposed. After `browser.click`, EstaCoda automatically follows the new tab only when exactly one new safe page tab appeared. When zero or multiple safe tabs appear, it keeps the current tab controlled and reports the new refs for an explicit switch.
+
 ## Snapshots
 
 Snapshots prefer `Accessibility.getFullAXTree`. AX nodes are converted into compact `BrowserSnapshot.elements` with deterministic refs such as `@e1`, preserving useful `role`, `name`, `value`, `disabled`, and `checked` fields. Unhelpful and ignored AX nodes are skipped. If the AX command fails, returns an empty/malformed tree, or refs cannot be bound to DOM nodes, EstaCoda falls back to the DOM-query snapshot path.
@@ -135,6 +137,8 @@ Browser tools exposed to the agent:
 | `browser.back` | Navigate back |
 | `browser.get_images` | List page images |
 | `browser.console` | Get console output |
+| `browser.tabs` | List safe tabs in the current isolated browser session |
+| `browser.switch_tab` | Focus and control a safe tab by opaque ref |
 | `browser.cdp` | Raw CDP command |
 | `browser.screenshot` | Capture screenshot |
 | `browser.vision` | Analyze screenshot with vision |

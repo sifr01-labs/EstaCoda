@@ -5,17 +5,27 @@ import type {
   BrowserBackendStatus,
   BrowserNavigateInput,
   BrowserNavigateResult,
-  BrowserScreenshotResult
+  BrowserScreenshotResult,
+  BrowserSnapshot,
+  BrowserSwitchTabInput,
+  BrowserTab,
+  BrowserTabList
 } from "../contracts/browser.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { connectCdp, type CdpFetchLike, type CdpWebSocketFactory } from "./cdp-client.js";
-import type { ResolveHostnameFn } from "./url-safety.js";
+import { isSafeUrl, redactUrlForMetadata, scanUrlForSecrets, type ResolveHostnameFn } from "./url-safety.js";
+import { checkWebsiteAccess, loadWebsiteBlocklist } from "./website-policy.js";
 import { CDPSupervisor } from "./cdp-supervisor.js";
 import type { BrowserSessionLifecycle } from "./session-lifecycle.js";
 import { findChromiumExecutable, type ChromiumFinderOptions, type ChromiumFinderResult } from "./chromium-finder.js";
 import { launchChrome, type ChromeLauncherOptions, type LaunchedChrome } from "./chrome-launcher.js";
 import { CdpTargetManager, type CdpTargetManagerOptions } from "./cdp-target-manager.js";
-import { BrowserSessionManager, type BrowserManagedSession, type BrowserSessionManagerOptions } from "./session-manager.js";
+import {
+  BrowserSessionManager,
+  type BrowserManagedSession,
+  type BrowserManagedTab,
+  type BrowserSessionManagerOptions
+} from "./session-manager.js";
 
 export type SupervisedLocalCdpBackendOptions = {
   cdpUrl?: string;
@@ -38,7 +48,8 @@ export type SupervisedLocalCdpBackendOptions = {
 
 type TargetManagerLike = Pick<CdpTargetManager, "createTarget" | "close">;
 
-type BrowserSessionManagerLike = Pick<BrowserSessionManager, "acquire" | "close" | "closeAll" | "has">;
+type BrowserSessionManagerLike = Pick<BrowserSessionManager, "acquire" | "close" | "closeAll" | "has"> &
+  Partial<Pick<BrowserSessionManager, "listTabs" | "switchTab">>;
 
 type BrowserSessionStack = {
   endpoint: string;
@@ -73,6 +84,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
   let configuredStack: BrowserSessionStack | undefined;
   let launchedStack: BrowserSessionStack | undefined;
   let closed = false;
+  const websitePolicy = loadWebsiteBlocklist(options.securityConfig?.websiteBlocklist ?? {});
   lifecycle?.start();
 
   const getSession = async (input?: BrowserActionInput): Promise<ManagedBackendSession> => {
@@ -83,6 +95,94 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       throw new Error(`Browser session not found: ${sessionId}`);
     }
     return asBackendSession(await stack.sessionManager.acquire(sessionId));
+  };
+
+  const tabUrlIsAllowed = async (url: string): Promise<boolean> => {
+    if (url === "about:blank") return true;
+    if (scanUrlForSecrets(url) !== undefined) return false;
+    try {
+      const parsed = new URL(url);
+      if (parsed.username !== "" || parsed.password !== "") return false;
+    } catch {
+      return false;
+    }
+    if (!await isSafeUrl(url, {
+      allowPrivateUrls: options.securityConfig?.allowPrivateUrls === true,
+      resolveHostname: options.resolveHostname
+    })) {
+      return false;
+    }
+    return checkWebsiteAccess(url, websitePolicy)?.allowed !== false;
+  };
+
+  const tabIsAllowed = async (tab: BrowserManagedTab): Promise<boolean> => tabUrlIsAllowed(tab.url);
+
+  const listManagedTabs = async (sessionId: string): Promise<BrowserManagedTab[]> => {
+    const stack = sessionStacks.get(sessionId);
+    if (stack === undefined || !stack.sessionManager.has(sessionId)) {
+      throw new Error(`Browser session not found: ${sessionId}`);
+    }
+    const listTabs = stack.sessionManager.listTabs;
+    if (listTabs === undefined) {
+      throw new Error("Browser backend does not support tab listing.");
+    }
+    return listTabs.call(stack.sessionManager, sessionId);
+  };
+
+  const listSafeTabs = async (sessionId: string): Promise<BrowserTabList> => {
+    const managedTabs = await listManagedTabs(sessionId);
+    const decisions = await Promise.all(managedTabs.map(async (tab) => ({
+      tab,
+      allowed: await tabIsAllowed(tab)
+    })));
+    return {
+      sessionId,
+      tabs: decisions.filter((entry) => entry.allowed).map((entry) => toBrowserTab(entry.tab)),
+      blockedCount: decisions.filter((entry) => !entry.allowed).length
+    };
+  };
+
+  const supportsTabManagement = (sessionId: string): boolean => {
+    const manager = sessionStacks.get(sessionId)?.sessionManager;
+    return manager?.listTabs !== undefined && manager.switchTab !== undefined;
+  };
+
+  const switchSafeTab = async (input: BrowserSwitchTabInput): Promise<{
+    session: ManagedBackendSession;
+    tab: BrowserTab;
+    snapshot: BrowserSnapshot;
+  }> => {
+    const sessionId = requireSessionId(input.sessionId);
+    const tabs = await listSafeTabs(sessionId);
+    const requestedTab = tabs.tabs.find((tab) => tab.ref === input.tabRef);
+    if (requestedTab === undefined) {
+      throw new Error(`Browser tab is unavailable under the current session or URL policy: ${input.tabRef}`);
+    }
+    const stack = sessionStacks.get(sessionId)!;
+    const switchTab = stack.sessionManager.switchTab;
+    if (switchTab === undefined) {
+      throw new Error("Browser backend does not support tab switching.");
+    }
+    const previousTab = tabs.tabs.find((tab) => tab.controlled);
+    const session = asBackendSession(await switchTab.call(stack.sessionManager, sessionId, input.tabRef));
+    const snapshot = await session.supervisor.getSnapshot(session.key);
+    if (!await tabUrlIsAllowed(snapshot.url)) {
+      if (previousTab !== undefined && previousTab.ref !== input.tabRef) {
+        await switchTab.call(stack.sessionManager, sessionId, previousTab.ref).catch(() => undefined);
+      }
+      throw new Error("Browser tab changed to a URL blocked by browser policy before it could be controlled.");
+    }
+    const tab: BrowserTab = {
+      ref: session.tabRef,
+      url: redactUrlForMetadata(snapshot.url),
+      ...(snapshot.title === undefined ? {} : { title: snapshot.title }),
+      controlled: true
+    };
+    return {
+      session,
+      tab,
+      snapshot
+    };
   };
 
   const closeSession = async (sessionId: string): Promise<void> => {
@@ -442,7 +542,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         await supervisor.send("Page.navigate", { url: input.url });
         await supervisor.waitFor("Page.loadEventFired", 5_000).catch(() => undefined);
 
-        const snapshot = await supervisor.getSnapshot(sessionId);
+        const snapshot = withSessionTab(session, await supervisor.getSnapshot(sessionId));
         sessionStacks.set(sessionId, existingStack ?? sessionStack);
 
         return {
@@ -465,15 +565,37 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     },
     snapshot: async (input) => {
       const session = await getSession(input);
-      return session.supervisor.getSnapshot(session.key, { full: input?.full === true });
+      return withSessionTab(
+        session,
+        await session.supervisor.getSnapshot(session.key, { full: input?.full === true })
+      );
     },
     click: async (input) => {
       const session = await getSession(input);
+      const beforeTabs = supportsTabManagement(session.key) ? await listManagedTabs(session.key) : undefined;
       await session.supervisor.send("Runtime.evaluate", {
         expression: refActionExpression(input.ref, "click"),
         awaitPromise: true
       });
-      return session.supervisor.getSnapshot(session.key);
+      const clickedSnapshot = await session.supervisor.getSnapshot(session.key);
+      if (beforeTabs === undefined) {
+        return withSessionTab(session, clickedSnapshot);
+      }
+      const afterTabs = await listManagedTabs(session.key);
+      const priorRefs = new Set(beforeTabs.map((tab) => tab.ref));
+      const openedCandidates = afterTabs.filter((tab) => !priorRefs.has(tab.ref));
+      const openedTabs = (await Promise.all(openedCandidates.map(async (tab) => (
+        await tabIsAllowed(tab) ? toBrowserTab(tab) : undefined
+      )))).filter((tab): tab is BrowserTab => tab !== undefined);
+      if (openedTabs.length === 1) {
+        const switched = await switchSafeTab({
+          sessionId: session.key,
+          tabRef: openedTabs[0]!.ref,
+          signal: input.signal
+        });
+        return withSessionTab(switched.session, switched.snapshot, [switched.tab]);
+      }
+      return withSessionTab(session, clickedSnapshot, openedTabs);
     },
     type: async (input) => {
       const session = await getSession(input);
@@ -481,7 +603,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         expression: refActionExpression(input.ref, "type", input.text ?? ""),
         awaitPromise: true
       });
-      return session.supervisor.getSnapshot(session.key);
+      return withSessionTab(session, await session.supervisor.getSnapshot(session.key));
     },
     scroll: async (input) => {
       const session = await getSession(input);
@@ -491,14 +613,14 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         expression: `window.scrollBy(0, ${JSON.stringify(delta)}); "ok";`,
         returnByValue: true
       });
-      return session.supervisor.getSnapshot(session.key);
+      return withSessionTab(session, await session.supervisor.getSnapshot(session.key));
     },
     press: async (input) => {
       const session = await getSession(input);
       const key = input.key ?? "Enter";
       await session.supervisor.send("Input.dispatchKeyEvent", { type: "keyDown", key });
       await session.supervisor.send("Input.dispatchKeyEvent", { type: "keyUp", key });
-      return session.supervisor.getSnapshot(session.key);
+      return withSessionTab(session, await session.supervisor.getSnapshot(session.key));
     },
     back: async (input = {}) => {
       const session = await getSession(input);
@@ -507,7 +629,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         returnByValue: true
       });
       await session.supervisor.waitFor("Page.loadEventFired", 2_000).catch(() => undefined);
-      return session.supervisor.getSnapshot(session.key);
+      return withSessionTab(session, await session.supervisor.getSnapshot(session.key));
     },
     getImages: async (input = {}) => {
       const session = await getSession(input);
@@ -520,6 +642,18 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     console: async (input = {}): Promise<BrowserConsoleEntry[]> => {
       const session = await getSession(input);
       return session.supervisor.consoleHistory({ clear: input.clear });
+    },
+    tabs: async (input = {}) => {
+      const session = await getSession(input);
+      return listSafeTabs(session.key);
+    },
+    switchTab: async (input) => {
+      const switched = await switchSafeTab(input);
+      const snapshot = withSessionTab(switched.session, switched.snapshot);
+      return {
+        tab: snapshot.tab!,
+        snapshot
+      };
     },
     cdp: async (input) => {
       const session = await getSession(input);
@@ -548,13 +682,39 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         accept: input.action !== "dismiss",
         promptText: input.promptText
       });
-      return session.supervisor.getSnapshot(session.key);
+      return withSessionTab(session, await session.supervisor.getSnapshot(session.key));
     },
     closeSession,
     close: closeBackend
   };
 
   return backend;
+}
+
+function toBrowserTab(tab: BrowserManagedTab): BrowserTab {
+  return {
+    ref: tab.ref,
+    url: redactUrlForMetadata(tab.url),
+    ...(tab.title === undefined ? {} : { title: tab.title }),
+    controlled: tab.controlled
+  };
+}
+
+function withSessionTab(
+  session: ManagedBackendSession,
+  snapshot: BrowserSnapshot,
+  openedTabs: BrowserTab[] = []
+): BrowserSnapshot {
+  return {
+    ...snapshot,
+    tab: {
+      ref: session.tabRef,
+      url: redactUrlForMetadata(snapshot.url),
+      ...(snapshot.title === undefined ? {} : { title: snapshot.title }),
+      controlled: true
+    },
+    ...(openedTabs.length === 0 ? {} : { openedTabs })
+  };
 }
 
 function refActionExpression(ref: string | undefined, action: "click" | "type", text = ""): string {

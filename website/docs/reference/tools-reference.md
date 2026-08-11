@@ -226,11 +226,13 @@ Local browser automation via CDP or remote browser backend.
 |------|------|---------------|
 | `browser.*` | `external-side-effect` | Browser session state |
 
-Implemented browser tools include `browser.status`, `browser.navigate`, `browser.snapshot`, `browser.click`, `browser.type`, `browser.scroll`, `browser.press`, `browser.back`, `browser.get_images`, `browser.console`, `browser.cdp`, `browser.screenshot`, `browser.vision`, and `browser.dialog`.
+Implemented browser tools include `browser.status`, `browser.navigate`, `browser.snapshot`, `browser.click`, `browser.type`, `browser.scroll`, `browser.press`, `browser.back`, `browser.get_images`, `browser.console`, `browser.tabs`, `browser.switch_tab`, `browser.cdp`, `browser.screenshot`, `browser.vision`, and `browser.dialog`.
 
 **Availability:** Requires a configured browser backend. `local-cdp` supports manual CDP and supervised auto-launch. Browserbase is implemented through the browser backend and remains blocked until `browser.cloudSpendApproved === true`. browser-use, Firecrawl browser, and Camofox are registered deferred providers.
 
 **Snapshots:** `browser.snapshot` returns compact output by default. Compact output is a bounded actionable AX subset with refs such as `@e1`; it is not true viewport-visible filtering yet. Passing `full: true` requests the larger full snapshot path. Rendered output labels compact vs full snapshots, truncates oversized text, and may summarize large results when `browser.summarizeSnapshots` and `browser.snapshotSummarizeThreshold` allow it.
+
+**Tabs:** `browser.tabs` returns safe same-session page tabs using opaque refs such as `@t1`. `browser.switch_tab` focuses and controls one of those refs. A click automatically follows exactly one newly opened safe tab; ambiguous multi-tab results require an explicit switch. Other browser contexts and policy-blocked tabs are not exposed.
 
 **Browserbase navigation:** Public HTTP(S) navigation may create a Browserbase session only when Browserbase is configured, `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID` are available, and cloud spend is approved. Credentials and config alone do not create sessions. Missing approval returns a spend-gate error and does not fall back to local. Eligible Browserbase failures may fall back to local only when `browser.cloudFallback === true`.
 

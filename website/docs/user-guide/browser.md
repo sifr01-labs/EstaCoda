@@ -111,6 +111,16 @@ Blocklists support exact domains, wildcard domains, and shared files. The blockl
 
 Hybrid routing uses the same classifier. Public HTTP(S) URLs route to Browserbase/cloud when Browserbase is configured and cloud spend is approved. Private/internal URLs route to local only when `security.allowPrivateUrls === true`. Metadata endpoints remain blocked. Cloud spend approval failure does not fall back to local. Browserbase failures may fall back to local when `browser.cloudFallback === true`. Unsafe redirects are blanked to `about:blank` when possible; otherwise the unsafe session is closed.
 
+### Working with tabs
+
+In a supervised local browser, EstaCoda can work across tabs without asking the model to interpret raw CDP target data:
+
+- `browser.tabs` lists the safe page tabs in the current isolated browser session and marks the tab EstaCoda currently controls.
+- `browser.switch_tab` focuses a tab by its opaque ref, such as `@t2`, and makes it the target of later snapshots and actions.
+- After a click, EstaCoda automatically follows a newly opened tab only when exactly one new safe tab appeared. If several tabs open, it stays on the current tab and reports their refs so the agent can choose explicitly.
+
+Tabs from other EstaCoda browser sessions are excluded. Tabs blocked by URL safety, website policy, cloud metadata protection, or secret detection are hidden and cannot be selected through `browser.switch_tab`.
+
 ---
 
 ## Approval Gating

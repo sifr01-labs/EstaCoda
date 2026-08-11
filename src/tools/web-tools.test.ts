@@ -30,6 +30,8 @@ const expectedToolNames = [
   "browser.back",
   "browser.get_images",
   "browser.console",
+  "browser.tabs",
+  "browser.switch_tab",
   "browser.cdp",
   "browser.screenshot",
   "browser.vision",
@@ -311,6 +313,30 @@ function createSessionRecordingBrowserBackend(calls: Array<{ method: string; inp
     console: async (input = {}) => {
       calls.push({ method: "console", input });
       return [{ level: "log", text: `Recorded console for ${input.sessionId ?? "missing-session"}` }];
+    },
+    tabs: async (input = {}) => {
+      calls.push({ method: "tabs", input });
+      return {
+        sessionId: input.sessionId ?? "missing-session",
+        tabs: [
+          { ref: "@t1", url: "https://example.com/", title: "Main", controlled: true },
+          { ref: "@t2", url: "https://example.com/details", title: "Details", controlled: false }
+        ],
+        blockedCount: 1
+      };
+    },
+    switchTab: async (input) => {
+      calls.push({ method: "switchTab", input });
+      const tab = { ref: input.tabRef, url: "https://example.com/details", title: "Details", controlled: true };
+      return {
+        tab,
+        snapshot: {
+          ...snapshotFor(input),
+          url: tab.url,
+          title: tab.title,
+          tab
+        }
+      };
     },
     cdp: async (input) => {
       calls.push({ method: "cdp", input });
@@ -1397,6 +1423,32 @@ describe("web and browser tools baselines", () => {
     expect(cdp.toolsets).toEqual(["dangerous"]);
   });
 
+  it("exposes safe tab discovery and explicit switching as concise browser tools", async () => {
+    const calls: Array<{ method: string; input: BrowserActionInput | BrowserNavigateInput }> = [];
+    const tools = createTestWebTools({
+      browserBackend: createSessionRecordingBrowserBackend(calls),
+      currentSessionId: () => "runtime-session"
+    });
+    const tabs = tool("browser.tabs", tools);
+    const switchTab = tool("browser.switch_tab", tools);
+
+    expect(tabs.riskClass).toBe("read-only-network");
+    expect(switchTab.riskClass).toBe("read-only-network");
+    await expect(tabs.run({})).resolves.toMatchObject({
+      ok: true,
+      content: expect.stringContaining("@t1 [controlled] Main — https://example.com/")
+    });
+    const switched = await switchTab.run({ tabRef: "@t2" });
+
+    expect(switched.ok).toBe(true);
+    expect(switched.content).toContain("Controlled tab: @t2 [controlled] Details — https://example.com/details");
+    expect(switched.content).toContain("Recorded browser snapshot for runtime-session:main.");
+    expect(calls).toEqual([
+      { method: "tabs", input: { sessionId: "runtime-session:main" } },
+      { method: "switchTab", input: { sessionId: "runtime-session:main", tabRef: "@t2", signal: undefined } }
+    ]);
+  });
+
   it("blocks browser.cdp Page.navigate to metadata and private URLs before the backend call", async () => {
     const calls: BrowserActionInput[] = [];
     const cdp = tool("browser.cdp", createTestWebTools({
@@ -1800,6 +1852,8 @@ describe("web and browser tools baselines", () => {
       { toolName: "browser.back", backendMethod: "back", input: {} },
       { toolName: "browser.press", backendMethod: "press", input: { key: "Enter" } },
       { toolName: "browser.console", backendMethod: "console", input: {} },
+      { toolName: "browser.tabs", backendMethod: "tabs", input: {} },
+      { toolName: "browser.switch_tab", backendMethod: "switchTab", input: { tabRef: "@t2" } },
       { toolName: "browser.get_images", backendMethod: "getImages", input: {} },
       { toolName: "browser.screenshot", backendMethod: "screenshot", input: {}, options: { workspaceRoot } },
       {
