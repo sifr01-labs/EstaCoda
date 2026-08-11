@@ -8,5 +8,5 @@ import type { ModelProfile } from "../contracts/provider.js";
 export function supportsMultipleImageInputs(profile: ModelProfile): boolean {
   if (!profile.supportsVision) return false;
   if (profile.supportsMultipleImages !== undefined) return profile.supportsMultipleImages;
-  return ["openai", "anthropic", "google", "openrouter", "local"].includes(profile.provider);
+  return ["openai", "codex", "anthropic", "google", "kimi", "openrouter", "local"].includes(profile.provider);
 }

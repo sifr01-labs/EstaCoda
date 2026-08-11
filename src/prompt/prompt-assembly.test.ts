@@ -1361,6 +1361,45 @@ describe("assembleProviderContinuationPrompt", () => {
     expect(JSON.stringify(prompt.messages.slice(0, -1))).not.toContain("image_url");
   });
 
+  it("aggregates images from separate native vision tool calls into one continuation", () => {
+    const toolPlans = Array.from({ length: 4 }, (_, index) => ({
+      id: `call-image-${index + 1}`,
+      tool: "vision.analyze",
+      input: { path: `sample-${index + 1}.png` },
+      source: "provider-tool-call" as const,
+      status: "executed" as const,
+      result: attachEphemeralVisionImages({
+        ok: true,
+        content: `prepared image ${index + 1}`
+      }, [{
+        content: {
+          type: "image_url" as const,
+          image_url: { url: `data:image/png;base64,aW1hZ2Ut${index + 1}` }
+        },
+        usage: { width: 20, height: 30, detail: "auto" as const },
+        delivery: "continuation" as const
+      }])
+    }));
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      model: {
+        ...toolModel,
+        id: "kimi-k3",
+        provider: "kimi",
+        supportsVision: true
+      },
+      providerExecution: providerExecution("", []),
+      toolPlans
+    }));
+
+    const continuation = prompt.messages.at(-1);
+    expect(continuation?.role).toBe("user");
+    expect(Array.isArray(continuation?.content)).toBe(true);
+    expect(Array.isArray(continuation?.content)
+      ? continuation.content.filter((part) => part.type === "image_url")
+      : []).toHaveLength(4);
+    expect(prompt.imageInputs).toHaveLength(4);
+  });
+
   it("uses flat fallback when native history is unsupported by provider, model, or API mode", () => {
     const rawSessionHistory = [
       providerToolTurn("tool-turn"),
