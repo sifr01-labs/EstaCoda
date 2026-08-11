@@ -124,7 +124,7 @@ It is responsible for:
 - tracking observed risk
 - returning tool results and failure state to the provider turn loop
 
-Repeated tool-failure budgets are enforced by `ProviderTurnLoop`, using the outcomes returned from tool execution. The runner reports what happened; the provider loop decides whether repeated failures have exceeded the turn budget.
+Repeated tool-failure and unchanged browser-observation budgets are enforced by `ProviderTurnLoop`, using the outcomes returned from tool execution. The runner reports what happened; the provider loop decides whether repeated failures or successful observation-only stalls have exceeded the turn budget.
 
 ---
 
@@ -218,7 +218,7 @@ For unsupported routes, continuation uses the existing flat `Executed tool resul
 
 If a selected native `tool` message already carries a tool result, that same result is not repeated in the flat continuation block. Non-selected tool results remain in flat text so the model still receives them.
 
-Continuation is still bounded by provider-turn budgets. Repeated tool failures, too many tool calls, too many provider iterations, or wall-clock exhaustion can stop the loop before another provider attempt is made.
+Continuation is still bounded by provider-turn budgets. Repeated tool failures, a third unchanged browser observation after one recovery nudge, too many tool calls, too many provider iterations, or wall-clock exhaustion can stop the loop before another provider attempt is made.
 
 ---
 

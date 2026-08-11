@@ -65,13 +65,17 @@ import {
   pendingDelegatedAnswerOwnership,
   type PendingDelegatedAnswerOwnership
 } from "./delegated-answer-ownership.js";
+import { BrowserObservationGuard } from "./browser-observation-guard.js";
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
+const BROWSER_NO_PROGRESS_NUDGE = "Repeated browser observations show no state change. Do not call browser.snapshot or browser.tabs again unless another action may have changed the page. Switch tabs or take a different browser action; if progress is blocked, explain what is blocking it.";
+const BROWSER_NO_PROGRESS_STOP = "I stopped this browser turn because repeated observations showed no state change. I can continue after switching tabs, taking a different browser action, or receiving clarification about the next step.";
 
 export type ProviderTurnLoopBudgets = {
   maxProviderIterations: number;
   maxProviderToolCalls: number;
   maxRepeatedToolFailures: number;
+  maxRepeatedBrowserObservations: number;
   maxProviderWallClockMs: number;
 };
 
@@ -153,7 +157,12 @@ export class ProviderTurnLoop {
     this.#skillsIndex = options.skillsIndex;
     this.#ui = options.ui;
     this.#agentProfile = options.agentProfile;
-    this.#budgets = options.budgets;
+    this.#budgets = {
+      ...options.budgets,
+      maxRepeatedBrowserObservations: normalizeBrowserObservationLimit(
+        options.budgets.maxRepeatedBrowserObservations
+      )
+    };
     this.#providerRequestDefaults = options.providerRequestDefaults ?? {};
     this.#profileId = options.profileId;
     this.#taskExecution = options.taskExecution;
@@ -207,8 +216,10 @@ export class ProviderTurnLoop {
     let iterations = 0;
     const loopStartedAt = Date.now();
     const repeatedFailures = new Map<string, number>();
+    const browserObservationGuard = new BrowserObservationGuard(this.#budgets.maxRepeatedBrowserObservations);
     let maxObservedRisk = input.initialRiskClass;
     let pendingEmptyResponseNudge = false;
+    let pendingBrowserNoProgressNudge = false;
     let postToolEmptyRetried = false;
     let capturedContentWithHousekeepingTools: string | undefined;
     let emptyContentRetries = 0;
@@ -282,9 +293,11 @@ export class ProviderTurnLoop {
           iteration,
           loopStartedAt,
           emptyResponseNudge: pendingEmptyResponseNudge,
+          browserNoProgressNudge: pendingBrowserNoProgressNudge,
           reasoningOnlyPrefill: pendingReasoningOnlyPrefill
         });
       pendingEmptyResponseNudge = false;
+      pendingBrowserNoProgressNudge = false;
       pendingReasoningOnlyPrefill = false;
 
       if (execution === undefined) {
@@ -415,6 +428,10 @@ export class ProviderTurnLoop {
       const currentPlans = input.toolPlans.slice(beforePlans);
       const hasRecoverableToolFeedback = currentPlans.some((plan) => isRecoverableToolPlanStatus(plan.status));
       const repeatedFailureBudgetExceeded = this.#recordRepeatedToolFailures(loopToolExecutions, repeatedFailures);
+      const browserObservation = browserObservationGuard.observe(loopToolExecutions);
+      if (browserObservation?.shouldNudge === true) {
+        pendingBrowserNoProgressNudge = true;
+      }
       if (repeatedFailureBudgetExceeded !== undefined) {
         await this.#runRecorder.recordProviderBudgetExhausted({
           budget: "repeated-tool-failures",
@@ -427,10 +444,30 @@ export class ProviderTurnLoop {
           "provider-budget-exhausted"
         );
       }
+      if (browserObservation?.shouldStop === true) {
+        const reason = `Tool ${browserObservation.tool} returned the same browser observation without progress.`;
+        await this.#runRecorder.recordProviderBudgetExhausted({
+          budget: "repeated-browser-observations",
+          limit: this.#budgets.maxRepeatedBrowserObservations,
+          observed: browserObservation.count,
+          reason
+        }, input.onEvent);
+        await this.#runRecorder.recordClassifiedFailure(
+          {
+            kind: "budget",
+            budget: "repeated-browser-observations",
+            limit: this.#budgets.maxRepeatedBrowserObservations,
+            observed: browserObservation.count,
+            reason
+          },
+          "provider-budget-exhausted"
+        );
+      }
       const exhausted = (
         iteration + consumedProviderIterations >= this.#budgets.maxProviderIterations ||
         providerToolExecutions.length >= this.#budgets.maxProviderToolCalls ||
-        repeatedFailureBudgetExceeded !== undefined
+        repeatedFailureBudgetExceeded !== undefined ||
+        browserObservation?.shouldStop === true
       ) && execution.toolCalls.length > 0 && loopToolExecutions.length > 0;
 
       let terminalPostToolEmpty =
@@ -462,6 +499,10 @@ export class ProviderTurnLoop {
         executedTools: providerToolExecutions.length - beforeExecutions,
         exhausted
       });
+
+      if (browserObservation?.shouldStop === true) {
+        execution = browserNoProgressStopExecution(execution);
+      }
 
       if (delegatedAnswerOwnership !== undefined) {
         effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
@@ -519,8 +560,11 @@ export class ProviderTurnLoop {
         exhausted
       ) {
         if (exhausted && execution.ok === true) {
+          const exhaustionReason = browserObservation?.shouldStop === true
+            ? "repeated browser observations made no progress"
+            : "max iterations, tool calls, or repeated tool failures reached with pending work";
           await this.#runRecorder.recordClassifiedFailure(
-            { kind: "loop-exhausted", reason: "max iterations or tool calls reached with pending work", iterations: iteration + 1 },
+            { kind: "loop-exhausted", reason: exhaustionReason, iterations: iteration + 1 },
             "provider-iteration"
           );
         }
@@ -713,6 +757,7 @@ export class ProviderTurnLoop {
     iteration: number;
     loopStartedAt: number;
     emptyResponseNudge?: boolean;
+    browserNoProgressNudge?: boolean;
     reasoningOnlyPrefill?: boolean;
     signal?: AbortSignal;
   }): Promise<ProviderExecutionResult | undefined> {
@@ -752,6 +797,12 @@ export class ProviderTurnLoop {
       prompt.messages.push({
         role: "user",
         content: "You just executed tool calls but returned an empty response. Please process the tool results above and continue with the task."
+      });
+    }
+    if (input.browserNoProgressNudge === true) {
+      prompt.messages.push({
+        role: "user",
+        content: BROWSER_NO_PROGRESS_NUDGE
       });
     }
     if (input.reasoningOnlyPrefill === true) {
@@ -1715,6 +1766,27 @@ function reasoningOnlySafeGuidanceExecution(
     },
     toolCalls: []
   };
+}
+
+function browserNoProgressStopExecution(execution: ProviderExecutionResult): ProviderExecutionResult {
+  const response = execution.response;
+  return {
+    ...execution,
+    response: {
+      ok: true,
+      content: BROWSER_NO_PROGRESS_STOP,
+      model: response?.model ?? execution.route?.id ?? "unknown",
+      provider: (response?.provider ?? execution.route?.provider ?? "unknown") as ProviderResponse["provider"],
+      finishReason: "stop",
+      ...(response?.usage === undefined ? {} : { usage: response.usage })
+    }
+  };
+}
+
+function normalizeBrowserObservationLimit(limit: number): number {
+  return Number.isFinite(limit)
+    ? Math.max(2, Math.floor(limit))
+    : 3;
 }
 
 function isTruncatedToolCallRefusalExecution(execution: ProviderExecutionResult): boolean {

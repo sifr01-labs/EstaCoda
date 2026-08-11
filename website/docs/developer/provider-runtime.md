@@ -87,11 +87,14 @@ Provider turns run inside explicit budgets. The current loop tracks:
 | Provider iterations | Prevents unbounded provider/tool continuation loops. |
 | Provider tool calls | Caps tool-call volume for a turn. |
 | Repeated tool failures | Stops repeated failures with the same tool and outcome. |
+| Repeated browser observations | Nudges once, then stops after a third unchanged `browser.snapshot` or `browser.tabs` result. |
 | Provider wall-clock time | Prevents a turn from running indefinitely. |
 
 Text continuation is separate from tool-call retry. If a response ends with `length` and contains visible text, the runtime may ask the same route chain to continue the answer. Continuation is bounded by the same provider iteration and wall-clock controls.
 
 Tool calls inside length-truncated output are treated more strictly. They are retried for a clean finalized tool-call response before any execution path can proceed.
+
+The browser observation guard compares only consecutive successful observation iterations. A changed observation or a different tool outcome resets it. Its fingerprints are turn-local and memory-only; persistent diagnostics contain only the tool name and bounded counts, never page content, tab data, hashes, or fingerprints.
 
 ---
 

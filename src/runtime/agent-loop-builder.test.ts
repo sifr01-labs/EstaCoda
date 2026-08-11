@@ -463,6 +463,7 @@ describe("AgentLoopBuilder", () => {
           maxProviderIterations: 7,
           maxProviderToolCalls: 100,
           maxRepeatedToolFailures: 5,
+          maxRepeatedBrowserObservations: 3,
           maxProviderWallClockMs: 42_000
         },
         providerRequestDefaults: {

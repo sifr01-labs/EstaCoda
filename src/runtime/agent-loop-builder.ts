@@ -82,6 +82,7 @@ export const DEFAULT_PROVIDER_TURN_BUDGETS: ProviderTurnLoopBudgets = {
   maxProviderIterations: 45,
   maxProviderToolCalls: 100,
   maxRepeatedToolFailures: 5,
+  maxRepeatedBrowserObservations: 3,
   maxProviderWallClockMs: 300_000
 };
 

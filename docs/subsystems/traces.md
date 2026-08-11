@@ -118,7 +118,7 @@ The failure-class source of truth is the `FailureClass` union in `src/contracts/
 | `tool-timeout` | Execution exceeded limit |
 | `plan-dependency-error` | Dependency resolution failed |
 | `skill-playbook-step-error` | Skill playbook step failed |
-| `budget-exhausted` | Token/wall-clock/tool-call budget |
+| `budget-exhausted` | Token/wall-clock/tool-call/no-progress budget |
 | `security-escalation` | Risk escalation aborted run |
 | `user-cancelled` | Agent cancelled by user |
 | `agent-loop-exhausted` | Max iterations reached |

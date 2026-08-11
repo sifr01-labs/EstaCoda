@@ -423,7 +423,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
     },
     {
       name: "browser.tabs",
-      description: "List safe page tabs in the current browser session. The controlled tab is the one EstaCoda will inspect and operate.",
+      description: "List safe page tabs in the current browser session. The controlled tab is the one EstaCoda will inspect and operate. Use browser.switch_tab rather than polling an unchanged list.",
       inputSchema: {
         type: "object",
         properties: {
@@ -504,7 +504,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
     },
     {
       name: "browser.cdp",
-      description: "Run a raw Chrome DevTools Protocol method against the active local-CDP browser session.",
+      description: "Run a raw Chrome DevTools Protocol method against the active local-CDP browser session. Use browser.tabs and browser.switch_tab for ordinary tab discovery and switching.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1174,7 +1174,7 @@ function createBrowserSnapshotTool(
 ): RegisteredTool {
   return {
     name: "browser.snapshot",
-    description: "Get a text snapshot of the current browser page with interactive element refs like @e1.",
+    description: "Get a text snapshot of the current browser page with interactive element refs like @e1. Act on the result instead of polling an unchanged page.",
     inputSchema: {
       type: "object",
       properties: {

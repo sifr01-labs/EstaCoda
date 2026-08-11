@@ -189,6 +189,7 @@ async function createProviderTurnLoopForTest(
       maxProviderIterations: 2,
       maxProviderToolCalls: 4,
       maxRepeatedToolFailures: 2,
+      maxRepeatedBrowserObservations: 3,
       maxProviderWallClockMs: 10_000
     },
     ...overrides
@@ -269,6 +270,7 @@ async function createCompressionHarness() {
       maxProviderIterations: 2,
       maxProviderToolCalls: 4,
       maxRepeatedToolFailures: 2,
+      maxRepeatedBrowserObservations: 3,
       maxProviderWallClockMs: 10_000
     },
     ...overrides
@@ -430,10 +432,14 @@ function incompleteStreamExecution(partialContent: string | undefined): Provider
   };
 }
 
-function providerToolCall(id: string, argumentsText = "{}"): ProviderExecutionResult["toolCalls"][number] {
+function providerToolCall(
+  id: string,
+  argumentsText = "{}",
+  name = testTool.name
+): ProviderExecutionResult["toolCalls"][number] {
   return {
     id,
-    name: testTool.name,
+    name,
     argumentsText
   };
 }
@@ -698,6 +704,7 @@ async function createPostToolNudgeHarness(input: {
       maxProviderIterations: input.maxProviderIterations ?? 3,
       maxProviderToolCalls: 8,
       maxRepeatedToolFailures: 3,
+      maxRepeatedBrowserObservations: 3,
       maxProviderWallClockMs: input.maxProviderWallClockMs ?? 10_000
     },
     taskExecution: input.taskExecution
@@ -788,6 +795,7 @@ async function createRealToolPlanningHarness(input: {
       maxProviderIterations: 1,
       maxProviderToolCalls: 8,
       maxRepeatedToolFailures: 3,
+      maxRepeatedBrowserObservations: 3,
       maxProviderWallClockMs: 10_000
     },
     taskExecution: input.taskExecution
@@ -1594,6 +1602,7 @@ describe("ProviderTurnLoop OpenAI-compatible stream recovery", () => {
           maxProviderIterations: 3,
           maxProviderToolCalls: 4,
           maxRepeatedToolFailures: 2,
+          maxRepeatedBrowserObservations: 3,
           maxProviderWallClockMs: 10_000
         }
       });
@@ -1622,6 +1631,65 @@ describe("ProviderTurnLoop OpenAI-compatible stream recovery", () => {
 });
 
 describe("ProviderTurnLoop post-tool empty response recovery", () => {
+  it("nudges once and then stops repeated unchanged browser observations", async () => {
+    const sensitivePageText = "private account marker";
+    const snapshotExecution = (id: string): ToolExecutionRecord => ({
+      ...toolExecutionForTool(id, "browser.snapshot", "Rendered browser snapshot."),
+      result: {
+        ok: true,
+        content: "Rendered browser snapshot.",
+        metadata: {
+          snapshot: {
+            sessionId: "browser-session",
+            url: "https://example.com/account",
+            title: "Account",
+            text: sensitivePageText
+          }
+        }
+      }
+    });
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-snapshot-1", "{}", "browser.snapshot")]),
+        providerExecution("", [providerToolCall("call-snapshot-2", "{}", "browser.snapshot")]),
+        providerExecution("", [providerToolCall("call-snapshot-3", "{}", "browser.snapshot")]),
+        providerExecution("This fourth response must not run.")
+      ],
+      toolSteps: [
+        { executions: [snapshotExecution("call-snapshot-1")] },
+        { executions: [snapshotExecution("call-snapshot-2")] },
+        { executions: [snapshotExecution("call-snapshot-3")] }
+      ],
+      maxProviderIterations: 5
+    });
+    const events: RuntimeEvent[] = [];
+
+    const result = await runBasicProviderTurn(harness.loop, {
+      onEvent: (event) => events.push(event)
+    });
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
+    expect(result.iterations).toBe(3);
+    expect(result.providerExecution?.response?.content).toBe(
+      "I stopped this browser turn because repeated observations showed no state change. I can continue after switching tabs, taking a different browser action, or receiving clarification about the next step."
+    );
+
+    const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
+    const nudge = "Repeated browser observations show no state change. Do not call browser.snapshot or browser.tabs again unless another action may have changed the page. Switch tabs or take a different browser action; if progress is blocked, explain what is blocking it.";
+    expect(requests.filter((request) => JSON.stringify(request.messages).includes(nudge))).toHaveLength(1);
+
+    const budgetEvent = events.find((event) =>
+      event.kind === "provider-budget-exhausted" && event.budget === "repeated-browser-observations"
+    );
+    expect(budgetEvent).toEqual(expect.objectContaining({
+      kind: "provider-budget-exhausted",
+      budget: "repeated-browser-observations",
+      limit: 3,
+      observed: 3
+    }));
+    expect(JSON.stringify(budgetEvent)).not.toContain(sensitivePageText);
+  });
+
   it("stops before a substitute continuation when a delegated Task owns the answer", async () => {
     const delegation = {
       ...toolExecutionForTool("call-delegate", "delegate_task", "Created durable Task task-owned."),
@@ -4014,6 +4082,7 @@ describe("ProviderTurnLoop explicit route propagation", () => {
         maxProviderIterations: 2,
         maxProviderToolCalls: 4,
         maxRepeatedToolFailures: 2,
+        maxRepeatedBrowserObservations: 3,
         maxProviderWallClockMs: 10_000
       }
     });
@@ -4141,6 +4210,7 @@ describe("ProviderTurnLoop explicit route propagation", () => {
         maxProviderIterations: 2,
         maxProviderToolCalls: 4,
         maxRepeatedToolFailures: 2,
+        maxRepeatedBrowserObservations: 3,
         maxProviderWallClockMs: 10_000
       }
     });
@@ -4224,6 +4294,7 @@ describe("ProviderTurnLoop explicit route propagation", () => {
         maxProviderIterations: 2,
         maxProviderToolCalls: 4,
         maxRepeatedToolFailures: 2,
+        maxRepeatedBrowserObservations: 3,
         maxProviderWallClockMs: 10_000
       }
     });
