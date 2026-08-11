@@ -965,6 +965,7 @@ describe("runConfigEditor", () => {
     await promptBrowserCapability(prompt, {
       backend: "local-cdp",
       autoLaunch: true,
+      headless: true,
       supervised: true,
       engine: "cdp",
     });
@@ -5508,6 +5509,7 @@ describe("runConfigEditor", () => {
     expect(values).toEqual({
       backend: "local-cdp",
       autoLaunch: true,
+      headless: true,
       supervised: true,
       engine: "cdp",
       launchArgs: [],
@@ -5524,6 +5526,7 @@ describe("runConfigEditor", () => {
       values: [
         "local-supervised",
         true,
+        false,
         "",
         "/usr/bin/chromium",
         "--headless=new",
@@ -5539,6 +5542,7 @@ describe("runConfigEditor", () => {
       chromeFlags: ["--no-first-run", "--disable-gpu"],
       launchCommand: undefined,
       autoLaunch: true,
+      headless: false,
       supervised: true,
     });
   });
@@ -5555,6 +5559,7 @@ describe("runConfigEditor", () => {
       chromeFlags: [],
       launchCommand: undefined,
       autoLaunch: false,
+      headless: true,
       supervised: true,
     });
   });
@@ -5570,6 +5575,7 @@ describe("runConfigEditor", () => {
       launchArgs: [],
       chromeFlags: [],
       autoLaunch: false,
+      headless: true,
       supervised: false,
       hybridRouting: true,
       cloudFallback: true,
@@ -5587,6 +5593,7 @@ describe("runConfigEditor", () => {
       launchArgs: [],
       chromeFlags: [],
       autoLaunch: false,
+      headless: true,
       supervised: false,
     });
   });
@@ -5625,6 +5632,7 @@ describe("runConfigEditor", () => {
         chromeFlags?: string[];
         launchCommand?: string;
         autoLaunch?: boolean;
+        headless?: boolean;
         supervised?: boolean;
       };
     };
@@ -5642,6 +5650,7 @@ describe("runConfigEditor", () => {
       backend: "local-cdp",
       cdpUrl: "http://127.0.0.1:1",
       autoLaunch: false,
+      headless: true,
       supervised: true,
     });
     expect(config.channels).toBeUndefined();

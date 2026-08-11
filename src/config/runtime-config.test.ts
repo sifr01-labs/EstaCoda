@@ -1259,6 +1259,7 @@ describe("loadRuntimeConfig browser provider compatibility", () => {
         launchExecutable: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
         launchArgs: ["--headless=new", "--profile-directory=Default"],
         autoLaunch: true,
+        headless: false,
         supervised: false,
         chromeFlags: ["--disable-gpu", "--no-first-run"],
         engine: "auto",
@@ -1281,6 +1282,7 @@ describe("loadRuntimeConfig browser provider compatibility", () => {
       launchExecutable: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
       launchArgs: ["--headless=new", "--profile-directory=Default"],
       autoLaunch: true,
+      headless: false,
       supervised: false,
       chromeFlags: ["--disable-gpu", "--no-first-run"],
       engine: "auto",
@@ -1305,6 +1307,7 @@ describe("loadRuntimeConfig browser provider compatibility", () => {
     expect(loaded.browser).toMatchObject({
       backend: "local-cdp",
       autoLaunch: false,
+      headless: true,
       supervised: true,
       engine: "cdp",
       hybridRouting: false,

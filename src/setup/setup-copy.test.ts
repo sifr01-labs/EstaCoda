@@ -503,6 +503,12 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.browser.autoLaunch.no",
   "setupEditor.prompt.browser.autoLaunch.description",
   "setupEditor.prompt.browser.autoLaunch.no.description",
+  "setupEditor.prompt.browser.window.title",
+  "setupEditor.prompt.browser.window.body",
+  "setupEditor.prompt.browser.window.background",
+  "setupEditor.prompt.browser.window.background.description",
+  "setupEditor.prompt.browser.window.visible",
+  "setupEditor.prompt.browser.window.visible.description",
   "setupEditor.prompt.browser.cdpUrl",
   "setupEditor.prompt.browser.cdpUrl.optional",
   "setupEditor.prompt.browser.cdpUrl.required",
@@ -811,6 +817,7 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.local.body")).toContain(isolateLtr("Chrome"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.autoLaunch")).toContain(isolateLtr("Chrome"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.autoLaunch.description")).toContain(isolateLtr("Chrome/Chromium"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.window.visible.description")).toContain(isolateLtr("Chrome"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.mode.existingCdp")).toContain(isolateLtr("CDP"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.hybridRouting.description")).toContain(isolateLtr("Browserbase"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.hybridRouting.description")).toContain(isolateLtr("security.allowPrivateUrls"));

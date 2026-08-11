@@ -168,6 +168,44 @@ describe("browser CLI setup", () => {
     expect(status.output).toContain("Chrome flags: 2");
   });
 
+  it("persists and reports visible supervised browser auto-launch", async () => {
+    await writeConfig(tempDir, {
+      model: { provider: "openai", id: "gpt-4o" }
+    });
+
+    const setup = await runCliCommand({
+      argv: ["browser", "setup", "--backend", "local-cdp", "--auto-launch", "--headed"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir
+    });
+
+    expect(setup.exitCode).toBe(0);
+    expect(setup.output).toContain("Auto-launch: enabled");
+    expect(setup.output).toContain("Browser window: visible");
+    await expect(readConfig(tempDir)).resolves.toMatchObject({
+      browser: {
+        backend: "local-cdp",
+        autoLaunch: true,
+        headless: false
+      }
+    });
+
+    const status = await runCliCommand({
+      argv: ["browser", "status"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir
+    });
+    expect(status.output).toContain("Browser window: visible");
+  });
+
+  it("rejects conflicting browser window flags", async () => {
+    await expect(runCliCommand({
+      argv: ["browser", "setup", "--auto-launch", "--headless", "--headed"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir
+    })).rejects.toThrow("Use only one of --headless or --headed.");
+  });
+
   it("keeps deprecated launch command as raw data without splitting shell-like values", async () => {
     await writeConfig(tempDir, {
       model: { provider: "openai", id: "gpt-4o" }
@@ -228,6 +266,7 @@ describe("browser CLI setup", () => {
     expect(settings.output).toContain("Backend: local-cdp");
     expect(settings.output).toContain("Supervised mode: disabled");
     expect(settings.output).toContain("Auto-launch: enabled");
+    expect(settings.output).toContain("Browser window: background");
     expect(settings.output).toContain("CDP URL: http://127.0.0.1:9222");
     expect(settings.output).toContain("Launch executable: /usr/bin/chromium");
     expect(settings.output).toContain("Launch args: 1");
@@ -235,7 +274,7 @@ describe("browser CLI setup", () => {
     expect(settings.output).toContain("Deprecated launch command: configured");
     expect(settings.output).toContain("Hybrid routing: disabled");
     expect(settings.output).toContain("--launch-executable /path/to/chrome");
-    expect(settings.output).toContain("--launch-arg --headless=new");
+    expect(settings.output).toContain("--auto-launch --headed");
     expect(settings.output).toContain("--chrome-flag --no-first-run");
     expect(settings.output).toContain("--cloud-provider browserbase --hybrid-routing");
   });

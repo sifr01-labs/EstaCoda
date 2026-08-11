@@ -31,6 +31,7 @@ export type BrowserbaseBrowserBackendOptions = {
   launchArgs?: string[];
   chromeFlags?: string[];
   autoLaunch?: boolean;
+  headless?: boolean;
   fetch?: CdpFetchLike;
   webSocketFactory?: CdpWebSocketFactory;
   browserbaseFetch?: typeof globalThis.fetch;
@@ -123,6 +124,7 @@ export function createBrowserbaseBrowserBackend(options: BrowserbaseBrowserBacke
       launchArgs: options.launchArgs,
       chromeFlags: options.chromeFlags,
       autoLaunch: options.autoLaunch,
+      headless: options.headless,
       fetch: options.fetch,
       webSocketFactory: options.webSocketFactory,
       securityConfig: options.securityConfig,

@@ -937,6 +937,7 @@ async function applyBrowserCapability(
         ? explicitOptionalArrayValue(operation.review.values.chromeFlags)
         : optionalArrayValue(operation.review.values.chromeFlags),
       autoLaunch: booleanValue(operation.review.values.autoLaunch ?? operation.review.values.autoLaunchRequested),
+      headless: booleanValue(operation.review.values.headless),
       supervised: booleanValue(operation.review.values.supervised),
       engine: browserEngineValue(operation.review.values.engine),
       hybridRouting: booleanValue(operation.review.values.hybridRouting),

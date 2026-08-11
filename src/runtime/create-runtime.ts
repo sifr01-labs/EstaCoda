@@ -172,6 +172,7 @@ export type RuntimeOptions = {
     launchArgs?: string[];
     chromeFlags?: string[];
     autoLaunch: boolean;
+    headless?: boolean;
     supervised?: boolean;
     hybridRouting?: boolean;
     cloudFallback?: boolean;
@@ -627,6 +628,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         launchArgs: options.browser?.launchArgs,
         chromeFlags: options.browser?.chromeFlags,
         autoLaunch: options.browser?.autoLaunch,
+        headless: options.browser?.headless,
         fetch: options.cdpFetch,
         webSocketFactory: options.cdpWebSocketFactory,
         securityConfig: options.securityConfig,
@@ -641,6 +643,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         launchArgs: options.browser?.launchArgs,
         chromeFlags: options.browser?.chromeFlags,
         autoLaunch: options.browser?.autoLaunch,
+        headless: options.browser?.headless,
         hybridRouting: options.browser?.hybridRouting,
         cloudFallback: options.browser?.cloudFallback,
         cloudSpendApproved: options.browser?.cloudSpendApproved,

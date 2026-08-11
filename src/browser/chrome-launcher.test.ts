@@ -109,6 +109,35 @@ describe("launchChrome", () => {
     ]));
   });
 
+  it("launches a visible browser when headless is false", async () => {
+    const harness = createHarness();
+
+    await launchChrome({
+      ...harness.options,
+      headless: false
+    });
+
+    expect(spawnedArgs(harness.spawn)).not.toContain("--headless=new");
+  });
+
+  it("lets visible mode override legacy headless launch arguments", async () => {
+    const harness = createHarness();
+
+    await launchChrome({
+      ...harness.options,
+      headless: false,
+      launchArgs: ["--headless=new", "--app=https://example.test"],
+      chromeFlags: ["--headless", "--disable-gpu"]
+    });
+
+    expect(spawnedArgs(harness.spawn)).not.toContain("--headless=new");
+    expect(spawnedArgs(harness.spawn)).not.toContain("--headless");
+    expect(spawnedArgs(harness.spawn)).toEqual(expect.arrayContaining([
+      "--app=https://example.test",
+      "--disable-gpu"
+    ]));
+  });
+
   it("uses an isolated temporary user data dir when none is supplied", async () => {
     const harness = createHarness();
 

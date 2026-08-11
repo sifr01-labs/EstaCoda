@@ -1417,6 +1417,7 @@ describe("reviewed setup apply executor", () => {
         launchArgs?: string[];
         chromeFlags?: string[];
         autoLaunch?: boolean;
+        headless?: boolean;
         supervised?: boolean;
         engine?: string;
         hybridRouting?: boolean;
@@ -1435,6 +1436,7 @@ describe("reviewed setup apply executor", () => {
       launchArgs: ["--headless=new"],
       chromeFlags: ["--no-first-run", "--disable-gpu"],
       autoLaunch: true,
+      headless: true,
       supervised: true,
       engine: "cdp",
       hybridRouting: true,

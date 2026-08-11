@@ -357,6 +357,7 @@ describe("setup review manifest", () => {
 
     expect(browserLine?.review.values.autoLaunchRequested).toBe(true);
     expect(browserLine?.review.values.autoLaunchWillRunNow).toBe(false);
+    expect(browserLine?.review.values.browserWindow).toBe("background");
   });
 
   it("lists structured browser launch fields in reviewed setup values", () => {
@@ -370,6 +371,7 @@ describe("setup review manifest", () => {
       launchExecutable: "/usr/bin/chromium",
       launchArgs: ["--headless=new"],
       chromeFlags: ["--no-first-run", "--disable-gpu"],
+      browserWindow: "background",
       autoLaunchRequested: true,
       autoLaunchWillRunNow: false
     });

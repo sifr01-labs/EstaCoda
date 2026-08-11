@@ -364,6 +364,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           cdpUrl: { type: "string" },
           launchCommand: { type: "string" },
           autoLaunch: { type: "boolean" },
+          headless: { type: "boolean" },
         }
       },
       riskClass: "shared-state-mutation",
@@ -385,6 +386,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             result.config.browser?.cdpUrl === undefined ? undefined : `CDP URL: ${result.config.browser.cdpUrl}`,
             result.config.browser?.launchCommand === undefined ? undefined : `Launch command: ${result.config.browser.launchCommand}`,
             `Auto-launch: ${result.config.browser?.autoLaunch === true ? "enabled" : "disabled"}`,
+            result.config.browser?.autoLaunch === true ? `Browser window: ${result.config.browser.headless === false ? "visible" : "background"}` : undefined,
             `Wrote ${result.path}.`
           ].filter((line) => line !== undefined).join("\n"),
           metadata: {

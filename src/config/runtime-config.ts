@@ -429,6 +429,7 @@ export type EstaCodaConfig = {
     launchExecutable?: string;
     launchArgs?: string[];
     autoLaunch?: boolean;
+    headless?: boolean;
     supervised?: boolean;
     chromeFlags?: string[];
     engine?: BrowserEngineKind;
@@ -618,6 +619,7 @@ export type LoadedRuntimeConfig = {
     launchExecutable?: string;
     launchArgs?: string[];
     autoLaunch: boolean;
+    headless: boolean;
     supervised: boolean;
     chromeFlags?: string[];
     engine?: BrowserEngineKind;
@@ -725,6 +727,7 @@ export type BrowserSetupInput = {
   launchExecutable?: string;
   launchArgs?: string[];
   autoLaunch?: boolean;
+  headless?: boolean;
   supervised?: boolean;
   chromeFlags?: string[];
   engine?: BrowserEngineKind;
@@ -1579,6 +1582,7 @@ function normalizeBrowserConfig(value: EstaCodaConfig["browser"]): LoadedRuntime
     launchExecutable,
     launchArgs,
     autoLaunch: normalizeOptionalBoolean(value?.autoLaunch, "browser.autoLaunch") ?? false,
+    headless: normalizeOptionalBoolean(value?.headless, "browser.headless") ?? true,
     supervised: normalizeOptionalBoolean(value?.supervised, "browser.supervised") ?? backend === "local-cdp",
     chromeFlags,
     engine,
@@ -2791,6 +2795,7 @@ export async function setupBrowserConfig(options: {
       launchExecutable: options.input.launchExecutable,
       launchArgs: options.input.launchArgs,
       autoLaunch: options.input.autoLaunch ?? false,
+      headless: options.input.headless ?? true,
       supervised: options.input.supervised,
       chromeFlags: options.input.chromeFlags,
       engine: options.input.engine,
@@ -3680,6 +3685,7 @@ function validateBrowserSetupInput(input: BrowserSetupInput): void {
     launchExecutable: input.launchExecutable,
     launchArgs: input.launchArgs,
     autoLaunch: input.autoLaunch,
+    headless: input.headless,
     supervised: input.supervised,
     chromeFlags: input.chromeFlags,
     engine: input.engine,

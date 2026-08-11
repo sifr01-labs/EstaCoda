@@ -33,7 +33,7 @@ The setup editor writes the existing flat `browser` config shape. It does not mi
 
 The browser setup flow supports four modes:
 
-- Local supervised browser: writes `backend: "local-cdp"`, `supervised: true`, reviewed `autoLaunch`, optional `cdpUrl`, and reviewed launch settings.
+- Local supervised browser: writes `backend: "local-cdp"`, `supervised: true`, reviewed `autoLaunch`, reviewed `headless`, optional `cdpUrl`, and reviewed launch settings.
 - Existing CDP browser: writes `backend: "local-cdp"`, `supervised: true`, `autoLaunch: false`, and the reviewed `cdpUrl`.
 - Browserbase cloud browser: writes `backend: "browserbase"`, `cloudProvider: "browserbase"`, `hybridRouting: true`, `cloudFallback: true`, and `cloudSpendApproved: false`.
 - Disabled / unconfigured browser tools: writes `backend: "unconfigured"`.
@@ -58,7 +58,7 @@ Disabled browser tools are an intentional onboarding outcome. Selecting disabled
 Local CDP has two paths:
 
 - Unsupervised local CDP keeps the compatibility behavior: users provide `browser.cdpUrl`, and EstaCoda connects to an already-running browser.
-- Supervised local CDP can auto-launch Chrome/Chromium when `browser.autoLaunch === true`. Discovery checks `browser.launchExecutable`, deprecated `browser.launchCommand` raw data, `CHROME_PATH`, `CHROMIUM_PATH`, local binaries, platform defaults, Homebrew paths, and conservative bundled/Docker paths. The launcher uses structured arguments, never shell-parses `launchCommand`, never calls `exec`, creates an isolated `--user-data-dir`, reads `DevToolsActivePort`, health-checks `/json/version`, and kills only the Chrome process EstaCoda launched during backend cleanup.
+- Supervised local CDP can auto-launch Chrome/Chromium when `browser.autoLaunch === true`. `browser.headless` defaults to `true`; setting it to `false` or using CLI `--headed` opens a visible managed browser window. Discovery checks `browser.launchExecutable`, deprecated `browser.launchCommand` raw data, `CHROME_PATH`, `CHROMIUM_PATH`, local binaries, platform defaults, Homebrew paths, and conservative bundled/Docker paths. The launcher uses structured arguments, never shell-parses `launchCommand`, never calls `exec`, creates an isolated `--user-data-dir`, reads `DevToolsActivePort`, health-checks `/json/version`, and kills only the Chrome process EstaCoda launched during backend cleanup.
 
 ## CDP Capabilities
 
@@ -162,7 +162,7 @@ Current coverage:
 ## Configuration
 
 ```bash
-pnpm run dev -- browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222 --launch-executable /path/to/chrome --launch-arg --headless=new --chrome-flag --no-first-run
+pnpm run dev -- browser setup --backend local-cdp --auto-launch --headed --launch-executable /path/to/chrome --chrome-flag --no-first-run
 pnpm run dev -- browser test
 ```
 
@@ -174,14 +174,15 @@ Structured launch fields are the supported configuration surface:
     "backend": "local-cdp",
     "supervised": true,
     "autoLaunch": true,
+    "headless": false,
     "launchExecutable": "/path/to/chrome",
-    "launchArgs": ["--headless=new"],
+    "launchArgs": [],
     "chromeFlags": ["--no-first-run"]
   }
 }
 ```
 
-`browser.launchExecutable` is the preferred executable path. `browser.launchArgs` and `browser.chromeFlags` are structured string arrays. `browser.launchCommand` remains accepted as deprecated compatibility data only. It is never split, guessed, or shell-parsed and should not be used as the normal setup path.
+`browser.launchExecutable` is the preferred executable path. `browser.headless` owns browser-window visibility and defaults to `true`; in visible mode, legacy `--headless` values in structured arguments are ignored. `browser.launchArgs` and `browser.chromeFlags` are structured string arrays. `browser.launchCommand` remains accepted as deprecated compatibility data only. It is never split, guessed, or shell-parsed and should not be used as the normal setup path.
 
 Browserbase configuration:
 

@@ -87,6 +87,7 @@ export type LocalCdpBrowserBackendOptions = {
   launchArgs?: string[];
   chromeFlags?: string[];
   autoLaunch?: boolean;
+  headless?: boolean;
   fetch?: CdpFetchLike;
   webSocketFactory?: CdpWebSocketFactory;
 };
@@ -857,6 +858,7 @@ export function createBrowserBackendFromConfig(config: {
   launchArgs?: string[];
   chromeFlags?: string[];
   autoLaunch?: boolean;
+  headless?: boolean;
   hybridRouting?: boolean;
   cloudFallback?: boolean;
   cloudSpendApproved?: "pending" | boolean;
@@ -879,6 +881,7 @@ export function createBrowserBackendFromConfig(config: {
       launchArgs: config.launchArgs,
       chromeFlags: config.chromeFlags,
       autoLaunch: config.autoLaunch,
+      headless: config.headless,
       fetch: config.fetch,
       webSocketFactory: config.webSocketFactory,
       securityConfig: config.securityConfig,
@@ -907,6 +910,7 @@ export function createBrowserBackendFromConfig(config: {
         launchArgs: config.launchArgs,
         chromeFlags: config.chromeFlags,
         autoLaunch: config.autoLaunch,
+        headless: config.headless,
         fetch: config.fetch,
         webSocketFactory: config.webSocketFactory,
         securityConfig: cloudSecurityConfig,
@@ -930,6 +934,7 @@ export function createBrowserBackendFromConfig(config: {
           launchArgs: config.launchArgs,
           chromeFlags: config.chromeFlags,
           autoLaunch: config.autoLaunch,
+          headless: config.headless,
           fetch: config.fetch,
           webSocketFactory: config.webSocketFactory,
           securityConfig: config.securityConfig,
@@ -943,6 +948,7 @@ export function createBrowserBackendFromConfig(config: {
         launchArgs: config.launchArgs,
         chromeFlags: config.chromeFlags,
         autoLaunch: config.autoLaunch,
+        headless: config.headless,
         fetch: config.fetch,
         webSocketFactory: config.webSocketFactory
       });
@@ -963,6 +969,7 @@ export function createBrowserBackendFromConfig(config: {
         launchArgs: config.launchArgs,
         chromeFlags: config.chromeFlags,
         autoLaunch: config.autoLaunch,
+        headless: config.headless,
         fetch: config.fetch,
         webSocketFactory: config.webSocketFactory,
         securityConfig: config.securityConfig,

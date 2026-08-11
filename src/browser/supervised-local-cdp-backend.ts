@@ -24,6 +24,7 @@ export type SupervisedLocalCdpBackendOptions = {
   launchArgs?: string[];
   chromeFlags?: string[];
   autoLaunch?: boolean;
+  headless?: boolean;
   fetch?: CdpFetchLike;
   webSocketFactory?: CdpWebSocketFactory;
   securityConfig?: Pick<LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
@@ -177,6 +178,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         launchExecutable: found.executablePath,
         launchArgs: options.launchArgs,
         chromeFlags: options.chromeFlags,
+        headless: options.headless,
         fetch: options.fetch as typeof globalThis.fetch | undefined
       });
       launchedChrome = chrome;

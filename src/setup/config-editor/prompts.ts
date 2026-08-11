@@ -127,6 +127,7 @@ export type BrowserCapabilityResult = {
   readonly chromeFlags: string[];
   readonly launchCommand?: string;
   readonly autoLaunch: boolean;
+  readonly headless: boolean;
   readonly supervised?: boolean;
   readonly engine?: BrowserEngineKind;
   readonly hybridRouting?: boolean;
@@ -2278,6 +2279,7 @@ export function promptBrowserCapability(
     readonly chromeFlags?: readonly string[];
     readonly launchCommand?: string;
     readonly autoLaunch?: boolean;
+    readonly headless?: boolean;
     readonly supervised?: boolean;
     readonly engine?: BrowserEngineKind;
     readonly hybridRouting?: boolean;
@@ -2298,6 +2300,7 @@ export function promptBrowserCapability(
     readonly chromeFlags?: readonly string[];
     readonly launchCommand?: string;
     readonly autoLaunch?: boolean;
+    readonly headless?: boolean;
     readonly supervised?: boolean;
     readonly engine?: BrowserEngineKind;
     readonly hybridRouting?: boolean;
@@ -2318,6 +2321,7 @@ export async function promptBrowserCapability(
     readonly chromeFlags?: readonly string[];
     readonly launchCommand?: string;
     readonly autoLaunch?: boolean;
+    readonly headless?: boolean;
     readonly supervised?: boolean;
     readonly engine?: BrowserEngineKind;
     readonly hybridRouting?: boolean;
@@ -2391,6 +2395,7 @@ export async function promptBrowserCapability(
       return browserCapabilityWithMode({
         backend: "local-cdp",
         autoLaunch: true,
+        headless: true,
         supervised: true,
         engine: "cdp",
         launchArgs: [],
@@ -2405,6 +2410,7 @@ export async function promptBrowserCapability(
         launchArgs: [],
         chromeFlags: [],
         autoLaunch: false,
+        headless: true,
         supervised: false,
       }, mode);
     }
@@ -2426,6 +2432,7 @@ export async function promptBrowserCapability(
         launchArgs: [],
         chromeFlags: [],
         autoLaunch: false,
+        headless: true,
         supervised: false,
         hybridRouting: true,
         cloudFallback: true,
@@ -2446,6 +2453,7 @@ export async function promptBrowserCapability(
         chromeFlags: [],
         launchCommand: current.launchCommand,
         autoLaunch: false,
+        headless: true,
         supervised: true,
       }, mode);
     }
@@ -2477,6 +2485,32 @@ export async function promptBrowserCapability(
       continue;
     }
     const autoLaunch = setupChoiceSelectedValue(autoLaunchResult);
+    let headless = current.headless ?? true;
+    if (autoLaunch) {
+      const headlessResult = await promptSetupChoiceMaybeBack(prompt, {
+        title: setupCopyText(locale, "setupEditor.prompt.browser.window.title"),
+        message: `${setupCopyText(locale, "setupEditor.prompt.browser.window.body")}\n`,
+        choices: [
+          {
+            id: "browser-window-background",
+            label: setupCopyText(locale, "setupEditor.prompt.browser.window.background"),
+            description: setupCopyText(locale, "setupEditor.prompt.browser.window.background.description"),
+            value: true,
+          },
+          {
+            id: "browser-window-visible",
+            label: setupCopyText(locale, "setupEditor.prompt.browser.window.visible"),
+            description: setupCopyText(locale, "setupEditor.prompt.browser.window.visible.description"),
+            value: false,
+          },
+        ],
+        defaultValue: headless,
+      }, options);
+      if (isSetupChoiceBackResult(headlessResult)) {
+        continue;
+      }
+      headless = setupChoiceSelectedValue(headlessResult);
+    }
     const cdpUrl = await promptSetupStringWithDefault(
       prompt,
       setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.cdpUrl.optional")),
@@ -2506,6 +2540,7 @@ export async function promptBrowserCapability(
       chromeFlags: splitCsv(chromeFlagsInput),
       launchCommand: current.launchCommand,
       autoLaunch,
+      headless,
       supervised: true,
     }, "local-supervised");
   }
@@ -2604,6 +2639,7 @@ function browserModeFromCurrent(current: {
 function isRecommendedBrowserConfig(current: {
   readonly backend?: BrowserBackendKind;
   readonly autoLaunch?: boolean;
+  readonly headless?: boolean;
   readonly supervised?: boolean;
   readonly cdpUrl?: string;
   readonly launchExecutable?: string;
@@ -2613,6 +2649,7 @@ function isRecommendedBrowserConfig(current: {
 }): boolean {
   return current.backend === "local-cdp" &&
     current.autoLaunch === true &&
+    current.headless !== false &&
     current.supervised === true &&
     current.cdpUrl === undefined &&
     current.launchExecutable === undefined &&
@@ -2625,6 +2662,7 @@ function browserCurrentStateIsKnown(current: {
   readonly backend?: BrowserBackendKind;
   readonly cloudProvider?: BrowserCloudProviderKind;
   readonly autoLaunch?: boolean;
+  readonly headless?: boolean;
   readonly cdpUrl?: string;
   readonly launchExecutable?: string;
   readonly launchArgs?: readonly string[];
@@ -2634,6 +2672,7 @@ function browserCurrentStateIsKnown(current: {
   return current.backend !== undefined ||
     current.cloudProvider !== undefined ||
     current.autoLaunch !== undefined ||
+    current.headless !== undefined ||
     current.cdpUrl !== undefined ||
     current.launchExecutable !== undefined ||
     current.launchArgs !== undefined ||

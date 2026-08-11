@@ -8,6 +8,7 @@ export interface ChromeLauncherOptions {
   launchExecutable: string;
   launchArgs?: string[];
   chromeFlags?: string[];
+  headless?: boolean;
   userDataDir?: string;
   env?: NodeJS.ProcessEnv;
   cwd?: string;
@@ -38,7 +39,6 @@ const POLL_INTERVAL_MS = 25;
 const APPARMOR_RESTRICT_USERNS_PATH = "/proc/sys/kernel/apparmor_restrict_unprivileged_userns";
 const DEFAULT_CHROME_FLAGS = [
   "--remote-debugging-port=0",
-  "--headless=new",
   "--no-first-run",
   "--no-default-browser-check",
   "--disable-background-timer-throttling",
@@ -59,8 +59,8 @@ export async function launchChrome(options: ChromeLauncherOptions): Promise<Laun
     throw new Error(`Chrome executable was not found: ${launchExecutable}`);
   }
 
-  const launchArgs = normalizeUserArgs(options.launchArgs, "launchArgs");
-  const chromeFlags = normalizeUserArgs(options.chromeFlags, "chromeFlags");
+  const launchArgs = browserDisplayArgs(normalizeUserArgs(options.launchArgs, "launchArgs"), options.headless);
+  const chromeFlags = browserDisplayArgs(normalizeUserArgs(options.chromeFlags, "chromeFlags"), options.headless);
   const mkdir = options.mkdir ?? nodeMkdir;
   const mkdtemp = options.mkdtemp ?? nodeMkdtemp;
   const rm = options.rm ?? nodeRm;
@@ -81,6 +81,7 @@ export async function launchChrome(options: ChromeLauncherOptions): Promise<Laun
     const args = [
       ...launchArgs,
       ...chromeFlags,
+      ...(options.headless === false ? [] : ["--headless=new"]),
       ...DEFAULT_CHROME_FLAGS,
       `--user-data-dir=${userDataDir}`
     ];
@@ -131,6 +132,12 @@ export async function launchChrome(options: ChromeLauncherOptions): Promise<Laun
     });
     throw error;
   }
+}
+
+function browserDisplayArgs(args: string[], headless: boolean | undefined): string[] {
+  return headless === false
+    ? args.filter((arg) => arg !== "--headless" && !arg.startsWith("--headless="))
+    : args;
 }
 
 function normalizeExecutable(value: string): string {

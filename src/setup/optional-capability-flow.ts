@@ -182,6 +182,7 @@ export function setupModuleContextFromConfig(
           launchArgs: stringArrayValue(browser.launchArgs),
           chromeFlags: stringArrayValue(browser.chromeFlags),
           autoLaunch: booleanValue(browser.autoLaunch),
+          headless: booleanValue(browser.headless),
           supervised: booleanValue(browser.supervised),
           engine: browserEngineValue(browser.engine),
           hybridRouting: booleanValue(browser.hybridRouting),

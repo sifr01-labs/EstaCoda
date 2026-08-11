@@ -437,6 +437,7 @@ describe("supervised local CDP backend", () => {
       launchCommand: "google-chrome",
       launchArgs: ["--app=https://example.test"],
       chromeFlags: ["--disable-gpu"],
+      headless: false,
       fetch,
       webSocketFactory: () => socket,
       findChromiumExecutable,
@@ -458,7 +459,8 @@ describe("supervised local CDP backend", () => {
     expect(launchChrome).toHaveBeenCalledWith(expect.objectContaining({
       launchExecutable: "/usr/bin/chromium",
       launchArgs: ["--app=https://example.test"],
-      chromeFlags: ["--disable-gpu"]
+      chromeFlags: ["--disable-gpu"],
+      headless: false
     }));
     expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:4567/json/version");
     expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:4567/json/list");

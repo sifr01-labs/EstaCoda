@@ -1864,7 +1864,7 @@ async function browser(options: CliOptions, args: string[]): Promise<CliCommandR
       output: [
         "EstaCoda browser backend",
         "  estacoda browser status",
-        "  estacoda browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222 --launch-executable /path/to/chrome --launch-arg --headless=new --chrome-flag --no-first-run",
+        "  estacoda browser setup --backend local-cdp --auto-launch [--headless | --headed] --launch-executable /path/to/chrome --chrome-flag --no-first-run",
         "  estacoda browser setup --backend browserbase --cloud-provider browserbase --hybrid-routing",
         "  estacoda browser approve-cloud",
         "  estacoda browser revoke-cloud",
@@ -1910,6 +1910,7 @@ async function browser(options: CliOptions, args: string[]): Promise<CliCommandR
         config.browser.launchCommand === undefined ? undefined : `Deprecated launch command: ${config.browser.launchCommand}`,
         ...deprecatedLaunchCommandWarnings(config.browser.launchCommand),
         `Auto-launch: ${config.browser.autoLaunch ? "enabled" : "disabled"}`,
+        config.browser.autoLaunch ? `Browser window: ${config.browser.headless ? "background" : "visible"}` : undefined,
         `Hybrid routing: ${config.browser.hybridRouting ? "enabled" : "disabled"}`,
         `Config sources: ${config.sources.join(", ") || "none"}`,
         subcommand === "test"
@@ -1942,6 +1943,7 @@ async function browser(options: CliOptions, args: string[]): Promise<CliCommandR
       result.config.browser?.launchCommand === undefined ? undefined : `Deprecated launch command: ${result.config.browser.launchCommand}`,
       ...deprecatedLaunchCommandWarnings(result.config.browser?.launchCommand),
       `Auto-launch: ${result.config.browser?.autoLaunch === true ? "enabled" : "disabled"}`,
+      result.config.browser?.autoLaunch === true ? `Browser window: ${result.config.browser.headless === false ? "visible" : "background"}` : undefined,
       `Hybrid routing: ${result.config.browser?.hybridRouting === true ? "enabled" : "disabled"}`,
       `Config: ${result.path}`
     ].filter((line) => line !== undefined).join("\n")
@@ -3743,6 +3745,16 @@ function parseBrowserArgs(args: string[]): Partial<BrowserSetupInput> {
       index += 1;
     } else if (arg === "--auto-launch") {
       parsed.autoLaunch = true;
+    } else if (arg === "--headless") {
+      if (parsed.headless === false) {
+        throw new Error("Use only one of --headless or --headed.");
+      }
+      parsed.headless = true;
+    } else if (arg === "--headed") {
+      if (parsed.headless === true) {
+        throw new Error("Use only one of --headless or --headed.");
+      }
+      parsed.headless = false;
     } else if (arg === "--hybrid-routing") {
       parsed.hybridRouting = true;
     }

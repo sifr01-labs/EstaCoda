@@ -146,7 +146,7 @@ WhatsApp uses an isolated Baileys bridge under `scripts/whatsapp-bridge/`. The b
 | Capability | Status |
 |---|---|
 | Arabic terminal support | Supported with shaped, bidirectional Arabic rendering for terminal workflows. |
-| Browser automation | Local CDP is supported, including supervised Chrome/Chromium auto-launch. Browserbase is implemented behind explicit cloud spend approval. |
+| Browser automation | Local CDP is supported, including supervised background or visible Chrome/Chromium auto-launch. Browserbase is implemented behind explicit cloud spend approval. |
 | Web research | Guarded built-in fetch/extraction is supported. Additional search providers are registered but not all are live-supported. |
 | Voice | Hosted TTS and hosted STT are supported. Local STT defaults to managed faster-whisper under `~/.estacoda/python-env`. |
 | Image generation | FAL and BytePlus/Seedream are supported. |

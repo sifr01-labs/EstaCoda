@@ -82,6 +82,7 @@ export type SetupModuleContext = SetupDraftBundleOptions & {
     readonly launchArgs?: readonly string[];
     readonly chromeFlags?: readonly string[];
     readonly autoLaunch?: boolean;
+    readonly headless?: boolean;
     readonly supervised?: boolean;
     readonly engine?: BrowserEngineKind;
     readonly hybridRouting?: boolean;
@@ -578,12 +579,21 @@ export const browserSetupModule: SetupModule = optionalCapabilityModule({
   scope: ["browser"],
   value: (context) => ({
     backend: context.browser?.backend,
+    browserBackend: context.browser?.backend,
     cloudProvider: context.browser?.cloudProvider,
     cdpUrl: context.browser?.cdpUrl,
     launchCommand: context.browser?.launchCommand,
     launchExecutable: context.browser?.launchExecutable,
     launchArgs: context.browser?.launchArgs,
     chromeFlags: context.browser?.chromeFlags,
+    headless: context.browser?.backend === undefined || context.browser.backend === "unconfigured"
+      ? undefined
+      : context.browser.headless,
+    browserWindow: context.browser?.backend === undefined || context.browser.backend === "unconfigured"
+      ? undefined
+      : context.browser.autoLaunch === true
+        ? context.browser.headless === false ? "visible" : "background"
+        : "externally managed",
     supervised: context.browser?.supervised,
     engine: context.browser?.engine,
     hybridRouting: context.browser?.hybridRouting,

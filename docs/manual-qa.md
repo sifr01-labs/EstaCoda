@@ -717,12 +717,14 @@ mkdir -p /tmp/estacoda-browser-qa-home
 **Local supervised auto-launch:**
 
 ```bash
-HOME=/tmp/estacoda-browser-qa-home pnpm run dev -- browser setup --backend local-cdp --auto-launch --launch-executable /path/to/chrome --launch-arg --headless=new --chrome-flag --no-first-run
+HOME=/tmp/estacoda-browser-qa-home pnpm run dev -- browser setup --backend local-cdp --auto-launch --headed --launch-executable /path/to/chrome --chrome-flag --no-first-run
 HOME=/tmp/estacoda-browser-qa-home pnpm run dev -- browser status
 ```
 
 **Verify:**
-- Status shows `local-cdp`, supervised mode, auto-launch enabled, launch executable, launch args count, and Chrome flags count.
+- Status shows `local-cdp`, supervised mode, auto-launch enabled, browser window visible, launch executable, launch args count, and Chrome flags count.
+- `--headed` opens an isolated visible Chrome/Chromium window on the first browser action; `--headless` keeps background behavior.
+- Setup planning, status, and verification do not launch a browser in either display mode.
 - Runtime navigation can launch Chrome/Chromium only from the configured structured executable/argument fields.
 - `browser.launchCommand` is not split, guessed, or shell-parsed.
 - Cleanup kills only the Chrome process launched by EstaCoda and removes the temporary user data directory.

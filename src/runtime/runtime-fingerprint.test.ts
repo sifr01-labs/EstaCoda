@@ -772,7 +772,7 @@ describe("computeRuntimeFingerprint", () => {
     const fp1 = computeRuntimeFingerprint(base, opts);
     const fp2 = computeRuntimeFingerprint(
       fakeLoadedRuntimeConfig({
-        browser: { backend: "local-cdp", autoLaunch: true, cdpUrl: "ws://localhost:9222", supervised: true },
+        browser: { backend: "local-cdp", autoLaunch: true, headless: true, cdpUrl: "ws://localhost:9222", supervised: true },
       }),
       opts
     );
