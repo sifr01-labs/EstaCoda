@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { SetupDraft, SetupDraftBundle } from "./setup-drafts.js";
 import { buildOnboardingWizardDraftBundle } from "./setup-drafts.js";
-import { buildSetupModuleDraftBundle, type SetupModuleContext } from "./setup-modules.js";
+import { browserSetupModule, buildSetupModuleDraftBundle, type SetupModuleContext } from "./setup-modules.js";
 import { buildSetupReviewManifest } from "./setup-review-manifest.js";
 import { renderSetupReviewManifest } from "./setup-prompts.js";
 import type { OnboardingWizardState } from "./onboarding-wizard/state.js";
@@ -358,6 +358,25 @@ describe("setup review manifest", () => {
     expect(browserLine?.review.values.autoLaunchRequested).toBe(true);
     expect(browserLine?.review.values.autoLaunchWillRunNow).toBe(false);
     expect(browserLine?.review.values.browserWindow).toBe("background");
+    expect(renderSetupReviewManifest(manifest, "en")).toContain("run in the background without showing a window");
+    expect(renderSetupReviewManifest(manifest, "ar")).toContain("سيعمل المتصفح المُدار في الخلفية من دون إظهار نافذة");
+    expect(renderSetupReviewManifest(manifest, "ar")).not.toContain("background");
+  });
+
+  it("renders disabled browser review without an empty window mode", () => {
+    const bundle = buildSetupModuleDraftBundle(moduleContext({
+      browser: {
+        backend: "unconfigured",
+        autoLaunch: false,
+        supervised: false,
+      },
+    }), [browserSetupModule]);
+    const manifest = buildSetupReviewManifest([bundle]);
+    const rendered = renderSetupReviewManifest(manifest, "en");
+
+    expect(manifest.sections["enabled-optional-capabilities"][0]?.review.values.browserWindow).toBe("disabled");
+    expect(rendered).toContain("Browser tools will be disabled.");
+    expect(rendered).not.toContain("window mode .");
   });
 
   it("lists structured browser launch fields in reviewed setup values", () => {

@@ -741,6 +741,11 @@ export type BrowserSetupInput = {
   snapshotSummarizeThreshold?: number;
 };
 
+export function isBrowserDisplayUpdate(input: BrowserSetupInput): boolean {
+  const keys = Object.keys(input);
+  return keys.length > 0 && keys.every((key) => key === "autoLaunch" || key === "headless");
+}
+
 export type VoiceSetupInput = {
   ttsProvider?: TtsProvider;
   ttsSpeed?: number;
@@ -2779,6 +2784,7 @@ export async function setupBrowserConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
   input: BrowserSetupInput;
+  preserveExisting?: boolean;
 }): Promise<{
   path: string;
   config: EstaCodaConfig;
@@ -2786,27 +2792,28 @@ export async function setupBrowserConfig(options: {
   validateBrowserSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
+  const current = options.preserveExisting === true ? existing.config.browser : undefined;
   const config = patchConfig(existing.config, {
     browser: {
-      backend: options.input.backend ?? "local-cdp",
-      cloudProvider: options.input.cloudProvider,
-      cdpUrl: options.input.cdpUrl,
-      launchCommand: options.input.launchCommand,
-      launchExecutable: options.input.launchExecutable,
-      launchArgs: options.input.launchArgs,
-      autoLaunch: options.input.autoLaunch ?? false,
-      headless: options.input.headless ?? true,
-      supervised: options.input.supervised,
-      chromeFlags: options.input.chromeFlags,
-      engine: options.input.engine,
-      commandTimeout: options.input.commandTimeout,
-      inactivityTimeout: options.input.inactivityTimeout,
-      recordSessions: options.input.recordSessions,
-      hybridRouting: options.input.hybridRouting,
-      cloudFallback: options.input.cloudFallback,
-      cloudSpendApproved: options.input.cloudSpendApproved,
-      summarizeSnapshots: options.input.summarizeSnapshots,
-      snapshotSummarizeThreshold: options.input.snapshotSummarizeThreshold
+      backend: options.input.backend ?? current?.backend ?? "local-cdp",
+      cloudProvider: options.input.cloudProvider ?? current?.cloudProvider,
+      cdpUrl: options.input.cdpUrl ?? current?.cdpUrl,
+      launchCommand: options.input.launchCommand ?? current?.launchCommand,
+      launchExecutable: options.input.launchExecutable ?? current?.launchExecutable,
+      launchArgs: options.input.launchArgs ?? current?.launchArgs,
+      autoLaunch: options.input.autoLaunch ?? current?.autoLaunch ?? false,
+      headless: options.input.headless ?? current?.headless ?? true,
+      supervised: options.input.supervised ?? current?.supervised,
+      chromeFlags: options.input.chromeFlags ?? current?.chromeFlags,
+      engine: options.input.engine ?? current?.engine,
+      commandTimeout: options.input.commandTimeout ?? current?.commandTimeout,
+      inactivityTimeout: options.input.inactivityTimeout ?? current?.inactivityTimeout,
+      recordSessions: options.input.recordSessions ?? current?.recordSessions,
+      hybridRouting: options.input.hybridRouting ?? current?.hybridRouting,
+      cloudFallback: options.input.cloudFallback ?? current?.cloudFallback,
+      cloudSpendApproved: options.input.cloudSpendApproved ?? current?.cloudSpendApproved,
+      summarizeSnapshots: options.input.summarizeSnapshots ?? current?.summarizeSnapshots,
+      snapshotSummarizeThreshold: options.input.snapshotSummarizeThreshold ?? current?.snapshotSummarizeThreshold
     }
   });
 

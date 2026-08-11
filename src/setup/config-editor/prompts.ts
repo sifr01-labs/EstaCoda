@@ -2371,7 +2371,7 @@ export async function promptBrowserCapability(
     },
   ] as const;
   const currentModeLabel = modeChoices.find((choice) => choice.value === defaultMode)?.label ?? defaultMode;
-  while (true) {
+  browserModeLoop: while (true) {
     const modeResult = await promptSetupChoiceMaybeBack<BrowserModeChoice>(prompt, {
       title: setupCopyText(locale, "setupEditor.prompt.browser.mode.title"),
       message: `${setupCopyText(locale, "setupEditor.prompt.browser.mode.body")}\n`,
@@ -2458,91 +2458,93 @@ export async function promptBrowserCapability(
       }, mode);
     }
 
-    const autoLaunchResult = await promptSetupChoiceMaybeBack(prompt, {
-      title: setupCopyText(locale, "setupEditor.prompt.browser.local.title"),
-      message: [
-        setupCopyText(locale, "setupEditor.prompt.browser.local.body"),
-        setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch"),
-        "",
-      ].join("\n"),
-      choices: [
-        {
-          id: "browser-auto-launch-yes",
-          label: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.yes"),
-          description: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.description"),
-          value: true,
-        },
-        {
-          id: "browser-auto-launch-no",
-          label: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.no"),
-          description: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.no.description"),
-          value: false,
-        },
-      ],
-      defaultValue: current.autoLaunch ?? false,
-    }, options);
-    if (isSetupChoiceBackResult(autoLaunchResult)) {
-      continue;
-    }
-    const autoLaunch = setupChoiceSelectedValue(autoLaunchResult);
-    let headless = current.headless ?? true;
-    if (autoLaunch) {
-      const headlessResult = await promptSetupChoiceMaybeBack(prompt, {
-        title: setupCopyText(locale, "setupEditor.prompt.browser.window.title"),
-        message: `${setupCopyText(locale, "setupEditor.prompt.browser.window.body")}\n`,
+    while (true) {
+      const autoLaunchResult = await promptSetupChoiceMaybeBack(prompt, {
+        title: setupCopyText(locale, "setupEditor.prompt.browser.local.title"),
+        message: [
+          setupCopyText(locale, "setupEditor.prompt.browser.local.body"),
+          setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch"),
+          "",
+        ].join("\n"),
         choices: [
           {
-            id: "browser-window-background",
-            label: setupCopyText(locale, "setupEditor.prompt.browser.window.background"),
-            description: setupCopyText(locale, "setupEditor.prompt.browser.window.background.description"),
+            id: "browser-auto-launch-yes",
+            label: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.yes"),
+            description: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.description"),
             value: true,
           },
           {
-            id: "browser-window-visible",
-            label: setupCopyText(locale, "setupEditor.prompt.browser.window.visible"),
-            description: setupCopyText(locale, "setupEditor.prompt.browser.window.visible.description"),
+            id: "browser-auto-launch-no",
+            label: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.no"),
+            description: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.no.description"),
             value: false,
           },
         ],
-        defaultValue: headless,
+        defaultValue: current.autoLaunch ?? false,
       }, options);
-      if (isSetupChoiceBackResult(headlessResult)) {
-        continue;
+      if (isSetupChoiceBackResult(autoLaunchResult)) {
+        continue browserModeLoop;
       }
-      headless = setupChoiceSelectedValue(headlessResult);
-    }
-    const cdpUrl = await promptSetupStringWithDefault(
-      prompt,
-      setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.cdpUrl.optional")),
-      current.cdpUrl ?? ""
-    );
-    const launchExecutable = await promptSetupStringWithDefault(
-      prompt,
-      setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.launchExecutable")),
-      current.launchExecutable ?? ""
-    );
-    const launchArgsInput = await promptSetupStringWithDefault(
-      prompt,
-      setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.launchArgs")),
-      current.launchArgs?.join(", ") ?? ""
-    );
-    const chromeFlagsInput = await promptSetupStringWithDefault(
-      prompt,
-      setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.chromeFlags")),
-      current.chromeFlags?.join(", ") ?? ""
-    );
+      const autoLaunch = setupChoiceSelectedValue(autoLaunchResult);
+      let headless = current.headless ?? true;
+      if (autoLaunch) {
+        const headlessResult = await promptSetupChoiceMaybeBack(prompt, {
+          title: setupCopyText(locale, "setupEditor.prompt.browser.window.title"),
+          message: `${setupCopyText(locale, "setupEditor.prompt.browser.window.body")}\n`,
+          choices: [
+            {
+              id: "browser-window-background",
+              label: setupCopyText(locale, "setupEditor.prompt.browser.window.background"),
+              description: setupCopyText(locale, "setupEditor.prompt.browser.window.background.description"),
+              value: true,
+            },
+            {
+              id: "browser-window-visible",
+              label: setupCopyText(locale, "setupEditor.prompt.browser.window.visible"),
+              description: setupCopyText(locale, "setupEditor.prompt.browser.window.visible.description"),
+              value: false,
+            },
+          ],
+          defaultValue: headless,
+        }, options);
+        if (isSetupChoiceBackResult(headlessResult)) {
+          continue;
+        }
+        headless = setupChoiceSelectedValue(headlessResult);
+      }
+      const cdpUrl = await promptSetupStringWithDefault(
+        prompt,
+        setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.cdpUrl.optional")),
+        current.cdpUrl ?? ""
+      );
+      const launchExecutable = await promptSetupStringWithDefault(
+        prompt,
+        setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.launchExecutable")),
+        current.launchExecutable ?? ""
+      );
+      const launchArgsInput = await promptSetupStringWithDefault(
+        prompt,
+        setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.launchArgs")),
+        current.launchArgs?.join(", ") ?? ""
+      );
+      const chromeFlagsInput = await promptSetupStringWithDefault(
+        prompt,
+        setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.chromeFlags")),
+        current.chromeFlags?.join(", ") ?? ""
+      );
 
-    return browserCapabilityWithMode({
-      backend: "local-cdp",
-      cdpUrl: optionalTrimmedString(cdpUrl),
-      launchExecutable: optionalTrimmedString(launchExecutable),
-      launchArgs: splitCsv(launchArgsInput),
-      chromeFlags: splitCsv(chromeFlagsInput),
-      launchCommand: current.launchCommand,
-      autoLaunch,
-      headless,
-      supervised: true,
-    }, "local-supervised");
+      return browserCapabilityWithMode({
+        backend: "local-cdp",
+        cdpUrl: optionalTrimmedString(cdpUrl),
+        launchExecutable: optionalTrimmedString(launchExecutable),
+        launchArgs: splitCsv(launchArgsInput),
+        chromeFlags: splitCsv(chromeFlagsInput),
+        launchCommand: current.launchCommand,
+        autoLaunch,
+        headless,
+        supervised: true,
+      }, "local-supervised");
+    }
   }
 }
 

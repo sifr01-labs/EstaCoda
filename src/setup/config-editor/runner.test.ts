@@ -5547,6 +5547,44 @@ describe("runConfigEditor", () => {
     });
   });
 
+  it("returns from browser window Back to the auto-launch choice", async () => {
+    const selectedTitles: string[] = [];
+    const basePrompt = fakePrompt({
+      values: [
+        "local-supervised",
+        true,
+        "Back",
+        true,
+        false,
+        "",
+        "/usr/bin/chromium",
+        "",
+        "",
+      ],
+    });
+    const prompt = basePrompt as Prompt;
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectedTitles.push(input.title);
+      return baseSelect(input);
+    };
+
+    const values = await promptBrowserCapability(prompt, {}, "en", { allowBack: true });
+
+    expect(values).toMatchObject({
+      backend: "local-cdp",
+      autoLaunch: true,
+      headless: false,
+    });
+    expect(selectedTitles).toEqual([
+      "Browser",
+      "Local supervised browser",
+      "Browser window",
+      "Local supervised browser",
+      "Browser window",
+    ]);
+  });
+
   it("maps existing CDP browser mode to flat browser config fields", async () => {
     const values = await promptBrowserCapability(fakePrompt({
       values: ["existing-cdp", "http://127.0.0.1:9222"],

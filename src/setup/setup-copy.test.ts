@@ -563,6 +563,10 @@ const SETUP_MODULE_KEYS = [
   "setupModules.browser.title",
   "setupModules.browser.review",
   "setupModules.browser.draft",
+  "setupModules.browser.summary.visible",
+  "setupModules.browser.summary.background",
+  "setupModules.browser.summary.externallyManaged",
+  "setupModules.browser.summary.disabled",
   "setupModules.{moduleId}.blocked",
 ] as const;
 
@@ -805,6 +809,10 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupModules.browser.draft")).toContain("محرك المتصفح");
     expect(resolveSetupCopy("ar", "setupModules.browser.draft")).not.toContain("واجهة المتصفح");
     expect(resolveSetupCopy("ar", "setupModules.browser.draft")).not.toContain("واجهة متصفح");
+    expect(resolveSetupCopy("ar", "setupModules.browser.summary.visible")).toContain("ستظهر نافذة المتصفح");
+    expect(resolveSetupCopy("ar", "setupModules.browser.summary.background")).toContain("في الخلفية");
+    expect(resolveSetupCopy("ar", "setupModules.browser.summary.externallyManaged")).toContain("خارجيًا");
+    expect(resolveSetupCopy("ar", "setupModules.browser.summary.disabled")).toContain("تعطيل أدوات المتصفح");
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.mode.disable.description")).toContain("محرك المتصفح");
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.mode.disable.description")).not.toContain("نظام المتصفح");
     expect(resolveSetupCopy("ar", "setupEditor.actions.verifyBrowser.description")).toContain("محرك المتصفح");
@@ -1026,7 +1034,7 @@ describe("setup copy", () => {
     expect(rawSetupCopy("ar", "setupEditor.prompt.browser.mode.body")).toBe("اختر كيف تشغّل EstaCoda أدوات المتصفح.");
     expect(rawSetupCopy("ar", "setupEditor.prompt.browser.mode.recommended")).toBe("إعداد المتصفح الموصى به");
     expect(rawSetupCopy("ar", "setupEditor.prompt.browser.mode.recommended.description")).toBe(
-      "يشغّل Chrome محلياً وتلقائياً تحت إشراف EstaCoda، مع إعدادات آمنة مناسبة لمعظم المستخدمين."
+      "يشغّل Chrome محلياً وتلقائياً في الخلفية تحت إشراف EstaCoda، مع إعدادات آمنة. اختر «متصفح محلي مُشرف عليه» لإظهار نافذته."
     );
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.mode.recommended.description")).toContain(isolateLtr("Chrome"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.mode.recommended.description")).toContain(isolateLtr("EstaCoda"));

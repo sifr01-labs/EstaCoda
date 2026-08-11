@@ -198,6 +198,44 @@ describe("browser CLI setup", () => {
     expect(status.output).toContain("Browser window: visible");
   });
 
+  it("changes window visibility without removing existing browser settings", async () => {
+    await writeConfig(tempDir, {
+      model: { provider: "openai", id: "gpt-4o" },
+      browser: {
+        backend: "local-cdp",
+        cdpUrl: "http://127.0.0.1:9222",
+        launchExecutable: "/usr/bin/chromium",
+        launchArgs: ["--app=https://example.test"],
+        chromeFlags: ["--no-first-run"],
+        commandTimeout: 12_000,
+        autoLaunch: true,
+        headless: true,
+        supervised: true
+      }
+    });
+
+    const setup = await runCliCommand({
+      argv: ["browser", "setup", "--auto-launch", "--headed"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir
+    });
+
+    expect(setup.output).toContain("Browser window: visible");
+    await expect(readConfig(tempDir)).resolves.toMatchObject({
+      browser: {
+        backend: "local-cdp",
+        cdpUrl: "http://127.0.0.1:9222",
+        launchExecutable: "/usr/bin/chromium",
+        launchArgs: ["--app=https://example.test"],
+        chromeFlags: ["--no-first-run"],
+        commandTimeout: 12_000,
+        autoLaunch: true,
+        headless: false,
+        supervised: true
+      }
+    });
+  });
+
   it("rejects conflicting browser window flags", async () => {
     await expect(runCliCommand({
       argv: ["browser", "setup", "--auto-launch", "--headless", "--headed"],

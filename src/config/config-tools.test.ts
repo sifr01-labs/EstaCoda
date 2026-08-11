@@ -334,6 +334,41 @@ describe("config.web.setup", () => {
   });
 });
 
+describe("config.browser.setup", () => {
+  it("changes window visibility without removing existing browser settings", async () => {
+    const homeDir = await configHome({
+      model: { provider: "local", id: "qwen2.5:3b" },
+      browser: {
+        backend: "local-cdp",
+        cdpUrl: "http://127.0.0.1:9222",
+        launchExecutable: "/usr/bin/chromium",
+        launchArgs: ["--app=https://example.test"],
+        chromeFlags: ["--no-first-run"],
+        autoLaunch: true,
+        headless: true,
+        supervised: true
+      }
+    });
+    const tool = configTool("config.browser.setup", homeDir);
+
+    const result = await tool.run({ headless: false });
+
+    expect(result.content).toContain("Browser window: visible");
+    expect(result.metadata).toMatchObject({
+      browser: {
+        backend: "local-cdp",
+        cdpUrl: "http://127.0.0.1:9222",
+        launchExecutable: "/usr/bin/chromium",
+        launchArgs: ["--app=https://example.test"],
+        chromeFlags: ["--no-first-run"],
+        autoLaunch: true,
+        headless: false,
+        supervised: true
+      }
+    });
+  });
+});
+
 describe("config.provider.execution_status", () => {
   it("reports no latest execution without making a live check", async () => {
     const homeDir = await configHome(localModelConfig({

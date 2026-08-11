@@ -8,6 +8,7 @@ import { buildCompressionStatusReport, renderCompressionStatusReport } from "../
 import { resolveEffectiveSessionModelOverride } from "../providers/model-switch-resolver.js";
 import {
   loadRuntimeConfig,
+  isBrowserDisplayUpdate,
   setupMcpConfig,
   setupBrowserConfig,
   setupImageGenerationConfig,
@@ -375,7 +376,8 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
       run: async (input: BrowserSetupInput) => {
         const result = await setupBrowserConfig({
           ...options,
-          input
+          input,
+          preserveExisting: isBrowserDisplayUpdate(input)
         });
 
         return {

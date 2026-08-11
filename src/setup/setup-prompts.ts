@@ -453,10 +453,29 @@ function renderReviewLine(
   summaryKey: string,
   values: Record<string, SetupPromptValue>
 ): string {
-  if (hasSetupCopyKey(summaryKey)) {
-    return formatSetupCopy(locale, summaryKey, reviewPlaceholderValues(values));
+  const resolvedSummaryKey = browserReviewSummaryKey(summaryKey, values.browserWindow);
+  if (hasSetupCopyKey(resolvedSummaryKey)) {
+    return formatSetupCopy(locale, resolvedSummaryKey, reviewPlaceholderValues(values));
   }
   return setupCopyText(locale, "setupReview.itemFallback");
+}
+
+function browserReviewSummaryKey(summaryKey: string, browserWindow: SetupPromptValue): string {
+  if (summaryKey !== "setupModules.browser.review" && summaryKey !== "setupModules.browser.draft") {
+    return summaryKey;
+  }
+  switch (browserWindow) {
+    case "visible":
+      return "setupModules.browser.summary.visible";
+    case "background":
+      return "setupModules.browser.summary.background";
+    case "externally managed":
+      return "setupModules.browser.summary.externallyManaged";
+    case "disabled":
+      return "setupModules.browser.summary.disabled";
+    default:
+      return summaryKey;
+  }
 }
 
 function reviewPlaceholderValues(

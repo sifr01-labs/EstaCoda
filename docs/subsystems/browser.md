@@ -184,6 +184,8 @@ Structured launch fields are the supported configuration surface:
 
 `browser.launchExecutable` is the preferred executable path. `browser.headless` owns browser-window visibility and defaults to `true`; in visible mode, legacy `--headless` values in structured arguments are ignored. `browser.launchArgs` and `browser.chromeFlags` are structured string arrays. `browser.launchCommand` remains accepted as deprecated compatibility data only. It is never split, guessed, or shell-parsed and should not be used as the normal setup path.
 
+CLI and model-tool updates that specify only browser window behavior preserve the other reviewed browser settings. The Setup Editor continues to apply its complete reviewed browser selection, including intentional field removal when switching modes.
+
 Browserbase configuration:
 
 ```json

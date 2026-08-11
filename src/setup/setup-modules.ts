@@ -589,11 +589,13 @@ export const browserSetupModule: SetupModule = optionalCapabilityModule({
     headless: context.browser?.backend === undefined || context.browser.backend === "unconfigured"
       ? undefined
       : context.browser.headless,
-    browserWindow: context.browser?.backend === undefined || context.browser.backend === "unconfigured"
+    browserWindow: context.browser?.backend === undefined
       ? undefined
-      : context.browser.autoLaunch === true
-        ? context.browser.headless === false ? "visible" : "background"
-        : "externally managed",
+      : context.browser.backend === "unconfigured"
+        ? "disabled"
+        : context.browser.autoLaunch === true
+          ? context.browser.headless === false ? "visible" : "background"
+          : "externally managed",
     supervised: context.browser?.supervised,
     engine: context.browser?.engine,
     hybridRouting: context.browser?.hybridRouting,

@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { stdin, stdout } from "node:process";
 import {
   createTelegramPairingCode,
+  isBrowserDisplayUpdate,
   loadRuntimeConfig,
   setupMcpConfig,
   setupBrowserConfig,
@@ -1927,7 +1928,8 @@ async function browser(options: CliOptions, args: string[]): Promise<CliCommandR
     : parseBrowserArgs(args.slice(1));
   const result = await setupBrowserConfig({
     ...options,
-    input: parsed
+    input: parsed,
+    preserveExisting: subcommand !== "disable" && isBrowserDisplayUpdate(parsed)
   });
 
   return {
@@ -3714,9 +3716,7 @@ function parseWebArgs(args: string[]): Partial<WebSetupInput> {
 }
 
 function parseBrowserArgs(args: string[]): Partial<BrowserSetupInput> {
-  const parsed: Partial<BrowserSetupInput> = {
-    backend: "local-cdp"
-  };
+  const parsed: Partial<BrowserSetupInput> = {};
 
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
