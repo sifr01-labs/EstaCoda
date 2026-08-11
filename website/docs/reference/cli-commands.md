@@ -436,11 +436,14 @@ estacoda browser disable
 estacoda tools                          # list available tools grouped by toolset
 estacoda mcp status                     # configured MCP servers and readiness
 estacoda mcp reload                     # reload MCP config
+estacoda mcp setup --name postman --command npx --args @postman/postman-mcp-server --env-ref POSTMAN_API_KEY=POSTMAN_API_KEY
 ```
 
-**State touched:** None for `tools`. `mcp reload` refreshes the runtime tool registry from current config.
+`--env-ref CHILD_KEY=PROFILE_ENV_KEY` forwards only the named secret from the selected profile `.env` when the MCP server starts. It stores the variable names in config, never the secret value.
 
-**Failure modes:** MCP servers missing from config are not errors; they simply do not appear.
+**State touched:** None for `tools`. `mcp setup` updates the selected profile config. `mcp reload` refreshes the runtime tool registry from current config.
+
+**Failure modes:** MCP servers missing from config are not errors; they simply do not appear. A missing or invalid `--env-ref` leaves that server unavailable and does not start its process.
 
 ---
 

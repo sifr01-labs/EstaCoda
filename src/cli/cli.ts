@@ -1267,7 +1267,8 @@ async function persistModelSelection(
     baseUrl: resolution.baseUrl,
     apiKeyEnv: envVarName,
     apiMode: resolution.apiMode,
-    authMethod: resolution.authMethod === "api_key" ? undefined : resolution.authMethod
+    authMethod: resolution.authMethod === "api_key" ? undefined : resolution.authMethod,
+    enableNetwork: true
   });
 
   mutated = applyRegisterProviderModel(mutated, {
@@ -3086,7 +3087,8 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
         "  estacoda mcp reload",
         "  estacoda mcp setup --name docs --command npx --args @modelcontextprotocol/server-filesystem,/path",
         "  estacoda mcp setup --name docs --command uvx --args mcp-server-fetch",
-        "  estacoda mcp setup --name remote --transport http --url http://127.0.0.1:3000/mcp --server-trust read-only-network"
+        "  estacoda mcp setup --name remote --transport http --url http://127.0.0.1:3000/mcp --server-trust read-only-network",
+        "  --env-ref CHILD_KEY=PROFILE_ENV_KEY forwards an explicitly named profile secret without storing its value in config"
       ].join("\n")
     };
   }
@@ -3158,7 +3160,7 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
     return {
       handled: true,
       exitCode: 1,
-      output: "Usage: estacoda mcp setup --name <server> --command <cmd> [--args a,b,c]"
+      output: "Usage: estacoda mcp setup --name <server> --command <cmd> [--args a,b,c] [--env-ref CHILD_KEY=PROFILE_ENV_KEY]"
     };
   }
   const result = await setupMcpConfig({
@@ -3861,6 +3863,9 @@ function parseMcpArgs(args: string[]): Partial<MCPSetupInput> {
       index += 1;
     } else if (arg === "--env") {
       parsed.env = parseKeyValueList(next ?? "");
+      index += 1;
+    } else if (arg === "--env-ref") {
+      parsed.envRefs = parseKeyValueList(next ?? "");
       index += 1;
     } else if (arg === "--header" || arg === "--headers") {
       parsed.headers = parseKeyValueList(next ?? "");

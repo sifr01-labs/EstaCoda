@@ -431,11 +431,14 @@ estacoda browser disable
 estacoda tools                          # قائمة الأدوات المتاحة مجمعة حسب toolset
 estacoda mcp status                     # خوادم MCP المُهيأة والجاهزية
 estacoda mcp reload                     # إعادة تحميل إعداد MCP
+estacoda mcp setup --name postman --command npx --args @postman/postman-mcp-server --env-ref POSTMAN_API_KEY=POSTMAN_API_KEY
 ```
 
-**الحالة المُعدّلة:** لا شيء لـ `tools`. `mcp reload` يُعيد بناء سجل أدوات التشغيل من الإعداد الحالي.
+يمرّر `--env-ref CHILD_KEY=PROFILE_ENV_KEY` السر المحدد فقط من ملف `.env` للملف الشخصي المختار عند تشغيل خادم MCP. تُحفظ أسماء المتغيرات في الإعداد من دون قيمة السر.
 
-**أنماط الفشل:** خوادم MCP المفقودة من الإعداد ليست أخطاء؛ ببساطة لا تظهر.
+**الحالة المُعدّلة:** لا شيء لـ `tools`. يحدّث `mcp setup` إعداد الملف الشخصي المختار. `mcp reload` يُعيد بناء سجل أدوات التشغيل من الإعداد الحالي.
+
+**أنماط الفشل:** خوادم MCP المفقودة من الإعداد ليست أخطاء؛ ببساطة لا تظهر. إذا كان `--env-ref` مفقودًا أو غير صالح، يبقى ذلك الخادم غير متاح ولا تبدأ عمليته.
 
 ---
 

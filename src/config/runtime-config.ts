@@ -338,6 +338,7 @@ export type MCPServerConfig = {
   args?: string[];
   cwd?: string;
   env?: Record<string, string>;
+  envRefs?: Record<string, string>;
   url?: string;
   headers?: Record<string, string>;
   tools?: MCPServerToolsConfig;
@@ -770,6 +771,7 @@ export type MCPSetupInput = {
   args?: string[];
   cwd?: string;
   env?: Record<string, string>;
+  envRefs?: Record<string, string>;
   url?: string;
   headers?: Record<string, string>;
   tools?: MCPServerToolsConfig;
@@ -2293,6 +2295,9 @@ function normalizeMcpServers(
       env: typeof record.env === "object" && record.env !== null && !Array.isArray(record.env)
         ? Object.fromEntries(Object.entries(record.env).filter(([, envValue]) => typeof envValue === "string") as Array<[string, string]>)
         : undefined,
+      envRefs: typeof record.envRefs === "object" && record.envRefs !== null && !Array.isArray(record.envRefs)
+        ? Object.fromEntries(Object.entries(record.envRefs).filter(([, envName]) => typeof envName === "string") as Array<[string, string]>)
+        : undefined,
       url: typeof record.url === "string" ? record.url : undefined,
       headers: typeof record.headers === "object" && record.headers !== null && !Array.isArray(record.headers)
         ? Object.fromEntries(Object.entries(record.headers).filter(([, headerValue]) => typeof headerValue === "string") as Array<[string, string]>)
@@ -3029,6 +3034,7 @@ export async function setupMcpConfig(options: {
     args: options.input.args,
     cwd: options.input.cwd === undefined ? undefined : expandConfiguredPath(options.input.cwd, options.homeDir),
     env: options.input.env,
+    envRefs: options.input.envRefs,
     url: options.input.url,
     headers: options.input.headers,
     tools: {
@@ -3728,6 +3734,13 @@ function validateMcpSetupInput(input: MCPSetupInput): void {
   validateRiskClass(input.toolRiskClass, "toolRiskClass");
   validateRiskClass(input.resourceReadRiskClass, "resourceReadRiskClass");
   validateRiskClass(input.promptGetRiskClass, "promptGetRiskClass");
+  for (const [targetName, sourceName] of Object.entries(input.envRefs ?? {})) {
+    validateOptionalEnvName(targetName, "MCP environment target");
+    validateOptionalEnvName(sourceName, `MCP environment reference for ${targetName}`);
+    if (input.env?.[targetName] !== undefined) {
+      throw new Error(`MCP environment target ${targetName} cannot use both env and envRefs`);
+    }
+  }
   if (input.timeoutMs !== undefined && (!Number.isInteger(input.timeoutMs) || input.timeoutMs <= 0)) {
     throw new Error("Expected timeoutMs to be a positive integer");
   }

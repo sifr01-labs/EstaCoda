@@ -24,6 +24,7 @@ export type LoadedMCPServer = {
 export async function loadMcpServers(input: {
   servers: Record<string, MCPServerConfig>;
   fetch?: MCPFetchLike;
+  environment?: NodeJS.ProcessEnv;
 }): Promise<LoadedMCPServer[]> {
   const loaded: LoadedMCPServer[] = [];
 
@@ -40,6 +41,11 @@ export async function loadMcpServers(input: {
       loaded.push(unavailableServer(name, config, "MCP HTTP server requires a url."));
       continue;
     }
+    const resolvedEnvironment = resolveMcpEnvironment(config, input.environment ?? process.env);
+    if (!resolvedEnvironment.ok) {
+      loaded.push(unavailableServer(name, config, resolvedEnvironment.error));
+      continue;
+    }
 
     const client = new MCPClient({
       name,
@@ -47,7 +53,7 @@ export async function loadMcpServers(input: {
       command: config.command,
       args: config.args,
       cwd: config.cwd,
-      env: config.env,
+      env: resolvedEnvironment.env,
       url: config.url,
       headers: config.headers,
       timeoutMs: config.timeoutMs,
@@ -93,6 +99,38 @@ export async function loadMcpServers(input: {
   }
 
   return loaded;
+}
+
+export type ResolvedMcpEnvironment =
+  | { readonly ok: true; readonly env: Record<string, string> | undefined }
+  | { readonly ok: false; readonly error: string };
+
+export function resolveMcpEnvironment(
+  config: Pick<MCPServerConfig, "env" | "envRefs">,
+  environment: NodeJS.ProcessEnv
+): ResolvedMcpEnvironment {
+  const refs = Object.entries(config.envRefs ?? {});
+  if (refs.length === 0) {
+    return { ok: true, env: config.env };
+  }
+
+  const resolved = { ...(config.env ?? {}) };
+  for (const [targetName, sourceName] of refs) {
+    if (!isEnvironmentVariableName(targetName) || !isEnvironmentVariableName(sourceName)) {
+      return { ok: false, error: `MCP environment reference ${targetName} is invalid.` };
+    }
+    const value = environment[sourceName];
+    if (typeof value !== "string" || value.length === 0) {
+      return { ok: false, error: `MCP environment variable ${sourceName} is not set.` };
+    }
+    resolved[targetName] = value;
+  }
+
+  return { ok: true, env: resolved };
+}
+
+function isEnvironmentVariableName(value: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/u.test(value);
 }
 
 function unavailableServer(name: string, config: MCPServerConfig, error: string): LoadedMCPServer {

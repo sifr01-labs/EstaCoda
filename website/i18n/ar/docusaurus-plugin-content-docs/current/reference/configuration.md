@@ -571,6 +571,7 @@ STT المستضاف المستقر: OpenAI، Groq، xAI. STT المحلي يد�
       "args": ["/path/to/server.js"],
       "cwd": "/optional/cwd",
       "env": { "KEY": "value" },
+      "envRefs": { "API_TOKEN": "PROFILE_API_TOKEN" },
       "includeTools": ["tool1"],
       "excludeTools": ["tool2"],
       "trust": "conservative",
@@ -581,6 +582,8 @@ STT المستضاف المستقر: OpenAI، Groq، xAI. STT المحلي يد�
 ```
 
 مستويات الثقة: `conservative`، `read-only-network`، `read-only-local`.
+
+استخدم `env` فقط للقيم الحرفية غير السرية. يربط `envRefs` اسم متغير العملية الفرعية بمتغير محمّل من ملف `.env` للملف الشخصي المختار؛ لا يُحفظ في `config.json` سوى الأسماء. إذا كان المرجع مفقودًا أو غير صالح، يبقى خادم MCP غير متاح.
 
 ### skills
 

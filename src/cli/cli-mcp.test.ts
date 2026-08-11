@@ -54,4 +54,37 @@ describe("cli mcp setup", () => {
       await rm(tmpDir, { recursive: true, force: true });
     }
   });
+
+  it("stores MCP environment references without storing secret values", async () => {
+    const tmpDir = await makeTempDir();
+    try {
+      const result = await runCliCommand({
+        argv: [
+          "mcp",
+          "setup",
+          "--name",
+          "postman",
+          "--command",
+          "npx",
+          "--args",
+          "@postman/postman-mcp-server",
+          "--env-ref",
+          "POSTMAN_API_KEY=POSTMAN_API_KEY",
+        ],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+      });
+
+      expect(result.exitCode).toBe(0);
+      const rawConfig = await readFile(profileConfigPath(tmpDir), "utf8");
+      const config = JSON.parse(rawConfig) as {
+        mcpServers?: Record<string, { env?: Record<string, string>; envRefs?: Record<string, string> }>;
+      };
+      expect(config.mcpServers?.postman?.envRefs).toEqual({ POSTMAN_API_KEY: "POSTMAN_API_KEY" });
+      expect(config.mcpServers?.postman?.env).toBeUndefined();
+      expect(rawConfig).not.toContain("postman-secret-value");
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
 });

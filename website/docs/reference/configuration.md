@@ -571,6 +571,7 @@ MCP server definitions.
       "args": ["/path/to/server.js"],
       "cwd": "/optional/cwd",
       "env": { "KEY": "value" },
+      "envRefs": { "API_TOKEN": "PROFILE_API_TOKEN" },
       "includeTools": ["tool1"],
       "excludeTools": ["tool2"],
       "trust": "conservative",
@@ -581,6 +582,8 @@ MCP server definitions.
 ```
 
 Trust levels: `conservative`, `read-only-network`, `read-only-local`.
+
+Use `env` only for non-secret literal values. `envRefs` maps a child-process variable name to a variable loaded from the selected profile `.env`; only the names are persisted in `config.json`. Missing or invalid references leave that MCP server unavailable.
 
 ### skills
 

@@ -3239,6 +3239,27 @@ describe("loadRuntimeConfig profile loading", () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
+  it("normalizes MCP environment references without resolving their values into config", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      mcpServers: {
+        postman: {
+          command: "npx",
+          args: ["@postman/postman-mcp-server"],
+          envRefs: { POSTMAN_API_KEY: "POSTMAN_API_KEY" }
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+
+    expect(loaded.mcp.servers.postman?.envRefs).toEqual({ POSTMAN_API_KEY: "POSTMAN_API_KEY" });
+    expect(loaded.mcp.servers.postman?.env).toBeUndefined();
+    await rm(workspace, { recursive: true, force: true });
+  });
+
   it("ignores invalid workspace project config", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(join(workspace, ".estacoda", "profiles", "default"), { recursive: true });

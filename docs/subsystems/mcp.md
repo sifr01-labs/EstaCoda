@@ -28,6 +28,13 @@ description: "MCP client transport, discovery, and trust metadata."
 5. Discovered tools registered into normal tool registry
 6. Optional wrappers for `resource.list`, `resource.read`, `prompt.list`, `prompt.get`
 
+## Credentials
+
+- `env` supplies literal, non-secret values to stdio servers.
+- `envRefs` maps child-process variable names to variables loaded from the selected profile `.env`.
+- Runtime resolution forwards only explicitly named variables through the sanitized child environment.
+- Missing or invalid references fail closed before the MCP process starts, and errors include variable names only.
+
 ## Trust
 
 - Server-level trust metadata maps MCP tools into EstaCoda risk classes.
