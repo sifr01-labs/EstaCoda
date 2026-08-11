@@ -1745,6 +1745,13 @@ export class ChannelGateway {
             }
           : {}),
         onEvent: async (event) => {
+          if (
+            this.#activeTurnRegistry !== undefined &&
+            turnId !== undefined &&
+            isTurnProgressEvent(event)
+          ) {
+            this.#activeTurnRegistry.markProgress(activeTurnKey, turnId);
+          }
           if (await this.#handleStreamingEvent(streamHandle, event, {
             deltasViaCallbacks: streamCallbacksWired,
             segmentBreaksViaCallbacks: streamCallbacksWired
@@ -4373,6 +4380,19 @@ export class ChannelGateway {
       `◈ Security: ${formatGatewayFreshSessionSecurity(this.#securityMode)}`
     ].join("\n");
   }
+}
+
+function isTurnProgressEvent(event: RuntimeEvent): boolean {
+  return event.kind === "agent-start" ||
+    event.kind === "tool-start" ||
+    event.kind === "tool-result" ||
+    event.kind === "provider-attempt" ||
+    event.kind === "provider-token" ||
+    event.kind === "provider-tool-call" ||
+    event.kind === "provider-result" ||
+    event.kind === "session-compacted" ||
+    event.kind === "memory-curation" ||
+    event.kind === "delegation-progress";
 }
 
 function yoloSessionKey(stableKey: string, sessionId: string): string {

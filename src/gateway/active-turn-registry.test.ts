@@ -113,6 +113,7 @@ describe("ActiveTurnRegistry", () => {
     expect(turn).toBeDefined();
     expect(turn!.turnId).toBe(turnId);
     expect(turn!.key).toBe("k1");
+    expect(turn!.lastProgressAt).toBe(turn!.startedAt);
     expect(turn!.stuckCheckCount).toBe(0);
   });
 
@@ -508,6 +509,64 @@ describe("ActiveTurnRegistry", () => {
     expect(warnings.length).toBe(1);
     expect(warnings[0]).toContain("updateTurn turnId mismatch");
     expect(registry.getTurn("k1")?.metadata).toEqual({ sessionId: "sess-1" });
+  });
+
+  it("markProgress refreshes inactivity without changing total turn age", () => {
+    const result = registry.startTurn("k1", new AbortController());
+    expect(result.ok).toBe(true);
+    const turnId = result.ok ? result.turnId : "";
+    const startedAt = registry.getTurn("k1")!.startedAt;
+
+    vi.advanceTimersByTime(299_000);
+    expect(registry.markProgress("k1", turnId)).toBe(true);
+    expect(registry.getTurn("k1")!.lastProgressAt).toBe(startedAt + 299_000);
+
+    vi.advanceTimersByTime(299_000);
+    expect(registry.listStuckTurns()).toHaveLength(0);
+    expect(registry.getTurn("k1")!.startedAt).toBe(startedAt);
+
+    vi.advanceTimersByTime(1_001);
+    expect(registry.listStuckTurns()).toHaveLength(1);
+  });
+
+  it("markProgress resets prior stuck scan evidence", () => {
+    const result = registry.startTurn("k1", new AbortController());
+    const turnId = result.ok ? result.turnId : "";
+    vi.advanceTimersByTime(300_001);
+    registry.listStuckTurns();
+    expect(registry.getTurn("k1")!.stuckCheckCount).toBe(1);
+
+    expect(registry.markProgress("k1", turnId)).toBe(true);
+    expect(registry.getTurn("k1")!.stuckCheckCount).toBe(0);
+    expect(registry.getRepeatStuckTurns()).toHaveLength(0);
+  });
+
+  it("markProgress ignores missing, mismatched, and aborted turns", () => {
+    const result = registry.startTurn("k1", new AbortController());
+    const turnId = result.ok ? result.turnId : "";
+    const lastProgressAt = registry.getTurn("k1")!.lastProgressAt;
+    vi.advanceTimersByTime(1_000);
+
+    expect(registry.markProgress("missing", turnId)).toBe(false);
+    expect(registry.markProgress("k1", "wrong-id")).toBe(false);
+    registry.abortTurn("k1", "reason");
+    expect(registry.markProgress("k1", turnId)).toBe(false);
+    expect(registry.getTurn("k1")!.lastProgressAt).toBe(lastProgressAt);
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("stuck history duration remains total wall time after progress", () => {
+    const result = registry.startTurn("k1", new AbortController());
+    const turnId = result.ok ? result.turnId : "";
+    vi.advanceTimersByTime(250_000);
+    registry.markProgress("k1", turnId);
+    vi.advanceTimersByTime(300_001);
+    registry.listStuckTurns();
+    registry.endTurn("k1", turnId);
+
+    expect(registry.stuckTurnHistory()).toEqual([
+      expect.objectContaining({ durationMs: 550_001 })
+    ]);
   });
 
   it("metadata preserved in listStuckTurns result", () => {

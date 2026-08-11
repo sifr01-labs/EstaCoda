@@ -160,14 +160,14 @@ Defaults:
 
 | Behavior | Default |
 |---|---|
-| Stuck threshold | 5 minutes |
+| Inactivity threshold | 5 minutes without a runtime progress event |
 | Max stuck checks | 3 |
 | Busy ack cooldown | 30 seconds |
 | Stuck-turn history size | 50 |
 
 If a key already has an active turn, `ActiveTurnRegistry` returns `busy` instead of starting a second concurrent turn for the same key. The channel layer then applies the configured busy policy. Depending on channel configuration, that can mean reject, queue, or interrupt behavior.
 
-Stuck scans increment a stuck-check count. Supervisor logic can record stuck events, abort stuck turns, and suspend a runtime after repeated distinct stuck-loop evidence for the same session. Treat stuck handling as a safety and resilience path, not as a guarantee that every blocked provider/tool operation can be recovered cleanly.
+Provider activity, tool starts and results, delegation progress, and other bounded runtime milestones refresh the active turn's progress timestamp. Stuck scans compare the current time with that timestamp and increment a stuck-check count only after five minutes without progress. Supervisor logic can record stuck events, abort inactive turns, and suspend a runtime after repeated distinct stuck-loop evidence for the same session. Treat stuck handling as a safety and resilience path, not as a guarantee that every blocked provider/tool operation can be recovered cleanly.
 
 ---
 

@@ -1,5 +1,5 @@
 export type ActiveTurnRegistryOptions = {
-  /** Stuck threshold in ms. Default 5 min (300_000). */
+  /** Inactivity threshold in ms. Default 5 min (300_000). */
   stuckThresholdMs?: number;
   /** Max stuck scans before a turn is flagged repeat-stuck. Default 3. */
   maxStuckChecks?: number;
@@ -15,6 +15,7 @@ export type ActiveTurn = {
   turnId: string;
   key: string;
   startedAt: number;
+  lastProgressAt: number;
   abortController?: AbortController;
   stuckCheckCount: number;
   busyAckSentAt?: number;
@@ -102,10 +103,12 @@ export class ActiveTurnRegistry {
     }
 
     const turnId = this.#generateTurnId();
+    const startedAt = Date.now();
     const turn: ActiveTurn = {
       turnId,
       key,
-      startedAt: Date.now(),
+      startedAt,
+      lastProgressAt: startedAt,
       abortController,
       stuckCheckCount: 0,
       metadata,
@@ -205,6 +208,23 @@ export class ActiveTurnRegistry {
     return this.#activeTurns.get(key);
   }
 
+  /** Refresh the inactivity watchdog for the exact active turn.
+   *  Late progress from an older or already-aborted turn is ignored. */
+  markProgress(key: string, turnId: string): boolean {
+    const turn = this.#activeTurns.get(key);
+    if (
+      turn === undefined ||
+      turn.turnId !== turnId ||
+      this.#abortedTurnIds.has(turnId)
+    ) {
+      return false;
+    }
+
+    turn.lastProgressAt = Date.now();
+    turn.stuckCheckCount = 0;
+    return true;
+  }
+
   /** Abort an active turn via its AbortController.
    *  Does NOT remove the turn from registry — caller cleanup calls endTurn. */
   abortTurn(key: string, reason: string): AbortTurnResult {
@@ -219,7 +239,7 @@ export class ActiveTurnRegistry {
     return { ok: true, turnId: turn.turnId };
   }
 
-  /** Scan active turns and return those exceeding stuckThresholdMs.
+  /** Scan active turns and return those inactive beyond stuckThresholdMs.
    *  Increments stuckCheckCount for each stuck turn found. */
   listStuckTurns(thresholdMs?: number): Array<ActiveTurn & { stuckForMs: number }> {
     const threshold = thresholdMs ?? this.#stuckThresholdMs;
@@ -227,7 +247,7 @@ export class ActiveTurnRegistry {
     const stuck: Array<ActiveTurn & { stuckForMs: number }> = [];
 
     for (const turn of this.#activeTurns.values()) {
-      const stuckForMs = now - turn.startedAt;
+      const stuckForMs = now - turn.lastProgressAt;
       if (stuckForMs > threshold) {
         turn.stuckCheckCount++;
         stuck.push({ ...turn, stuckForMs });
@@ -245,7 +265,7 @@ export class ActiveTurnRegistry {
 
     for (const turn of this.#activeTurns.values()) {
       if (turn.stuckCheckCount >= this.#maxStuckChecks) {
-        repeat.push({ ...turn, stuckForMs: now - turn.startedAt });
+        repeat.push({ ...turn, stuckForMs: now - turn.lastProgressAt });
       }
     }
 
@@ -292,7 +312,7 @@ export class ActiveTurnRegistry {
     const now = Date.now();
 
     for (const turn of this.#activeTurns.values()) {
-      if (now - turn.startedAt > this.#stuckThresholdMs) {
+      if (now - turn.lastProgressAt > this.#stuckThresholdMs) {
         stuckTurnCount++;
         if (turn.stuckCheckCount >= this.#maxStuckChecks) {
           repeatStuckCount++;

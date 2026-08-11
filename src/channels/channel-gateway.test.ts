@@ -4035,6 +4035,60 @@ describe("ChannelGateway commands", () => {
       expect(registry.stats().totalStarted).toBe(1);
     });
 
+    it("refreshes the active-turn heartbeat for meaningful runtime progress", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      const markProgress = vi.spyOn(registry, "markProgress");
+      const progressEvents: RuntimeEvent[] = [
+        { kind: "agent-start", sessionId: "session-1", input: "hello" },
+        { kind: "provider-attempt", provider: "kimi", model: "kimi-k3", fallback: false },
+        { kind: "provider-token", provider: "kimi", model: "kimi-k3", text: "working" },
+        { kind: "provider-tool-call", provider: "kimi", model: "kimi-k3", id: "call-1", name: "file.read" },
+        { kind: "tool-start", tool: "file.read", activityId: "call-1" },
+        { kind: "tool-result", tool: "file.read", activityId: "call-1", ok: true },
+        { kind: "provider-result", provider: "kimi", model: "kimi-k3", ok: true, fallback: false, willFallback: false },
+        {
+          kind: "delegation-progress",
+          subagentId: "child-1",
+          childSessionId: "child-session",
+          parentSessionId: "session-1",
+          role: "leaf",
+          depth: 1,
+          childEvent: { kind: "agent-start", sessionId: "child-session" }
+        }
+      ];
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async ({ onEvent }) => {
+            for (const event of progressEvents) {
+              await onEvent?.(event);
+            }
+            await onEvent?.({
+              kind: "context-estimate",
+              filled: 100,
+              total: 1_000,
+              source: "live-estimate",
+              stage: "preflight"
+            });
+            return runtimeResponse({ text: "done", securityDecision: "allow" });
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        activeTurnRegistry: registry
+      });
+
+      await gateway.receive(makeMessage("hello"));
+
+      expect(markProgress).toHaveBeenCalledTimes(progressEvents.length);
+      expect(markProgress.mock.calls.every(([key, turnId]) =>
+        typeof key === "string" && turnId === "turn-1"
+      )).toBe(true);
+    });
+
     it("receive() rejects new turns while draining with no side effects", async () => {
       const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
       const registry = new ActiveTurnRegistry();
