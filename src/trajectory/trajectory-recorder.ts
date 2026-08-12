@@ -75,6 +75,9 @@ export class TrajectoryRecorder {
       evaluationSignals: {
         eventCount: trajectory.events.length,
         success: trajectory.outcome?.success ?? null,
+        finalOutcomeStatus: trajectory.outcome?.status ?? null,
+        confirmedActionCount: trajectory.outcome?.confirmedActions?.length ?? 0,
+        uncertainActionCount: trajectory.outcome?.uncertainActions?.length ?? 0,
         userAccepted: trajectory.outcome?.userAccepted ?? null
       }
     };
@@ -98,4 +101,3 @@ function summarize(trajectory: Trajectory): string {
 function randomId(): string {
   return crypto.randomUUID();
 }
-

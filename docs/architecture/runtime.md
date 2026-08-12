@@ -297,6 +297,10 @@ Foreground execution plans use the `execution-plan-*` event family. Each event c
 
 Plan completion is evidence-gated. A session-local harness index accepts only successful, allowed `ToolExecutionRecord` values and derives bounded receipts containing the call ID, tool name, risk class, and redacted target. Provider-supplied evidence details, failed or gated calls, `plan`, and `delegate_task` cannot prove completion. Reasoning-only completion must be explicit and is rejected for action-shaped items. If a provider stops with unfinished plan items, the runtime sends one local-only recovery nudge and then returns a deterministic incomplete receipt; successful root delegation remains authoritative and bypasses this recovery path.
 
+Final execution outcomes preserve consequential work independently of provider synthesis. The harness derives `ConfirmedActionReceipt` records only from successful, allowed consequential tool executions in the current turn; interrupted consequential executions that returned no result are retained separately as uncertain actions. These receipts contain only the call ID, tool name, risk class, status, and verification state—never tool input, tool output, page contents, collection contents, or credentials. A failed final provider call therefore cannot erase a confirmed mutation, and incomplete verification is reported as partial work rather than a fabricated failure.
+
+Responses and trajectories use the structured statuses `completed`, `completed_with_recovered_errors`, `partially_completed`, `blocked`, `failed`, and `cancelled`. The existing trajectory `success` boolean remains as a coarse compatibility signal: only completed outcomes, including recovered intermediate errors, set it to true. Learning telemetry maps recovered and partial work to its existing `partial` status, while blocked and cancelled outcomes retain their existing meanings. This changes reporting only; it does not bypass tool security, approvals, workspace trust, or Task ownership.
+
 ---
 
 ## Registries

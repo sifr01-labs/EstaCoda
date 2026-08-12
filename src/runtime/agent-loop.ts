@@ -2,7 +2,7 @@ import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
-import type { ExecutionPlan, ExecutionPlanReader } from "../contracts/execution-plan.js";
+import type { ExecutionFinalOutcome, ExecutionPlan, ExecutionPlanReader } from "../contracts/execution-plan.js";
 import type { ExecutionPlanController } from "./execution-plan-controller.js";
 import type { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 import type { MemoryConclusion, MemoryFileKind, MemoryProvider, MemoryPromptContext, SkillOutcome } from "../contracts/memory.js";
@@ -20,7 +20,6 @@ import type {
   SkillConfigField,
   SkillDefinition,
   SkillCatalogEntry,
-  SkillRouteFinalOutcomeStatus,
   SkillRouteLlmRerankTelemetry
 } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
@@ -71,6 +70,11 @@ import { emitContextEstimate } from "./context-usage-events.js";
 import { projectTurnUsageEntries, unavailableTurnUsage } from "../session/usage-inspector.js";
 import { renderDelegatedAnswerAcknowledgement } from "./delegated-answer-ownership.js";
 import { visionInputProvenanceForTurn } from "../vision/vision-egress-policy.js";
+import {
+  appendExecutionReceipt,
+  deriveExecutionFinalOutcome,
+  learningOutcomeStatus
+} from "./execution-outcome.js";
 
 export type AgentLoopInput = {
   text: string;
@@ -102,6 +106,7 @@ export type AgentLoopResponse = {
   progress: string[];
   setupApprovals?: AgentLoopSetupApprovalRequest[];
   executionPlan?: ExecutionPlan;
+  finalOutcome?: ExecutionFinalOutcome;
 };
 
 export type AgentLoopSetupApprovalRequest =
@@ -337,6 +342,7 @@ export class AgentLoop {
         resumeNote
       }), {
         success: false,
+        status: "cancelled",
         summary: "Turn cancelled before start."
       });
     }
@@ -424,6 +430,7 @@ export class AgentLoop {
         resumeNote
       }), {
         success: false,
+        status: "cancelled",
         summary: "Turn cancelled before routing."
       }, visibleTurn.id);
     }
@@ -501,6 +508,7 @@ export class AgentLoop {
         ]
       }, {
         success: false,
+        status: "failed",
         summary: "Attachment preflight failed."
       }, visibleTurn.id);
     }
@@ -776,6 +784,32 @@ export class AgentLoop {
         projectContext: this.#projectContext,
         providerExecution: effectiveProviderExecution
       });
+      const cancellationOutcome = deriveExecutionFinalOutcome({
+        providerExecution: effectiveProviderExecution,
+        toolExecutions,
+        executionPlan: this.#executionPlanReader?.current(),
+        cancelled: true
+      });
+      response.finalOutcome = cancellationOutcome;
+      response.text = appendExecutionReceipt(
+        response.text,
+        cancellationOutcome,
+        this.#ui?.language === "ar" ? "ar" : "en"
+      );
+      await this.#skillLearningManager?.observeTurn({
+        profileId: this.#profileId,
+        sessionId: this.#currentSessionId(),
+        userText: effectiveText,
+        selectedSkill,
+        finalSkillUsed: selectedSkill?.name,
+        noSkillResult: selectedSkill === undefined ? "not-applicable" : undefined,
+        routeConfidence: intent.confidence,
+        promptHash: hashSkillRoutePrompt(effectiveText),
+        outcomeStatus: "cancelled",
+        candidatesShown: intent.suggestedSkills.map((skill) => skill.name),
+        agentEvolutionPolicy: this.#agentEvolutionPolicy ?? noLearningPolicy(),
+        toolExecutions
+      }).catch(() => undefined);
       await this.#runRecorder.appendCancelledAssistantMessage({
         response,
         channel: input.channel,
@@ -784,14 +818,25 @@ export class AgentLoop {
 
       return await this.#completeAndReturn(response, {
         success: false,
-        summary: "Turn cancelled during provider/tool loop."
+        status: "cancelled",
+        summary: "Turn cancelled during provider/tool loop.",
+        confirmedActions: cancellationOutcome.confirmedActions,
+        uncertainActions: cancellationOutcome.uncertainActions
       }, visibleTurn.id);
     }
+    const finalOutcome = deriveExecutionFinalOutcome({
+      providerExecution: providerLoop.delegatedAnswerOwnership === undefined ? effectiveProviderExecution : undefined,
+      toolExecutions,
+      executionPlan: this.#executionPlanReader?.current(),
+      executionPlanIncomplete: providerLoop.executionPlanIncomplete,
+      delegatedAnswerOwned: providerLoop.delegatedAnswerOwnership !== undefined
+    });
     const skillOutcomes = await this.#runRecorder.recordSkillOutcomes({
       selectedSkill,
       userText: effectiveText,
       toolExecutions,
-      toolPlans
+      toolPlans,
+      finalOutcomeStatus: learningOutcomeStatus(finalOutcome.status)
     });
     const rawProviderContent = effectiveProviderExecution?.ok === true
       ? (effectiveProviderExecution.response?.content ?? "")
@@ -899,6 +944,25 @@ export class AgentLoop {
             ...providerProgress
           ]
         });
+    response.finalOutcome = finalOutcome;
+    const needsDeterministicReceipt = delegatedAnswerAcknowledgement === undefined &&
+      (finalOutcome.confirmedActions.length > 0 || finalOutcome.uncertainActions.length > 0) &&
+      (effectiveProviderExecution?.ok === false || providerLoop.executionPlanIncomplete === true);
+    if (needsDeterministicReceipt) {
+      const receiptLead = effectiveProviderExecution?.ok === false
+        ? effectiveProviderExecution.spendDenialReason === undefined
+          ? [
+              "The model provider became unavailable before final synthesis.",
+              `Provider note: ${summarizeProviderFailure(effectiveProviderExecution)}`
+            ].join("\n\n")
+          : providerSpendDenialMessage(effectiveProviderExecution.spendDenialReason)
+        : response.text;
+      response.text = appendArtifactSummary(appendExecutionReceipt(
+        receiptLead,
+        finalOutcome,
+        this.#ui?.language === "ar" ? "ar" : "en"
+      ), artifacts);
+    }
     const conversationContinuationState = updateConversationContinuationState({
       previous: previousConversationContinuationState,
       userText: effectiveText,
@@ -916,10 +980,7 @@ export class AgentLoop {
       noSkillResult: selectedSkill === undefined ? "not-applicable" : undefined,
       routeConfidence: intent.confidence,
       promptHash: hashSkillRoutePrompt(effectiveText),
-      outcomeStatus: finalOutcomeStatusForLearning(
-        delegatedAnswerAcknowledgement === undefined ? effectiveProviderExecution : undefined,
-        toolExecutions
-      ),
+      outcomeStatus: learningOutcomeStatus(finalOutcome.status),
       candidatesShown: intent.suggestedSkills.map((skill) => skill.name),
       agentEvolutionPolicy: this.#agentEvolutionPolicy ?? noLearningPolicy(),
       toolExecutions
@@ -971,6 +1032,7 @@ export class AgentLoop {
           providerExecution: providerSummary,
           providerFallbackUsed: providerSummary.fallbackUsed,
           providerPrimaryFailureClass: providerSummary.primaryFailureClass,
+          finalOutcome,
           ...(conversationContinuationState === undefined ? {} : { conversationContinuationState }),
           toolPlans: toolPlans.map((plan) => ({
             id: plan.id,
@@ -1001,7 +1063,7 @@ export class AgentLoop {
 
     return await this.#completeAndReturn(
       response,
-      outcomeFromResponse(response, delegatedAnswerAcknowledgement !== undefined),
+      trajectoryOutcome(finalOutcome),
       visibleTurn.id
     );
   }
@@ -1407,15 +1469,31 @@ export class AgentLoop {
 
   async #completeAndReturn(response: AgentLoopResponse, outcome: {
     success: boolean;
+    status: ExecutionFinalOutcome["status"];
     summary: string;
     userAccepted?: boolean;
+    confirmedActions?: ExecutionFinalOutcome["confirmedActions"];
+    uncertainActions?: ExecutionFinalOutcome["uncertainActions"];
   }, visibleTurnId?: string): Promise<AgentLoopResponse> {
     const executionPlan = this.#executionPlanReader?.current();
-    const projectedResponse = executionPlan === undefined ? response : { ...response, executionPlan };
+    const finalOutcome = response.finalOutcome ?? {
+      status: outcome.status,
+      confirmedActions: outcome.confirmedActions ?? [],
+      uncertainActions: outcome.uncertainActions ?? []
+    };
+    const projectedResponse = {
+      ...response,
+      finalOutcome,
+      ...(executionPlan === undefined ? {} : { executionPlan })
+    };
     const completedResponse = visibleTurnId === undefined
       ? projectedResponse
       : await this.#withTurnUsage(projectedResponse, visibleTurnId);
-    await this.#runRecorder.completeTrajectory(outcome, { bestEffort: true });
+    await this.#runRecorder.completeTrajectory({
+      ...outcome,
+      confirmedActions: finalOutcome.confirmedActions,
+      uncertainActions: finalOutcome.uncertainActions
+    }, { bestEffort: true });
     return completedResponse;
   }
 
@@ -1590,41 +1668,31 @@ function buildSetupApprovalRequests(
     }));
 }
 
-function outcomeFromResponse(response: AgentLoopResponse, delegatedAnswerOwned = false): {
+function trajectoryOutcome(outcome: ExecutionFinalOutcome): {
   success: boolean;
+  status: ExecutionFinalOutcome["status"];
   summary: string;
+  confirmedActions: ExecutionFinalOutcome["confirmedActions"];
+  uncertainActions: ExecutionFinalOutcome["uncertainActions"];
 } {
-  if (!delegatedAnswerOwned &&
-    response.providerExecution?.ok === true &&
-    (response.providerExecution.response?.content ?? "").trim().length === 0
-  ) {
-    return {
-      success: false,
-      summary: "Provider turn succeeded but returned empty visible content."
-    };
-  }
-
-  if (!delegatedAnswerOwned && response.providerExecution?.ok === false) {
-    return {
-      success: false,
-      summary: "Provider turn failed; fallback response returned."
-    };
-  }
-
-  const failedTools = response.toolExecutions.filter((execution) =>
-    execution.decision !== "allow" || execution.result?.ok === false
-  ).length;
-  if (failedTools > 0) {
-    return {
-      success: false,
-      summary: `${failedTools} tool execution(s) failed or were blocked.`
-    };
-  }
-
   return {
-    success: true,
-    summary: "Turn completed."
+    success: outcome.status === "completed" || outcome.status === "completed_with_recovered_errors",
+    status: outcome.status,
+    summary: trajectoryOutcomeSummary(outcome.status),
+    confirmedActions: outcome.confirmedActions,
+    uncertainActions: outcome.uncertainActions
   };
+}
+
+function trajectoryOutcomeSummary(status: ExecutionFinalOutcome["status"]): string {
+  switch (status) {
+    case "completed": return "Turn completed.";
+    case "completed_with_recovered_errors": return "Turn completed after recovering from intermediate errors.";
+    case "partially_completed": return "Turn partially completed; completed work was preserved.";
+    case "blocked": return "Turn blocked before completion.";
+    case "failed": return "Turn failed.";
+    case "cancelled": return "Turn cancelled.";
+  }
 }
 
 function suppressProviderGeneratedText(execution: ProviderExecutionResult): ProviderExecutionResult {
@@ -1647,22 +1715,6 @@ function suppressProviderGeneratedText(execution: ProviderExecutionResult): Prov
       partialContent: undefined
     }))
   };
-}
-
-function finalOutcomeStatusForLearning(
-  providerExecution: ProviderExecutionResult | undefined,
-  toolExecutions: ToolExecutionRecord[]
-): SkillRouteFinalOutcomeStatus {
-  if (providerExecution?.ok === false) {
-    return "failed";
-  }
-  if (toolExecutions.some((execution) => execution.decision !== "allow")) {
-    return "blocked";
-  }
-  if (toolExecutions.some((execution) => execution.result?.ok === false)) {
-    return "failed";
-  }
-  return "succeeded";
 }
 
 function noLearningPolicy(): AgentEvolutionPolicy {

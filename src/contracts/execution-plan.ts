@@ -42,6 +42,37 @@ export type ExecutionPlanEvidence = {
   targetSummary?: string;
 };
 
+export type ConfirmedActionReceipt = {
+  toolCallId?: string;
+  tool: string;
+  riskClass: import("./tool.js").ToolRiskClass;
+  targetSummary?: string;
+  status: "confirmed";
+  verification: "verified" | "not_verified";
+};
+
+export type UncertainActionReceipt = {
+  toolCallId?: string;
+  tool: string;
+  riskClass: import("./tool.js").ToolRiskClass;
+  targetSummary?: string;
+  status: "uncertain";
+};
+
+export type ExecutionFinalOutcomeStatus =
+  | "completed"
+  | "completed_with_recovered_errors"
+  | "partially_completed"
+  | "blocked"
+  | "failed"
+  | "cancelled";
+
+export type ExecutionFinalOutcome = {
+  status: ExecutionFinalOutcomeStatus;
+  confirmedActions: ConfirmedActionReceipt[];
+  uncertainActions: UncertainActionReceipt[];
+};
+
 /** Safe, harness-derived receipt persisted independently of raw tool output. */
 export type ExecutionEvidenceRecord =
   | {

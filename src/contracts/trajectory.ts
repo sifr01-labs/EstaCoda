@@ -1,3 +1,9 @@
+import type {
+  ConfirmedActionReceipt,
+  ExecutionFinalOutcomeStatus,
+  UncertainActionReceipt
+} from "./execution-plan.js";
+
 export type TrajectoryEventKind =
   | "session-start"
   | "user-input"
@@ -59,8 +65,11 @@ export type Trajectory = {
   events: TrajectoryEvent[];
   outcome?: {
     success: boolean;
+    status?: ExecutionFinalOutcomeStatus;
     summary: string;
     userAccepted?: boolean;
+    confirmedActions?: ConfirmedActionReceipt[];
+    uncertainActions?: UncertainActionReceipt[];
   };
 };
 

@@ -548,6 +548,7 @@ export class RunRecorder {
     userText: string;
     toolExecutions: ToolExecutionRecord[];
     toolPlans: ToolCallPlan[];
+    finalOutcomeStatus?: import("../contracts/skill.js").SkillRouteFinalOutcomeStatus;
   }): Promise<SkillOutcome[]> {
     if (
       input.selectedSkill === undefined ||
@@ -562,8 +563,15 @@ export class RunRecorder {
     const executedPlans = input.toolPlans.filter((plan) => plan.status === "executed");
     const blockedPlans = input.toolPlans.filter((plan) => plan.status === "blocked");
     const failedPlans = input.toolPlans.filter((plan) => plan.status === "invalid" || plan.status === "unavailable");
-    const status: SkillOutcome["status"] =
-      blocked.length > 0 || blockedPlans.length > 0
+    const status: SkillOutcome["status"] = input.finalOutcomeStatus === "succeeded"
+      ? "succeeded"
+      : input.finalOutcomeStatus === "partial"
+        ? "partial"
+        : input.finalOutcomeStatus === "blocked"
+          ? "blocked"
+          : input.finalOutcomeStatus === "failed" || input.finalOutcomeStatus === "cancelled"
+            ? "failed"
+            : blocked.length > 0 || blockedPlans.length > 0
         ? "blocked"
         : (failed.length > 0 || failedPlans.length > 0) && (succeeded.length > 0 || executedPlans.length > 0)
           ? "partial"
@@ -611,7 +619,12 @@ export class RunRecorder {
   }
 
   async appendCancelledAssistantMessage(input: {
-    response: { text: string; progress: string[]; toolPlans: ToolCallPlan[] };
+    response: {
+      text: string;
+      progress: string[];
+      toolPlans: ToolCallPlan[];
+      finalOutcome?: import("../contracts/execution-plan.js").ExecutionFinalOutcome;
+    };
     channel: ChannelKind;
     respondingToTurnId?: string;
   }): Promise<void> {
@@ -623,6 +636,7 @@ export class RunRecorder {
       metadata: {
         ...(input.respondingToTurnId === undefined ? {} : { respondingToTurnId: input.respondingToTurnId }),
         cancelled: true,
+        ...(input.response.finalOutcome === undefined ? {} : { finalOutcome: input.response.finalOutcome }),
         resumeNote: input.response.progress.find((entry) => entry.startsWith("resume:"))?.replace(/^resume:\s*/u, ""),
         toolPlans: input.response.toolPlans.map((plan) => ({
           id: plan.id,

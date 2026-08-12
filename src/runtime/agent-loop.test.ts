@@ -220,6 +220,27 @@ function failedProviderExecution(): ProviderExecutionResult {
   };
 }
 
+function postmanMutation(overrides: Partial<ToolExecutionRecord> = {}): ToolExecutionRecord {
+  return {
+    tool: {
+      name: "mcp.postman.updateCollection",
+      description: "Update Postman",
+      inputSchema: {},
+      riskClass: "external-side-effect",
+      toolsets: ["mcp"],
+      progressLabel: "updating Postman",
+      maxResultSizeChars: 1_000
+    },
+    input: { apiKey: "raw-postman-secret", collection: "private collection contents" },
+    decision: "allow",
+    riskClass: "external-side-effect",
+    targetSummary: "collection token=raw-postman-secret",
+    toolCallId: "call-postman-update",
+    result: { ok: true, content: "private Postman collection response" },
+    ...overrides
+  };
+}
+
 function fallbackProviderExecution(content: string): ProviderExecutionResult {
   return {
     ok: true,
@@ -957,7 +978,10 @@ describe("AgentLoop provider availability gating", () => {
     expect(response.text).toBe("I completed the requested actions but did not produce any visible output.");
     expect(trajectoryRecorder.snapshot().outcome).toEqual({
       success: false,
-      summary: "Provider turn succeeded but returned empty visible content."
+      status: "failed",
+      confirmedActions: [],
+      uncertainActions: [],
+      summary: "Turn failed."
     });
   });
 
@@ -1308,6 +1332,90 @@ describe("AgentLoop provider availability gating", () => {
     });
   });
 
+  it("preserves a successful Postman mutation when the provider later fails", async () => {
+    const learning = { observeTurn: vi.fn(async () => undefined) } as unknown as SkillLearningManager;
+    const { loop, sessionDb, sessionId, trajectoryRecorder } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: failedProviderExecution(),
+      providerLoopToolExecutions: [postmanMutation()],
+      skillLearningManager: learning
+    });
+
+    const response = await loop.handle({
+      text: "Update the Postman collection and verify it.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(response.finalOutcome).toEqual({
+      status: "partially_completed",
+      confirmedActions: [expect.objectContaining({
+        toolCallId: "call-postman-update",
+        tool: "mcp.postman.updateCollection",
+        status: "confirmed",
+        verification: "not_verified"
+      })],
+      uncertainActions: []
+    });
+    expect(response.skillOutcomes).toEqual([expect.objectContaining({ status: "partial" })]);
+    expect(response.text).toContain("Confirmed actions:");
+    expect(response.text).toContain("The confirmed actions remain confirmed");
+    expect(response.text).not.toContain("raw-postman-secret");
+    expect(response.text).not.toContain("private collection contents");
+    expect(response.text).not.toContain("private Postman collection response");
+    expect(trajectoryRecorder.snapshot().outcome).toMatchObject({
+      success: false,
+      status: "partially_completed",
+      confirmedActions: [expect.objectContaining({ toolCallId: "call-postman-update" })]
+    });
+    const finalMessage = (await sessionDb.listMessages(sessionId)).filter((message) => message.role === "agent").at(-1);
+    expect(finalMessage?.metadata?.finalOutcome).toEqual(response.finalOutcome);
+    expect(vi.mocked(learning.observeTurn)).toHaveBeenCalledWith(expect.objectContaining({
+      outcomeStatus: "partial"
+    }));
+  });
+
+  it("records an uncertain receipt when cancellation interrupts a consequential execution", async () => {
+    const controller = new AbortController();
+    const learning = { observeTurn: vi.fn(async () => undefined) } as unknown as SkillLearningManager;
+    const { loop, sessionDb, sessionId, trajectoryRecorder } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("late response"),
+      providerLoopToolExecutions: [postmanMutation({ result: undefined })],
+      skillLearningManager: learning,
+      onProviderTurnRun: () => controller.abort("stop")
+    });
+
+    const response = await loop.handle({
+      text: "Update Postman.",
+      channel: "cli",
+      trustedWorkspace: true,
+      signal: controller.signal
+    });
+
+    expect(response.finalOutcome).toEqual({
+      status: "cancelled",
+      confirmedActions: [],
+      uncertainActions: [expect.objectContaining({
+        toolCallId: "call-postman-update",
+        status: "uncertain"
+      })]
+    });
+    expect(response.text).toContain("Uncertain actions:");
+    expect(trajectoryRecorder.snapshot().outcome).toMatchObject({
+      success: false,
+      status: "cancelled",
+      uncertainActions: [expect.objectContaining({ toolCallId: "call-postman-update" })]
+    });
+    const finalMessage = (await sessionDb.listMessages(sessionId)).filter((message) => message.role === "agent").at(-1);
+    expect(finalMessage?.metadata?.finalOutcome).toEqual(response.finalOutcome);
+    expect(vi.mocked(learning.observeTurn)).toHaveBeenCalledWith(expect.objectContaining({
+      outcomeStatus: "cancelled"
+    }));
+  });
+
   it("returns a deterministic local spending denial without a provider-authored explanation", async () => {
     const denialReason = "SESSION_LIMIT_EXHAUSTED" as const;
     const providerExecution: ProviderExecutionResult = {
@@ -1364,6 +1472,9 @@ describe("AgentLoop provider availability gating", () => {
       id: trajectoryRecorder.trajectoryId,
       outcome: {
         success: true,
+        status: "completed",
+        confirmedActions: [],
+        uncertainActions: [],
         summary: "Turn completed."
       },
       events: expect.arrayContaining([
