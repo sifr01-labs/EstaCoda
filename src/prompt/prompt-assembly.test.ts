@@ -920,11 +920,11 @@ describe("assembleProviderContinuationPrompt", () => {
     }));
     const rendered = renderMessages(prompt.messages);
 
-    expect(rendered).toContain(
-      "I have requested tools and received their results below. I will now process these results to produce the final answer."
-    );
+    expect(rendered).toContain("Tool calls were requested; their results follow.");
     expect(rendered).not.toContain("I requested tools and am waiting for EstaCoda to provide their results.");
-    expect(rendered).toContain("Use these results to produce the final answer now.");
+    expect(rendered).toContain("Continue executing the user's original request.");
+    expect(rendered).not.toContain("produce the final answer now");
+    expect(rendered).not.toContain("I will now process these results");
   });
 
   it("preserves non-empty prior provider content unchanged", () => {
@@ -934,9 +934,7 @@ describe("assembleProviderContinuationPrompt", () => {
     const rendered = renderMessages(prompt.messages);
 
     expect(rendered).toContain("I found the relevant files and will summarize them.");
-    expect(rendered).not.toContain(
-      "I have requested tools and received their results below. I will now process these results to produce the final answer."
-    );
+    expect(rendered).not.toContain("Tool calls were requested; their results follow.");
   });
 
   it("strips hidden reasoning blocks from continuation assistant content", () => {
@@ -950,13 +948,44 @@ describe("assembleProviderContinuationPrompt", () => {
     expect(rendered).not.toContain("<think>");
   });
 
-  it("keeps final-answer continuation guidance with executed tool results", () => {
+  it("continues the original request after executed tool results", () => {
     const prompt = assembleProviderContinuationPrompt(baseContinuationInput());
     const rendered = renderMessages(prompt.messages);
 
-    expect(rendered).toContain("EstaCoda executed the requested tools. Use these results to produce the final answer now.");
+    expect(rendered).toContain("EstaCoda executed the requested tools. Use the results below to continue the work.");
+    expect(rendered).toContain("Continue executing the user's original request.");
+    expect(rendered).toContain(
+      "Do not stop merely to narrate the next step or request permission for safe, in-scope actions."
+    );
+    expect(rendered).toContain(
+      "Return a final answer only when the request is complete or a concrete blocker requires user input."
+    );
+    expect(rendered).not.toContain("produce the final answer now");
     expect(rendered).toContain("Executed tool results:");
     expect(rendered).toContain("Tool: files.read");
+  });
+
+  it("keeps the autonomy contract when a tool call needs recovery", () => {
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      toolPlans: [
+        {
+          id: "call-missing",
+          tool: "missing.tool",
+          input: {},
+          source: "provider-tool-call",
+          status: "unavailable",
+          error: "Tool is unavailable."
+        }
+      ]
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("EstaCoda could not execute one or more requested tool calls.");
+    expect(rendered).toContain("Continue executing the user's original request.");
+    expect(rendered).toContain(
+      "Return a final answer only when the request is complete or a concrete blocker requires user input."
+    );
+    expect(rendered).not.toContain("produce the final answer now");
   });
 
   it("uses the delegation result budget in continuations without widening other tools", () => {

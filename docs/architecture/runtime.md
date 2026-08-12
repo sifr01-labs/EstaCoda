@@ -249,6 +249,8 @@ Tool groups are atomic throughout packing and compression. A group is the provid
 
 Continuation prompts reuse the same native selector and builder path when route gates pass. The final continuation instruction remains the last user message. Tool results already included as selected native `tool` messages are not duplicated in the flat continuation results block; non-selected tool results still appear there.
 
+Post-tool continuation preserves the original request's execution contract. The provider is instructed to continue safe, in-scope work instead of stopping to narrate the next step or ask for unnecessary permission. It may return a final answer only when the request is complete or a concrete blocker requires user input. This instruction does not bypass tool security: workspace trust, approvals, the hardline floor, and other capability gates still decide whether an action may execute.
+
 Native replay diagnostics are persistent session events, not runtime live events. They use the `structured-tool-history-*` event family and contain only counts and coarse reasons. They are meant to answer "why did native replay happen or not happen?" without copying prompt material into observability.
 
 Inspection surfaces:

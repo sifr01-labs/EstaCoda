@@ -208,7 +208,8 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
   const continuationContent = [
     unresolvedPlans.length > 0
       ? "EstaCoda could not execute one or more requested tool calls. Use the feedback below to correct the tool call or choose an available tool."
-      : "EstaCoda executed the requested tools. Use these results to produce the final answer now.",
+      : "EstaCoda executed the requested tools. Use the results below to continue the work.",
+    PROVIDER_CONTINUATION_AUTONOMY_CONTRACT,
     "Do not ask the user to run these tools again.",
     nativeToolResultIds.size > 0
       ? "Some tool results are already included as structured tool messages above."
@@ -237,7 +238,7 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
       role: "assistant",
       content: input.providerExecution?.response?.content.trim().length
         ? stripInlineReasoning(input.providerExecution.response.content)
-        : "I have requested tools and received their results below. I will now process these results to produce the final answer."
+        : "Tool calls were requested; their results follow."
     },
     {
       role: "user",
@@ -259,6 +260,12 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
     nativeHistoryDiagnostics: nativeHistory?.diagnostics
   };
 }
+
+const PROVIDER_CONTINUATION_AUTONOMY_CONTRACT = [
+  "Continue executing the user's original request.",
+  "Do not stop merely to narrate the next step or request permission for safe, in-scope actions.",
+  "Return a final answer only when the request is complete or a concrete blocker requires user input."
+].join(" ");
 
 type InternalPromptLayer = PromptLayerReport & {
   content: string;

@@ -92,6 +92,8 @@ Provider turns run inside explicit budgets. The current loop tracks:
 
 Text continuation is separate from tool-call retry. If a response ends with `length` and contains visible text, the runtime may ask the same route chain to continue the answer. Continuation is bounded by the same provider iteration and wall-clock controls.
 
+After tool execution, continuation prompts tell the provider to keep executing the original request. The provider should not stop merely to narrate its next step or request permission for safe, in-scope actions; it should finalize only when the work is complete or a concrete blocker requires user input. Existing workspace trust, approval, hardline, and capability checks remain authoritative for every tool call.
+
 Tool calls inside length-truncated output are treated more strictly. They are retried for a clean finalized tool-call response before any execution path can proceed.
 
 The browser observation guard compares only consecutive successful observation iterations. A changed observation or a different tool outcome resets it. Its fingerprints are turn-local and memory-only; persistent diagnostics contain only the tool name and bounded counts, never page content, tab data, hashes, or fingerprints.
