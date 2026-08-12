@@ -357,7 +357,9 @@ Use a tool call that requires a second provider pass after tool execution.
 - Supported routes include selected assistant/tool history as structured native messages.
 - The final continuation instruction remains the last user message.
 - Tool results already selected as native `tool` messages do not appear again in the flat `Executed tool results` block.
-- Non-selected tool results still appear in flat continuation text.
+- Non-selected results from the newest batch appear in flat continuation text; older batches appear only as compact receipts.
+- A 1M-context model still receives at most the fixed approximately 12K-token native-history allowance.
+- Flat continuation feedback stays within approximately 12K characters, and only newest-batch images are resent.
 
 ### Compression Excluding Echo
 

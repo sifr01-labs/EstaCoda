@@ -214,9 +214,9 @@ See [Provider runtime](./provider-runtime.md) for provider echo, serializer rule
 
 After tools run, provider continuation sends tool results back to the model.
 
-For unsupported routes, continuation uses the existing flat `Executed tool results` text path. For supported native routes, selected tool groups are inserted as structured assistant/tool history. The final continuation instruction remains the last user message.
+For unsupported routes, continuation uses the flat `Executed tool results` text path. For supported native routes, selected tool groups are inserted as structured assistant/tool history. Native history has a fixed allowance of approximately 12K tokens independent of model context size, and assistant/tool groups remain atomic. Older unselected native units are repacked into bounded summaries. The final continuation instruction remains the last user message.
 
-If a selected native `tool` message already carries a tool result, that same result is not repeated in the flat continuation block. Non-selected tool results remain in flat text so the model still receives them.
+The newest tool batch remains available at the existing per-tool result limits. Older batches become compact redacted receipts, and the entire flat feedback block is capped at approximately 12K characters. Only newest-batch images are sent again; artifact references remain available separately. If a selected native `tool` message already carries a newest-batch result, that same result is not repeated in the flat continuation block.
 
 Continuation is still bounded by provider-turn budgets. Repeated tool failures, a third unchanged browser observation after one recovery nudge, too many tool calls, too many provider iterations, or wall-clock exhaustion can stop the loop before another provider attempt is made.
 

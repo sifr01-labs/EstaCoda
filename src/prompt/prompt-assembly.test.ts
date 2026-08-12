@@ -1068,6 +1068,87 @@ describe("assembleProviderContinuationPrompt", () => {
     });
   });
 
+  it("renders only the newest tool batch verbatim and bounds flat continuation feedback", () => {
+    const priorRawResult = "prior-raw-result-should-not-repeat";
+    const latestRawResult = `${"n".repeat(20_000)}latest-result-tail`;
+    const latestPlan = {
+      id: "call-latest",
+      tool: "files.read",
+      input: { path: "README.md" },
+      source: "provider-tool-call" as const,
+      status: "executed" as const,
+      result: { ok: true, content: latestRawResult }
+    };
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      toolPlans: [
+        {
+          id: "call-prior",
+          tool: "files.read",
+          input: { path: "old.txt" },
+          source: "provider-tool-call",
+          status: "executed",
+          result: { ok: true, content: priorRawResult }
+        },
+        latestPlan
+      ],
+      toolFeedbackLedger: {
+        latest: [{ plan: latestPlan }],
+        consumed: [{
+          callId: "call-prior",
+          tool: "files.read",
+          status: "executed",
+          ok: true,
+          riskClass: "read-only-local",
+          targetSummary: "old.txt",
+          resultChars: priorRawResult.length
+        }],
+        omittedCount: 0
+      }
+    }));
+
+    const continuation = prompt.messages.at(-1);
+    const content = typeof continuation?.content === "string"
+      ? continuation.content
+      : JSON.stringify(continuation?.content);
+    expect(content.length).toBeLessThanOrEqual(12_000);
+    expect(content).toContain("call-latest");
+    expect(content).toContain("call-prior");
+    expect(content).not.toContain(priorRawResult);
+    expect(content).not.toContain("latest-result-tail");
+  });
+
+  it("keeps cumulative artifact references when older raw feedback is consumed", () => {
+    const artifact = {
+      id: "artifact-report",
+      path: "artifact://artifact-report",
+      kind: "document" as const,
+      bytes: 2_048,
+      createdAt: "2030-01-01T00:00:00.000Z",
+      summary: "Generated report"
+    };
+    const latestPlan = baseContinuationInput().toolPlans[0]!;
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      toolExecutions: [toolExecution({ content: "older raw artifact body", metadata: artifact })],
+      toolFeedbackLedger: {
+        latest: [{ plan: latestPlan }],
+        consumed: [{
+          callId: "call-artifact",
+          tool: "artifact.write",
+          status: "executed",
+          ok: true,
+          riskClass: "workspace-write",
+          resultChars: 23
+        }],
+        omittedCount: 0
+      }
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("artifact://artifact-report");
+    expect(rendered).toContain("Generated report");
+    expect(rendered).not.toContain("older raw artifact body");
+  });
+
   it("uses structured native history for supported continuation prompts", () => {
     const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
       model: toolModel,
@@ -1211,6 +1292,66 @@ describe("assembleProviderContinuationPrompt", () => {
     expect(countOccurrences(JSON.stringify(prompt.messages), "selected native result")).toBe(1);
   });
 
+  it("keeps only the newest native tool group active when the runtime ledger is present", () => {
+    const latestPlan = {
+      id: "call-new",
+      tool: "files.read",
+      input: { path: "new.txt" },
+      source: "provider-tool-call" as const,
+      status: "executed" as const,
+      result: { ok: true, content: "new native result" }
+    };
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      model: toolModel,
+      rawSessionHistory: [
+        providerToolTurn("old-turn", {
+          providerToolCalls: [{
+            id: "call-old",
+            name: "files.read",
+            argumentsText: "{\"path\":\"old.txt\"}"
+          }]
+        }),
+        sessionMessage("old-result", "tool", "old native raw result", { tool_call_id: "call-old" }),
+        providerToolTurn("new-turn", {
+          providerToolCalls: [{
+            id: "call-new",
+            name: "files.read",
+            argumentsText: "{\"path\":\"new.txt\"}"
+          }]
+        }),
+        sessionMessage("new-result", "tool", "new native result", { tool_call_id: "call-new" })
+      ],
+      nativeHistoryRoute: supportedNativeRoute,
+      providerExecution: providerExecution("", [{
+        index: 0,
+        id: "call-new",
+        name: "files.read",
+        argumentsText: "{\"path\":\"new.txt\"}"
+      }]),
+      toolPlans: [latestPlan],
+      toolFeedbackLedger: {
+        latest: [{ plan: latestPlan }],
+        consumed: [{
+          callId: "call-old",
+          tool: "files.read",
+          status: "executed",
+          ok: true,
+          resultChars: 21
+        }],
+        omittedCount: 0
+      }
+    }));
+    const rendered = JSON.stringify(prompt.messages);
+
+    expect(prompt.messages.filter((message) => message.role === "tool")).toEqual([
+      expect.objectContaining({ toolCallId: "call-new" })
+    ]);
+    expect(rendered).toContain("new native result");
+    expect(rendered).not.toContain("old native raw result");
+    expect(rendered).toContain("Earlier native tool group repacked");
+    expect(rendered).toContain("call-old");
+  });
+
   it("keeps flat continuation behavior for unsupported native history routes", () => {
     const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
       model: toolModel,
@@ -1324,6 +1465,53 @@ describe("assembleProviderContinuationPrompt", () => {
     expect(rendered).toContain("[Historical tool result");
     expect(prompt.messages.findIndex((message) => message.role === "assistant" && message.toolCalls !== undefined))
       .toBeLessThan(prompt.messages.length - 1);
+  });
+
+  it("uses a fixed native-history allowance for a one-million-token model", () => {
+    const rawSessionHistory: SessionMessage[] = [];
+    for (let index = 0; index < 10; index += 1) {
+      const callId = `call-native-${index}`;
+      rawSessionHistory.push(
+        providerToolTurn(`tool-turn-${index}`, {
+          providerToolCalls: [{
+            id: callId,
+            name: "files.read",
+            argumentsText: JSON.stringify({ path: `file-${index}.txt` })
+          }]
+        }),
+        sessionMessage(
+          `tool-result-${index}`,
+          "tool",
+          `native-result-${index}-${String(index).repeat(7_000)}`,
+          { tool_call_id: callId }
+        )
+      );
+    }
+
+    const prompt = assembleProviderPrompt(basePromptInput({
+      model: {
+        ...toolModel,
+        id: "kimi-k3",
+        provider: "kimi",
+        contextWindowTokens: 1_048_576
+      },
+      rawSessionHistory,
+      nativeHistoryRoute: {
+        ...supportedNativeRoute,
+        provider: "kimi",
+        id: "kimi-k3"
+      }
+    }));
+    const rendered = JSON.stringify(prompt.messages);
+    const nativeToolMessages = prompt.messages.filter((message) => message.role === "tool");
+
+    expect(nativeToolMessages.length).toBeGreaterThan(0);
+    expect(nativeToolMessages.length).toBeLessThan(10);
+    expect(rendered).toContain("native-result-9");
+    expect(rendered).not.toContain("native-result-0-");
+    expect(rendered).toContain("Earlier native tool group repacked");
+    expect(prompt.budget.layers.find((layer) => layer.name === "native-history")?.estimatedTokens)
+      .toBeLessThanOrEqual(12_000);
   });
 
   it("excludes the active current user from native history selection and appends it once at the end", () => {

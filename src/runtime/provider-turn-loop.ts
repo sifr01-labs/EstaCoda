@@ -67,6 +67,11 @@ import {
   type PendingDelegatedAnswerOwnership
 } from "./delegated-answer-ownership.js";
 import { BrowserObservationGuard } from "./browser-observation-guard.js";
+import {
+  createTurnToolFeedbackLedger,
+  recordTurnToolFeedbackBatch,
+  type TurnToolFeedbackLedger
+} from "./turn-tool-feedback-ledger.js";
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
 const BROWSER_NO_PROGRESS_NUDGE = "Repeated browser observations show no state change. Do not call browser.snapshot or browser.tabs again unless another action may have changed the page. Switch tabs or take a different browser action; if progress is blocked, explain what is blocking it.";
@@ -237,6 +242,7 @@ export class ProviderTurnLoop {
     let pendingExecutionPlanRecoveryNudge = false;
     let executionPlanRecoveryUsed = false;
     let executionPlanIncomplete = false;
+    let toolFeedbackLedger = createTurnToolFeedbackLedger();
 
     for (let iteration = 0; iteration < this.#budgets.maxProviderIterations; iteration += 1) {
       if (isAborted(input.signal)) {
@@ -298,6 +304,7 @@ export class ProviderTurnLoop {
             ...input.toolExecutions,
             ...providerToolExecutions
           ],
+          toolFeedbackLedger,
           providerExecution: previousProviderExecution,
           iteration,
           loopStartedAt,
@@ -437,6 +444,11 @@ export class ProviderTurnLoop {
         });
       }
       const currentPlans = input.toolPlans.slice(beforePlans);
+      toolFeedbackLedger = recordTurnToolFeedbackBatch(
+        toolFeedbackLedger,
+        currentPlans,
+        loopToolExecutions
+      );
       const hasRecoverableToolFeedback = currentPlans.some((plan) => isRecoverableToolPlanStatus(plan.status));
       const repeatedFailureBudgetExceeded = this.#recordRepeatedToolFailures(loopToolExecutions, repeatedFailures);
       const browserObservation = browserObservationGuard.observe(loopToolExecutions);
@@ -787,6 +799,7 @@ export class ProviderTurnLoop {
     providerTools: OpenAICompatibleToolSchema[];
     providerExecution: ProviderExecutionResult | undefined;
     toolPlans: ToolCallPlan[];
+    toolFeedbackLedger: TurnToolFeedbackLedger;
     conversationContinuationState?: ConversationContinuationState;
     fallbackText: string;
     onEvent?: RuntimeEventSink;

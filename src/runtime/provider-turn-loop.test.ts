@@ -1634,6 +1634,32 @@ describe("ProviderTurnLoop OpenAI-compatible stream recovery", () => {
 });
 
 describe("ProviderTurnLoop post-tool empty response recovery", () => {
+  it("replays only the newest raw tool batch in flat continuation feedback", async () => {
+    const firstRawResult = "FIRST_RAW_TOOL_RESULT";
+    const secondRawResult = "SECOND_RAW_TOOL_RESULT";
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-first")]),
+        providerExecution("", [providerToolCall("call-second")]),
+        providerExecution("Completed after both tool batches.")
+      ],
+      toolSteps: [
+        { executions: [toolExecution("call-first", firstRawResult)] },
+        { executions: [toolExecution("call-second", secondRawResult)] },
+        {}
+      ],
+      maxProviderIterations: 3
+    });
+
+    await runBasicProviderTurn(harness.loop);
+
+    const thirdRequest = harness.completeSpy.mock.calls[2]?.[0] as ProviderRequest;
+    const continuation = JSON.stringify(thirdRequest.messages.at(-1)?.content);
+    expect(continuation).toContain(secondRawResult);
+    expect(continuation).toContain("call-first");
+    expect(continuation).not.toContain(firstRawResult);
+  });
+
   it("nudges once for a premature final answer and then returns a deterministic incomplete receipt", async () => {
     const planStore = new ExecutionPlanStore();
     planStore.replace({

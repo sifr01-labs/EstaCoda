@@ -26,7 +26,7 @@ import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import type { PromptCache } from "./prompt-cache.js";
-import { countImageLikeMetadata, estimateTextTokensRough, IMAGE_TOKEN_ESTIMATE } from "./token-estimator.js";
+import { countImageLikeMetadata, estimateMessagesTokensRough, estimateTextTokensRough, IMAGE_TOKEN_ESTIMATE } from "./token-estimator.js";
 import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import { buildNativeHistoryMessages, type ProviderReplayEchoContext, type ProviderReplayEchoRouteIdentity } from "./native-history-builder.js";
 import { selectNativeHistoryWindow, type NativeHistoryUnit } from "./native-history-selector.js";
@@ -35,6 +35,11 @@ import {
   renderConversationContinuationPrompt,
   type ConversationContinuationState
 } from "../runtime/conversation-continuation-state.js";
+import type {
+  ToolFeedbackEntry,
+  ToolFeedbackSummary,
+  TurnToolFeedbackLedger
+} from "../runtime/turn-tool-feedback-ledger.js";
 import {
   ephemeralVisionImages,
   handledVisionAttachmentIds,
@@ -131,7 +136,12 @@ export type ProviderPromptInput = {
 export type ProviderContinuationPromptInput = ProviderPromptInput & {
   providerExecution: ProviderExecutionResult | undefined;
   toolPlans: ToolCallPlan[];
+  toolFeedbackLedger?: TurnToolFeedbackLedger;
 };
+
+export const ACTIVE_NATIVE_HISTORY_MAX_TOKENS = 12_000;
+export const FLAT_CONTINUATION_FEEDBACK_MAX_CHARS = 12_000;
+const REPACKED_NATIVE_HISTORY_MAX_CHARS = 4_000;
 
 export function assembleProviderPrompt(input: ProviderPromptInput): ProviderPromptAssembly {
   const contextWindowTokens = input.model?.contextWindowTokens ?? 128_000;
@@ -140,14 +150,18 @@ export function assembleProviderPrompt(input: ProviderPromptInput): ProviderProm
   const promptInput = nativeHistory === undefined
     ? input
     : { ...input, sessionHistory: nativeHistory.unselectedSessionHistory };
-  const layers = applyCache(input.cache, fitLayersToBudget(buildBaseLayers(promptInput), budgetTarget));
+  const renderedLayers = applyCache(input.cache, fitLayersToBudget(buildBaseLayers(promptInput), budgetTarget));
+  const budgetLayers = withNativeHistoryBudgetLayer(
+    renderedLayers,
+    nativeHistory?.messages ?? []
+  );
   const images = visionImagesFromExecutions(promptInput.toolExecutions, "initial");
-  const messages = renderBaseMessages(layers, promptInput, nativeHistory?.messages, images);
+  const messages = renderBaseMessages(renderedLayers, promptInput, nativeHistory?.messages, images);
   const budget = buildBudgetReport({
     model: input.model?.id ?? "unconfigured",
     contextWindowTokens,
     targetTokens: budgetTarget,
-    layers,
+    layers: budgetLayers,
     compression: input.compression
   });
 
@@ -166,61 +180,37 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
   const promptInput = nativeHistory === undefined
     ? input
     : { ...input, sessionHistory: nativeHistory.unselectedSessionHistory };
-  const baseLayers = applyCache(input.cache, fitLayersToBudget(
+  const renderedBaseLayers = applyCache(input.cache, fitLayersToBudget(
     buildBaseLayers(promptInput, { includeToolResults: false }),
     Math.floor(budgetTarget * 0.85)
   ));
-  const baseMessages = renderBaseMessages(baseLayers, promptInput, nativeHistory?.messages, []);
+  const budgetBaseLayers = withNativeHistoryBudgetLayer(
+    renderedBaseLayers,
+    nativeHistory?.messages ?? []
+  );
+  const baseMessages = renderBaseMessages(renderedBaseLayers, promptInput, nativeHistory?.messages, []);
   const baseBudget = buildBudgetReport({
     model: input.model?.id ?? "unconfigured",
     contextWindowTokens,
     targetTokens: budgetTarget,
-    layers: baseLayers,
+    layers: budgetBaseLayers,
     compression: input.compression
   });
-  const executedPlans = input.toolPlans.filter((plan) => plan.status === "executed");
-  const unresolvedPlans = input.toolPlans.filter((plan) =>
+  const feedbackLedger = input.toolFeedbackLedger ?? fallbackToolFeedbackLedger(input.toolPlans);
+  const latestPlans = feedbackLedger.latest.map((entry) => entry.plan);
+  const executedPlans = latestPlans.filter((plan) => plan.status === "executed");
+  const unresolvedPlans = latestPlans.filter((plan) =>
     plan.status === "invalid" || plan.status === "unavailable" || plan.status === "blocked"
   );
   const nativeToolResultIds = nativeSelectedToolResultIds(nativeHistory?.messages ?? []);
-  const flatExecutedPlans = executedPlans.filter((plan) => !nativeToolResultIds.has(plan.id));
   const continuationImages = executedPlans.flatMap((plan) =>
     ephemeralVisionImages(plan.result, "continuation")
   );
-  const toolResults = flatExecutedPlans
-    .map((plan) => [
-      `Tool: ${plan.tool}`,
-      `Call id: ${plan.id}`,
-      renderToolResultPacket(packetizeToolResult({
-        tool: plan.tool,
-        result: plan.result,
-        maxChars: providerVisibleToolResultMaxChars(plan.tool, 1_800)
-      }))
-    ].join("\n"))
-    .join("\n\n");
-  const toolPlanFeedback = unresolvedPlans
-    .map((plan) => [
-      `Tool call failed: ${plan.tool || "unknown"}`,
-      `Call id: ${plan.id}`,
-      `Status: ${plan.status}`,
-      `Error: ${plan.error ?? "No error details were provided."}`,
-      "Use the available tool schemas and try again if another tool call is needed."
-    ].join("\n"))
-    .join("\n\n");
-  const continuationContent = [
-    unresolvedPlans.length > 0
-      ? "EstaCoda could not execute one or more requested tool calls. Use the feedback below to correct the tool call or choose an available tool."
-      : "EstaCoda executed the requested tools. Use the results below to continue the work.",
-    PROVIDER_CONTINUATION_AUTONOMY_CONTRACT,
-    "Do not ask the user to run these tools again.",
-    nativeToolResultIds.size > 0
-      ? "Some tool results are already included as structured tool messages above."
-      : undefined,
-    "",
-    `Executed tool results:\n${toolResults || "No additional executed tool results were available."}`,
-    "",
-    `Tool call feedback:\n${toolPlanFeedback || "No tool-call errors were recorded."}`
-  ].filter((line): line is string => line !== undefined).join("\n");
+  const continuationContent = renderBoundedContinuationFeedback({
+    ledger: feedbackLedger,
+    nativeToolResultIds,
+    hasUnresolvedPlans: unresolvedPlans.length > 0
+  });
   const continuationLayer = layer({
     name: "provider-continuation",
     content: continuationContent,
@@ -231,7 +221,7 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
     estimatedTokens: estimateTokens(continuationContent) + continuationImages.length * IMAGE_TOKEN_ESTIMATE
   });
   const fittedLayers = applyCache(input.cache, fitLayersToBudget([
-    ...baseLayers,
+    ...budgetBaseLayers,
     continuationLayer
   ], budgetTarget));
   const messages: ProviderMessage[] = [
@@ -268,6 +258,133 @@ const PROVIDER_CONTINUATION_AUTONOMY_CONTRACT = [
   "Do not stop merely to narrate the next step or request permission for safe, in-scope actions.",
   "Return a final answer only when the request is complete or a concrete blocker requires user input."
 ].join(" ");
+
+function fallbackToolFeedbackLedger(toolPlans: readonly ToolCallPlan[]): TurnToolFeedbackLedger {
+  return {
+    latest: toolPlans.map((plan) => ({ plan })),
+    consumed: [],
+    omittedCount: 0
+  };
+}
+
+function withNativeHistoryBudgetLayer(
+  layers: InternalPromptLayer[],
+  messages: readonly ProviderMessage[]
+): InternalPromptLayer[] {
+  if (messages.length === 0) return layers;
+  const estimatedTokens = estimateMessagesTokensRough(messages.map((message) => ({
+    role: message.role,
+    content: stringifyProviderMessageContent(message.content),
+    toolCalls: message.toolCalls,
+    toolCallId: message.toolCallId,
+    providerReplayEcho: message.providerReplayEcho
+  })));
+  return [
+    ...layers,
+    layer({
+      name: "native-history",
+      content: `[${messages.length} structured native history messages]`,
+      cacheable: false,
+      truncated: false,
+      protectedLayer: true,
+      priority: 0,
+      estimatedTokens
+    })
+  ];
+}
+
+function renderBoundedContinuationFeedback(input: {
+  ledger: TurnToolFeedbackLedger;
+  nativeToolResultIds: ReadonlySet<string>;
+  hasUnresolvedPlans: boolean;
+}): string {
+  const header = [
+    input.hasUnresolvedPlans
+      ? "EstaCoda could not execute one or more requested tool calls. Use the feedback below to correct the tool call or choose an available tool."
+      : "EstaCoda executed the requested tools. Use the results below to continue the work.",
+    PROVIDER_CONTINUATION_AUTONOMY_CONTRACT,
+    "Do not ask the user to run these tools again.",
+    input.nativeToolResultIds.size > 0
+      ? "Some tool results are already included as structured tool messages above."
+      : undefined,
+    "",
+    "Newest tool batch:",
+    "Executed tool results:"
+  ].filter((line): line is string => line !== undefined).join("\n");
+  const latestBlocks = input.ledger.latest
+    .filter((entry) => entry.plan.status !== "executed" || !input.nativeToolResultIds.has(entry.plan.id))
+    .map(renderLatestToolFeedback);
+  const consumedBlocks = input.ledger.consumed.map(renderConsumedToolFeedback);
+  const omittedBeforeRendering = input.ledger.omittedCount;
+  const sections = [
+    ...latestBlocks,
+    ...(consumedBlocks.length === 0 ? [] : ["Previously consumed tool receipts:", ...consumedBlocks])
+  ];
+  let content = header;
+  let omittedWhileRendering = 0;
+
+  for (const section of sections) {
+    const separator = content.endsWith("\n") ? "" : "\n\n";
+    const remaining = FLAT_CONTINUATION_FEEDBACK_MAX_CHARS - content.length - separator.length;
+    if (remaining <= 120) {
+      omittedWhileRendering += 1;
+      continue;
+    }
+    if (section.length > remaining) {
+      content += `${separator}${truncate(section, remaining)}`;
+      omittedWhileRendering += 1;
+      continue;
+    }
+    content += `${separator}${section}`;
+  }
+
+  const omitted = omittedBeforeRendering + omittedWhileRendering;
+  if (omitted > 0) {
+    const notice = `\n\n[${omitted} older or oversized tool feedback entr${omitted === 1 ? "y was" : "ies were"} omitted; artifact references remain available.]`;
+    content = `${content.slice(0, Math.max(0, FLAT_CONTINUATION_FEEDBACK_MAX_CHARS - notice.length))}${notice}`;
+  }
+  if (latestBlocks.length === 0) {
+    content += "\nNo additional flat tool results were needed for the newest batch.";
+  }
+  if (input.ledger.latest.length === 0 && input.ledger.consumed.length === 0) {
+    content += "\nNo tool feedback was recorded for this continuation.";
+  }
+
+  return content.slice(0, FLAT_CONTINUATION_FEEDBACK_MAX_CHARS);
+}
+
+function renderLatestToolFeedback(entry: ToolFeedbackEntry): string {
+  const plan = entry.plan;
+  if (plan.status === "executed") {
+    return [
+      `Tool: ${plan.tool}`,
+      `Call id: ${plan.id}`,
+      renderToolResultPacket(packetizeToolResult({
+        tool: plan.tool,
+        result: plan.result,
+        maxChars: providerVisibleToolResultMaxChars(plan.tool, 1_800)
+      }))
+    ].join("\n");
+  }
+
+  return [
+    `Tool call failed: ${plan.tool || "unknown"}`,
+    `Call id: ${plan.id}`,
+    `Status: ${plan.status}`,
+    `Error: ${truncate(redactSensitiveText(plan.error ?? "No error details were provided."), 1_800)}`,
+    "Use the available tool schemas and try again if another tool call is needed."
+  ].join("\n");
+}
+
+function renderConsumedToolFeedback(summary: ToolFeedbackSummary): string {
+  return [
+    `- ${summary.callId} · ${summary.tool} · status=${summary.status}`,
+    summary.ok === undefined ? undefined : `ok=${summary.ok}`,
+    summary.riskClass === undefined ? undefined : `risk=${summary.riskClass}`,
+    summary.targetSummary === undefined ? undefined : `target=${summary.targetSummary}`,
+    `result_chars=${summary.resultChars}`
+  ].filter((part): part is string => part !== undefined).join(" · ");
+}
 
 type InternalPromptLayer = PromptLayerReport & {
   content: string;
@@ -950,14 +1067,15 @@ function buildNativePromptHistory(
     };
   }
 
-  const selection = selectNativeHistoryWindow(rawMessages, {
-    maxTokens: budgetTarget,
-    reservedTokens: Math.floor(budgetTarget * 0.75)
+  const selectedWindow = selectNativeHistoryWindow(rawMessages, {
+    maxTokens: Math.min(budgetTarget, ACTIVE_NATIVE_HISTORY_MAX_TOKENS),
+    reservedTokens: 0
   });
+  const selection = selectActiveContinuationNativeGroup(input, selectedWindow);
   if (selection.selectedUnits.length === 0) {
     return {
       messages: [],
-      unselectedSessionHistory: input.sessionHistory ?? rawMessages.map(toPromptSessionHistoryMessage),
+      unselectedSessionHistory: repackNativeHistoryUnits(selection.unselectedUnits),
       diagnostics: [{
         kind: "structured-tool-history-skipped",
         ...baseDiagnostic,
@@ -969,7 +1087,10 @@ function buildNativePromptHistory(
   if (selectedMessages.length === 0) {
     return {
       messages: [],
-      unselectedSessionHistory: input.sessionHistory ?? rawMessages.map(toPromptSessionHistoryMessage),
+      unselectedSessionHistory: repackNativeHistoryUnits([
+        ...selection.unselectedUnits,
+        ...selection.selectedUnits
+      ]),
       diagnostics: [{
         kind: "structured-tool-history-skipped",
         ...baseDiagnostic,
@@ -991,7 +1112,10 @@ function buildNativePromptHistory(
   if (built.stats.nativeToolTurns === 0) {
     return {
       messages: [],
-      unselectedSessionHistory: input.sessionHistory ?? rawMessages.map(toPromptSessionHistoryMessage),
+      unselectedSessionHistory: repackNativeHistoryUnits([
+        ...selection.unselectedUnits,
+        ...selection.selectedUnits
+      ]),
       diagnostics: [
         ...diagnostics,
         {
@@ -1012,7 +1136,7 @@ function buildNativePromptHistory(
 
   return {
     messages: built.messages,
-    unselectedSessionHistory: flattenNativeHistoryUnits(selection.unselectedUnits).map(toPromptSessionHistoryMessage),
+    unselectedSessionHistory: repackNativeHistoryUnits(selection.unselectedUnits),
     diagnostics: [
       ...diagnostics,
       {
@@ -1033,6 +1157,57 @@ function buildNativePromptHistory(
       }
     ]
   };
+}
+
+function selectActiveContinuationNativeGroup(
+  input: ProviderPromptInput | ProviderContinuationPromptInput,
+  selection: ReturnType<typeof selectNativeHistoryWindow>
+): ReturnType<typeof selectNativeHistoryWindow> {
+  if (!("providerExecution" in input) || input.toolFeedbackLedger === undefined) {
+    return selection;
+  }
+  const activeIds = activeContinuationToolCallIds(input);
+  if (activeIds.size === 0) {
+    return selection;
+  }
+  const selectedUnits = selection.selectedUnits.filter((unit) => (
+    unit.kind === "tool-group" && equalStringSets(nativeToolGroupCallIds(unit), activeIds)
+  ));
+  const displacedUnits = selection.selectedUnits.filter((unit) => !selectedUnits.includes(unit));
+  return {
+    selectedUnits,
+    unselectedUnits: [...selection.unselectedUnits, ...displacedUnits],
+    stats: {
+      ...selection.stats,
+      selectedMessages: selectedUnits.reduce(
+        (sum, unit) => sum + (unit.kind === "message" ? 1 : unit.messages.length),
+        0
+      ),
+      unselectedMessages: selection.stats.unselectedMessages + displacedUnits.reduce(
+        (sum, unit) => sum + (unit.kind === "message" ? 1 : unit.messages.length),
+        0
+      ),
+      selectedToolGroups: selectedUnits.length,
+      unselectedToolGroups: selection.stats.unselectedToolGroups + displacedUnits.filter(
+        (unit) => unit.kind === "tool-group"
+      ).length,
+      estimatedTokens: selectedUnits.reduce((sum, unit) => sum + unit.estimatedTokens, 0)
+    }
+  };
+}
+
+function nativeToolGroupCallIds(unit: Extract<NativeHistoryUnit, { kind: "tool-group" }>): ReadonlySet<string> {
+  const calls = unit.messages[0]?.metadata?.providerToolCalls;
+  if (!Array.isArray(calls)) return new Set();
+  return new Set(calls.flatMap((call) => {
+    if (call === null || typeof call !== "object") return [];
+    const id = (call as Record<string, unknown>).id;
+    return typeof id === "string" && id.length > 0 ? [id] : [];
+  }));
+}
+
+function equalStringSets(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
+  return left.size === right.size && [...left].every((value) => right.has(value));
 }
 
 function nativeReplayEchoContext(input: ProviderPromptInput | ProviderContinuationPromptInput): ProviderReplayEchoContext {
@@ -1070,7 +1245,7 @@ function activeContinuationToolCallIds(input: ProviderContinuationPromptInput): 
   }
 
   return new Set(
-    input.toolPlans
+    (input.toolFeedbackLedger?.latest.map((entry) => entry.plan) ?? input.toolPlans)
       .filter((plan) => plan.status === "executed" && plan.source === "provider-tool-call")
       .map((plan) => plan.id)
       .filter((id) => id.length > 0)
@@ -1217,6 +1392,67 @@ function flattenNativeHistoryUnits(units: NativeHistoryUnit[]): SessionMessage[]
   return units.flatMap((unit) => unit.kind === "message" ? [unit.message] : unit.messages);
 }
 
+function repackNativeHistoryUnits(units: NativeHistoryUnit[]): PromptSessionHistoryMessage[] {
+  const packed: PromptSessionHistoryMessage[] = [];
+  let usedChars = 0;
+
+  for (let index = units.length - 1; index >= 0; index -= 1) {
+    const message = repackNativeHistoryUnit(units[index]!);
+    const content = stringifyProviderMessageContent(message.content);
+    if (usedChars + content.length > REPACKED_NATIVE_HISTORY_MAX_CHARS) {
+      break;
+    }
+    packed.unshift(message);
+    usedChars += content.length;
+  }
+
+  if (packed.length < units.length) {
+    packed.unshift({
+      role: "assistant",
+      content: `[Earlier native history repacked: ${units.length - packed.length} unit(s) omitted.]`
+    });
+  }
+  return packed;
+}
+
+function repackNativeHistoryUnit(unit: NativeHistoryUnit): PromptSessionHistoryMessage {
+  if (unit.kind === "message") {
+    if (unit.message.role === "tool") {
+      return {
+        role: "assistant",
+        content: "[Earlier orphaned native tool result repacked; raw result omitted.]"
+      };
+    }
+    return {
+      role: unit.message.role === "agent" ? "assistant" : unit.message.role,
+      content: truncate(
+        redactSensitiveText(stripInlineReasoning(unit.message.content)).trim(),
+        500
+      )
+    };
+  }
+
+  const assistant = unit.messages[0];
+  const calls = Array.isArray(assistant?.metadata?.providerToolCalls)
+    ? assistant.metadata.providerToolCalls
+    : [];
+  const tools = calls
+    .flatMap((call) => {
+      if (call === null || typeof call !== "object") return [];
+      const name = (call as Record<string, unknown>).name;
+      return typeof name === "string" && name.length > 0 ? [name] : [];
+    });
+  return {
+    role: "assistant",
+    content: [
+      "[Earlier native tool group repacked; raw results omitted.]",
+      `tools=${tools.length > 0 ? [...new Set(tools)].join(",") : "unknown"}`,
+      `calls=${calls.length}`,
+      `results=${Math.max(0, unit.messages.length - 1)}`
+    ].join(" ")
+  };
+}
+
 function priorNativeHistoryMessages(messages: SessionMessage[], currentUserText: string): SessionMessage[] {
   const last = messages.at(-1);
   if (last?.role !== "user" || last.content !== currentUserText) {
@@ -1224,14 +1460,6 @@ function priorNativeHistoryMessages(messages: SessionMessage[], currentUserText:
   }
 
   return messages.slice(0, -1);
-}
-
-function toPromptSessionHistoryMessage(message: SessionMessage): PromptSessionHistoryMessage {
-  return {
-    role: message.role === "agent" ? "assistant" : message.role,
-    content: message.content,
-    metadata: message.metadata
-  };
 }
 
 function sanitizeNativeHistorySessionMessage(message: SessionMessage): SessionMessage {
