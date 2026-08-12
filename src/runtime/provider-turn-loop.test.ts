@@ -24,6 +24,7 @@ import { ToolRegistry } from "../tools/tool-registry.js";
 import { RunRecorder } from "./run-recorder.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
 import { ProviderTurnLoop, type ProviderTurnLoopOptions } from "./provider-turn-loop.js";
+import { ExecutionPlanStore } from "./execution-plan-store.js";
 import { attachEphemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 
 function createMockAdapter() {
@@ -618,6 +619,7 @@ async function createPostToolNudgeHarness(input: {
   maxProviderIterations?: number;
   maxProviderWallClockMs?: number;
   taskExecution?: ProviderTurnLoopOptions["taskExecution"];
+  executionPlanReader?: ProviderTurnLoopOptions["executionPlanReader"];
   onExecutePlans?: (input: {
     sessionDb: InMemorySessionDB;
     sessionId: string;
@@ -707,7 +709,8 @@ async function createPostToolNudgeHarness(input: {
       maxRepeatedBrowserObservations: 3,
       maxProviderWallClockMs: input.maxProviderWallClockMs ?? 10_000
     },
-    taskExecution: input.taskExecution
+    taskExecution: input.taskExecution,
+    executionPlanReader: input.executionPlanReader
   });
 
   return {
@@ -1631,6 +1634,34 @@ describe("ProviderTurnLoop OpenAI-compatible stream recovery", () => {
 });
 
 describe("ProviderTurnLoop post-tool empty response recovery", () => {
+  it("nudges once for a premature final answer and then returns a deterministic incomplete receipt", async () => {
+    const planStore = new ExecutionPlanStore();
+    planStore.replace({
+      objective: "Build the collection",
+      originTurnId: "turn-plan",
+      revision: 1,
+      status: "active",
+      items: [
+        { id: "build", content: "Build collection", status: "in_progress" },
+        { id: "verify", content: "Verify collection", status: "pending" }
+      ]
+    });
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("I can do that next."), providerExecution("Would you like me to continue?")],
+      toolSteps: [],
+      executionPlanReader: planStore
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+    const recoveryText = "Your active execution plan still has unfinished items.";
+    const requests = harness.completeSpy.mock.calls.map((call) => call[0] as ProviderRequest);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    expect(requests.filter((request) => JSON.stringify(request.messages).includes(recoveryText))).toHaveLength(1);
+    expect(result.executionPlanIncomplete).toBe(true);
+    expect(result.providerExecution?.response?.content).toContain("The Mission is incomplete.");
+    expect(result.providerExecution?.response?.content).toContain("- Build collection");
+  });
   it("nudges once and then stops repeated unchanged browser observations", async () => {
     const sensitivePageText = "private account marker";
     const snapshotExecution = (id: string): ToolExecutionRecord => ({
@@ -1691,6 +1722,14 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
   });
 
   it("stops before a substitute continuation when a delegated Task owns the answer", async () => {
+    const activePlan = new ExecutionPlanStore();
+    activePlan.replace({
+      objective: "Delegate the work",
+      originTurnId: "turn-delegate",
+      revision: 1,
+      status: "active",
+      items: [{ id: "delegate", content: "Delegate the work", status: "in_progress" }]
+    });
     const delegation = {
       ...toolExecutionForTool("call-delegate", "delegate_task", "Created durable Task task-owned."),
       riskClass: "shared-state-mutation" as const,
@@ -1715,7 +1754,8 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
         }]),
         providerExecution("The workers have not returned, but here is my direct synthesis.")
       ],
-      toolSteps: [{ executions: [delegation] }]
+      toolSteps: [{ executions: [delegation] }],
+      executionPlanReader: activePlan
     });
 
     const result = await runBasicProviderTurn(harness.loop);
@@ -1726,6 +1766,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     });
     expect(result.providerExecution?.response?.content).toContain("premature substitute");
     expect(result.providerExecution?.response?.content).not.toContain("direct synthesis");
+    expect(result.executionPlanIncomplete).toBeUndefined();
     const messages = await harness.sessionDb.listMessages(harness.sessionId);
     const protocolTurn = messages.find((message) => message.metadata?.kind === "provider-tool-call-turn");
     expect(protocolTurn?.content).toBe("");

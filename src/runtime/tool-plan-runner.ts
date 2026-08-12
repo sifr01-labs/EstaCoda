@@ -13,6 +13,7 @@ import { packetizeToolExecution } from "../tools/tool-result-packet.js";
 import { DelegateCallBudget } from "../delegation/delegate-call-budget.js";
 import type { RunRecorder } from "./run-recorder.js";
 import type { SessionRuntimeContext } from "./session-runtime-context.js";
+import type { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 import { emit } from "../utils/runtime-helpers.js";
 
 export type ToolPlanRunnerOptions = {
@@ -23,6 +24,7 @@ export type ToolPlanRunnerOptions = {
   sessionRuntimeContext?: SessionRuntimeContext;
   maxConcurrentSafeTools: number;
   delegateTaskCallLimit?: number;
+  executionEvidenceIndex?: ExecutionEvidenceIndex;
 };
 
 export class ToolPlanRunner {
@@ -33,6 +35,7 @@ export class ToolPlanRunner {
   readonly #sessionRuntimeContext: SessionRuntimeContext | undefined;
   readonly #maxConcurrentSafeTools: number;
   readonly #delegateCallBudget: DelegateCallBudget | undefined;
+  readonly #executionEvidenceIndex: ExecutionEvidenceIndex | undefined;
 
   constructor(options: ToolPlanRunnerOptions) {
     this.#toolCallPlanner = options.toolCallPlanner;
@@ -44,6 +47,7 @@ export class ToolPlanRunner {
     this.#delegateCallBudget = options.delegateTaskCallLimit === undefined
       ? undefined
       : new DelegateCallBudget(options.delegateTaskCallLimit);
+    this.#executionEvidenceIndex = options.executionEvidenceIndex;
   }
 
   resetPerTurnBudgets(): void {
@@ -222,6 +226,11 @@ export class ToolPlanRunner {
         displayPreview: buildToolDisplayPreview(plan.tool, plan.input),
         activityId: plan.id
       });
+      if (this.#executionEvidenceIndex !== undefined) {
+        await this.#runRecorder.recordExecutionEvidence(
+          this.#executionEvidenceIndex.recordUnavailable(plan.id, plan.tool)
+        );
+      }
       return undefined;
     }
 
@@ -252,6 +261,11 @@ export class ToolPlanRunner {
       activityId: plan.id,
       ...toolResultStats(execution)
     });
+
+    const evidenceRecord = this.#executionEvidenceIndex?.record(execution);
+    if (evidenceRecord !== undefined) {
+      await this.#runRecorder.recordExecutionEvidence(evidenceRecord);
+    }
 
     return execution;
   }
@@ -342,7 +356,8 @@ function isConcurrentSafeTool(tool: import("../contracts/tool.js").ToolDefinitio
 
   return (tool.riskClass === "read-only-local" || tool.riskClass === "read-only-network") &&
     tool.name !== "terminal.run" &&
-    tool.name !== "process.start";
+    tool.name !== "process.start" &&
+    tool.name !== "plan";
 }
 
 type ProviderToolPlanEntry = {
@@ -350,7 +365,7 @@ type ProviderToolPlanEntry = {
   definition: import("../contracts/tool.js").ToolDefinition | undefined;
 };
 
-function groupProviderToolPlans(
+export function groupProviderToolPlans(
   entries: ProviderToolPlanEntry[],
   maxConcurrentSafeTools: number
 ): Array<{ concurrent: boolean; entries: ProviderToolPlanEntry[] }> {

@@ -93,7 +93,18 @@ describe("assembleProviderPrompt", () => {
         revision: 2,
         status: "active",
         items: [
-          { id: "build", content: "Build it", status: "completed", evidenceCallIds: ["call-build"] },
+          {
+            id: "build",
+            content: "Build it",
+            status: "completed",
+            evidenceCallIds: ["call-build"],
+            evidence: [{
+              toolCallId: "call-build",
+              tool: "postman.update",
+              outcome: "success",
+              riskClass: "external-side-effect"
+            }]
+          },
           { id: "verify", content: "Verify it", status: "in_progress" }
         ]
       }

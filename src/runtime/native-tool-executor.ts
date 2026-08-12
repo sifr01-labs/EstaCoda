@@ -83,7 +83,12 @@ export class NativeToolExecutor {
       input: plan.input,
       trustedWorkspace: input.trustedWorkspace,
       sessionId: this.#currentSessionId(),
-      signal: input.signal
+      toolCallId: plan.id,
+      visibleTurnId: input.visibleTurnId,
+      providerUsageLineage: input.providerUsageLineage,
+      visionInputProvenance: input.visionInputProvenance,
+      signal: input.signal,
+      onEvent: input.onEvent
     });
 
     if (execution === undefined) {

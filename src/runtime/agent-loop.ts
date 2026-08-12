@@ -4,6 +4,7 @@ import type { ContextExpansionResult, ProjectContextSnapshot } from "../contract
 import type { IntentRoute } from "../contracts/intent.js";
 import type { ExecutionPlan, ExecutionPlanReader } from "../contracts/execution-plan.js";
 import type { ExecutionPlanController } from "./execution-plan-controller.js";
+import type { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 import type { MemoryConclusion, MemoryFileKind, MemoryProvider, MemoryPromptContext, SkillOutcome } from "../contracts/memory.js";
 import type { PromptBudgetReport, PromptSemanticCompressionReport } from "../contracts/prompt.js";
 import type { ModelProfile, ProviderMessage, ProviderRequest, ProviderRoutePreferences } from "../contracts/provider.js";
@@ -166,6 +167,7 @@ export type AgentLoopOptions = {
   taskExecution?: ProviderUsageTaskAttribution;
   executionPlanReader?: ExecutionPlanReader;
   executionPlanController?: ExecutionPlanController;
+  executionEvidenceIndex?: ExecutionEvidenceIndex;
 };
 
 export type AgentLoopBudgets = {
@@ -248,6 +250,7 @@ export class AgentLoop {
   readonly #taskExecution: ProviderUsageTaskAttribution | undefined;
   readonly #executionPlanReader: ExecutionPlanReader | undefined;
   readonly #executionPlanController: ExecutionPlanController | undefined;
+  readonly #executionEvidenceIndex: ExecutionEvidenceIndex | undefined;
 
   constructor(options: AgentLoopOptions) {
     this.#responseLabel = options.responseLabel;
@@ -264,6 +267,7 @@ export class AgentLoop {
     this.#taskExecution = options.taskExecution;
     this.#executionPlanReader = options.executionPlanReader;
     this.#executionPlanController = options.executionPlanController;
+    this.#executionEvidenceIndex = options.executionEvidenceIndex;
     this.#toolExecutor = options.toolExecutor;
     this.#toolCallPlanner = options.toolCallPlanner;
     this.#memoryProvider = options.memoryProvider;
@@ -648,6 +652,14 @@ export class AgentLoop {
       ...deterministicNativeTools.executions,
       ...skillPlaybookToolExecutions
     ];
+    if (this.#executionEvidenceIndex !== undefined) {
+      for (const execution of toolExecutions) {
+        const evidenceRecord = this.#executionEvidenceIndex.record(execution);
+        if (evidenceRecord !== undefined) {
+          await this.#runRecorder.recordExecutionEvidence(evidenceRecord);
+        }
+      }
+    }
     await this.#emitLiveContextUsageEstimate({
       onEvent: input.onEvent,
       routedText,

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ExecutionPlanController } from "../runtime/execution-plan-controller.js";
 import { ExecutionPlanStore } from "../runtime/execution-plan-store.js";
 import { createPlanTools, planToolProvider } from "./plan-tools.js";
+import { ExecutionEvidenceIndex } from "../runtime/execution-evidence-index.js";
 
 describe("plan tool", () => {
   it("is absent without a foreground controller", () => {
@@ -16,7 +17,15 @@ describe("plan tool", () => {
 
   it("supports write, read, and merge with canonical snapshots", async () => {
     const emitted: string[] = [];
-    const controller = new ExecutionPlanController(new ExecutionPlanStore());
+    const evidence = new ExecutionEvidenceIndex();
+    evidence.record({
+      tool: { name: "test.tool", description: "test", inputSchema: {}, riskClass: "read-only-local", toolsets: ["core"], progressLabel: "test", maxResultSizeChars: 100 },
+      decision: "allow",
+      riskClass: "read-only-local",
+      toolCallId: "call-1",
+      result: { ok: true, content: "done" }
+    });
+    const controller = new ExecutionPlanController(new ExecutionPlanStore(), undefined, evidence);
     const tool = createPlanTools({ controller })[0]!;
     const write = await tool.run({
       operation: "write",

@@ -36,6 +36,7 @@ export function createPlanTools(options: {
                 maxItems: 16,
                 items: { type: "string", minLength: 1, maxLength: 256 }
               },
+              completionKind: { type: "string", enum: ["reasoning"] },
               blocker: {
                 anyOf: [
                   {

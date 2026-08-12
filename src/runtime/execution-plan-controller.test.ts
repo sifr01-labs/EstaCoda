@@ -2,9 +2,47 @@ import { describe, expect, it } from "vitest";
 import { EXECUTION_PLAN_MAX_ITEMS } from "../contracts/execution-plan.js";
 import { ExecutionPlanController, ExecutionPlanValidationError } from "./execution-plan-controller.js";
 import { ExecutionPlanStore } from "./execution-plan-store.js";
+import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 
 function controller() {
-  return new ExecutionPlanController(new ExecutionPlanStore());
+  return new ExecutionPlanController(new ExecutionPlanStore(), undefined, evidenceIndex());
+}
+
+function evidenceIndex() {
+  const index = new ExecutionEvidenceIndex();
+  index.record({
+    tool: {
+      name: "postman.update",
+      description: "Update Postman",
+      inputSchema: {},
+      riskClass: "external-side-effect",
+      toolsets: ["mcp"],
+      progressLabel: "updating",
+      maxResultSizeChars: 1000
+    },
+    input: { token: "must-not-persist" },
+    decision: "allow",
+    riskClass: "external-side-effect",
+    targetSummary: "Collection token=must-not-persist",
+    toolCallId: "call-1",
+    result: { ok: true, content: "raw result must not persist" }
+  });
+  index.record({
+    tool: {
+      name: "postman.update",
+      description: "Update Postman",
+      inputSchema: {},
+      riskClass: "external-side-effect",
+      toolsets: ["mcp"],
+      progressLabel: "updating",
+      maxResultSizeChars: 1000
+    },
+    decision: "allow",
+    riskClass: "external-side-effect",
+    toolCallId: "call-failed",
+    result: { ok: false, content: "failed" }
+  });
+  return index;
 }
 
 describe("ExecutionPlanController", () => {
@@ -12,14 +50,15 @@ describe("ExecutionPlanController", () => {
     const events: string[] = [];
     const target = new ExecutionPlanController(
       new ExecutionPlanStore(),
-      async (event) => { events.push(event.kind); }
+      async (event) => { events.push(event.kind); },
+      evidenceIndex()
     );
     await target.write({
       objective: "Complete the mission",
       items: [{ id: "work", content: "Do the work", status: "in_progress" }]
     }, "turn-1");
     await target.merge({ items: [{ id: "work", status: "pending" }] });
-    await target.merge({ items: [{ id: "work", status: "completed" }] });
+    await target.merge({ items: [{ id: "work", status: "completed", evidenceCallIds: ["call-1"] }] });
     target.clear();
     await target.write({
       objective: "Delegate the mission",
@@ -89,13 +128,20 @@ describe("ExecutionPlanController", () => {
       revision: 1,
       status: "active",
       items: [
-        { id: "inspect", status: "completed", evidenceCallIds: ["call-1"] },
+        {
+          id: "inspect",
+          status: "completed",
+          evidenceCallIds: ["call-1"],
+          evidence: [{ toolCallId: "call-1", tool: "postman.update", outcome: "success" }]
+        },
         { id: "verify", status: "in_progress" }
       ]
     });
     expect(plan.objective).toContain("API token=[REDACTED]");
     expect(plan.objective).not.toContain("\n");
     expect(JSON.stringify(plan)).not.toContain("super-secret-value");
+    expect(JSON.stringify(plan)).not.toContain("raw result must not persist");
+    expect(JSON.stringify(plan)).not.toContain("must-not-persist");
   });
 
   it("merges existing items, appends new items, and increments revision", async () => {
@@ -108,7 +154,7 @@ describe("ExecutionPlanController", () => {
     const plan = await target.merge({
       objective: "Build and verify collection",
       items: [
-        { id: "build", status: "completed", evidenceCallIds: ["call-build"] },
+        { id: "build", status: "completed", evidenceCallIds: ["call-1"] },
         { id: "verify", content: "Verify it", status: "in_progress" }
       ]
     });
@@ -118,20 +164,84 @@ describe("ExecutionPlanController", () => {
       revision: 2,
       status: "active",
       items: [
-        { id: "build", status: "completed", evidenceCallIds: ["call-build"] },
+        { id: "build", status: "completed", evidenceCallIds: ["call-1"] },
         { id: "verify", status: "in_progress" }
       ]
     });
   });
 
-  it("derives terminal status without enforcing evidence yet", async () => {
+  it("derives terminal status after reasoning completion passes enforcement", async () => {
     const target = controller();
     await target.write({
       objective: "Finish work",
-      items: [{ id: "finish", content: "Finish it", status: "in_progress" }]
+      items: [{ id: "finish", content: "Explain the result", status: "in_progress" }]
     }, "turn-1");
 
-    expect((await target.merge({ items: [{ id: "finish", status: "completed" }] })).status).toBe("completed");
+    expect((await target.merge({
+      items: [{ id: "finish", status: "completed", completionKind: "reasoning" }]
+    })).status).toBe("completed");
+  });
+
+  it("rejects unknown and failed evidence and reasoning for consequential actions", async () => {
+    const target = controller();
+    await target.write({
+      objective: "Update the collection",
+      items: [{ id: "update", content: "Update Postman collection", status: "in_progress" }]
+    }, "turn-1");
+
+    await expect(target.merge({
+      items: [{ id: "update", status: "completed", evidenceCallIds: ["unknown-call"] }]
+    })).rejects.toThrow("Unknown evidence call id");
+    await expect(target.merge({
+      items: [{ id: "update", status: "completed", evidenceCallIds: ["call-failed"] }]
+    })).rejects.toThrow("cannot prove completion");
+    await expect(target.merge({
+      items: [{ id: "update", status: "completed", completionKind: "reasoning" }]
+    })).rejects.toThrow("cannot use completionKind=reasoning");
+    await expect(target.merge({
+      items: [{
+        id: "update",
+        content: "Review the result and commit the changes",
+        status: "completed",
+        completionKind: "reasoning"
+      }]
+    })).rejects.toThrow("cannot use completionKind=reasoning");
+    expect(target.current()?.items[0]?.status).toBe("in_progress");
+  });
+
+  it("accepts reasoning completion only for non-consequential work", async () => {
+    const target = controller();
+    await target.write({
+      objective: "Explain the tradeoff",
+      items: [{ id: "explain", content: "Explain the tradeoff", status: "in_progress" }]
+    }, "turn-1");
+
+    const completed = await target.merge({
+      items: [{ id: "explain", status: "completed", completionKind: "reasoning" }]
+    });
+    expect(completed).toMatchObject({ status: "completed", items: [{ completionKind: "reasoning" }] });
+  });
+
+  it("rejects non-concrete blocker excuses", async () => {
+    const target = controller();
+    await expect(target.write({
+      objective: "Finish the work",
+      items: [{
+        id: "work",
+        content: "Finish work",
+        status: "blocked",
+        blocker: { kind: "external_state", summary: "Would you like me to continue?" }
+      }]
+    }, "turn-1")).rejects.toThrow("concrete blocker");
+    await expect(target.write({
+      objective: "Finish the work",
+      items: [{
+        id: "work",
+        content: "Finish work",
+        status: "blocked",
+        blocker: { kind: "external_state", summary: "I need more time before finishing, please." }
+      }]
+    }, "turn-1")).rejects.toThrow("concrete blocker");
   });
 
   it("distinguishes an abandoned all-cancelled plan from completed work", async () => {

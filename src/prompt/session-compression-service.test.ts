@@ -341,6 +341,52 @@ describe("SessionCompressionService", () => {
     expect(JSON.stringify(carried)).not.toContain("tool-result");
   });
 
+  it("carries bounded evidence receipts without copying raw tool results", async () => {
+    const { db, sessionId } = await sessionDbWithMessages(8);
+    await db.appendEvent(sessionId, {
+      kind: "tool-result",
+      tool: "postman.update",
+      toolCallId: "call-1",
+      result: { ok: true, content: "secret raw collection body" }
+    });
+    await db.appendEvent(sessionId, {
+      kind: "execution-evidence-recorded",
+      toolCallId: "call-1",
+      tool: "postman.update",
+      status: "success",
+      riskClass: "external-side-effect",
+      targetSummary: "Collection A"
+    });
+    await db.appendEvent(sessionId, {
+      kind: "execution-evidence-recorded",
+      toolCallId: "call-2",
+      tool: "postman.update",
+      status: "success",
+      riskClass: "external-side-effect",
+      targetSummary: "token=secret-compaction-value"
+    });
+    const service = new SessionCompressionService({
+      sessionDb: db,
+      config: normalizeSessionCompressionConfig({ enabled: false, protectFirstN: 1, protectLastN: 2 }),
+      ...auxiliaryHarness("evidence-aware summary")
+    });
+
+    const result = await service.compactNow({
+      profileId: "profile",
+      sessionId,
+      preserveTranscript: true
+    });
+    const childEvents = await db.listEvents(result.activeSessionId);
+
+    expect(childEvents).toContainEqual(expect.objectContaining({
+      kind: "execution-evidence-recorded",
+      toolCallId: "call-1",
+      targetSummary: "Collection A"
+    }));
+    expect(JSON.stringify(childEvents)).not.toContain("secret raw collection body");
+    expect(JSON.stringify(childEvents)).not.toContain("secret-compaction-value");
+  });
+
   it("compactIfNeeded can rotate hygiene compaction to a compacted child session", async () => {
     const { db, sessionId } = await sessionDbWithMessages(8);
     const service = new SessionCompressionService({

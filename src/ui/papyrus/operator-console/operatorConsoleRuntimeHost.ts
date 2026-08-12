@@ -296,6 +296,7 @@ function cloneExecutionPlanState(plan: ExecutionPlan): ExecutionPlan {
       ...item,
       ...(item.evidenceCallIds === undefined ? {} : { evidenceCallIds: [...item.evidenceCallIds] }),
       ...(item.evidence === undefined ? {} : { evidence: item.evidence.map((entry) => ({ ...entry })) }),
+      ...(item.completionKind === undefined ? {} : { completionKind: item.completionKind }),
       ...(item.blocker === undefined ? {} : { blocker: { ...item.blocker } })
     }))
   };

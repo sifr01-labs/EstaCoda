@@ -1,7 +1,7 @@
 import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
-import type { ExecutionPlanReader } from "../contracts/execution-plan.js";
+import type { ExecutionPlan, ExecutionPlanReader } from "../contracts/execution-plan.js";
 import type { MemoryPromptContext } from "../contracts/memory.js";
 import type {
   ModelProfile,
@@ -71,6 +71,7 @@ import { BrowserObservationGuard } from "./browser-observation-guard.js";
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
 const BROWSER_NO_PROGRESS_NUDGE = "Repeated browser observations show no state change. Do not call browser.snapshot or browser.tabs again unless another action may have changed the page. Switch tabs or take a different browser action; if progress is blocked, explain what is blocking it.";
 const BROWSER_NO_PROGRESS_STOP = "I stopped this browser turn because repeated observations showed no state change. I can continue after switching tabs, taking a different browser action, or receiving clarification about the next step.";
+const EXECUTION_PLAN_RECOVERY_NUDGE = "Your active execution plan still has unfinished items. Continue executing the original request now. Use plan merge to mark verified progress with successful tool call IDs, or record a concrete blocker that requires user input. Do not stop to narrate the next step or ask whether to continue.";
 
 export type ProviderTurnLoopBudgets = {
   maxProviderIterations: number;
@@ -211,6 +212,7 @@ export class ProviderTurnLoop {
     toolExecutions: ToolExecutionRecord[];
     iterations: number;
     delegatedAnswerOwnership?: PendingDelegatedAnswerOwnership;
+    executionPlanIncomplete?: boolean;
   }> {
     this.#providerRequestSequence = 0;
     this.#toolPlanRunner.resetPerTurnBudgets?.();
@@ -232,6 +234,9 @@ export class ProviderTurnLoop {
     let pendingReasoningOnlyPrefill = false;
     let retryReasoningOnlyInitialResponse = false;
     let delegatedAnswerOwnership: PendingDelegatedAnswerOwnership | undefined;
+    let pendingExecutionPlanRecoveryNudge = false;
+    let executionPlanRecoveryUsed = false;
+    let executionPlanIncomplete = false;
 
     for (let iteration = 0; iteration < this.#budgets.maxProviderIterations; iteration += 1) {
       if (isAborted(input.signal)) {
@@ -298,10 +303,12 @@ export class ProviderTurnLoop {
           loopStartedAt,
           emptyResponseNudge: pendingEmptyResponseNudge,
           browserNoProgressNudge: pendingBrowserNoProgressNudge,
+          executionPlanRecoveryNudge: pendingExecutionPlanRecoveryNudge,
           reasoningOnlyPrefill: pendingReasoningOnlyPrefill
         });
       pendingEmptyResponseNudge = false;
       pendingBrowserNoProgressNudge = false;
+      pendingExecutionPlanRecoveryNudge = false;
       pendingReasoningOnlyPrefill = false;
 
       if (execution === undefined) {
@@ -517,6 +524,30 @@ export class ProviderTurnLoop {
         break;
       }
 
+      const stoppedWithoutToolsWithPendingPlan =
+        execution.ok === true &&
+        execution.toolCalls.length === 0 &&
+        hasUnfinishedExecutionPlan(this.#executionPlanReader?.current());
+      if (stoppedWithoutToolsWithPendingPlan) {
+        if (
+          !executionPlanRecoveryUsed &&
+          iteration + consumedProviderIterations < this.#budgets.maxProviderIterations
+        ) {
+          executionPlanRecoveryUsed = true;
+          pendingExecutionPlanRecoveryNudge = true;
+          effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+          previousProviderExecution = execution;
+          if (consumedProviderIterations > 1) iteration += consumedProviderIterations - 1;
+          continue;
+        }
+        executionPlanIncomplete = true;
+        execution = incompleteExecutionPlanReceipt(
+          execution,
+          this.#executionPlanReader?.current(),
+          this.#ui?.language ?? "en"
+        );
+      }
+
       if (
         terminalPostToolEmpty &&
         !postToolEmptyRetried &&
@@ -584,7 +615,8 @@ export class ProviderTurnLoop {
       providerExecution: effectiveProviderExecution,
       toolExecutions: providerToolExecutions,
       iterations,
-      ...(delegatedAnswerOwnership === undefined ? {} : { delegatedAnswerOwnership })
+      ...(delegatedAnswerOwnership === undefined ? {} : { delegatedAnswerOwnership }),
+      ...(executionPlanIncomplete ? { executionPlanIncomplete: true } : {})
     };
   }
 
@@ -640,6 +672,7 @@ export class ProviderTurnLoop {
     loopStartedAt: number;
     signal?: AbortSignal;
     reasoningOnlyPrefill?: boolean;
+    executionPlanRecoveryNudge?: boolean;
   }): Promise<ProviderExecutionResult | undefined> {
     if (this.#providerExecutor === undefined || this.#model === undefined || this.#model.provider === "unconfigured") {
       return undefined;
@@ -763,6 +796,7 @@ export class ProviderTurnLoop {
     loopStartedAt: number;
     emptyResponseNudge?: boolean;
     browserNoProgressNudge?: boolean;
+    executionPlanRecoveryNudge?: boolean;
     reasoningOnlyPrefill?: boolean;
     signal?: AbortSignal;
   }): Promise<ProviderExecutionResult | undefined> {
@@ -771,8 +805,15 @@ export class ProviderTurnLoop {
       this.#model === undefined ||
       this.#model.provider === "unconfigured" ||
       input.providerExecution?.ok !== true ||
-      (input.providerExecution.toolCalls.length === 0 && input.emptyResponseNudge !== true) ||
-      !input.toolPlans.some((plan) => plan.status === "executed" || isRecoverableToolPlanStatus(plan.status))
+      (
+        input.providerExecution.toolCalls.length === 0 &&
+        input.emptyResponseNudge !== true &&
+        input.executionPlanRecoveryNudge !== true
+      ) ||
+      (
+        input.executionPlanRecoveryNudge !== true &&
+        !input.toolPlans.some((plan) => plan.status === "executed" || isRecoverableToolPlanStatus(plan.status))
+      )
     ) {
       return undefined;
     }
@@ -810,6 +851,9 @@ export class ProviderTurnLoop {
         role: "user",
         content: BROWSER_NO_PROGRESS_NUDGE
       });
+    }
+    if (input.executionPlanRecoveryNudge === true) {
+      prompt.messages.push({ role: "user", content: EXECUTION_PLAN_RECOVERY_NUDGE });
     }
     if (input.reasoningOnlyPrefill === true) {
       prompt.messages.push(reasoningOnlyPrefillMessage());
@@ -864,7 +908,7 @@ export class ProviderTurnLoop {
         status: plan.status
       })),
       ...providerExecutionEventMetadata(execution),
-      nudge: input.emptyResponseNudge === true
+      nudge: input.emptyResponseNudge === true || input.executionPlanRecoveryNudge === true
     };
     await this.#sessionDb.appendEvent(this.#currentSessionId(), continuationEvent);
     this.#trajectoryRecorder.record("provider-continuation", {
@@ -877,7 +921,7 @@ export class ProviderTurnLoop {
         status: plan.status
       })),
       ...providerExecutionEventMetadata(execution),
-      nudge: input.emptyResponseNudge === true
+      nudge: input.emptyResponseNudge === true || input.executionPlanRecoveryNudge === true
     });
 
     if (!execution.ok) {
@@ -1786,6 +1830,50 @@ function browserNoProgressStopExecution(execution: ProviderExecutionResult): Pro
       finishReason: "stop",
       ...(response?.usage === undefined ? {} : { usage: response.usage })
     }
+  };
+}
+
+function hasUnfinishedExecutionPlan(plan: ExecutionPlan | undefined): boolean {
+  return plan?.status === "active" && plan.items.some((item) =>
+    item.status === "pending" || item.status === "in_progress"
+  );
+}
+
+function incompleteExecutionPlanReceipt(
+  execution: ProviderExecutionResult,
+  plan: ExecutionPlan | undefined,
+  locale: UiLanguage
+): ProviderExecutionResult {
+  const response = execution.response;
+  const unfinished = plan?.items.filter((item) => item.status === "pending" || item.status === "in_progress") ?? [];
+  const content = locale === "ar"
+    ? [
+        "لم تكتمل خطة التنفيذ.",
+        "",
+        "العناصر المتبقية:",
+        ...unfinished.map((item) => `- ${item.content}`),
+        "",
+        "توقّف النموذج مرتين دون إكمال العناصر أو تسجيل عائق ملموس."
+      ].join("\n")
+    : [
+        "The Mission is incomplete.",
+        "",
+        "Remaining items:",
+        ...unfinished.map((item) => `- ${item.content}`),
+        "",
+        "The model stopped twice without completing these items or recording a concrete blocker."
+      ].join("\n");
+  return {
+    ...execution,
+    response: {
+      ok: true,
+      content,
+      model: response?.model ?? execution.route?.id ?? "unknown",
+      provider: (response?.provider ?? execution.route?.provider ?? "unknown") as ProviderResponse["provider"],
+      finishReason: "stop",
+      ...(response?.usage === undefined ? {} : { usage: response.usage })
+    },
+    toolCalls: []
   };
 }
 

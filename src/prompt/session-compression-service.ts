@@ -14,6 +14,7 @@ import { stripInlineReasoning } from "../providers/provider-reasoning.js";
 import { SessionCompressionLock } from "../session/session-compression-lock.js";
 import { reconstructSessionCompressionState } from "../session/session-compression-state.js";
 import { executionPlanCarryForwardEvent } from "../session/execution-plan-state.js";
+import { executionEvidenceCarryForwardEvents } from "../session/execution-evidence-state.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import {
   SemanticCompressor,
@@ -370,11 +371,13 @@ export class SessionCompressionService {
 
 function childCompactionEvents(events: readonly SessionEvent[]): SessionEvent[] {
   const carriedPlan = executionPlanCarryForwardEvent(events);
+  const carriedEvidence = executionEvidenceCarryForwardEvents(events);
   return [
     {
       kind: "context-window-usage-invalidated",
       reason: "compaction"
     },
+    ...carriedEvidence,
     ...(carriedPlan === undefined ? [] : [carriedPlan])
   ];
 }

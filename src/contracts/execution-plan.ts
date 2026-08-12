@@ -42,6 +42,27 @@ export type ExecutionPlanEvidence = {
   targetSummary?: string;
 };
 
+/** Safe, harness-derived receipt persisted independently of raw tool output. */
+export type ExecutionEvidenceRecord =
+  | {
+      kind: "execution-evidence-recorded";
+      toolCallId: string;
+      tool: string;
+      status: "success";
+      riskClass: import("./tool.js").ToolRiskClass;
+      targetSummary?: string;
+    }
+  | {
+      kind: "execution-evidence-recorded";
+      toolCallId: string;
+      tool: string;
+      status: "failed" | "blocked" | "unavailable" | "ineligible";
+      riskClass?: import("./tool.js").ToolRiskClass;
+      targetSummary?: string;
+    };
+
+export type ExecutionPlanCompletionKind = "reasoning";
+
 export type ExecutionPlanItem = {
   id: string;
   content: string;
@@ -50,6 +71,8 @@ export type ExecutionPlanItem = {
   evidenceCallIds?: string[];
   /** Harness-derived evidence. Provider input must never populate this field directly. */
   evidence?: ExecutionPlanEvidence[];
+  /** Explicit exception for genuinely reasoning-only work. */
+  completionKind?: ExecutionPlanCompletionKind;
   blocker?: ExecutionPlanBlocker;
 };
 
@@ -88,6 +111,7 @@ export type ExecutionPlanWriteInput = {
     content: string;
     status?: ExecutionPlanItemStatus;
     evidenceCallIds?: string[];
+    completionKind?: ExecutionPlanCompletionKind;
     blocker?: ExecutionPlanBlocker;
   }>;
 };
@@ -97,6 +121,7 @@ export type ExecutionPlanMergeItemInput = {
   content?: string;
   status?: ExecutionPlanItemStatus;
   evidenceCallIds?: string[];
+  completionKind?: ExecutionPlanCompletionKind;
   blocker?: ExecutionPlanBlocker | null;
 };
 

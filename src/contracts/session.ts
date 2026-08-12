@@ -19,7 +19,7 @@ import type {
 import type { FailureRecord } from "./failure.js";
 import type { ProviderUsageEntry, ProviderUsageQuery } from "./provider-usage.js";
 import type { DelegateRole } from "./delegation.js";
-import type { ExecutionPlanLifecycleEvent } from "./execution-plan.js";
+import type { ExecutionEvidenceRecord, ExecutionPlanLifecycleEvent } from "./execution-plan.js";
 import type {
   ModelProfile,
   ProviderApiMode,
@@ -240,6 +240,7 @@ export type StructuredToolHistoryDiagnosticEvent = {
 
 export type SessionEvent =
   | ExecutionPlanLifecycleEvent
+  | ExecutionEvidenceRecord
   | {
       kind: "intent-routed";
       route: IntentRoute;

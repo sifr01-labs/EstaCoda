@@ -25,6 +25,7 @@ export type TrajectoryEventKind =
   | "execution-plan-blocked"
   | "execution-plan-transferred"
   | "execution-plan-abandoned"
+  | "execution-evidence-recorded"
   | "skill-route-usage"
   | "skill-route-telemetry"
   | "skill-lifecycle-changed"

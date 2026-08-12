@@ -7,7 +7,8 @@ import type { ProviderExecutionResult } from "../providers/provider-executor.js"
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { NativeToolExecutor } from "./native-tool-executor.js";
 import { SkillPlaybookRunner } from "./skill-playbook-runner.js";
-import { ToolPlanRunner } from "./tool-plan-runner.js";
+import { groupProviderToolPlans, ToolPlanRunner } from "./tool-plan-runner.js";
+import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 import { attachEphemeralVisionImages, ephemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 
 const fileReadTool: ToolDefinition = {
@@ -36,16 +37,19 @@ function runRecorder() {
     recordClassifiedFailure: vi.fn(),
     recordSecurityRiskEscalation: vi.fn(),
     recordSkillPlaybookStep: vi.fn(),
+    recordExecutionEvidence: vi.fn(),
   };
 }
 
 function execution(overrides?: Partial<ToolExecutionRecord>): ToolExecutionRecord {
+  const toolCallId = overrides?.toolCallId ?? "tc1";
   return {
     tool: fileReadTool,
     input: { path: "src/app.ts" },
     decision: "allow",
     riskClass: "read-only-local",
     targetSummary: "src/app.ts",
+    toolCallId,
     result: { ok: true, content: "ok" },
     ...overrides,
   };
@@ -75,8 +79,30 @@ function providerExecution(): ProviderExecutionResult {
 }
 
 describe("runtime tool activity events", () => {
+  it("keeps plan updates sequential with evidence-producing tool calls", () => {
+    const entries = [
+      { plan: { id: "read", tool: "file.read" } as never, definition: fileReadTool },
+      {
+        plan: { id: "plan", tool: "plan" } as never,
+        definition: { ...fileReadTool, name: "plan", toolsets: ["core"] }
+      },
+      { plan: { id: "read-2", tool: "file.read" } as never, definition: fileReadTool }
+    ];
+
+    expect(groupProviderToolPlans(entries, 4).map((group) => ({
+      concurrent: group.concurrent,
+      tools: group.entries.map((entry) => entry.plan.tool)
+    }))).toEqual([
+      { concurrent: true, tools: ["file.read"] },
+      { concurrent: false, tools: ["plan"] },
+      { concurrent: true, tools: ["file.read"] }
+    ]);
+  });
+
   it("forwards target summaries from provider tool plans", async () => {
     const events: RuntimeEvent[] = [];
+    const recorder = runRecorder();
+    const evidenceIndex = new ExecutionEvidenceIndex();
     const runner = new ToolPlanRunner({
       toolCallPlanner: {
         planFromProviderDelta: () => ({
@@ -91,9 +117,10 @@ describe("runtime tool activity events", () => {
         getToolDefinition: () => fileReadTool,
         executeTool: vi.fn().mockResolvedValue(execution()),
       } as never,
-      runRecorder: runRecorder() as never,
+      runRecorder: recorder as never,
       sessionId: "s1",
       maxConcurrentSafeTools: 1,
+      executionEvidenceIndex: evidenceIndex,
     });
 
     await runner.executePlans({
@@ -122,6 +149,18 @@ describe("runtime tool activity events", () => {
       ok: true,
       activityId: "tc1",
     }));
+    expect(recorder.recordExecutionEvidence).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "execution-evidence-recorded",
+      toolCallId: "tc1",
+      tool: "file.read",
+      status: "success",
+      riskClass: "read-only-local",
+      targetSummary: "src/app.ts"
+    }));
+    expect(evidenceIndex.resolve(["tc1"])).toEqual([expect.objectContaining({
+      toolCallId: "tc1",
+      tool: "file.read"
+    })]);
   });
 
   it("keeps security summaries separate from compact display previews", async () => {

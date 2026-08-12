@@ -9,8 +9,10 @@ import {
   type ExecutionPlan,
   type ExecutionPlanBlocker,
   type ExecutionPlanBlockerKind,
+  type ExecutionPlanCompletionKind,
   type ExecutionPlanControllerApi,
   type ExecutionPlanEventSink,
+  type ExecutionPlanEvidence,
   type ExecutionPlanLifecycleEvent,
   type ExecutionPlanItem,
   type ExecutionPlanItemStatus,
@@ -20,6 +22,7 @@ import {
 } from "../contracts/execution-plan.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import { isAcknowledgementContinuation, isExplicitNewRequest } from "./conversation-continuation-state.js";
+import { ExecutionEvidenceError, ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 import { ExecutionPlanStore } from "./execution-plan-store.js";
 
 const ITEM_STATUSES = new Set<ExecutionPlanItemStatus>([
@@ -43,6 +46,7 @@ const PLAN_STATUSES = new Set<ExecutionPlanStatus>([
   "transferred",
   "abandoned"
 ]);
+const COMPLETION_KINDS = new Set<ExecutionPlanCompletionKind>(["reasoning"]);
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/u;
 
 export class ExecutionPlanValidationError extends Error {
@@ -55,14 +59,17 @@ export class ExecutionPlanValidationError extends Error {
 export class ExecutionPlanController implements ExecutionPlanControllerApi {
   readonly #store: ExecutionPlanStore;
   readonly #record: ((event: ExecutionPlanLifecycleEvent, sink?: ExecutionPlanEventSink) => Promise<void>) | undefined;
+  readonly #evidenceIndex: ExecutionEvidenceIndex;
   #awaitingResumeDecision = false;
 
   constructor(
     store: ExecutionPlanStore,
-    record?: (event: ExecutionPlanLifecycleEvent, sink?: ExecutionPlanEventSink) => Promise<void>
+    record?: (event: ExecutionPlanLifecycleEvent, sink?: ExecutionPlanEventSink) => Promise<void>,
+    evidenceIndex = new ExecutionEvidenceIndex()
   ) {
     this.#store = store;
     this.#record = record;
+    this.#evidenceIndex = evidenceIndex;
   }
 
   current(): ExecutionPlan | undefined {
@@ -81,7 +88,7 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
       originTurnId: stableId(originTurnId, "originTurnId", 256),
       revision: (previous?.revision ?? 0) + 1,
       status: "active",
-      items: validateWriteItems(input.items)
+      items: validateWriteItems(input.items).map((item) => this.#validateCompletion(item))
     });
     await this.#recordTransition({
       kind: plan.status === "active" ? "execution-plan-started" : eventKindForPlan(plan),
@@ -103,6 +110,7 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
     const items = current.items.map((item) => ({ ...item }));
     const indexes = new Map(items.map((item, index) => [item.id, index]));
     const patchedIds = new Set<string>();
+    const completionValidationIds = new Set<string>();
     for (const rawPatch of input.items) {
       if (!isRecord(rawPatch)) {
         throw new ExecutionPlanValidationError("Each merge item must be an object.");
@@ -122,10 +130,12 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
           content: rawPatch.content,
           status: rawPatch.status ?? "pending",
           evidenceCallIds: rawPatch.evidenceCallIds,
+          completionKind: rawPatch.completionKind,
           blocker: rawPatch.blocker ?? undefined
         });
         indexes.set(id, items.length);
         items.push(item);
+        if (item.status === "completed") completionValidationIds.add(id);
         continue;
       }
 
@@ -135,12 +145,20 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
         ...(rawPatch.content === undefined ? {} : { content: rawPatch.content }),
         ...(rawPatch.status === undefined ? {} : { status: rawPatch.status }),
         ...(rawPatch.evidenceCallIds === undefined ? {} : { evidenceCallIds: rawPatch.evidenceCallIds }),
+        ...(rawPatch.completionKind === undefined ? {} : { completionKind: rawPatch.completionKind }),
         ...(rawPatch.blocker === undefined
           ? {}
           : rawPatch.blocker === null
             ? { blocker: undefined }
             : { blocker: rawPatch.blocker })
       });
+      if (
+        rawPatch.status === "completed" ||
+        rawPatch.evidenceCallIds !== undefined ||
+        rawPatch.completionKind !== undefined
+      ) {
+        completionValidationIds.add(id);
+      }
     }
 
     const plan = validatePlan({
@@ -150,10 +168,44 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
         : boundedText(input.objective, "objective", EXECUTION_PLAN_MAX_OBJECTIVE_CHARS),
       revision: current.revision + 1,
       status: "active",
-      items
+      items: items.map((item) => completionValidationIds.has(item.id) ? this.#validateCompletion(item) : item)
     });
     await this.#recordTransition({ kind: eventKindForPlan(plan), plan }, sink);
     return this.#store.replace(plan);
+  }
+
+  #validateCompletion(item: ExecutionPlanItem): ExecutionPlanItem {
+    if (item.status !== "completed") {
+      return {
+        ...item,
+        evidence: undefined
+      };
+    }
+    if (item.completionKind === "reasoning") {
+      if (item.evidenceCallIds !== undefined && item.evidenceCallIds.length > 0) {
+        throw new ExecutionPlanValidationError(
+          `Completed reasoning item ${item.id} must not include evidence call IDs.`
+        );
+      }
+      return { ...item, evidenceCallIds: undefined, evidence: undefined };
+    }
+    if (item.evidenceCallIds === undefined || item.evidenceCallIds.length === 0) {
+      throw new ExecutionPlanValidationError(
+        `Completed item ${item.id} requires successful evidenceCallIds or completionKind=reasoning.`
+      );
+    }
+    try {
+      return {
+        ...item,
+        completionKind: undefined,
+        evidence: this.#evidenceIndex.resolve(item.evidenceCallIds)
+      };
+    } catch (error) {
+      if (error instanceof ExecutionEvidenceError) {
+        throw new ExecutionPlanValidationError(error.message);
+      }
+      throw error;
+    }
   }
 
   hydrate(plan: ExecutionPlan): ExecutionPlan {
@@ -256,7 +308,7 @@ function validateHydratedPlan(input: ExecutionPlan): ExecutionPlan {
     status: "active",
     items: input.items.map((item) => {
       if (!isRecord(item)) throw new ExecutionPlanValidationError("Persisted execution plan item is malformed.");
-      return validateItem(item);
+      return validateItem(item, { persisted: true });
     })
   });
   const derived = validated.status;
@@ -283,6 +335,7 @@ function validateWriteItems(input: unknown): ExecutionPlanItem[] {
       content: item.content,
       status: item.status ?? "pending",
       evidenceCallIds: item.evidenceCallIds,
+      completionKind: item.completionKind,
       blocker: item.blocker
     });
   });
@@ -315,7 +368,10 @@ function validatePlan(input: ExecutionPlan): ExecutionPlan {
   return plan;
 }
 
-function validateItem(input: Record<string, unknown>): ExecutionPlanItem {
+function validateItem(
+  input: Record<string, unknown>,
+  options: { persisted?: boolean } = {}
+): ExecutionPlanItem {
   const id = stableId(input.id, "item id", EXECUTION_PLAN_MAX_ID_CHARS);
   const content = boundedText(input.content, `content for ${id}`, EXECUTION_PLAN_MAX_ITEM_CHARS);
   const status = itemStatus(input.status, id);
@@ -327,23 +383,110 @@ function validateItem(input: Record<string, unknown>): ExecutionPlanItem {
     throw new ExecutionPlanValidationError(`Only blocked or cancelled item ${id} may include a blocker.`);
   }
   const evidenceCallIds = validateEvidenceCallIds(input.evidenceCallIds, id);
+  const completionKind = validateCompletionKind(input.completionKind, id);
+  if (completionKind === "reasoning" && !isClearlyReasoningOnlyContent(content)) {
+    throw new ExecutionPlanValidationError(
+      `Consequential action item ${id} cannot use completionKind=reasoning.`
+    );
+  }
+  const evidence = options.persisted ? validatePersistedEvidence(input.evidence, id) : undefined;
+  if (options.persisted === true) {
+    if (status === "completed" && completionKind !== "reasoning" && (evidence === undefined || evidence.length === 0)) {
+      throw new ExecutionPlanValidationError(`Persisted completed item ${id} has no harness evidence.`);
+    }
+    if (status !== "completed" && evidence !== undefined) {
+      throw new ExecutionPlanValidationError(`Only completed persisted item ${id} may include evidence.`);
+    }
+    if (
+      evidence !== undefined &&
+      (evidenceCallIds === undefined ||
+        evidence.length !== evidenceCallIds.length ||
+        evidence.some((entry, index) => entry.toolCallId !== evidenceCallIds[index]))
+    ) {
+      throw new ExecutionPlanValidationError(`Persisted evidence for ${id} does not match its call IDs.`);
+    }
+  }
   return {
     id,
     content,
     status,
     ...(evidenceCallIds === undefined ? {} : { evidenceCallIds }),
+    ...(completionKind === undefined ? {} : { completionKind }),
+    ...(evidence === undefined ? {} : { evidence }),
     ...(blocker === undefined ? {} : { blocker })
   };
+}
+
+function validateCompletionKind(input: unknown, id: string): ExecutionPlanCompletionKind | undefined {
+  if (input === undefined) return undefined;
+  if (typeof input !== "string" || !COMPLETION_KINDS.has(input as ExecutionPlanCompletionKind)) {
+    throw new ExecutionPlanValidationError(`Item ${id} has an invalid completion kind.`);
+  }
+  return input as ExecutionPlanCompletionKind;
 }
 
 function validateBlocker(input: unknown, id: string): ExecutionPlanBlocker {
   if (!isRecord(input) || !BLOCKER_KINDS.has(input.kind as ExecutionPlanBlockerKind)) {
     throw new ExecutionPlanValidationError(`Item ${id} has an invalid blocker kind.`);
   }
+  const summary = boundedText(input.summary, `blocker summary for ${id}`, EXECUTION_PLAN_MAX_BLOCKER_CHARS);
+  if (isNonConcreteBlockerSummary(summary)) {
+    throw new ExecutionPlanValidationError(`Item ${id} requires a concrete blocker, not a request to pause or continue.`);
+  }
   return {
     kind: input.kind as ExecutionPlanBlockerKind,
-    summary: boundedText(input.summary, `blocker summary for ${id}`, EXECUTION_PLAN_MAX_BLOCKER_CHARS)
+    summary
   };
+}
+
+function validatePersistedEvidence(input: unknown, id: string): ExecutionPlanItem["evidence"] {
+  if (input === undefined) return undefined;
+  if (!Array.isArray(input) || input.length > EXECUTION_PLAN_MAX_EVIDENCE_CALL_IDS) {
+    throw new ExecutionPlanValidationError(`Persisted evidence for ${id} is invalid.`);
+  }
+  return input.map((entry) => {
+    if (!isRecord(entry) || entry.outcome !== "success") {
+      throw new ExecutionPlanValidationError(`Persisted evidence for ${id} is malformed.`);
+    }
+    const riskClass = entry.riskClass;
+    if (!isToolRiskClass(riskClass)) {
+      throw new ExecutionPlanValidationError(`Persisted evidence for ${id} has an invalid risk class.`);
+    }
+    return {
+      toolCallId: stableId(entry.toolCallId, `evidence call id for ${id}`, 256),
+      tool: boundedText(entry.tool, `evidence tool for ${id}`, 256),
+      outcome: "success" as const,
+      riskClass,
+      ...(entry.targetSummary === undefined
+        ? {}
+        : { targetSummary: boundedText(entry.targetSummary, `evidence target for ${id}`, 240) })
+    };
+  });
+}
+
+function isToolRiskClass(input: unknown): input is ExecutionPlanEvidence["riskClass"] {
+  return input === "read-only-local" || input === "read-only-network" || input === "workspace-write" ||
+    input === "external-side-effect" || input === "credential-access" || input === "destructive-local" ||
+    input === "shared-state-mutation" || input === "spend-money" || input === "sandbox-escape";
+}
+
+function isClearlyReasoningOnlyContent(content: string): boolean {
+  const normalized = content.trim();
+  const startsAsReasoning = /^(explain|summarize|compare|analyze|analyse|assess|recommend|answer|reason|describe|brainstorm|outline|review)\b/iu.test(normalized) ||
+    /^(اشرح|لخص|قارن|حلل|قيّم|قيم|اقترح|أجب|اجب|صف|راجع)(?:\s|$)/u.test(normalized);
+  const includesConsequentialAction = /\b(create|change|update|edit|write|delete|remove|install|configure|commit|push|publish|deploy|send|submit|approve|reject|purchase|pay|upload|download|execute|run|launch|open|navigate|click|type|test|verify|validate|fix|implement|build)\b/iu.test(normalized) ||
+    /(أنشئ|انشئ|غيّر|غير|حدّث|حدث|عدّل|عدل|اكتب|احذف|أزل|ازل|ثبّت|ثبت|هيّئ|هيئ|نفّذ|نفذ|شغّل|شغل|افتح|انتقل|انقر|اختبر|تحقق|أصلح|اصلح|طبّق|طبق|ابنِ|ابني)/u.test(normalized);
+  return startsAsReasoning && !includesConsequentialAction;
+}
+
+function isNonConcreteBlockerSummary(summary: string): boolean {
+  const normalized = summary.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/gu, " ").trim();
+  return /\b(need|require) more time\b/u.test(normalized) ||
+    /\b(would|do) you like me to continue\b/u.test(normalized) ||
+    /\b(should|may|can) i continue\b/u.test(normalized) ||
+    /^(work is )?(still )?(pending|in progress|not finished)( for now)?$/u.test(normalized) ||
+    /(أحتاج|احتاج|نحتاج) (إلى |الى )?مزيد من الوقت/u.test(normalized) ||
+    /(هل )?(تريد|ترغب) (مني )?(أن |ان )?أستمر/u.test(normalized);
 }
 
 function validateEvidenceCallIds(input: unknown, id: string): string[] | undefined {

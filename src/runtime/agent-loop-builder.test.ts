@@ -158,6 +158,43 @@ describe("AgentLoopBuilder", () => {
     });
   });
 
+  it("hydrates safe execution evidence so a resumed root plan can complete", async () => {
+    const harness = await createBuilderHarness();
+    await harness.sessionDb.createSession({ id: "evidence-resume", profileId: "default" });
+    await harness.sessionDb.appendEvent("evidence-resume", {
+      kind: "execution-evidence-recorded",
+      toolCallId: "call-verified",
+      tool: "browser.snapshot",
+      status: "success",
+      riskClass: "read-only-network",
+      targetSummary: "Postman collection"
+    });
+    await harness.sessionDb.appendEvent("evidence-resume", {
+      kind: "execution-plan-updated",
+      plan: {
+        objective: "Resume API testing",
+        originTurnId: "turn-origin",
+        revision: 4,
+        status: "active",
+        items: [{ id: "verify", content: "Verify responses", status: "in_progress" }]
+      }
+    });
+
+    const built = await harness.build("evidence-resume");
+    const completed = await built.executionPlanController?.merge({
+      items: [{ id: "verify", status: "completed", evidenceCallIds: ["call-verified"] }]
+    });
+
+    expect(completed).toMatchObject({
+      status: "completed",
+      items: [{
+        id: "verify",
+        status: "completed",
+        evidence: [{ toolCallId: "call-verified", tool: "browser.snapshot" }]
+      }]
+    });
+  });
+
   it("seeds each provider loop from its own persisted session usage", async () => {
     const captured: unknown[] = [];
     const harness = await createBuilderHarness({
@@ -886,7 +923,7 @@ async function createBuilderHarness(input: {
       return await builder.buildSession({
         sessionId,
         sessionDb,
-        trajectoryRecorder: {} as never,
+        trajectoryRecorder: { record: vi.fn() } as never,
         skillLearningManager: {} as never,
         agentEvolutionPolicy: deriveAgentEvolutionPolicy("none"),
         responseLabel: "EstaCoda",

@@ -63,6 +63,7 @@ import { RuntimeRouter } from "./runtime-router.js";
 import { SkillPlaybookRunner } from "./skill-playbook-runner.js";
 import { ExecutionPlanController } from "./execution-plan-controller.js";
 import { ExecutionPlanStore } from "./execution-plan-store.js";
+import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 import { LlmSkillRouteShadowReranker } from "./skill-route-reranker.js";
 import { createSessionRuntimeContext, type SessionRuntimeContext } from "./session-runtime-context.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
@@ -299,17 +300,24 @@ export class AgentLoopBuilder {
       profileId: substrate.profileId,
       skillEvolutionStore: substrate.skillEvolutionStore
     });
-    const executionPlanController = input.parentSessionId === undefined && input.taskExecution === undefined
+    const ownsExecutionPlan = input.parentSessionId === undefined && input.taskExecution === undefined;
+    const executionEvidenceIndex = ownsExecutionPlan ? new ExecutionEvidenceIndex() : undefined;
+    const persistedSessionEvents = ownsExecutionPlan
+      ? await input.sessionDb.listEvents(input.sessionId)
+      : [];
+    executionEvidenceIndex?.hydrate(persistedSessionEvents);
+    const executionPlanController = ownsExecutionPlan && executionEvidenceIndex !== undefined
       ? new ExecutionPlanController(
           new ExecutionPlanStore(),
           (event, sink) => runRecorder.recordExecutionPlanTransition(
             event,
             sink === undefined ? undefined : (runtimeEvent) => sink(runtimeEvent as typeof event)
-          )
+          ),
+          executionEvidenceIndex
         )
       : undefined;
     if (executionPlanController !== undefined) {
-      const persistedPlan = hydratableExecutionPlanSnapshot(await input.sessionDb.listEvents(input.sessionId));
+      const persistedPlan = hydratableExecutionPlanSnapshot(persistedSessionEvents);
       if (persistedPlan !== undefined) {
         try {
           executionPlanController.hydrate(persistedPlan);
@@ -533,7 +541,8 @@ export class AgentLoopBuilder {
       sessionId: input.sessionId,
       sessionRuntimeContext,
       maxConcurrentSafeTools: 4,
-      delegateTaskCallLimit: (substrate.delegationConfig ?? DEFAULT_DELEGATION_CONFIG).maxDelegateCallsPerTurn
+      delegateTaskCallLimit: (substrate.delegationConfig ?? DEFAULT_DELEGATION_CONFIG).maxDelegateCallsPerTurn,
+      executionEvidenceIndex
     });
     const providerTurnLoop = (this.#factories.providerTurnLoop ?? ((options) => new ProviderTurnLoop(options)))({
       providerExecutor: substrate.providerExecutor,
@@ -626,6 +635,7 @@ export class AgentLoopBuilder {
       taskExecution: input.taskExecution,
       executionPlanReader: executionPlanController,
       executionPlanController,
+      executionEvidenceIndex,
       ui: input.ui,
       agentProfile: input.agentProfile
     });

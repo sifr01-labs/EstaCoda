@@ -291,7 +291,9 @@ Operational failure modes to check before changing this area:
 **File:** `src/runtime/run-recorder.ts`
 **Role:** Records run events, tool calls, outcomes, and artifacts to the session DB. Provides structured run history for trace inspection and Agent Evolution evidence.
 
-Foreground execution plans use the `execution-plan-*` event family. Each event contains only the latest bounded canonical snapshot and optional trusted Task IDs for an ownership transfer; raw tool inputs and results are not embedded. Root interactive runtimes hydrate only unresolved session-local plans, and semantic compaction copies only the latest unresolved snapshot into the child session. This working state is not written to memory or Agent Evolution.
+Foreground execution plans use the `execution-plan-*` event family. Each event contains only the latest bounded canonical snapshot and optional trusted Task IDs for an ownership transfer; raw tool inputs and results are not embedded. Root interactive runtimes hydrate only unresolved session-local plans. Semantic compaction copies the latest unresolved snapshot plus bounded `execution-evidence-recorded` receipts into the child session; it does not copy raw tool inputs or outputs. This working state is not written to memory or Agent Evolution.
+
+Plan completion is evidence-gated. A session-local harness index accepts only successful, allowed `ToolExecutionRecord` values and derives bounded receipts containing the call ID, tool name, risk class, and redacted target. Provider-supplied evidence details, failed or gated calls, `plan`, and `delegate_task` cannot prove completion. Reasoning-only completion must be explicit and is rejected for action-shaped items. If a provider stops with unfinished plan items, the runtime sends one local-only recovery nudge and then returns a deterministic incomplete receipt; successful root delegation remains authoritative and bypasses this recovery path.
 
 ---
 

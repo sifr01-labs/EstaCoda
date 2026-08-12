@@ -30,6 +30,7 @@ export function cloneExecutionPlan(plan: ExecutionPlan): ExecutionPlan {
       ...(item.evidence === undefined ? {} : {
         evidence: item.evidence.map((entry) => ({ ...entry }))
       }),
+      ...(item.completionKind === undefined ? {} : { completionKind: item.completionKind }),
       ...(item.blocker === undefined ? {} : { blocker: { ...item.blocker } })
     }))
   };
