@@ -2,6 +2,7 @@ import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
+import type { ExecutionPlan, ExecutionPlanReader } from "../contracts/execution-plan.js";
 import type { MemoryConclusion, MemoryFileKind, MemoryProvider, MemoryPromptContext, SkillOutcome } from "../contracts/memory.js";
 import type { PromptBudgetReport, PromptSemanticCompressionReport } from "../contracts/prompt.js";
 import type { ModelProfile, ProviderMessage, ProviderRequest, ProviderRoutePreferences } from "../contracts/provider.js";
@@ -98,6 +99,7 @@ export type AgentLoopResponse = {
   turnUsage?: TurnUsageSummary;
   progress: string[];
   setupApprovals?: AgentLoopSetupApprovalRequest[];
+  executionPlan?: ExecutionPlan;
 };
 
 export type AgentLoopSetupApprovalRequest =
@@ -161,6 +163,7 @@ export type AgentLoopOptions = {
   maxProviderIterations?: number;
   budgets?: Partial<AgentLoopBudgets>;
   taskExecution?: ProviderUsageTaskAttribution;
+  executionPlanReader?: ExecutionPlanReader;
 };
 
 export type AgentLoopBudgets = {
@@ -241,6 +244,7 @@ export class AgentLoop {
   readonly #agentProfile: AgentLoopOptions["agentProfile"];
   readonly #budgets: AgentLoopBudgets;
   readonly #taskExecution: ProviderUsageTaskAttribution | undefined;
+  readonly #executionPlanReader: ExecutionPlanReader | undefined;
 
   constructor(options: AgentLoopOptions) {
     this.#responseLabel = options.responseLabel;
@@ -255,6 +259,7 @@ export class AgentLoop {
     this.#sessionRuntimeContext = options.sessionRuntimeContext;
     this.#profileId = options.profileId;
     this.#taskExecution = options.taskExecution;
+    this.#executionPlanReader = options.executionPlanReader;
     this.#toolExecutor = options.toolExecutor;
     this.#toolCallPlanner = options.toolCallPlanner;
     this.#memoryProvider = options.memoryProvider;
@@ -1382,9 +1387,11 @@ export class AgentLoop {
     summary: string;
     userAccepted?: boolean;
   }, visibleTurnId?: string): Promise<AgentLoopResponse> {
+    const executionPlan = this.#executionPlanReader?.current();
+    const projectedResponse = executionPlan === undefined ? response : { ...response, executionPlan };
     const completedResponse = visibleTurnId === undefined
-      ? response
-      : await this.#withTurnUsage(response, visibleTurnId);
+      ? projectedResponse
+      : await this.#withTurnUsage(projectedResponse, visibleTurnId);
     await this.#runRecorder.completeTrajectory(outcome, { bestEffort: true });
     return completedResponse;
   }

@@ -60,6 +60,8 @@ import { ProviderTurnLoop, type ProviderTurnLoopBudgets, type ProviderTurnLoopOp
 import { RunRecorder } from "./run-recorder.js";
 import { RuntimeRouter } from "./runtime-router.js";
 import { SkillPlaybookRunner } from "./skill-playbook-runner.js";
+import { ExecutionPlanController } from "./execution-plan-controller.js";
+import { ExecutionPlanStore } from "./execution-plan-store.js";
 import { LlmSkillRouteShadowReranker } from "./skill-route-reranker.js";
 import { createSessionRuntimeContext, type SessionRuntimeContext } from "./session-runtime-context.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
@@ -237,6 +239,7 @@ export type AgentLoopSessionInput = {
 
 export type BuiltAgentLoopSession = {
   sessionRuntimeContext: SessionRuntimeContext;
+  executionPlanController?: ExecutionPlanController;
   toolRegistry: ToolRegistry;
   toolExecutor: ToolExecutor;
   toolCallPlanner: ToolCallPlanner;
@@ -286,6 +289,9 @@ export class AgentLoopBuilder {
     const substrate = this.#substrate;
     const routes = input.providerRoutes ?? substrate.routes;
     const sessionRuntimeContext = input.sessionRuntimeContext ?? createSessionRuntimeContext(input.sessionId);
+    const executionPlanController = input.parentSessionId === undefined && input.taskExecution === undefined
+      ? new ExecutionPlanController(new ExecutionPlanStore())
+      : undefined;
     const initialContextWindowUsage = await loadSessionContextWindowUsage({
       sessionDb: input.sessionDb,
       sessionId: input.sessionId,
@@ -328,6 +334,7 @@ export class AgentLoopBuilder {
         parentSessionId: input.parentSessionId,
         childSessionId: input.parentSessionId === undefined ? undefined : input.sessionId,
         currentSessionId: () => sessionRuntimeContext.currentSessionId(),
+        executionPlanController,
         homeDir: substrate.homeDir,
         childProcessEnv: substrate.executionControls?.childProcessEnv,
         pythonStateRoot: substrate.pythonStateRoot,
@@ -535,7 +542,8 @@ export class AgentLoopBuilder {
       },
       providerRequestDefaults: substrate.executionControls?.providerRequestDefaults,
       initialContextWindowUsage,
-      taskExecution: input.taskExecution
+      taskExecution: input.taskExecution,
+      executionPlanReader: executionPlanController
     });
     const skillPlaybookRunner = (this.#factories.skillPlaybookRunner ?? ((options) => new SkillPlaybookRunner(options)))({
       toolExecutor,
@@ -599,12 +607,14 @@ export class AgentLoopBuilder {
       skillEvolutionStore: substrate.skillEvolutionStore,
       agentEvolutionPolicy: input.agentEvolutionPolicy,
       taskExecution: input.taskExecution,
+      executionPlanReader: executionPlanController,
       ui: input.ui,
       agentProfile: input.agentProfile
     });
 
     return {
       sessionRuntimeContext,
+      executionPlanController,
       toolRegistry,
       toolExecutor,
       toolCallPlanner,
@@ -725,6 +735,7 @@ function buildPreSkillVisibilityToolContext(input: SessionToolContext): SessionT
     parentSessionId: input.parentSessionId,
     childSessionId: input.childSessionId,
     currentSessionId: input.currentSessionId,
+    executionPlanController: input.executionPlanController,
     homeDir: input.homeDir,
     childProcessEnv: input.childProcessEnv,
     pythonStateRoot: input.pythonStateRoot,

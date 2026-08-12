@@ -338,7 +338,8 @@ describe("createRuntime provider turn budgets", () => {
 });
 
 const providerToolNameGroups = [
-  { providerName: "builtin", toolNames: ["playbook.plan", "trajectory.record"] },
+  { providerName: "builtin", toolNames: ["trajectory.record"] },
+  { providerName: "plan", toolNames: ["plan"] },
   { providerName: "python", toolNames: ["python.probe", "document.probe"] },
   {
     providerName: "web",
@@ -879,30 +880,9 @@ describe("createRuntime MCP trust gating", () => {
       })).toMatchInlineSnapshot(`
         [
           {
-            "maxResultSizeChars": 4000,
-            "name": "playbook.plan",
-            "orderIndex": 0,
-            "providerKind": "static",
-            "providerPhase": "pre-skill-visibility",
-            "requiredConfig": undefined,
-            "riskClass": "read-only-local",
-            "schemaAliasOrder": [
-              "firstStep",
-              "intent",
-              "playbookStep",
-              "previousResults",
-              "skill",
-              "stepDescription",
-            ],
-            "toolsets": [
-              "core",
-              "research",
-            ],
-          },
-          {
             "maxResultSizeChars": 2000,
             "name": "trajectory.record",
-            "orderIndex": 1,
+            "orderIndex": 0,
             "providerKind": "static",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -914,6 +894,23 @@ describe("createRuntime MCP trust gating", () => {
             "toolsets": [
               "core",
               "research",
+            ],
+          },
+          {
+            "maxResultSizeChars": 8192,
+            "name": "plan",
+            "orderIndex": 1,
+            "providerKind": "session",
+            "providerPhase": "pre-skill-visibility",
+            "requiredConfig": undefined,
+            "riskClass": "read-only-local",
+            "schemaAliasOrder": [
+              "items",
+              "objective",
+              "operation",
+            ],
+            "toolsets": [
+              "core",
             ],
           },
           {
@@ -2724,8 +2721,8 @@ describe("createRuntime MCP trust gating", () => {
       `);
       expect(tools.map((tool) => tool.name)).toMatchInlineSnapshot(`
         [
-          "playbook.plan",
           "trajectory.record",
+          "plan",
           "python.probe",
           "document.probe",
           "web.search",

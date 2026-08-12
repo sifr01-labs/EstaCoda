@@ -34,6 +34,13 @@ describe("toolRegistrationPlan", () => {
     expect(configEntry?.phase).toBe("pre-skill-visibility");
   });
 
+  it("registers foreground planning as session-bound and pre-skill", () => {
+    const entry = toolRegistrationPlan.find((candidate) => candidate.provider.name === "plan");
+
+    expect(entry?.provider.kind).toBe("session");
+    expect(entry?.phase).toBe("pre-skill-visibility");
+  });
+
   it("registers local memory read/search tools without changing session_search schema", () => {
     const memoryEntry = toolRegistrationPlan.find((entry) => entry.provider.name === "memory");
     const memoryRetrievalEntry = toolRegistrationPlan.find((entry) => entry.provider.name === "memoryRetrieval");

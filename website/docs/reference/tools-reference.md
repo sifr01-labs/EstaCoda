@@ -37,8 +37,11 @@ Static tools that are always registered if their provider is loaded.
 
 | Tool | Risk | State touched |
 |------|------|---------------|
-| `playbook.plan` | `read-only-local` | None |
 | `trajectory.record` | `read-only-local` | SQLite (trajectory events) |
+
+### Foreground planning tool
+
+`plan` is a session-aware `read-only-local` core tool for the current foreground Mission. It supports `read`, `write`, and `merge`, and stores one bounded in-memory execution plan per root interactive runtime. It is intentionally absent from delegated-child and durable Task-worker inventories. The plan grants no authority: every action still uses its own tool and existing security policy.
 
 ### Workspace tools
 

@@ -1,6 +1,7 @@
 import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
+import type { ExecutionPlanReader } from "../contracts/execution-plan.js";
 import type { MemoryPromptContext } from "../contracts/memory.js";
 import type {
   ModelProfile,
@@ -113,6 +114,7 @@ export type ProviderTurnLoopOptions = {
   providerRequestDefaults?: ProviderTurnLoopRequestDefaults;
   initialContextWindowUsage?: SessionContextWindowUsage;
   taskExecution?: ProviderUsageTaskAttribution;
+  executionPlanReader?: ExecutionPlanReader;
 };
 
 export class ProviderTurnLoop {
@@ -136,6 +138,7 @@ export class ProviderTurnLoop {
   readonly #providerRequestDefaults: ProviderTurnLoopRequestDefaults;
   readonly #profileId: string;
   readonly #taskExecution: ProviderUsageTaskAttribution | undefined;
+  readonly #executionPlanReader: ExecutionPlanReader | undefined;
   #providerRequestSequence = 0;
   #lastPromptTokens = 0;
   #lastActualPromptTokens: number | undefined;
@@ -166,6 +169,7 @@ export class ProviderTurnLoop {
     this.#providerRequestDefaults = options.providerRequestDefaults ?? {};
     this.#profileId = options.profileId;
     this.#taskExecution = options.taskExecution;
+    this.#executionPlanReader = options.executionPlanReader;
     this.#lastActualPromptTokens = options.initialContextWindowUsage?.usedTokens;
   }
 
@@ -660,7 +664,8 @@ export class ProviderTurnLoop {
       selectedSkillSetup: input.selectedSkillSetup,
       attachments: input.attachments,
       ui: this.#ui,
-      agentProfile: this.#agentProfile
+      agentProfile: this.#agentProfile,
+      executionPlan: this.#executionPlanReader?.current()
     });
     if (input.reasoningOnlyPrefill === true) {
       prompt.messages.push(reasoningOnlyPrefillMessage());
@@ -791,7 +796,8 @@ export class ProviderTurnLoop {
       selectedSkillSetup: input.selectedSkillSetup,
       attachments: input.attachments,
       ui: this.#ui,
-      agentProfile: this.#agentProfile
+      agentProfile: this.#agentProfile,
+      executionPlan: this.#executionPlanReader?.current()
     });
     if (input.emptyResponseNudge === true) {
       prompt.messages.push({

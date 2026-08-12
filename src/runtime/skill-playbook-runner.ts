@@ -13,6 +13,8 @@ import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { emit, isAborted } from "../utils/runtime-helpers.js";
 import { truncate } from "../utils/formatting.js";
 
+const NON_EXECUTABLE_PLAYBOOK_TOOLS = new Set(["plan"]);
+
 export type SkillPlaybookRunnerOptions = {
   toolExecutor: ToolExecutor;
   sessionId: string;
@@ -165,7 +167,7 @@ export class SkillPlaybookRunner {
             toolset,
             sessionId: this.#currentSessionId(),
             trustedWorkspace: input.trustedWorkspace,
-            excludedTools: [...input.usedTools],
+            excludedTools: [...input.usedTools, ...NON_EXECUTABLE_PLAYBOOK_TOOLS],
             input: toolInput
           })
         : await this.#toolExecutor.executeTool({
@@ -265,7 +267,7 @@ function firstAvailablePreferredTool(
     preferredToolForStep(step, toolset)
   ].filter((tool): tool is string => tool !== undefined && !usedTools.has(tool));
 
-  return candidates[0];
+  return candidates.find((tool) => !NON_EXECUTABLE_PLAYBOOK_TOOLS.has(tool));
 }
 
 function nextFallbackIndex(

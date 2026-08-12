@@ -7,6 +7,7 @@ export type PromptLayerName =
   | "project-context"
   | "session-history"
   | "conversation-continuation"
+  | "execution-plan"
   | "compaction-notice"
   | "user-message"
   | "channel-attachments"

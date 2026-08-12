@@ -13,7 +13,7 @@ export type ToolDisplayLabelSet = {
 };
 
 export const TOOL_DISPLAY_LABELS: Readonly<Record<string, ToolDisplayLabelSet>> = {
-  "playbook.plan": { en: "Plan", ar: "تخطيط" },
+  plan: { en: "Update Mission", ar: "تحديث خطة التنفيذ" },
   "trajectory.record": { en: "Record Trajectory", ar: "تسجيل المسار" },
   "file.read": { en: "Read File", ar: "قراءة ملف" },
   "file.write": { en: "Write File", ar: "كتابة ملف" },
@@ -116,7 +116,7 @@ export const TOOL_DISPLAY_LABELS: Readonly<Record<string, ToolDisplayLabelSet>> 
 };
 
 const TOOL_DISPLAY_ICONS: Readonly<Record<string, string>> = {
-  "playbook.plan": "🜁",
+  plan: "🜁",
   "trajectory.record": "🜃",
   "python.probe": "𓆙",
   "document.probe": "📄",

@@ -84,6 +84,55 @@ describe("AgentLoopBuilder", () => {
     expect(first.runRecorder).not.toBe(second.runRecorder);
     expect(first.providerTurnLoop).not.toBe(second.providerTurnLoop);
     expect(first.agentLoop).not.toBe(second.agentLoop);
+    expect(first.executionPlanController).toBeDefined();
+    expect(second.executionPlanController).toBeDefined();
+    expect(first.executionPlanController).not.toBe(second.executionPlanController);
+    expect(first.toolRegistry.get("plan")).toBeDefined();
+  });
+
+  it("does not register foreground execution planning in child or Task worker runtimes", async () => {
+    const harness = await createBuilderHarness();
+    const delegatedChild = await harness.build("child-session", { parentSessionId: "parent-session" });
+    const taskWorker = await harness.build("task-worker", {
+      parentSessionId: "parent-session",
+      taskExecution: {
+        taskId: "task-1",
+        rootTaskId: "task-1",
+        planRevisionId: "revision-1",
+        stepId: "step-1",
+        attemptId: "attempt-1"
+      }
+    });
+
+    expect(delegatedChild.executionPlanController).toBeUndefined();
+    expect(taskWorker.executionPlanController).toBeUndefined();
+    expect(delegatedChild.toolRegistry.get("plan")).toBeUndefined();
+    expect(taskWorker.toolRegistry.get("plan")).toBeUndefined();
+    expect(delegatedChild.providerTools.map((tool) => tool.function.name)).not.toContain("plan");
+    expect(taskWorker.providerTools.map((tool) => tool.function.name)).not.toContain("plan");
+  });
+
+  it("shares one read-only execution-plan projection with the root provider and agent loops", async () => {
+    const providerReaders: unknown[] = [];
+    const agentReaders: unknown[] = [];
+    const harness = await createBuilderHarness({
+      factories: {
+        providerTurnLoop(options) {
+          providerReaders.push(options.executionPlanReader);
+          return { run: vi.fn() } as never;
+        },
+        agentLoop(options) {
+          agentReaders.push(options.executionPlanReader);
+          return { handle: vi.fn() } as never;
+        }
+      }
+    });
+
+    const root = await harness.build("root-session");
+    await harness.build("child-session", { parentSessionId: "root-session" });
+
+    expect(providerReaders).toEqual([root.executionPlanController, undefined]);
+    expect(agentReaders).toEqual([root.executionPlanController, undefined]);
   });
 
   it("seeds each provider loop from its own persisted session usage", async () => {

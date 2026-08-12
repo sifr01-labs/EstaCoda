@@ -18,6 +18,7 @@ export type SessionToolContext = {
   parentSessionId?: string;
   childSessionId?: string;
   currentSessionId: () => string;
+  executionPlanController?: import("./execution-plan.js").ExecutionPlanControllerApi;
   sessionRuntimeContext?: {
     currentSessionId(): string;
     rotateSession(sessionId: string): void;
