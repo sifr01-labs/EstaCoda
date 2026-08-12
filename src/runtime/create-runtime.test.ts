@@ -332,7 +332,10 @@ describe("createRuntime provider turn budgets", () => {
       maxProviderToolCalls: 100,
       maxRepeatedToolFailures: 5,
       maxRepeatedBrowserObservations: 3,
-      maxProviderWallClockMs: 300_000
+      noProgressNudgeIteration: 3,
+      maxNoProgressIterations: 6,
+      maxProviderWallClockMs: 30 * 60_000,
+      finalizationReserveMs: 15_000
     });
   });
 });

@@ -156,6 +156,23 @@ describe("execution outcome receipts", () => {
     expect(learningOutcomeStatus(outcome.status)).toBe("partial");
   });
 
+  it("classifies an emergency deadline receipt as partial without fabricating failure", () => {
+    const outcome = deriveExecutionFinalOutcome({
+      providerExecution: {
+        ok: true,
+        fallbackUsed: false,
+        attempts: [],
+        toolCalls: [],
+        response: { ok: true, content: "Emergency receipt", model: "test", provider: "openai" }
+      },
+      toolExecutions: [],
+      emergencyDeadlineReached: true
+    });
+
+    expect(outcome.status).toBe("partially_completed");
+    expect(learningOutcomeStatus(outcome.status)).toBe("partial");
+  });
+
   it("does not claim recovery when the final execution still failed", () => {
     const outcome = deriveExecutionFinalOutcome({
       providerExecution: {

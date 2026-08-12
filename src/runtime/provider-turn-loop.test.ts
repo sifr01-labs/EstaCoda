@@ -191,7 +191,10 @@ async function createProviderTurnLoopForTest(
       maxProviderToolCalls: 4,
       maxRepeatedToolFailures: 2,
       maxRepeatedBrowserObservations: 3,
-      maxProviderWallClockMs: 10_000
+      noProgressNudgeIteration: 3,
+      maxNoProgressIterations: 6,
+      maxProviderWallClockMs: 10_000,
+      finalizationReserveMs: 0
     },
     ...overrides
   });
@@ -272,7 +275,10 @@ async function createCompressionHarness() {
       maxProviderToolCalls: 4,
       maxRepeatedToolFailures: 2,
       maxRepeatedBrowserObservations: 3,
-      maxProviderWallClockMs: 10_000
+      noProgressNudgeIteration: 3,
+      maxNoProgressIterations: 6,
+      maxProviderWallClockMs: 10_000,
+      finalizationReserveMs: 0
     },
     ...overrides
   });
@@ -618,6 +624,9 @@ async function createPostToolNudgeHarness(input: {
   modelFallbackRoutes?: ResolvedModelRoute[];
   maxProviderIterations?: number;
   maxProviderWallClockMs?: number;
+  noProgressNudgeIteration?: number;
+  maxNoProgressIterations?: number;
+  finalizationReserveMs?: number;
   taskExecution?: ProviderTurnLoopOptions["taskExecution"];
   executionPlanReader?: ProviderTurnLoopOptions["executionPlanReader"];
   onExecutePlans?: (input: {
@@ -707,7 +716,10 @@ async function createPostToolNudgeHarness(input: {
       maxProviderToolCalls: 8,
       maxRepeatedToolFailures: 3,
       maxRepeatedBrowserObservations: 3,
-      maxProviderWallClockMs: input.maxProviderWallClockMs ?? 10_000
+      noProgressNudgeIteration: input.noProgressNudgeIteration ?? 3,
+      maxNoProgressIterations: input.maxNoProgressIterations ?? 6,
+      maxProviderWallClockMs: input.maxProviderWallClockMs ?? 10_000,
+      finalizationReserveMs: input.finalizationReserveMs ?? 0
     },
     taskExecution: input.taskExecution,
     executionPlanReader: input.executionPlanReader
@@ -799,7 +811,10 @@ async function createRealToolPlanningHarness(input: {
       maxProviderToolCalls: 8,
       maxRepeatedToolFailures: 3,
       maxRepeatedBrowserObservations: 3,
-      maxProviderWallClockMs: 10_000
+      noProgressNudgeIteration: 3,
+      maxNoProgressIterations: 6,
+      maxProviderWallClockMs: 10_000,
+      finalizationReserveMs: 0
     },
     taskExecution: input.taskExecution
   });
@@ -1606,7 +1621,10 @@ describe("ProviderTurnLoop OpenAI-compatible stream recovery", () => {
           maxProviderToolCalls: 4,
           maxRepeatedToolFailures: 2,
           maxRepeatedBrowserObservations: 3,
-          maxProviderWallClockMs: 10_000
+          noProgressNudgeIteration: 3,
+          maxNoProgressIterations: 6,
+          maxProviderWallClockMs: 10_000,
+          finalizationReserveMs: 0
         }
       });
 
@@ -1660,7 +1678,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(continuation).not.toContain(firstRawResult);
   });
 
-  it("nudges once for a premature final answer and then returns a deterministic incomplete receipt", async () => {
+  it("nudges at three no-progress iterations and stops with a deterministic receipt at six", async () => {
     const planStore = new ExecutionPlanStore();
     planStore.replace({
       objective: "Build the collection",
@@ -1673,20 +1691,154 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       ]
     });
     const harness = await createPostToolNudgeHarness({
-      responses: [providerExecution("I can do that next."), providerExecution("Would you like me to continue?")],
+      responses: Array.from({ length: 7 }, (_, index) => providerExecution(`Narration ${index + 1}`)),
       toolSteps: [],
-      executionPlanReader: planStore
+      executionPlanReader: planStore,
+      maxProviderIterations: 8
     });
 
     const result = await runBasicProviderTurn(harness.loop);
-    const recoveryText = "Your active execution plan still has unfinished items.";
+    const recoveryText = "Your active execution plan has made no material progress for several iterations.";
     const requests = harness.completeSpy.mock.calls.map((call) => call[0] as ProviderRequest);
 
-    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(6);
     expect(requests.filter((request) => JSON.stringify(request.messages).includes(recoveryText))).toHaveLength(1);
     expect(result.executionPlanIncomplete).toBe(true);
     expect(result.providerExecution?.response?.content).toContain("The Mission is incomplete.");
     expect(result.providerExecution?.response?.content).toContain("- Build collection");
+    expect(result.providerExecution?.response?.content).toContain("6 consecutive iterations");
+  });
+
+  it("resets no-progress counting after a material plan transition", async () => {
+    const planStore = new ExecutionPlanStore();
+    planStore.replace({
+      objective: "Build and verify",
+      originTurnId: "turn-progress-reset",
+      revision: 1,
+      status: "active",
+      items: [
+        { id: "build", content: "Build", status: "in_progress" },
+        { id: "verify", content: "Verify", status: "pending" }
+      ]
+    });
+    let executionCount = 0;
+    const harness = await createPostToolNudgeHarness({
+      responses: Array.from({ length: 8 }, (_, index) => providerExecution("", [
+        providerToolCall(`call-progress-${index + 1}`)
+      ])),
+      toolSteps: Array.from({ length: 8 }, (_, index) => ({
+        executions: [toolExecutionForTool(`call-progress-${index + 1}`, "web.extract", "same evidence")]
+      })),
+      executionPlanReader: planStore,
+      maxProviderIterations: 8,
+      onExecutePlans: () => {
+        executionCount += 1;
+        if (executionCount === 3) {
+          planStore.replace({
+            objective: "Build and verify",
+            originTurnId: "turn-progress-reset",
+            revision: 2,
+            status: "active",
+            items: [
+              { id: "build", content: "Build", status: "completed", evidenceCallIds: ["call-progress-3"], evidence: [{
+                toolCallId: "call-progress-3",
+                tool: "web.extract",
+                outcome: "success",
+                riskClass: "read-only-network"
+              }] },
+              { id: "verify", content: "Verify", status: "in_progress" }
+            ]
+          });
+        }
+      }
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(8);
+    expect(result.executionPlanIncomplete).toBeUndefined();
+    const nudgeText = "Your active execution plan has made no material progress for several iterations.";
+    const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
+    expect(requests.filter((request) => JSON.stringify(request.messages).includes(nudgeText))).toHaveLength(1);
+  });
+
+  it("stops before new tool work when the emergency finalization reserve is reached", async () => {
+    const planStore = new ExecutionPlanStore();
+    planStore.replace({
+      objective: "Update external state",
+      originTurnId: "turn-deadline",
+      revision: 1,
+      status: "active",
+      items: [{ id: "update", content: "Update", status: "in_progress" }]
+    });
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("", [providerToolCall("call-deadline")])],
+      toolSteps: [{ executions: [toolExecutionForTool("call-deadline", "mcp.postman.updateCollection")] }],
+      executionPlanReader: planStore,
+      maxProviderWallClockMs: 100,
+      finalizationReserveMs: 20
+    });
+    let dateCalls = 0;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => {
+      dateCalls += 1;
+      return dateCalls <= 2 ? 0 : 85;
+    });
+
+    try {
+      const result = await runBasicProviderTurn(harness.loop);
+
+      expect(harness.executePlans).not.toHaveBeenCalled();
+      expect(result.executionPlanIncomplete).toBe(true);
+      expect(result.providerExecution?.response?.content).toContain("emergency deadline reserve");
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("does not interrupt a consequential mutation merely to preserve finalization time", async () => {
+    const planStore = new ExecutionPlanStore();
+    planStore.replace({
+      objective: "Update external state",
+      originTurnId: "turn-running-mutation",
+      revision: 1,
+      status: "active",
+      items: [{ id: "update", content: "Update", status: "in_progress" }]
+    });
+    let now = 0;
+    const mutation = toolExecutionForTool(
+      "call-running-mutation",
+      "mcp.postman.updateCollection",
+      "updated"
+    );
+    mutation.riskClass = "external-side-effect";
+    mutation.tool.riskClass = "external-side-effect";
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("", [providerToolCall("call-running-mutation")])],
+      toolSteps: [{ executions: [mutation] }],
+      executionPlanReader: planStore,
+      maxProviderIterations: 3,
+      maxProviderWallClockMs: 100,
+      finalizationReserveMs: 20,
+      onExecutePlans: () => {
+        now = 90;
+      }
+    });
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+
+    try {
+      const result = await runBasicProviderTurn(harness.loop);
+
+      expect(harness.executePlans).toHaveBeenCalledTimes(1);
+      expect(harness.completeSpy).toHaveBeenCalledTimes(1);
+      expect(result.toolExecutions).toEqual([expect.objectContaining({
+        toolCallId: "call-running-mutation",
+        result: expect.objectContaining({ ok: true })
+      })]);
+      expect(result.executionPlanIncomplete).toBe(true);
+      expect(result.providerExecution?.response?.content).toContain("emergency deadline reserve");
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
   it("nudges once and then stops repeated unchanged browser observations", async () => {
     const sensitivePageText = "private account marker";
@@ -3089,7 +3241,7 @@ describe("ProviderTurnLoop reasoning-only response recovery", () => {
 
       expect(result.iterations).toBe(1);
       expect(harness.completeSpy).toHaveBeenCalledTimes(1);
-      expect(result.providerExecution?.response?.content).toBe("");
+      expect(result.providerExecution?.response?.content).toContain("emergency deadline reserve");
       expect(harness.executePlans).not.toHaveBeenCalled();
     } finally {
       nowSpy.mockRestore();
@@ -4150,7 +4302,10 @@ describe("ProviderTurnLoop explicit route propagation", () => {
         maxProviderToolCalls: 4,
         maxRepeatedToolFailures: 2,
         maxRepeatedBrowserObservations: 3,
-        maxProviderWallClockMs: 10_000
+        noProgressNudgeIteration: 3,
+        maxNoProgressIterations: 6,
+        maxProviderWallClockMs: 10_000,
+        finalizationReserveMs: 0
       }
     });
 
@@ -4278,7 +4433,10 @@ describe("ProviderTurnLoop explicit route propagation", () => {
         maxProviderToolCalls: 4,
         maxRepeatedToolFailures: 2,
         maxRepeatedBrowserObservations: 3,
-        maxProviderWallClockMs: 10_000
+        noProgressNudgeIteration: 3,
+        maxNoProgressIterations: 6,
+        maxProviderWallClockMs: 10_000,
+        finalizationReserveMs: 0
       }
     });
 
@@ -4362,7 +4520,10 @@ describe("ProviderTurnLoop explicit route propagation", () => {
         maxProviderToolCalls: 4,
         maxRepeatedToolFailures: 2,
         maxRepeatedBrowserObservations: 3,
-        maxProviderWallClockMs: 10_000
+        noProgressNudgeIteration: 3,
+        maxNoProgressIterations: 6,
+        maxProviderWallClockMs: 10_000,
+        finalizationReserveMs: 0
       }
     });
 

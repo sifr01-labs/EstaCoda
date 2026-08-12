@@ -301,6 +301,10 @@ Final execution outcomes preserve consequential work independently of provider s
 
 Responses and trajectories use the structured statuses `completed`, `completed_with_recovered_errors`, `partially_completed`, `blocked`, `failed`, and `cancelled`. The existing trajectory `success` boolean remains as a coarse compatibility signal: only completed outcomes, including recovered intermediate errors, set it to true. Learning telemetry maps recovered and partial work to its existing `partial` status, while blocked and cancelled outcomes retain their existing meanings. This changes reporting only; it does not bypass tool security, approvals, workspace trust, or Task ownership.
 
+Active foreground Missions also use semantic progress control. A plan item transition, new successful evidence, successful mutation or verification, changed browser state, or concrete blocker resets the no-progress counter. Repeated observations and failures, plan reads, narration, and reasoning-only output do not. The runtime sends one recovery nudge after three consecutive no-progress iterations and returns a deterministic partial receipt after six. The existing browser observation guard remains the stricter browser-specific path, and the general 45-iteration and 100-tool ceilings remain unchanged.
+
+The provider loop has a 30-minute absolute emergency ceiling with a 15-second local-finalization reserve. Remaining absolute time caps each provider transport request without replacing route-level `timeoutMs` or stream-inactivity `staleTimeoutMs`. Near the ceiling the runtime stops starting new provider or tool work and renders its local receipt. It does not abort an already-running consequential tool merely to preserve finalization time. These controls are runtime defaults only; the Setup Editor does not expose Mission-duration settings yet.
+
 ---
 
 ## Registries

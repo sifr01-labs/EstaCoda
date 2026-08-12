@@ -27,6 +27,7 @@ export function deriveExecutionFinalOutcome(input: {
   toolExecutions: readonly ToolExecutionRecord[];
   executionPlan?: ExecutionPlan;
   executionPlanIncomplete?: boolean;
+  emergencyDeadlineReached?: boolean;
   delegatedAnswerOwned?: boolean;
   cancelled?: boolean;
 }): ExecutionFinalOutcome {
@@ -182,6 +183,7 @@ function classifyFinalStatus(input: {
   toolExecutions: readonly ToolExecutionRecord[];
   executionPlan?: ExecutionPlan;
   executionPlanIncomplete?: boolean;
+  emergencyDeadlineReached?: boolean;
   delegatedAnswerOwned?: boolean;
   cancelled?: boolean;
   confirmedActions: readonly ConfirmedActionReceipt[];
@@ -203,7 +205,12 @@ function classifyFinalStatus(input: {
   const hasConfirmedWork = input.confirmedActions.length > 0 || succeeded > 0;
   const planIncomplete = input.executionPlanIncomplete === true || input.executionPlan?.status === "active";
 
-  if (input.uncertainActions.length > 0 || input.verificationMissing || planIncomplete) {
+  if (
+    input.emergencyDeadlineReached === true ||
+    input.uncertainActions.length > 0 ||
+    input.verificationMissing ||
+    planIncomplete
+  ) {
     return "partially_completed";
   }
   if (input.executionPlan?.status === "blocked" || blocked) {

@@ -573,7 +573,10 @@ describe("AgentLoopBuilder", () => {
           maxProviderToolCalls: 100,
           maxRepeatedToolFailures: 5,
           maxRepeatedBrowserObservations: 3,
-          maxProviderWallClockMs: 42_000
+          noProgressNudgeIteration: 3,
+          maxNoProgressIterations: 6,
+          maxProviderWallClockMs: 42_000,
+          finalizationReserveMs: 15_000
         },
         providerRequestDefaults: {
           temperature: 0,

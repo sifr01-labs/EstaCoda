@@ -142,6 +142,8 @@ export type ProviderExecutionOptions = {
   onEvent?: (event: ProviderRuntimeEvent) => void | Promise<void>;
   now?: () => number;
   usage?: ProviderUsageContext;
+  /** Absolute emergency ceiling for the complete route chain, including fallbacks and retries. */
+  deadlineAtMs?: number;
 };
 
 export type ProviderExecutorOptions = {
@@ -422,6 +424,25 @@ export class ProviderExecutor {
 
       while (routeAttemptCount < maxRouteAttempts) {
         routeAttemptCount++;
+        const deadlineTimeoutMs = remainingDeadlineMs(options.deadlineAtMs, options.now);
+        if (deadlineTimeoutMs !== undefined && deadlineTimeoutMs <= 0) {
+          attempts.push({
+            provider: route.provider,
+            model: route.id,
+            routeIndex: index,
+            routeRole: routeRoleForIndex(index),
+            state: "preflight",
+            ok: false,
+            errorClass: "timeout",
+            content: "Provider turn emergency deadline elapsed before dispatch."
+          });
+          return {
+            ok: false,
+            fallbackUsed: index > 0,
+            attempts,
+            toolCalls
+          };
+        }
         const dispatchedAt = new Date().toISOString();
         const routeRequest = buildRouteProviderRequest(request, route, { stream: options.stream === true });
         const providerAttemptIndex = attempts.length;
@@ -474,7 +495,7 @@ export class ProviderExecutor {
         const completionOptions: ProviderCompletionOptions = {
           credential,
           signal: options.signal,
-          timeoutMs: route.timeoutMs,
+          timeoutMs: boundedProviderTimeout(route.timeoutMs, deadlineTimeoutMs),
           staleTimeoutMs: route.staleTimeoutMs
         };
 
@@ -1281,6 +1302,23 @@ function isCredentialIndependent(a: ResolvedModelRoute, b: ResolvedModelRoute): 
     return false;
   }
   return true;
+}
+
+function remainingDeadlineMs(
+  deadlineAtMs: number | undefined,
+  now: (() => number) | undefined
+): number | undefined {
+  if (deadlineAtMs === undefined) return undefined;
+  return Math.max(0, Math.floor(deadlineAtMs - (now?.() ?? Date.now())));
+}
+
+function boundedProviderTimeout(
+  routeTimeoutMs: number | undefined,
+  deadlineTimeoutMs: number | undefined
+): number | undefined {
+  if (deadlineTimeoutMs === undefined) return routeTimeoutMs;
+  if (routeTimeoutMs === undefined) return deadlineTimeoutMs;
+  return Math.min(routeTimeoutMs, deadlineTimeoutMs);
 }
 
 function lastPartialContent(attempts: readonly ProviderAttempt[]): string | undefined {

@@ -829,6 +829,7 @@ export class AgentLoop {
       toolExecutions,
       executionPlan: this.#executionPlanReader?.current(),
       executionPlanIncomplete: providerLoop.executionPlanIncomplete,
+      emergencyDeadlineReached: providerLoop.emergencyDeadlineReached,
       delegatedAnswerOwned: providerLoop.delegatedAnswerOwnership !== undefined
     });
     const skillOutcomes = await this.#runRecorder.recordSkillOutcomes({
@@ -947,7 +948,11 @@ export class AgentLoop {
     response.finalOutcome = finalOutcome;
     const needsDeterministicReceipt = delegatedAnswerAcknowledgement === undefined &&
       (finalOutcome.confirmedActions.length > 0 || finalOutcome.uncertainActions.length > 0) &&
-      (effectiveProviderExecution?.ok === false || providerLoop.executionPlanIncomplete === true);
+      (
+        effectiveProviderExecution?.ok === false ||
+        providerLoop.executionPlanIncomplete === true ||
+        providerLoop.emergencyDeadlineReached === true
+      );
     if (needsDeterministicReceipt) {
       const receiptLead = effectiveProviderExecution?.ok === false
         ? effectiveProviderExecution.spendDenialReason === undefined

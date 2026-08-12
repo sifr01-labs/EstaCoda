@@ -190,6 +190,74 @@ describe("ProviderExecutor route-based execution", () => {
     expect(adapter.calls[0].options?.staleTimeoutMs).toBe(567);
   });
 
+  it("caps the provider transport timeout at the remaining absolute deadline", async () => {
+    const adapter = createMockAdapter({ id: "test-provider" });
+    registry.register(adapter);
+
+    const route = createDefaultRoute({ provider: "test-provider", timeoutMs: 10_000 });
+    const result = await executor.complete({ messages: [] }, {}, {
+      primaryRoute: route,
+      deadlineAtMs: 5_000,
+      now: () => 3_750
+    });
+
+    expect(result.ok).toBe(true);
+    expect(adapter.calls[0].options?.timeoutMs).toBe(1_250);
+    expect(route.timeoutMs).toBe(10_000);
+  });
+
+  it("does not dispatch after the absolute deadline has elapsed", async () => {
+    const adapter = createMockAdapter({ id: "test-provider" });
+    registry.register(adapter);
+
+    const result = await executor.complete({ messages: [] }, {}, {
+      primaryRoute: createDefaultRoute({ provider: "test-provider" }),
+      deadlineAtMs: 5_000,
+      now: () => 5_000
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.attempts).toEqual([expect.objectContaining({
+      state: "preflight",
+      errorClass: "timeout"
+    })]);
+    expect(adapter.calls).toHaveLength(0);
+  });
+
+  it("recomputes remaining absolute time before fallback dispatch", async () => {
+    const primary = createMockAdapter({
+      id: "test-provider",
+      completeResponse: {
+        ok: false,
+        content: "primary unavailable",
+        errorClass: "server",
+        model: "primary-model",
+        provider: "test-provider"
+      }
+    });
+    const fallback = createMockAdapter({ id: "fallback-provider" });
+    registry.register(primary);
+    registry.register(fallback);
+    const clock = [0, 400];
+
+    const result = await executor.complete({ messages: [] }, {}, {
+      primaryRoute: createDefaultRoute({ provider: "test-provider", id: "primary-model", apiMode: "custom_openai_compatible" }),
+      fallbackChain: [createDefaultRoute({
+        provider: "fallback-provider",
+        id: "fallback-model",
+        apiMode: "custom_openai_compatible",
+        authMethod: "none",
+        baseUrl: "http://localhost:9999/v1"
+      })],
+      deadlineAtMs: 1_000,
+      now: () => clock.shift() ?? 400
+    });
+
+    expect(result.ok).toBe(true);
+    expect(primary.calls[0].options?.timeoutMs).toBe(1_000);
+    expect(fallback.calls[0].options?.timeoutMs).toBe(600);
+  });
+
   it("passes route maxTokens when request maxTokens is unset", async () => {
     const adapter = createMockAdapter({ id: "test-provider" });
     registry.register(adapter);
