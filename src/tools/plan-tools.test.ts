@@ -15,23 +15,25 @@ describe("plan tool", () => {
   });
 
   it("supports write, read, and merge with canonical snapshots", async () => {
+    const emitted: string[] = [];
     const controller = new ExecutionPlanController(new ExecutionPlanStore());
     const tool = createPlanTools({ controller })[0]!;
     const write = await tool.run({
       operation: "write",
       objective: "Test APIs",
       items: [{ id: "inspect", content: "Inspect APIs", status: "in_progress" }]
-    }, { visibleTurnId: "turn-1" });
+    }, { visibleTurnId: "turn-1", onEvent: (event) => { emitted.push(event.kind); } });
     const merge = await tool.run({
       operation: "merge",
       items: [{ id: "inspect", status: "completed", evidenceCallIds: ["call-1"] }]
-    });
+    }, { onEvent: (event) => { emitted.push(event.kind); } });
     const read = await tool.run({ operation: "read" });
 
     expect(write.ok).toBe(true);
     expect(JSON.parse(write.content)).toMatchObject({ revision: 1, status: "active" });
     expect(JSON.parse(merge.content)).toMatchObject({ revision: 2, status: "completed" });
     expect(read.content).toBe(merge.content);
+    expect(emitted).toEqual(["execution-plan-started", "execution-plan-completed"]);
   });
 
   it("returns structured errors instead of throwing", async () => {

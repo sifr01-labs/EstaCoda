@@ -11,6 +11,14 @@ export class ExecutionPlanStore implements ExecutionPlanReader {
     this.#plan = cloneExecutionPlan(plan);
     return cloneExecutionPlan(this.#plan);
   }
+
+  hydrate(plan: ExecutionPlan): ExecutionPlan {
+    return this.replace(plan);
+  }
+
+  clear(): void {
+    this.#plan = undefined;
+  }
 }
 
 export function cloneExecutionPlan(plan: ExecutionPlan): ExecutionPlan {

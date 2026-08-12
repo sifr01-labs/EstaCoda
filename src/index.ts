@@ -488,7 +488,8 @@ async function main(): Promise<void> {
   const oneShot = await Promise.race([
     runOneShotPrompt({
       runtime,
-      argv
+      argv,
+      locale: config.ui.language === "ar" ? "ar" : "en"
     }),
     new Promise<never>((_, reject) => {
       setTimeout(() => {

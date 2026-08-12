@@ -135,6 +135,29 @@ describe("AgentLoopBuilder", () => {
     expect(agentReaders).toEqual([root.executionPlanController, undefined]);
   });
 
+  it("hydrates the latest unresolved execution plan only for the root session", async () => {
+    const harness = await createBuilderHarness();
+    await harness.sessionDb.createSession({ id: "resume-session", profileId: "default" });
+    await harness.sessionDb.appendEvent("resume-session", {
+      kind: "execution-plan-updated",
+      plan: {
+        objective: "Resume API testing",
+        originTurnId: "turn-origin",
+        revision: 4,
+        status: "active",
+        items: [{ id: "verify", content: "Verify responses", status: "in_progress" }]
+      }
+    });
+
+    const built = await harness.build("resume-session");
+
+    expect(built.executionPlanController?.current()).toMatchObject({
+      objective: "Resume API testing",
+      originTurnId: "turn-origin",
+      revision: 4
+    });
+  });
+
   it("seeds each provider loop from its own persisted session usage", async () => {
     const captured: unknown[] = [];
     const harness = await createBuilderHarness({

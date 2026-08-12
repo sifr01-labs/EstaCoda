@@ -28,6 +28,48 @@ function makeTempDir(): string {
 }
 
 describe("RunRecorder", () => {
+  it("records execution-plan lifecycle state without raw tool results", async () => {
+    const db = new SQLiteSessionDB({ path: join(makeTempDir(), "sessions.sqlite") });
+    try {
+      const session = await db.createSession({ id: "session-plan", profileId: "default" });
+      const trajectoryRecorder = new TrajectoryRecorder({
+        profileId: "default",
+        sessionId: session.id,
+        modelId: "test-model",
+        id: () => "trajectory-plan"
+      });
+      const recorder = new RunRecorder({
+        sessionDb: db,
+        sessionId: session.id,
+        trajectoryRecorder,
+        profileId: "default"
+      });
+      const event = {
+        kind: "execution-plan-started" as const,
+        plan: {
+          objective: "Test APIs",
+          originTurnId: "turn-1",
+          revision: 1,
+          status: "active" as const,
+          items: [{ id: "test", content: "Test APIs", status: "in_progress" as const }]
+        }
+      };
+      const emitted: RuntimeEvent[] = [];
+
+      await recorder.recordExecutionPlanTransition(event, (runtimeEvent) => { emitted.push(runtimeEvent); });
+
+      expect(await db.listEvents(session.id)).toContainEqual(event);
+      expect(trajectoryRecorder.snapshot().events).toContainEqual(expect.objectContaining({
+        kind: "execution-plan-started",
+        data: { plan: event.plan }
+      }));
+      expect(emitted).toEqual([event]);
+      expect(JSON.stringify(event)).not.toContain("toolResult");
+    } finally {
+      db.close();
+    }
+  });
+
   it("records artifacts nested in safe tool metadata envelopes", async () => {
     const db = new SQLiteSessionDB({ path: join(makeTempDir(), "sessions.sqlite") });
     try {

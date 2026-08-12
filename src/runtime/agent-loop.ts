@@ -3,6 +3,7 @@ import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { ExecutionPlan, ExecutionPlanReader } from "../contracts/execution-plan.js";
+import type { ExecutionPlanController } from "./execution-plan-controller.js";
 import type { MemoryConclusion, MemoryFileKind, MemoryProvider, MemoryPromptContext, SkillOutcome } from "../contracts/memory.js";
 import type { PromptBudgetReport, PromptSemanticCompressionReport } from "../contracts/prompt.js";
 import type { ModelProfile, ProviderMessage, ProviderRequest, ProviderRoutePreferences } from "../contracts/provider.js";
@@ -164,6 +165,7 @@ export type AgentLoopOptions = {
   budgets?: Partial<AgentLoopBudgets>;
   taskExecution?: ProviderUsageTaskAttribution;
   executionPlanReader?: ExecutionPlanReader;
+  executionPlanController?: ExecutionPlanController;
 };
 
 export type AgentLoopBudgets = {
@@ -245,6 +247,7 @@ export class AgentLoop {
   readonly #budgets: AgentLoopBudgets;
   readonly #taskExecution: ProviderUsageTaskAttribution | undefined;
   readonly #executionPlanReader: ExecutionPlanReader | undefined;
+  readonly #executionPlanController: ExecutionPlanController | undefined;
 
   constructor(options: AgentLoopOptions) {
     this.#responseLabel = options.responseLabel;
@@ -260,6 +263,7 @@ export class AgentLoop {
     this.#profileId = options.profileId;
     this.#taskExecution = options.taskExecution;
     this.#executionPlanReader = options.executionPlanReader;
+    this.#executionPlanController = options.executionPlanController;
     this.#toolExecutor = options.toolExecutor;
     this.#toolCallPlanner = options.toolCallPlanner;
     this.#memoryProvider = options.memoryProvider;
@@ -298,6 +302,7 @@ export class AgentLoop {
   }
 
   async handle(input: AgentLoopInput): Promise<AgentLoopResponse> {
+    await this.#executionPlanController?.prepareForTurn(input.text, input.onEvent);
     const latestResumeNote = await this.#runRecorder.latestResumeNote();
     const effectiveText = isResumeRequest(input.text) && latestResumeNote !== undefined
       ? [
@@ -788,6 +793,12 @@ export class AgentLoop {
           providerLoop.delegatedAnswerOwnership,
           this.#ui?.language === "ar" ? "ar" : "en"
         );
+    if (providerLoop.delegatedAnswerOwnership !== undefined) {
+      await this.#executionPlanController?.transfer(
+        providerLoop.delegatedAnswerOwnership.tasks.map((task) => task.taskId),
+        input.onEvent
+      );
+    }
     const displayText = delegatedAnswerAcknowledgement ?? (providerReturnedEmptyContent
       ? "I completed the requested actions but did not produce any visible output."
       : rawProviderContent);

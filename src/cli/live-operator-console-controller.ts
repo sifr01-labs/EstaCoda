@@ -35,6 +35,7 @@ import { RawPromptRenderLoop } from "./rawPromptRenderLoop.js";
 import { semanticMotionForPhase, semanticMotionFrameIndex } from "../ui/semantic-motion.js";
 import type { TaskOperatorService } from "../tasks/task-operator-service.js";
 import type { TaskControlIntent } from "../ui/papyrus/operator-console/taskSurface.js";
+import type { ExecutionPlan } from "../contracts/execution-plan.js";
 
 export type LiveOperatorConsoleControllerOptions = {
   readonly output: Pick<Writable, "write"> & {
@@ -93,6 +94,7 @@ export class LiveOperatorConsoleController {
   #activeWork: ToolActivityState = createActiveWorkRuntimeState();
   #steer: SteerState | undefined;
   #turnActivity: TurnActivityState | undefined;
+  #executionPlan: ExecutionPlan | undefined;
   #transcript: readonly TranscriptBlock[];
   #streamingSegments: readonly StreamingSegment[] = [];
   #streamingCurrentSegmentText = "";
@@ -339,6 +341,12 @@ export class LiveOperatorConsoleController {
     this.#syncAnimationTimer();
   }
 
+  setExecutionPlan(plan: ExecutionPlan | undefined): void {
+    this.#executionPlan = plan;
+    this.#runtimeHost.setExecutionPlan(this.#executionPlan);
+    this.refresh({ dirtyRegions: ["mission"] });
+  }
+
   clear(): void {
     this.#stopAnimationTimer();
     this.#stopStreamingRefreshTimer();
@@ -367,6 +375,7 @@ export class LiveOperatorConsoleController {
         focus,
         transcript: this.#transcript,
         turnActivity: this.#turnActivity,
+        executionPlan: this.#executionPlan,
         activeWork,
         streaming: this.#streamingSnapshotForRender(),
         steer: this.#steer,

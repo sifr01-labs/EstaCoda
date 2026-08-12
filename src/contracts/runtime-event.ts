@@ -13,6 +13,7 @@ import type {
   SkillRouteTelemetryDetails,
   SkillRouteFinalOutcomeStatus
 } from "./skill.js";
+import type { ExecutionPlanLifecycleEvent } from "./execution-plan.js";
 
 export type ContextEstimateStage =
   | "input"
@@ -24,6 +25,7 @@ export type ContextEstimateStage =
   | "assembled-prompt";
 
 export type RuntimeEvent =
+  | ExecutionPlanLifecycleEvent
   | {
       kind: "agent-start";
       sessionId: string;

@@ -21,6 +21,7 @@ import { renderStatusRailSurface } from "./statusRailSurface.js";
 import { renderStreamingSurface } from "./streamingSurface.js";
 import { renderTranscriptSurface } from "./transcriptSurface.js";
 import { renderTurnActivitySurface } from "./turnActivitySurface.js";
+import { renderMissionSurface } from "./missionSurface.js";
 import { renderTaskCardSurface, renderTaskInspectionSurface } from "./taskSurface.js";
 
 export type OperatorConsoleRenderedLine = {
@@ -152,6 +153,13 @@ function renderRegionLines(
       motionElapsedMs: state.motionElapsedMs,
     }).map((text) => ({ region: region.kind, text }));
   }
+  if (region.kind === "mission") {
+    return renderMissionSurface(state.executionPlan, {
+      width: region.width,
+      height: region.height,
+      locale: state.locale,
+    }).map((text) => ({ region: region.kind, text }));
+  }
   if (region.kind === "approvals") {
     return renderApprovalSurface(state.approvals, {
       width: region.width,
@@ -203,6 +211,8 @@ function regionLabel(
       return `Approvals: ${state.approvals.length}`;
     case "turnActivity":
       return `Turn activity: ${state.turnActivity?.phase ?? ""}`;
+    case "mission":
+      return "";
     case "queuedSteer":
       return `Queued steer: ${state.steer?.queued?.text ?? ""}`;
     case "taskCards":

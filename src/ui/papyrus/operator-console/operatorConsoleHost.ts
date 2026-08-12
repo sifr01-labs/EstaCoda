@@ -27,6 +27,7 @@ import {
   type OperatorConsoleRuntimeHost,
 } from "./operatorConsoleRuntimeHost.js";
 import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
+import type { ExecutionPlan } from "../../../contracts/execution-plan.js";
 
 export type OperatorConsoleRawPromptSnapshot = {
   readonly mode?: OperatorConsoleMode;
@@ -42,6 +43,7 @@ export type OperatorConsoleRawPromptSnapshot = {
   readonly approvals?: readonly ApprovalCardState[];
   readonly tasks?: TaskSurfaceState;
   readonly turnActivity?: TurnActivityState;
+  readonly executionPlan?: ExecutionPlan;
   readonly slash?: SlashMenuState;
   readonly activeWork?: ToolActivityState;
   readonly streaming?: StreamingState;
@@ -87,6 +89,7 @@ export function buildOperatorConsoleStateFromRawPrompt(
     motionElapsedMs: snapshot.motionElapsedMs,
     transcript: snapshot.transcript ?? [],
     turnActivity: snapshot.turnActivity,
+    executionPlan: snapshot.executionPlan,
     attachments: snapshot.attachments ?? [],
     approvals: snapshot.approvals ?? [],
     tasks: snapshot.tasks,
@@ -133,6 +136,7 @@ export function buildOperatorConsoleRawPromptFrameWithRuntimeHost(
   host.setSetupPanel(snapshot.setupPanel);
   host.setTranscript(snapshot.transcript ?? []);
   host.setTurnActivity(snapshot.turnActivity);
+  host.setExecutionPlan(snapshot.executionPlan);
   host.setAttachments(snapshot.attachments ?? []);
   host.setApprovals(snapshot.approvals ?? []);
   host.setTasks(snapshot.tasks ?? createInitialOperatorConsoleState().tasks);

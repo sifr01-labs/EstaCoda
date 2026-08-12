@@ -8,6 +8,7 @@ import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 import type { SessionCostSummary, SpendingBudgetSummary } from "../../../contracts/usage-cost.js";
 import type { TaskCompletionTraceSnapshot } from "../../../contracts/task-completion-trace.js";
 import type { ResolvedBidiMode } from "../screen/bidi.js";
+import type { ExecutionPlan } from "../../../contracts/execution-plan.js";
 
 export type OperatorConsoleMode = "session" | "setup";
 
@@ -553,6 +554,7 @@ export type OperatorConsoleState = {
   /** One elapsed-time clock shared by every animated surface. */
   readonly motionElapsedMs: number;
   readonly turnActivity?: TurnActivityState;
+  readonly executionPlan?: ExecutionPlan;
   readonly attachments: readonly AttachmentCardState[];
   readonly tasks: TaskSurfaceState;
   readonly activeWork: ToolActivityState;
@@ -572,6 +574,7 @@ export type OperatorConsoleSurface =
   | "streaming"
   | "approvals"
   | "turnActivity"
+  | "mission"
   | "activeWork"
   | "queuedSteer"
   | "taskCards"
@@ -589,6 +592,7 @@ export const OPERATOR_CONSOLE_SURFACE_ORDER: readonly OperatorConsoleSurface[] =
   "streaming",
   "approvals",
   "turnActivity",
+  "mission",
   "activeWork",
   "queuedSteer",
   "taskCards",
@@ -610,6 +614,7 @@ export type CreateInitialOperatorConsoleStateInput = {
   readonly status?: StatusRailState;
   readonly motionElapsedMs?: number;
   readonly turnActivity?: TurnActivityState;
+  readonly executionPlan?: ExecutionPlan;
   readonly attachments?: readonly AttachmentCardState[];
   readonly tasks?: TaskSurfaceState;
   readonly activeWork?: ToolActivityState;
@@ -639,6 +644,7 @@ export function createInitialOperatorConsoleState(
     status: input.status ?? createDefaultStatusRailState(),
     motionElapsedMs: normalizeMotionElapsedMs(input.motionElapsedMs),
     ...(input.turnActivity === undefined ? {} : { turnActivity: input.turnActivity }),
+    ...(input.executionPlan === undefined ? {} : { executionPlan: input.executionPlan }),
     attachments: input.attachments ?? [],
     tasks: input.tasks ?? createDefaultTaskSurfaceState(),
     activeWork: input.activeWork ?? createDefaultToolActivityState(),

@@ -20,6 +20,7 @@ import {
   hasStreamingSurface,
 } from "./streamingSurface.js";
 import { getTurnActivitySurfaceDesiredHeight } from "./turnActivitySurface.js";
+import { getMissionSurfaceDesiredHeight } from "./missionSurface.js";
 import {
   getQueuedSteerSurfaceDesiredHeight,
   getSteerInputSurfaceDesiredHeight,
@@ -62,6 +63,7 @@ const STATUS_PRIORITY = 2;
 const INTERACTIVE_OPTIONAL_PRIORITY = 3;
 const APPROVAL_PRIORITY = 3;
 const TURN_ACTIVITY_PRIORITY = 3;
+const MISSION_PRIORITY = 3;
 const ACTIVE_WORK_PRIORITY = 4;
 const STREAMING_PRIORITY = 5;
 const ATTACHMENTS_PRIORITY = 5;
@@ -175,6 +177,15 @@ function createRegionDescriptors(
       priority: TURN_ACTIVITY_PRIORITY,
       minHeight: 1,
       desiredHeight: getTurnActivitySurfaceDesiredHeight(state.turnActivity),
+    });
+  }
+
+  if (state.executionPlan !== undefined) {
+    descriptors.push({
+      kind: "mission",
+      priority: MISSION_PRIORITY,
+      minHeight: 1,
+      desiredHeight: getMissionSurfaceDesiredHeight(state.executionPlan),
     });
   }
 
@@ -342,24 +353,26 @@ function surfaceOrderIndex(kind: OperatorConsoleRegionKind): number {
       return 4;
     case "turnActivity":
       return 5;
-    case "activeWork":
+    case "mission":
       return 6;
-    case "queuedSteer":
+    case "activeWork":
       return 7;
-    case "taskCards":
+    case "queuedSteer":
       return 8;
-    case "taskInspection":
+    case "taskCards":
       return 9;
-    case "attachments":
+    case "taskInspection":
       return 10;
-    case "promptGap":
+    case "attachments":
       return 11;
-    case "prompt":
+    case "promptGap":
       return 12;
-    case "slashMenu":
+    case "prompt":
       return 13;
-    case "statusRail":
+    case "slashMenu":
       return 14;
+    case "statusRail":
+      return 15;
   }
 }
 

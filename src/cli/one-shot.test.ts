@@ -127,4 +127,63 @@ describe("one-shot prompt", () => {
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("Warning: background memory finalization could not be queued.");
   });
+
+  it("prints only the final plain Mission snapshot", async () => {
+    const basePlan = {
+      objective: "Test APIs",
+      originTurnId: "turn-1",
+      revision: 1,
+      status: "active" as const,
+      items: [{ id: "test", content: "Test APIs", status: "in_progress" as const }]
+    };
+    const finalPlan = {
+      ...basePlan,
+      revision: 2,
+      status: "completed" as const,
+      items: [{ id: "test", content: "Test APIs", status: "completed" as const }]
+    };
+    const runtime = {
+      tools: () => [],
+      handle: async (input: { onEvent?: (event: import("../contracts/runtime-event.js").RuntimeEvent) => void }) => {
+        input.onEvent?.({ kind: "execution-plan-started", plan: basePlan });
+        input.onEvent?.({ kind: "execution-plan-completed", plan: finalPlan });
+        return {
+          label: "assistant",
+          text: "done",
+          toolExecutions: [],
+          progress: [],
+          executionPlan: finalPlan
+        };
+      }
+    } as unknown as Runtime;
+
+    const result = await runOneShotPrompt({ runtime, argv: ["test APIs"] });
+
+    expect(result.output).toContain("Mission · Test APIs\n✓ Test APIs");
+    expect(result.output.match(/Mission ·/gu)).toHaveLength(1);
+  });
+
+  it("uses the Arabic Mission label in one-shot output", async () => {
+    const plan = {
+      objective: "اختبار الواجهات",
+      originTurnId: "turn-1",
+      revision: 1,
+      status: "active" as const,
+      items: [{ id: "test", content: "اختبار الواجهات", status: "in_progress" as const }]
+    };
+    const runtime = {
+      tools: () => [],
+      handle: async () => ({
+        label: "assistant",
+        text: "جارٍ العمل",
+        toolExecutions: [],
+        progress: [],
+        executionPlan: plan
+      })
+    } as unknown as Runtime;
+
+    const result = await runOneShotPrompt({ runtime, argv: ["اختبر"], locale: "ar" });
+
+    expect(result.output).toContain("خطة التنفيذ · اختبار الواجهات");
+  });
 });

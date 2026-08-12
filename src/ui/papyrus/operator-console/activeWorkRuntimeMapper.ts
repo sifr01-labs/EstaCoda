@@ -9,6 +9,7 @@ import type {
   ToolActivityState,
 } from "./operatorConsoleState.js";
 import { createDefaultToolActivityState } from "./operatorConsoleState.js";
+import type { ExecutionPlan } from "../../../contracts/execution-plan.js";
 
 const MAX_REMEMBERED_DELEGATION_SETTLEMENTS = 512;
 export const MAX_DELEGATION_WORKER_ACTIVITY_ROWS = 6;
@@ -52,6 +53,20 @@ export type ActiveWorkRuntimeEventMapperOptions = {
   readonly locale?: ToolDisplayLocale;
   readonly now?: () => number;
 };
+
+export function executionPlanFromRuntimeEvent(event: RuntimeEvent): ExecutionPlan | undefined {
+  switch (event.kind) {
+    case "execution-plan-started":
+    case "execution-plan-updated":
+    case "execution-plan-completed":
+    case "execution-plan-blocked":
+    case "execution-plan-transferred":
+    case "execution-plan-abandoned":
+      return event.plan;
+    default:
+      return undefined;
+  }
+}
 
 export class ActiveWorkRuntimeEventMapper {
   readonly #starts = new Map<string, number[]>();

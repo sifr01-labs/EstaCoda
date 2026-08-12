@@ -21,6 +21,7 @@ import type {
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolsetName, ToolRiskClass } from "../contracts/tool.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
+import type { ExecutionPlanLifecycleEvent } from "../contracts/execution-plan.js";
 import type { Trajectory } from "../contracts/trajectory.js";
 import type { TrajectoryStore } from "../contracts/trajectory-store.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
@@ -33,6 +34,7 @@ import { truncate } from "../utils/formatting.js";
 import { buildFailureRecord, type FailureContext } from "../trajectory/failure-classifier.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import type { SessionRuntimeContext } from "./session-runtime-context.js";
+import { cloneExecutionPlan } from "./execution-plan-store.js";
 
 export type RunRecorderOptions = {
   sessionDb: SessionDB;
@@ -61,6 +63,31 @@ export class RunRecorder {
     this.#trajectoryStore = options.trajectoryStore;
     this.#profileId = options.profileId;
     this.#skillEvolutionStore = options.skillEvolutionStore;
+  }
+
+  async recordExecutionPlanTransition(
+    event: ExecutionPlanLifecycleEvent,
+    sink?: RuntimeEventSink
+  ): Promise<void> {
+    const persistedEvent: ExecutionPlanLifecycleEvent = {
+      ...event,
+      plan: cloneExecutionPlan(event.plan),
+      ...(event.taskIds === undefined ? {} : { taskIds: [...event.taskIds] })
+    };
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), persistedEvent);
+    this.#trajectoryRecorder.record(persistedEvent.kind, {
+      plan: cloneExecutionPlan(persistedEvent.plan),
+      ...(persistedEvent.taskIds === undefined ? {} : { taskIds: [...persistedEvent.taskIds] })
+    });
+    try {
+      await emit(sink, {
+        ...persistedEvent,
+        plan: cloneExecutionPlan(persistedEvent.plan),
+        ...(persistedEvent.taskIds === undefined ? {} : { taskIds: [...persistedEvent.taskIds] })
+      });
+    } catch {
+      // UI/event consumers are observational; persistence remains authoritative.
+    }
   }
 
   async recordSkillPlaybookStep(input: {

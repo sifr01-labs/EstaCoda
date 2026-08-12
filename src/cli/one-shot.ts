@@ -4,6 +4,7 @@ import { ToolActivityViewModelBuilder } from "./tool-activity-view-models.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import { toolDisplayIcon, toolDisplayLabel } from "../ui/tool-display.js";
 import { formatPlainDelegationProgressEvent } from "../ui/papyrus/operator-console/activeWorkRuntimeMapper.js";
+import { formatPlainExecutionPlan } from "../ui/papyrus/operator-console/missionSurface.js";
 import { formatSpendingThresholdWarning } from "../ui/spending-warning-format.js";
 
 export type OneShotPromptResult = {
@@ -15,6 +16,7 @@ export type OneShotPromptResult = {
 export type OneShotPromptOptions = {
   runtime: Runtime;
   argv: string[];
+  locale?: "en" | "ar";
 };
 
 export async function runOneShotPrompt(options: OneShotPromptOptions): Promise<OneShotPromptResult> {
@@ -58,6 +60,7 @@ export async function runOneShotPrompt(options: OneShotPromptOptions): Promise<O
     exitCode: 0,
     output: [
       ...eventLines,
+      formatPlainExecutionPlan(response.executionPlan, options.locale),
       "",
       `${response.label}: ${response.text}`,
       response.providerExecution?.response === undefined
@@ -130,6 +133,13 @@ function renderOneShotEvent(
       return safeLine(formatSpendingThresholdWarning(event));
     case "context-estimate":
     case "context-window-usage":
+      return undefined;
+    case "execution-plan-started":
+    case "execution-plan-updated":
+    case "execution-plan-completed":
+    case "execution-plan-blocked":
+    case "execution-plan-transferred":
+    case "execution-plan-abandoned":
       return undefined;
     case "delegation-progress": {
       const line = formatPlainDelegationProgressEvent(event);

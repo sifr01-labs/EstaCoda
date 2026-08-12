@@ -43,6 +43,7 @@ describe("Papyrus operator console state model", () => {
       "streaming",
       "approvals",
       "turnActivity",
+      "mission",
       "activeWork",
       "queuedSteer",
       "taskCards",

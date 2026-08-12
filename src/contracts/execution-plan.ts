@@ -61,6 +61,26 @@ export type ExecutionPlan = {
   items: ExecutionPlanItem[];
 };
 
+export const EXECUTION_PLAN_EVENT_KINDS = [
+  "execution-plan-started",
+  "execution-plan-updated",
+  "execution-plan-completed",
+  "execution-plan-blocked",
+  "execution-plan-transferred",
+  "execution-plan-abandoned"
+] as const;
+
+export type ExecutionPlanEventKind = typeof EXECUTION_PLAN_EVENT_KINDS[number];
+
+export type ExecutionPlanLifecycleEvent = {
+  kind: ExecutionPlanEventKind;
+  plan: ExecutionPlan;
+  /** Trusted Task identifiers recorded only for an ownership handoff. */
+  taskIds?: string[];
+};
+
+export type ExecutionPlanEventSink = (event: ExecutionPlanLifecycleEvent) => void | Promise<void>;
+
 export type ExecutionPlanWriteInput = {
   objective: string;
   items: Array<{
@@ -95,6 +115,6 @@ export type ExecutionPlanReader = {
 };
 
 export type ExecutionPlanControllerApi = ExecutionPlanReader & {
-  write(input: ExecutionPlanWriteInput, originTurnId: string): ExecutionPlan;
-  merge(input: ExecutionPlanMergeInput): ExecutionPlan;
+  write(input: ExecutionPlanWriteInput, originTurnId: string, sink?: ExecutionPlanEventSink): Promise<ExecutionPlan>;
+  merge(input: ExecutionPlanMergeInput, sink?: ExecutionPlanEventSink): Promise<ExecutionPlan>;
 };

@@ -297,6 +297,50 @@ describe("SessionCompressionService", () => {
     }));
   });
 
+  it("carries only the latest unresolved execution-plan snapshot into a compacted child", async () => {
+    const { db, sessionId } = await sessionDbWithMessages(8);
+    await db.appendEvent(sessionId, {
+      kind: "execution-plan-started",
+      plan: {
+        objective: "Test APIs",
+        originTurnId: "turn-plan",
+        revision: 1,
+        status: "active",
+        items: [{ id: "test", content: "Test APIs", status: "in_progress" }]
+      }
+    });
+    await db.appendEvent(sessionId, {
+      kind: "execution-plan-updated",
+      plan: {
+        objective: "Test APIs",
+        originTurnId: "turn-plan",
+        revision: 2,
+        status: "active",
+        items: [{ id: "test", content: "Test APIs", status: "pending" }]
+      }
+    });
+    const service = new SessionCompressionService({
+      sessionDb: db,
+      config: normalizeSessionCompressionConfig({ enabled: false, protectFirstN: 1, protectLastN: 2 }),
+      ...auxiliaryHarness("plan-aware summary")
+    });
+
+    const result = await service.compactNow({
+      profileId: "profile",
+      sessionId,
+      preserveTranscript: true
+    });
+    const childEvents = await db.listEvents(result.activeSessionId);
+    const carried = childEvents.filter((event) => event.kind.startsWith("execution-plan-"));
+
+    expect(carried).toHaveLength(1);
+    expect(carried[0]).toMatchObject({
+      kind: "execution-plan-updated",
+      plan: { revision: 2, originTurnId: "turn-plan" }
+    });
+    expect(JSON.stringify(carried)).not.toContain("tool-result");
+  });
+
   it("compactIfNeeded can rotate hygiene compaction to a compacted child session", async () => {
     const { db, sessionId } = await sessionDbWithMessages(8);
     const service = new SessionCompressionService({

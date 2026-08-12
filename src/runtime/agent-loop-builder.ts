@@ -36,6 +36,7 @@ import type { SessionCompressionConfig } from "../config/runtime-config.js";
 import type { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import type { ProviderUsageTaskAttribution } from "../providers/provider-usage-ledger.js";
 import { loadSessionContextWindowUsage } from "../session/session-context-window-usage.js";
+import { hydratableExecutionPlanSnapshot } from "../session/execution-plan-state.js";
 import type { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import type { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import type { SkillLearningManager } from "../skills/skill-learning.js";
@@ -289,9 +290,34 @@ export class AgentLoopBuilder {
     const substrate = this.#substrate;
     const routes = input.providerRoutes ?? substrate.routes;
     const sessionRuntimeContext = input.sessionRuntimeContext ?? createSessionRuntimeContext(input.sessionId);
+    const runRecorder = (this.#factories.runRecorder ?? ((options) => new RunRecorder(options)))({
+      sessionDb: input.sessionDb,
+      sessionId: input.sessionId,
+      sessionRuntimeContext,
+      trajectoryRecorder: input.trajectoryRecorder,
+      trajectoryStore: hasTrajectoryStore(input.sessionDb) ? input.sessionDb : undefined,
+      profileId: substrate.profileId,
+      skillEvolutionStore: substrate.skillEvolutionStore
+    });
     const executionPlanController = input.parentSessionId === undefined && input.taskExecution === undefined
-      ? new ExecutionPlanController(new ExecutionPlanStore())
+      ? new ExecutionPlanController(
+          new ExecutionPlanStore(),
+          (event, sink) => runRecorder.recordExecutionPlanTransition(
+            event,
+            sink === undefined ? undefined : (runtimeEvent) => sink(runtimeEvent as typeof event)
+          )
+        )
       : undefined;
+    if (executionPlanController !== undefined) {
+      const persistedPlan = hydratableExecutionPlanSnapshot(await input.sessionDb.listEvents(input.sessionId));
+      if (persistedPlan !== undefined) {
+        try {
+          executionPlanController.hydrate(persistedPlan);
+        } catch {
+          // Malformed persisted working state is ignored rather than entering the provider prompt.
+        }
+      }
+    }
     const initialContextWindowUsage = await loadSessionContextWindowUsage({
       sessionDb: input.sessionDb,
       sessionId: input.sessionId,
@@ -488,15 +514,6 @@ export class AgentLoopBuilder {
       registry: toolRegistry,
       aliases: providerToolSchemaCatalog.aliases
     });
-    const runRecorder = (this.#factories.runRecorder ?? ((options) => new RunRecorder(options)))({
-      sessionDb: input.sessionDb,
-      sessionId: input.sessionId,
-      sessionRuntimeContext,
-      trajectoryRecorder: input.trajectoryRecorder,
-      trajectoryStore: hasTrajectoryStore(input.sessionDb) ? input.sessionDb : undefined,
-      profileId: substrate.profileId,
-      skillEvolutionStore: substrate.skillEvolutionStore
-    });
     const memoryRecallOrchestrator = input.memoryRecall === "disabled"
       ? undefined
       : new MemoryRecallOrchestrator({
@@ -608,6 +625,7 @@ export class AgentLoopBuilder {
       agentEvolutionPolicy: input.agentEvolutionPolicy,
       taskExecution: input.taskExecution,
       executionPlanReader: executionPlanController,
+      executionPlanController,
       ui: input.ui,
       agentProfile: input.agentProfile
     });

@@ -56,6 +56,8 @@ import {
   createSubmittedSteerTranscriptBlock,
   ActiveWorkRuntimeEventMapper,
   formatPlainDelegationProgressEvent,
+  executionPlanFromRuntimeEvent,
+  formatPlainExecutionPlan,
   createOperatorConsoleRuntimeHost,
   createOperatorConsoleStyle,
   mapStartupDashboardViewModelToOperatorConsoleState,
@@ -1117,6 +1119,10 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
                   operatorConsoleLiveFrame.flushStreamingSegment(reason);
                 },
 	            onEvent: (event) => {
+	              const executionPlan = executionPlanFromRuntimeEvent(event);
+	              if (executionPlan !== undefined) {
+	                operatorConsoleLiveFrame?.setExecutionPlan(executionPlan);
+	              }
 	              if (event.kind === "context-window-usage") {
 	                latestContextUsage = { filled: event.usedTokens, total: event.totalTokens };
 	                refreshOperatorConsoleTransientSurface();
@@ -1136,7 +1142,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	                operatorConsoleLiveFrame.resetStreaming();
 	              }
               let newPhase: string | undefined;
-              if (operatorConsoleLiveFrame !== undefined && event.kind === "delegation-progress") {
+              if (executionPlan !== undefined) {
+                newPhase = undefined;
+              } else if (operatorConsoleLiveFrame !== undefined && event.kind === "delegation-progress") {
                 operatorConsoleLiveFrame.applyActiveWorkEvent(activeWorkEventMapper.buildDelegationProgress(event));
                 newPhase = "tool";
               } else if (operatorConsoleLiveFrame !== undefined && isToolActivityRuntimeEvent(event)) {
@@ -1200,6 +1208,10 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           });
           writeTurnBoundaryRows(completedRows.length === 0 ? [] : completedRows);
           operatorConsoleLiveFrame?.resetActiveWork();
+        }
+        if (!operatorConsoleEnabled) {
+          const mission = formatPlainExecutionPlan(response.executionPlan, renderer.locale === "ar" ? "ar" : "en");
+          if (mission !== undefined) writeTurnBoundaryRows(mission.split("\n"));
         }
         lastProviderExecutionSummary = response.providerExecution === undefined
           ? undefined
@@ -3012,6 +3024,13 @@ export function renderRuntimeEvent(
     case "context-estimate":
     case "context-window-usage":
       return undefined;
+    case "execution-plan-started":
+    case "execution-plan-updated":
+    case "execution-plan-completed":
+    case "execution-plan-blocked":
+    case "execution-plan-transferred":
+    case "execution-plan-abandoned":
+      return undefined;
     case "session-compacted":
       return undefined;
     case "delegation-progress": {
@@ -3047,6 +3066,13 @@ function operatorConsoleTransientPhaseForRuntimeEvent(event: RuntimeEvent): stri
       return event.ok || !event.willFallback ? "finalizing" : "provider";
     case "context-estimate":
     case "context-window-usage":
+      return undefined;
+    case "execution-plan-started":
+    case "execution-plan-updated":
+    case "execution-plan-completed":
+    case "execution-plan-blocked":
+    case "execution-plan-transferred":
+    case "execution-plan-abandoned":
       return undefined;
     case "session-compacted":
       return "background";

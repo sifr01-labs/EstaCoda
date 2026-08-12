@@ -10,6 +10,7 @@ export * from "./contextCompactionSurface.js";
 export * from "./doctorSurface.js";
 export * from "./focusModel.js";
 export * from "./inlineToolTrailSurface.js";
+export * from "./missionSurface.js";
 export * from "./inputPrecedence.js";
 export * from "./operatorConsoleEvents.js";
 export * from "./operatorConsoleHost.js";

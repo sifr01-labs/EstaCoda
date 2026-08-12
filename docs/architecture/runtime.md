@@ -291,6 +291,8 @@ Operational failure modes to check before changing this area:
 **File:** `src/runtime/run-recorder.ts`
 **Role:** Records run events, tool calls, outcomes, and artifacts to the session DB. Provides structured run history for trace inspection and Agent Evolution evidence.
 
+Foreground execution plans use the `execution-plan-*` event family. Each event contains only the latest bounded canonical snapshot and optional trusted Task IDs for an ownership transfer; raw tool inputs and results are not embedded. Root interactive runtimes hydrate only unresolved session-local plans, and semantic compaction copies only the latest unresolved snapshot into the child session. This working state is not written to memory or Agent Evolution.
+
 ---
 
 ## Registries

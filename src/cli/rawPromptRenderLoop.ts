@@ -84,6 +84,7 @@ export type RawPromptOperatorConsoleOptions = Omit<OperatorConsoleRawPromptSnaps
   readonly streaming?: StreamingState;
   readonly transcript?: readonly TranscriptBlock[];
   readonly turnActivity?: TurnActivityState;
+  readonly executionPlan?: OperatorConsoleRawPromptSnapshot["executionPlan"];
   readonly steer?: SteerState;
   readonly promptMode?: PromptSurfaceState["mode"];
 };
@@ -153,6 +154,7 @@ export class RawPromptRenderLoop {
         setupPanel: snapshot.operatorConsole.setupPanel,
         transcript: snapshot.operatorConsole.transcript,
         turnActivity: snapshot.operatorConsole.turnActivity,
+        executionPlan: snapshot.operatorConsole.executionPlan,
         terminal: {
           ...snapshot.operatorConsole.terminal,
           ...liveTerminal,

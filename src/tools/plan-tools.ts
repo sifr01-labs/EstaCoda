@@ -83,10 +83,10 @@ export function createPlanTools(options: {
           if (context?.visibleTurnId === undefined) {
             return error("missing-origin-turn", "plan write requires a current visible turn.");
           }
-          return planResult(controller.write(input, context.visibleTurnId));
+          return planResult(await controller.write(input, context.visibleTurnId, context.onEvent));
         }
         if (input.operation === "merge") {
-          return planResult(controller.merge(input));
+          return planResult(await controller.merge(input, context?.onEvent));
         }
         return error("invalid-operation", "plan operation must be read, write, or merge.");
       } catch (caught) {

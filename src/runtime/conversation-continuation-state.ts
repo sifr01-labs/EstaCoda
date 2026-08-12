@@ -168,7 +168,7 @@ function isCancellation(userText: string): boolean {
   return /^(stop|never mind|nevermind|new topic|cancel|drop it)$/iu.test(normalizeUserText(userText));
 }
 
-function isExplicitNewRequest(userText: string): boolean {
+export function isExplicitNewRequest(userText: string): boolean {
   const text = normalizeUserText(userText);
   if (text.length < 8 || isAcknowledgementContinuation(text) || isCancellation(text)) {
     return false;

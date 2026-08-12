@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { AcpServer } from "./server.js";
+import { AcpServer, executionPlanAcpUpdate } from "./server.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 
 describe("AcpServer SQLite lifecycle", () => {
@@ -39,5 +39,28 @@ describe("AcpServer SQLite lifecycle", () => {
     } finally {
       db.close();
     }
+  });
+});
+
+describe("ACP execution-plan mapping", () => {
+  it("maps the real Mission items to the ACP plan protocol", () => {
+    expect(executionPlanAcpUpdate({
+      objective: "Test APIs",
+      originTurnId: "turn-1",
+      revision: 2,
+      status: "active",
+      items: [
+        { id: "done", content: "Inspect APIs", status: "completed" },
+        { id: "doing", content: "Build requests", status: "in_progress" },
+        { id: "blocked", content: "Verify responses", status: "blocked", blocker: { kind: "external_state", summary: "Unavailable" } }
+      ]
+    })).toEqual({
+      sessionUpdate: "plan",
+      entries: [
+        { label: "Inspect APIs", status: "completed", priority: "medium" },
+        { label: "Build requests", status: "in_progress", priority: "medium" },
+        { label: "Verify responses", status: "pending", priority: "medium" }
+      ]
+    });
   });
 });

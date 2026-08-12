@@ -4,12 +4,27 @@ import {
   ActiveWorkRuntimeEventMapper,
   applyActiveWorkRuntimeEvent,
   createActiveWorkRuntimeState,
+  executionPlanFromRuntimeEvent,
   formatPlainDelegationProgressEvent,
   normalizeActiveWorkRuntimeEventId,
 } from "./activeWorkRuntimeMapper.js";
 import { formatActiveWorkSummary, getActiveWorkSurfaceDesiredHeight, renderActiveWorkSurface } from "./activeWorkSurface.js";
 
 describe("active work runtime mapper", () => {
+  it("projects execution-plan lifecycle events into explicit Mission state", () => {
+    const plan = {
+      objective: "Test APIs",
+      originTurnId: "turn-1",
+      revision: 1,
+      status: "active" as const,
+      items: [{ id: "test", content: "Test APIs", status: "in_progress" as const }]
+    };
+
+    expect(executionPlanFromRuntimeEvent({ kind: "execution-plan-started", plan })).toEqual(plan);
+    expect(executionPlanFromRuntimeEvent({ kind: "agent-start", sessionId: "session", input: "test" }))
+      .toBeUndefined();
+  });
+
   it("maps runtime tool starts directly into localized active-work events", () => {
     const mapper = new ActiveWorkRuntimeEventMapper({ locale: "ar" });
 

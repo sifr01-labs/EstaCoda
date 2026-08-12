@@ -2,6 +2,7 @@ import { createOperatorConsoleLayout, type OperatorConsoleLayout } from "./opera
 import { renderOperatorConsoleTextLines } from "./operatorConsoleRenderer.js";
 import type { FocusState, FocusTarget } from "./focusModel.js";
 import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
+import type { ExecutionPlan } from "../../../contracts/execution-plan.js";
 import {
   createDefaultPromptSurfaceState,
   createDefaultStatusRailState,
@@ -110,6 +111,16 @@ export class OperatorConsoleRuntimeHost {
     this.#state = {
       ...this.#state,
       ...(turnActivity === undefined ? { turnActivity: undefined } : { turnActivity: cloneTurnActivityState(turnActivity) }),
+    };
+  }
+
+  setExecutionPlan(executionPlan: ExecutionPlan | undefined): void {
+    if (this.#disposed) return;
+    this.#state = {
+      ...this.#state,
+      ...(executionPlan === undefined
+        ? { executionPlan: undefined }
+        : { executionPlan: cloneExecutionPlanState(executionPlan) }),
     };
   }
 
@@ -260,6 +271,7 @@ function cloneOperatorConsoleState(state: OperatorConsoleState): OperatorConsole
     status: cloneStatusRailState(state.status),
     motionElapsedMs: state.motionElapsedMs,
     turnActivity: state.turnActivity === undefined ? undefined : cloneTurnActivityState(state.turnActivity),
+    executionPlan: state.executionPlan === undefined ? undefined : cloneExecutionPlanState(state.executionPlan),
     attachments: state.attachments.map(cloneAttachmentCardState),
     tasks: cloneTaskSurfaceState(state.tasks),
     activeWork: cloneToolActivityState(state.activeWork),
@@ -275,6 +287,18 @@ function cloneOperatorConsoleState(state: OperatorConsoleState): OperatorConsole
 
 function cloneTurnActivityState(turnActivity: TurnActivityState): TurnActivityState {
   return { ...turnActivity };
+}
+
+function cloneExecutionPlanState(plan: ExecutionPlan): ExecutionPlan {
+  return {
+    ...plan,
+    items: plan.items.map((item) => ({
+      ...item,
+      ...(item.evidenceCallIds === undefined ? {} : { evidenceCallIds: [...item.evidenceCallIds] }),
+      ...(item.evidence === undefined ? {} : { evidence: item.evidence.map((entry) => ({ ...entry })) }),
+      ...(item.blocker === undefined ? {} : { blocker: { ...item.blocker } })
+    }))
+  };
 }
 
 function cloneFocusState(focus: FocusState): FocusState {

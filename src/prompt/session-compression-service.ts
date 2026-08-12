@@ -13,6 +13,7 @@ import type { ProviderExecutor } from "../providers/provider-executor.js";
 import { stripInlineReasoning } from "../providers/provider-reasoning.js";
 import { SessionCompressionLock } from "../session/session-compression-lock.js";
 import { reconstructSessionCompressionState } from "../session/session-compression-state.js";
+import { executionPlanCarryForwardEvent } from "../session/execution-plan-state.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import {
   SemanticCompressor,
@@ -95,7 +96,8 @@ export class SessionCompressionService {
         ? await this.#requireSession(input.sessionId)
         : undefined;
       const messages = await this.#sessionDb.listMessages(input.sessionId);
-      const previousState = reconstructSessionCompressionState(await this.#sessionDb.listEvents(input.sessionId));
+      const sessionEvents = await this.#sessionDb.listEvents(input.sessionId);
+      const previousState = reconstructSessionCompressionState(sessionEvents);
       const compressed = await this.#compressor.compress({
         messages,
         profileId: input.profileId,
@@ -141,10 +143,7 @@ export class SessionCompressionService {
         const written = await this.#sessionDb.rewriteTranscript({
           sessionId: childSession.id,
           messages: compressed.messages.map(toChildTranscriptMessage),
-          events: [{
-            kind: "context-window-usage-invalidated",
-            reason: "compaction"
-          }]
+          events: childCompactionEvents(sessionEvents)
         });
         await this.#sessionDb.endSession(parentSession.id, "compression");
         const eventWarnings = [
@@ -367,6 +366,17 @@ export class SessionCompressionService {
       return [`session compaction fork event write failed: ${errorMessage(error)}`];
     }
   }
+}
+
+function childCompactionEvents(events: readonly SessionEvent[]): SessionEvent[] {
+  const carriedPlan = executionPlanCarryForwardEvent(events);
+  return [
+    {
+      kind: "context-window-usage-invalidated",
+      reason: "compaction"
+    },
+    ...(carriedPlan === undefined ? [] : [carriedPlan])
+  ];
 }
 
 export function renderSessionCompactionResult(
