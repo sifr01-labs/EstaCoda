@@ -79,6 +79,8 @@ import {
 import { ExecutionPlanProgressGuard } from "./execution-plan-progress-guard.js";
 import { assessExecutionPlanActivation, isPlanToolName } from "./execution-plan-activation.js";
 import { ExecutionWorkingSetController } from "./execution-working-set.js";
+import type { BrowserSessionLease } from "../browser/session-lifecycle.js";
+import { deriveBrowserSessionKey } from "../browser/session-key.js";
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
 const BROWSER_NO_PROGRESS_NUDGE = "Repeated browser observations show no state change. Do not call browser.snapshot or browser.tabs again unless another action may have changed the page. Switch tabs or take a different browser action; if progress is blocked, explain what is blocking it.";
@@ -137,6 +139,7 @@ export type ProviderTurnLoopOptions = {
   executionPlanReader?: ExecutionPlanReader;
   executionPlanController?: ExecutionPlanControllerApi;
   executionWorkingSet?: ExecutionWorkingSetController;
+  browserSessionLease?: BrowserSessionLease;
 };
 
 export class ProviderTurnLoop {
@@ -163,6 +166,8 @@ export class ProviderTurnLoop {
   readonly #executionPlanReader: ExecutionPlanReader | undefined;
   readonly #executionPlanController: ExecutionPlanControllerApi | undefined;
   readonly #executionWorkingSet: ExecutionWorkingSetController | undefined;
+  readonly #browserSessionLease: BrowserSessionLease | undefined;
+  #activeBrowserLease: { sessionId: string; owner: string } | undefined;
   #providerRequestSequence = 0;
   #lastPromptTokens = 0;
   #lastActualPromptTokens: number | undefined;
@@ -205,6 +210,7 @@ export class ProviderTurnLoop {
     this.#executionPlanController = options.executionPlanController;
     this.#executionPlanReader = options.executionPlanController ?? options.executionPlanReader;
     this.#executionWorkingSet = options.executionWorkingSet;
+    this.#browserSessionLease = options.browserSessionLease;
     this.#lastActualPromptTokens = options.initialContextWindowUsage?.usedTokens;
   }
 
@@ -250,6 +256,9 @@ export class ProviderTurnLoop {
     executionPlanIncomplete?: boolean;
     emergencyDeadlineReached?: boolean;
   }> {
+    const releaseBrowserLeaseOnAbort = (): void => this.#syncBrowserSessionLease(true);
+    input.signal?.addEventListener("abort", releaseBrowserLeaseOnAbort, { once: true });
+    try {
     this.#providerRequestSequence = 0;
     this.#toolPlanRunner.resetPerTurnBudgets?.();
     const providerToolExecutions: ToolExecutionRecord[] = [];
@@ -287,6 +296,7 @@ export class ProviderTurnLoop {
       input.toolExecutions,
       workingSessionId
     );
+    this.#syncBrowserSessionLease(false);
     const executionPlanProgressGuard = new ExecutionPlanProgressGuard({
       plan: this.#executionPlanReader?.current(),
       existingExecutions: input.toolExecutions,
@@ -295,6 +305,7 @@ export class ProviderTurnLoop {
     });
 
     for (let iteration = 0; iteration < this.#budgets.maxProviderIterations; iteration += 1) {
+      this.#syncBrowserSessionLease(false);
       if (isAborted(input.signal)) {
         await this.#runRecorder.recordProviderBudgetExhausted({
           budget: "abort-signal",
@@ -719,6 +730,7 @@ export class ProviderTurnLoop {
         loopToolExecutions,
         this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId
       );
+      this.#syncBrowserSessionLease(false);
       if (browserObservation?.shouldNudge === true) {
         pendingBrowserNoProgressNudge = true;
       }
@@ -939,6 +951,54 @@ export class ProviderTurnLoop {
       ...(executionPlanIncomplete ? { executionPlanIncomplete: true } : {}),
       ...(emergencyDeadlineReached ? { emergencyDeadlineReached: true } : {})
     };
+    } finally {
+      input.signal?.removeEventListener("abort", releaseBrowserLeaseOnAbort);
+      this.#syncBrowserSessionLease(input.signal?.aborted === true);
+    }
+  }
+
+  #syncBrowserSessionLease(cancelled: boolean): void {
+    const plan = this.#executionPlanReader?.current();
+    const shouldHold = !cancelled && plan?.status === "active";
+    const owner = shouldHold
+      ? `execution-plan:${this.#profileId}:${plan.originTurnId}`
+      : undefined;
+
+    if (owner === undefined) {
+      if (this.#activeBrowserLease !== undefined) {
+        this.#browserSessionLease?.release(
+          this.#activeBrowserLease.sessionId,
+          this.#activeBrowserLease.owner
+        );
+        this.#activeBrowserLease = undefined;
+      }
+      return;
+    }
+    if (this.#browserSessionLease === undefined) {
+      return;
+    }
+
+    const runtimeSessionId = this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
+    const sessionId = deriveBrowserSessionKey({ currentSessionId: () => runtimeSessionId });
+
+    if (
+      this.#activeBrowserLease !== undefined &&
+      (this.#activeBrowserLease.sessionId !== sessionId ||
+        this.#activeBrowserLease.owner !== owner)
+    ) {
+      this.#browserSessionLease.release(
+        this.#activeBrowserLease.sessionId,
+        this.#activeBrowserLease.owner
+      );
+      this.#activeBrowserLease = undefined;
+    }
+
+    if (this.#activeBrowserLease === undefined) {
+      this.#browserSessionLease.acquire(sessionId, owner);
+      this.#activeBrowserLease = { sessionId, owner };
+      return;
+    }
+    this.#browserSessionLease.renew(sessionId, owner);
   }
 
   #recordRepeatedToolFailures(

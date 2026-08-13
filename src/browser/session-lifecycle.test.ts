@@ -2,7 +2,11 @@ import { access, mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BrowserSessionLifecycle, registerEmergencyCleanup } from "./session-lifecycle.js";
+import {
+  BrowserSessionLifecycle,
+  DEFAULT_BROWSER_INACTIVITY_TIMEOUT_MS,
+  registerEmergencyCleanup
+} from "./session-lifecycle.js";
 
 async function exists(path: string): Promise<boolean> {
   return access(path).then(() => true, () => false);
@@ -47,6 +51,69 @@ describe("BrowserSessionLifecycle", () => {
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(onCleanup).toHaveBeenCalledWith("session-1");
+    lifecycle.stop();
+  });
+
+  it("uses the deterministic five-minute inactivity default", async () => {
+    vi.useFakeTimers();
+    const onCleanup = vi.fn();
+    const lifecycle = new BrowserSessionLifecycle({ onCleanup });
+
+    lifecycle.start();
+    lifecycle.register("session-1", {});
+    await vi.advanceTimersByTimeAsync(DEFAULT_BROWSER_INACTIVITY_TIMEOUT_MS - 1);
+    expect(onCleanup).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(onCleanup).toHaveBeenCalledWith("session-1");
+    lifecycle.stop();
+  });
+
+  it("keeps leased sessions alive and resumes normal cleanup after release", async () => {
+    vi.useFakeTimers();
+    const onCleanup = vi.fn();
+    const lifecycle = new BrowserSessionLifecycle({
+      inactivityTimeoutMs: 1_000,
+      onCleanup
+    });
+
+    lifecycle.start();
+    lifecycle.register("session-1", {});
+    lifecycle.acquire("session-1", "execution-plan:profile-a:mission-1");
+    lifecycle.unregister("session-1");
+    lifecycle.register("session-1", { replacement: true });
+    await vi.advanceTimersByTimeAsync(7 * 60_000);
+    expect(onCleanup).not.toHaveBeenCalled();
+
+    lifecycle.release("session-1", "execution-plan:profile-a:mission-1");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(onCleanup).toHaveBeenCalledWith("session-1");
+    lifecycle.stop();
+  });
+
+  it("isolates leases by session and owner and clears them during shutdown", async () => {
+    vi.useFakeTimers();
+    const onCleanup = vi.fn();
+    const lifecycle = new BrowserSessionLifecycle({
+      inactivityTimeoutMs: 1_000,
+      onCleanup
+    });
+
+    lifecycle.start();
+    lifecycle.register("session-a", {});
+    lifecycle.register("session-b", {});
+    lifecycle.acquire("session-a", "execution-plan:profile-a:mission-1");
+    lifecycle.release("session-a", "execution-plan:profile-b:mission-1");
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(onCleanup).not.toHaveBeenCalledWith("session-a");
+    expect(onCleanup).toHaveBeenCalledWith("session-b");
+    await lifecycle.cleanupAll();
+    expect(onCleanup).toHaveBeenCalledWith("session-a");
+
+    onCleanup.mockClear();
+    lifecycle.register("session-a", {});
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(onCleanup).toHaveBeenCalledWith("session-a");
     lifecycle.stop();
   });
 

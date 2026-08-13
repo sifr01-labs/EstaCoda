@@ -356,6 +356,7 @@ async function runBasicProviderTurn(
     visibleTurnId?: string;
     userText?: string;
     providerTools?: OpenAICompatibleToolSchema[];
+    signal?: AbortSignal;
   } = {}
 ): Promise<Awaited<ReturnType<ProviderTurnLoop["run"]>>> {
   return await loop.run({
@@ -380,7 +381,8 @@ async function runBasicProviderTurn(
     initialRiskClass: "read-only-local",
     onEvent: callbacks.onEvent,
     onDelta: callbacks.onDelta,
-    onSegmentBreak: callbacks.onSegmentBreak
+    onSegmentBreak: callbacks.onSegmentBreak,
+    signal: callbacks.signal
   });
 }
 
@@ -652,6 +654,7 @@ async function createPostToolNudgeHarness(input: {
   executionPlanReader?: ProviderTurnLoopOptions["executionPlanReader"];
   executionPlanController?: ProviderTurnLoopOptions["executionPlanController"];
   executionWorkingSet?: ProviderTurnLoopOptions["executionWorkingSet"];
+  browserSessionLease?: ProviderTurnLoopOptions["browserSessionLease"];
   onExecutePlans?: (input: {
     sessionDb: InMemorySessionDB;
     sessionId: string;
@@ -747,7 +750,8 @@ async function createPostToolNudgeHarness(input: {
     taskExecution: input.taskExecution,
     executionPlanReader: input.executionPlanReader,
     executionPlanController: input.executionPlanController,
-    executionWorkingSet: input.executionWorkingSet
+    executionWorkingSet: input.executionWorkingSet,
+    browserSessionLease: input.browserSessionLease
   });
 
   return {
@@ -1835,6 +1839,158 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(continuation).toContain("Collection ID: collection-123");
     expect(continuation.match(/RAW COLLECTION PAYLOAD/gu)).toHaveLength(1);
   });
+
+  it("holds and renews the browser session lease while a foreground Mission remains active", async () => {
+    const planStore = new ExecutionPlanStore();
+    planStore.replace({
+      objective: "Configure MTN products in Postman",
+      originTurnId: "turn-browser-lease",
+      revision: 1,
+      status: "active",
+      items: [{ id: "inspect", content: "Inspect Postman", status: "in_progress" }]
+    });
+    const browserSessionLease = {
+      acquire: vi.fn(),
+      renew: vi.fn(),
+      release: vi.fn()
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("Still working."), providerExecution("Still working.")],
+      toolSteps: [],
+      executionPlanReader: planStore,
+      browserSessionLease,
+      maxProviderIterations: 2
+    });
+
+    await runBasicProviderTurn(harness.loop);
+
+    expect(browserSessionLease.acquire).toHaveBeenCalledWith(
+      `${harness.sessionId}:main`,
+      "execution-plan:default:turn-browser-lease"
+    );
+    expect(browserSessionLease.renew).toHaveBeenCalled();
+    expect(browserSessionLease.release).not.toHaveBeenCalled();
+  });
+
+  it("releases the browser session lease when the Mission completes or the turn is cancelled", async () => {
+    const completedPlanStore = new ExecutionPlanStore();
+    completedPlanStore.replace({
+      objective: "Configure MTN products in Postman",
+      originTurnId: "turn-browser-complete",
+      revision: 1,
+      status: "active",
+      items: [{ id: "update", content: "Update Postman", status: "in_progress" }]
+    });
+    const completedLease = { acquire: vi.fn(), renew: vi.fn(), release: vi.fn() };
+    const completedHarness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-update", "{}", "mcp.postman.updateCollection")]),
+        providerExecution("Complete.")
+      ],
+      toolSteps: [{ executions: [toolExecutionForTool("call-update", "mcp.postman.updateCollection", "updated")] }],
+      executionPlanReader: completedPlanStore,
+      browserSessionLease: completedLease,
+      maxProviderIterations: 2,
+      onExecutePlans: () => {
+        completedPlanStore.replace({
+          objective: "Configure MTN products in Postman",
+          originTurnId: "turn-browser-complete",
+          revision: 2,
+          status: "completed",
+          items: [{
+            id: "update",
+            content: "Update Postman",
+            status: "completed",
+            completionKind: "reasoning"
+          }]
+        });
+      }
+    });
+
+    await runBasicProviderTurn(completedHarness.loop);
+    expect(completedLease.release).toHaveBeenCalledWith(
+      `${completedHarness.sessionId}:main`,
+      "execution-plan:default:turn-browser-complete"
+    );
+
+    const cancelledPlanStore = new ExecutionPlanStore();
+    cancelledPlanStore.replace({
+      objective: "Inspect MTN",
+      originTurnId: "turn-browser-cancelled",
+      revision: 1,
+      status: "active",
+      items: [{ id: "inspect", content: "Inspect MTN", status: "in_progress" }]
+    });
+    const cancelledLease = { acquire: vi.fn(), renew: vi.fn(), release: vi.fn() };
+    const cancelledHarness = await createPostToolNudgeHarness({
+      responses: [providerExecution("unused")],
+      toolSteps: [],
+      executionPlanReader: cancelledPlanStore,
+      browserSessionLease: cancelledLease
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    await runBasicProviderTurn(cancelledHarness.loop, { signal: controller.signal });
+    expect(cancelledLease.release).toHaveBeenCalledWith(
+      `${cancelledHarness.sessionId}:main`,
+      "execution-plan:default:turn-browser-cancelled"
+    );
+  });
+
+  it.each(["blocked", "abandoned"] as const)(
+    "releases the browser session lease when the Mission becomes %s",
+    async (terminalStatus) => {
+      const planStore = new ExecutionPlanStore();
+      const originTurnId = `turn-browser-${terminalStatus}`;
+      planStore.replace({
+        objective: "Configure MTN products in Postman",
+        originTurnId,
+        revision: 1,
+        status: "active",
+        items: [{ id: "update", content: "Update Postman", status: "in_progress" }]
+      });
+      const browserSessionLease = { acquire: vi.fn(), renew: vi.fn(), release: vi.fn() };
+      const harness = await createPostToolNudgeHarness({
+        responses: [
+          providerExecution("", [providerToolCall("call-terminal", "{}", "mcp.postman.updateCollection")]),
+          providerExecution("Stopped.")
+        ],
+        toolSteps: [{ executions: [toolExecutionForTool(
+          "call-terminal",
+          "mcp.postman.updateCollection",
+          terminalStatus === "blocked" ? "authentication expired" : "cancelled"
+        )] }],
+        executionPlanReader: planStore,
+        browserSessionLease,
+        maxProviderIterations: 2,
+        onExecutePlans: () => {
+          planStore.replace({
+            objective: "Configure MTN products in Postman",
+            originTurnId,
+            revision: 2,
+            status: terminalStatus,
+            items: [{
+              id: "update",
+              content: "Update Postman",
+              status: terminalStatus === "blocked" ? "blocked" : "cancelled",
+              blocker: {
+                kind: "external_state",
+                summary: terminalStatus === "blocked" ? "Authentication expired" : "User cancelled"
+              }
+            }]
+          });
+        }
+      });
+
+      await runBasicProviderTurn(harness.loop);
+
+      expect(browserSessionLease.release).toHaveBeenCalledWith(
+        `${harness.sessionId}:main`,
+        `execution-plan:default:${originTurnId}`
+      );
+    }
+  );
 
   it("requires a Mission before executing the natural MTN and Postman tool batch", async () => {
     const planStore = new ExecutionPlanStore();

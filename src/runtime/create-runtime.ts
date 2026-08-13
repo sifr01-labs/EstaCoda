@@ -179,6 +179,7 @@ export type RuntimeOptions = {
     cloudSpendApproved?: "pending" | boolean;
     summarizeSnapshots?: LoadedRuntimeConfig["browser"]["summarizeSnapshots"];
     snapshotSummarizeThreshold?: LoadedRuntimeConfig["browser"]["snapshotSummarizeThreshold"];
+    inactivityTimeout?: number;
   };
   tts?: LoadedRuntimeConfig["tts"];
   stt?: LoadedRuntimeConfig["stt"];
@@ -611,6 +612,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   }) | undefined;
   const browserSessionLifecycle = supervisedLocalCdp
     ? new BrowserSessionLifecycle({
+      inactivityTimeoutMs: options.browser?.inactivityTimeout,
       onCleanup: async (sessionId) => {
         await browserLifecycleBackend?.closeSession?.(sessionId);
       }
@@ -950,6 +952,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       externalMemoryProviders,
       processManager,
       browserBackend,
+      browserSessionLease: browserSessionLifecycle,
       browserConfig: options.browser,
       artifactStore,
       taskResultService,

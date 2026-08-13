@@ -3422,6 +3422,55 @@ describe("createRuntime external memory providers", () => {
 });
 
 describe("createRuntime browser backend wiring", () => {
+  it("forwards the configured browser inactivity timeout to supervised lifecycle cleanup", async () => {
+    const intervalCallbacks: Array<() => void> = [];
+    const intervalSpy = vi.spyOn(globalThis, "setInterval").mockImplementation(((callback: TimerHandler, delay?: number) => {
+      if (typeof callback === "function" && delay === 60_000) {
+        intervalCallbacks.push(callback as () => void);
+      }
+      return 1 as unknown as ReturnType<typeof setInterval>;
+    }) as unknown as typeof setInterval);
+    let now = 1_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    const options = await minimalRuntimeOptions();
+    const socket = new FakeRuntimeCdpSocket();
+    const runtime = await createRuntime({
+      ...options,
+      cdpFetch: createRuntimeCdpFetch(),
+      cdpWebSocketFactory: () => socket,
+      browser: {
+        backend: "local-cdp",
+        cdpUrl: "http://127.0.0.1:9222",
+        autoLaunch: false,
+        inactivityTimeout: 1_000
+      }
+    });
+
+    try {
+      const navigation = await runtime.executeTool?.({
+        tool: "browser.navigate",
+        toolInput: { url: "https://93.184.216.34/" }
+      });
+      expect(navigation?.result?.ok).toBe(true);
+
+      now += 1_001;
+      for (const callback of intervalCallbacks) callback();
+      await Promise.resolve();
+      await Promise.resolve();
+      const snapshot = await runtime.executeTool?.({ tool: "browser.snapshot", toolInput: {} });
+
+      expect(snapshot?.result).toMatchObject({
+        ok: false,
+        metadata: { backend: "local-cdp", reason: "session_missing" }
+      });
+      expect(socket.closeCount).toBeGreaterThan(0);
+    } finally {
+      await runtime.dispose();
+      intervalSpy.mockRestore();
+      nowSpy.mockRestore();
+    }
+  });
+
   it("uses supervised local CDP by default from ordinary runtime config", async () => {
     const options = await minimalRuntimeOptions();
     const socket = new FakeRuntimeCdpSocket();

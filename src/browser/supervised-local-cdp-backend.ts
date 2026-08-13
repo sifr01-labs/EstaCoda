@@ -17,6 +17,7 @@ import { isSafeUrl, redactUrlForMetadata, scanUrlForSecrets, type ResolveHostnam
 import { checkWebsiteAccess, loadWebsiteBlocklist } from "./website-policy.js";
 import { CDPSupervisor } from "./cdp-supervisor.js";
 import type { BrowserSessionLifecycle } from "./session-lifecycle.js";
+import { BrowserSessionStateError, browserSessionStateReason } from "./session-state.js";
 import { findChromiumExecutable, type ChromiumFinderOptions, type ChromiumFinderResult } from "./chromium-finder.js";
 import { launchChrome, type ChromeLauncherOptions, type LaunchedChrome } from "./chrome-launcher.js";
 import { CdpTargetManager, type CdpTargetManagerOptions } from "./cdp-target-manager.js";
@@ -79,6 +80,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
   const configuredEndpoint = normalizeCdpUrl(options.cdpUrl);
   const lifecycle = options.lifecycle;
   const sessionStacks = new Map<string, BrowserSessionStack>();
+  const lostSessions = new Map<string, "session_missing" | "browser_process_missing">();
   let launchedChrome: LaunchedChrome | undefined;
   let launchPromise: Promise<LaunchedChrome> | undefined;
   let configuredStack: BrowserSessionStack | undefined;
@@ -92,7 +94,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     const stack = sessionStacks.get(sessionId);
     if (stack === undefined || !stack.sessionManager.has(sessionId)) {
       sessionStacks.delete(sessionId);
-      throw new Error(`Browser session not found: ${sessionId}`);
+      throw new BrowserSessionStateError("session_missing", `Browser session not found: ${sessionId}`);
     }
     return asBackendSession(await stack.sessionManager.acquire(sessionId));
   };
@@ -120,7 +122,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
   const listManagedTabs = async (sessionId: string): Promise<BrowserManagedTab[]> => {
     const stack = sessionStacks.get(sessionId);
     if (stack === undefined || !stack.sessionManager.has(sessionId)) {
-      throw new Error(`Browser session not found: ${sessionId}`);
+      throw new BrowserSessionStateError("session_missing", `Browser session not found: ${sessionId}`);
     }
     const listTabs = stack.sessionManager.listTabs;
     if (listTabs === undefined) {
@@ -156,7 +158,10 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     const tabs = await listSafeTabs(sessionId);
     const requestedTab = tabs.tabs.find((tab) => tab.ref === input.tabRef);
     if (requestedTab === undefined) {
-      throw new Error(`Browser tab is unavailable under the current session or URL policy: ${input.tabRef}`);
+      throw new BrowserSessionStateError(
+        "tab_missing",
+        `Browser tab is unavailable under the current session or URL policy: ${input.tabRef}`
+      );
     }
     const stack = sessionStacks.get(sessionId)!;
     const switchTab = stack.sessionManager.switchTab;
@@ -193,6 +198,8 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       await closeLaunchedChromeIfIdle();
       return;
     }
+
+    lostSessions.set(sessionId, "session_missing");
 
     let closeError: unknown;
     try {
@@ -345,6 +352,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       return {
         backend: "local-cdp",
         available: false,
+        sessionState: "browser_process_missing",
         reason: "Browser backend is closed."
       };
     }
@@ -372,6 +380,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     return {
       backend: "local-cdp",
       available: true,
+      sessionState: "backend_available",
       ...(endpoint === undefined ? {} : { endpoint }),
       reason: endpoint === undefined
         ? "Chrome/Chromium auto-launch is ready and will start on the first browser action."
@@ -415,6 +424,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       }
     }
     sessionStacks.clear();
+    lostSessions.clear();
     configuredStack = undefined;
     launchedStack = undefined;
     try {
@@ -486,10 +496,11 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     status: resolveAvailabilityStatus,
     async navigate(input: BrowserNavigateInput): Promise<BrowserNavigateResult> {
       if (closed) {
-        throw new Error("Browser backend is closed.");
+        throw new BrowserSessionStateError("browser_process_missing", "Browser backend is closed.");
       }
 
       const sessionId = requireSessionId(input.sessionId);
+      const priorSessionLoss = lostSessions.get(sessionId);
       const existingStack = sessionStacks.get(sessionId);
       const resolved = existingStack === undefined
         ? await resolveSessionStack()
@@ -536,7 +547,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
           }
         }
         if (session === undefined) {
-          throw new Error(`Browser session not found: ${sessionId}`);
+          throw new BrowserSessionStateError("session_missing", `Browser session not found: ${sessionId}`);
         }
         const supervisor = session.supervisor;
         await supervisor.send("Page.navigate", { url: input.url });
@@ -544,6 +555,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
 
         const snapshot = withSessionTab(session, await supervisor.getSnapshot(sessionId));
         sessionStacks.set(sessionId, existingStack ?? sessionStack);
+        lostSessions.delete(sessionId);
 
         return {
           session: {
@@ -553,8 +565,20 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
             createdAt: new Date().toISOString(),
           },
           snapshot,
+          ...(priorSessionLoss === undefined ? {} : {
+            metadata: {
+              sessionRecovery: {
+                reason: priorSessionLoss,
+                authenticationPreserved: false
+              }
+            }
+          })
         };
       } catch (error) {
+        const reason = browserSessionStateReason(error);
+        if (reason === "browser_process_missing") {
+          lostSessions.set(sessionId, reason);
+        }
         if (resolved.launchedDuringCall) {
           await closeStack(launchedStack).catch(() => undefined);
           launchedStack = undefined;
@@ -759,6 +783,7 @@ async function checkLocalCdpStatus(endpoint: string | undefined, fetchLike: CdpF
     return {
       backend: "local-cdp",
       available: false,
+      sessionState: "browser_process_missing",
       reason: "CDP URL is not configured."
     };
   }
@@ -777,6 +802,7 @@ async function checkLocalCdpStatus(endpoint: string | undefined, fetchLike: CdpF
         backend: "local-cdp",
         available: false,
         endpoint,
+        sessionState: "browser_process_missing",
         reason: `CDP endpoint returned ${response.status} ${response.statusText}`
       };
     }
@@ -790,6 +816,7 @@ async function checkLocalCdpStatus(endpoint: string | undefined, fetchLike: CdpF
       backend: "local-cdp",
       available: true,
       endpoint,
+      sessionState: "backend_available",
       browser: payload.Browser,
       version: payload["Protocol-Version"]
     };
@@ -798,6 +825,7 @@ async function checkLocalCdpStatus(endpoint: string | undefined, fetchLike: CdpF
       backend: "local-cdp",
       available: false,
       endpoint,
+      sessionState: "browser_process_missing",
       reason: error instanceof Error ? error.message : "CDP status check failed."
     };
   } finally {

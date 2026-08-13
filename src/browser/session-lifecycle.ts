@@ -8,6 +8,12 @@ export type SessionLifecycleOptions = {
   onCleanup: (sessionId: string) => void | Promise<void>;
 };
 
+export interface BrowserSessionLease {
+  acquire(sessionId: string, owner: string): void;
+  renew(sessionId: string, owner: string): void;
+  release(sessionId: string, owner: string): void;
+}
+
 type SessionRecord = {
   metadata: unknown;
   lastActiveAt: number;
@@ -17,21 +23,22 @@ type EmergencyRegistration = {
   unregister: () => void;
 };
 
-const DEFAULT_INACTIVITY_TIMEOUT_MS = 300_000;
+export const DEFAULT_BROWSER_INACTIVITY_TIMEOUT_MS = 300_000;
 const CLEANUP_INTERVAL_MS = 60_000;
 const EMERGENCY_CLEANUP_TIMEOUT_MS = 5_000;
 const emergencyRegistrations = new WeakMap<BrowserSessionLifecycle, EmergencyRegistration>();
 
-export class BrowserSessionLifecycle {
+export class BrowserSessionLifecycle implements BrowserSessionLease {
   readonly #inactivityTimeoutMs: number;
   readonly #tmpDir: string;
   readonly #onCleanup: (sessionId: string) => void | Promise<void>;
   readonly #sessions = new Map<string, SessionRecord>();
+  readonly #leaseOwners = new Map<string, Set<string>>();
   #interval: ReturnType<typeof setInterval> | undefined;
   #cleanupRunning = false;
 
   constructor(options: SessionLifecycleOptions) {
-    this.#inactivityTimeoutMs = options.inactivityTimeoutMs ?? DEFAULT_INACTIVITY_TIMEOUT_MS;
+    this.#inactivityTimeoutMs = options.inactivityTimeoutMs ?? DEFAULT_BROWSER_INACTIVITY_TIMEOUT_MS;
     this.#tmpDir = options.tmpDir ?? tmpdir();
     this.#onCleanup = options.onCleanup;
   }
@@ -58,6 +65,37 @@ export class BrowserSessionLifecycle {
     this.#sessions.delete(sessionId);
   }
 
+  acquire(sessionId: string, owner: string): void {
+    const normalizedSessionId = requireLeaseValue(sessionId, "session ID");
+    const normalizedOwner = requireLeaseValue(owner, "owner");
+    const owners = this.#leaseOwners.get(normalizedSessionId) ?? new Set<string>();
+    owners.add(normalizedOwner);
+    this.#leaseOwners.set(normalizedSessionId, owners);
+    this.touch(normalizedSessionId);
+  }
+
+  renew(sessionId: string, owner: string): void {
+    const normalizedSessionId = requireLeaseValue(sessionId, "session ID");
+    const normalizedOwner = requireLeaseValue(owner, "owner");
+    if (!this.#leaseOwners.get(normalizedSessionId)?.has(normalizedOwner)) {
+      return;
+    }
+    this.touch(normalizedSessionId);
+  }
+
+  release(sessionId: string, owner: string): void {
+    const normalizedSessionId = requireLeaseValue(sessionId, "session ID");
+    const normalizedOwner = requireLeaseValue(owner, "owner");
+    const owners = this.#leaseOwners.get(normalizedSessionId);
+    if (owners === undefined || !owners.delete(normalizedOwner)) {
+      return;
+    }
+    if (owners.size === 0) {
+      this.#leaseOwners.delete(normalizedSessionId);
+    }
+    this.touch(normalizedSessionId);
+  }
+
   start(): void {
     if (this.#interval !== undefined) {
       return;
@@ -78,6 +116,7 @@ export class BrowserSessionLifecycle {
   async cleanupAll(): Promise<void> {
     const sessionIds = [...this.#sessions.keys()];
     this.#sessions.clear();
+    this.#leaseOwners.clear();
     for (const sessionId of sessionIds) {
       await this.#cleanupSession(sessionId);
     }
@@ -106,7 +145,8 @@ export class BrowserSessionLifecycle {
     try {
       const now = Date.now();
       const expired = [...this.#sessions.entries()]
-        .filter(([, record]) => now - record.lastActiveAt >= this.#inactivityTimeoutMs)
+        .filter(([sessionId, record]) =>
+          !this.#hasLease(sessionId) && now - record.lastActiveAt >= this.#inactivityTimeoutMs)
         .map(([sessionId]) => sessionId);
       for (const sessionId of expired) {
         this.#sessions.delete(sessionId);
@@ -124,6 +164,18 @@ export class BrowserSessionLifecycle {
       // Best-effort cleanup: one failed session must not block other cleanup.
     }
   }
+
+  #hasLease(sessionId: string): boolean {
+    return (this.#leaseOwners.get(sessionId)?.size ?? 0) > 0;
+  }
+}
+
+function requireLeaseValue(value: string, label: string): string {
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    throw new Error(`Browser session lease ${label} must be a non-empty string.`);
+  }
+  return normalized;
 }
 
 export function registerEmergencyCleanup(lifecycle: BrowserSessionLifecycle): () => void {

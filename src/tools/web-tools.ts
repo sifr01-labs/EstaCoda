@@ -15,6 +15,7 @@ import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/pr
 import { resolveGlobalStateHome } from "../config/profile-home.js";
 import { createBrowserDebugSession, type BrowserDebugSession } from "../browser/browser-debug.js";
 import { createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
+import { browserSessionStateReason } from "../browser/session-state.js";
 import { deriveBrowserSessionKey } from "../browser/session-key.js";
 import { maybeSummarizeSnapshot, truncateSnapshotText } from "../browser/snapshot-summarizer.js";
 import { isAlwaysBlockedUrl, isSafeUrl, redactUrlForMetadata, scanUrlForSecrets, type ResolveHostnameFn } from "../browser/url-safety.js";
@@ -255,6 +256,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             status.endpoint === undefined ? undefined : `Endpoint: ${status.endpoint}`,
             status.browser === undefined ? undefined : `Browser: ${status.browser}`,
             status.version === undefined ? undefined : `Protocol: ${status.version}`,
+            status.sessionState === undefined ? undefined : `Session state: ${status.sessionState}`,
             status.hybridRouting === undefined ? undefined : `Hybrid routing: ${status.hybridRouting ? "enabled" : "disabled"}`,
             status.lastNavigationBackend === undefined ? undefined : `Last served backend: ${status.lastNavigationBackend}`,
             status.reason === undefined ? undefined : `Reason: ${status.reason}`
@@ -372,7 +374,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           return {
             ok: false,
             content: images.error instanceof Error ? images.error.message : "Browser image listing failed.",
-            metadata: { backend: browserBackend.kind }
+            metadata: browserFailureMetadata(browserBackend, images.error)
           };
         }
         return {
@@ -409,7 +411,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           return {
             ok: false,
             content: entries.error instanceof Error ? entries.error.message : "Browser console read failed.",
-            metadata: { backend: browserBackend.kind }
+            metadata: browserFailureMetadata(browserBackend, entries.error)
           };
         }
         return {
@@ -445,7 +447,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           return {
             ok: false,
             content: result.error instanceof Error ? result.error.message : "Browser tab listing failed.",
-            metadata: { backend: browserBackend.kind }
+            metadata: browserFailureMetadata(browserBackend, result.error)
           };
         }
         return {
@@ -488,7 +490,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           return {
             ok: false,
             content: result.error instanceof Error ? result.error.message : "Browser tab switch failed.",
-            metadata: { backend: browserBackend.kind }
+            metadata: browserFailureMetadata(browserBackend, result.error)
           };
         }
         return {
@@ -550,7 +552,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           return withDebug({
             ok: false,
             content: result.error instanceof Error ? result.error.message : "Browser CDP command failed.",
-            metadata: { backend: browserBackend.kind }
+            metadata: browserFailureMetadata(browserBackend, result.error)
           }, debug);
         }
         debug.log("browser.cdp.complete", {
@@ -589,7 +591,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           return {
             ok: false,
             content: screenshot.error instanceof Error ? screenshot.error.message : "Browser screenshot failed.",
-            metadata: { backend: browserBackend.kind }
+            metadata: browserFailureMetadata(browserBackend, screenshot.error)
           };
         }
         const saved = await saveBrowserScreenshot(
@@ -652,7 +654,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           return {
             ok: false,
             content: screenshot.error instanceof Error ? screenshot.error.message : "Browser screenshot failed.",
-            metadata: { backend: browserBackend.kind }
+            metadata: browserFailureMetadata(browserBackend, screenshot.error)
           };
         }
         const saved = await saveBrowserScreenshot(
@@ -789,8 +791,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             content: result.error instanceof Error ? result.error.message : "Browser navigation failed.",
             metadata: {
               url: redactUrlForMetadata(url),
-              backend: browserBackend.kind,
-              reason: "navigation-failed"
+              ...browserFailureMetadata(browserBackend, result.error, "navigation-failed")
             }
           }, debug);
         }
@@ -827,6 +828,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             `Session: ${result.session.id}`,
             `URL: ${result.snapshot.url}`,
             result.snapshot.title === undefined ? undefined : `Title: ${result.snapshot.title}`,
+            browserSessionRecoveryWarning(result.metadata),
             botDetectionWarning === undefined ? undefined : `Warning: ${botDetectionWarning}`,
             "",
             renderBrowserSnapshot(result.snapshot, { maxChars: 4000 })
@@ -1150,6 +1152,31 @@ function truncateSummary(value: string, maxChars: number): string {
   return value.length <= maxChars ? value : `${value.slice(0, Math.max(0, maxChars - 3))}...`;
 }
 
+function browserFailureMetadata(
+  backend: BrowserBackend,
+  error: unknown,
+  fallbackReason?: string
+): { backend: BrowserBackend["kind"]; reason?: string } {
+  const reason = browserSessionStateReason(error) ?? fallbackReason;
+  return {
+    backend: backend.kind,
+    ...(reason === undefined ? {} : { reason })
+  };
+}
+
+function browserSessionRecoveryWarning(metadata: Record<string, unknown> | undefined): string | undefined {
+  const recovery = metadata?.sessionRecovery;
+  if (
+    typeof recovery !== "object" ||
+    recovery === null ||
+    !("authenticationPreserved" in recovery) ||
+    recovery.authenticationPreserved !== false
+  ) {
+    return undefined;
+  }
+  return "Warning: a new browser session was created after the previous session was lost. Authentication was not preserved; sign-in may be required again.";
+}
+
 function safeHostname(url: string): string | undefined {
   try {
     return new URL(url).hostname;
@@ -1198,7 +1225,7 @@ function createBrowserSnapshotTool(
         return withDebug({
           ok: false,
           content: snapshot.error instanceof Error ? snapshot.error.message : "Browser snapshot failed.",
-          metadata: { backend: browserBackend.kind }
+          metadata: browserFailureMetadata(browserBackend, snapshot.error)
         }, debug);
       }
       const renderedSnapshot = renderBrowserSnapshot(snapshot, { full: browserInput.full === true });
@@ -1260,7 +1287,7 @@ function createBrowserActionTool(input: {
         return {
           ok: false,
           content: snapshot.error instanceof Error ? snapshot.error.message : `${input.name} failed.`,
-          metadata: { backend: input.browserBackend.kind }
+          metadata: browserFailureMetadata(input.browserBackend, snapshot.error)
         };
       }
       return {

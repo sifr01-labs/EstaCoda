@@ -334,6 +334,7 @@ describe("supervised local CDP backend", () => {
     await expect(available.status()).resolves.toMatchObject({
       backend: "local-cdp",
       available: true,
+      sessionState: "backend_available",
       endpoint: "http://127.0.0.1:9222",
       browser: "Chrome/125.0.0.0",
       version: "1.3"
@@ -358,6 +359,7 @@ describe("supervised local CDP backend", () => {
     await expect(backend.status()).resolves.toEqual({
       backend: "local-cdp",
       available: true,
+      sessionState: "backend_available",
       reason: "Chrome/Chromium auto-launch is ready and will start on the first browser action."
     });
     expect(findChromiumExecutable).toHaveBeenCalledWith({
@@ -379,6 +381,7 @@ describe("supervised local CDP backend", () => {
     await expect(backend.status()).resolves.toEqual({
       backend: "local-cdp",
       available: false,
+      sessionState: "browser_process_missing",
       reason: "CDP URL is not configured and Chrome/Chromium auto-launch is unavailable because no executable was found."
     });
     expect(launchChrome).not.toHaveBeenCalled();
@@ -1004,6 +1007,33 @@ describe("supervised local CDP backend", () => {
     await expect(backend.snapshot?.({ sessionId: "   " })).rejects.toThrow("Browser sessionId is required for supervised local CDP operations.");
     await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
     await expect(backend.snapshot?.({ sessionId: "missing" })).rejects.toThrow("Browser session not found: missing");
+    await expect(backend.snapshot?.({ sessionId: "missing" })).rejects.toMatchObject({
+      reason: "session_missing"
+    });
+  });
+
+  it("marks replacement sessions as unauthenticated after session loss", async () => {
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => new FakeCdpSocket()
+    }) as ReturnType<typeof createSupervisedLocalCdpBrowserBackend> & {
+      closeSession(sessionId: string): Promise<void>;
+    };
+
+    await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+    await backend.closeSession("session-1");
+    const replacement = await backend.navigate({
+      url: "https://example.com/start-again",
+      sessionId: "session-1"
+    });
+
+    expect(replacement.metadata).toEqual({
+      sessionRecovery: {
+        reason: "session_missing",
+        authenticationPreserved: false
+      }
+    });
   });
 
   it("uses the persistent supervisor for raw CDP instead of reconnecting per action", async () => {

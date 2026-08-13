@@ -1,4 +1,5 @@
 import type { BrowserSessionLifecycle } from "./session-lifecycle.js";
+import { BrowserSessionStateError } from "./session-state.js";
 import type {
   AttachedCdpTarget,
   CdpPageTarget,
@@ -129,7 +130,7 @@ export class BrowserSessionManager {
     const normalizedRef = validateTabRef(tabRef);
     const target = (await this.listTabs(session.key)).find((candidate) => candidate.ref === normalizedRef);
     if (target === undefined) {
-      throw new Error(`Browser tab not found: ${normalizedRef}`);
+      throw new BrowserSessionStateError("tab_missing", `Browser tab not found: ${normalizedRef}`);
     }
 
     if (target.targetId === session.targetId) {
@@ -228,7 +229,7 @@ export class BrowserSessionManager {
     const sessionKey = validateSessionKey(key);
     const session = this.#sessions.get(sessionKey);
     if (session === undefined) {
-      throw new Error(`Browser session not found: ${sessionKey}`);
+      throw new BrowserSessionStateError("session_missing", `Browser session not found: ${sessionKey}`);
     }
     return session;
   }

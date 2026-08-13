@@ -153,6 +153,7 @@ describe("AgentLoopBuilder", () => {
     const providerReaders: unknown[] = [];
     const providerControllers: unknown[] = [];
     const providerWorkingSets: unknown[] = [];
+    const providerBrowserLeases: unknown[] = [];
     const agentReaders: unknown[] = [];
     const harness = await createBuilderHarness({
       factories: {
@@ -160,6 +161,7 @@ describe("AgentLoopBuilder", () => {
           providerReaders.push(options.executionPlanReader);
           providerControllers.push(options.executionPlanController);
           providerWorkingSets.push(options.executionWorkingSet);
+          providerBrowserLeases.push(options.browserSessionLease);
           return { run: vi.fn() } as never;
         },
         agentLoop(options) {
@@ -175,6 +177,7 @@ describe("AgentLoopBuilder", () => {
     expect(providerReaders).toEqual([root.executionPlanController, undefined]);
     expect(providerControllers).toEqual([root.executionPlanController, undefined]);
     expect(providerWorkingSets).toEqual([root.executionWorkingSet, undefined]);
+    expect(providerBrowserLeases).toEqual([harness.browserSessionLease, undefined]);
     expect(agentReaders).toEqual([root.executionPlanController, undefined]);
   });
 
@@ -824,6 +827,7 @@ async function createBuilderHarness(input: {
   skillRegistry?: SkillRegistry;
   routes?: AgentLoopRuntimeSubstrate["routes"];
   executionControls?: AgentLoopRuntimeSubstrate["executionControls"];
+  browserSessionLease?: AgentLoopRuntimeSubstrate["browserSessionLease"];
   factories?: ConstructorParameters<typeof AgentLoopBuilder>[0]["factories"];
   sessionRecallServiceFactory?: AgentLoopRuntimeSubstrate["sessionRecallServiceFactory"];
   memoryFileCompactionServiceFactory?: AgentLoopRuntimeSubstrate["memoryFileCompactionServiceFactory"];
@@ -865,6 +869,11 @@ async function createBuilderHarness(input: {
   });
   const skillRegistry = input.skillRegistry ?? new SkillRegistry();
   const fileStateTracker = new FileStateTracker();
+  const browserSessionLease = input.browserSessionLease ?? {
+    acquire: vi.fn(),
+    renew: vi.fn(),
+    release: vi.fn()
+  };
   const skillEvolutionStore = new SkillEvolutionStore({
     usagePath: join(workspaceRoot, "usage.json"),
     evolutionRoot: join(workspaceRoot, "evolution")
@@ -936,6 +945,7 @@ async function createBuilderHarness(input: {
     browserBackend: {
       isAvailable: async () => false
     } as BrowserBackend,
+    browserSessionLease,
     browserConfig: undefined,
     artifactStore: new ArtifactStore(),
     trustStore: new WorkspaceTrustStore({ path: join(workspaceRoot, "trust.json") }),
@@ -962,6 +972,7 @@ async function createBuilderHarness(input: {
   return {
     builder,
     fileStateTracker,
+    browserSessionLease,
     sessionDb,
     workspaceRoot,
     stateRoot: join(homeDir, ".estacoda"),

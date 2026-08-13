@@ -6,6 +6,12 @@ export type BrowserBackendKind =
   | "mock"
   | "unconfigured";
 
+export type BrowserSessionStateReason =
+  | "backend_available"
+  | "session_missing"
+  | "tab_missing"
+  | "browser_process_missing";
+
 export type BrowserCloudProviderKind =
   | "browserbase"
   | "browser-use"
@@ -140,6 +146,7 @@ export type BrowserBackendStatus = {
   fallbackFromCloud?: boolean;
   fallbackProvider?: BrowserCloudProviderKind;
   fallbackReason?: string;
+  sessionState?: BrowserSessionStateReason;
 };
 
 export type BrowserBackend = {

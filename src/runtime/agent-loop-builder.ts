@@ -1,6 +1,7 @@
 import type { ProjectContextSnapshot } from "../contracts/context.js";
 import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { BrowserBackend } from "../contracts/browser.js";
+import type { BrowserSessionLease } from "../browser/session-lifecycle.js";
 import type { ExternalMemoryProvider, MemoryProvider, MemoryPromptContext } from "../contracts/memory.js";
 import type { ModelProfile, ProviderRoutePreferences, ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import type { SecurityPolicy } from "../contracts/security.js";
@@ -172,6 +173,7 @@ export type AgentLoopRuntimeSubstrate = {
   externalMemoryProviders: ExternalMemoryProvider[];
   processManager: ProcessManager;
   browserBackend: BrowserBackend;
+  browserSessionLease?: BrowserSessionLease;
   browserConfig: SessionToolContext["browserConfig"];
   artifactStore: ArtifactStore;
   taskResultService?: TaskResultService;
@@ -582,7 +584,8 @@ export class AgentLoopBuilder {
       taskExecution: input.taskExecution,
       executionPlanReader: executionPlanController,
       executionPlanController,
-      executionWorkingSet
+      executionWorkingSet,
+      browserSessionLease: ownsExecutionPlan ? substrate.browserSessionLease : undefined
     });
     const skillPlaybookRunner = (this.#factories.skillPlaybookRunner ?? ((options) => new SkillPlaybookRunner(options)))({
       toolExecutor,

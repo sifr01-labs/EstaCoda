@@ -11,6 +11,7 @@ import { DDGS_CAPABILITY_ID } from "../python-env/capability-registry.js";
 import type { ProviderExecutor, ProviderExecutionResult } from "../providers/provider-executor.js";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
 import { createMockBrowserBackend, createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
+import { BrowserSessionStateError } from "../browser/session-state.js";
 import { ephemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 import { createGovernedVisionArtifactDispatcher, createVisionTools } from "./vision-tools.js";
 import { createWebTools, webToolProvider, type FetchLike, type WebToolOptions } from "./web-tools.js";
@@ -1904,6 +1905,60 @@ describe("web and browser tools baselines", () => {
 
     expect(result.ok).toBe(true);
     expect(result.content).toContain("Browser backend: mock");
+  });
+
+  it("surfaces structured browser session-loss reasons to the model", async () => {
+    const browserBackend = {
+      ...createSessionRecordingBrowserBackend(),
+      snapshot: async () => {
+        throw new BrowserSessionStateError("session_missing", "Browser session not found: runtime-session:main");
+      }
+    };
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend,
+      currentSessionId: () => "runtime-session"
+    }));
+
+    const result = await snapshot.run({});
+
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: { backend: "mock", reason: "session_missing" }
+    });
+  });
+
+  it("warns that authentication was not preserved when navigation replaces a lost session", async () => {
+    const browserBackend = {
+      ...createSessionRecordingBrowserBackend(),
+      navigate: async (input: BrowserNavigateInput) => ({
+        session: {
+          id: input.sessionId ?? "missing",
+          backend: "mock" as const,
+          currentUrl: input.url,
+          createdAt: "2026-08-13T00:00:00.000Z"
+        },
+        snapshot: {
+          sessionId: input.sessionId ?? "missing",
+          url: input.url
+        },
+        metadata: {
+          sessionRecovery: {
+            reason: "session_missing",
+            authenticationPreserved: false
+          }
+        }
+      })
+    };
+    const navigate = tool("browser.navigate", createTestWebTools({
+      browserBackend,
+      currentSessionId: () => "runtime-session",
+      resolveHostname: publicResolver
+    }));
+
+    const result = await navigate.run({ url: "https://example.com/recovered" });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("Authentication was not preserved");
   });
 
   it("preserves explicit browser session IDs and treats blank explicit IDs as absent", async () => {
