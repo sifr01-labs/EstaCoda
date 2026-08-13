@@ -1047,6 +1047,8 @@ describe("createRuntime MCP trust gating", () => {
             "schemaAliasOrder": [
               "ref",
               "sessionId",
+              "waitFor",
+              "waitTimeoutMs",
             ],
             "toolsets": [
               "browser",
@@ -1066,6 +1068,8 @@ describe("createRuntime MCP trust gating", () => {
               "ref",
               "sessionId",
               "text",
+              "waitFor",
+              "waitTimeoutMs",
             ],
             "toolsets": [
               "browser",
@@ -1085,6 +1089,8 @@ describe("createRuntime MCP trust gating", () => {
               "amount",
               "direction",
               "sessionId",
+              "waitFor",
+              "waitTimeoutMs",
             ],
             "toolsets": [
               "browser",
@@ -1103,6 +1109,8 @@ describe("createRuntime MCP trust gating", () => {
             "schemaAliasOrder": [
               "key",
               "sessionId",
+              "waitFor",
+              "waitTimeoutMs",
             ],
             "toolsets": [
               "browser",
@@ -1120,6 +1128,8 @@ describe("createRuntime MCP trust gating", () => {
             "riskClass": "read-only-network",
             "schemaAliasOrder": [
               "sessionId",
+              "waitFor",
+              "waitTimeoutMs",
             ],
             "toolsets": [
               "browser",
@@ -1262,6 +1272,8 @@ describe("createRuntime MCP trust gating", () => {
               "action",
               "promptText",
               "sessionId",
+              "waitFor",
+              "waitTimeoutMs",
             ],
             "toolsets": [
               "browser",
@@ -1278,8 +1290,11 @@ describe("createRuntime MCP trust gating", () => {
             "requiredConfig": undefined,
             "riskClass": "read-only-network",
             "schemaAliasOrder": [
+              "sessionId",
               "text",
               "url",
+              "waitFor",
+              "waitTimeoutMs",
             ],
             "toolsets": [
               "browser",
@@ -3638,6 +3653,8 @@ describe("createRuntime browser backend wiring", () => {
           snapshot: {
             sessionId: "injected",
             url: input.url,
+            revision: 1,
+            observedAt: "1970-01-01T00:00:00.000Z",
             text: "Injected backend",
             elements: []
           }
@@ -3676,6 +3693,8 @@ describe("createRuntime browser backend wiring", () => {
         snapshot: {
           sessionId: "injected",
           url: input.url,
+          revision: 1,
+          observedAt: "1970-01-01T00:00:00.000Z",
           text: "Injected backend",
           elements: []
         }

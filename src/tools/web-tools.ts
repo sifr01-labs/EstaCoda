@@ -5,6 +5,8 @@ import type { RegisteredTool } from "../contracts/tool.js";
 import type { SessionToolProvider } from "../contracts/tool.js";
 import type {
   BrowserActionInput,
+  BrowserActionDelta,
+  BrowserActionDeltaElement,
   BrowserBackend,
   BrowserNavigateInput,
   BrowserSnapshot,
@@ -274,7 +276,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
     }),
     createBrowserActionTool({
       name: "browser.click",
-      description: "Click an interactive browser element by ref from browser.snapshot.",
+      description: "Click an interactive browser element by ref, wait for a requested or stable state, and return a concise delta.",
       progressLabel: "clicking browser element",
       browserBackend,
       deriveBrowserInput,
@@ -283,14 +285,15 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         type: "object",
         properties: {
           ref: { type: "string" },
-          sessionId: { type: "string" }
+          sessionId: { type: "string" },
+          ...browserWaitInputProperties()
         },
         required: ["ref"]
       }
     }),
     createBrowserActionTool({
       name: "browser.type",
-      description: "Type text into an input element by ref from browser.snapshot.",
+      description: "Type text into an input element by ref, wait for a requested or stable state, and return a concise delta.",
       progressLabel: "typing in browser",
       browserBackend,
       deriveBrowserInput,
@@ -300,14 +303,15 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         properties: {
           ref: { type: "string" },
           text: { type: "string" },
-          sessionId: { type: "string" }
+          sessionId: { type: "string" },
+          ...browserWaitInputProperties()
         },
         required: ["ref", "text"]
       }
     }),
     createBrowserActionTool({
       name: "browser.scroll",
-      description: "Scroll the current browser page up or down.",
+      description: "Scroll the current browser page, wait for a requested or stable state, and return a concise delta.",
       progressLabel: "scrolling browser",
       browserBackend,
       deriveBrowserInput,
@@ -317,13 +321,14 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         properties: {
           direction: { type: "string", enum: ["up", "down"] },
           amount: { type: "number" },
-          sessionId: { type: "string" }
+          sessionId: { type: "string" },
+          ...browserWaitInputProperties()
         }
       }
     }),
     createBrowserActionTool({
       name: "browser.press",
-      description: "Press a keyboard key in the current browser page.",
+      description: "Press a keyboard key, wait for a requested or stable state, and return a concise delta.",
       progressLabel: "pressing browser key",
       browserBackend,
       deriveBrowserInput,
@@ -332,13 +337,14 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         type: "object",
         properties: {
           key: { type: "string" },
-          sessionId: { type: "string" }
+          sessionId: { type: "string" },
+          ...browserWaitInputProperties()
         }
       }
     }),
     createBrowserActionTool({
       name: "browser.back",
-      description: "Navigate the current browser page back in history.",
+      description: "Navigate back, wait for a requested or stable state, and return a concise delta.",
       progressLabel: "going back in browser",
       browserBackend,
       deriveBrowserInput,
@@ -346,7 +352,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       inputSchema: {
         type: "object",
         properties: {
-          sessionId: { type: "string" }
+          sessionId: { type: "string" },
+          ...browserWaitInputProperties()
         }
       }
     }),
@@ -498,7 +505,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           content: [
             `Controlled tab: ${renderBrowserTab(result.tab)}`,
             "",
-            renderBrowserSnapshot(result.snapshot, { maxChars: 7500 })
+            renderBrowserActionResult(result.snapshot, 7500)
           ].join("\n"),
           metadata: { backend: browserBackend.kind, tab: result.tab, snapshot: result.snapshot }
         };
@@ -685,7 +692,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
     },
     createBrowserActionTool({
       name: "browser.dialog",
-      description: "Accept or dismiss a native JavaScript dialog in the active local-CDP browser session.",
+      description: "Accept or dismiss a native JavaScript dialog, wait for a requested or stable state, and return a concise delta.",
       progressLabel: "responding to browser dialog",
       browserBackend,
       deriveBrowserInput,
@@ -695,18 +702,21 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         properties: {
           sessionId: { type: "string" },
           action: { type: "string", enum: ["accept", "dismiss"] },
-          promptText: { type: "string" }
+          promptText: { type: "string" },
+          ...browserWaitInputProperties()
         }
       }
     }),
     {
       name: "browser.navigate",
-      description: "Navigate a browser backend to a URL and return a first snapshot when a backend is configured.",
+      description: "Navigate a browser backend to a URL, wait for the requested or stable state, and return a concise action delta.",
       inputSchema: {
         type: "object",
         properties: {
           url: { type: "string" },
-          text: { type: "string" }
+          text: { type: "string" },
+          sessionId: { type: "string" },
+          ...browserWaitInputProperties()
         }
       },
       riskClass: "read-only-network",
@@ -714,7 +724,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       progressLabel: "navigating browser",
       maxResultSizeChars: 4000,
       isAvailable: () => browserBackend.isAvailable(),
-      run: async (input: { url?: string; text?: string; sessionId?: string }, context) => {
+      run: async (input: Omit<BrowserNavigateInput, "url"> & { url?: string; text?: string }, context) => {
         const debug = createBrowserDebugSession();
         const url = normalizeUrl(input.url ?? extractFirstUrl(input.text ?? ""));
 
@@ -775,7 +785,13 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           }, debug);
         }
 
-        const browserInput = deriveBrowserInput({ url, sessionId: input.sessionId, signal: context?.signal });
+        const browserInput = deriveBrowserInput({
+          url,
+          sessionId: input.sessionId,
+          waitFor: input.waitFor,
+          waitTimeoutMs: input.waitTimeoutMs,
+          signal: context?.signal
+        });
         const result = await browserBackend.navigate(browserInput).catch((error: unknown) => ({
           error
         }));
@@ -831,7 +847,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             browserSessionRecoveryWarning(result.metadata),
             botDetectionWarning === undefined ? undefined : `Warning: ${botDetectionWarning}`,
             "",
-            renderBrowserSnapshot(result.snapshot, { maxChars: 4000 })
+            renderBrowserActionResult(result.snapshot, 4000)
           ].filter((line) => line !== undefined).join("\n"),
           metadata: {
             url: redactUrlForMetadata(url),
@@ -1292,7 +1308,7 @@ function createBrowserActionTool(input: {
       }
       return {
         ok: true,
-        content: renderBrowserSnapshot(snapshot, { maxChars: 8000 }),
+        content: renderBrowserActionResult(snapshot, 8000),
         metadata: { backend: input.browserBackend.kind, snapshot }
       };
     }
@@ -1389,6 +1405,9 @@ function renderBrowserSnapshot(snapshot: BrowserSnapshot, options: BrowserSnapsh
   const consoleHistory = snapshot.consoleHistory ?? [];
   const content = [
     options.full === true ? "[Full page snapshot]" : "[Compact viewport snapshot]",
+    `Revision: ${snapshot.revision}`,
+    `Observed: ${snapshot.observedAt}`,
+    snapshot.readiness === undefined ? undefined : `Readiness: ${snapshot.readiness}`,
     snapshot.tab === undefined ? undefined : `Controlled tab: ${renderBrowserTab(snapshot.tab)}`,
     snapshot.openedTabs === undefined || snapshot.openedTabs.length === 0 ? undefined : `Opened tabs: ${snapshot.openedTabs.map((tab) => tab.ref).join(", ")}`,
     "",
@@ -1417,6 +1436,68 @@ function renderBrowserSnapshot(snapshot: BrowserSnapshot, options: BrowserSnapsh
     ...elements.map((element) => renderBrowserSnapshotElement(element))
   ].filter((line) => line !== undefined).join("\n");
   return truncateRenderedBrowserSnapshot(content, options.maxChars);
+}
+
+function renderBrowserActionDelta(delta: BrowserActionDelta): string {
+  const heading = delta.outcome === "timeout"
+    ? "Action wait timed out; current browser state was captured."
+    : delta.outcome === "no-change"
+      ? "Action dispatched; no observable page change was detected."
+      : "Action completed with an observable page change.";
+  const url = delta.url.changed
+    ? `URL: ${delta.url.before ?? "new session"} → ${delta.url.after}`
+    : `URL: unchanged (${delta.url.after})`;
+  return [
+    heading,
+    `Revision: ${delta.beforeRevision} → ${delta.afterRevision}`,
+    `Wait: ${delta.waitCondition} (${delta.conditionMet ? "met" : "not met"})`,
+    url,
+    ...(delta.addedElements ?? []).map((element) => `Added: ${renderDeltaElement(element)}`),
+    ...(delta.removedElements ?? []).map((element) => `Removed: ${renderDeltaElement(element)}`),
+    ...(delta.openedTabs ?? []).map((tab) => `Opened tab: ${tab.ref}${tab.title === undefined ? "" : ` ${tab.title}`} — ${tab.url}`)
+  ].join("\n");
+}
+
+function renderBrowserActionResult(snapshot: BrowserSnapshot, maxChars: number): string {
+  if (snapshot.actionDelta === undefined) {
+    return renderBrowserSnapshot(snapshot, { maxChars });
+  }
+  const delta = renderBrowserActionDelta(snapshot.actionDelta);
+  if (snapshot.actionDelta.outcome !== "timeout") {
+    return delta;
+  }
+  return truncateRenderedBrowserSnapshot([
+    delta,
+    "",
+    "Current state:",
+    renderBrowserSnapshot(snapshot)
+  ].join("\n"), maxChars);
+}
+
+function renderDeltaElement(element: BrowserActionDeltaElement): string {
+  return [element.role ?? "element", element.name === undefined ? undefined : JSON.stringify(element.name)]
+    .filter((value): value is string => value !== undefined)
+    .join(" ");
+}
+
+function browserWaitInputProperties(): Record<string, unknown> {
+  return {
+    waitFor: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["url", "text", "element", "dialog", "dom-stable"] },
+        contains: { type: "string" },
+        value: { type: "string" },
+        role: { type: "string" },
+        name: { type: "string" }
+      },
+      required: ["kind"]
+    },
+    waitTimeoutMs: {
+      type: "number",
+      description: "Maximum wait for the requested browser state, capped at 10000 ms."
+    }
+  };
 }
 
 function renderBrowserTab(tab: BrowserTab): string {

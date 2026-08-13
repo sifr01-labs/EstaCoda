@@ -77,7 +77,7 @@ function fingerprintObservations(executions: ToolExecutionRecord[]): string {
 function observationState(execution: ToolExecutionRecord): unknown {
   const metadata = execution.result?.metadata;
   if (execution.tool.name === "browser.snapshot" && metadata?.snapshot !== undefined) {
-    return metadata.snapshot;
+    return stableBrowserSnapshot(metadata.snapshot);
   }
   if (execution.tool.name === "browser.tabs" && metadata !== undefined) {
     return {
@@ -87,6 +87,14 @@ function observationState(execution: ToolExecutionRecord): unknown {
     };
   }
   return execution.result?.content ?? "";
+}
+
+function stableBrowserSnapshot(value: unknown): unknown {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+  const { observedAt: _observedAt, ...stable } = value as Record<string, unknown>;
+  return stable;
 }
 
 function stableSerialize(value: unknown): string {

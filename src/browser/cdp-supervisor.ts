@@ -1,4 +1,5 @@
 import type { BrowserSnapshot } from "../contracts/browser.js";
+import { observeBrowserSnapshot, type BrowserSnapshotRevisionState } from "./snapshot-state.js";
 import { type CdpClient, type CdpWebSocketEvent, type CdpWebSocketFactory, type CdpWebSocketLike } from "./cdp-client.js";
 import { CdpClient as PersistentCdpClient } from "./cdp-client.js";
 import {
@@ -45,6 +46,7 @@ export class CDPSupervisor {
   #pendingDialogs = new Map<string, NonNullable<BrowserSnapshot["pendingDialogs"]>[number]>();
   #consoleHistory: NonNullable<BrowserSnapshot["consoleHistory"]> = [];
   #frameTree: NonNullable<BrowserSnapshot["frameTree"]> = [];
+  readonly #snapshotRevision: BrowserSnapshotRevisionState = { revision: 0 };
 
   constructor(options: CDPSupervisorOptions) {
     this.#webSocketUrl = options.webSocketUrl;
@@ -93,12 +95,12 @@ export class CDPSupervisor {
 
   async getSnapshot(sessionId = "cdp-supervisor", options: BrowserSnapshotOptions = {}): Promise<SupervisorSnapshot> {
     const snapshot = await evaluateCdpSnapshot(this.#requireClient(), sessionId, options);
-    return {
+    return observeBrowserSnapshot({
       ...snapshot,
       pendingDialogs: [...this.#pendingDialogs.values()],
       frameTree: [...this.#frameTree],
       consoleHistory: [...this.#consoleHistory],
-    };
+    }, this.#snapshotRevision) as SupervisorSnapshot;
   }
 
   async respondToDialog(input: {
@@ -401,6 +403,7 @@ function pageSnapshotMetadataExpression(): string {
   return `(() => JSON.stringify({
     url: location.href,
     title: document.title,
+    readiness: document.readyState,
     text: (document.body && document.body.innerText ? document.body.innerText : '').slice(0, 12000)
   }))()`;
 }
@@ -413,6 +416,7 @@ export function snapshotExpression(): string {
     return JSON.stringify({
       url: location.href,
       title: document.title,
+      readiness: document.readyState,
       text: (document.body && document.body.innerText ? document.body.innerText : '').slice(0, 12000),
       elements: candidates.map((el, index) => ({
         ref: '@e' + (index + 1),
@@ -628,7 +632,10 @@ function parsePageSnapshotMetadata(value: unknown): Omit<BrowserSnapshot, "sessi
     const parsed = JSON.parse(value) as Partial<BrowserSnapshot>;
     return {
       url: typeof parsed.url === "string" ? parsed.url : "about:blank",
+      revision: 1,
+      observedAt: new Date().toISOString(),
       ...(typeof parsed.title === "string" ? { title: parsed.title } : {}),
+      readiness: parseReadiness(parsed.readiness),
       ...(typeof parsed.text === "string" ? { text: parsed.text } : { text: "" })
     };
   } catch {
@@ -638,18 +645,37 @@ function parsePageSnapshotMetadata(value: unknown): Omit<BrowserSnapshot, "sessi
 
 export function parseCdpSnapshot(value: unknown, sessionId: string): BrowserSnapshot {
   if (typeof value !== "string") {
-    return { sessionId, url: "about:blank", text: "", elements: [] };
+    return emptySnapshot(sessionId, "");
   }
   try {
     const parsed = JSON.parse(value) as BrowserSnapshot;
     return {
       sessionId,
       url: parsed.url,
+      revision: 1,
+      observedAt: new Date().toISOString(),
+      readiness: parseReadiness(parsed.readiness),
       title: parsed.title,
       text: parsed.text,
       elements: Array.isArray(parsed.elements) ? parsed.elements : []
     };
   } catch {
-    return { sessionId, url: "about:blank", text: value, elements: [] };
+    return emptySnapshot(sessionId, value);
   }
+}
+
+function emptySnapshot(sessionId: string, text: string): BrowserSnapshot {
+  return {
+    sessionId,
+    url: "about:blank",
+    revision: 1,
+    observedAt: new Date().toISOString(),
+    readiness: "unknown",
+    text,
+    elements: []
+  };
+}
+
+function parseReadiness(value: unknown): NonNullable<BrowserSnapshot["readiness"]> {
+  return value === "loading" || value === "interactive" || value === "complete" ? value : "unknown";
 }

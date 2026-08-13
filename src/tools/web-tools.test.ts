@@ -222,6 +222,8 @@ function createLargeSnapshotBackend(text = "Snapshot text. ".repeat(800)): Brows
     snapshot: async () => ({
       sessionId: "session-1",
       url: "https://example.com/",
+      revision: 1,
+      observedAt: "2026-08-13T00:00:00.000Z",
       title: "Large Snapshot",
       text,
       elements: [
@@ -259,6 +261,8 @@ function createSessionRecordingBrowserBackend(calls: Array<{ method: string; inp
   const snapshotFor = (input: BrowserActionInput | BrowserNavigateInput = {}): ReturnType<NonNullable<BrowserBackend["snapshot"]>> extends Promise<infer T> ? T : never => ({
     sessionId: input.sessionId ?? "missing-session",
     url: "https://example.com/",
+    revision: 1,
+    observedAt: "2026-08-13T00:00:00.000Z",
     title: "Recorded Browser Page",
     text: `Recorded browser snapshot for ${input.sessionId ?? "missing-session"}.`,
     elements: [{ ref: "@e1", role: "button", name: "Recorded Button" }]
@@ -1140,6 +1144,8 @@ describe("web and browser tools baselines", () => {
           snapshot: {
             sessionId: input.sessionId ?? "nav-session",
             url: input.url,
+            revision: 1,
+            observedAt: "2026-08-13T00:00:00.000Z",
             text: "Fallback snapshot."
           },
           metadata: {
@@ -1313,6 +1319,8 @@ describe("web and browser tools baselines", () => {
           snapshot: {
             sessionId: input.sessionId ?? "redirect-session",
             url: input.url === "about:blank" ? "about:blank" : "http://169.254.169.254/latest",
+            revision: 1,
+            observedAt: "2026-08-13T00:00:00.000Z",
             text: "redirected"
           }
         };
@@ -1351,6 +1359,8 @@ describe("web and browser tools baselines", () => {
           snapshot: {
             sessionId: input.sessionId ?? "private-redirect-session",
             url: input.url === "about:blank" ? "about:blank" : "http://192.168.1.1/admin",
+            revision: 1,
+            observedAt: "2026-08-13T00:00:00.000Z",
             text: "redirected"
           }
         };
@@ -1389,6 +1399,8 @@ describe("web and browser tools baselines", () => {
           snapshot: {
             sessionId: input.sessionId ?? "policy-redirect-session",
             url: input.url === "about:blank" ? "about:blank" : "https://blocked.test/final",
+            revision: 1,
+            observedAt: "2026-08-13T00:00:00.000Z",
             text: "redirected"
           }
         };
@@ -1939,7 +1951,9 @@ describe("web and browser tools baselines", () => {
         },
         snapshot: {
           sessionId: input.sessionId ?? "missing",
-          url: input.url
+          url: input.url,
+          revision: 1,
+          observedAt: "2026-08-13T00:00:00.000Z"
         },
         metadata: {
           sessionRecovery: {
@@ -2065,6 +2079,8 @@ describe("web and browser tools baselines", () => {
         snapshot: async () => ({
           sessionId: "session-1",
           url: "https://example.com",
+          revision: 1,
+          observedAt: "2026-08-13T00:00:00.000Z",
           title: "Snapshot Title",
           text: "Snapshot text.",
           elements: [
@@ -2103,6 +2119,8 @@ describe("web and browser tools baselines", () => {
         snapshot: async () => ({
           sessionId: "session-1",
           url: "https://example.com",
+          revision: 1,
+          observedAt: "2026-08-13T00:00:00.000Z",
           text: "x".repeat(9_000),
           elements: []
         })
@@ -2250,6 +2268,8 @@ describe("web and browser tools baselines", () => {
       snapshot: async () => ({
         sessionId: "session-1",
         url: "https://example.com",
+        revision: 1,
+        observedAt: "2026-08-13T00:00:00.000Z",
         text: "Page text.",
         pendingDialogs: [{ id: "dialog-1", type: "alert", message: "Careful" }],
         frameTree: [{ frameId: "frame-1", url: "https://frame.test/app", origin: "https://frame.test", isOopif: false }],
@@ -2281,6 +2301,86 @@ describe("web and browser tools baselines", () => {
     expect(result.ok).toBe(false);
     expect(result.content).toBe("Invalid browser element ref: invalid-ref");
     expect(result.metadata).toEqual({ backend: "mock" });
+  });
+
+  it("forwards browser wait conditions and prioritizes compact action deltas", async () => {
+    const calls: BrowserActionInput[] = [];
+    const browserBackend: BrowserBackend = {
+      ...createMockBrowserBackend(),
+      click: async (input) => {
+        calls.push(input);
+        return {
+          sessionId: input.sessionId ?? "session-1",
+          url: "https://example.com/products/loans",
+          revision: 7,
+          observedAt: "2026-08-13T00:00:00.000Z",
+          readiness: "complete",
+          text: "This full snapshot text should not be repeated after an action.",
+          elements: [{ ref: "@e2", role: "button", name: "View product" }],
+          actionDelta: {
+            outcome: "changed",
+            beforeRevision: 6,
+            afterRevision: 7,
+            waitCondition: "text",
+            conditionMet: true,
+            url: {
+              changed: true,
+              before: "https://example.com/products",
+              after: "https://example.com/products/loans"
+            },
+            addedElements: [{ role: "button", name: "View product" }]
+          }
+        };
+      }
+    };
+    const click = tool("browser.click", createTestWebTools({
+      browserBackend,
+      currentSessionId: () => "runtime-session"
+    }));
+
+    const result = await click.run({
+      ref: "@e1",
+      waitFor: { kind: "text", value: "Loan API" },
+      waitTimeoutMs: 3_000
+    });
+
+    expect(calls[0]).toMatchObject({
+      sessionId: "runtime-session:main",
+      waitFor: { kind: "text", value: "Loan API" },
+      waitTimeoutMs: 3_000
+    });
+    expect(result.content).toContain("Action completed with an observable page change.");
+    expect(result.content).toContain("Revision: 6 → 7");
+    expect(result.content).toContain("Added: button \"View product\"");
+    expect(result.content).not.toContain("full snapshot text");
+  });
+
+  it("renders action wait timeouts without claiming completion", async () => {
+    const browserBackend: BrowserBackend = {
+      ...createMockBrowserBackend(),
+      press: async (input) => ({
+        sessionId: input.sessionId ?? "session-1",
+        url: "https://example.com",
+        revision: 2,
+        observedAt: "2026-08-13T00:00:00.000Z",
+        actionDelta: {
+          outcome: "timeout",
+          beforeRevision: 2,
+          afterRevision: 2,
+          waitCondition: "dialog",
+          conditionMet: false,
+          url: { changed: false, after: "https://example.com" }
+        }
+      })
+    };
+    const press = tool("browser.press", createTestWebTools({ browserBackend }));
+
+    const result = await press.run({ key: "Enter" });
+
+    expect(result.content).toContain("Action wait timed out");
+    expect(result.content).not.toContain("Action completed");
+    expect(result.content).toContain("Current state:");
+    expect(result.content).toContain("[Compact viewport snapshot]");
   });
 
   it("writes browser.screenshot under a temp workspace root", async () => {

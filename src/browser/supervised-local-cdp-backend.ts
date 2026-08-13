@@ -18,6 +18,7 @@ import { checkWebsiteAccess, loadWebsiteBlocklist } from "./website-policy.js";
 import { CDPSupervisor } from "./cdp-supervisor.js";
 import type { BrowserSessionLifecycle } from "./session-lifecycle.js";
 import { BrowserSessionStateError, browserSessionStateReason } from "./session-state.js";
+import { settleBrowserAction, withBrowserActionDelta } from "./action-settling.js";
 import { findChromiumExecutable, type ChromiumFinderOptions, type ChromiumFinderResult } from "./chromium-finder.js";
 import { launchChrome, type ChromeLauncherOptions, type LaunchedChrome } from "./chrome-launcher.js";
 import { CdpTargetManager, type CdpTargetManagerOptions } from "./cdp-target-manager.js";
@@ -45,12 +46,17 @@ export type SupervisedLocalCdpBackendOptions = {
   launchChrome?: (options: ChromeLauncherOptions) => Promise<LaunchedChrome>;
   createTargetManager?: (options: CdpTargetManagerOptions) => TargetManagerLike;
   createSessionManager?: (options: BrowserSessionManagerOptions) => BrowserSessionManagerLike;
+  settling?: {
+    pollIntervalMs?: number;
+    stableWindowMs?: number;
+    minimumObservationMs?: number;
+  };
 };
 
 type TargetManagerLike = Pick<CdpTargetManager, "createTarget" | "close">;
 
 type BrowserSessionManagerLike = Pick<BrowserSessionManager, "acquire" | "close" | "closeAll" | "has"> &
-  Partial<Pick<BrowserSessionManager, "listTabs" | "switchTab">>;
+  Partial<Pick<BrowserSessionManager, "listTabs" | "switchTab" | "observeSnapshot">>;
 
 type BrowserSessionStack = {
   endpoint: string;
@@ -81,6 +87,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
   const lifecycle = options.lifecycle;
   const sessionStacks = new Map<string, BrowserSessionStack>();
   const lostSessions = new Map<string, "session_missing" | "browser_process_missing">();
+  const latestSnapshots = new Map<string, BrowserSnapshot>();
   let launchedChrome: LaunchedChrome | undefined;
   let launchPromise: Promise<LaunchedChrome> | undefined;
   let configuredStack: BrowserSessionStack | undefined;
@@ -94,6 +101,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     const stack = sessionStacks.get(sessionId);
     if (stack === undefined || !stack.sessionManager.has(sessionId)) {
       sessionStacks.delete(sessionId);
+      latestSnapshots.delete(sessionId);
       throw new BrowserSessionStateError("session_missing", `Browser session not found: ${sessionId}`);
     }
     return asBackendSession(await stack.sessionManager.acquire(sessionId));
@@ -149,6 +157,56 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     return manager?.listTabs !== undefined && manager.switchTab !== undefined;
   };
 
+  const observeSessionSnapshot = (
+    session: ManagedBackendSession,
+    snapshot: BrowserSnapshot
+  ): BrowserSnapshot => {
+    const manager = sessionStacks.get(session.key)?.sessionManager;
+    const observed = manager?.observeSnapshot?.(session.key, snapshot) ?? snapshot;
+    latestSnapshots.set(session.key, observed);
+    return observed;
+  };
+
+  const captureSessionSnapshot = async (
+    session: ManagedBackendSession,
+    openedTabs: BrowserTab[] = [],
+    full = false
+  ): Promise<BrowserSnapshot> => {
+    const raw = withSessionTab(
+      session,
+      await session.supervisor.getSnapshot(session.key, { full }),
+      openedTabs
+    );
+    return observeSessionSnapshot(session, raw);
+  };
+
+  const settleAction = async (input: {
+    session: ManagedBackendSession;
+    before?: BrowserSnapshot;
+    actionInput: Pick<BrowserActionInput, "waitFor" | "waitTimeoutMs" | "signal">;
+    capture?: () => Promise<BrowserSnapshot>;
+    initialSnapshot?: BrowserSnapshot;
+    openedTabs?: BrowserTab[];
+  }): Promise<BrowserSnapshot> => {
+    const settlement = await settleBrowserAction({
+      capture: input.capture ?? (() => captureSessionSnapshot(input.session)),
+      waitFor: input.actionInput.waitFor,
+      waitTimeoutMs: input.actionInput.waitTimeoutMs,
+      signal: input.actionInput.signal,
+      initialSnapshot: input.initialSnapshot,
+      pollIntervalMs: options.settling?.pollIntervalMs,
+      stableWindowMs: options.settling?.stableWindowMs,
+      minimumObservationMs: options.settling?.minimumObservationMs
+    });
+    const snapshot = withBrowserActionDelta({
+      before: input.before,
+      settlement,
+      openedTabs: input.openedTabs
+    });
+    latestSnapshots.set(input.session.key, snapshot);
+    return snapshot;
+  };
+
   const switchSafeTab = async (input: BrowserSwitchTabInput): Promise<{
     session: ManagedBackendSession;
     tab: BrowserTab;
@@ -170,13 +228,14 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     }
     const previousTab = tabs.tabs.find((tab) => tab.controlled);
     const session = asBackendSession(await switchTab.call(stack.sessionManager, sessionId, input.tabRef));
-    const snapshot = await session.supervisor.getSnapshot(session.key);
-    if (!await tabUrlIsAllowed(snapshot.url)) {
+    const rawSnapshot = withSessionTab(session, await session.supervisor.getSnapshot(session.key));
+    if (!await tabUrlIsAllowed(rawSnapshot.url)) {
       if (previousTab !== undefined && previousTab.ref !== input.tabRef) {
         await switchTab.call(stack.sessionManager, sessionId, previousTab.ref).catch(() => undefined);
       }
       throw new Error("Browser tab changed to a URL blocked by browser policy before it could be controlled.");
     }
+    const snapshot = observeSessionSnapshot(session, rawSnapshot);
     const tab: BrowserTab = {
       ref: session.tabRef,
       url: redactUrlForMetadata(snapshot.url),
@@ -208,6 +267,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       closeError = error;
     } finally {
       sessionStacks.delete(sessionId);
+      latestSnapshots.delete(sessionId);
     }
 
     try {
@@ -246,6 +306,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     for (const [sessionId, owner] of [...sessionStacks.entries()]) {
       if (owner === stack) {
         sessionStacks.delete(sessionId);
+        latestSnapshots.delete(sessionId);
       }
     }
   };
@@ -425,6 +486,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     }
     sessionStacks.clear();
     lostSessions.clear();
+    latestSnapshots.clear();
     configuredStack = undefined;
     launchedStack = undefined;
     try {
@@ -550,11 +612,18 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
           throw new BrowserSessionStateError("session_missing", `Browser session not found: ${sessionId}`);
         }
         const supervisor = session.supervisor;
+        const before = latestSnapshots.get(sessionId);
         await supervisor.send("Page.navigate", { url: input.url });
         await supervisor.waitFor("Page.loadEventFired", 5_000).catch(() => undefined);
 
-        const snapshot = withSessionTab(session, await supervisor.getSnapshot(sessionId));
         sessionStacks.set(sessionId, existingStack ?? sessionStack);
+        const initialSnapshot = await captureSessionSnapshot(session);
+        const snapshot = await settleAction({
+          session,
+          before,
+          actionInput: input,
+          initialSnapshot
+        });
         lostSessions.delete(sessionId);
 
         return {
@@ -589,71 +658,87 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     },
     snapshot: async (input) => {
       const session = await getSession(input);
-      return withSessionTab(
-        session,
-        await session.supervisor.getSnapshot(session.key, { full: input?.full === true })
-      );
+      return captureSessionSnapshot(session, [], input?.full === true);
     },
     click: async (input) => {
-      const session = await getSession(input);
+      let session = await getSession(input);
+      const before = latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session);
       const beforeTabs = supportsTabManagement(session.key) ? await listManagedTabs(session.key) : undefined;
       await session.supervisor.send("Runtime.evaluate", {
         expression: refActionExpression(input.ref, "click"),
         awaitPromise: true
       });
-      const clickedSnapshot = await session.supervisor.getSnapshot(session.key);
-      if (beforeTabs === undefined) {
-        return withSessionTab(session, clickedSnapshot);
-      }
-      const afterTabs = await listManagedTabs(session.key);
-      const priorRefs = new Set(beforeTabs.map((tab) => tab.ref));
-      const openedCandidates = afterTabs.filter((tab) => !priorRefs.has(tab.ref));
-      const openedTabs = (await Promise.all(openedCandidates.map(async (tab) => (
-        await tabIsAllowed(tab) ? toBrowserTab(tab) : undefined
-      )))).filter((tab): tab is BrowserTab => tab !== undefined);
-      if (openedTabs.length === 1) {
-        const switched = await switchSafeTab({
-          sessionId: session.key,
-          tabRef: openedTabs[0]!.ref,
-          signal: input.signal
-        });
-        return withSessionTab(switched.session, switched.snapshot, [switched.tab]);
-      }
-      return withSessionTab(session, clickedSnapshot, openedTabs);
+      const priorRefs = new Set(beforeTabs?.map((tab) => tab.ref) ?? []);
+      let openedTabs: BrowserTab[] = [];
+      const capture = async (): Promise<BrowserSnapshot> => {
+        if (beforeTabs !== undefined && openedTabs.length === 0) {
+          const afterTabs = await listManagedTabs(session.key);
+          const openedCandidates = afterTabs.filter((tab) => !priorRefs.has(tab.ref));
+          openedTabs = (await Promise.all(openedCandidates.map(async (tab) => (
+            await tabIsAllowed(tab) ? toBrowserTab(tab) : undefined
+          )))).filter((tab): tab is BrowserTab => tab !== undefined);
+          if (openedTabs.length === 1) {
+            const switched = await switchSafeTab({
+              sessionId: session.key,
+              tabRef: openedTabs[0]!.ref,
+              signal: input.signal
+            });
+            session = switched.session;
+            openedTabs = [switched.tab];
+          }
+        }
+        return captureSessionSnapshot(session, openedTabs);
+      };
+      const settlement = await settleBrowserAction({
+        capture,
+        waitFor: input.waitFor,
+        waitTimeoutMs: input.waitTimeoutMs,
+        signal: input.signal,
+        pollIntervalMs: options.settling?.pollIntervalMs,
+        stableWindowMs: options.settling?.stableWindowMs,
+        minimumObservationMs: options.settling?.minimumObservationMs
+      });
+      const snapshot = withBrowserActionDelta({ before, settlement, openedTabs });
+      latestSnapshots.set(session.key, snapshot);
+      return snapshot;
     },
     type: async (input) => {
       const session = await getSession(input);
+      const before = latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session);
       await session.supervisor.send("Runtime.evaluate", {
         expression: refActionExpression(input.ref, "type", input.text ?? ""),
         awaitPromise: true
       });
-      return withSessionTab(session, await session.supervisor.getSnapshot(session.key));
+      return settleAction({ session, before, actionInput: input });
     },
     scroll: async (input) => {
       const session = await getSession(input);
+      const before = latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session);
       const amount = input.amount ?? 700;
       const delta = input.direction === "up" ? -amount : amount;
       await session.supervisor.send("Runtime.evaluate", {
         expression: `window.scrollBy(0, ${JSON.stringify(delta)}); "ok";`,
         returnByValue: true
       });
-      return withSessionTab(session, await session.supervisor.getSnapshot(session.key));
+      return settleAction({ session, before, actionInput: input });
     },
     press: async (input) => {
       const session = await getSession(input);
+      const before = latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session);
       const key = input.key ?? "Enter";
       await session.supervisor.send("Input.dispatchKeyEvent", { type: "keyDown", key });
       await session.supervisor.send("Input.dispatchKeyEvent", { type: "keyUp", key });
-      return withSessionTab(session, await session.supervisor.getSnapshot(session.key));
+      return settleAction({ session, before, actionInput: input });
     },
     back: async (input = {}) => {
       const session = await getSession(input);
+      const before = latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session);
       await session.supervisor.send("Runtime.evaluate", {
         expression: "history.back(); 'ok';",
         returnByValue: true
       });
       await session.supervisor.waitFor("Page.loadEventFired", 2_000).catch(() => undefined);
-      return withSessionTab(session, await session.supervisor.getSnapshot(session.key));
+      return settleAction({ session, before, actionInput: input });
     },
     getImages: async (input = {}) => {
       const session = await getSession(input);
@@ -672,8 +757,14 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       return listSafeTabs(session.key);
     },
     switchTab: async (input) => {
+      const before = latestSnapshots.get(requireSessionId(input.sessionId));
       const switched = await switchSafeTab(input);
-      const snapshot = withSessionTab(switched.session, switched.snapshot);
+      const snapshot = await settleAction({
+        session: switched.session,
+        before,
+        actionInput: { signal: input.signal },
+        initialSnapshot: switched.snapshot
+      });
       return {
         tab: snapshot.tab!,
         snapshot
@@ -702,11 +793,12 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     },
     dialog: async (input = {}) => {
       const session = await getSession(input);
+      const before = latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session);
       await session.supervisor.respondToDialog({
         accept: input.action !== "dismiss",
         promptText: input.promptText
       });
-      return withSessionTab(session, await session.supervisor.getSnapshot(session.key));
+      return settleAction({ session, before, actionInput: input });
     },
     closeSession,
     close: closeBackend

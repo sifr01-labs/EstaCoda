@@ -271,6 +271,39 @@ describe("ExecutionPlanProgressGuard", () => {
     });
   });
 
+  it("credits only browser actions whose settled delta confirms a state change", () => {
+    const plan = activePlan({
+      items: [{ id: "configure", content: "Configure the browser form", status: "in_progress" }]
+    });
+    const guard = new ExecutionPlanProgressGuard({
+      plan,
+      noProgressNudgeIteration: 3,
+      maxNoProgressIterations: 6
+    });
+    const browserAction = (outcome: "changed" | "no-change" | "timeout", callId: string) => execution({
+      tool: { ...execution().tool, name: "browser.click" },
+      toolCallId: callId,
+      result: {
+        ok: true,
+        content: outcome,
+        metadata: { snapshot: { actionDelta: { outcome } } }
+      }
+    });
+
+    expect(guard.observe({ plan, executions: [browserAction("no-change", "no-change")] })).toMatchObject({
+      materialProgress: false,
+      progressKinds: ["incidental-observation"]
+    });
+    expect(guard.observe({ plan, executions: [browserAction("timeout", "timeout")] })).toMatchObject({
+      materialProgress: false,
+      progressKinds: ["incidental-observation"]
+    });
+    expect(guard.observe({ plan, executions: [browserAction("changed", "changed")] })).toMatchObject({
+      materialProgress: true,
+      progressKinds: ["target-mutation"]
+    });
+  });
+
   it("keeps content-derived fingerprints in memory-only assessments", () => {
     const secret = "private-browser-page-token";
     const plan = activePlan();

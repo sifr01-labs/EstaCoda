@@ -62,6 +62,23 @@ describe("BrowserObservationGuard", () => {
     expect(guard.observe([changed])).toMatchObject({ count: 1, shouldNudge: false, shouldStop: false });
   });
 
+  it("ignores volatile snapshot observation timestamps", () => {
+    const guard = new BrowserObservationGuard(3);
+    const first = execution({ metadata: { snapshot: {
+      url: "https://example.com",
+      revision: 4,
+      observedAt: "2026-08-13T00:00:00.000Z"
+    } } });
+    const later = execution({ metadata: { snapshot: {
+      url: "https://example.com",
+      revision: 4,
+      observedAt: "2026-08-13T00:00:01.000Z"
+    } } });
+
+    guard.observe([first]);
+    expect(guard.observe([later])).toMatchObject({ count: 2, shouldNudge: true });
+  });
+
   it("resets after a browser action or failed observation", () => {
     const guard = new BrowserObservationGuard(3);
     const observation = execution();

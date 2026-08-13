@@ -7,6 +7,7 @@ import type {
   CdpTargetSupervisor,
   ManagedCdpTarget
 } from "./cdp-target-manager.js";
+import type { BrowserSnapshot } from "../contracts/browser.js";
 
 class FakeSupervisor implements CdpTargetSupervisor {
   close = vi.fn();
@@ -128,6 +129,25 @@ describe("BrowserSessionManager", () => {
     expect(session.pageWebSocketDebuggerUrl).toBe("ws://page-1");
     expect(session.supervisor).toBe(targetManager.targets[0]?.supervisor);
     expect(manager.has("session-1")).toBe(true);
+  });
+
+  it("tracks meaningful snapshot revisions independently per browser session", async () => {
+    const manager = new BrowserSessionManager({ targetManager: new FakeTargetManager() });
+    await manager.acquire("session-a");
+    await manager.acquire("session-b");
+    const base = (sessionId: string, text: string): BrowserSnapshot => ({
+      sessionId,
+      url: "https://example.com",
+      revision: 0,
+      observedAt: "1970-01-01T00:00:00.000Z",
+      text,
+      elements: []
+    });
+
+    expect(manager.observeSnapshot("session-a", base("session-a", "first")).revision).toBe(1);
+    expect(manager.observeSnapshot("session-a", base("session-a", "first")).revision).toBe(1);
+    expect(manager.observeSnapshot("session-a", base("session-a", "changed")).revision).toBe(2);
+    expect(manager.observeSnapshot("session-b", base("session-b", "first")).revision).toBe(1);
   });
 
   it("acquire() reuses an existing session for the same key", async () => {

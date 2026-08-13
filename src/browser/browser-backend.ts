@@ -12,6 +12,7 @@ import type {
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { connectCdp, type CdpClient, type CdpFetchLike, type CdpWebSocketFactory } from "./cdp-client.js";
 import { evaluateCdpSnapshot } from "./cdp-supervisor.js";
+import { observeBrowserSnapshot, type BrowserSnapshotRevisionState } from "./snapshot-state.js";
 import { registerDefaultBrowserProviders, selectBrowserProvider } from "./browser-registry.js";
 import { createSupervisedLocalCdpBrowserBackend } from "./supervised-local-cdp-backend.js";
 import { createBrowserbaseBrowserBackend, type BrowserbaseBrowserBackendOptions } from "./browser-providers/browserbase-provider.js";
@@ -46,13 +47,17 @@ export function createMockBrowserBackend(input: {
   text?: string;
 } = {}): BrowserBackend {
   const sessionId = input.sessionId ?? "mock-browser-session";
-  const snapshot = (url = "mock://browser"): BrowserSnapshot => ({
+  const revisionState: BrowserSnapshotRevisionState = { revision: 0 };
+  const snapshot = (url = "mock://browser"): BrowserSnapshot => observeBrowserSnapshot({
     sessionId,
     url,
+    revision: revisionState.revision,
+    observedAt: new Date().toISOString(),
+    readiness: "complete",
     title: input.title ?? "Mock Browser Page",
     text: input.text ?? `Mock browser snapshot for ${url}.`,
     elements: [{ ref: "@e1", role: "button", name: "Mock Button" }]
-  });
+  }, revisionState);
 
   return {
     kind: "mock",

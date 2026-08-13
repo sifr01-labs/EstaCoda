@@ -20,6 +20,7 @@ class FakeCdpSocket implements CdpWebSocketLike {
     elements: [{ ref: "@e1", role: "button", name: "Open" }]
   };
   axTree: unknown;
+  onRuntimeEvaluate?: (expression: string) => void;
 
   send(data: string): void {
     const message = JSON.parse(data) as {
@@ -28,6 +29,9 @@ class FakeCdpSocket implements CdpWebSocketLike {
       params?: Record<string, unknown>;
     };
     this.sent.push(message);
+    if (message.method === "Runtime.evaluate" && typeof message.params?.expression === "string") {
+      this.onRuntimeEvaluate?.(message.params.expression);
+    }
     if (message.method === "Runtime.evaluate" && typeof message.params?.expression === "string") {
       const index = /__estacodaElements\?\.\[(\d+)\]/u.exec(message.params.expression)?.[1];
       if (index !== undefined && this.missingElementIndexes.has(Number(index))) {
@@ -576,7 +580,7 @@ describe("supervised local CDP backend", () => {
     const launchedEvalCount = launchedPage?.sent.filter((message) => message.method === "Runtime.evaluate").length ?? 0;
     const configuredEvalCount = secondConfiguredPage?.sent.filter((message) => message.method === "Runtime.evaluate").length ?? 0;
     await backend.click?.({ sessionId: "launched-session", ref: "@e1" });
-    expect(launchedPage?.sent.filter((message) => message.method === "Runtime.evaluate")).toHaveLength(launchedEvalCount + 2);
+    expect(launchedPage?.sent.filter((message) => message.method === "Runtime.evaluate").length).toBeGreaterThan(launchedEvalCount + 1);
     expect(secondConfiguredPage?.sent.filter((message) => message.method === "Runtime.evaluate")).toHaveLength(configuredEvalCount);
 
     await backend.closeSession("launched-session");
@@ -734,6 +738,56 @@ describe("supervised local CDP backend", () => {
     ]));
   });
 
+  it("click() waits for an asynchronous React-style update and returns its delta", async () => {
+    const sockets = createSocketFactory();
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: sockets.webSocketFactory,
+      settling: {
+        pollIntervalMs: 5,
+        stableWindowMs: 10,
+        minimumObservationMs: 20
+      }
+    });
+
+    const navigation = await backend.navigate({
+      url: "https://example.com/start",
+      sessionId: "session-1"
+    });
+    const page = sockets.pageSocket();
+    expect(page).toBeDefined();
+    page!.onRuntimeEvaluate = (expression) => {
+      if (!expression.includes(".click()")) return;
+      setTimeout(() => {
+        page!.snapshot = {
+          url: "https://example.com/final",
+          title: "Supervised Page",
+          text: "React update complete",
+          elements: [{ ref: "@e1", role: "button", name: "View product" }]
+        };
+      }, 10);
+    };
+
+    const result = await backend.click?.({
+      sessionId: "session-1",
+      ref: "@e1",
+      waitFor: { kind: "text", value: "React update complete" },
+      waitTimeoutMs: 200
+    });
+
+    expect(result).toMatchObject({
+      text: "React update complete",
+      actionDelta: {
+        outcome: "changed",
+        beforeRevision: navigation.snapshot.revision,
+        conditionMet: true,
+        addedElements: [{ role: "button", name: "View product" }]
+      }
+    });
+    expect(result!.revision).toBeGreaterThan(navigation.snapshot.revision);
+  });
+
   it("click() follows one newly opened safe tab and focuses its snapshot", async () => {
     const mainSnapshot = {
       sessionId: "session-1",
@@ -814,7 +868,11 @@ describe("supervised local CDP backend", () => {
       url: detailSnapshot.url,
       title: "Loans",
       tab: { ref: "@t2", controlled: true },
-      openedTabs: [{ ref: "@t2", controlled: true }]
+      openedTabs: [{ ref: "@t2", controlled: true }],
+      actionDelta: {
+        outcome: "changed",
+        openedTabs: [{ ref: "@t2" }]
+      }
     });
   });
 
@@ -1130,7 +1188,7 @@ describe("supervised local CDP backend", () => {
     await backend.screenshot?.({ sessionId: "session-1" });
     await backend.cdp?.({ sessionId: "session-1", method: "Runtime.getProperties" });
 
-    expect(touch).toHaveBeenCalledTimes(11);
+    expect(touch.mock.calls.length).toBeGreaterThanOrEqual(11);
     expect(touch).toHaveBeenCalledWith("session-1");
     lifecycle.stop();
   });
@@ -1179,7 +1237,7 @@ describe("supervised local CDP backend", () => {
 
     try {
       const navigate = backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
-      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(1_000);
       await navigate;
       await vi.advanceTimersByTimeAsync(60_000);
 

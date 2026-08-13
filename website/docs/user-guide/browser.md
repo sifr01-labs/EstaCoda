@@ -63,6 +63,8 @@ The DOM snapshot path remains as fallback when AX is unavailable, empty, malform
 
 `browser.snapshot` defaults to a compact snapshot. Compact snapshots are a bounded actionable AX subset, not true viewport-visible filtering yet. Passing `full: true` requests the full snapshot path. Rendered tool output labels compact vs full snapshots, truncates large results, and may summarize oversized snapshots when configured.
 
+Snapshots include a session-scoped revision, observation time, and page readiness. Actions such as `browser.navigate`, `browser.click`, `browser.type`, `browser.press`, and `browser.back` wait briefly for DOM stability by default and return a concise change summary. You can pass `waitFor` to wait for a URL fragment, page text, an element role/name, a dialog, or DOM stability, plus `waitTimeoutMs` up to 10 seconds. If the condition is not met, EstaCoda returns the latest state and labels the result as timed out rather than claiming success. Use `browser.snapshot` when you explicitly need a detailed current page snapshot.
+
 Snapshot summarization is controlled by:
 
 - `browser.summarizeSnapshots`: `false`, `true`, or `"auto"`

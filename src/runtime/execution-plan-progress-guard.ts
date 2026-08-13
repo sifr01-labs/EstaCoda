@@ -163,6 +163,11 @@ export class ExecutionPlanProgressGuard {
     for (const execution of executions) {
       if (executionEvidenceStatus(execution) !== "success" || focus === undefined) continue;
 
+      if (isExplicitBrowserNoChange(execution)) {
+        progressKinds?.add("incidental-observation");
+        continue;
+      }
+
       if (isMutationExecution(execution)) {
         const mutationKey = fingerprint({
           focus: focus.key,
@@ -276,7 +281,24 @@ function isExecutionRelevant(execution: ToolExecutionRecord, focus: ExecutionPla
 }
 
 function isMutationExecution(execution: ToolExecutionRecord): boolean {
-  return MUTATION_RISK_CLASSES.has(execution.riskClass) || BROWSER_STATE_CHANGE_TOOLS.has(execution.tool.name);
+  if (MUTATION_RISK_CLASSES.has(execution.riskClass)) return true;
+  if (!BROWSER_STATE_CHANGE_TOOLS.has(execution.tool.name)) return false;
+  const outcome = browserActionOutcome(execution);
+  return outcome === undefined || outcome === "changed";
+}
+
+function isExplicitBrowserNoChange(execution: ToolExecutionRecord): boolean {
+  const outcome = browserActionOutcome(execution);
+  return outcome === "no-change" || outcome === "timeout";
+}
+
+function browserActionOutcome(execution: ToolExecutionRecord): string | undefined {
+  const snapshot = execution.result?.metadata?.snapshot;
+  if (snapshot === null || typeof snapshot !== "object" || Array.isArray(snapshot)) return undefined;
+  const delta = (snapshot as Record<string, unknown>).actionDelta;
+  if (delta === null || typeof delta !== "object" || Array.isArray(delta)) return undefined;
+  const outcome = (delta as Record<string, unknown>).outcome;
+  return typeof outcome === "string" ? outcome : undefined;
 }
 
 function isVerificationItem(item: ExecutionPlanItem): boolean {

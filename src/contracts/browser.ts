@@ -35,9 +35,43 @@ export type WebExtractionResult = {
   source: "fetch" | "browser" | "cache" | "mock";
 };
 
+export type BrowserReadiness = "loading" | "interactive" | "complete" | "unknown";
+
+export type BrowserWaitCondition =
+  | { kind: "url"; contains: string }
+  | { kind: "text"; value: string }
+  | { kind: "element"; role?: string; name?: string }
+  | { kind: "dialog" }
+  | { kind: "dom-stable" };
+
+export type BrowserActionDeltaElement = {
+  role?: string;
+  name?: string;
+};
+
+export type BrowserActionDelta = {
+  outcome: "changed" | "no-change" | "timeout";
+  beforeRevision: number;
+  afterRevision: number;
+  waitCondition: BrowserWaitCondition["kind"];
+  conditionMet: boolean;
+  url: {
+    changed: boolean;
+    before?: string;
+    after: string;
+  };
+  addedElements?: BrowserActionDeltaElement[];
+  removedElements?: BrowserActionDeltaElement[];
+  openedTabs?: Array<Pick<BrowserTab, "ref" | "url" | "title">>;
+};
+
 export type BrowserSnapshot = {
   sessionId: string;
   url: string;
+  revision: number;
+  observedAt: string;
+  readiness?: BrowserReadiness;
+  actionDelta?: BrowserActionDelta;
   title?: string;
   text?: string;
   tab?: BrowserTab;
@@ -107,6 +141,8 @@ export type BrowserActionInput = {
   params?: Record<string, unknown>;
   action?: "accept" | "dismiss";
   promptText?: string;
+  waitFor?: BrowserWaitCondition;
+  waitTimeoutMs?: number;
   signal?: AbortSignal;
 };
 
@@ -124,6 +160,8 @@ export type BrowserScreenshotResult = {
 export type BrowserNavigateInput = {
   url: string;
   sessionId?: string;
+  waitFor?: BrowserWaitCondition;
+  waitTimeoutMs?: number;
   signal?: AbortSignal;
 };
 

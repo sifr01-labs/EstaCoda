@@ -8,6 +8,9 @@ URL: https://example.com/
 Title: Test Page
 
 [Compact viewport snapshot]
+Revision: 1
+Observed: <timestamp>
+Readiness: complete
 
 Hello world.
 
@@ -29,6 +32,9 @@ Interactive elements:
           "role": "button",
         },
       ],
+      "observedAt": "<timestamp>",
+      "readiness": "complete",
+      "revision": 1,
       "sessionId": "<session-id>",
       "text": "Hello world.",
       "title": "Test Page",
@@ -43,6 +49,9 @@ Interactive elements:
 exports[`web and browser golden snapshots > browser.snapshot output matches golden > browser-snapshot-mock 1`] = `
 {
   "content": "[Compact viewport snapshot]
+Revision: 1
+Observed: <timestamp>
+Readiness: complete
 
 Hello world.
 
@@ -58,6 +67,9 @@ Interactive elements:
           "role": "button",
         },
       ],
+      "observedAt": "<timestamp>",
+      "readiness": "complete",
+      "revision": 1,
       "sessionId": "<session-id>",
       "text": "Hello world.",
       "title": "Test Page",

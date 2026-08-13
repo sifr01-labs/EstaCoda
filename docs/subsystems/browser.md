@@ -104,6 +104,8 @@ Snapshots prefer `Accessibility.getFullAXTree`. AX nodes are converted into comp
 
 The default snapshot is a bounded actionable AX subset. It is not true viewport-visible filtering yet. `browser.snapshot` with `full: true` requests a larger full-page snapshot. Snapshot rendering marks compact and full snapshots with headers, truncates oversized text, and can summarize large snapshots when configured.
 
+Every snapshot carries a session-scoped `revision`, `observedAt`, and document `readiness`. Revisions advance only when meaningful captured page state changes. After navigation and ordinary browser actions, the supervised backend waits for an explicit `waitFor` condition or bounded DOM stability, then returns a compact before/after delta instead of replaying the full page. Supported conditions are URL text, page text, an element role/name, a dialog, and DOM stability. `waitTimeoutMs` is capped at 10 seconds; a timeout returns the latest state with an explicit timeout outcome and does not claim that the requested condition succeeded. Delta labels, titles, and URLs are redacted before they are returned.
+
 Snapshot summarization settings:
 
 ```json

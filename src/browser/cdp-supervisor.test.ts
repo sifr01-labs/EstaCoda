@@ -166,6 +166,9 @@ describe("CDPSupervisor", () => {
     await expect(supervisor.getSnapshot("session-1")).resolves.toEqual({
       sessionId: "session-1",
       url: "https://example.com/page",
+      revision: 1,
+      observedAt: expect.any(String),
+      readiness: "unknown",
       title: "Example",
       text: "Readable text",
       elements: [{ ref: "@e1", role: "button", name: "Continue" }],
