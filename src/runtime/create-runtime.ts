@@ -41,6 +41,7 @@ import { MemoryPromotionStore } from "../memory/memory-promotion-store.js";
 import { normalizeExternalMemoryConfig, normalizeSessionCompressionConfig, type AgentProfileMode, type AgentResponseLanguage, type EstaCodaConfig, type LoadedRuntimeConfig, type MCPServerConfig, type UiFlavor, type UiLanguage } from "../config/runtime-config.js";
 import { loadMcpServers, type MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import { ProcessManager } from "../process/process-manager.js";
+import { createProtectedProcessEnvironmentTransport, createProtectedProcessStdinTransport } from "../process/protected-process-transports.js";
 import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolver.js";
 import { createCatalogProvider } from "../providers/catalog-provider.js";
 import { fallbackKnownModelProfiles, inferModelProfile } from "../providers/model-catalog.js";
@@ -65,6 +66,11 @@ import { createProviderUsageRecorder } from "../providers/provider-usage-ledger.
 import { SQLiteProviderSpendController } from "../tasks/sqlite-provider-spend.js";
 import { SessionCompressionService, type CompactResult } from "../prompt/session-compression-service.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
+import { EphemeralSecretBroker } from "../security/ephemeral-secret-broker.js";
+import { SecureInputTransportRegistry } from "../security/secure-input-transport-registry.js";
+import { createProtectedToolArgumentTransport } from "../security/protected-tool-argument-transport.js";
+import { createProfileEnvSecretStore, createRegisteredSecretStoreTransport, RegisteredSecretStoreRegistry } from "../security/registered-secret-store.js";
+import { createProtectedBrowserFieldTransport } from "../browser/protected-browser-field-transport.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
 import { type ApprovalScope, type PersistedWorkspaceApprovalGrant, type SmartApprovalAssessorRuntimeConfig, type WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
 import { loadSkillsFromDirectory } from "../skills/skill-loader.js";
@@ -97,6 +103,7 @@ import type { WorkspaceFsAdapter } from "../tools/workspace-tools.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { AgentLoopInput, AgentLoopResponse } from "./agent-loop.js";
 import { AgentLoopBuilder, type AgentLoopExecutionControls } from "./agent-loop-builder.js";
+import { SecureInputCoordinator, type SecureInputAuthorizationHandler, type SecureInputWaitHandler } from "./secure-input-coordinator.js";
 import { DefaultChildAgentLoopFactory } from "./agent-loop-factory.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
 import { buildStatusViewModel, buildKeyValueBlockViewModel, kv, buildWarningErrorViewModel, buildStartupViewModel, buildTableViewModel } from "../ui/view-models/builders.js";
@@ -287,6 +294,13 @@ export type Runtime = {
     signal?: AbortSignal;
     onSecureInputRequest?: import("../contracts/secure-input.js").SecureInputRequestHandler;
   }): Promise<import("../tools/tool-executor.js").ToolExecutionRecord | undefined>;
+  createSecureInputRequestHandler?(input: {
+    collect: import("../contracts/secure-input.js").SecureInputCollector;
+    authorize?: SecureInputAuthorizationHandler;
+    onWaitStateChange?: SecureInputWaitHandler;
+    userId?: string;
+    signal?: AbortSignal;
+  }): import("../contracts/secure-input.js").SecureInputRequestHandler;
   transcribeAudio?(input: {
     path: string;
     language?: string;
@@ -1076,6 +1090,31 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     sessionRecallService,
     memoryCurationService
   } = builtSession;
+  const secretBroker = new EphemeralSecretBroker();
+  const secureInputTransports = new SecureInputTransportRegistry();
+  secureInputTransports.register(createProtectedToolArgumentTransport((request) => {
+    const destination = request.destination;
+    if (destination.type === "tool-argument") {
+      return toolRegistry.get(destination.toolName)?.protectedArguments?.some((entry) =>
+        entry.path === destination.argumentPath && entry.destination === undefined
+      ) === true;
+    }
+    if (destination.type !== "mcp-argument") return false;
+    return toolRegistry.getRegisteredByToolset("mcp").some((tool) =>
+      tool.protectedArguments?.some((entry) =>
+        entry.path === destination.argumentPath &&
+        entry.destination?.type === "mcp-argument" &&
+        entry.destination.serverId === destination.serverId &&
+        entry.destination.toolName === destination.toolName
+      ) === true
+    );
+  }));
+  secureInputTransports.register(createProtectedBrowserFieldTransport(browserBackend));
+  secureInputTransports.register(createProtectedProcessStdinTransport(processManager));
+  secureInputTransports.register(createProtectedProcessEnvironmentTransport(processManager));
+  const secretStores = new RegisteredSecretStoreRegistry();
+  secretStores.register(createProfileEnvSecretStore({ profileId, homeDir: options.homeDir }));
+  secureInputTransports.register(createRegisteredSecretStoreTransport(secretStores));
   const taskAgentExecutor = taskStore === undefined
     ? undefined
     : new AgentStepExecutor({
@@ -1250,6 +1289,20 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         onSecureInputRequest: input.onSecureInputRequest
       });
     },
+    createSecureInputRequestHandler(input) {
+      const coordinator = new SecureInputCoordinator({
+        broker: secretBroker,
+        transports: secureInputTransports,
+        collect: input.collect,
+        authorize: input.authorize,
+        onWaitStateChange: input.onWaitStateChange
+      });
+      return coordinator.createRequestHandler({
+        profileId,
+        sessionId: sessionRuntimeContext.currentSessionId(),
+        ...(input.userId === undefined ? {} : { userId: input.userId })
+      }, input.signal);
+    },
     async transcribeAudio(input) {
       return await transcribeAudioFile({
         path: input.path,
@@ -1344,6 +1397,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         return;
       }
       disposed = true;
+      secretBroker.dispose();
       unregisterBrowserEmergencyCleanup?.();
       browserSessionLifecycle?.stop();
       await browserSessionLifecycle?.cleanupAll();

@@ -163,22 +163,71 @@ function createMcpTool(
 ): RegisteredTool {
   const toolName = prefixTool(serverName, config, tool.name);
   const riskClass = resolveMcpToolRiskClass(config, client.transport, tool.name);
+  const protectedPaths = config.protectedToolArguments?.[tool.name] ?? [];
   return {
     name: toolName,
     description: mcpToolDescription(serverName, tool, riskClass),
-    inputSchema: tool.inputSchema ?? {
+    inputSchema: addProtectedArgumentEnvelopes(tool.inputSchema ?? {
       type: "object",
       additionalProperties: true
-    },
+    }, protectedPaths),
     riskClass,
     toolsets: ["mcp"],
     progressLabel: `calling MCP ${serverName}`,
     maxResultSizeChars: 12_000,
+    protectedArguments: protectedPaths.map((path) => ({
+      path,
+      destination: { type: "mcp-argument" as const, serverId: serverName, toolName: tool.name }
+    })),
     isAvailable: () => true,
     run: async (input: Record<string, unknown>) => {
       const result = await client.callTool(tool.name, input);
       return normalizeMcpResult(result);
     }
+  };
+}
+
+function addProtectedArgumentEnvelopes(schema: unknown, paths: readonly string[]): unknown {
+  if (paths.length === 0 || typeof schema !== "object" || schema === null || Array.isArray(schema)) return schema;
+  const clone = structuredClone(schema) as Record<string, unknown>;
+  for (const path of paths) {
+    const segments = path.split(".");
+    let node: Record<string, unknown> = clone;
+    for (let index = 0; index < segments.length; index += 1) {
+      const properties = typeof node.properties === "object" && node.properties !== null && !Array.isArray(node.properties)
+        ? node.properties as Record<string, unknown>
+        : undefined;
+      if (properties === undefined) break;
+      const key = segments[index];
+      const property = properties[key];
+      if (typeof property !== "object" || property === null || Array.isArray(property)) break;
+      if (index === segments.length - 1) {
+        properties[key] = {
+          oneOf: [property, protectedArgumentEnvelopeSchema()]
+        };
+      } else {
+        node = property as Record<string, unknown>;
+      }
+    }
+  }
+  return clone;
+}
+
+function protectedArgumentEnvelopeSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      protectedInput: {
+        type: "object",
+        properties: {
+          kind: { type: "string" },
+          purpose: { type: "string" },
+          retention: { type: "string", enum: ["use-once"] }
+        },
+        required: ["kind"]
+      }
+    },
+    required: ["protectedInput"]
   };
 }
 

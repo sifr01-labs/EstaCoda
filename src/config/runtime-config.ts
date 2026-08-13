@@ -352,6 +352,7 @@ export type MCPServerConfig = {
   trust?: MCPServerTrust;
   toolRiskClass?: ToolRiskClass;
   toolRiskClasses?: Record<string, ToolRiskClass>;
+  protectedToolArguments?: Record<string, string[]>;
   resourceReadRiskClass?: ToolRiskClass;
   promptGetRiskClass?: ToolRiskClass;
 };
@@ -794,6 +795,7 @@ export type MCPSetupInput = {
   trust?: MCPServerTrust;
   toolRiskClass?: ToolRiskClass;
   toolRiskClasses?: Record<string, ToolRiskClass>;
+  protectedToolArguments?: Record<string, string[]>;
   resourceReadRiskClass?: ToolRiskClass;
   promptGetRiskClass?: ToolRiskClass;
 };
@@ -2346,6 +2348,7 @@ function normalizeMcpServers(
         : undefined,
       toolRiskClass: isToolRiskClass(record.toolRiskClass) ? record.toolRiskClass : undefined,
       toolRiskClasses: normalizeToolRiskClasses(record.toolRiskClasses),
+      protectedToolArguments: normalizeProtectedToolArguments(record.protectedToolArguments),
       resourceReadRiskClass: isToolRiskClass(record.resourceReadRiskClass) ? record.resourceReadRiskClass : undefined,
       promptGetRiskClass: isToolRiskClass(record.promptGetRiskClass) ? record.promptGetRiskClass : undefined
     };
@@ -2359,6 +2362,18 @@ function normalizeToolRiskClasses(value: unknown): Record<string, ToolRiskClass>
   }
   const entries = Object.entries(value)
     .filter((entry): entry is [string, ToolRiskClass] => entry[0].trim().length > 0 && isToolRiskClass(entry[1]));
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
+}
+
+function normalizeProtectedToolArguments(value: unknown): Record<string, string[]> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value).flatMap(([toolName, paths]) => {
+    if (toolName.trim().length === 0 || !Array.isArray(paths)) return [];
+    const normalized = paths.filter((path): path is string =>
+      typeof path === "string" && isProtectedArgumentPath(path)
+    );
+    return normalized.length === 0 ? [] : [[toolName, [...new Set(normalized)] as string[]] as [string, string[]]];
+  });
   return entries.length === 0 ? undefined : Object.fromEntries(entries);
 }
 
@@ -3078,6 +3093,7 @@ export async function setupMcpConfig(options: {
     trust: options.input.trust,
     toolRiskClass: options.input.toolRiskClass,
     toolRiskClasses: options.input.toolRiskClasses,
+    protectedToolArguments: options.input.protectedToolArguments,
     resourceReadRiskClass: options.input.resourceReadRiskClass,
     promptGetRiskClass: options.input.promptGetRiskClass
   };
@@ -3762,6 +3778,12 @@ function validateMcpSetupInput(input: MCPSetupInput): void {
     requireNonEmpty(toolName, "MCP tool risk override name");
     validateRiskClass(riskClass, `toolRiskClasses.${toolName}`);
   }
+  for (const [toolName, paths] of Object.entries(input.protectedToolArguments ?? {})) {
+    requireNonEmpty(toolName, "MCP protected argument tool name");
+    if (!Array.isArray(paths) || paths.length === 0 || paths.some((path) => !isProtectedArgumentPath(path))) {
+      throw new Error(`Invalid protected argument declaration for MCP tool ${toolName}`);
+    }
+  }
   validateRiskClass(input.resourceReadRiskClass, "resourceReadRiskClass");
   validateRiskClass(input.promptGetRiskClass, "promptGetRiskClass");
   for (const [targetName, sourceName] of Object.entries(input.envRefs ?? {})) {
@@ -3777,6 +3799,14 @@ function validateMcpSetupInput(input: MCPSetupInput): void {
   if (input.connectTimeoutMs !== undefined && (!Number.isInteger(input.connectTimeoutMs) || input.connectTimeoutMs <= 0)) {
     throw new Error("Expected connectTimeoutMs to be a positive integer");
   }
+}
+
+function isProtectedArgumentPath(value: string): boolean {
+  const segments = value.split(".");
+  return segments.length > 0 && segments.every((segment) =>
+    /^[A-Za-z_][A-Za-z0-9_]*$/u.test(segment) &&
+    segment !== "__proto__" && segment !== "prototype" && segment !== "constructor"
+  );
 }
 
 function validateSecuritySetupInput(input: SecuritySetupInput): void {

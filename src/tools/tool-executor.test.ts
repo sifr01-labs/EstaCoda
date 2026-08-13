@@ -936,6 +936,75 @@ describe("ToolExecutor input redaction", () => {
 });
 
 describe("ToolExecutor tool-call metadata persistence", () => {
+  it("injects one declared protected argument immediately before dispatch and scrubs tool echoes", async () => {
+    const sentinel = "declared-tool-sentinel-secret";
+    const observed: unknown[] = [];
+    const tool: RegisteredTool = {
+      ...createEchoTool("trusted.api.call"),
+      protectedArguments: [{ path: "auth.token" }],
+      run: async (input) => {
+        observed.push(input);
+        return { ok: true, content: `remote echoed ${String(input.auth?.token)}`, metadata: { echoed: input.auth?.token } };
+      }
+    };
+    const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({ tools: [tool] });
+    const execution = await executor.executeTool({
+      tool: tool.name,
+      input: {
+        auth: {
+          token: { protectedInput: { kind: "access-token", purpose: "Authenticate trusted API" } }
+        }
+      },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      onSecureInputRequest: async (request, consume) => {
+        expect(request.destination).toEqual({ type: "tool-argument", toolName: tool.name, argumentPath: "auth.token" });
+        const value = new TextEncoder().encode(sentinel);
+        try {
+          await consume(value, {
+            requestId: "request",
+            scope: { profileId: "test", sessionId: "test-session" },
+            request,
+            signal: new AbortController().signal
+          });
+        } finally {
+          value.fill(0);
+        }
+        return { status: "delivered", destinationLabel: "Trusted tool argument", persisted: false };
+      }
+    });
+
+    expect(observed).toEqual([{ auth: { token: sentinel } }]);
+    expect(execution?.result).toEqual({
+      ok: true,
+      content: "remote echoed [PROTECTED_INPUT]",
+      metadata: { echoed: "[PROTECTED_INPUT]" }
+    });
+    expect(await persistedExecutionState(sessionDb, trajectoryRecorder)).not.toContain(sentinel);
+  });
+
+  it("fails closed instead of dispatching multiple protected arguments in one call", async () => {
+    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "unexpected" }));
+    const tool: RegisteredTool = {
+      ...createEchoTool("trusted.multi"),
+      protectedArguments: [{ path: "first" }, { path: "second" }],
+      run
+    };
+    const { executor } = await setupExecutor({ tools: [tool] });
+    const execution = await executor.executeTool({
+      tool: tool.name,
+      input: {
+        first: { protectedInput: { kind: "api-key" } },
+        second: { protectedInput: { kind: "client-secret" } }
+      },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      onSecureInputRequest: vi.fn()
+    });
+    expect(execution?.result?.content).toContain("Only one protected argument");
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("passes secure-input coordination independently from approval", async () => {
     const onSecureInputRequest = vi.fn(async () => ({
       status: "delivered" as const,

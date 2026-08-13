@@ -3263,6 +3263,29 @@ describe("loadRuntimeConfig profile loading", () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
+  it("loads only syntactically bounded reviewed MCP protected argument declarations", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      mcpServers: {
+        trusted: {
+          command: "trusted-mcp",
+          protectedToolArguments: {
+            authenticate: ["credential", "nested.token", "credential"],
+            invalid: ["__proto__.token", "token[0]"]
+          }
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.mcp.servers.trusted?.protectedToolArguments).toEqual({
+      authenticate: ["credential", "nested.token"]
+    });
+    await rm(workspace, { recursive: true, force: true });
+  });
+
   it("ignores invalid workspace project config", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(join(workspace, ".estacoda", "profiles", "default"), { recursive: true });

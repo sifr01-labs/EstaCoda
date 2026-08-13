@@ -104,7 +104,19 @@ export type ToolSecurityResolverContext = Omit<ToolExecutionContext, "securityRe
 
 export type ToolHandler<TInput = unknown> = (input: TInput, context?: ToolExecutionContext) => Promise<ToolResult>;
 
+export type ProtectedToolArgumentDeclaration = {
+  /** Dot-separated object path from reviewed code or profile configuration. */
+  path: string;
+  destination?: {
+    type: "mcp-argument";
+    serverId: string;
+    toolName: string;
+  };
+};
+
 export type RegisteredTool<TInput = any> = ToolDefinition & {
+  /** Runtime-only declaration; ToolRegistry intentionally omits it from ToolDefinition. */
+  protectedArguments?: readonly ProtectedToolArgumentDeclaration[];
   isAvailable(): Promise<boolean> | boolean;
   resolveSecurity?(input: TInput, context: ToolSecurityResolverContext): Promise<ToolSecurityResolution | undefined> | ToolSecurityResolution | undefined;
   run: ToolHandler<TInput>;

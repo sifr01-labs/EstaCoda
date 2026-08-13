@@ -1,6 +1,8 @@
 import type { RegisteredTool, StaticToolProvider } from "../contracts/tool.js";
+import { createRegisteredSecretStoreTool } from "./secure-input-tools.js";
 
 export const builtinTools: readonly RegisteredTool[] = [
+  createRegisteredSecretStoreTool(),
   {
     name: "trajectory.record",
     description: "Record agent trajectory events for evaluation and future learning.",

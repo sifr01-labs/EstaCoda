@@ -8,11 +8,11 @@ import {
   type SecurityPolicy
 } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
-import type { ToolApprovalHandler, ToolDefinition, ToolResult, ToolRiskClass, ToolSecurityResolution, ToolsetName } from "../contracts/tool.js";
+import type { ToolApprovalHandler, ToolDefinition, ToolExecutionContext, ToolResult, ToolRiskClass, ToolSecurityResolution, ToolsetName } from "../contracts/tool.js";
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
 import type { VisionDispatchPhase, VisionInputProvenanceContext } from "../contracts/vision.js";
-import type { SecureInputRequestHandler } from "../contracts/secure-input.js";
+import type { SecureInputKind, SecureInputRequestHandler } from "../contracts/secure-input.js";
 import { assessCommandSafety } from "../security/command-safety.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { ToolRegistry } from "./tool-registry.js";
@@ -337,7 +337,7 @@ export class ToolExecutor {
       result = reusableResult;
     } else {
       try {
-        result = await tool.run(request.input, {
+        const executionContext = {
           toolCallId: request.toolCallId,
           visibleTurnId: request.visibleTurnId,
           providerUsageLineage: request.providerUsageLineage,
@@ -349,7 +349,8 @@ export class ToolExecutor {
           onEvent: request.onEvent,
           onApprovalRequest: tool.name === "execute_code" ? request.onApprovalRequest : undefined,
           onSecureInputRequest: request.onSecureInputRequest
-        });
+        };
+        result = await runToolWithProtectedArguments(tool, request.input, executionContext);
       } catch (error) {
         if (request.signal?.aborted) {
           result = {
@@ -605,6 +606,128 @@ export class ToolExecutor {
     };
   }
 }
+
+async function runToolWithProtectedArguments(
+  tool: import("../contracts/tool.js").RegisteredTool,
+  input: Record<string, unknown>,
+  context: ToolExecutionContext
+): Promise<ToolResult> {
+  const declarations = tool.protectedArguments ?? [];
+  const protectedArguments = declarations.flatMap((declaration) => {
+    const envelope = getAtPath(input, declaration.path);
+    return isProtectedInputEnvelope(envelope) ? [{ declaration, envelope }] : [];
+  });
+  if (protectedArguments.length === 0) return await tool.run(input, context);
+  if (protectedArguments.length > 1) {
+    return protectedArgumentFailure("Only one protected argument may be supplied per tool call.");
+  }
+  if (context.onSecureInputRequest === undefined) {
+    return protectedArgumentFailure("Protected tool arguments are unavailable on this runtime.");
+  }
+
+  const [{ declaration, envelope }] = protectedArguments;
+  const descriptor = parseProtectedArgumentDescriptor(envelope.protectedInput, tool.name, declaration.path);
+  if (descriptor === undefined) {
+    return protectedArgumentFailure("Protected tool argument metadata is invalid.");
+  }
+  let dispatchedResult: ToolResult | undefined;
+  const destination = declaration.destination === undefined
+    ? { type: "tool-argument" as const, toolName: tool.name, argumentPath: declaration.path }
+    : {
+        type: "mcp-argument" as const,
+        serverId: declaration.destination.serverId,
+        toolName: declaration.destination.toolName,
+        argumentPath: declaration.path
+      };
+  const receipt = await context.onSecureInputRequest({
+    kind: descriptor.kind,
+    purpose: descriptor.purpose,
+    retention: "use-once",
+    destination
+  }, async (value) => {
+    const decoded = new TextDecoder("utf-8", { fatal: true }).decode(value);
+    const dispatchedInput = structuredClone(input);
+    setAtPath(dispatchedInput, declaration.path, decoded);
+    try {
+      dispatchedResult = redactExactSecret(await tool.run(dispatchedInput, {
+        ...context,
+        onSecureInputRequest: undefined
+      }), decoded);
+    } catch {
+      throw new Error("Protected tool argument dispatch failed.");
+    }
+  }).catch(() => undefined);
+
+  if (receipt?.status !== "delivered" || dispatchedResult === undefined) {
+    return protectedArgumentFailure(receipt === undefined
+      ? "Protected tool argument delivery failed."
+      : `Protected tool argument ${receipt.status}: ${receipt.reason ?? "delivery did not complete."}`);
+  }
+  return dispatchedResult;
+}
+
+function getAtPath(input: Record<string, unknown>, path: string): unknown {
+  if (!isSafeProtectedArgumentPath(path)) return undefined;
+  let current: unknown = input;
+  for (const segment of path.split(".")) {
+    if (!isObjectRecord(current) || !Object.hasOwn(current, segment)) return undefined;
+    current = current[segment];
+  }
+  return current;
+}
+
+function setAtPath(input: Record<string, unknown>, path: string, value: string): void {
+  if (!isSafeProtectedArgumentPath(path)) throw new Error("Protected argument path is invalid.");
+  const segments = path.split(".");
+  let current = input;
+  for (const segment of segments.slice(0, -1)) {
+    const next = current[segment];
+    if (!isObjectRecord(next)) throw new Error("Protected argument path changed before dispatch.");
+    current = next;
+  }
+  current[segments.at(-1) as string] = value;
+}
+
+function isSafeProtectedArgumentPath(path: string): boolean {
+  return path.split(".").every((segment) =>
+    /^[A-Za-z_][A-Za-z0-9_]*$/u.test(segment) &&
+    segment !== "__proto__" && segment !== "prototype" && segment !== "constructor"
+  );
+}
+
+function parseProtectedArgumentDescriptor(
+  value: Record<string, unknown>,
+  toolName: string,
+  argumentPath: string
+): { kind: SecureInputKind; purpose: string } | undefined {
+  if (!SECURE_INPUT_KINDS.has(value.kind as SecureInputKind)) return undefined;
+  if (value.retention !== undefined && value.retention !== "use-once") return undefined;
+  const purpose = typeof value.purpose === "string" && value.purpose.trim().length > 0 && value.purpose.length <= 500
+    ? value.purpose.trim()
+    : `Provide protected argument ${argumentPath} to ${toolName}`;
+  return { kind: value.kind as SecureInputKind, purpose };
+}
+
+function redactExactSecret(result: ToolResult, secret: string): ToolResult {
+  if (secret.length === 0) return result;
+  return replaceExactSecret(result, secret) as ToolResult;
+}
+
+function replaceExactSecret(value: unknown, secret: string): unknown {
+  if (typeof value === "string") return value.split(secret).join("[PROTECTED_INPUT]");
+  if (Array.isArray(value)) return value.map((entry) => replaceExactSecret(entry, secret));
+  if (!isObjectRecord(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, replaceExactSecret(entry, secret)]));
+}
+
+function protectedArgumentFailure(content: string): ToolResult {
+  return { ok: false, content, metadata: { reason: "protected-tool-argument-unavailable" } };
+}
+
+const SECURE_INPUT_KINDS = new Set<SecureInputKind>([
+  "password", "one-time-code", "api-key", "client-secret", "access-token",
+  "private-key", "recovery-code", "generic-secret"
+]);
 
 function isAbortSignalAborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;

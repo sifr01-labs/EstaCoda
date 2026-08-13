@@ -1,10 +1,10 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { realpath } from "node:fs/promises";
-import type { Readable } from "node:stream";
+import type { Readable, Writable } from "node:stream";
 import { resolve } from "node:path";
 import { platform } from "node:os";
 
-export type ManagedProcessStatus = "running" | "exited" | "stopped" | "failed";
+export type ManagedProcessStatus = "prepared" | "running" | "exited" | "stopped" | "failed";
 
 export type ManagedProcessRecord = {
   id: string;
@@ -24,8 +24,10 @@ export type ManagedProcessLog = {
 };
 
 type InternalManagedProcess = ManagedProcessRecord & {
-  child?: ChildProcessByStdio<null, Readable, Readable>;
+  child?: ChildProcessByStdio<Writable, Readable, Readable>;
   logs: ManagedProcessLog[];
+  protectedEnvironmentVariable?: string;
+  sensitiveOutput?: boolean;
 };
 
 export type ProcessManagerOptions = {
@@ -52,6 +54,65 @@ export class ProcessManager {
   }
 
   async start(command: string): Promise<ManagedProcessRecord> {
+    const record = await this.#createRecord(command, "running");
+    this.#spawn(record);
+    return toRecord(record);
+  }
+
+  async prepareProtectedEnvironment(command: string, variableName: string): Promise<ManagedProcessRecord> {
+    assertEnvironmentVariableName(variableName);
+    return toRecord(await this.#createRecord(command, "prepared", variableName));
+  }
+
+  canStartProtectedEnvironment(id: string, variableName: string): boolean {
+    const record = this.#processes.get(id);
+    return record?.status === "prepared" && record.protectedEnvironmentVariable === variableName;
+  }
+
+  startProtectedEnvironment(id: string, variableName: string, value: Uint8Array): ManagedProcessRecord | undefined {
+    const record = this.#processes.get(id);
+    if (record === undefined || !this.canStartProtectedEnvironment(id, variableName)) return undefined;
+    const decoded = new TextDecoder("utf-8", { fatal: true }).decode(value);
+    record.sensitiveOutput = true;
+    record.logs.length = 0;
+    record.status = "running";
+    record.updatedAt = this.#now().toISOString();
+    this.#spawn(record, { [variableName]: decoded });
+    return toRecord(record);
+  }
+
+  hasObservedPrompt(id: string, promptLabel: string): boolean {
+    const record = this.#processes.get(id);
+    if (record?.status !== "running" || record.child?.stdin.destroyed === true) return false;
+    const label = promptLabel.trim();
+    const observedOutput = record.logs
+      .filter((entry) => entry.stream === "stdout" || entry.stream === "stderr")
+      .map((entry) => entry.text)
+      .join("")
+      .slice(-12_000);
+    return label.length > 0 && label.length <= 200 && observedOutput.includes(label);
+  }
+
+  writeProtectedInput(id: string, promptLabel: string, value: Uint8Array): boolean {
+    const record = this.#processes.get(id);
+    if (record === undefined || !this.hasObservedPrompt(id, promptLabel) || record.child === undefined) return false;
+    record.sensitiveOutput = true;
+    record.logs.length = 0;
+    record.child.stdin.write(value);
+    record.child.stdin.write("\n");
+    return true;
+  }
+
+  releasePrepared(id: string): void {
+    const record = this.#processes.get(id);
+    if (record?.status === "prepared") this.#processes.delete(id);
+  }
+
+  async #createRecord(
+    command: string,
+    status: "prepared" | "running",
+    protectedEnvironmentVariable?: string
+  ): Promise<InternalManagedProcess> {
     const cwd = await realpath(this.#workspaceRoot);
     const id = this.#id();
     const startedAt = this.#now().toISOString();
@@ -59,23 +120,28 @@ export class ProcessManager {
       id,
       command,
       cwd,
-      status: "running",
+      status,
       startedAt,
       updatedAt: startedAt,
-      logs: []
+      logs: [],
+      protectedEnvironmentVariable
     };
 
     this.#processes.set(id, record);
+    return record;
+  }
 
+  #spawn(record: InternalManagedProcess, protectedEnvironment?: Record<string, string>): void {
     try {
       const shell = resolveShell();
-      const child = spawn(shell.command, [...shell.args, command], {
-        cwd,
+      const child = spawn(shell.command, [...shell.args, record.command], {
+        cwd: record.cwd,
         env: {
           ...process.env,
-          PWD: cwd
+          PWD: record.cwd,
+          ...protectedEnvironment
         },
-        stdio: ["ignore", "pipe", "pipe"]
+        stdio: ["pipe", "pipe", "pipe"]
       });
       record.child = child;
       this.#appendLog(record, "system", `started pid ${child.pid ?? "unknown"}`);
@@ -88,6 +154,7 @@ export class ProcessManager {
         this.#appendLog(record, "system", error.message);
       });
       child.on("close", (code, signal) => {
+        record.protectedEnvironmentVariable = undefined;
         if (record.status === "stopped") {
           record.exitCode = code;
           record.signal = signal;
@@ -102,12 +169,12 @@ export class ProcessManager {
         this.#appendLog(record, "system", `closed with code ${code ?? "null"} signal ${signal ?? "null"}`);
       });
     } catch (error) {
+      record.protectedEnvironmentVariable = undefined;
       record.status = "failed";
       record.updatedAt = this.#now().toISOString();
       this.#appendLog(record, "system", error instanceof Error ? error.message : "failed to start process");
     }
 
-    return toRecord(record);
   }
 
   list(): ManagedProcessRecord[] {
@@ -125,6 +192,7 @@ export class ProcessManager {
     if (process === undefined) {
       return undefined;
     }
+    if (process.sensitiveOutput === true) return [];
 
     const tailChars = options.tailChars ?? 12_000;
     const logs: ManagedProcessLog[] = [];
@@ -166,6 +234,7 @@ export class ProcessManager {
   }
 
   #appendLog(process: InternalManagedProcess, stream: ManagedProcessLog["stream"], text: string): void {
+    if (process.sensitiveOutput === true) return;
     process.logs.push({
       stream,
       text,
@@ -177,6 +246,12 @@ export class ProcessManager {
       const removed = process.logs.shift();
       totalChars -= removed?.text.length ?? 0;
     }
+  }
+}
+
+function assertEnvironmentVariableName(value: string): void {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(value)) {
+    throw new Error("Protected environment variable name is invalid.");
   }
 }
 

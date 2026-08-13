@@ -57,14 +57,16 @@ export function secureInputDestinationLabel(destination: SecureInputDestination)
     case "application-field":
       return destination.label ?? `Application field in ${destination.applicationId}`;
     case "process-stdin":
-      return destination.promptLabel ?? `Process ${destination.processId} input`;
+      return destination.promptLabel === undefined
+        ? `Process ${destination.processId} input`
+        : `${destination.promptLabel} for process ${destination.processId}`;
     case "process-environment":
       return `${destination.variableName} for process ${destination.processId}`;
     case "registered-store":
-      return `Registered store ${destination.storeId}`;
+      return `${destination.entryName} in registered store ${destination.storeId}`;
     case "tool-argument":
-      return `${destination.toolName} protected argument`;
+      return `${destination.argumentPath} for ${destination.toolName}`;
     case "mcp-argument":
-      return `${destination.serverId}/${destination.toolName} protected argument`;
+      return `${destination.argumentPath} for ${destination.serverId}/${destination.toolName}`;
   }
 }

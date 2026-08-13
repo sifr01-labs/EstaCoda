@@ -71,6 +71,7 @@ import {
   type ContextCompactionSurfaceState,
   type OperatorConsoleStyle,
   type OperatorConsoleRuntimeHost,
+  OperatorConsoleSecureInputCollector,
   type QueuedSteerState,
   type SteerState,
   type TaskControlIntent,
@@ -138,7 +139,7 @@ import type {
 import type { SessionCostSummary, TurnUsageSummary, UsageCostSummary } from "../contracts/usage-cost.js";
 import { mergeUsageCostSummaries, unavailableUsageCostSummary } from "../providers/provider-usage-projection.js";
 import { formatTurnUsageFooter } from "../ui/usage-cost-format.js";
-import { isolateLtr, isolateRtl } from "../ui/bidi.js";
+import { isolateAuto, isolateLtr, isolateRtl } from "../ui/bidi.js";
 import { resolveWorkspaceStatus } from "./workspace-status.js";
 import { listResumableSessions, resolveSessionForResume } from "../session/session-resume.js";
 import {
@@ -867,6 +868,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             },
             turnStartedAtMs,
           });
+        const secureInputCollector = operatorConsoleRuntimeHost === undefined
+          ? undefined
+          : new OperatorConsoleSecureInputCollector(operatorConsoleRuntimeHost);
         let turnWasCancelled = false;
 
         function clearOperatorConsoleLiveFrame(): void {
@@ -1050,6 +1054,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           const keypressDispatcher = createKeypressStreamDispatcher({
             onEvents: (events: readonly ParsedKeypress[]) => {
               for (const event of events) {
+                if (secureInputCollector?.routeInput(event) === true) continue;
                 if (operatorConsoleLiveFrame?.routeInput(event) === true) continue;
                 handleOperatorConsoleSteerKey(event);
               }
@@ -1146,6 +1151,38 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           return pendingPrompt;
         };
 
+        const onSecureInputRequest = secureInputCollector === undefined || runtime.createSecureInputRequestHandler === undefined
+          ? undefined
+          : runtime.createSecureInputRequestHandler({
+              collect: secureInputCollector.collect,
+              signal: activeTurn.signal,
+              authorize: async ({ destinationLabel, assessment }) => {
+                disposeOperatorConsoleSteerInput?.();
+                disposeOperatorConsoleSteerInput = undefined;
+                clearSpinner();
+                try {
+                  const arabic = renderer.locale === "ar";
+                  const reason = assessment.reason === "persistent-secret-requires-approval"
+                    ? arabic
+                      ? "سيتم حفظ بيانات الاعتماد في مخزن الأسرار للملف الشخصي النشط."
+                      : "This will persist the credential in the active profile secret store."
+                    : arabic
+                      ? "يتطلب هذا التسليم المحمي تفويضاً صريحاً."
+                      : "This protected delivery requires explicit authorization.";
+                  const question = arabic
+                    ? `${isolateRtl(reason)}\n${isolateRtl(`هل تسمح بتسليم الإدخال المحمي إلى ${isolateAuto(destinationLabel)}؟`)} [y/N] `
+                    : `${reason}\nAuthorize protected input delivery to ${destinationLabel}? [y/N] `;
+                  const answer = await prompt(question);
+                  return /^(?:y|yes)$/iu.test(answer.trim()) ? "approved" : "denied";
+                } finally {
+                  if (activeTurn?.signal.aborted !== true) {
+                    disposeOperatorConsoleSteerInput = startOperatorConsoleSteerInput();
+                    renderSpinner("tool");
+                  }
+                }
+              }
+            });
+
         disposeOperatorConsoleSteerInput = startOperatorConsoleSteerInput();
         const responsePromise = runtime.handle({
             text: retryText,
@@ -1162,6 +1199,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
                   operatorConsoleLiveFrame.flushStreamingSegment(reason);
                 },
 	            onApprovalRequest,
+	            onSecureInputRequest,
 	            onEvent: (event) => {
 	              const executionPlan = executionPlanFromRuntimeEvent(event);
 	              if (executionPlan !== undefined) {
@@ -1212,6 +1250,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             }
           })
 	          .finally(() => {
+	            secureInputCollector?.dispose();
 	            activeTurn = undefined;
 	            activeTurnStartedAtMs = undefined;
 	            disposeOperatorConsoleSteerInput?.();

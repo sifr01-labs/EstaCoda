@@ -122,3 +122,50 @@ describe("loadMcpServers environment references", () => {
     });
   });
 });
+
+describe("MCP protected argument declarations", () => {
+  it("accepts protected envelopes only for reviewed configured argument paths", async () => {
+    const fetch = async (_url: string, init?: { body?: string }) => {
+      const payload = JSON.parse(init?.body ?? "{}") as { id?: number; method?: string };
+      const result = payload.method === "initialize"
+        ? { capabilities: { tools: {} } }
+        : payload.method === "tools/list"
+          ? {
+              tools: [{
+                name: "authenticate",
+                inputSchema: {
+                  type: "object",
+                  properties: { credential: { type: "string" } },
+                  required: ["credential"]
+                }
+              }]
+            }
+          : {};
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({ jsonrpc: "2.0", id: payload.id, result }),
+        text: async () => ""
+      };
+    };
+    const [server] = await loadMcpServers({
+      servers: {
+        trusted: {
+          transport: "http",
+          url: "https://mcp.example.test",
+          protectedToolArguments: { authenticate: ["credential"] }
+        }
+      },
+      fetch
+    });
+    const tool = server?.tools[0];
+    expect(tool?.protectedArguments).toEqual([{
+      path: "credential",
+      destination: { type: "mcp-argument", serverId: "trusted", toolName: "authenticate" }
+    }]);
+    expect(JSON.stringify(tool?.inputSchema)).toContain("protectedInput");
+    expect(JSON.stringify(tool?.inputSchema)).toContain('"type":"string"');
+    await server?.stop();
+  });
+});
