@@ -290,8 +290,11 @@ export function createBrowserbaseBrowserBackend(options: BrowserbaseBrowserBacke
       await runWithBackend((delegate) => delegate.navigate(input))
     ),
     snapshot: (input) => runWithBackend((delegate) => requiredMethod(delegate.snapshot, "snapshot")(input)),
+    find: (input) => runWithBackend((delegate) => requiredMethod(delegate.find, "find")(input)),
     click: (input) => runWithBackend((delegate) => requiredMethod(delegate.click, "click")(input)),
     type: (input) => runWithBackend((delegate) => requiredMethod(delegate.type, "type")(input)),
+    select: (input) => runWithBackend((delegate) => requiredMethod(delegate.select, "select")(input)),
+    extract: (input) => runWithBackend((delegate) => requiredMethod(delegate.extract, "extract")(input)),
     scroll: (input) => runWithBackend((delegate) => requiredMethod(delegate.scroll, "scroll")(input)),
     press: (input) => runWithBackend((delegate) => requiredMethod(delegate.press, "press")(input)),
     back: (input = {}) => runWithBackend((delegate) => requiredMethod(delegate.back, "back")(input)),

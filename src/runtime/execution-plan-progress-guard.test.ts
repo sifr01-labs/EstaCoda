@@ -280,8 +280,12 @@ describe("ExecutionPlanProgressGuard", () => {
       noProgressNudgeIteration: 3,
       maxNoProgressIterations: 6
     });
-    const browserAction = (outcome: "changed" | "no-change" | "timeout", callId: string) => execution({
-      tool: { ...execution().tool, name: "browser.click" },
+    const browserAction = (
+      outcome: "changed" | "no-change" | "timeout",
+      callId: string,
+      tool = "browser.click"
+    ) => execution({
+      tool: { ...execution().tool, name: tool },
       toolCallId: callId,
       result: {
         ok: true,
@@ -299,6 +303,10 @@ describe("ExecutionPlanProgressGuard", () => {
       progressKinds: ["incidental-observation"]
     });
     expect(guard.observe({ plan, executions: [browserAction("changed", "changed")] })).toMatchObject({
+      materialProgress: true,
+      progressKinds: ["target-mutation"]
+    });
+    expect(guard.observe({ plan, executions: [browserAction("changed", "select-changed", "browser.select")] })).toMatchObject({
       materialProgress: true,
       progressKinds: ["target-mutation"]
     });

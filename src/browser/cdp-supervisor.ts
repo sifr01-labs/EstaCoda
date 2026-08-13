@@ -412,7 +412,34 @@ export function snapshotExpression(): string {
   return `(() => {
     const candidates = Array.from(document.querySelectorAll('a,button,input,textarea,select,[role],[tabindex]')).slice(0, 120);
     window.__estacodaElements = candidates;
-    const label = (el) => (el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('name') || el.id || '').trim().slice(0, 160);
+    const clean = (value, max = 240) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, max);
+    const labelText = (el) => clean(Array.from(el.labels || []).map((label) => label.innerText || label.textContent || '').join(' ') || el.getAttribute('aria-label') || el.closest('label')?.innerText || '');
+    const elementText = (el) => clean(el.innerText || el.textContent || '');
+    const sensitive = (el) => el instanceof HTMLInputElement && el.type.toLowerCase() === 'password';
+    const name = (el) => clean(el.getAttribute('aria-label') || labelText(el) || el.innerText || (sensitive(el) ? '' : el.value) || el.getAttribute('title') || el.getAttribute('name') || el.id || '', 160);
+    const role = (el) => {
+      const explicit = el.getAttribute('role');
+      if (explicit) return explicit;
+      const tag = el.tagName.toLowerCase();
+      if (tag === 'a') return 'link';
+      if (tag === 'button') return 'button';
+      if (tag === 'textarea') return 'textbox';
+      if (tag === 'select') return el.multiple ? 'listbox' : 'combobox';
+      if (tag === 'input') {
+        const type = (el.getAttribute('type') || 'text').toLowerCase();
+        if (type === 'checkbox') return 'checkbox';
+        if (type === 'radio') return 'radio';
+        if (type === 'range') return 'slider';
+        if (type === 'number') return 'spinbutton';
+        return 'textbox';
+      }
+      return tag;
+    };
+    const withinText = (el) => clean(el.closest('article,li,form,section,[role="listitem"],[role="group"],[role="row"],tr')?.innerText || el.parentElement?.innerText || '');
+    const hidden = (el) => {
+      const style = getComputedStyle(el);
+      return !el.isConnected || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || el.getClientRects().length === 0;
+    };
     return JSON.stringify({
       url: location.href,
       title: document.title,
@@ -420,8 +447,13 @@ export function snapshotExpression(): string {
       text: (document.body && document.body.innerText ? document.body.innerText : '').slice(0, 12000),
       elements: candidates.map((el, index) => ({
         ref: '@e' + (index + 1),
-        role: el.getAttribute('role') || el.tagName.toLowerCase(),
-        name: label(el)
+        role: role(el),
+        name: name(el),
+        text: elementText(el),
+        label: labelText(el),
+        withinText: withinText(el),
+        hidden: hidden(el),
+        disabled: el.matches(':disabled,[aria-disabled="true"]')
       }))
     });
   })()`;
@@ -431,6 +463,10 @@ type BrowserSnapshotElement = NonNullable<BrowserSnapshot["elements"]>[number];
 type AxSnapshotElementCandidate = BrowserSnapshotElement & {
   backendDOMNodeId?: number;
   actionable: boolean;
+};
+
+type BoundElementMetadata = Pick<BrowserSnapshotElement, "text" | "label" | "withinText" | "hidden"> & {
+  sensitive?: boolean;
 };
 
 const AX_INTERACTIVE_ROLES = new Set([
@@ -539,47 +575,84 @@ async function bindAxElements(
 
   const elements: BrowserSnapshotElement[] = [];
   for (const candidate of candidates) {
-    const bound = candidate.backendDOMNodeId === undefined
-      ? false
+    const binding = candidate.backendDOMNodeId === undefined
+      ? undefined
       : await bindAxElement(client, candidate.backendDOMNodeId, elements.length);
-    if (candidate.actionable && !bound) {
+    if (candidate.actionable && binding === undefined) {
       continue;
     }
-    if (options.full !== true && !bound) {
+    if (options.full !== true && binding === undefined) {
       continue;
     }
     const { backendDOMNodeId: _backendDOMNodeId, actionable: _actionable, ...element } = candidate;
+    const { value: elementValue, ...elementWithoutValue } = element;
+    const { sensitive, ...publicMetadata } = binding?.metadata ?? {};
     elements.push({
-      ...element,
+      ...elementWithoutValue,
+      ...(sensitive === true || elementValue === undefined ? {} : { value: elementValue }),
+      ...publicMetadata,
       ref: `@e${elements.length + 1}`
     });
   }
   return elements;
 }
 
-async function bindAxElement(client: CdpClient, backendNodeId: number, index: number): Promise<boolean> {
+async function bindAxElement(
+  client: CdpClient,
+  backendNodeId: number,
+  index: number
+): Promise<{ metadata?: BoundElementMetadata } | undefined> {
   try {
     const resolved = await client.send("DOM.resolveNode", { backendNodeId }) as {
       object?: { objectId?: unknown };
     };
     const objectId = resolved.object?.objectId;
     if (typeof objectId !== "string" || objectId.length === 0) {
-      return false;
+      return undefined;
     }
-    await client.send("Runtime.callFunctionOn", {
+    const bound = await client.send("Runtime.callFunctionOn", {
       objectId,
       functionDeclaration: `function(index) {
         window.__estacodaElements = window.__estacodaElements || [];
         window.__estacodaElements[index] = this;
-        return true;
+        const clean = (value, max = 240) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, max);
+        const label = clean(Array.from(this.labels || []).map((entry) => entry.innerText || entry.textContent || '').join(' ') || this.getAttribute?.('aria-label') || this.closest?.('label')?.innerText || '');
+        const style = getComputedStyle(this);
+        return {
+          text: clean(this.innerText || this.textContent || ''),
+          label,
+          withinText: clean(this.closest?.('article,li,form,section,[role="listitem"],[role="group"],[role="row"],tr')?.innerText || this.parentElement?.innerText || ''),
+          hidden: !this.isConnected || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || this.getClientRects().length === 0,
+          sensitive: this instanceof HTMLInputElement && this.type.toLowerCase() === 'password'
+        };
       }`,
       arguments: [{ value: index }],
       returnByValue: true
-    });
-    return true;
+    }) as { result?: { value?: unknown } };
+    return { metadata: parseBoundElementMetadata(bound.result?.value) };
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+function parseBoundElementMetadata(value: unknown): BoundElementMetadata | undefined {
+  if (!isRecord(value)) return undefined;
+  const text = boundedMetadataText(value.text);
+  const label = boundedMetadataText(value.label);
+  const withinText = boundedMetadataText(value.withinText);
+  return {
+    ...(text === undefined ? {} : { text }),
+    ...(label === undefined ? {} : { label }),
+    ...(withinText === undefined ? {} : { withinText }),
+    ...(typeof value.hidden === "boolean" ? { hidden: value.hidden } : {}),
+    ...(typeof value.sensitive === "boolean" ? { sensitive: value.sensitive } : {})
+  };
+}
+
+function boundedMetadataText(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  return normalized.length === 0 ? undefined : normalized.slice(0, 240);
 }
 
 function axPropertyString(value: unknown): string | undefined {

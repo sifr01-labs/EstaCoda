@@ -57,13 +57,15 @@ Supervised local CDP can auto-launch Chrome/Chromium when `browser.autoLaunch ==
 
 ## Snapshots
 
-Browser snapshots prefer the accessibility tree from `Accessibility.getFullAXTree`. Snapshot elements expose deterministic refs such as `@e1` and may include `role`, `name`, `value`, `disabled`, and `checked`. Ignored and unhelpful AX nodes are skipped.
+Browser snapshots prefer the accessibility tree from `Accessibility.getFullAXTree`. Snapshot elements expose refs such as `@e1` and may include `role`, `name`, `label`, surrounding text, `value`, `disabled`, and `checked`. Ignored and unhelpful AX nodes are skipped.
 
 The DOM snapshot path remains as fallback when AX is unavailable, empty, malformed, or cannot bind actionable refs. Refs are actionable where exposed.
 
 `browser.snapshot` defaults to a compact snapshot. Compact snapshots are a bounded actionable AX subset, not true viewport-visible filtering yet. Passing `full: true` requests the full snapshot path. Rendered tool output labels compact vs full snapshots, truncates large results, and may summarize oversized snapshots when configured.
 
 Snapshots include a session-scoped revision, observation time, and page readiness. Actions such as `browser.navigate`, `browser.click`, `browser.type`, `browser.press`, and `browser.back` wait briefly for DOM stability by default and return a concise change summary. You can pass `waitFor` to wait for a URL fragment, page text, an element role/name, a dialog, or DOM stability, plus `waitTimeoutMs` up to 10 seconds. If the condition is not met, EstaCoda returns the latest state and labels the result as timed out rather than claiming success. Use `browser.snapshot` when you explicitly need a detailed current page snapshot.
+
+Prefer semantic locators for interaction. `browser.find`, `browser.click`, `browser.type`, `browser.select`, and `browser.extract` can target elements by `role`, `name`, `text`, `label`, or surrounding `withinText`; for example, a “View product” button inside the “Security MTN OAuth V1” card. Hidden and disabled matches are skipped, and ambiguous matches return candidates rather than being selected automatically. If you use an `@eN` ref, also pass the snapshot's `revision` and controlled `tabRef`. EstaCoda rejects stale and cross-tab refs before dispatching the action.
 
 Snapshot summarization is controlled by:
 

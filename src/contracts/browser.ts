@@ -44,6 +44,44 @@ export type BrowserWaitCondition =
   | { kind: "dialog" }
   | { kind: "dom-stable" };
 
+export type BrowserLocator = {
+  role?: string;
+  name?: string;
+  text?: string;
+  label?: string;
+  withinText?: string;
+  exact?: boolean;
+  revision?: number;
+};
+
+export type BrowserLocatorCandidate = {
+  ref: string;
+  revision: number;
+  tabRef: string;
+  role?: string;
+  name?: string;
+  text?: string;
+  label?: string;
+  withinText?: string;
+};
+
+export type BrowserFindResult = {
+  sessionId: string;
+  revision: number;
+  tabRef: string;
+  status: "found" | "ambiguous" | "not-found";
+  candidates: BrowserLocatorCandidate[];
+};
+
+export type BrowserExtractResult = {
+  sessionId: string;
+  revision: number;
+  tabRef: string;
+  target: BrowserLocatorCandidate;
+  text?: string;
+  value?: string;
+};
+
 export type BrowserActionDeltaElement = {
   role?: string;
   name?: string;
@@ -80,6 +118,10 @@ export type BrowserSnapshot = {
     ref: string;
     role?: string;
     name?: string;
+    text?: string;
+    label?: string;
+    withinText?: string;
+    hidden?: boolean;
     value?: string;
     disabled?: boolean;
     checked?: boolean | "mixed";
@@ -120,6 +162,8 @@ export type BrowserTabList = {
 export type BrowserSwitchTabInput = {
   sessionId?: string;
   tabRef: string;
+  waitFor?: BrowserWaitCondition;
+  waitTimeoutMs?: number;
   signal?: AbortSignal;
 };
 
@@ -132,7 +176,11 @@ export type BrowserActionInput = {
   sessionId?: string;
   full?: boolean;
   ref?: string;
+  revision?: number;
+  tabRef?: string;
+  locator?: BrowserLocator;
   text?: string;
+  value?: string;
   key?: string;
   direction?: "up" | "down";
   amount?: number;
@@ -193,8 +241,11 @@ export type BrowserBackend = {
   status(): Promise<BrowserBackendStatus> | BrowserBackendStatus;
   navigate(input: BrowserNavigateInput): Promise<BrowserNavigateResult>;
   snapshot?(input?: BrowserActionInput): Promise<BrowserSnapshot>;
+  find?(input: BrowserActionInput): Promise<BrowserFindResult>;
   click?(input: BrowserActionInput): Promise<BrowserSnapshot>;
   type?(input: BrowserActionInput): Promise<BrowserSnapshot>;
+  select?(input: BrowserActionInput): Promise<BrowserSnapshot>;
+  extract?(input: BrowserActionInput): Promise<BrowserExtractResult>;
   scroll?(input: BrowserActionInput): Promise<BrowserSnapshot>;
   press?(input: BrowserActionInput): Promise<BrowserSnapshot>;
   back?(input?: BrowserActionInput): Promise<BrowserSnapshot>;

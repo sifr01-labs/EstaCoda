@@ -11,6 +11,7 @@ import { DDGS_CAPABILITY_ID } from "../python-env/capability-registry.js";
 import type { ProviderExecutor, ProviderExecutionResult } from "../providers/provider-executor.js";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
 import { createMockBrowserBackend, createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
+import { BrowserTargetError } from "../browser/browser-locator.js";
 import { BrowserSessionStateError } from "../browser/session-state.js";
 import { ephemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 import { createGovernedVisionArtifactDispatcher, createVisionTools } from "./vision-tools.js";
@@ -24,8 +25,11 @@ const expectedToolNames = [
   "web.crawl",
   "browser.status",
   "browser.snapshot",
+  "browser.find",
   "browser.click",
   "browser.type",
+  "browser.select",
+  "browser.extract",
   "browser.scroll",
   "browser.press",
   "browser.back",
@@ -265,6 +269,7 @@ function createSessionRecordingBrowserBackend(calls: Array<{ method: string; inp
     observedAt: "2026-08-13T00:00:00.000Z",
     title: "Recorded Browser Page",
     text: `Recorded browser snapshot for ${input.sessionId ?? "missing-session"}.`,
+    tab: { ref: "@t1", url: "https://example.com/", title: "Recorded Browser Page", controlled: true },
     elements: [{ ref: "@e1", role: "button", name: "Recorded Button" }]
   });
 
@@ -291,6 +296,16 @@ function createSessionRecordingBrowserBackend(calls: Array<{ method: string; inp
       calls.push({ method: "snapshot", input });
       return snapshotFor(input);
     },
+    find: async (input) => {
+      calls.push({ method: "find", input });
+      return {
+        sessionId: input.sessionId ?? "missing-session",
+        revision: 1,
+        tabRef: "@t1",
+        status: "found",
+        candidates: [{ ref: "@e1", revision: 1, tabRef: "@t1", role: "button", name: "Recorded Button" }]
+      };
+    },
     click: async (input) => {
       calls.push({ method: "click", input });
       return snapshotFor(input);
@@ -298,6 +313,20 @@ function createSessionRecordingBrowserBackend(calls: Array<{ method: string; inp
     type: async (input) => {
       calls.push({ method: "type", input });
       return snapshotFor(input);
+    },
+    select: async (input) => {
+      calls.push({ method: "select", input });
+      return snapshotFor(input);
+    },
+    extract: async (input) => {
+      calls.push({ method: "extract", input });
+      return {
+        sessionId: input.sessionId ?? "missing-session",
+        revision: 1,
+        tabRef: "@t1",
+        target: { ref: "@e1", revision: 1, tabRef: "@t1", role: "button", name: "Recorded Button" },
+        text: "Recorded Button"
+      };
     },
     scroll: async (input) => {
       calls.push({ method: "scroll", input });
@@ -1859,8 +1888,11 @@ describe("web and browser tools baselines", () => {
     }> = [
       { toolName: "browser.navigate", backendMethod: "navigate", input: { url: "https://example.com" } },
       { toolName: "browser.snapshot", backendMethod: "snapshot", input: {} },
+      { toolName: "browser.find", backendMethod: "find", input: { locator: { role: "button", name: "Recorded Button" } } },
       { toolName: "browser.click", backendMethod: "click", input: { ref: "@e1" } },
       { toolName: "browser.type", backendMethod: "type", input: { ref: "@e1", text: "hello" } },
+      { toolName: "browser.select", backendMethod: "select", input: { locator: { label: "Environment" }, value: "Sandbox" } },
+      { toolName: "browser.extract", backendMethod: "extract", input: { locator: { role: "button", name: "Recorded Button" } } },
       { toolName: "browser.scroll", backendMethod: "scroll", input: { direction: "down", amount: 300 } },
       { toolName: "browser.back", backendMethod: "back", input: {} },
       { toolName: "browser.press", backendMethod: "press", input: { key: "Enter" } },
@@ -2301,6 +2333,65 @@ describe("web and browser tools baselines", () => {
     expect(result.ok).toBe(false);
     expect(result.content).toBe("Invalid browser element ref: invalid-ref");
     expect(result.metadata).toEqual({ backend: "mock" });
+  });
+
+  it("renders semantic candidates and forwards locators to browser actions", async () => {
+    const calls: Array<{ method: string; input: BrowserActionInput | BrowserNavigateInput }> = [];
+    const browserBackend = createSessionRecordingBrowserBackend(calls);
+    const tools = createTestWebTools({ browserBackend, currentSessionId: () => "runtime-session" });
+
+    const found = await tool("browser.find", tools).run({
+      locator: { role: "button", name: "Recorded Button", withinText: "OAuth V1" }
+    });
+    const selected = await tool("browser.select", tools).run({
+      locator: { label: "Environment" },
+      value: "Sandbox"
+    });
+    const extracted = await tool("browser.extract", tools).run({
+      locator: { role: "button", name: "Recorded Button" }
+    });
+
+    expect(found.content).toContain("@e1 revision=1 tab=@t1 button \"Recorded Button\"");
+    expect(selected.ok).toBe(true);
+    expect(extracted.content).toContain("Text: Recorded Button");
+    expect(calls).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: "find", input: expect.objectContaining({ sessionId: "runtime-session:main" }) }),
+      expect.objectContaining({ method: "select", input: expect.objectContaining({ locator: { label: "Environment" }, value: "Sandbox" }) }),
+      expect.objectContaining({ method: "extract", input: expect.objectContaining({ locator: { role: "button", name: "Recorded Button" } }) })
+    ]));
+  });
+
+  it("surfaces stale and ambiguous browser targets as structured failures", async () => {
+    const backend: BrowserBackend = {
+      ...createMockBrowserBackend(),
+      click: async () => {
+        throw new BrowserTargetError({
+          reason: "browser-target-ambiguous",
+          message: "Browser locator matched 2 current elements; refine the locator instead of guessing.",
+          currentRevision: 9,
+          currentTabRef: "@t2",
+          candidates: [
+            { ref: "@e1", revision: 9, tabRef: "@t2", role: "button", name: "Open" },
+            { ref: "@e2", revision: 9, tabRef: "@t2", role: "button", name: "Open" }
+          ]
+        });
+      }
+    };
+
+    const result = await tool("browser.click", createTestWebTools({ browserBackend: backend })).run({
+      locator: { role: "button", name: "Open" }
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: {
+        backend: "mock",
+        reason: "browser-target-ambiguous",
+        currentRevision: 9,
+        currentTabRef: "@t2",
+        candidates: [{ ref: "@e1" }, { ref: "@e2" }]
+      }
+    });
   });
 
   it("forwards browser wait conditions and prioritizes compact action deltas", async () => {

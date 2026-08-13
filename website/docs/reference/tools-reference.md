@@ -231,11 +231,13 @@ Local browser automation via CDP or remote browser backend.
 |------|------|---------------|
 | `browser.*` | `external-side-effect` | Browser session state |
 
-Implemented browser tools include `browser.status`, `browser.navigate`, `browser.snapshot`, `browser.click`, `browser.type`, `browser.scroll`, `browser.press`, `browser.back`, `browser.get_images`, `browser.console`, `browser.tabs`, `browser.switch_tab`, `browser.cdp`, `browser.screenshot`, `browser.vision`, and `browser.dialog`.
+Implemented browser tools include `browser.status`, `browser.navigate`, `browser.snapshot`, `browser.find`, `browser.click`, `browser.type`, `browser.select`, `browser.extract`, `browser.scroll`, `browser.press`, `browser.back`, `browser.get_images`, `browser.console`, `browser.tabs`, `browser.switch_tab`, `browser.cdp`, `browser.screenshot`, `browser.vision`, and `browser.dialog`.
 
 **Availability:** Requires a configured browser backend. `local-cdp` supports manual CDP and supervised auto-launch. Browserbase is implemented through the browser backend and remains blocked until `browser.cloudSpendApproved === true`. browser-use, Firecrawl browser, and Camofox are registered deferred providers.
 
 **Snapshots:** `browser.snapshot` returns compact output by default. Compact output is a bounded actionable AX subset with refs such as `@e1`; it is not true viewport-visible filtering yet. Passing `full: true` requests the larger full snapshot path. Rendered output labels compact vs full snapshots, truncates oversized text, and may summarize large results when `browser.summarizeSnapshots` and `browser.snapshotSummarizeThreshold` allow it.
+
+**Semantic targets:** `browser.find`, `browser.click`, `browser.type`, `browser.select`, and `browser.extract` accept locators containing `role`, `name`, `text`, `label`, `withinText`, `exact`, and optional `revision`. Hidden and disabled elements are excluded. Ambiguous locators return candidates. Ref-based actions require the source snapshot `revision` and `tabRef`; stale or cross-tab refs fail before dispatch.
 
 **Action settling:** Snapshots expose a session-scoped revision, observation time, and readiness. Navigation and browser actions accept an optional `waitFor` condition and `waitTimeoutMs` capped at 10 seconds. Without an explicit condition, the supervised backend waits for bounded DOM stability. Normal action results contain compact, redacted before/after deltas; an unmet condition is reported as a timeout with the latest state, not as confirmed success.
 

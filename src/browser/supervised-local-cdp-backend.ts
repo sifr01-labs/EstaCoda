@@ -3,6 +3,7 @@ import type {
   BrowserBackend,
   BrowserConsoleEntry,
   BrowserBackendStatus,
+  BrowserExtractResult,
   BrowserNavigateInput,
   BrowserNavigateResult,
   BrowserScreenshotResult,
@@ -19,6 +20,7 @@ import { CDPSupervisor } from "./cdp-supervisor.js";
 import type { BrowserSessionLifecycle } from "./session-lifecycle.js";
 import { BrowserSessionStateError, browserSessionStateReason } from "./session-state.js";
 import { settleBrowserAction, withBrowserActionDelta } from "./action-settling.js";
+import { findBrowserLocator, resolveBrowserTarget } from "./browser-locator.js";
 import { findChromiumExecutable, type ChromiumFinderOptions, type ChromiumFinderResult } from "./chromium-finder.js";
 import { launchChrome, type ChromeLauncherOptions, type LaunchedChrome } from "./chrome-launcher.js";
 import { CdpTargetManager, type CdpTargetManagerOptions } from "./cdp-target-manager.js";
@@ -28,6 +30,8 @@ import {
   type BrowserManagedTab,
   type BrowserSessionManagerOptions
 } from "./session-manager.js";
+import { observeBrowserSnapshot, type BrowserSnapshotRevisionState } from "./snapshot-state.js";
+import { redactSensitiveText } from "../utils/redaction.js";
 
 export type SupervisedLocalCdpBackendOptions = {
   cdpUrl?: string;
@@ -88,6 +92,8 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
   const sessionStacks = new Map<string, BrowserSessionStack>();
   const lostSessions = new Map<string, "session_missing" | "browser_process_missing">();
   const latestSnapshots = new Map<string, BrowserSnapshot>();
+  const latestSnapshotScopes = new Map<string, boolean>();
+  const fallbackSnapshotRevisions = new Map<string, BrowserSnapshotRevisionState>();
   let launchedChrome: LaunchedChrome | undefined;
   let launchPromise: Promise<LaunchedChrome> | undefined;
   let configuredStack: BrowserSessionStack | undefined;
@@ -102,6 +108,8 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     if (stack === undefined || !stack.sessionManager.has(sessionId)) {
       sessionStacks.delete(sessionId);
       latestSnapshots.delete(sessionId);
+      latestSnapshotScopes.delete(sessionId);
+      fallbackSnapshotRevisions.delete(sessionId);
       throw new BrowserSessionStateError("session_missing", `Browser session not found: ${sessionId}`);
     }
     return asBackendSession(await stack.sessionManager.acquire(sessionId));
@@ -162,7 +170,9 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     snapshot: BrowserSnapshot
   ): BrowserSnapshot => {
     const manager = sessionStacks.get(session.key)?.sessionManager;
-    const observed = manager?.observeSnapshot?.(session.key, snapshot) ?? snapshot;
+    const fallbackRevision = fallbackSnapshotRevisions.get(session.key) ?? { revision: 0 };
+    fallbackSnapshotRevisions.set(session.key, fallbackRevision);
+    const observed = manager?.observeSnapshot?.(session.key, snapshot) ?? observeBrowserSnapshot(snapshot, fallbackRevision);
     latestSnapshots.set(session.key, observed);
     return observed;
   };
@@ -177,7 +187,20 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       await session.supervisor.getSnapshot(session.key, { full }),
       openedTabs
     );
+    latestSnapshotScopes.set(session.key, full);
     return observeSessionSnapshot(session, raw);
+  };
+
+  const captureSafeTargetSnapshot = async (
+    session: ManagedBackendSession,
+    input: BrowserActionInput
+  ): Promise<{ snapshot: BrowserSnapshot; full: boolean }> => {
+    const full = input.ref !== undefined && latestSnapshotScopes.get(session.key) === true;
+    const snapshot = await captureSessionSnapshot(session, [], full);
+    if (!await tabUrlIsAllowed(snapshot.url)) {
+      throw new Error("Browser target resolution is blocked because the controlled tab URL violates browser policy.");
+    }
+    return { snapshot, full };
   };
 
   const settleAction = async (input: {
@@ -187,9 +210,10 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     capture?: () => Promise<BrowserSnapshot>;
     initialSnapshot?: BrowserSnapshot;
     openedTabs?: BrowserTab[];
+    full?: boolean;
   }): Promise<BrowserSnapshot> => {
     const settlement = await settleBrowserAction({
-      capture: input.capture ?? (() => captureSessionSnapshot(input.session)),
+      capture: input.capture ?? (() => captureSessionSnapshot(input.session, [], input.full === true)),
       waitFor: input.actionInput.waitFor,
       waitTimeoutMs: input.actionInput.waitTimeoutMs,
       signal: input.actionInput.signal,
@@ -253,6 +277,9 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     const stack = sessionStacks.get(sessionId);
     if (stack === undefined || !stack.sessionManager.has(sessionId)) {
       sessionStacks.delete(sessionId);
+      latestSnapshots.delete(sessionId);
+      latestSnapshotScopes.delete(sessionId);
+      fallbackSnapshotRevisions.delete(sessionId);
       lifecycle?.unregister(sessionId);
       await closeLaunchedChromeIfIdle();
       return;
@@ -268,6 +295,8 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     } finally {
       sessionStacks.delete(sessionId);
       latestSnapshots.delete(sessionId);
+      latestSnapshotScopes.delete(sessionId);
+      fallbackSnapshotRevisions.delete(sessionId);
     }
 
     try {
@@ -307,6 +336,8 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       if (owner === stack) {
         sessionStacks.delete(sessionId);
         latestSnapshots.delete(sessionId);
+        latestSnapshotScopes.delete(sessionId);
+        fallbackSnapshotRevisions.delete(sessionId);
       }
     }
   };
@@ -487,6 +518,8 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     sessionStacks.clear();
     lostSessions.clear();
     latestSnapshots.clear();
+    latestSnapshotScopes.clear();
+    fallbackSnapshotRevisions.clear();
     configuredStack = undefined;
     launchedStack = undefined;
     try {
@@ -660,12 +693,22 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       const session = await getSession(input);
       return captureSessionSnapshot(session, [], input?.full === true);
     },
+    find: async (input) => {
+      if (input.locator === undefined) {
+        throw new Error("browser.find requires a semantic locator.");
+      }
+      const session = await getSession(input);
+      const { snapshot } = await captureSafeTargetSnapshot(session, input);
+      return findBrowserLocator(snapshot, input.locator);
+    },
     click: async (input) => {
       let session = await getSession(input);
-      const before = latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session);
+      const targetState = await captureSafeTargetSnapshot(session, input);
+      const before = targetState.snapshot;
+      const target = resolveBrowserTarget(before, input);
       const beforeTabs = supportsTabManagement(session.key) ? await listManagedTabs(session.key) : undefined;
       await session.supervisor.send("Runtime.evaluate", {
-        expression: refActionExpression(input.ref, "click"),
+        expression: refActionExpression(target.ref, "click"),
         awaitPromise: true
       });
       const priorRefs = new Set(beforeTabs?.map((tab) => tab.ref) ?? []);
@@ -687,7 +730,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
             openedTabs = [switched.tab];
           }
         }
-        return captureSessionSnapshot(session, openedTabs);
+        return captureSessionSnapshot(session, openedTabs, targetState.full);
       };
       const settlement = await settleBrowserAction({
         capture,
@@ -704,12 +747,42 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     },
     type: async (input) => {
       const session = await getSession(input);
-      const before = latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session);
+      const targetState = await captureSafeTargetSnapshot(session, input);
+      const before = targetState.snapshot;
+      const target = resolveBrowserTarget(before, input);
       await session.supervisor.send("Runtime.evaluate", {
-        expression: refActionExpression(input.ref, "type", input.text ?? ""),
+        expression: refActionExpression(target.ref, "type", input.text ?? ""),
         awaitPromise: true
       });
-      return settleAction({ session, before, actionInput: input });
+      return settleAction({ session, before, actionInput: input, full: targetState.full });
+    },
+    select: async (input) => {
+      const session = await getSession(input);
+      const targetState = await captureSafeTargetSnapshot(session, input);
+      const before = targetState.snapshot;
+      const target = resolveBrowserTarget(before, input);
+      if (input.value === undefined || input.value.length === 0) {
+        throw new Error("browser.select requires a non-empty value.");
+      }
+      await session.supervisor.send("Runtime.evaluate", {
+        expression: selectActionExpression(target.ref, input.value),
+        awaitPromise: true
+      });
+      return settleAction({ session, before, actionInput: input, full: targetState.full });
+    },
+    extract: async (input): Promise<BrowserExtractResult> => {
+      const session = await getSession(input);
+      const { snapshot } = await captureSafeTargetSnapshot(session, input);
+      const target = resolveBrowserTarget(snapshot, input);
+      const element = snapshot.elements?.find((candidate) => candidate.ref === target.ref);
+      return {
+        sessionId: snapshot.sessionId,
+        revision: snapshot.revision,
+        tabRef: target.tabRef,
+        target,
+        ...(element?.text === undefined && element?.name === undefined ? {} : { text: redactSensitiveText(element.text ?? element.name ?? "").slice(0, 4_000) }),
+        ...(element?.value === undefined ? {} : { value: redactSensitiveText(element.value).slice(0, 1_000) })
+      };
     },
     scroll: async (input) => {
       const session = await getSession(input);
@@ -762,7 +835,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       const snapshot = await settleAction({
         session: switched.session,
         before,
-        actionInput: { signal: input.signal },
+        actionInput: input,
         initialSnapshot: switched.snapshot
       });
       return {
@@ -836,9 +909,28 @@ function withSessionTab(
 function refActionExpression(ref: string | undefined, action: "click" | "type", text = ""): string {
   const index = refToIndex(ref);
   if (action === "click") {
-    return `(() => { const el = window.__estacodaElements?.[${index}]; if (!el) throw new Error('Browser element ref not found: ${ref ?? ""}'); el.click(); return 'clicked'; })()`;
+    return `(() => { const el = window.__estacodaElements?.[${index}]; if (!el || !el.isConnected) throw new Error('Browser element ref not found: ${ref ?? ""}'); if (el.matches(':disabled,[aria-disabled="true"]')) throw new Error('Browser element is disabled: ${ref ?? ""}'); const style = getComputedStyle(el); if (style.display === 'none' || style.visibility === 'hidden' || el.getClientRects().length === 0) throw new Error('Browser element is hidden: ${ref ?? ""}'); el.click(); return 'clicked'; })()`;
   }
-  return `(() => { const el = window.__estacodaElements?.[${index}]; if (!el) throw new Error('Browser element ref not found: ${ref ?? ""}'); el.focus(); el.value = ${JSON.stringify(text)}; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return 'typed'; })()`;
+  return `(() => { const el = window.__estacodaElements?.[${index}]; if (!el || !el.isConnected) throw new Error('Browser element ref not found: ${ref ?? ""}'); if (el.matches(':disabled,[aria-disabled="true"]')) throw new Error('Browser element is disabled: ${ref ?? ""}'); const style = getComputedStyle(el); if (style.display === 'none' || style.visibility === 'hidden' || el.getClientRects().length === 0) throw new Error('Browser element is hidden: ${ref ?? ""}'); if (!(el instanceof HTMLInputElement) && !(el instanceof HTMLTextAreaElement) && !el.isContentEditable) throw new Error('Browser target does not accept text: ${ref ?? ""}'); el.focus(); if (el.isContentEditable) el.textContent = ${JSON.stringify(text)}; else el.value = ${JSON.stringify(text)}; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return 'typed'; })()`;
+}
+
+function selectActionExpression(ref: string | undefined, value: string): string {
+  const index = refToIndex(ref);
+  return `(() => {
+    const el = window.__estacodaElements?.[${index}];
+    if (!el || !el.isConnected) throw new Error('Browser element ref not found: ${ref ?? ""}');
+    if (el.matches(':disabled,[aria-disabled="true"]')) throw new Error('Browser element is disabled: ${ref ?? ""}');
+    const style = getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden' || el.getClientRects().length === 0) throw new Error('Browser element is hidden: ${ref ?? ""}');
+    if (!(el instanceof HTMLSelectElement)) throw new Error('Browser target is not a select element: ${ref ?? ""}');
+    const requested = ${JSON.stringify(value)};
+    const option = Array.from(el.options).find((entry) => entry.value === requested || entry.text.trim() === requested);
+    if (!option) throw new Error('Browser select option not found');
+    el.value = option.value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return 'selected';
+  })()`;
 }
 
 function refToIndex(ref: string | undefined): number {

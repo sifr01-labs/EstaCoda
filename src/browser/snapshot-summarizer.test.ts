@@ -202,7 +202,7 @@ describe("maybeSummarizeSnapshot", () => {
   it("prompts the provider to preserve interactive refs", async () => {
     const executor = createExecutor("summary");
     await maybeSummarizeSnapshot({
-      renderedSnapshot: "[Compact viewport snapshot]\n\nInteractive elements:\n@e1 button Save",
+      renderedSnapshot: "[Compact viewport snapshot]\nRevision: 4\nControlled tab: @t2\n\nInteractive elements:\n@e1 button Save",
       userTask: "Click save"
     }, {
       providerExecutor: executor,
@@ -216,6 +216,9 @@ describe("maybeSummarizeSnapshot", () => {
     const request = vi.mocked(executor.complete).mock.calls[0]?.[0];
     const prompt = JSON.stringify(request?.messages);
     expect(prompt).toContain("Preserve all useful interactive elements and their exact @eN refs");
+    expect(prompt).toContain("Preserve the snapshot revision and controlled tab ref");
+    expect(prompt).toContain("Revision: 4");
+    expect(prompt).toContain("Controlled tab: @t2");
     expect(prompt).toContain("@e1 button Save");
     expect(prompt).toContain("Click save");
   });

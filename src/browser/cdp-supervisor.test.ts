@@ -20,6 +20,7 @@ class FakeCdpSocket implements CdpWebSocketLike {
       axTree?: unknown;
       failAxTree?: boolean;
       failElementClear?: boolean;
+      callFunctionValue?: unknown;
     } = {}
   ) {}
 
@@ -60,7 +61,7 @@ class FakeCdpSocket implements CdpWebSocketLike {
         : message.method === "DOM.resolveNode"
           ? { object: { objectId: `object-${message.params?.backendNodeId ?? "unknown"}` } }
           : message.method === "Runtime.callFunctionOn"
-            ? { result: { value: true } }
+            ? { result: { value: this.options.callFunctionValue ?? true } }
         : { ok: true, method: message.method };
     this.#emit("message", {
       data: JSON.stringify({
@@ -256,6 +257,37 @@ describe("CDPSupervisor", () => {
       sessionId: "session-1",
       elements: [{ ref: "@e1", role: "button", name: "Continue" }]
     });
+  });
+
+  it("does not expose password values from AX snapshots", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1", {
+      axTree: {
+        nodes: [{
+          nodeId: "password-1",
+          backendDOMNodeId: 201,
+          role: { value: "textbox" },
+          name: { value: "Password" },
+          value: { value: "plain-user-password" }
+        }]
+      },
+      callFunctionValue: { label: "Password", sensitive: true, hidden: false }
+    });
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+
+    await supervisor.start();
+    const snapshot = await supervisor.getSnapshot("session-1");
+
+    expect(snapshot.elements).toEqual([{
+      ref: "@e1",
+      role: "textbox",
+      name: "Password",
+      label: "Password",
+      hidden: false
+    }]);
+    expect(JSON.stringify(snapshot)).not.toContain("plain-user-password");
   });
 
   it("getSnapshot() falls back when AX element bindings cannot be cleared", async () => {

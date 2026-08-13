@@ -110,6 +110,7 @@ export async function maybeSummarizeSnapshot(
             content: [
               "You summarize EstaCoda browser snapshots for an agent.",
               "Preserve all useful interactive elements and their exact @eN refs.",
+              "Preserve the snapshot revision and controlled tab ref because ref actions require both.",
               "Preserve headings, labels, buttons, links, input names, values, checked/disabled states, warnings, and page context.",
               "Do not invent refs or browser state. Stay concise and task-relevant."
             ].join(" ")

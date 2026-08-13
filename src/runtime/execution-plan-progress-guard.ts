@@ -15,6 +15,7 @@ const MUTATION_RISK_CLASSES = new Set<ToolRiskClass>([
 const BROWSER_STATE_CHANGE_TOOLS = new Set([
   "browser.click",
   "browser.type",
+  "browser.select",
   "browser.press",
   "browser.dialog",
   "browser.cdp"

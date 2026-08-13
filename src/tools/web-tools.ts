@@ -8,6 +8,8 @@ import type {
   BrowserActionDelta,
   BrowserActionDeltaElement,
   BrowserBackend,
+  BrowserFindResult,
+  BrowserLocatorCandidate,
   BrowserNavigateInput,
   BrowserSnapshot,
   BrowserTab,
@@ -18,6 +20,7 @@ import { resolveGlobalStateHome } from "../config/profile-home.js";
 import { createBrowserDebugSession, type BrowserDebugSession } from "../browser/browser-debug.js";
 import { createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
 import { browserSessionStateReason } from "../browser/session-state.js";
+import { browserTargetFailureMetadata } from "../browser/browser-locator.js";
 import { deriveBrowserSessionKey } from "../browser/session-key.js";
 import { maybeSummarizeSnapshot, truncateSnapshotText } from "../browser/snapshot-summarizer.js";
 import { isAlwaysBlockedUrl, isSafeUrl, redactUrlForMetadata, scanUrlForSecrets, type ResolveHostnameFn } from "../browser/url-safety.js";
@@ -274,9 +277,10 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       providerExecutor: options.providerExecutor,
       currentSessionId: options.currentSessionId
     }),
+    createBrowserFindTool(browserBackend, deriveBrowserInput),
     createBrowserActionTool({
       name: "browser.click",
-      description: "Click an interactive browser element by ref, wait for a requested or stable state, and return a concise delta.",
+      description: "Click by semantic locator, or by a ref with its source revision and tabRef. Ambiguous locators return candidates instead of guessing.",
       progressLabel: "clicking browser element",
       browserBackend,
       deriveBrowserInput,
@@ -284,16 +288,16 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       inputSchema: {
         type: "object",
         properties: {
-          ref: { type: "string" },
+          ...browserTargetInputProperties(),
           sessionId: { type: "string" },
           ...browserWaitInputProperties()
         },
-        required: ["ref"]
+        oneOf: browserTargetOneOf()
       }
     }),
     createBrowserActionTool({
       name: "browser.type",
-      description: "Type text into an input element by ref, wait for a requested or stable state, and return a concise delta.",
+      description: "Type into an input by semantic locator, or by a ref with its source revision and tabRef, then return a settled delta.",
       progressLabel: "typing in browser",
       browserBackend,
       deriveBrowserInput,
@@ -301,14 +305,35 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       inputSchema: {
         type: "object",
         properties: {
-          ref: { type: "string" },
+          ...browserTargetInputProperties(),
           text: { type: "string" },
           sessionId: { type: "string" },
           ...browserWaitInputProperties()
         },
-        required: ["ref", "text"]
+        required: ["text"],
+        oneOf: browserTargetOneOf()
       }
     }),
+    createBrowserActionTool({
+      name: "browser.select",
+      description: "Select an option by value or visible option text using a semantic locator, or a ref with its source revision and tabRef.",
+      progressLabel: "selecting browser option",
+      browserBackend,
+      deriveBrowserInput,
+      method: "select",
+      inputSchema: {
+        type: "object",
+        properties: {
+          ...browserTargetInputProperties(),
+          value: { type: "string" },
+          sessionId: { type: "string" },
+          ...browserWaitInputProperties()
+        },
+        required: ["value"],
+        oneOf: browserTargetOneOf()
+      }
+    }),
+    createBrowserExtractTool(browserBackend, deriveBrowserInput),
     createBrowserActionTool({
       name: "browser.scroll",
       description: "Scroll the current browser page, wait for a requested or stable state, and return a concise delta.",
@@ -474,7 +499,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         type: "object",
         properties: {
           tabRef: { type: "string" },
-          sessionId: { type: "string" }
+          sessionId: { type: "string" },
+          ...browserWaitInputProperties()
         },
         required: ["tabRef"]
       },
@@ -491,6 +517,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         const result = await browserBackend.switchTab({
           sessionId: browserInput.sessionId,
           tabRef: input.tabRef ?? "",
+          waitFor: browserInput.waitFor,
+          waitTimeoutMs: browserInput.waitTimeoutMs,
           signal: browserInput.signal
         }).catch((error: unknown) => ({ error }));
         if ("error" in result) {
@@ -1172,11 +1200,13 @@ function browserFailureMetadata(
   backend: BrowserBackend,
   error: unknown,
   fallbackReason?: string
-): { backend: BrowserBackend["kind"]; reason?: string } {
+): Record<string, unknown> {
+  const targetFailure = browserTargetFailureMetadata(error);
   const reason = browserSessionStateReason(error) ?? fallbackReason;
   return {
     backend: backend.kind,
-    ...(reason === undefined ? {} : { reason })
+    ...(reason === undefined ? {} : { reason }),
+    ...(targetFailure ?? {})
   };
 }
 
@@ -1280,7 +1310,7 @@ function createBrowserActionTool(input: {
   progressLabel: string;
   browserBackend: BrowserBackend;
   deriveBrowserInput: DeriveBrowserInput;
-  method: "click" | "type" | "scroll" | "press" | "back" | "dialog";
+  method: "click" | "type" | "select" | "scroll" | "press" | "back" | "dialog";
   inputSchema: RegisteredTool["inputSchema"];
 }): RegisteredTool {
   return {
@@ -1310,6 +1340,88 @@ function createBrowserActionTool(input: {
         ok: true,
         content: renderBrowserActionResult(snapshot, 8000),
         metadata: { backend: input.browserBackend.kind, snapshot }
+      };
+    }
+  };
+}
+
+function createBrowserFindTool(
+  browserBackend: BrowserBackend,
+  deriveBrowserInput: DeriveBrowserInput
+): RegisteredTool {
+  return {
+    name: "browser.find",
+    description: "Find current visible, enabled browser elements by semantic role, name, text, label, or surrounding text. Returns candidates without guessing when ambiguous.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        locator: browserLocatorSchema(),
+        sessionId: { type: "string" }
+      },
+      required: ["locator"]
+    },
+    riskClass: "read-only-network",
+    toolsets: ["browser", "web", "research"],
+    progressLabel: "finding browser element",
+    maxResultSizeChars: 5000,
+    isAvailable: async () => browserBackend.find !== undefined && await browserBackend.isAvailable(),
+    run: async (input: BrowserActionInput) => {
+      if (browserBackend.find === undefined) return unsupportedBrowserTool(browserBackend, "browser.find");
+      const result = await browserBackend.find(deriveBrowserInput(input)).catch((error: unknown) => ({ error }));
+      if ("error" in result) {
+        return {
+          ok: false,
+          content: result.error instanceof Error ? result.error.message : "Browser element lookup failed.",
+          metadata: browserFailureMetadata(browserBackend, result.error, "browser-find-failed")
+        };
+      }
+      return {
+        ok: true,
+        content: renderBrowserFindResult(result),
+        metadata: { backend: browserBackend.kind, ...result }
+      };
+    }
+  };
+}
+
+function createBrowserExtractTool(
+  browserBackend: BrowserBackend,
+  deriveBrowserInput: DeriveBrowserInput
+): RegisteredTool {
+  return {
+    name: "browser.extract",
+    description: "Extract bounded text/value from one current browser element selected semantically, or by a ref with its source revision and tabRef.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...browserTargetInputProperties(),
+        sessionId: { type: "string" }
+      },
+      oneOf: browserTargetOneOf()
+    },
+    riskClass: "read-only-network",
+    toolsets: ["browser", "web", "research"],
+    progressLabel: "extracting browser element",
+    maxResultSizeChars: 5000,
+    isAvailable: async () => browserBackend.extract !== undefined && await browserBackend.isAvailable(),
+    run: async (input: BrowserActionInput) => {
+      if (browserBackend.extract === undefined) return unsupportedBrowserTool(browserBackend, "browser.extract");
+      const result = await browserBackend.extract(deriveBrowserInput(input)).catch((error: unknown) => ({ error }));
+      if ("error" in result) {
+        return {
+          ok: false,
+          content: result.error instanceof Error ? result.error.message : "Browser element extraction failed.",
+          metadata: browserFailureMetadata(browserBackend, result.error, "browser-extract-failed")
+        };
+      }
+      return {
+        ok: true,
+        content: [
+          renderBrowserLocatorCandidate(result.target),
+          result.text === undefined ? undefined : `Text: ${result.text}`,
+          result.value === undefined ? undefined : `Value: ${result.value}`
+        ].filter((line): line is string => line !== undefined).join("\n"),
+        metadata: { backend: browserBackend.kind, ...result }
       };
     }
   };
@@ -1480,6 +1592,57 @@ function renderDeltaElement(element: BrowserActionDeltaElement): string {
     .join(" ");
 }
 
+function renderBrowserFindResult(result: BrowserFindResult): string {
+  if (result.status === "not-found") {
+    return `No visible, enabled browser element matched at revision ${result.revision} on tab ${result.tabRef}.`;
+  }
+  const heading = result.status === "ambiguous"
+    ? `Locator is ambiguous: ${result.candidates.length} candidates matched. Refine it instead of guessing.`
+    : "Found one browser element.";
+  return [heading, ...result.candidates.map(renderBrowserLocatorCandidate)].join("\n");
+}
+
+function renderBrowserLocatorCandidate(candidate: BrowserLocatorCandidate): string {
+  return [
+    `${candidate.ref} revision=${candidate.revision} tab=${candidate.tabRef}`,
+    candidate.role,
+    candidate.name === undefined ? undefined : JSON.stringify(candidate.name),
+    candidate.label === undefined ? undefined : `label=${JSON.stringify(candidate.label)}`,
+    candidate.withinText === undefined ? undefined : `within=${JSON.stringify(candidate.withinText)}`
+  ].filter((part): part is string => part !== undefined).join(" ");
+}
+
+function browserLocatorSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      role: { type: "string" },
+      name: { type: "string" },
+      text: { type: "string" },
+      label: { type: "string" },
+      withinText: { type: "string" },
+      exact: { type: "boolean" },
+      revision: { type: "number" }
+    }
+  };
+}
+
+function browserTargetInputProperties(): Record<string, unknown> {
+  return {
+    ref: { type: "string", description: "Element ref from a snapshot; revision and tabRef are required with refs." },
+    revision: { type: "number", description: "Snapshot revision that produced ref." },
+    tabRef: { type: "string", description: "Controlled tab that produced ref." },
+    locator: browserLocatorSchema()
+  };
+}
+
+function browserTargetOneOf(): Array<{ required: string[] }> {
+  return [
+    { required: ["locator"] },
+    { required: ["ref", "revision", "tabRef"] }
+  ];
+}
+
 function browserWaitInputProperties(): Record<string, unknown> {
   return {
     waitFor: {
@@ -1508,6 +1671,8 @@ function renderBrowserTab(tab: BrowserTab): string {
 function renderBrowserSnapshotElement(element: NonNullable<BrowserSnapshot["elements"]>[number]): string {
   const details = [
     element.name,
+    element.label === undefined || element.label === element.name ? undefined : `label=${JSON.stringify(element.label)}`,
+    element.withinText === undefined ? undefined : `within=${JSON.stringify(element.withinText.slice(0, 120))}`,
     element.value === undefined ? undefined : `value=${JSON.stringify(element.value)}`,
     element.disabled === undefined ? undefined : `disabled=${element.disabled}`,
     element.checked === undefined ? undefined : `checked=${element.checked}`

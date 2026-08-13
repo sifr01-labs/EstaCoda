@@ -17,7 +17,14 @@ class FakeCdpSocket implements CdpWebSocketLike {
     url: "https://example.com/final",
     title: "Supervised Page",
     text: "Supervised text",
-    elements: [{ ref: "@e1", role: "button", name: "Open" }]
+    elements: [{ ref: "@e1", role: "button", name: "Open" }] as Array<{
+      ref: string;
+      role: string;
+      name: string;
+      withinText?: string;
+      label?: string;
+      value?: string;
+    }>
   };
   axTree: unknown;
   onRuntimeEvaluate?: (expression: string) => void;
@@ -428,7 +435,8 @@ describe("supervised local CDP backend", () => {
     const backend = createSupervisedLocalCdpBrowserBackend({
       cdpUrl: "http://127.0.0.1:9222",
       fetch: createFetch(),
-      webSocketFactory: () => socket
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"]
     });
 
     await backend.navigate({ url: "https://example.com/one", sessionId: "session-1" });
@@ -511,7 +519,7 @@ describe("supervised local CDP backend", () => {
       launchChrome
     });
 
-    await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+    const navigation = await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
 
     expect(findChromiumExecutable).not.toHaveBeenCalled();
     expect(launchChrome).not.toHaveBeenCalled();
@@ -554,6 +562,7 @@ describe("supervised local CDP backend", () => {
       autoLaunch: true,
       fetch: harness.fetch,
       webSocketFactory: harness.webSocketFactory,
+      resolveHostname: () => ["93.184.216.34"],
       findChromiumExecutable: vi.fn(async () => ({ executablePath: "/usr/bin/chromium", source: "platformDefault" as const })),
       launchChrome: vi.fn(async () => launchedChrome)
     }) as ReturnType<typeof createSupervisedLocalCdpBrowserBackend> & {
@@ -565,7 +574,7 @@ describe("supervised local CDP backend", () => {
     expect(firstConfiguredPage).toBeDefined();
 
     harness.failConfiguredContext("configured browser context failed");
-    await backend.navigate({ url: "https://example.com/launched", sessionId: "launched-session" });
+    const launchedNavigation = await backend.navigate({ url: "https://example.com/launched", sessionId: "launched-session" });
     const launchedPage = harness.socket("ws://launched/target-1");
     expect(launchedPage).toBeDefined();
     expect(firstConfiguredPage?.closed).toBe(true);
@@ -579,7 +588,12 @@ describe("supervised local CDP backend", () => {
 
     const launchedEvalCount = launchedPage?.sent.filter((message) => message.method === "Runtime.evaluate").length ?? 0;
     const configuredEvalCount = secondConfiguredPage?.sent.filter((message) => message.method === "Runtime.evaluate").length ?? 0;
-    await backend.click?.({ sessionId: "launched-session", ref: "@e1" });
+    await backend.click?.({
+      sessionId: "launched-session",
+      ref: "@e1",
+      revision: launchedNavigation.snapshot.revision,
+      tabRef: launchedNavigation.snapshot.tab!.ref
+    });
     expect(launchedPage?.sent.filter((message) => message.method === "Runtime.evaluate").length).toBeGreaterThan(launchedEvalCount + 1);
     expect(secondConfiguredPage?.sent.filter((message) => message.method === "Runtime.evaluate")).toHaveLength(configuredEvalCount);
 
@@ -694,7 +708,8 @@ describe("supervised local CDP backend", () => {
     const backend = createSupervisedLocalCdpBrowserBackend({
       cdpUrl: "http://127.0.0.1:9222",
       fetch: createFetch(),
-      webSocketFactory: () => socket
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"]
     });
 
     await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
@@ -706,6 +721,16 @@ describe("supervised local CDP backend", () => {
       { ref: "@e1", role: "heading", name: "Overview" },
       { ref: "@e2", role: "button", name: "Open" }
     ]);
+    await backend.click?.({
+      sessionId: "session-1",
+      ref: "@e2",
+      revision: full!.revision,
+      tabRef: full!.tab!.ref
+    });
+    expect(socket.sent).toContainEqual(expect.objectContaining({
+      method: "Runtime.evaluate",
+      params: expect.objectContaining({ expression: expect.stringContaining("__estacodaElements?.[1]") })
+    }));
   });
 
   it("click() can use AX-derived button refs bound to DOM nodes", async () => {
@@ -718,11 +743,17 @@ describe("supervised local CDP backend", () => {
     const backend = createSupervisedLocalCdpBrowserBackend({
       cdpUrl: "http://127.0.0.1:9222",
       fetch: createFetch(),
-      webSocketFactory: () => socket
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"]
     });
 
-    await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
-    await expect(backend.click?.({ sessionId: "session-1", ref: "@e1" })).resolves.toMatchObject({
+    const navigation = await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+    await expect(backend.click?.({
+      sessionId: "session-1",
+      ref: "@e1",
+      revision: navigation.snapshot.revision,
+      tabRef: navigation.snapshot.tab!.ref
+    })).resolves.toMatchObject({
       sessionId: "session-1"
     });
 
@@ -738,12 +769,126 @@ describe("supervised local CDP backend", () => {
     ]));
   });
 
+  it("resolves card-scoped semantic locators against the current revision", async () => {
+    const socket = new FakeCdpSocket();
+    socket.snapshot = {
+      ...socket.snapshot,
+      text: "Loans V2 Security MTN OAuth V1",
+      elements: [
+        { ref: "@e1", role: "button", name: "View product", withinText: "Loans V2" },
+        { ref: "@e2", role: "button", name: "View product", withinText: "Security MTN OAuth V1" }
+      ]
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"]
+    });
+
+    await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+    const found = await backend.find?.({
+      sessionId: "session-1",
+      locator: { role: "button", name: "View product", withinText: "OAuth V1" }
+    });
+    await backend.click?.({
+      sessionId: "session-1",
+      locator: { role: "button", name: "View product", withinText: "OAuth V1" }
+    });
+
+    expect(found).toMatchObject({ status: "found", candidates: [{ ref: "@e2" }] });
+    expect(socket.sent).toContainEqual(expect.objectContaining({
+      method: "Runtime.evaluate",
+      params: expect.objectContaining({ expression: expect.stringContaining("__estacodaElements?.[1]") })
+    }));
+  });
+
+  it("rejects stale and cross-tab refs before dispatching an action", async () => {
+    const socket = new FakeCdpSocket();
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"]
+    });
+    const navigation = await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+    socket.snapshot = { ...socket.snapshot, text: "Externally changed" };
+
+    await expect(backend.click?.({
+      sessionId: "session-1",
+      ref: "@e1",
+      revision: navigation.snapshot.revision,
+      tabRef: navigation.snapshot.tab!.ref
+    })).rejects.toMatchObject({ reason: "stale-browser-ref", currentRevision: navigation.snapshot.revision + 1 });
+    await expect(backend.click?.({
+      sessionId: "session-1",
+      ref: "@e1",
+      revision: navigation.snapshot.revision + 1,
+      tabRef: "@t99"
+    })).rejects.toMatchObject({ reason: "browser-ref-wrong-tab", currentTabRef: navigation.snapshot.tab!.ref });
+  });
+
+  it("selects by label and extracts the resolved current element", async () => {
+    const socket = new FakeCdpSocket();
+    socket.snapshot = {
+      ...socket.snapshot,
+      elements: [{ ref: "@e1", role: "select", name: "Environment", label: "Environment", value: "Sandbox" }]
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"]
+    });
+    await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+
+    await backend.select?.({
+      sessionId: "session-1",
+      locator: { role: "select", label: "Environment" },
+      value: "Production"
+    });
+    const extracted = await backend.extract?.({
+      sessionId: "session-1",
+      locator: { role: "select", label: "Environment" }
+    });
+
+    expect(socket.sent).toContainEqual(expect.objectContaining({
+      method: "Runtime.evaluate",
+      params: expect.objectContaining({ expression: expect.stringContaining("HTMLSelectElement") })
+    }));
+    expect(extracted).toMatchObject({ target: { ref: "@e1", label: "Environment" }, value: "Sandbox" });
+  });
+
+  it("redacts secret-looking extracted values", async () => {
+    const socket = new FakeCdpSocket();
+    socket.snapshot = {
+      ...socket.snapshot,
+      elements: [{ ref: "@e1", role: "textbox", name: "API key", label: "API key", value: "api_key=do-not-render" }]
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"]
+    });
+    await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+
+    const extracted = await backend.extract?.({
+      sessionId: "session-1",
+      locator: { role: "textbox", label: "API key" }
+    });
+
+    expect(JSON.stringify(extracted)).not.toContain("do-not-render");
+    expect(extracted?.value).toContain("[REDACTED]");
+  });
+
   it("click() waits for an asynchronous React-style update and returns its delta", async () => {
     const sockets = createSocketFactory();
     const backend = createSupervisedLocalCdpBrowserBackend({
       cdpUrl: "http://127.0.0.1:9222",
       fetch: createFetch(),
       webSocketFactory: sockets.webSocketFactory,
+      resolveHostname: () => ["93.184.216.34"],
       settling: {
         pollIntervalMs: 5,
         stableWindowMs: 10,
@@ -772,6 +917,8 @@ describe("supervised local CDP backend", () => {
     const result = await backend.click?.({
       sessionId: "session-1",
       ref: "@e1",
+      revision: navigation.snapshot.revision,
+      tabRef: navigation.snapshot.tab!.ref,
       waitFor: { kind: "text", value: "React update complete" },
       waitTimeoutMs: 200
     });
@@ -860,8 +1007,13 @@ describe("supervised local CDP backend", () => {
       createSessionManager: () => sessionManager
     });
 
-    await backend.navigate({ url: mainSnapshot.url, sessionId: "session-1" });
-    const result = await backend.click?.({ sessionId: "session-1", ref: "@e1" });
+    const navigation = await backend.navigate({ url: mainSnapshot.url, sessionId: "session-1" });
+    const result = await backend.click?.({
+      sessionId: "session-1",
+      ref: "@e1",
+      revision: navigation.snapshot.revision,
+      tabRef: navigation.snapshot.tab!.ref
+    });
 
     expect(sessionManager.switchTab).toHaveBeenCalledWith("session-1", "@t2");
     expect(result).toMatchObject({
@@ -983,11 +1135,18 @@ describe("supervised local CDP backend", () => {
     const backend = createSupervisedLocalCdpBrowserBackend({
       cdpUrl: "http://127.0.0.1:9222",
       fetch: createFetch(),
-      webSocketFactory: () => socket
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"]
     });
 
-    await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
-    await expect(backend.type?.({ sessionId: "session-1", ref: "@e1", text: "ada@example.com" })).resolves.toMatchObject({
+    const navigation = await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+    await expect(backend.type?.({
+      sessionId: "session-1",
+      ref: "@e1",
+      revision: navigation.snapshot.revision,
+      tabRef: navigation.snapshot.tab!.ref,
+      text: "ada@example.com"
+    })).resolves.toMatchObject({
       sessionId: "session-1"
     });
 
@@ -1013,11 +1172,17 @@ describe("supervised local CDP backend", () => {
     const backend = createSupervisedLocalCdpBrowserBackend({
       cdpUrl: "http://127.0.0.1:9222",
       fetch: createFetch(),
-      webSocketFactory: () => socket
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"]
     });
 
-    await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
-    await expect(backend.click?.({ sessionId: "session-1", ref: "@e99" })).rejects.toThrow(
+    const navigation = await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+    await expect(backend.click?.({
+      sessionId: "session-1",
+      ref: "@e99",
+      revision: navigation.snapshot.revision,
+      tabRef: navigation.snapshot.tab!.ref
+    })).rejects.toThrow(
       "Browser element ref not found"
     );
   });
@@ -1148,6 +1313,7 @@ describe("supervised local CDP backend", () => {
       cdpUrl: "http://127.0.0.1:9222",
       fetch: createFetch(),
       webSocketFactory: () => new FakeCdpSocket(),
+      resolveHostname: () => ["93.184.216.34"],
       lifecycle
     });
 
@@ -1170,6 +1336,7 @@ describe("supervised local CDP backend", () => {
       cdpUrl: "http://127.0.0.1:9222",
       fetch: createFetch(),
       webSocketFactory: () => new FakeCdpSocket(),
+      resolveHostname: () => ["93.184.216.34"],
       lifecycle
     });
 
@@ -1177,8 +1344,8 @@ describe("supervised local CDP backend", () => {
     touch.mockClear();
 
     await backend.snapshot?.({ sessionId: "session-1" });
-    await backend.click?.({ sessionId: "session-1", ref: "@e1" });
-    await backend.type?.({ sessionId: "session-1", ref: "@e1", text: "hello" });
+    await backend.click?.({ sessionId: "session-1", locator: { role: "button", name: "Open" } });
+    await backend.type?.({ sessionId: "session-1", locator: { role: "button", name: "Open" }, text: "hello" });
     await backend.scroll?.({ sessionId: "session-1", direction: "down" });
     await backend.press?.({ sessionId: "session-1", key: "Enter" });
     await backend.back?.({ sessionId: "session-1" });

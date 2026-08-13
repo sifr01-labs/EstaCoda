@@ -13,6 +13,7 @@ import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { connectCdp, type CdpClient, type CdpFetchLike, type CdpWebSocketFactory } from "./cdp-client.js";
 import { evaluateCdpSnapshot } from "./cdp-supervisor.js";
 import { observeBrowserSnapshot, type BrowserSnapshotRevisionState } from "./snapshot-state.js";
+import { findBrowserLocator, resolveBrowserTarget } from "./browser-locator.js";
 import { registerDefaultBrowserProviders, selectBrowserProvider } from "./browser-registry.js";
 import { createSupervisedLocalCdpBrowserBackend } from "./supervised-local-cdp-backend.js";
 import { createBrowserbaseBrowserBackend, type BrowserbaseBrowserBackendOptions } from "./browser-providers/browserbase-provider.js";
@@ -56,6 +57,7 @@ export function createMockBrowserBackend(input: {
     readiness: "complete",
     title: input.title ?? "Mock Browser Page",
     text: input.text ?? `Mock browser snapshot for ${url}.`,
+    tab: { ref: "@t1", url, title: input.title ?? "Mock Browser Page", controlled: true },
     elements: [{ ref: "@e1", role: "button", name: "Mock Button" }]
   }, revisionState);
 
@@ -79,8 +81,26 @@ export function createMockBrowserBackend(input: {
       };
     },
     snapshot: async () => snapshot(),
+    find: async (request) => {
+      if (request.locator === undefined) throw new Error("browser.find requires a semantic locator.");
+      return findBrowserLocator(snapshot(), request.locator);
+    },
     click: async () => snapshot(),
     type: async () => snapshot(),
+    select: async () => snapshot(),
+    extract: async (request) => {
+      const current = snapshot();
+      const target = resolveBrowserTarget(current, request);
+      const element = current.elements?.find((candidate) => candidate.ref === target.ref);
+      return {
+        sessionId: current.sessionId,
+        revision: current.revision,
+        tabRef: target.tabRef,
+        target,
+        ...(element?.text === undefined && element?.name === undefined ? {} : { text: element.text ?? element.name }),
+        ...(element?.value === undefined ? {} : { value: element.value })
+      };
+    },
     scroll: async () => snapshot(),
     press: async () => snapshot(),
     back: async () => snapshot(),
@@ -798,8 +818,23 @@ export function createHybridBrowserBackend(options: HybridBrowserBackendOptions)
       };
     },
     snapshot: (input) => runSnapshotAction(input, "snapshot", "snapshot"),
+    find: async (input) => {
+      const route = resolveActionRoute(input);
+      const method = backendForRoute(route.route).find;
+      if (method === undefined) throw new Error(`Hybrid browser ${route.route} backend does not support find.`);
+      const result = await method(actionInputForRoute(input, route));
+      return { ...result, sessionId: browserKeyForInput(input.sessionId) };
+    },
     click: (input) => runSnapshotAction(input, "click", "click"),
     type: (input) => runSnapshotAction(input, "type", "type"),
+    select: (input) => runSnapshotAction(input, "select", "select"),
+    extract: async (input) => {
+      const route = resolveActionRoute(input);
+      const method = backendForRoute(route.route).extract;
+      if (method === undefined) throw new Error(`Hybrid browser ${route.route} backend does not support extract.`);
+      const result = await method(actionInputForRoute(input, route));
+      return { ...result, sessionId: browserKeyForInput(input.sessionId) };
+    },
     scroll: (input) => runSnapshotAction(input, "scroll", "scroll"),
     press: (input) => runSnapshotAction(input, "press", "press"),
     back: (input = {}) => runSnapshotAction(input, "back", "back"),

@@ -11,6 +11,7 @@ Title: Test Page
 Revision: 1
 Observed: <timestamp>
 Readiness: complete
+Controlled tab: @t1 [controlled] Test Page — https://example.com/
 
 Hello world.
 
@@ -36,6 +37,12 @@ Interactive elements:
       "readiness": "complete",
       "revision": 1,
       "sessionId": "<session-id>",
+      "tab": {
+        "controlled": true,
+        "ref": "@t1",
+        "title": "Test Page",
+        "url": "https://example.com/",
+      },
       "text": "Hello world.",
       "title": "Test Page",
       "url": "https://example.com/",
@@ -52,6 +59,7 @@ exports[`web and browser golden snapshots > browser.snapshot output matches gold
 Revision: 1
 Observed: <timestamp>
 Readiness: complete
+Controlled tab: @t1 [controlled] Test Page — mock://browser
 
 Hello world.
 
@@ -71,6 +79,12 @@ Interactive elements:
       "readiness": "complete",
       "revision": 1,
       "sessionId": "<session-id>",
+      "tab": {
+        "controlled": true,
+        "ref": "@t1",
+        "title": "Test Page",
+        "url": "mock://browser",
+      },
       "text": "Hello world.",
       "title": "Test Page",
       "url": "mock://browser",

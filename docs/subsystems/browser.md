@@ -100,7 +100,9 @@ The provider turn loop also guards against observation-only stalls. When `browse
 
 ## Snapshots
 
-Snapshots prefer `Accessibility.getFullAXTree`. AX nodes are converted into compact `BrowserSnapshot.elements` with deterministic refs such as `@e1`, preserving useful `role`, `name`, `value`, `disabled`, and `checked` fields. Unhelpful and ignored AX nodes are skipped. If the AX command fails, returns an empty/malformed tree, or refs cannot be bound to DOM nodes, EstaCoda falls back to the DOM-query snapshot path.
+Snapshots prefer `Accessibility.getFullAXTree`. AX nodes are converted into compact `BrowserSnapshot.elements` with refs such as `@e1`, preserving useful `role`, `name`, `label`, surrounding text, `value`, `disabled`, and `checked` fields. Unhelpful and ignored AX nodes are skipped. If the AX command fails, returns an empty/malformed tree, or refs cannot be bound to DOM nodes, EstaCoda falls back to the DOM-query snapshot path.
+
+Element refs are intentionally revision- and tab-scoped. A ref action must include the source snapshot's `revision` and `tabRef`; stale or cross-tab refs fail with structured current-state metadata before an action is dispatched. `browser.find`, `browser.click`, `browser.type`, `browser.select`, and `browser.extract` also accept semantic locators using `role`, `name`, `text`, `label`, `withinText`, and optional exact matching. Semantic resolution uses a fresh policy-checked snapshot, ignores hidden and disabled matches, and returns bounded candidates instead of guessing when a locator is ambiguous.
 
 The default snapshot is a bounded actionable AX subset. It is not true viewport-visible filtering yet. `browser.snapshot` with `full: true` requests a larger full-page snapshot. Snapshot rendering marks compact and full snapshots with headers, truncates oversized text, and can summarize large snapshots when configured.
 
@@ -134,8 +136,11 @@ Browser tools exposed to the agent:
 | `browser.status` | Show browser state |
 | `browser.navigate` | Navigate to URL |
 | `browser.snapshot` | Get accessible page snapshot |
-| `browser.click` | Click element by ref |
-| `browser.type` | Type text into element |
+| `browser.find` | Find visible, enabled elements by semantic locator |
+| `browser.click` | Click by semantic locator or revision-scoped ref |
+| `browser.type` | Type by semantic locator or revision-scoped ref |
+| `browser.select` | Select an option by semantic locator or revision-scoped ref |
+| `browser.extract` | Extract one semantically resolved element |
 | `browser.scroll` | Scroll page |
 | `browser.press` | Press keyboard key |
 | `browser.back` | Navigate back |
