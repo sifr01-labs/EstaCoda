@@ -12,7 +12,11 @@ import type {
 } from "../contracts/channel.js";
 import type { ChannelKind } from "../contracts/channel.js";
 import type { ChannelTextDeliveryReceipt } from "../contracts/channel.js";
-import type { ChannelBusyPolicy, LoadedRuntimeConfig } from "../config/runtime-config.js";
+import type { ChannelBusyPolicy, LoadedRuntimeConfig, TelegramSecureInputMode } from "../config/runtime-config.js";
+import type {
+  SecureInputCollectionResult,
+  SecureInputRequestSnapshot
+} from "../contracts/secure-input.js";
 import {
   SessionMessageQueue,
   type BeforeQueueMutation,
@@ -58,15 +62,18 @@ import {
   type PendingApprovalChannel
 } from "../gateway/approval-queue.js";
 import { HookRegistry, sanitizeHookError } from "../gateway/hook-registry.js";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { unlink } from "node:fs/promises";
+import { join } from "node:path";
 import type { HandoffStore } from "./handoff-store.js";
 import type { SurfacePointerStore } from "./surface-pointer-store.js";
 import type { SurfaceType } from "./surface-pointer.js";
 import type { DeliveryRouter } from "./delivery-router.js";
 import {
   parseApprovalAction,
+  parseSecureInputAction,
   renderApprovalActions,
+  renderSecureInputActions,
   renderSetupApprovalActions,
   type ApprovalActionScope
 } from "./approval-actions.js";
@@ -99,6 +106,7 @@ import {
   mergedTelegramAttributionMetadata,
   telegramAttributionMessageIds
 } from "./telegram-message-attribution.js";
+import { TelegramSecureInputReplayStore } from "./telegram-secure-input-replay-store.js";
 import type { VoiceStateManager, VoiceMode } from "../gateway/voice-state.js";
 import {
   checkTtsProviderStatus,
@@ -276,6 +284,9 @@ export type ChannelGatewayOptions = {
   /** @deprecated Use textDebounceResolver. Ignored when the resolver is provided. */
   whatsappTextDebounce?: WhatsAppTextDebounceConfig;
   telegramStreaming?: ChannelStreamingTextOptions & { enabled?: boolean };
+  /** Profile-level Telegram protected-input behavior. Defaults to protected handoff. */
+  telegramSecureInputMode?: TelegramSecureInputMode;
+  telegramSecureInputReplayStore?: Pick<TelegramSecureInputReplayStore, "has" | "record">;
 };
 
 type ApprovalScope = "once" | "session" | "always";
@@ -295,6 +306,27 @@ type ChannelTextDebounceBuffer = {
   telegramMessageIds: string[];
   totalChars: number;
   timer: ReturnType<typeof setTimeout> | undefined;
+};
+
+type PendingTelegramSecureInput = {
+  actionId: string;
+  captureKey: string;
+  mode: Exclude<TelegramSecureInputMode, "disabled">;
+  destinationLabel: string;
+  state: "prompted" | "armed";
+  settle(result: SecureInputCollectionResult): void;
+  closeIntake(): void;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+type ArmedTelegramSecret = {
+  label: string;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+type SuppliedTelegramSecret = {
+  value: Uint8Array;
+  timer: ReturnType<typeof setTimeout>;
 };
 
 type ProviderServingState =
@@ -484,6 +516,13 @@ export class ChannelGateway {
   readonly #textDebounceBuffers = new Map<string, ChannelTextDebounceBuffer>();
   readonly #textDebounceFlushes = new Set<Promise<void>>();
   readonly #telegramStreaming: (ChannelStreamingTextOptions & { enabled?: boolean }) | undefined;
+  readonly #telegramSecureInputMode: TelegramSecureInputMode;
+  readonly #pendingTelegramSecureInputByAction = new Map<string, PendingTelegramSecureInput>();
+  readonly #pendingTelegramSecureInputByCapture = new Map<string, PendingTelegramSecureInput>();
+  readonly #armedTelegramSecrets = new Map<string, ArmedTelegramSecret>();
+  readonly #suppliedTelegramSecrets = new Map<string, SuppliedTelegramSecret>();
+  readonly #capturedTelegramSecretMessages = new Set<string>();
+  readonly #telegramSecureInputReplayStore: Pick<TelegramSecureInputReplayStore, "has" | "record"> | undefined;
   readonly #providerServingStateBySessionKey = new Map<string, ProviderServingState>();
 
   constructor(options: ChannelGatewayOptions) {
@@ -544,6 +583,17 @@ export class ChannelGateway {
         : (channelKind) => channelKind === "whatsapp" ? legacyWhatsAppTextDebounce : undefined
     );
     this.#telegramStreaming = options.telegramStreaming;
+    this.#telegramSecureInputMode = options.telegramSecureInputMode ?? "protected-handoff";
+    this.#telegramSecureInputReplayStore = options.telegramSecureInputReplayStore ?? (
+      options.homeDir === undefined
+        ? undefined
+        : new TelegramSecureInputReplayStore({
+            path: join(
+              resolveProfileStateHome({ homeDir: options.homeDir, profileId: this.#profileId }).gatewayStatePath,
+              "telegram-secure-input-replays.json"
+            )
+          })
+    );
 
     for (const adapter of options.adapters) {
       this.#adapters.set(adapter.id ?? adapter.kind, adapter);
@@ -1039,6 +1089,7 @@ export class ChannelGateway {
   }
 
   async stop(): Promise<void> {
+    this.#cancelAllTelegramSecureInput();
     await this.flushPendingDebounces();
     for (const adapter of this.#adapters.values()) {
       await adapter.stop?.();
@@ -1280,6 +1331,13 @@ export class ChannelGateway {
       ? message
       : { ...message, text: auth.authorizedText };
 
+    if (await this.#isCapturedTelegramSecretReplay(authorizedMessage)) {
+      return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+    }
+
+    const secureInputResult = await this.#interceptTelegramSecureInput(authorizedMessage, adapter);
+    if (secureInputResult !== undefined) return secureInputResult;
+
     const commandResult = await this.#handleCommand(authorizedMessage, adapter);
 
     if (commandResult !== undefined) {
@@ -1313,6 +1371,382 @@ export class ChannelGateway {
     }
 
     return this.#routeNormalTurn(processedMessage, adapter);
+  }
+
+  async #interceptTelegramSecureInput(
+    message: ChannelMessage,
+    adapter: ChannelAdapter
+  ): Promise<ChannelGatewayResult | undefined> {
+    if (message.channel !== "telegram") return undefined;
+
+    const action = parseSecureInputAction(message.text);
+    if (action !== undefined) {
+      return this.#handleTelegramSecureInputAction(message, adapter, action);
+    }
+
+    const captureKey = this.#telegramSecureInputCaptureKey(message);
+    const pending = this.#pendingTelegramSecureInputByCapture.get(captureKey);
+    if (pending?.state === "armed") {
+      if (!this.#isAuthorizedTelegramDirectDm(message)) {
+        return this.#telegramSecureInputReply(
+          adapter,
+          message,
+          "Protected input is accepted only from the configured private Telegram user and chat."
+        );
+      }
+      if (!this.#isCapturableTelegramSecretMessage(message)) {
+        return this.#telegramSecureInputReply(
+          adapter,
+          message,
+          "Send the credential as one text-only message, or tap Cancel."
+        );
+      }
+
+      if (!await this.#recordTelegramSecretCapture(message)) {
+        pending.settle({ status: "cancelled" });
+        await this.#bestEffortDeleteTelegramSecret(adapter, message);
+        return this.#telegramSecureInputReply(
+          adapter,
+          message,
+          "Credential was not used because the local replay guard could not be recorded. Retry from a trusted device."
+        );
+      }
+      const value = new TextEncoder().encode(message.text);
+      await this.#bestEffortDeleteTelegramSecret(adapter, message);
+      pending.settle({ status: "provided", value });
+      return this.#telegramSecureInputReply(
+        adapter,
+        message,
+        "Credential received for one-time protected delivery. Telegram deletion was attempted but is not guaranteed."
+      );
+    }
+
+    const armed = this.#armedTelegramSecrets.get(captureKey);
+    if (armed !== undefined) {
+      if (!this.#isAuthorizedTelegramDirectDm(message)) {
+        return this.#telegramSecureInputReply(
+          adapter,
+          message,
+          "Protected input is accepted only from the configured private Telegram user and chat."
+        );
+      }
+      if (!this.#isCapturableTelegramSecretMessage(message)) {
+        return this.#telegramSecureInputReply(
+          adapter,
+          message,
+          "Send the credential as one text-only message, or use /secret again to replace this request."
+        );
+      }
+
+      if (!await this.#recordTelegramSecretCapture(message)) {
+        clearTimeout(armed.timer);
+        this.#armedTelegramSecrets.delete(captureKey);
+        await this.#bestEffortDeleteTelegramSecret(adapter, message);
+        return this.#telegramSecureInputReply(
+          adapter,
+          message,
+          "Credential was not used because the local replay guard could not be recorded. Retry from a trusted device."
+        );
+      }
+      clearTimeout(armed.timer);
+      this.#armedTelegramSecrets.delete(captureKey);
+      const existing = this.#suppliedTelegramSecrets.get(captureKey);
+      if (existing !== undefined) {
+        clearTimeout(existing.timer);
+        existing.value.fill(0);
+      }
+      const supplied: SuppliedTelegramSecret = {
+        value: new TextEncoder().encode(message.text),
+        timer: setTimeout(() => this.#expireSuppliedTelegramSecret(captureKey), 2 * 60 * 1000)
+      };
+      this.#suppliedTelegramSecrets.set(captureKey, supplied);
+      await this.#bestEffortDeleteTelegramSecret(adapter, message);
+
+      const syntheticMessage: ChannelMessage = {
+        ...message,
+        id: `${message.id}:protected-secret`,
+        text: `The user supplied a protected credential labeled ${JSON.stringify(armed.label)}. The protected value is available only through the secure-input runtime boundary.`,
+        attachments: [],
+        metadata: {
+          protectedCredential: { label: armed.label, source: "telegram-direct-dm" }
+        }
+      };
+      const result = await this.#routeNormalTurn(syntheticMessage, adapter);
+      await this.#deliverText(
+        adapter,
+        message.sessionKey,
+        "Credential received and offered to the runtime without adding its value to local history. Telegram deletion was attempted but is not guaranteed."
+      );
+      return result;
+    }
+
+    const secretLabel = parseTelegramSecretCommand(message.text);
+    if (secretLabel !== undefined) {
+      if (this.#isDraining?.()) {
+        return this.#telegramSecureInputReply(
+          adapter,
+          message,
+          "Gateway is restarting, please try again shortly."
+        );
+      }
+      if (this.#telegramSecureInputMode !== "direct-dm") {
+        return this.#telegramSecureInputReply(
+          adapter,
+          message,
+          this.#telegramSecureInputMode === "disabled"
+            ? "Telegram protected input is disabled for this profile."
+            : "Direct Telegram credential intake is not enabled. Continue on a trusted device instead."
+        );
+      }
+      if (!this.#isAuthorizedTelegramDirectDm(message)) {
+        return this.#telegramSecureInputReply(
+          adapter,
+          message,
+          "The /secret command requires a configured private chat with both this user ID and chat ID allowlisted."
+        );
+      }
+      if (secretLabel.length === 0) {
+        return this.#telegramSecureInputReply(adapter, message, "Usage: /secret <label>");
+      }
+
+      const existing = this.#armedTelegramSecrets.get(captureKey);
+      if (existing !== undefined) clearTimeout(existing.timer);
+      this.#armedTelegramSecrets.set(captureKey, {
+        label: secretLabel,
+        timer: setTimeout(() => this.#armedTelegramSecrets.delete(captureKey), 2 * 60 * 1000)
+      });
+      return this.#telegramSecureInputReply(
+        adapter,
+        message,
+        [
+          `Send the credential for ${JSON.stringify(secretLabel)} as your next text message.`,
+          "It will be held in memory for up to 2 minutes and used once.",
+          "Telegram and the bot transport will receive it; message deletion is best-effort."
+        ].join("\n")
+      );
+    }
+
+    return undefined;
+  }
+
+  async #collectTelegramSecureInput(input: {
+    request: SecureInputRequestSnapshot;
+    signal: AbortSignal;
+    destinationLabel: string;
+    message: ChannelMessage;
+    adapter: ChannelAdapter;
+  }): Promise<SecureInputCollectionResult> {
+    if (
+      input.signal.aborted ||
+      input.message.channel !== "telegram" ||
+      this.#telegramSecureInputMode === "disabled"
+    ) {
+      return { status: "cancelled" };
+    }
+
+    const captureKey = this.#telegramSecureInputCaptureKey(input.message);
+    const supplied = this.#suppliedTelegramSecrets.get(captureKey);
+    if (supplied !== undefined && this.#isAuthorizedTelegramDirectDm(input.message)) {
+      clearTimeout(supplied.timer);
+      this.#suppliedTelegramSecrets.delete(captureKey);
+      return { status: "provided", value: supplied.value };
+    }
+
+    const direct = this.#telegramSecureInputMode === "direct-dm" &&
+      this.#isAuthorizedTelegramDirectDm(input.message);
+    const mode: PendingTelegramSecureInput["mode"] = direct ? "direct-dm" : "protected-handoff";
+    const actionId = randomBytes(9).toString("base64url");
+    const expiresAtMs = new Date(input.request.expiresAt).getTime();
+    const ttlMs = Math.max(1, Math.min(5 * 60 * 1000, expiresAtMs - Date.now()));
+
+    return await new Promise<SecureInputCollectionResult>((resolve) => {
+      let settled = false;
+      const settle = (result: SecureInputCollectionResult) => {
+        if (settled) {
+          if (result.status === "provided") result.value.fill(0);
+          return;
+        }
+        settled = true;
+        input.signal.removeEventListener("abort", onAbort);
+        pending.closeIntake();
+        clearTimeout(pending.timer);
+        this.#pendingTelegramSecureInputByAction.delete(actionId);
+        if (this.#pendingTelegramSecureInputByCapture.get(captureKey) === pending) {
+          this.#pendingTelegramSecureInputByCapture.delete(captureKey);
+        }
+        resolve(result);
+      };
+      const onAbort = () => settle({ status: "cancelled" });
+      const closeIntake = input.adapter.beginSecureInputIntake?.() ?? (() => undefined);
+      const pending: PendingTelegramSecureInput = {
+        actionId,
+        captureKey,
+        mode,
+        destinationLabel: input.destinationLabel,
+        state: "prompted",
+        settle,
+        closeIntake,
+        timer: setTimeout(() => settle({ status: "cancelled" }), ttlMs)
+      };
+
+      const previous = this.#pendingTelegramSecureInputByCapture.get(captureKey);
+      previous?.settle({ status: "cancelled" });
+      this.#pendingTelegramSecureInputByAction.set(actionId, pending);
+      this.#pendingTelegramSecureInputByCapture.set(captureKey, pending);
+      input.signal.addEventListener("abort", onAbort, { once: true });
+
+      void this.#deliverText(
+          input.adapter,
+          input.message.sessionKey,
+          renderTelegramSecureInputPrompt(input.request, input.destinationLabel, mode),
+          { actions: renderSecureInputActions(actionId, mode) }
+        ).catch(() => settle({ status: "cancelled" }));
+    });
+  }
+
+  async #handleTelegramSecureInputAction(
+    message: ChannelMessage,
+    adapter: ChannelAdapter,
+    action: NonNullable<ReturnType<typeof parseSecureInputAction>>
+  ): Promise<ChannelGatewayResult> {
+    const pending = this.#pendingTelegramSecureInputByAction.get(action.actionId);
+    const options = telegramSecureInputFinalDeliveryOptions(message);
+    if (pending === undefined || pending.captureKey !== this.#telegramSecureInputCaptureKey(message)) {
+      return this.#telegramSecureInputReply(adapter, message, "This secure-input button is stale. Retry the original task.", options);
+    }
+
+    if (action.action === "arm") {
+      if (pending.mode !== "direct-dm" || !this.#isAuthorizedTelegramDirectDm(message)) {
+        return this.#telegramSecureInputReply(adapter, message, "Direct Telegram intake is not authorized for this chat.", options);
+      }
+      pending.state = "armed";
+      return this.#telegramSecureInputReply(
+        adapter,
+        message,
+        [
+          `Send the credential as your next text message for ${pending.destinationLabel}.`,
+          "Telegram and the bot transport will receive it; deletion is best-effort, not a security guarantee."
+        ].join("\n"),
+        options
+      );
+    }
+
+    pending.settle({ status: "cancelled" });
+    const text = action.action === "cancel"
+      ? "Protected input request canceled."
+      : action.action === "destination-entry"
+        ? "Enter the credential directly in the visible destination, then retry or continue the task."
+        : "Continue from a trusted local EstaCoda surface; this Telegram request has been closed.";
+    return this.#telegramSecureInputReply(adapter, message, text, options);
+  }
+
+  #isAuthorizedTelegramDirectDm(message: ChannelMessage): boolean {
+    if (message.channel !== "telegram" || message.sessionKey.chatType !== "dm" || message.sessionKey.threadId !== undefined) {
+      return false;
+    }
+    const policy = this.#authPolicy.telegram;
+    const userIds = new Set(policy?.allowedUserIds ?? []);
+    const chatIds = new Set(policy?.allowedChatIds ?? []);
+    return userIds.size > 0 && chatIds.size > 0 &&
+      userIds.has(message.sender.id) && chatIds.has(message.sessionKey.chatId);
+  }
+
+  #isCapturableTelegramSecretMessage(message: ChannelMessage): boolean {
+    return message.text.length > 0 &&
+      (message.attachments?.length ?? 0) === 0 &&
+      (message.metadata?.telegram as { edited?: unknown } | undefined)?.edited !== true &&
+      telegramCallbackQueryId(message) === undefined;
+  }
+
+  #telegramSecureInputCaptureKey(message: ChannelMessage): string {
+    return JSON.stringify([
+      this.#profileId,
+      message.sessionKey.accountId ?? "telegram",
+      message.sessionKey.chatId,
+      message.sender.id
+    ]);
+  }
+
+  async #bestEffortDeleteTelegramSecret(adapter: ChannelAdapter, message: ChannelMessage): Promise<void> {
+    try {
+      await adapter.deleteInboundMessage?.(message);
+    } catch (error) {
+      this.#logWarning?.(`Telegram protected-input deletion failed (${boundedErrorClass(error)}).`);
+    }
+  }
+
+  async #isCapturedTelegramSecretReplay(message: ChannelMessage): Promise<boolean> {
+    if (message.channel !== "telegram") return false;
+    const key = this.#telegramCapturedMessageKey(message);
+    if (this.#capturedTelegramSecretMessages.has(key)) return true;
+    try {
+      return await this.#telegramSecureInputReplayStore?.has(message) ?? false;
+    } catch (error) {
+      this.#logWarning?.(`Telegram protected-input replay check failed (${boundedErrorClass(error)}).`);
+      // Fail closed: a transport replay must never become an ordinary model-visible message.
+      return true;
+    }
+  }
+
+  async #recordTelegramSecretCapture(message: ChannelMessage): Promise<boolean> {
+    const key = this.#telegramCapturedMessageKey(message);
+    if (this.#telegramSecureInputReplayStore === undefined) {
+      this.#logWarning?.("Telegram protected-input replay recording is unavailable.");
+      return false;
+    }
+    try {
+      await this.#telegramSecureInputReplayStore.record(message);
+      this.#capturedTelegramSecretMessages.add(key);
+      while (this.#capturedTelegramSecretMessages.size > 256) {
+        const oldest = this.#capturedTelegramSecretMessages.values().next().value as string | undefined;
+        if (oldest === undefined) break;
+        this.#capturedTelegramSecretMessages.delete(oldest);
+      }
+      return true;
+    } catch (error) {
+      this.#logWarning?.(`Telegram protected-input replay recording failed (${boundedErrorClass(error)}).`);
+      return false;
+    }
+  }
+
+  #telegramCapturedMessageKey(message: ChannelMessage): string {
+    return JSON.stringify([
+      message.sessionKey.accountId ?? "telegram",
+      message.sessionKey.chatId,
+      message.sender.id,
+      message.id
+    ]);
+  }
+
+  async #telegramSecureInputReply(
+    adapter: ChannelAdapter,
+    message: ChannelMessage,
+    text: string,
+    options?: ChannelTextOptions
+  ): Promise<ChannelGatewayResult> {
+    await this.#deliverText(adapter, message.sessionKey, text, options);
+    return {
+      sessionId: this.#sessionIdByTurnKey.get(stableSessionKey(message.sessionKey, this.#sessionPolicy)) ?? "",
+      replyText: text,
+      artifactCount: 0,
+      progressCount: 0
+    };
+  }
+
+  #expireSuppliedTelegramSecret(captureKey: string): void {
+    const supplied = this.#suppliedTelegramSecrets.get(captureKey);
+    if (supplied === undefined) return;
+    supplied.value.fill(0);
+    this.#suppliedTelegramSecrets.delete(captureKey);
+  }
+
+  #cancelAllTelegramSecureInput(): void {
+    for (const pending of [...this.#pendingTelegramSecureInputByAction.values()]) {
+      pending.settle({ status: "cancelled" });
+    }
+    for (const armed of this.#armedTelegramSecrets.values()) clearTimeout(armed.timer);
+    this.#armedTelegramSecrets.clear();
+    for (const [key] of this.#suppliedTelegramSecrets) this.#expireSuppliedTelegramSecret(key);
   }
 
   async #maybeDebounceText(message: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult | undefined> {
@@ -1729,6 +2163,21 @@ export class ChannelGateway {
         channel: message.channel,
         trustedWorkspace,
         signal: controller.signal,
+        ...(message.channel === "telegram" && runtime!.createSecureInputRequestHandler !== undefined
+          ? {
+              onSecureInputRequest: runtime!.createSecureInputRequestHandler({
+                collect: (request, signal, context) => this.#collectTelegramSecureInput({
+                  request,
+                  signal,
+                  destinationLabel: context.verifiedDestinationLabel,
+                  message,
+                  adapter
+                }),
+                userId: message.sender.id,
+                signal: controller.signal
+              })
+            }
+          : {}),
         inputMetadata: {
           surfaceType: message.sessionKey.platform,
           chatId: message.sessionKey.chatId,
@@ -2882,6 +3331,7 @@ export class ChannelGateway {
         "/resume - show the latest interrupted-turn resume note",
         "/approve [once|session|always] - approve the pending gated action",
         "/deny - deny the pending gated action",
+        "/secret <label> - protect the next authorized private Telegram message",
         "/approvals - inspect current approval state",
         "/revoke <approval-id> - revoke a persistent approval",
         "/attach <code> - attach this chat to a CLI session via handoff code",
@@ -4505,6 +4955,66 @@ function modelPickerTelegramCallbackMessageId(message: ChannelMessage): string |
   return undefined;
 }
 
+function telegramCallbackQueryId(message: ChannelMessage): string | undefined {
+  const telegram = message.metadata?.telegram;
+  if (typeof telegram !== "object" || telegram === null) return undefined;
+  const value = (telegram as { callbackQueryId?: unknown }).callbackQueryId;
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function telegramSecureInputFinalDeliveryOptions(message: ChannelMessage): ChannelTextOptions {
+  const editMessageId = modelPickerTelegramCallbackMessageId(message);
+  return {
+    actions: [],
+    ...(editMessageId === undefined ? {} : { editMessageId })
+  };
+}
+
+function parseTelegramSecretCommand(text: string): string | undefined {
+  const match = text.match(/^\/secret(?:@\w+)?(?:\s+(.*))?$/u);
+  if (match === null) return undefined;
+  return (match[1] ?? "")
+    .replace(/[\u0000-\u001F\u007F]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 80);
+}
+
+function renderTelegramSecureInputPrompt(
+  snapshot: SecureInputRequestSnapshot,
+  destinationLabel: string,
+  mode: PendingTelegramSecureInput["mode"]
+): string {
+  const kind = snapshot.request.kind.replaceAll("-", " ");
+  const storage = snapshot.request.retention === "use-once"
+    ? "Not saved"
+    : snapshot.request.retention === "destination-managed"
+      ? "Managed by destination"
+      : "Profile secret store (explicit authorization required)";
+  if (mode === "direct-dm") {
+    return [
+      "🔐 Send credential here",
+      "",
+      `Your next message can be used once for: ${kind}`,
+      `Destination: ${destinationLabel}`,
+      `Storage: ${storage}`,
+      "",
+      "Telegram and the bot transport will receive the value.",
+      "EstaCoda keeps it out of model context and local history. Deletion is best-effort."
+    ].join("\n");
+  }
+  return [
+    "🔐 Secure input required",
+    "",
+    `${snapshot.request.purpose}`,
+    `Credential: ${kind}`,
+    `Destination: ${destinationLabel}`,
+    `Storage: ${storage}`,
+    "",
+    "The credential will not be collected through Telegram in this mode."
+  ].join("\n");
+}
+
 function modelPickerModelNavigationRows(providerId: string, page: number, totalPages: number): ChannelTextAction[][] {
   const safeTotalPages = Math.max(1, totalPages);
   const safePage = clampModelPickerPage(page, safeTotalPages);
@@ -5142,6 +5652,7 @@ export function telegramGatewayCommands(): Array<{ command: string; description:
     { command: "/resume", description: "Show the latest interrupted turn" },
     { command: "/approve", description: "Approve the pending gated action" },
     { command: "/deny", description: "Deny the pending gated action" },
+    { command: "/secret", description: "Protect the next private message" },
     { command: "/approvals", description: "Show approval state for this chat" },
     { command: "/revoke", description: "Revoke a persistent approval" },
     { command: "/commands", description: "Show available Telegram commands" },

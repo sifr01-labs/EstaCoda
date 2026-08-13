@@ -239,6 +239,10 @@ export type ChannelAdapter = {
   leaveVoiceChannelForMessage?(message: ChannelMessage): Promise<ChannelVoiceCommandResult>;
   /** Poll for inbound messages. Present on polling adapters (Telegram, Email). */
   pollOnce?(): Promise<number>;
+  /** Best-effort deletion of one inbound platform message. Authorization stays in ChannelGateway. */
+  deleteInboundMessage?(message: ChannelMessage): Promise<boolean>;
+  /** Temporarily let a polling adapter receive the next protected-input message while a turn is waiting. */
+  beginSecureInputIntake?(): () => void;
 };
 
 export type TelegramAuthPolicy = {

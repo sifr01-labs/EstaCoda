@@ -1576,6 +1576,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           busyPolicyResolver,
           textDebounceResolver,
           telegramStreaming: config.channels.telegram.streaming,
+          telegramSecureInputMode: config.channels.telegram.secureInputMode,
           runtimeForSession: async ({ sessionId, securityPolicy, metadata }) => {
             const latestConfig = await loadConfig();
             return createGatewayRuntime(latestConfig, sessionDb, homeDir, trustStorePath, {
@@ -1643,6 +1644,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           busyPolicyResolver,
           textDebounceResolver,
           telegramStreaming: config.channels.telegram.streaming,
+          telegramSecureInputMode: config.channels.telegram.secureInputMode,
           runtimeForSession: async ({ sessionId, securityPolicy, metadata }) => {
             const latestConfig = await loadConfig();
             return createGatewayRuntime(latestConfig, sessionDb, homeDir, trustStorePath, {

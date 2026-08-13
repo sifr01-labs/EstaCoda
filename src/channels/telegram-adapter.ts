@@ -323,6 +323,8 @@ export class TelegramAdapter implements ChannelAdapter {
   #running = false;
   readonly #progressBySession = new Map<string, TelegramProgressState>();
   readonly #mediaGroupBuffers = new Map<string, TelegramMediaGroupBuffer>();
+  readonly #secureInputPollReleases = new Set<() => void>();
+  #secureInputIntakeCount = 0;
 
   readonly delivery = {
     sendText: async (sessionKey: ChannelSessionKey, text: string, options?: ChannelTextOptions) => {
@@ -467,6 +469,30 @@ export class TelegramAdapter implements ChannelAdapter {
     await this.#flushMediaGroupBuffers();
   }
 
+  beginSecureInputIntake(): () => void {
+    this.#secureInputIntakeCount += 1;
+    for (const release of [...this.#secureInputPollReleases]) release();
+    let closed = false;
+    return () => {
+      if (closed) return;
+      closed = true;
+      this.#secureInputIntakeCount = Math.max(0, this.#secureInputIntakeCount - 1);
+    };
+  }
+
+  async deleteInboundMessage(message: ChannelMessage): Promise<boolean> {
+    if (message.channel !== "telegram") return false;
+    const messageId = telegramMessageId(message);
+    if (
+      messageId === undefined ||
+      !Number.isSafeInteger(messageId) ||
+      messageId <= 0 ||
+      message.sessionKey.chatId.length === 0
+    ) return false;
+    await this.#deleteMessage(message.sessionKey.chatId, messageId);
+    return true;
+  }
+
   async pollOnce(): Promise<number> {
     if (this.#handler === undefined) {
       throw new Error("TelegramAdapter must be started before polling");
@@ -494,7 +520,7 @@ export class TelegramAdapter implements ChannelAdapter {
       const buffered = this.#maybeBufferMediaGroup(message);
       if (!buffered) {
         try {
-          await this.#handler(message);
+          await this.#awaitHandlerOrSecureInputIntake(() => this.#handler!(message));
         } finally {
           if (update.callback_query?.id !== undefined) {
             await this.#answerCallbackQuery(update.callback_query.id);
@@ -505,6 +531,30 @@ export class TelegramAdapter implements ChannelAdapter {
     }
 
     return count;
+  }
+
+  async #awaitHandlerOrSecureInputIntake(handle: () => Promise<void>): Promise<void> {
+    if (this.#secureInputIntakeCount > 0) {
+      void handle().catch(() => undefined);
+      return;
+    }
+    let release = (): void => {};
+    const intakeStarted = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.#secureInputPollReleases.add(release);
+    try {
+      const handled = handle();
+      const outcome = await Promise.race([
+        handled.then(() => "handled" as const),
+        intakeStarted.then(() => "intake" as const)
+      ]);
+      if (outcome === "intake") {
+        void handled.catch(() => undefined);
+      }
+    } finally {
+      this.#secureInputPollReleases.delete(release);
+    }
   }
 
   #maybeBufferMediaGroup(message: ChannelMessage): boolean {
@@ -2322,6 +2372,7 @@ export function updateToChannelMessage(update: TelegramUpdate, now: () => Date =
         messageId: message.message_id,
         chatType: message.chat.type,
         ...(replyToMessageId === undefined ? {} : { replyToMessageId }),
+        ...(update.edited_message === undefined ? {} : { edited: true }),
         ...(message.media_group_id === undefined ? {} : { mediaGroupId: message.media_group_id })
       }
     }

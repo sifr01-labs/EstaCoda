@@ -705,6 +705,7 @@ async function applyTelegramCapability(
   const botTokenEnv = stringValue(operation.review.values.botTokenEnv ?? operation.review.values.envVar) ?? "ESTACODA_TELEGRAM_BOT_TOKEN";
   const allowedUserIds = arrayValue(operation.review.values.allowedUserIds);
   const allowedChatIds = arrayValue(operation.review.values.allowedChatIds);
+  const secureInputMode = stringValue(operation.review.values.secureInputMode);
   if (allowedUserIds.length === 0 && allowedChatIds.length === 0) {
     throw new Error("Telegram apply requires allowed user or chat identities.");
   }
@@ -716,6 +717,9 @@ async function applyTelegramCapability(
       botTokenEnv,
       allowedUserIds,
       allowedChatIds,
+      secureInputMode: secureInputMode === "direct-dm" || secureInputMode === "disabled" || secureInputMode === "protected-handoff"
+        ? secureInputMode
+        : undefined,
     },
   });
 }

@@ -2655,6 +2655,26 @@ describe("TelegramAdapter", () => {
     });
   });
 
+  it("deletes an inbound message only from its Telegram transport metadata", async () => {
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const message = updateToChannelMessage({
+      update_id: 43,
+      message: {
+        message_id: 17,
+        text: "sensitive value",
+        chat: { id: "chat-1", type: "private" },
+        from: { id: "user-1" }
+      }
+    });
+
+    expect(message).toBeDefined();
+    await expect(adapter.deleteInboundMessage(message!)).resolves.toBe(true);
+    expect(callsFor(calls, "deleteMessage")[0]?.body).toEqual({
+      chat_id: "chat-1",
+      message_id: 17
+    });
+  });
+
   it("acknowledges callback queries after polling", async () => {
     const calls: TelegramHarnessCall[] = [];
     const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
@@ -2708,6 +2728,41 @@ describe("TelegramAdapter", () => {
     expect(callsFor(calls, "answerCallbackQuery")[0]?.body).toEqual({
       callback_query_id: "callback-ack"
     });
+  });
+
+  it("releases polling only while a secure-input handler is waiting", async () => {
+    const polls = [
+      [{ update_id: 50, message: { message_id: 20, text: "start", chat: { id: "chat-1", type: "private" }, from: { id: "user-1" } } }],
+      [{ update_id: 51, message: { message_id: 21, text: "credential", chat: { id: "chat-1", type: "private" }, from: { id: "user-1" } } }]
+    ];
+    let pollIndex = 0;
+    const fetch = vi.fn(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        result: url.endsWith("/getUpdates") ? polls[pollIndex++] ?? [] : true
+      })
+    }));
+    const adapter = new TelegramAdapter({ botToken: "test-token", fetch });
+    let resolveWaiting: (() => void) | undefined;
+    const waiting = new Promise<void>((resolve) => { resolveWaiting = resolve; });
+    let firstFinished = false;
+    await adapter.start(async (message) => {
+      if (message.text === "start") {
+        const close = adapter.beginSecureInputIntake();
+        await waiting;
+        close();
+        firstFinished = true;
+      } else {
+        resolveWaiting?.();
+      }
+    });
+
+    await expect(adapter.pollOnce()).resolves.toBe(1);
+    expect(firstFinished).toBe(false);
+    await expect(adapter.pollOnce()).resolves.toBe(1);
+    await vi.waitFor(() => expect(firstFinished).toBe(true));
   });
 
   it("preserves Telegram media group ids on parsed messages", () => {

@@ -2111,6 +2111,7 @@ describe("createRuntime MCP trust gating", () => {
               "defaultChatId",
               "enabled",
               "pollTimeoutSeconds",
+              "secureInputMode",
             ],
             "toolsets": [
               "core",

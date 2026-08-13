@@ -36,7 +36,12 @@ import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { GatewayApprovalQueue } from "../gateway/approval-queue.js";
 import { SQLitePendingTurnStore } from "../gateway/pending-turn-store.js";
 import { WorkspaceApprovalController, WorkspaceApprovalStore } from "../security/workspace-approval-controller.js";
-import { renderApprovalActions, renderSetupApprovalActions } from "./approval-actions.js";
+import {
+  parseSecureInputAction,
+  renderApprovalActions,
+  renderSecureInputActions,
+  renderSetupApprovalActions
+} from "./approval-actions.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
@@ -357,6 +362,173 @@ function createRecordingDeliveryRouter() {
   } as unknown as ChannelGatewayOptions["deliveryRouter"];
   return { deliveryRouter, routedTexts, routedArtifacts, routedProgress };
 }
+
+describe("ChannelGateway Telegram secure input", () => {
+  function createSecureInputGateway(mode: "protected-handoff" | "direct-dm" | "disabled" = "direct-dm") {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const deleted: ChannelMessage[] = [];
+    adapter.deleteInboundMessage = async (message) => {
+      deleted.push(message);
+      return true;
+    };
+    const runtime = createMinimalRuntime();
+    const runtimeTexts: string[] = [];
+    const consumed: string[] = [];
+    runtime.createSecureInputRequestHandler = (input) => async (request, consume) => {
+      const snapshot = {
+        id: "request-1",
+        scope: { profileId: "default", sessionId: "session-1", userId: "user-1" },
+        request,
+        status: "awaiting_input" as const,
+        requestedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 60_000).toISOString()
+      };
+      const collected = await input.collect(snapshot, input.signal ?? new AbortController().signal, {
+        verifiedDestinationLabel: "Verified password field"
+      });
+      if (collected.status === "provided") {
+        await consume(collected.value, {
+          requestId: snapshot.id,
+          scope: snapshot.scope,
+          request,
+          signal: input.signal ?? new AbortController().signal
+        });
+        collected.value.fill(0);
+        return { status: "delivered", destinationLabel: "Verified password field", persisted: false };
+      }
+      return { status: "cancelled", destinationLabel: "Verified password field", persisted: false };
+    };
+    runtime.handle = async (input) => {
+      runtimeTexts.push(input.text);
+      const receipt = await input.onSecureInputRequest?.({
+        kind: "password",
+        purpose: "Sign in",
+        destination: {
+          type: "browser-field",
+          sessionId: "browser-1",
+          ref: "password",
+          expectedOrigin: "https://example.test"
+        },
+        retention: "use-once",
+        expiresInMs: 60_000
+      }, async (value) => {
+        consumed.push(new TextDecoder().decode(value));
+      });
+      return runtimeResponse({
+        text: receipt?.status === "delivered" ? "Protected credential delivered." : "Protected input canceled.",
+        securityDecision: "allow"
+      });
+    };
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession: async () => runtime,
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: {
+        telegram: { allowedUserIds: ["user-1"], allowedChatIds: ["123456"] }
+      },
+      telegramSecureInputMode: mode,
+      telegramSecureInputReplayStore: {
+        has: async () => false,
+        record: async () => undefined
+      },
+      profileId: "default"
+    });
+    return { adapter, consumed, deleted, gateway, runtimeTexts };
+  }
+
+  it("uses compact callback actions without exposing request metadata", () => {
+    const actions = renderSecureInputActions("opaque-action", "direct-dm");
+    const values = actions.flat().map((action) => action.value);
+    expect(values.every((value) => value.length <= 64)).toBe(true);
+    expect(values.map(parseSecureInputAction)).toEqual([
+      { actionId: "opaque-action", action: "arm" },
+      { actionId: "opaque-action", action: "trusted-device" },
+      { actionId: "opaque-action", action: "cancel" }
+    ]);
+    expect(parseSecureInputAction("ecsi1:a:not%ZZvalid")).toBeUndefined();
+  });
+
+  it("intercepts an armed direct-DM credential before runtime dispatch and attempts deletion", async () => {
+    const harness = createSecureInputGateway();
+    const sentinel = "SENTINEL-telegram-password-9281";
+    const turn = harness.gateway.receive(makeTelegramDmMessage("sign me in"));
+    await waitFor(() => harness.adapter.records.some((record) => record.text?.includes("Send credential here")));
+
+    const prompt = harness.adapter.records.find((record) => record.text?.includes("Send credential here"));
+    const arm = prompt?.options?.actions?.flat().find((action) => action.label === "Use next message");
+    expect(arm).toBeDefined();
+    await harness.gateway.receive(makeTelegramDmMessage(arm!.value, {
+      id: "callback-arm",
+      metadata: { telegram: { messageId: 88, callbackQueryId: "cb-1", chatType: "private" } }
+    }));
+    await harness.gateway.receive(makeTelegramDmMessage(sentinel, { id: "secret-message" }));
+    await turn;
+
+    expect(harness.consumed).toEqual([sentinel]);
+    expect(harness.deleted.map((message) => message.id)).toEqual(["secret-message"]);
+    expect(harness.runtimeTexts).toEqual(["sign me in"]);
+    expect(JSON.stringify(harness.adapter.records)).not.toContain(sentinel);
+
+    const replay = await harness.gateway.receive(makeTelegramDmMessage(sentinel, { id: "secret-message" }));
+    expect(replay.replyText).toBe("");
+    expect(harness.runtimeTexts).toEqual(["sign me in"]);
+  });
+
+  it("requires both direct-DM allowlists and rejects group capture", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession: async () => createMinimalRuntime(),
+      authPolicy: { telegram: { allowedUserIds: ["user-1"], allowedChatIds: [] } },
+      telegramSecureInputMode: "direct-dm"
+    });
+    const missingChatAllowlist = await gateway.receive(makeTelegramDmMessage("/secret production token"));
+    expect(missingChatAllowlist.replyText).toContain("both this user ID and chat ID allowlisted");
+
+    const group = await gateway.receive(makeTelegramDmMessage("/secret production token", {
+      sessionKey: {
+        platform: "telegram",
+        accountId: "telegram",
+        chatId: "123456",
+        chatType: "group",
+        userId: "user-1"
+      }
+    }));
+    expect(group.replyText).toContain("both this user ID and chat ID allowlisted");
+  });
+
+  it("binds a proactive /secret value to the next runtime request without model exposure", async () => {
+    const harness = createSecureInputGateway();
+    const sentinel = "SENTINEL-proactive-secret-4412";
+    await harness.gateway.receive(makeTelegramDmMessage("/secret MTN consumer secret"));
+    await harness.gateway.receive(makeTelegramDmMessage(sentinel, { id: "proactive-secret" }));
+
+    expect(harness.consumed).toEqual([sentinel]);
+    expect(harness.deleted.map((message) => message.id)).toEqual(["proactive-secret"]);
+    expect(harness.runtimeTexts).toEqual([
+      'The user supplied a protected credential labeled "MTN consumer secret". The protected value is available only through the secure-input runtime boundary.'
+    ]);
+    expect(JSON.stringify(harness.runtimeTexts)).not.toContain(sentinel);
+    expect(JSON.stringify(harness.adapter.records)).not.toContain(sentinel);
+  });
+
+  it("fails closed on stale buttons and tolerates Telegram deletion failure", async () => {
+    const harness = createSecureInputGateway();
+    harness.adapter.deleteInboundMessage = async () => {
+      throw new Error("Telegram delete failed");
+    };
+    const stale = await harness.gateway.receive(makeTelegramDmMessage("ecsi1:a:old-process", {
+      metadata: { telegram: { messageId: 91, callbackQueryId: "cb-stale", chatType: "private" } }
+    }));
+    expect(stale.replyText).toContain("stale");
+
+    const sentinel = "SENTINEL-delete-failure-77";
+    await harness.gateway.receive(makeTelegramDmMessage("/secret temporary"));
+    await harness.gateway.receive(makeTelegramDmMessage(sentinel, { id: "delete-failure-secret" }));
+    expect(harness.consumed).toEqual([sentinel]);
+    expect(JSON.stringify(harness.adapter.records)).not.toContain(sentinel);
+  });
+});
 
 describe("ChannelGateway Telegram streaming", () => {
   it("starts streaming only for Telegram when config is enabled and passes config options", async () => {
@@ -1091,6 +1263,20 @@ function makeTelegramCallbackMessage(text: string, messageId = "77", callbackQue
         callbackQueryId
       }
     }
+  });
+}
+
+function makeTelegramDmMessage(text: string, overrides?: Partial<ChannelMessage>): ChannelMessage {
+  return makeMessage(text, {
+    sessionKey: {
+      platform: "telegram",
+      accountId: "telegram",
+      chatId: "123456",
+      chatType: "dm",
+      userId: "user-1"
+    },
+    metadata: { telegram: { messageId: 42, chatType: "private" } },
+    ...overrides
   });
 }
 

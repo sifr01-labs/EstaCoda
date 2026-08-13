@@ -522,6 +522,10 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           allowedUserIds: { type: "array", items: { type: "string" } },
           allowedChatIds: { type: "array", items: { type: "string" } },
           pollTimeoutSeconds: { type: "number" },
+          secureInputMode: {
+            type: "string",
+            enum: ["protected-handoff", "direct-dm", "disabled"]
+          },
           enabled: { type: "boolean" },
         }
       },

@@ -485,6 +485,8 @@ export type EstaCodaConfig = {
   };
 };
 
+export type TelegramSecureInputMode = "protected-handoff" | "direct-dm" | "disabled";
+
 export type TelegramChannelConfig = {
   enabled?: boolean;
   botTokenEnv?: string;
@@ -503,6 +505,7 @@ export type TelegramChannelConfig = {
   textDebounceMs?: number;
   textDebounceMaxMessages?: number;
   textDebounceMaxChars?: number;
+  secureInputMode?: TelegramSecureInputMode;
   streaming?: TelegramStreamingConfig;
   pairing?: {
     code?: string;
@@ -807,6 +810,7 @@ export type TelegramSetupInput = {
   allowedUserIds?: string[];
   allowedChatIds?: string[];
   pollTimeoutSeconds?: number;
+  secureInputMode?: TelegramSecureInputMode;
   enabled?: boolean;
 };
 
@@ -1085,6 +1089,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
         textDebounceMs: normalizeTextDebounceMs(telegram.textDebounceMs, 1_500),
         textDebounceMaxMessages: normalizeTextDebounceMaxMessages(telegram.textDebounceMaxMessages),
         textDebounceMaxChars: normalizeTextDebounceMaxChars(telegram.textDebounceMaxChars),
+        secureInputMode: normalizeTelegramSecureInputMode(telegram.secureInputMode),
         streaming: normalizeTelegramStreamingConfig(telegram.streaming)
       },
       discord: {
@@ -1547,6 +1552,12 @@ function normalizeProfileConfig(value: EstaCodaConfig["profile"]): LoadedRuntime
       ? value.responseLanguage
       : "match-user"
   };
+}
+
+function normalizeTelegramSecureInputMode(value: unknown): TelegramSecureInputMode {
+  return value === "direct-dm" || value === "disabled" || value === "protected-handoff"
+    ? value
+    : "protected-handoff";
 }
 
 function normalizeTelegramStreamingConfig(value: TelegramStreamingConfig | undefined): Required<TelegramStreamingConfig> {
@@ -3305,7 +3316,9 @@ export async function setupTelegramConfig(options: {
   validateTelegramSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
-  const envName = options.input.botTokenEnv ?? "ESTACODA_TELEGRAM_BOT_TOKEN";
+  const envName = options.input.botTokenEnv ??
+    existing.config.channels?.telegram?.botTokenEnv ??
+    "ESTACODA_TELEGRAM_BOT_TOKEN";
   let secretPath: string | undefined;
   if (options.input.botToken !== undefined && options.input.botToken.trim().length > 0) {
     const secret = await writeEnvSecret({
@@ -3334,6 +3347,9 @@ export async function setupTelegramConfig(options: {
   }
   if (options.input.pollTimeoutSeconds !== undefined) {
     telegramPatch.pollTimeoutSeconds = options.input.pollTimeoutSeconds;
+  }
+  if (options.input.secureInputMode !== undefined) {
+    telegramPatch.secureInputMode = options.input.secureInputMode;
   }
 
   const config = patchConfig(existing.config, {
@@ -3851,6 +3867,14 @@ function validateTelegramSetupInput(input: TelegramSetupInput): void {
   validateOptionalEnvName(input.botTokenEnv, "botTokenEnv");
   if (input.pollTimeoutSeconds !== undefined && (!Number.isInteger(input.pollTimeoutSeconds) || input.pollTimeoutSeconds <= 0)) {
     throw new Error("Expected pollTimeoutSeconds to be a positive integer");
+  }
+  if (
+    input.secureInputMode !== undefined &&
+    input.secureInputMode !== "protected-handoff" &&
+    input.secureInputMode !== "direct-dm" &&
+    input.secureInputMode !== "disabled"
+  ) {
+    throw new Error("Expected secureInputMode protected-handoff, direct-dm, or disabled");
   }
 }
 

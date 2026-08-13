@@ -4,6 +4,7 @@ export type ApprovalActionDecision = "approved" | "denied";
 export type ApprovalActionScope = "once" | "session" | "always";
 
 const ACTION_PREFIX = "ecap1";
+const SECURE_INPUT_ACTION_PREFIX = "ecsi1";
 const DECISION_CODES: Record<ApprovalActionDecision, string> = {
   approved: "a",
   denied: "d"
@@ -87,6 +88,59 @@ export function parseApprovalAction(value: string):
     decision,
     scope
   };
+}
+
+export type SecureInputAction = "arm" | "trusted-device" | "destination-entry" | "cancel";
+
+const SECURE_INPUT_ACTION_CODES: Record<SecureInputAction, string> = {
+  arm: "a",
+  "trusted-device": "t",
+  "destination-entry": "d",
+  cancel: "c"
+};
+
+const SECURE_INPUT_ACTIONS_BY_CODE: Record<string, SecureInputAction> = {
+  a: "arm",
+  t: "trusted-device",
+  d: "destination-entry",
+  c: "cancel"
+};
+
+export function renderSecureInputActions(
+  actionId: string,
+  mode: "protected-handoff" | "direct-dm"
+): ChannelTextAction[][] {
+  return mode === "direct-dm"
+    ? [
+        [{ label: "Use next message", value: secureInputActionValue(actionId, "arm") }],
+        [{ label: "Continue on trusted device", value: secureInputActionValue(actionId, "trusted-device") }],
+        [{ label: "Cancel", value: secureInputActionValue(actionId, "cancel") }]
+      ]
+    : [
+        [{ label: "Continue on trusted device", value: secureInputActionValue(actionId, "trusted-device") }],
+        [{ label: "I'll enter it in the destination", value: secureInputActionValue(actionId, "destination-entry") }],
+        [{ label: "Cancel", value: secureInputActionValue(actionId, "cancel") }]
+      ];
+}
+
+export function parseSecureInputAction(value: string):
+  | { actionId: string; action: SecureInputAction }
+  | undefined {
+  const parts = value.trim().split(":");
+  if (parts.length !== 3 || parts[0] !== SECURE_INPUT_ACTION_PREFIX) return undefined;
+  const action = SECURE_INPUT_ACTIONS_BY_CODE[parts[1] ?? ""];
+  if (action === undefined) return undefined;
+  let actionId: string;
+  try {
+    actionId = decodeURIComponent(parts[2] ?? "");
+  } catch {
+    return undefined;
+  }
+  return actionId.trim().length === 0 ? undefined : { actionId, action };
+}
+
+function secureInputActionValue(actionId: string, action: SecureInputAction): string {
+  return [SECURE_INPUT_ACTION_PREFIX, SECURE_INPUT_ACTION_CODES[action], encodeURIComponent(actionId)].join(":");
 }
 
 function approvalActionValue(

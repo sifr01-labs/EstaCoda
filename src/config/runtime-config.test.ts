@@ -1624,6 +1624,37 @@ describe("setupWebConfig", () => {
 });
 
 describe("setupTelegramConfig", () => {
+  it("enables direct DM intake without replacing an existing bot token reference", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-telegram-config-"));
+    const configPath = profileConfigPath(workspace);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {
+        telegram: {
+          enabled: true,
+          botTokenEnv: "CUSTOM_TELEGRAM_TOKEN",
+          allowedUserIds: ["42"],
+          allowedChatIds: ["99"]
+        }
+      }
+    }));
+
+    const result = await setupTelegramConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace,
+      input: { secureInputMode: "direct-dm" }
+    });
+
+    expect(result.config.channels?.telegram).toMatchObject({
+      botTokenEnv: "CUSTOM_TELEGRAM_TOKEN",
+      secureInputMode: "direct-dm",
+      allowedUserIds: ["42"],
+      allowedChatIds: ["99"]
+    });
+    await rm(workspace, { recursive: true, force: true });
+  });
+
   it("preserves rapid text debounce settings during guided setup mutations", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-telegram-config-"));
     const configPath = profileConfigPath(workspace);
@@ -1745,6 +1776,7 @@ describe("loadRuntimeConfig channel readiness", () => {
     expect(loaded.channels.telegram.textDebounceMs).toBe(1_500);
     expect(loaded.channels.telegram.textDebounceMaxMessages).toBe(10);
     expect(loaded.channels.telegram.textDebounceMaxChars).toBe(8_000);
+    expect(loaded.channels.telegram.secureInputMode).toBe("protected-handoff");
     await rm(workspace, { recursive: true, force: true });
   });
 
@@ -1758,7 +1790,8 @@ describe("loadRuntimeConfig channel readiness", () => {
           enabled: false,
           textDebounceMs: 0,
           textDebounceMaxMessages: 4,
-          textDebounceMaxChars: 1_200
+          textDebounceMaxChars: 1_200,
+          secureInputMode: "direct-dm"
         }
       }
     }));
@@ -1767,6 +1800,7 @@ describe("loadRuntimeConfig channel readiness", () => {
     expect(loaded.channels.telegram.textDebounceMs).toBe(0);
     expect(loaded.channels.telegram.textDebounceMaxMessages).toBe(4);
     expect(loaded.channels.telegram.textDebounceMaxChars).toBe(1_200);
+    expect(loaded.channels.telegram.secureInputMode).toBe("direct-dm");
     await rm(workspace, { recursive: true, force: true });
   });
 

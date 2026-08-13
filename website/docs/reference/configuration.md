@@ -681,6 +681,7 @@ Channel adapter configuration. See [Channel Configuration](../user-guide/channel
       "enabled": true,
       "botTokenEnv": "ESTACODA_TELEGRAM_BOT_TOKEN",
       "textDebounceMs": 1500,
+      "secureInputMode": "protected-handoff",
       "textDebounceMaxMessages": 10,
       "textDebounceMaxChars": 8000,
       "streaming": {
@@ -715,6 +716,11 @@ Ordinary Telegram text is batched by canonical account/chat/topic session and se
 | `channels.telegram.textDebounceMs` | non-negative integer | `1500` | Quiet window in milliseconds. `0` dispatches text immediately. |
 | `channels.telegram.textDebounceMaxMessages` | positive integer | `10` | Flush threshold, capped at `100`. |
 | `channels.telegram.textDebounceMaxChars` | positive integer | `8000` | Flush threshold, capped at `100000`. |
+| `channels.telegram.secureInputMode` | `"protected-handoff"`, `"direct-dm"`, or `"disabled"` | `"protected-handoff"` | Controls Telegram credential intake. `direct-dm` is an explicit convenience mode and requires both the sender user ID and private chat ID to be allowlisted. |
+
+Telegram protected input defaults to `protected-handoff`, so credential values do not enter Telegram. In explicitly configured `direct-dm` mode, an authorized private chat can arm the next message from a runtime prompt or with `/secret <label>`. Groups, channels, and topics are rejected. The captured update is intercepted before batching, durable turn storage, session history, model dispatch, memory, streaming, and progress; its value remains memory-only and one-use. Telegram and the bot transport still receive the value, and deletion is best-effort rather than a security guarantee. EstaCoda persists only a short-lived hash of the captured Telegram delivery identity to prevent a post-restart update replay from reaching the model.
+
+Enable convenience mode explicitly with `estacoda telegram configure --secure-input-mode direct-dm`. Keep `protected-handoff` when Telegram transport exposure is not acceptable.
 
 All four channel objects support optional bounded FIFO-tail text coalescing. It is disabled by default and takes effect only with `busyPolicy: "queue"`. Eligible ordinary text combines only with the final queued entry from the same canonical session and sender, without changing its FIFO position. Commands, callbacks, approvals, attachments, and media never combine, and interrupt behavior is unchanged. Reaching a limit creates a new queue entry, subject to the normal queue-depth limit.
 

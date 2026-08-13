@@ -2809,6 +2809,7 @@ async function telegram(options: CliOptions, args: string[]): Promise<CliCommand
         "EstaCoda Telegram channel",
         "  estacoda telegram status",
         "  estacoda telegram setup",
+        "  estacoda telegram configure --secure-input-mode protected-handoff|direct-dm|disabled",
         "  estacoda telegram allow-user <id>",
         "  estacoda telegram allow-chat <id>",
         "  estacoda telegram set-default-chat <id>",
@@ -2835,6 +2836,7 @@ async function telegram(options: CliOptions, args: string[]): Promise<CliCommand
         telegram.defaultChatId === undefined ? undefined : `Default chat: ${telegram.defaultChatId}`,
         `Allowed users: ${(telegram.allowedUserIds ?? []).join(", ") || "none"}`,
         `Allowed chats: ${(telegram.allowedChatIds ?? []).join(", ") || "none"}`,
+        `Secure input: ${telegram.secureInputMode ?? "protected-handoff"}`,
         telegram.missing === undefined ? undefined : `Missing: ${telegram.missing.join(", ")}`,
         `Config sources: ${config.sources.join(", ") || "none"}`
       ].filter((line) => line !== undefined).join("\n")
@@ -2893,6 +2895,7 @@ async function telegram(options: CliOptions, args: string[]): Promise<CliCommand
       result.config.channels?.telegram?.botTokenEnv === undefined ? undefined : `Bot token env: ${result.config.channels.telegram.botTokenEnv}`,
       result.secretPath === undefined ? undefined : `Secret store: ${result.secretPath}`,
       result.config.channels?.telegram?.defaultChatId === undefined ? undefined : `Default chat: ${result.config.channels.telegram.defaultChatId}`,
+      `Secure input: ${result.config.channels?.telegram?.secureInputMode ?? "protected-handoff"}`,
       parsed.enabled === false ? undefined : "Next: run estacoda telegram status, then start the gateway when channel runtime is enabled."
     ].filter((line) => line !== undefined).join("\n")
   };
@@ -3803,6 +3806,13 @@ function parseTelegramArgs(args: string[]): TelegramSetupInput {
       index += 1;
     } else if (arg === "--poll-timeout-seconds") {
       parsed.pollTimeoutSeconds = Number.parseInt(next ?? "", 10);
+      index += 1;
+    } else if (arg === "--secure-input-mode") {
+      if (next === "protected-handoff" || next === "direct-dm" || next === "disabled") {
+        parsed.secureInputMode = next;
+      } else {
+        throw new Error("Expected --secure-input-mode protected-handoff, direct-dm, or disabled");
+      }
       index += 1;
     }
   }
