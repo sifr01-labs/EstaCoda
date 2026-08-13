@@ -63,6 +63,57 @@ describe("plan tool", () => {
     );
   });
 
+  it("repairs invalid completion metadata and preserves the model-authored Mission", async () => {
+    const controller = new ExecutionPlanController(new ExecutionPlanStore());
+    const tool = createPlanTools({ controller })[0]!;
+    const result = await tool.run({
+      operation: "write",
+      objective: "Configure five MTN product steps in Postman",
+      items: [
+        { id: "inspect", content: "Inspect the approved MTN app", status: "in_progress", completionKind: "reasoning" },
+        { id: "products", content: "Identify MTN products", status: "pending", completionKind: "reasoning" },
+        { id: "postman", content: "Inspect Postman", status: "pending", completionKind: "reasoning" },
+        { id: "update", content: "Update Postman collection", status: "pending", completionKind: "reasoning" },
+        { id: "verify", content: "Verify Postman collection", status: "pending", completionKind: "reasoning" }
+      ]
+    }, { visibleTurnId: "turn-mtn" });
+
+    expect(result.ok).toBe(true);
+    expect(result.metadata?.repairs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ itemId: "update", field: "completionKind" })
+    ]));
+    expect(controller.current()).toMatchObject({
+      objective: "Configure five MTN product steps in Postman",
+      originTurnId: "turn-mtn",
+      status: "active",
+      items: [
+        { id: "inspect", status: "in_progress" },
+        { id: "products", status: "pending" },
+        { id: "postman", status: "pending" },
+        { id: "update", status: "pending" },
+        { id: "verify", status: "pending" }
+      ]
+    });
+    expect(JSON.stringify(controller.current())).not.toContain("completionKind");
+    expect(JSON.stringify(controller.current())).not.toContain("evidenceCallIds");
+  });
+
+  it("keeps structurally invalid Mission writes rejected", async () => {
+    const controller = new ExecutionPlanController(new ExecutionPlanStore());
+    const tool = createPlanTools({ controller })[0]!;
+    const duplicate = await tool.run({
+      operation: "write",
+      objective: "Duplicate plan",
+      items: [
+        { id: "same", content: "First" },
+        { id: "same", content: "Second" }
+      ]
+    }, { visibleTurnId: "turn-duplicate" });
+
+    expect(duplicate).toMatchObject({ ok: false, metadata: { error: "invalid-plan" } });
+    expect(controller.current()).toBeUndefined();
+  });
+
   it("registers as one read-only local core tool", () => {
     const tools = createPlanTools({
       controller: new ExecutionPlanController(new ExecutionPlanStore())

@@ -470,7 +470,7 @@ function isToolRiskClass(input: unknown): input is ExecutionPlanEvidence["riskCl
     input === "shared-state-mutation" || input === "spend-money" || input === "sandbox-escape";
 }
 
-function isClearlyReasoningOnlyContent(content: string): boolean {
+export function isClearlyReasoningOnlyContent(content: string): boolean {
   const normalized = content.trim();
   const startsAsReasoning = /^(explain|summarize|compare|analyze|analyse|assess|recommend|answer|reason|describe|brainstorm|outline|review)\b/iu.test(normalized) ||
     /^(اشرح|لخص|قارن|حلل|قيّم|قيم|اقترح|أجب|اجب|صف|راجع)(?:\s|$)/u.test(normalized);

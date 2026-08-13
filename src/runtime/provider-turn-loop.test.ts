@@ -22,6 +22,7 @@ import { stableToolCallId, ToolCallPlanner } from "../tools/tool-call-planner.js
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
+import { createPlanTools } from "../tools/plan-tools.js";
 import { RunRecorder } from "./run-recorder.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
 import { ProviderTurnLoop, type ProviderTurnLoopOptions } from "./provider-turn-loop.js";
@@ -1836,6 +1837,56 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
         { id: "verify", status: "pending" }
       ]
     });
+  });
+
+  it("keeps a repaired five-step MTN Mission instead of substituting the provisional fallback", async () => {
+    const controller = new ExecutionPlanController(new ExecutionPlanStore());
+    const planTool = createPlanTools({ controller })[0]!;
+    const proposal = {
+      operation: "write" as const,
+      objective: "Configure approved MTN products in Postman and verify the result",
+      items: [
+        { id: "inspect", content: "Inspect the approved MTN app", status: "in_progress" as const, completionKind: "reasoning" as const },
+        { id: "products", content: "Identify MTN products", status: "pending" as const, completionKind: "reasoning" as const },
+        { id: "postman", content: "Inspect Postman", status: "pending" as const, completionKind: "reasoning" as const },
+        { id: "update", content: "Update Postman collection", status: "pending" as const, completionKind: "reasoning" as const },
+        { id: "verify", content: "Verify Postman collection", status: "pending" as const, completionKind: "reasoning" as const }
+      ]
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-plan", JSON.stringify(proposal), "plan")]),
+        providerExecution("Mission is active.")
+      ],
+      toolSteps: [{
+        executions: [{
+          ...toolExecutionForTool("call-plan", "plan", "plan repaired"),
+          riskClass: "read-only-local",
+          tool: { ...testTool, name: "plan", riskClass: "read-only-local", toolsets: ["core"] }
+        }]
+      }],
+      executionPlanController: controller,
+      maxProviderIterations: 2,
+      onExecutePlans: async ({ stepInput }) => {
+        if (!stepInput.providerExecution?.toolCalls.some((call) => call.name === "plan")) return;
+        const result = await planTool.run(proposal, { visibleTurnId: "visible-turn" });
+        expect(result.ok).toBe(true);
+      }
+    });
+
+    await runBasicProviderTurn(harness.loop, {
+      visibleTurnId: "visible-turn",
+      userText: "Inspect the approved MTN app, configure all products in Postman, and verify every change.",
+      providerTools: [planProviderSchema(), toolProviderSchema("mcp.postman.updateCollection")]
+    });
+
+    expect(controller.current()).toMatchObject({
+      objective: proposal.objective,
+      originTurnId: "visible-turn",
+      items: proposal.items.map((item) => ({ id: item.id, content: item.content, status: item.status }))
+    });
+    expect(controller.current()?.items).toHaveLength(5);
+    expect(controller.current()?.items.map((item) => item.id)).not.toEqual(["execute", "verify"]);
   });
 
   it("does not activate a Mission for simple or read-only multi-part work", async () => {

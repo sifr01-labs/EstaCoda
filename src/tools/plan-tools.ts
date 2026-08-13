@@ -1,6 +1,10 @@
 import type { ExecutionPlanControllerApi, ExecutionPlanToolInput } from "../contracts/execution-plan.js";
 import type { RegisteredTool, SessionToolProvider, ToolExecutionContext, ToolResult } from "../contracts/tool.js";
 import { ExecutionPlanValidationError } from "../runtime/execution-plan-controller.js";
+import {
+  repairExecutionPlanWriteInput,
+  type ExecutionPlanRepair
+} from "../runtime/execution-plan-repair.js";
 
 export function createPlanTools(options: {
   controller?: ExecutionPlanControllerApi;
@@ -84,7 +88,13 @@ export function createPlanTools(options: {
           if (context?.visibleTurnId === undefined) {
             return error("missing-origin-turn", "plan write requires a current visible turn.");
           }
-          return planResult(await controller.write(input, context.visibleTurnId, context.onEvent));
+          const repair = repairExecutionPlanWriteInput(input);
+          const plan = await controller.write(
+            repair?.plan ?? input,
+            context.visibleTurnId,
+            context.onEvent
+          );
+          return planResult(plan, repair?.repairs);
         }
         if (input.operation === "merge") {
           return planResult(await controller.merge(input, context?.onEvent));
@@ -107,11 +117,19 @@ export const planToolProvider: SessionToolProvider = {
   }
 };
 
-function planResult(plan: NonNullable<ReturnType<ExecutionPlanControllerApi["current"]>>): ToolResult {
+function planResult(
+  plan: NonNullable<ReturnType<ExecutionPlanControllerApi["current"]>>,
+  repairs: readonly ExecutionPlanRepair[] = []
+): ToolResult {
   return {
     ok: true,
-    content: JSON.stringify(plan),
-    metadata: { plan }
+    content: repairs.length === 0
+      ? JSON.stringify(plan)
+      : JSON.stringify({ plan, repairs }),
+    metadata: {
+      plan,
+      ...(repairs.length === 0 ? {} : { repairs })
+    }
   };
 }
 
