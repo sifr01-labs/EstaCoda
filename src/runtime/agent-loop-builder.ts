@@ -64,6 +64,7 @@ import { SkillPlaybookRunner } from "./skill-playbook-runner.js";
 import { ExecutionPlanController } from "./execution-plan-controller.js";
 import { ExecutionPlanStore } from "./execution-plan-store.js";
 import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
+import { ExecutionWorkingSetController } from "./execution-working-set.js";
 import { LlmSkillRouteShadowReranker } from "./skill-route-reranker.js";
 import { createSessionRuntimeContext, type SessionRuntimeContext } from "./session-runtime-context.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
@@ -245,6 +246,7 @@ export type AgentLoopSessionInput = {
 export type BuiltAgentLoopSession = {
   sessionRuntimeContext: SessionRuntimeContext;
   executionPlanController?: ExecutionPlanController;
+  executionWorkingSet?: ExecutionWorkingSetController;
   toolRegistry: ToolRegistry;
   toolExecutor: ToolExecutor;
   toolCallPlanner: ToolCallPlanner;
@@ -318,6 +320,12 @@ export class AgentLoopBuilder {
           ),
           executionEvidenceIndex
         )
+      : undefined;
+    const executionWorkingSet = ownsExecutionPlan
+      ? new ExecutionWorkingSetController({
+          profileId: substrate.profileId,
+          sessionId: input.sessionId
+        })
       : undefined;
     if (executionPlanController !== undefined) {
       const persistedPlan = hydratableExecutionPlanSnapshot(persistedSessionEvents);
@@ -573,7 +581,8 @@ export class AgentLoopBuilder {
       initialContextWindowUsage,
       taskExecution: input.taskExecution,
       executionPlanReader: executionPlanController,
-      executionPlanController
+      executionPlanController,
+      executionWorkingSet
     });
     const skillPlaybookRunner = (this.#factories.skillPlaybookRunner ?? ((options) => new SkillPlaybookRunner(options)))({
       toolExecutor,
@@ -648,6 +657,7 @@ export class AgentLoopBuilder {
     return {
       sessionRuntimeContext,
       executionPlanController,
+      executionWorkingSet,
       toolRegistry,
       toolExecutor,
       toolCallPlanner,

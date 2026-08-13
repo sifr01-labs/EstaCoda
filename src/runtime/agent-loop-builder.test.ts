@@ -87,6 +87,9 @@ describe("AgentLoopBuilder", () => {
     expect(first.executionPlanController).toBeDefined();
     expect(second.executionPlanController).toBeDefined();
     expect(first.executionPlanController).not.toBe(second.executionPlanController);
+    expect(first.executionWorkingSet).toBeDefined();
+    expect(second.executionWorkingSet).toBeDefined();
+    expect(first.executionWorkingSet).not.toBe(second.executionWorkingSet);
     expect(first.toolRegistry.get("plan")).toBeDefined();
   });
 
@@ -106,6 +109,8 @@ describe("AgentLoopBuilder", () => {
 
     expect(delegatedChild.executionPlanController).toBeUndefined();
     expect(taskWorker.executionPlanController).toBeUndefined();
+    expect(delegatedChild.executionWorkingSet).toBeUndefined();
+    expect(taskWorker.executionWorkingSet).toBeUndefined();
     expect(delegatedChild.toolRegistry.get("plan")).toBeUndefined();
     expect(taskWorker.toolRegistry.get("plan")).toBeUndefined();
     expect(delegatedChild.providerTools.map((tool) => tool.function.name)).not.toContain("plan");
@@ -147,12 +152,14 @@ describe("AgentLoopBuilder", () => {
   it("shares one read-only execution-plan projection with the root provider and agent loops", async () => {
     const providerReaders: unknown[] = [];
     const providerControllers: unknown[] = [];
+    const providerWorkingSets: unknown[] = [];
     const agentReaders: unknown[] = [];
     const harness = await createBuilderHarness({
       factories: {
         providerTurnLoop(options) {
           providerReaders.push(options.executionPlanReader);
           providerControllers.push(options.executionPlanController);
+          providerWorkingSets.push(options.executionWorkingSet);
           return { run: vi.fn() } as never;
         },
         agentLoop(options) {
@@ -167,6 +174,7 @@ describe("AgentLoopBuilder", () => {
 
     expect(providerReaders).toEqual([root.executionPlanController, undefined]);
     expect(providerControllers).toEqual([root.executionPlanController, undefined]);
+    expect(providerWorkingSets).toEqual([root.executionWorkingSet, undefined]);
     expect(agentReaders).toEqual([root.executionPlanController, undefined]);
   });
 

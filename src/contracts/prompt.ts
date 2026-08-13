@@ -9,6 +9,7 @@ export type PromptLayerName =
   | "native-history"
   | "conversation-continuation"
   | "execution-plan"
+  | "execution-working-set"
   | "compaction-notice"
   | "user-message"
   | "channel-attachments"

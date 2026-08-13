@@ -28,6 +28,7 @@ import { ToolPlanRunner } from "./tool-plan-runner.js";
 import { ProviderTurnLoop, type ProviderTurnLoopOptions } from "./provider-turn-loop.js";
 import { ExecutionPlanStore } from "./execution-plan-store.js";
 import { ExecutionPlanController } from "./execution-plan-controller.js";
+import { ExecutionWorkingSetController } from "./execution-working-set.js";
 import { attachEphemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 
 function createMockAdapter() {
@@ -650,6 +651,7 @@ async function createPostToolNudgeHarness(input: {
   taskExecution?: ProviderTurnLoopOptions["taskExecution"];
   executionPlanReader?: ProviderTurnLoopOptions["executionPlanReader"];
   executionPlanController?: ProviderTurnLoopOptions["executionPlanController"];
+  executionWorkingSet?: ProviderTurnLoopOptions["executionWorkingSet"];
   onExecutePlans?: (input: {
     sessionDb: InMemorySessionDB;
     sessionId: string;
@@ -744,7 +746,8 @@ async function createPostToolNudgeHarness(input: {
     },
     taskExecution: input.taskExecution,
     executionPlanReader: input.executionPlanReader,
-    executionPlanController: input.executionPlanController
+    executionPlanController: input.executionPlanController,
+    executionWorkingSet: input.executionWorkingSet
   });
 
   return {
@@ -1791,6 +1794,46 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
         observed: 6
       })
     ]));
+  });
+
+  it("reuses confirmed Postman identifiers in continuation prompts without replaying raw payloads", async () => {
+    const planStore = new ExecutionPlanStore();
+    planStore.replace({
+      objective: "Configure MTN products in Postman",
+      originTurnId: "turn-working-set",
+      revision: 1,
+      status: "active",
+      items: [{ id: "inspect", content: "Inspect Postman", status: "in_progress" }]
+    });
+    const workingSet = new ExecutionWorkingSetController({
+      profileId: "default",
+      sessionId: "placeholder"
+    });
+    const collectionRead = toolExecutionForTool(
+      "call-collection-working-set",
+      "mcp.postman.getCollection",
+      "RAW COLLECTION PAYLOAD"
+    );
+    collectionRead.input = { collectionId: "collection-123" };
+    collectionRead.riskClass = "read-only-network";
+    collectionRead.tool.riskClass = "read-only-network";
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-collection-working-set", "{}", "mcp.postman.getCollection")]),
+        providerExecution("Continue with the known collection.")
+      ],
+      toolSteps: [{ executions: [collectionRead] }],
+      executionPlanReader: planStore,
+      executionWorkingSet: workingSet,
+      maxProviderIterations: 2
+    });
+
+    await runBasicProviderTurn(harness.loop);
+
+    const continuation = JSON.stringify((harness.completeSpy.mock.calls[1]?.[0] as ProviderRequest).messages);
+    expect(continuation).toContain("Confirmed Mission state");
+    expect(continuation).toContain("Collection ID: collection-123");
+    expect(continuation.match(/RAW COLLECTION PAYLOAD/gu)).toHaveLength(1);
   });
 
   it("requires a Mission before executing the natural MTN and Postman tool batch", async () => {

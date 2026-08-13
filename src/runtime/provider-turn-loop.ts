@@ -78,6 +78,7 @@ import {
 } from "./turn-tool-feedback-ledger.js";
 import { ExecutionPlanProgressGuard } from "./execution-plan-progress-guard.js";
 import { assessExecutionPlanActivation, isPlanToolName } from "./execution-plan-activation.js";
+import { ExecutionWorkingSetController } from "./execution-working-set.js";
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
 const BROWSER_NO_PROGRESS_NUDGE = "Repeated browser observations show no state change. Do not call browser.snapshot or browser.tabs again unless another action may have changed the page. Switch tabs or take a different browser action; if progress is blocked, explain what is blocking it.";
@@ -135,6 +136,7 @@ export type ProviderTurnLoopOptions = {
   taskExecution?: ProviderUsageTaskAttribution;
   executionPlanReader?: ExecutionPlanReader;
   executionPlanController?: ExecutionPlanControllerApi;
+  executionWorkingSet?: ExecutionWorkingSetController;
 };
 
 export class ProviderTurnLoop {
@@ -160,6 +162,7 @@ export class ProviderTurnLoop {
   readonly #taskExecution: ProviderUsageTaskAttribution | undefined;
   readonly #executionPlanReader: ExecutionPlanReader | undefined;
   readonly #executionPlanController: ExecutionPlanControllerApi | undefined;
+  readonly #executionWorkingSet: ExecutionWorkingSetController | undefined;
   #providerRequestSequence = 0;
   #lastPromptTokens = 0;
   #lastActualPromptTokens: number | undefined;
@@ -201,6 +204,7 @@ export class ProviderTurnLoop {
     this.#taskExecution = options.taskExecution;
     this.#executionPlanController = options.executionPlanController;
     this.#executionPlanReader = options.executionPlanController ?? options.executionPlanReader;
+    this.#executionWorkingSet = options.executionWorkingSet;
     this.#lastActualPromptTokens = options.initialContextWindowUsage?.usedTokens;
   }
 
@@ -276,6 +280,13 @@ export class ProviderTurnLoop {
     let executionPlanIncomplete = false;
     let emergencyDeadlineReached = false;
     let toolFeedbackLedger = createTurnToolFeedbackLedger();
+    const workingSessionId = this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
+    this.#executionWorkingSet?.beginTurn(this.#executionPlanReader?.current(), workingSessionId);
+    this.#executionWorkingSet?.observe(
+      this.#executionPlanReader?.current(),
+      input.toolExecutions,
+      workingSessionId
+    );
     const executionPlanProgressGuard = new ExecutionPlanProgressGuard({
       plan: this.#executionPlanReader?.current(),
       existingExecutions: input.toolExecutions,
@@ -703,6 +714,11 @@ export class ProviderTurnLoop {
         plan: this.#executionPlanReader?.current(),
         executions: loopToolExecutions
       });
+      this.#executionWorkingSet?.observe(
+        this.#executionPlanReader?.current(),
+        loopToolExecutions,
+        this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId
+      );
       if (browserObservation?.shouldNudge === true) {
         pendingBrowserNoProgressNudge = true;
       }
@@ -1005,7 +1021,11 @@ export class ProviderTurnLoop {
       attachments: input.attachments,
       ui: this.#ui,
       agentProfile: this.#agentProfile,
-      executionPlan: this.#executionPlanReader?.current()
+      executionPlan: this.#executionPlanReader?.current(),
+      executionWorkingSet: this.#executionWorkingSet?.snapshot(
+        this.#executionPlanReader?.current(),
+        this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId
+      )
     });
     if (input.reasoningOnlyPrefill === true) {
       prompt.messages.push(reasoningOnlyPrefillMessage());
@@ -1157,7 +1177,11 @@ export class ProviderTurnLoop {
       attachments: input.attachments,
       ui: this.#ui,
       agentProfile: this.#agentProfile,
-      executionPlan: this.#executionPlanReader?.current()
+      executionPlan: this.#executionPlanReader?.current(),
+      executionWorkingSet: this.#executionWorkingSet?.snapshot(
+        this.#executionPlanReader?.current(),
+        this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId
+      )
     });
     if (input.emptyResponseNudge === true) {
       prompt.messages.push({

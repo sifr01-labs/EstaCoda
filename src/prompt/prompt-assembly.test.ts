@@ -122,6 +122,38 @@ describe("assembleProviderPrompt", () => {
     }));
   });
 
+  it("keeps confirmed Mission receipts in a protected layer across context packing", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      executionWorkingSet: {
+        missionRevision: 3,
+        facts: [{
+          key: "collection-id",
+          summary: "Collection ID: collection-123",
+          sourceCallId: "call-collection",
+          targetKey: "mcp.postman:collectionId:collection-123",
+          observedAt: "2026-08-13T00:00:00.000Z",
+          freshness: "historical"
+        }],
+      },
+      sessionHistory: Array.from({ length: 50 }, (_, index) => ({
+        id: `history-${index}`,
+        role: "user" as const,
+        content: `large historical context ${index} ${"x".repeat(2_000)}`
+      }))
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("Confirmed Mission state");
+    expect(rendered).toContain("Collection ID: collection-123");
+    expect(rendered).toContain("freshness=historical");
+    expect(rendered).toContain("reuse these instead of rediscovering them");
+    expect(prompt.budget.layers).toContainEqual(expect.objectContaining({
+      name: "execution-working-set",
+      cacheable: false,
+      protected: true
+    }));
+  });
+
   it("uses updated fallback identity when no custom soul is provided", () => {
     const prompt = assembleProviderPrompt(basePromptInput());
     const rendered = renderMessages(prompt.messages);
