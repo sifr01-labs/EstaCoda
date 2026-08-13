@@ -35,7 +35,8 @@ describe("SecureInputCoordinator", () => {
   it("announces waiting_for_input, re-verifies, delivers once, and returns only a receipt", async () => {
     const broker = brokerWithStableIds();
     const registry = new SecureInputTransportRegistry();
-    const transport = browserTransport();
+    const release = vi.fn(async () => undefined);
+    const transport = browserTransport({ release });
     registry.register(transport);
     const collectedBytes = new TextEncoder().encode("sentinel-secret-value");
     const collect = vi.fn(async () => ({ status: "provided" as const, value: collectedBytes }));
@@ -59,6 +60,8 @@ describe("SecureInputCoordinator", () => {
     });
     expect(transport.verify).toHaveBeenCalledTimes(2);
     expect(consumer).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledWith(request);
     expect(collect).toHaveBeenCalledWith(
       expect.objectContaining({ status: "awaiting_input" }),
       expect.any(AbortSignal),

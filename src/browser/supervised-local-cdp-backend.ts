@@ -6,6 +6,8 @@ import type {
   BrowserExtractResult,
   BrowserNavigateInput,
   BrowserNavigateResult,
+  BrowserProtectedFieldDeliveryInput,
+  BrowserProtectedFieldInput,
   BrowserScreenshotResult,
   BrowserSnapshot,
   BrowserSwitchTabInput,
@@ -32,6 +34,7 @@ import {
 } from "./session-manager.js";
 import { observeBrowserSnapshot, type BrowserSnapshotRevisionState } from "./snapshot-state.js";
 import { redactSensitiveText } from "../utils/redaction.js";
+import { ProtectedBrowserFieldController } from "./protected-browser-field.js";
 
 export type SupervisedLocalCdpBackendOptions = {
   cdpUrl?: string;
@@ -79,6 +82,7 @@ type PageSupervisor = Pick<CDPSupervisor,
   | "getSnapshot"
   | "consoleHistory"
   | "respondToDialog"
+  | "setSensitiveInputActive"
   | "close"
 >;
 
@@ -93,7 +97,9 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
   const lostSessions = new Map<string, "session_missing" | "browser_process_missing">();
   const latestSnapshots = new Map<string, BrowserSnapshot>();
   const latestSnapshotScopes = new Map<string, boolean>();
+  const latestObservedUrls = new Map<string, string>();
   const fallbackSnapshotRevisions = new Map<string, BrowserSnapshotRevisionState>();
+  const protectedFields = new ProtectedBrowserFieldController();
   let launchedChrome: LaunchedChrome | undefined;
   let launchPromise: Promise<LaunchedChrome> | undefined;
   let configuredStack: BrowserSessionStack | undefined;
@@ -109,6 +115,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       sessionStacks.delete(sessionId);
       latestSnapshots.delete(sessionId);
       latestSnapshotScopes.delete(sessionId);
+      latestObservedUrls.delete(sessionId);
       fallbackSnapshotRevisions.delete(sessionId);
       throw new BrowserSessionStateError("session_missing", `Browser session not found: ${sessionId}`);
     }
@@ -181,11 +188,13 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     snapshot: BrowserSnapshot
   ): BrowserSnapshot => {
     const manager = sessionStacks.get(session.key)?.sessionManager;
+    latestObservedUrls.set(session.key, snapshot.url);
     const fallbackRevision = fallbackSnapshotRevisions.get(session.key) ?? { revision: 0 };
     fallbackSnapshotRevisions.set(session.key, fallbackRevision);
     const observed = manager?.observeSnapshot?.(session.key, snapshot) ?? observeBrowserSnapshot(snapshot, fallbackRevision);
-    latestSnapshots.set(session.key, observed);
-    return observed;
+    const protectedSnapshot = protectedFields.protectSnapshot(session.key, observed);
+    latestSnapshots.set(session.key, protectedSnapshot);
+    return protectedSnapshot;
   };
 
   const captureSessionSnapshot = async (
@@ -223,6 +232,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     openedTabs?: BrowserTab[];
     full?: boolean;
   }): Promise<BrowserSnapshot> => {
+    const beforeObservedUrl = latestObservedUrls.get(input.session.key);
     const settlement = await settleBrowserAction({
       capture: input.capture ?? (() => captureSessionSnapshot(input.session, [], input.full === true)),
       waitFor: input.actionInput.waitFor,
@@ -233,12 +243,17 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       stableWindowMs: options.settling?.stableWindowMs,
       minimumObservationMs: options.settling?.minimumObservationMs
     });
-    const snapshot = withBrowserActionDelta({
+    const settledSnapshot = withBrowserActionDelta({
       before: input.before,
       settlement,
       openedTabs: input.openedTabs
     });
+    const snapshot = protectedFields.protectSnapshot(input.session.key, settledSnapshot);
     latestSnapshots.set(input.session.key, snapshot);
+    const afterObservedUrl = latestObservedUrls.get(input.session.key);
+    if (beforeObservedUrl !== undefined && afterObservedUrl !== undefined && beforeObservedUrl !== afterObservedUrl) {
+      await protectedFields.invalidateSession(input.session);
+    }
     return snapshot;
   };
 
@@ -285,11 +300,13 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
   };
 
   const closeSession = async (sessionId: string): Promise<void> => {
+    await protectedFields.clearSession(sessionId);
     const stack = sessionStacks.get(sessionId);
     if (stack === undefined || !stack.sessionManager.has(sessionId)) {
       sessionStacks.delete(sessionId);
       latestSnapshots.delete(sessionId);
       latestSnapshotScopes.delete(sessionId);
+      latestObservedUrls.delete(sessionId);
       fallbackSnapshotRevisions.delete(sessionId);
       lifecycle?.unregister(sessionId);
       await closeLaunchedChromeIfIdle();
@@ -307,6 +324,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       sessionStacks.delete(sessionId);
       latestSnapshots.delete(sessionId);
       latestSnapshotScopes.delete(sessionId);
+      latestObservedUrls.delete(sessionId);
       fallbackSnapshotRevisions.delete(sessionId);
     }
 
@@ -348,6 +366,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         sessionStacks.delete(sessionId);
         latestSnapshots.delete(sessionId);
         latestSnapshotScopes.delete(sessionId);
+        latestObservedUrls.delete(sessionId);
         fallbackSnapshotRevisions.delete(sessionId);
       }
     }
@@ -655,6 +674,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         if (session === undefined) {
           throw new BrowserSessionStateError("session_missing", `Browser session not found: ${sessionId}`);
         }
+        await protectedFields.invalidateSession(session);
         const supervisor = session.supervisor;
         const before = latestSnapshots.get(sessionId);
         await supervisor.send("Page.navigate", { url: input.url });
@@ -716,6 +736,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       let session = await getSession(input);
       const targetState = await captureSafeTargetSnapshot(session, input);
       const before = targetState.snapshot;
+      const beforeObservedUrl = latestObservedUrls.get(session.key);
       const target = resolveBrowserTarget(before, input);
       const beforeTabs = supportsTabManagement(session.key) ? await listManagedTabs(session.key) : undefined;
       await session.supervisor.send("Runtime.evaluate", {
@@ -752,8 +773,13 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         stableWindowMs: options.settling?.stableWindowMs,
         minimumObservationMs: options.settling?.minimumObservationMs
       });
-      const snapshot = withBrowserActionDelta({ before, settlement, openedTabs });
+      const settledSnapshot = withBrowserActionDelta({ before, settlement, openedTabs });
+      const snapshot = protectedFields.protectSnapshot(session.key, settledSnapshot);
       latestSnapshots.set(session.key, snapshot);
+      const afterObservedUrl = latestObservedUrls.get(session.key);
+      if (beforeObservedUrl !== undefined && afterObservedUrl !== undefined && beforeObservedUrl !== afterObservedUrl) {
+        await protectedFields.invalidateSession(session);
+      }
       return snapshot;
     },
     type: async (input) => {
@@ -786,6 +812,14 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       const { snapshot } = await captureSafeTargetSnapshot(session, input);
       const target = resolveBrowserTarget(snapshot, input);
       const element = snapshot.elements?.find((candidate) => candidate.ref === target.ref);
+      if (protectedFields.isSensitive(session.key)) {
+        return {
+          sessionId: snapshot.sessionId,
+          revision: snapshot.revision,
+          tabRef: target.tabRef,
+          target,
+        };
+      }
       return {
         sessionId: snapshot.sessionId,
         revision: snapshot.revision,
@@ -816,6 +850,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     },
     back: async (input = {}) => {
       const session = await getSession(input);
+      await protectedFields.invalidateSession(session);
       const before = latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session);
       await session.supervisor.send("Runtime.evaluate", {
         expression: "history.back(); 'ok';",
@@ -826,6 +861,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     },
     getImages: async (input = {}) => {
       const session = await getSession(input);
+      if (protectedFields.isSensitive(session.key)) return [];
       const evaluated = await session.supervisor.send("Runtime.evaluate", {
         expression: "JSON.stringify(Array.from(document.images).slice(0, 100).map((img) => ({ src: img.currentSrc || img.src, alt: img.alt || undefined })))",
         returnByValue: true
@@ -834,13 +870,25 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     },
     console: async (input = {}): Promise<BrowserConsoleEntry[]> => {
       const session = await getSession(input);
+      if (protectedFields.isSensitive(session.key)) return [];
       return session.supervisor.consoleHistory({ clear: input.clear });
     },
     tabs: async (input = {}) => {
       const session = await getSession(input);
-      return listSafeTabs(session.key);
+      if (!protectedFields.isSensitive(session.key)) return listSafeTabs(session.key);
+      const snapshot = latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session);
+      return {
+        sessionId: session.key,
+        tabs: snapshot.tab === undefined ? [] : [{
+          ref: snapshot.tab.ref,
+          url: originForUrl(snapshot.tab.url),
+          controlled: true,
+        }],
+        blockedCount: 0,
+      };
     },
     switchTab: async (input) => {
+      await protectedFields.invalidateSession(await getSession(input));
       const before = latestSnapshots.get(requireSessionId(input.sessionId));
       const switched = await switchSafeTab(input);
       const snapshot = await settleAction({
@@ -856,6 +904,9 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     },
     cdp: async (input) => {
       const session = await getSession(input);
+      if (protectedFields.isSensitive(session.key)) {
+        throw new Error("Raw browser CDP access is blocked while protected input is active.");
+      }
       if (input.method === undefined || input.method.trim().length === 0) {
         throw new Error("browser.cdp requires a CDP method.");
       }
@@ -863,6 +914,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     },
     screenshot: async (input = {}) => {
       const session = await getSession(input);
+      protectedFields.assertVisualObservationAllowed(session.key);
       const result = await session.supervisor.send("Page.captureScreenshot", {
         format: "png",
         captureBeyondViewport: true
@@ -875,6 +927,41 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         base64: result.data
       } satisfies BrowserScreenshotResult;
     },
+    prepareProtectedField: async (input) => {
+      const session = await getSession(input);
+      const { snapshot } = await captureSafeTargetSnapshot(session, input);
+      const target = resolveBrowserTarget(snapshot, input);
+      const origin = originForUrl(snapshot.url);
+      if (origin === "null") {
+        throw new Error("Protected browser input requires an HTTP or HTTPS origin.");
+      }
+      const frameTree = await session.supervisor.send("Page.getFrameTree") as {
+        frameTree?: { frame?: { id?: unknown } };
+      };
+      const frameId = typeof frameTree.frameTree?.frame?.id === "string"
+        ? frameTree.frameTree.frame.id
+        : undefined;
+      return {
+        type: "browser-field",
+        sessionId: session.key,
+        ref: target.ref,
+        expectedOrigin: origin,
+        tabRef: target.tabRef,
+        ...(frameId === undefined ? {} : { frameId }),
+      };
+    },
+    verifyProtectedField: async (input: BrowserProtectedFieldInput) => {
+      const session = await getSession({ sessionId: input.destination.sessionId });
+      return await protectedFields.verify(session, input);
+    },
+    deliverProtectedField: async (input: BrowserProtectedFieldDeliveryInput) => {
+      const session = await getSession({ sessionId: input.destination.sessionId });
+      await protectedFields.deliver(session, input);
+    },
+    releaseProtectedField: async (destination) => {
+      await protectedFields.release(destination);
+    },
+    isSensitiveInputActive: (sessionId) => protectedFields.isSensitive(sessionId),
     dialog: async (input = {}) => {
       const session = await getSession(input);
       const before = latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session);
@@ -971,6 +1058,15 @@ function requireSessionId(sessionId: string | undefined): string {
     throw new Error("Browser sessionId is required for supervised local CDP operations.");
   }
   return sessionId;
+}
+
+function originForUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.origin : "null";
+  } catch {
+    return "null";
+  }
 }
 
 async function checkLocalCdpStatus(endpoint: string | undefined, fetchLike: CdpFetchLike | undefined): Promise<BrowserBackendStatus> {

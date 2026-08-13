@@ -511,6 +511,30 @@ describe("CDPSupervisor", () => {
     });
   });
 
+  it("clears and suppresses console history while protected input is active", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1");
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+
+    await supervisor.start();
+    socket.emitMessage({
+      method: "Runtime.consoleAPICalled",
+      params: { type: "log", args: [{ value: "before-protected-entry" }] }
+    });
+    supervisor.setSensitiveInputActive(true);
+    socket.emitMessage({
+      method: "Runtime.consoleAPICalled",
+      params: { type: "log", args: [{ value: "protected-sentinel-secret" }] }
+    });
+
+    expect(supervisor.consoleHistory()).toEqual([]);
+    expect(JSON.stringify(await supervisor.getSnapshot("session-1"))).not.toContain("protected-sentinel-secret");
+    supervisor.setSensitiveInputActive(false);
+    expect(supervisor.consoleHistory()).toEqual([]);
+  });
+
   it("captures frame navigation data in a bounded frame list", async () => {
     const socket = new FakeCdpSocket("ws://cdp/page-1");
     const supervisor = new CDPSupervisor({

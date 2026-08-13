@@ -179,6 +179,13 @@ export class SecureInputCoordinator {
       }
       return receipt(selection, "failed", false, "Protected input delivery failed.");
     } finally {
+      if (selection !== undefined) {
+        try {
+          await selection.transport.release?.(structuredClone(input.request));
+        } catch {
+          // Guard cleanup is best-effort and cannot change the delivery receipt.
+        }
+      }
       if (waitAnnounced && snapshot !== undefined) {
         const current = this.#broker.getRequest(snapshot.id, input.scope) ?? snapshot;
         try {

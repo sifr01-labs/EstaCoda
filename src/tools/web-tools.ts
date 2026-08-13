@@ -1,7 +1,7 @@
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
-import type { RegisteredTool } from "../contracts/tool.js";
+import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
 import type { SessionToolProvider } from "../contracts/tool.js";
 import type {
   BrowserActionInput,
@@ -15,6 +15,7 @@ import type {
   BrowserTab,
   WebExtractionResult
 } from "../contracts/browser.js";
+import type { SecureInputKind, SecureInputRetention } from "../contracts/secure-input.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import { resolveGlobalStateHome } from "../config/profile-home.js";
 import { createBrowserDebugSession, type BrowserDebugSession } from "../browser/browser-debug.js";
@@ -295,25 +296,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         oneOf: browserTargetOneOf()
       }
     }),
-    createBrowserActionTool({
-      name: "browser.type",
-      description: "Type into an input by semantic locator, or by a ref with its source revision and tabRef, then return a settled delta.",
-      progressLabel: "typing in browser",
-      browserBackend,
-      deriveBrowserInput,
-      method: "type",
-      inputSchema: {
-        type: "object",
-        properties: {
-          ...browserTargetInputProperties(),
-          text: { type: "string" },
-          sessionId: { type: "string" },
-          ...browserWaitInputProperties()
-        },
-        required: ["text"],
-        oneOf: browserTargetOneOf()
-      }
-    }),
+    createBrowserTypeTool(browserBackend, deriveBrowserInput),
     createBrowserActionTool({
       name: "browser.select",
       description: "Select an option by value or visible option text using a semantic locator, or a ref with its source revision and tabRef.",
@@ -1342,6 +1325,121 @@ function createBrowserActionTool(input: {
         metadata: { backend: input.browserBackend.kind, snapshot }
       };
     }
+  };
+}
+
+type BrowserProtectedInputDescriptor = {
+  kind?: SecureInputKind;
+  purpose?: string;
+  retention?: SecureInputRetention;
+};
+
+function createBrowserTypeTool(
+  browserBackend: BrowserBackend,
+  deriveBrowserInput: DeriveBrowserInput
+): RegisteredTool {
+  return {
+    name: "browser.type",
+    description: "Type ordinary text or request protected input for a verified field. Protected values bypass model context and browser snapshots.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...browserTargetInputProperties(),
+        text: { type: "string" },
+        protectedInput: {
+          type: "object",
+          properties: {
+            kind: { type: "string" },
+            purpose: { type: "string" },
+            retention: { type: "string" },
+          },
+        },
+        sessionId: { type: "string" },
+        ...browserWaitInputProperties(),
+      },
+      oneOf: browserTargetOneOf().flatMap((target) => [
+        { required: [...target.required, "text"] },
+        { required: [...target.required, "protectedInput"] },
+      ]),
+    },
+    riskClass: "read-only-network",
+    toolsets: ["browser", "web", "research"],
+    progressLabel: "typing in browser",
+    maxResultSizeChars: 8_000,
+    isAvailable: () => browserBackend.isAvailable(),
+    run: async (toolInput: BrowserActionInput & { protectedInput?: BrowserProtectedInputDescriptor }, context) => {
+      const browserInput = deriveBrowserInput(toolInput);
+      if (toolInput.protectedInput === undefined) {
+        if (typeof toolInput.text !== "string" || browserBackend.type === undefined) {
+          return unsupportedBrowserTool(browserBackend, "browser.type");
+        }
+        const snapshot = await browserBackend.type(browserInput).catch((error: unknown) => ({ error }));
+        if ("error" in snapshot) {
+          return {
+            ok: false,
+            content: snapshot.error instanceof Error ? snapshot.error.message : "browser.type failed.",
+            metadata: browserFailureMetadata(browserBackend, snapshot.error),
+          };
+        }
+        return {
+          ok: true,
+          content: renderBrowserActionResult(snapshot, 8_000),
+          metadata: { backend: browserBackend.kind, snapshot },
+        };
+      }
+
+      const descriptor = parseBrowserProtectedInput(toolInput.protectedInput);
+      if (descriptor === undefined) {
+        return protectedBrowserFailure("Protected browser input requires a supported kind, purpose, and use-once retention.");
+      }
+      if (context?.onSecureInputRequest === undefined || browserBackend.prepareProtectedField === undefined) {
+        return protectedBrowserFailure("Protected browser input is unavailable on this runtime.");
+      }
+      const destination = await browserBackend.prepareProtectedField(browserInput).catch(() => undefined);
+      if (destination === undefined) {
+        return protectedBrowserFailure("The protected browser field could not be resolved to a current verified destination.");
+      }
+      const receipt = await context.onSecureInputRequest({
+        kind: descriptor.kind,
+        purpose: descriptor.purpose,
+        destination,
+        retention: descriptor.retention,
+      }, async () => undefined).catch(() => undefined);
+      if (receipt === undefined) {
+        return protectedBrowserFailure("Protected browser input delivery failed.");
+      }
+      return {
+        ok: receipt.status === "delivered",
+        content: receipt.status === "delivered"
+          ? `Protected input delivered to ${receipt.destinationLabel}.`
+          : `Protected input ${receipt.status}: ${receipt.reason ?? "delivery did not complete."}`,
+        metadata: {
+          backend: browserBackend.kind,
+          secureInputReceipt: receipt,
+        },
+      };
+    },
+  };
+}
+
+function parseBrowserProtectedInput(
+  value: BrowserProtectedInputDescriptor
+): { kind: SecureInputKind; purpose: string; retention: "use-once" } | undefined {
+  const kinds = new Set<SecureInputKind>([
+    "password", "one-time-code", "api-key", "client-secret", "access-token",
+    "private-key", "recovery-code", "generic-secret",
+  ]);
+  if (value.kind === undefined || !kinds.has(value.kind)) return undefined;
+  if (typeof value.purpose !== "string" || value.purpose.trim().length === 0 || value.purpose.length > 500) return undefined;
+  if (value.retention !== undefined && value.retention !== "use-once") return undefined;
+  return { kind: value.kind, purpose: value.purpose.trim(), retention: "use-once" };
+}
+
+function protectedBrowserFailure(content: string): ToolResult {
+  return {
+    ok: false,
+    content,
+    metadata: { reason: "protected-browser-input-unavailable" },
   };
 }
 

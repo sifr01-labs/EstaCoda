@@ -27,6 +27,15 @@ class FakeCdpSocket implements CdpWebSocketLike {
     }>
   };
   axTree: unknown;
+  protectedFieldInspection = {
+    connected: true,
+    current: true,
+    visible: true,
+    disabled: false,
+    editable: true,
+    semanticsMatch: true,
+    conflictCount: 1
+  };
   onRuntimeEvaluate?: (expression: string) => void;
 
   send(data: string): void {
@@ -61,7 +70,7 @@ class FakeCdpSocket implements CdpWebSocketLike {
       });
       return;
     }
-    const result = this.#resultFor(message.method);
+    const result = this.#resultFor(message);
     this.#emit("message", {
       data: JSON.stringify({
         id: message.id,
@@ -87,7 +96,8 @@ class FakeCdpSocket implements CdpWebSocketLike {
     this.#listeners.set(type, listeners);
   }
 
-  #resultFor(method: string): unknown {
+  #resultFor(message: { method: string; params?: Record<string, unknown> }): unknown {
+    const method = message.method;
     if (method === "Target.createBrowserContext") {
       return { browserContextId: `context-${++this.#contextCounter}` };
     }
@@ -106,6 +116,9 @@ class FakeCdpSocket implements CdpWebSocketLike {
       };
     }
     if (method === "Runtime.evaluate") {
+      if (typeof message.params?.expression === "string" && /^window\.__estacodaElements\?\.\[\d+\]$/u.test(message.params.expression)) {
+        return { result: { objectId: "protected-field-object" } };
+      }
       return { result: { value: JSON.stringify(this.snapshot) } };
     }
     if (method === "Accessibility.getFullAXTree") {
@@ -115,7 +128,13 @@ class FakeCdpSocket implements CdpWebSocketLike {
       return { object: { objectId: `object-${this.sent.at(-1)?.params?.backendNodeId ?? "unknown"}` } };
     }
     if (method === "Runtime.callFunctionOn") {
+      if (typeof message.params?.functionDeclaration === "string" && message.params.functionDeclaration.includes("conflictCount")) {
+        return { result: { value: this.protectedFieldInspection } };
+      }
       return { result: { value: true } };
+    }
+    if (method === "Page.getFrameTree") {
+      return { frameTree: { frame: { id: "main-frame", url: this.snapshot.url } } };
     }
     if (method === "Page.captureScreenshot") {
       return { data: "png-data" };
@@ -880,6 +899,152 @@ describe("supervised local CDP backend", () => {
 
     expect(JSON.stringify(extracted)).not.toContain("do-not-render");
     expect(extracted?.value).toContain("[REDACTED]");
+  });
+
+  it("verifies and delivers protected input without embedding the value in evaluated source", async () => {
+    const socket = new FakeCdpSocket();
+    socket.snapshot = {
+      url: "https://accounts.example.com/login",
+      title: "Sign in",
+      text: "Sign in",
+      elements: [{ ref: "@e1", role: "textbox", name: "Password" }]
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"]
+    });
+    const navigation = await backend.navigate({
+      url: "https://accounts.example.com/login",
+      sessionId: "session-1"
+    });
+    const destination = await backend.prepareProtectedField?.({
+      sessionId: "session-1",
+      ref: "@e1",
+      revision: navigation.snapshot.revision,
+      tabRef: navigation.snapshot.tab!.ref
+    });
+
+    expect(destination).toEqual({
+      type: "browser-field",
+      sessionId: "session-1",
+      ref: "@e1",
+      expectedOrigin: "https://accounts.example.com",
+      tabRef: navigation.snapshot.tab!.ref,
+      frameId: "main-frame"
+    });
+    await expect(backend.verifyProtectedField?.({
+      destination: destination!,
+      kind: "password",
+      phase: "before-collection"
+    })).resolves.toEqual({ status: "verified" });
+
+    const guardedSnapshot = await backend.snapshot?.({ sessionId: "session-1" });
+    expect(guardedSnapshot).toMatchObject({ sensitiveInputActive: true });
+    expect(guardedSnapshot).not.toHaveProperty("text");
+    expect(guardedSnapshot?.elements?.[0]).not.toHaveProperty("name");
+    await expect(backend.screenshot?.({ sessionId: "session-1" })).rejects.toMatchObject({
+      code: "sensitive-input-active"
+    });
+    await expect(backend.cdp?.({ sessionId: "session-1", method: "Page.captureScreenshot" })).rejects.toThrow(
+      "Raw browser CDP access is blocked"
+    );
+
+    const secret = "browser-sentinel-secret";
+    await expect(backend.verifyProtectedField?.({
+      destination: destination!,
+      kind: "password",
+      phase: "before-delivery"
+    })).resolves.toEqual({ status: "verified" });
+    await backend.deliverProtectedField?.({
+      destination: destination!,
+      kind: "password",
+      value: new TextEncoder().encode(secret)
+    });
+    await backend.releaseProtectedField?.(destination!);
+    socket.snapshot.elements[0]!.value = secret;
+
+    const sent = socket.sent.filter((message) =>
+      message.method === "Runtime.evaluate" || message.method === "Runtime.callFunctionOn"
+    );
+    expect(sent.some((message) => (JSON.stringify(message.params?.arguments) ?? "").includes(secret))).toBe(true);
+    expect(sent.some((message) => String(message.params?.expression ?? "").includes(secret))).toBe(false);
+    expect(sent.some((message) => String(message.params?.functionDeclaration ?? "").includes(secret))).toBe(false);
+    const afterDeliverySnapshot = await backend.snapshot?.({ sessionId: "session-1" });
+    expect(JSON.stringify(afterDeliverySnapshot)).not.toContain(secret);
+    expect(JSON.stringify(await backend.extract?.({
+      sessionId: "session-1",
+      ref: "@e1",
+      revision: afterDeliverySnapshot!.revision,
+      tabRef: afterDeliverySnapshot!.tab!.ref
+    }))).not.toContain(secret);
+    await expect(backend.getImages?.({ sessionId: "session-1" })).resolves.toEqual([]);
+    const protectedTabs = await backend.tabs?.({ sessionId: "session-1" });
+    expect(protectedTabs?.tabs.every((tab) => tab.title === undefined && new URL(tab.url).pathname === "/")).toBe(true);
+    await expect(backend.screenshot?.({ sessionId: "session-1" })).rejects.toMatchObject({
+      code: "sensitive-input-active"
+    });
+
+    socket.snapshot.url = "https://accounts.example.com/complete";
+    await backend.press?.({ sessionId: "session-1", key: "Enter" });
+    await expect(backend.screenshot?.({ sessionId: "session-1" })).resolves.toMatchObject({ base64: "png-data" });
+  });
+
+  it("rejects changed origins, frames, fields, and ambiguous credential targets", async () => {
+    const socket = new FakeCdpSocket();
+    socket.snapshot = {
+      url: "https://accounts.example.com/login",
+      title: "Sign in",
+      text: "Sign in",
+      elements: [{ ref: "@e1", role: "textbox", name: "Password" }]
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"]
+    });
+    const navigation = await backend.navigate({ url: socket.snapshot.url, sessionId: "session-1" });
+    const base = {
+      type: "browser-field" as const,
+      sessionId: "session-1",
+      ref: "@e1",
+      expectedOrigin: "https://accounts.example.com",
+      tabRef: navigation.snapshot.tab!.ref,
+      frameId: "main-frame"
+    };
+
+    await expect(backend.verifyProtectedField?.({
+      destination: { ...base, expectedOrigin: "https://attacker.example" },
+      kind: "password",
+      phase: "before-collection"
+    })).resolves.toEqual({ status: "rejected", reason: "origin-mismatch" });
+    await expect(backend.verifyProtectedField?.({
+      destination: { ...base, frameId: "attacker-frame" },
+      kind: "password",
+      phase: "before-collection"
+    })).resolves.toEqual({ status: "rejected", reason: "frame-mismatch" });
+
+    socket.protectedFieldInspection.conflictCount = 2;
+    await expect(backend.verifyProtectedField?.({
+      destination: base,
+      kind: "password",
+      phase: "before-collection"
+    })).resolves.toEqual({ status: "rejected", reason: "field-ambiguous" });
+    socket.protectedFieldInspection.conflictCount = 1;
+    await expect(backend.verifyProtectedField?.({
+      destination: base,
+      kind: "password",
+      phase: "before-collection"
+    })).resolves.toEqual({ status: "verified" });
+    socket.protectedFieldInspection.current = false;
+    await expect(backend.verifyProtectedField?.({
+      destination: base,
+      kind: "password",
+      phase: "before-delivery"
+    })).resolves.toEqual({ status: "rejected", reason: "field-replaced" });
+    await backend.releaseProtectedField?.(base);
   });
 
   it("click() waits for an asynchronous React-style update and returns its delta", async () => {

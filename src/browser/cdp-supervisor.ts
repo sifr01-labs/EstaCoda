@@ -45,6 +45,7 @@ export class CDPSupervisor {
   #dialogCounter = 0;
   #pendingDialogs = new Map<string, NonNullable<BrowserSnapshot["pendingDialogs"]>[number]>();
   #consoleHistory: NonNullable<BrowserSnapshot["consoleHistory"]> = [];
+  #sensitiveInputActive = false;
   #frameTree: NonNullable<BrowserSnapshot["frameTree"]> = [];
   readonly #snapshotRevision: BrowserSnapshotRevisionState = { revision: 0 };
 
@@ -114,11 +115,17 @@ export class CDPSupervisor {
   }
 
   consoleHistory(options: { clear?: boolean } = {}): NonNullable<BrowserSnapshot["consoleHistory"]> {
+    if (this.#sensitiveInputActive) return [];
     const entries = [...this.#consoleHistory];
     if (options.clear === true) {
       this.#consoleHistory = [];
     }
     return entries;
+  }
+
+  setSensitiveInputActive(active: boolean): void {
+    this.#sensitiveInputActive = active;
+    if (active) this.#consoleHistory = [];
   }
 
   close(): void {
@@ -214,6 +221,7 @@ export class CDPSupervisor {
   }
 
   #handleConsole(params: unknown): void {
+    if (this.#sensitiveInputActive) return;
     if (!isRecord(params)) {
       return;
     }

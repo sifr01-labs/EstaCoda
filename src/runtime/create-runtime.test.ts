@@ -1090,6 +1090,7 @@ describe("createRuntime MCP trust gating", () => {
             "riskClass": "read-only-network",
             "schemaAliasOrder": [
               "locator",
+              "protectedInput",
               "ref",
               "revision",
               "sessionId",

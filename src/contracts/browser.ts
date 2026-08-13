@@ -113,6 +113,8 @@ export type BrowserSnapshot = {
   revision: number;
   observedAt: string;
   readiness?: BrowserReadiness;
+  /** Observation content is intentionally suppressed while protected entry is active. */
+  sensitiveInputActive?: true;
   actionDelta?: BrowserActionDelta;
   title?: string;
   text?: string;
@@ -225,6 +227,40 @@ export type BrowserScreenshotResult = {
   base64: string;
 };
 
+export type BrowserProtectedFieldVerificationPhase = "before-collection" | "before-delivery";
+
+export type BrowserProtectedFieldVerification =
+  | { status: "verified" }
+  | {
+      status: "rejected";
+      reason:
+        | "session-mismatch"
+        | "tab-mismatch"
+        | "origin-mismatch"
+        | "frame-mismatch"
+        | "field-missing"
+        | "field-replaced"
+        | "field-hidden"
+        | "field-disabled"
+        | "field-semantics-mismatch"
+        | "field-ambiguous"
+        | "request-not-active";
+    };
+
+export type BrowserProtectedFieldInput = {
+  destination: import("./secure-input.js").BrowserFieldSecureInputDestination;
+  kind: import("./secure-input.js").SecureInputKind;
+  phase: BrowserProtectedFieldVerificationPhase;
+  signal?: AbortSignal;
+};
+
+export type BrowserProtectedFieldDeliveryInput = {
+  destination: import("./secure-input.js").BrowserFieldSecureInputDestination;
+  kind: import("./secure-input.js").SecureInputKind;
+  value: Uint8Array;
+  signal?: AbortSignal;
+};
+
 export type BrowserNavigateInput = {
   url: string;
   sessionId?: string;
@@ -278,6 +314,14 @@ export type BrowserBackend = {
   switchTab?(input: BrowserSwitchTabInput): Promise<BrowserSwitchTabResult>;
   cdp?(input: BrowserActionInput): Promise<unknown>;
   screenshot?(input?: BrowserActionInput): Promise<BrowserScreenshotResult>;
+  /** Resolves a current semantic target to runtime-observed destination metadata. */
+  prepareProtectedField?(input: BrowserActionInput): Promise<import("./secure-input.js").BrowserFieldSecureInputDestination>;
+  /** Runtime-only protected field inspection. This is never registered as a model tool. */
+  verifyProtectedField?(input: BrowserProtectedFieldInput): Promise<BrowserProtectedFieldVerification>;
+  /** Runtime-only one-use delivery. The value must not be embedded in evaluated source. */
+  deliverProtectedField?(input: BrowserProtectedFieldDeliveryInput): Promise<void>;
+  releaseProtectedField?(destination: import("./secure-input.js").BrowserFieldSecureInputDestination): Promise<void> | void;
+  isSensitiveInputActive?(sessionId: string): boolean;
   dialog?(input?: BrowserActionInput): Promise<BrowserSnapshot>;
   closeSession?(sessionId: string): Promise<void> | void;
   close?(): Promise<void> | void;

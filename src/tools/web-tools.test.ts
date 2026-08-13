@@ -1940,6 +1940,86 @@ describe("web and browser tools baselines", () => {
     }
   });
 
+  it("requests protected browser input for a runtime-derived verified field without calling plaintext type", async () => {
+    const type = vi.fn();
+    const prepareProtectedField = vi.fn(async () => ({
+      type: "browser-field" as const,
+      sessionId: "test-runtime-session:main",
+      ref: "@e1",
+      expectedOrigin: "https://example.com",
+      tabRef: "@t1",
+      frameId: "main-frame",
+    }));
+    const onSecureInputRequest = vi.fn(async () => ({
+      status: "delivered" as const,
+      destinationLabel: "Browser field at https://example.com",
+      persisted: false,
+    }));
+    const browserType = tool("browser.type", createTestWebTools({
+      browserBackend: {
+        ...createSessionRecordingBrowserBackend(),
+        kind: "local-cdp",
+        type,
+        prepareProtectedField,
+      },
+    }));
+
+    const result = await browserType.run({
+      ref: "@e1",
+      protectedInput: {
+        kind: "password",
+        purpose: "Sign in",
+        retention: "use-once",
+      },
+    }, { onSecureInputRequest });
+
+    expect(result).toMatchObject({
+      ok: true,
+      metadata: {
+        backend: "local-cdp",
+        secureInputReceipt: { status: "delivered", persisted: false },
+      },
+    });
+    expect(result.content).not.toContain("password");
+    expect(type).not.toHaveBeenCalled();
+    expect(prepareProtectedField).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: "test-runtime-session:main",
+      ref: "@e1",
+    }));
+    expect(onSecureInputRequest).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "password",
+      purpose: "Sign in",
+      destination: expect.objectContaining({ ref: "@e1", expectedOrigin: "https://example.com" }),
+    }), expect.any(Function));
+  });
+
+  it("does not expose secure-input handler failures through browser.type", async () => {
+    const browserType = tool("browser.type", createTestWebTools({
+      browserBackend: {
+        ...createSessionRecordingBrowserBackend(),
+        kind: "local-cdp",
+        prepareProtectedField: async () => ({
+          type: "browser-field",
+          sessionId: "test-runtime-session:main",
+          ref: "@e1",
+          expectedOrigin: "https://example.com",
+        }),
+      },
+    }));
+
+    const result = await browserType.run({
+      ref: "@e1",
+      protectedInput: { kind: "api-key", purpose: "Authenticate" },
+    }, {
+      onSecureInputRequest: async () => {
+        throw new Error("handler-sentinel-secret");
+      },
+    });
+
+    expect(result).toMatchObject({ ok: false });
+    expect(JSON.stringify(result)).not.toContain("handler-sentinel-secret");
+  });
+
   it("does not require a browser session key for browser.status", async () => {
     const status = tool("browser.status", createWebTools({
       browserBackend: createSessionRecordingBrowserBackend()
