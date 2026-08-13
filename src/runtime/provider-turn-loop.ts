@@ -910,6 +910,11 @@ export class ProviderTurnLoop {
       }
     }
 
+    await this.#runRecorder.markPlannedToolPlansCancelled(
+      input.toolPlans,
+      "Provider turn ended before the planned tool call produced a result."
+    );
+
     return {
       providerExecution: effectiveProviderExecution,
       toolExecutions: providerToolExecutions,

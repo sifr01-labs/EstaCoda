@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ExecutionPlan } from "../contracts/execution-plan.js";
+import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { isolateLtr } from "../ui/bidi.js";
 import {
@@ -70,6 +71,32 @@ function completedPlan(): ExecutionPlan {
   };
 }
 
+function activePlan(): ExecutionPlan {
+  return {
+    objective: "Update and verify Postman",
+    originTurnId: "turn-1",
+    revision: 1,
+    status: "active",
+    items: [
+      { id: "inspect", content: "Inspect the collection", status: "in_progress" },
+      { id: "update", content: "Update the collection", status: "pending" },
+      { id: "verify", content: "Verify the collection", status: "pending" }
+    ]
+  };
+}
+
+function toolPlan(overrides: Partial<ToolCallPlan> = {}): ToolCallPlan {
+  return {
+    id: "call-update",
+    tool: "mcp.postman.updateCollection",
+    input: {},
+    source: "provider-tool-call",
+    status: "planned",
+    riskClass: "external-side-effect",
+    ...overrides
+  };
+}
+
 describe("execution outcome receipts", () => {
   it("creates redacted confirmed receipts only for successful consequential executions", () => {
     const outcome = deriveExecutionFinalOutcome({
@@ -126,6 +153,100 @@ describe("execution outcome receipts", () => {
       toolCallId: "call-update",
       verification: "verified"
     })]);
+  });
+
+  it("does not report success while a Mission remains active after successful reads", () => {
+    const outcome = deriveExecutionFinalOutcome({
+      providerExecution: {
+        ok: true,
+        fallbackUsed: false,
+        attempts: [],
+        toolCalls: [],
+        response: { ok: true, content: "I inspected the collection.", model: "test", provider: "openai" }
+      },
+      toolExecutions: [execution({
+        tool: { ...execution().tool, name: "mcp.postman.getCollection", riskClass: "read-only-network" },
+        riskClass: "read-only-network",
+        toolCallId: "call-read"
+      })],
+      executionPlan: activePlan()
+    });
+
+    expect(outcome.status).toBe("partially_completed");
+  });
+
+  it("reports a blocked Mission with no completed items as blocked despite successful exploration", () => {
+    const plan = activePlan();
+    plan.status = "blocked";
+    plan.items[0] = {
+      ...plan.items[0]!,
+      status: "blocked",
+      blocker: { kind: "external_state", summary: "Postman authentication expired." }
+    };
+
+    const outcome = deriveExecutionFinalOutcome({
+      toolExecutions: [execution({
+        tool: { ...execution().tool, name: "mcp.postman.getCollection", riskClass: "read-only-network" },
+        riskClass: "read-only-network",
+        toolCallId: "call-read"
+      })],
+      executionPlan: plan
+    });
+
+    expect(outcome.status).toBe("blocked");
+  });
+
+  it("reports a blocked Mission with a completed item as partially completed", () => {
+    const plan = activePlan();
+    plan.status = "blocked";
+    plan.items[0] = {
+      ...plan.items[0]!,
+      status: "completed",
+      completionKind: "reasoning"
+    };
+    plan.items[1] = {
+      ...plan.items[1]!,
+      status: "blocked",
+      blocker: { kind: "external_state", summary: "Postman authentication expired." }
+    };
+
+    expect(deriveExecutionFinalOutcome({ toolExecutions: [], executionPlan: plan }).status)
+      .toBe("partially_completed");
+  });
+
+  it("keeps a planned consequential call without a result uncertain and non-successful", () => {
+    const outcome = deriveExecutionFinalOutcome({
+      providerExecution: {
+        ok: true,
+        fallbackUsed: false,
+        attempts: [],
+        toolCalls: [],
+        response: { ok: true, content: "done", model: "test", provider: "openai" }
+      },
+      toolExecutions: [],
+      toolPlans: [toolPlan()]
+    });
+
+    expect(outcome).toEqual({
+      status: "partially_completed",
+      confirmedActions: [],
+      uncertainActions: [{
+        toolCallId: "call-update",
+        tool: "mcp.postman.updateCollection",
+        riskClass: "external-side-effect",
+        status: "uncertain"
+      }]
+    });
+  });
+
+  it("does not let delegated answer ownership bypass an active Mission", () => {
+    const outcome = deriveExecutionFinalOutcome({
+      toolExecutions: [],
+      executionPlan: activePlan(),
+      delegatedAnswerOwned: true
+    });
+
+    expect(outcome.status).toBe("partially_completed");
   });
 
   it("classifies successful recovery after an intermediate failure", () => {

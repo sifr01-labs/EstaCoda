@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelAttachment } from "../contracts/channel.js";
 import type { IntentRoute } from "../contracts/intent.js";
+import type { ExecutionPlan, ExecutionPlanReader } from "../contracts/execution-plan.js";
 import type { MemoryProvider } from "../contracts/memory.js";
 import type { ModelProfile, ProviderStreamDiagnostics } from "../contracts/provider.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
@@ -327,6 +328,7 @@ async function createAgentLoop(input: {
   routeIntent?: IntentRoute;
   routeAttachments?: ChannelAttachment[];
   providerToolDefinitions?: ToolDefinition[];
+  executionPlanReader?: ExecutionPlanReader;
 }) {
   const sessionDb = new InMemorySessionDB();
   const sessionId = `agent-loop-test-${Date.now()}-${Math.random()}`;
@@ -475,7 +477,8 @@ async function createAgentLoop(input: {
     compressionConfig: input.compressionConfig,
     skillLearningManager: input.skillLearningManager,
     skillRouteShadowReranker: input.skillRouteShadowReranker,
-    agentEvolutionPolicy: input.agentEvolutionPolicy ?? deriveAgentEvolutionPolicy("suggest")
+    agentEvolutionPolicy: input.agentEvolutionPolicy ?? deriveAgentEvolutionPolicy("suggest"),
+    executionPlanReader: input.executionPlanReader
   });
 
   return {
@@ -1561,6 +1564,60 @@ describe("AgentLoop provider availability gating", () => {
         expect.objectContaining({ kind: "session-end" })
       ])
     }));
+  });
+
+  it("clears a prior successful trajectory outcome before later incomplete Mission work", async () => {
+    const savedTrajectories: Array<ReturnType<TrajectoryRecorder["snapshot"]>> = [];
+    const saveTrajectory = vi.fn(async (trajectory: ReturnType<TrajectoryRecorder["snapshot"]>) => {
+      savedTrajectories.push(structuredClone(trajectory));
+    });
+    let currentPlan: ExecutionPlan | undefined;
+    let providerRuns = 0;
+    let outcomeObservedDuringSecondTurn: unknown = "not-observed";
+    const { loop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      trajectoryStore: { saveTrajectory },
+      executionPlanReader: { current: () => currentPlan },
+      onProviderTurnRun: () => {
+        providerRuns += 1;
+        if (providerRuns === 2) {
+          outcomeObservedDuringSecondTurn = savedTrajectories.at(-1)?.outcome;
+        }
+      }
+    });
+
+    const first = await loop.handle({
+      text: "inspect the current state",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+    expect(first.finalOutcome?.status).toBe("completed");
+
+    currentPlan = {
+      objective: "Update and verify Postman",
+      originTurnId: "turn-2",
+      revision: 1,
+      status: "active",
+      items: [
+        { id: "inspect", content: "Inspect Postman", status: "in_progress" },
+        { id: "update", content: "Update Postman", status: "pending" },
+        { id: "verify", content: "Verify Postman", status: "pending" }
+      ]
+    };
+    const second = await loop.handle({
+      text: "complete the Postman and MTN work",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(outcomeObservedDuringSecondTurn).toBeUndefined();
+    expect(second.finalOutcome?.status).toBe("partially_completed");
+    expect(savedTrajectories.at(-1)?.outcome).toMatchObject({
+      success: false,
+      status: "partially_completed"
+    });
   });
 
   it("does not fail a completed turn when final trajectory persistence fails", async () => {

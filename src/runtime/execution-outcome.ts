@@ -7,6 +7,7 @@ import type {
 } from "../contracts/execution-plan.js";
 import type { SkillRouteFinalOutcomeStatus } from "../contracts/skill.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
+import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { isolateLtr } from "../ui/bidi.js";
@@ -25,6 +26,7 @@ const VERIFICATION_ITEM_PATTERN = /\b(?:verify|verification|validate|validation|
 export function deriveExecutionFinalOutcome(input: {
   providerExecution?: ProviderExecutionResult;
   toolExecutions: readonly ToolExecutionRecord[];
+  toolPlans?: readonly ToolCallPlan[];
   executionPlan?: ExecutionPlan;
   executionPlanIncomplete?: boolean;
   emergencyDeadlineReached?: boolean;
@@ -34,7 +36,7 @@ export function deriveExecutionFinalOutcome(input: {
   const verification = planVerificationStatus(input.executionPlan);
   const verifiedCallIds = verifiedActionCallIds(input.executionPlan);
   const confirmedActions = confirmedActionReceipts(input.toolExecutions, verifiedCallIds);
-  const uncertainActions = uncertainActionReceipts(input.toolExecutions);
+  const uncertainActions = uncertainActionReceipts(input.toolExecutions, input.toolPlans ?? []);
   const status = classifyFinalStatus({
     ...input,
     confirmedActions,
@@ -97,7 +99,8 @@ function confirmedActionReceipts(
 }
 
 function uncertainActionReceipts(
-  executions: readonly ToolExecutionRecord[]
+  executions: readonly ToolExecutionRecord[],
+  plans: readonly ToolCallPlan[]
 ): UncertainActionReceipt[] {
   const receipts = new Map<string, UncertainActionReceipt>();
   for (const execution of executions) {
@@ -110,7 +113,30 @@ function uncertainActionReceipts(
     };
     receipts.set(receiptKey(receipt, receipts.size), receipt);
   }
+  for (const plan of plans) {
+    if (!isUnresolvedPlan(plan) || !isReceiptEligiblePlan(plan)) continue;
+    const riskClass = plan.riskClass;
+    if (riskClass === undefined) continue;
+    const receipt: UncertainActionReceipt = {
+      toolCallId: plan.id,
+      tool: plan.tool,
+      riskClass,
+      status: "uncertain"
+    };
+    receipts.set(receiptKey(receipt, receipts.size), receipt);
+  }
   return [...receipts.values()];
+}
+
+function isUnresolvedPlan(plan: ToolCallPlan): boolean {
+  return (plan.status === "planned" || plan.status === "cancelled" || plan.status === "executed") &&
+    plan.result === undefined;
+}
+
+function isReceiptEligiblePlan(plan: ToolCallPlan): boolean {
+  return plan.riskClass !== undefined &&
+    RECEIPT_RISK_CLASSES.has(plan.riskClass) &&
+    !RECEIPT_INELIGIBLE_TOOLS.has(plan.tool);
 }
 
 function hasNoAuthoritativeResult(execution: ToolExecutionRecord): boolean {
@@ -181,6 +207,7 @@ function isCompletedVerificationItem(item: ExecutionPlan["items"][number]): bool
 function classifyFinalStatus(input: {
   providerExecution?: ProviderExecutionResult;
   toolExecutions: readonly ToolExecutionRecord[];
+  toolPlans?: readonly ToolCallPlan[];
   executionPlan?: ExecutionPlan;
   executionPlanIncomplete?: boolean;
   emergencyDeadlineReached?: boolean;
@@ -191,7 +218,6 @@ function classifyFinalStatus(input: {
   verificationMissing: boolean;
 }): ExecutionFinalOutcomeStatus {
   if (input.cancelled === true) return "cancelled";
-  if (input.delegatedAnswerOwned === true) return "completed";
 
   const successfulIndexes: number[] = [];
   const failedIndexes: number[] = [];
@@ -202,18 +228,42 @@ function classifyFinalStatus(input: {
   const succeeded = successfulIndexes.length;
   const failed = failedIndexes.length;
   const blocked = input.toolExecutions.some((execution) => execution.decision !== "allow");
-  const hasConfirmedWork = input.confirmedActions.length > 0 || succeeded > 0;
+  const hasCompletedPlanWork = input.executionPlan?.items.some((item) => item.status === "completed") === true;
+  const hasConfirmedWork = input.confirmedActions.length > 0 || hasCompletedPlanWork || (
+    input.executionPlan === undefined && succeeded > 0
+  );
   const planIncomplete = input.executionPlanIncomplete === true || input.executionPlan?.status === "active";
+  const unresolvedToolPlans = (input.toolPlans ?? []).some(isUnresolvedPlan);
 
+  if (
+    input.delegatedAnswerOwned === true &&
+    input.executionPlanIncomplete !== true &&
+    input.emergencyDeadlineReached !== true &&
+    input.uncertainActions.length === 0 &&
+    !unresolvedToolPlans &&
+    (
+      input.executionPlan === undefined ||
+      input.executionPlan.status === "completed" ||
+      input.executionPlan.status === "transferred" ||
+      input.executionPlan.status === "abandoned"
+    )
+  ) {
+    return "completed";
+  }
+
+  if (input.executionPlan?.status === "blocked") {
+    return hasConfirmedWork ? "partially_completed" : "blocked";
+  }
   if (
     input.emergencyDeadlineReached === true ||
     input.uncertainActions.length > 0 ||
+    unresolvedToolPlans ||
     input.verificationMissing ||
     planIncomplete
   ) {
     return "partially_completed";
   }
-  if (input.executionPlan?.status === "blocked" || blocked) {
+  if (blocked) {
     return hasConfirmedWork ? "partially_completed" : "blocked";
   }
   if (input.providerExecution?.ok === false) {

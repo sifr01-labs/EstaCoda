@@ -30,7 +30,8 @@ export class ToolCallPlanner {
       };
     }
 
-    if (this.#registry.get(tool) === undefined) {
+    const definition = this.#registry.get(tool);
+    if (definition === undefined) {
       return {
         id,
         tool,
@@ -62,6 +63,7 @@ export class ToolCallPlanner {
       input: canonicalizeNestedToolNames(tool, parsed.input, this.#aliases),
       source: "provider-tool-call",
       status: "planned",
+      riskClass: definition.riskClass,
       raw: delta.raw
     };
   }

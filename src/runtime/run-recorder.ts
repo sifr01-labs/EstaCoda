@@ -675,6 +675,15 @@ export class RunRecorder {
     await this.#trajectoryStore?.saveTrajectory(this.#trajectoryRecorder.snapshot());
   }
 
+  async beginTurn(): Promise<void> {
+    if (!this.#trajectoryRecorder.beginTurn()) return;
+    try {
+      await this.persistTrajectory();
+    } catch {
+      // A stale completed outcome must be cleared in memory even if trace persistence is unavailable.
+    }
+  }
+
   async completeTrajectory(
     outcome: Trajectory["outcome"],
     options: { bestEffort?: boolean } = {}

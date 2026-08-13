@@ -69,7 +69,8 @@ export class NativeToolExecutor {
         aspectRatio: inferImageAspectRatio(input.text)
       },
       source: "internal",
-      status: "planned"
+      status: "planned",
+      riskClass: tool.riskClass
     };
     await this.#runRecorder.recordToolPlan(plan);
     await emit(input.onEvent, {
@@ -163,7 +164,8 @@ export class NativeToolExecutor {
         ? { path: paths[0], prompt: input.text }
         : { paths, prompt: input.text },
       source: "internal",
-      status: "planned"
+      status: "planned",
+      riskClass: this.#toolExecutor.getToolDefinition("vision.analyze")?.riskClass
     };
     plans.push(plan);
     await this.#runRecorder.recordToolPlan(plan);

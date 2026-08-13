@@ -48,6 +48,12 @@ export class TrajectoryRecorder {
     return this.snapshot();
   }
 
+  beginTurn(): boolean {
+    if (this.#trajectory.outcome === undefined) return false;
+    this.#trajectory.outcome = undefined;
+    return true;
+  }
+
   snapshot(): Trajectory {
     return {
       ...this.#trajectory,

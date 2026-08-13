@@ -316,6 +316,7 @@ export class AgentLoop {
   }
 
   async handle(input: AgentLoopInput): Promise<AgentLoopResponse> {
+    await this.#runRecorder.beginTurn();
     await this.#executionPlanController?.prepareForTurn(input.text, input.onEvent);
     const latestResumeNote = await this.#runRecorder.latestResumeNote();
     const effectiveText = isResumeRequest(input.text) && latestResumeNote !== undefined
@@ -802,6 +803,7 @@ export class AgentLoop {
       const cancellationOutcome = deriveExecutionFinalOutcome({
         providerExecution: effectiveProviderExecution,
         toolExecutions,
+        toolPlans,
         executionPlan: this.#executionPlanReader?.current(),
         cancelled: true
       });
@@ -839,9 +841,16 @@ export class AgentLoop {
         uncertainActions: cancellationOutcome.uncertainActions
       }, visibleTurn.id);
     }
+    if (providerLoop.delegatedAnswerOwnership !== undefined) {
+      await this.#executionPlanController?.transfer(
+        providerLoop.delegatedAnswerOwnership.tasks.map((task) => task.taskId),
+        input.onEvent
+      );
+    }
     const finalOutcome = deriveExecutionFinalOutcome({
       providerExecution: providerLoop.delegatedAnswerOwnership === undefined ? effectiveProviderExecution : undefined,
       toolExecutions,
+      toolPlans,
       executionPlan: this.#executionPlanReader?.current(),
       executionPlanIncomplete: providerLoop.executionPlanIncomplete,
       emergencyDeadlineReached: providerLoop.emergencyDeadlineReached,
@@ -866,12 +875,6 @@ export class AgentLoop {
           providerLoop.delegatedAnswerOwnership,
           this.#ui?.language === "ar" ? "ar" : "en"
         );
-    if (providerLoop.delegatedAnswerOwnership !== undefined) {
-      await this.#executionPlanController?.transfer(
-        providerLoop.delegatedAnswerOwnership.tasks.map((task) => task.taskId),
-        input.onEvent
-      );
-    }
     const displayText = delegatedAnswerAcknowledgement ?? (providerReturnedEmptyContent
       ? "I completed the requested actions but did not produce any visible output."
       : rawProviderContent);
@@ -1523,10 +1526,11 @@ export class AgentLoop {
     const completedResponse = visibleTurnId === undefined
       ? projectedResponse
       : await this.#withTurnUsage(projectedResponse, visibleTurnId);
+    const derivedTrajectoryOutcome = trajectoryOutcome(finalOutcome);
     await this.#runRecorder.completeTrajectory({
-      ...outcome,
-      confirmedActions: finalOutcome.confirmedActions,
-      uncertainActions: finalOutcome.uncertainActions
+      ...derivedTrajectoryOutcome,
+      ...(outcome.status === finalOutcome.status ? { summary: outcome.summary } : {}),
+      ...(outcome.userAccepted === undefined ? {} : { userAccepted: outcome.userAccepted })
     }, { bestEffort: true });
     return completedResponse;
   }

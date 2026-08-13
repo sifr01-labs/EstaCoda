@@ -4663,7 +4663,7 @@ describe("ProviderTurnLoop explicit route propagation", () => {
     completeSpy.mockRestore();
   });
 
-  it("returns undefined providerExecution when providerExecutor is undefined", async () => {
+  it("returns undefined providerExecution and cancels unresolved plans when providerExecutor is undefined", async () => {
     const sessionDb = new InMemorySessionDB();
     const sessionId = "test-session-789";
     await sessionDb.createSession({ id: sessionId, profileId: "default", title: "test" });
@@ -4720,6 +4720,7 @@ describe("ProviderTurnLoop explicit route propagation", () => {
       }
     });
 
+    const toolPlans = [toolPlan("call-pending", "planned")];
     const result = await loop.run({
       userText: "hello",
       routedText: "hello",
@@ -4736,12 +4737,19 @@ describe("ProviderTurnLoop explicit route propagation", () => {
       memoryPromptContext: undefined,
       providerTools: [],
       fallbackText: "",
-      toolPlans: [],
+      toolPlans,
       trustedWorkspace: false,
       initialRiskClass: "read-only-local"
     });
 
     expect(result.providerExecution).toBeUndefined();
     expect(result.iterations).toBe(0);
+    expect(toolPlans).toEqual([
+      expect.objectContaining({
+        id: "call-pending",
+        status: "cancelled",
+        error: "Provider turn ended before the planned tool call produced a result."
+      })
+    ]);
   });
 });
