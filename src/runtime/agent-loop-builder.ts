@@ -585,7 +585,8 @@ export class AgentLoopBuilder {
       executionPlanReader: executionPlanController,
       executionPlanController,
       executionWorkingSet,
-      browserSessionLease: ownsExecutionPlan ? substrate.browserSessionLease : undefined
+      browserSessionLease: ownsExecutionPlan ? substrate.browserSessionLease : undefined,
+      browserBackend: substrate.browserBackend
     });
     const skillPlaybookRunner = (this.#factories.skillPlaybookRunner ?? ((options) => new SkillPlaybookRunner(options)))({
       toolExecutor,

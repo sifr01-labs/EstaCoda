@@ -27,7 +27,7 @@ export type BrowserManagedTab = CdpPageTarget & {
 };
 
 type BrowserTargetManager = Pick<CdpTargetManager, "createTarget"> &
-  Partial<Pick<CdpTargetManager, "listPageTargets" | "attachTarget" | "activateTarget">>;
+  Partial<Pick<CdpTargetManager, "listPageTargets" | "attachTarget" | "activateTarget" | "findVisiblePageTargetId">>;
 
 export interface BrowserSessionManagerOptions {
   targetManager: BrowserTargetManager;
@@ -122,6 +122,19 @@ export class BrowserSessionManager {
       ref: this.#tabRef(session, target.targetId),
       controlled: target.targetId === session.targetId
     }));
+  }
+
+  async visibleTab(key: string): Promise<BrowserManagedTab | undefined> {
+    const session = this.#requireSession(key);
+    const findVisiblePageTargetId = this.#targetManager.findVisiblePageTargetId;
+    if (findVisiblePageTargetId === undefined) return undefined;
+    const targetId = await findVisiblePageTargetId.call(
+      this.#targetManager,
+      session.browserContextId,
+      session.targetId
+    );
+    if (targetId === undefined) return undefined;
+    return (await this.listTabs(session.key)).find((tab) => tab.targetId === targetId);
   }
 
   async switchTab(key: string, tabRef: string): Promise<BrowserManagedSession> {

@@ -60,7 +60,7 @@ export type SupervisedLocalCdpBackendOptions = {
 type TargetManagerLike = Pick<CdpTargetManager, "createTarget" | "close">;
 
 type BrowserSessionManagerLike = Pick<BrowserSessionManager, "acquire" | "close" | "closeAll" | "has"> &
-  Partial<Pick<BrowserSessionManager, "listTabs" | "switchTab" | "observeSnapshot">>;
+  Partial<Pick<BrowserSessionManager, "listTabs" | "visibleTab" | "switchTab" | "observeSnapshot">>;
 
 type BrowserSessionStack = {
   endpoint: string;
@@ -148,7 +148,18 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
   };
 
   const listSafeTabs = async (sessionId: string): Promise<BrowserTabList> => {
-    const managedTabs = await listManagedTabs(sessionId);
+    let managedTabs = await listManagedTabs(sessionId);
+    const stack = sessionStacks.get(sessionId)!;
+    const visibleTab = await stack.sessionManager.visibleTab?.call(stack.sessionManager, sessionId);
+    if (
+      visibleTab !== undefined &&
+      !visibleTab.controlled &&
+      await tabIsAllowed(visibleTab) &&
+      stack.sessionManager.switchTab !== undefined
+    ) {
+      await stack.sessionManager.switchTab.call(stack.sessionManager, sessionId, visibleTab.ref);
+      managedTabs = await listManagedTabs(sessionId);
+    }
     const decisions = await Promise.all(managedTabs.map(async (tab) => ({
       tab,
       allowed: await tabIsAllowed(tab)

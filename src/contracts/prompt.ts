@@ -10,6 +10,7 @@ export type PromptLayerName =
   | "conversation-continuation"
   | "execution-plan"
   | "execution-working-set"
+  | "browser-state"
   | "compaction-notice"
   | "user-message"
   | "channel-attachments"

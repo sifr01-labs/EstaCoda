@@ -123,6 +123,8 @@ In a supervised local browser, EstaCoda can work across tabs without asking the 
 - `browser.switch_tab` focuses a tab by its opaque ref, such as `@t2`, and makes it the target of later snapshots and actions.
 - After a click, EstaCoda automatically follows a newly opened tab only when exactly one new safe tab appeared. If several tabs open, it stays on the current tab and reports their refs so the agent can choose explicitly.
 
+During browser work, EstaCoda also supplies the model with a small current-state summary containing the live session status, controlled tab, safe tabs, page revision/readiness, and last browser action. This summary overrides older browser details in the conversation and reduces repeated tab or snapshot checks. If you navigate or change the controlled browser manually, EstaCoda refreshes the summary at the next browser-related turn boundary. A tab change reports both the source and destination.
+
 If the agent repeats the same successful snapshot or tab listing without taking an action, EstaCoda gives it one recovery instruction and then stops after the third unchanged observation. This prevents an observation-only loop from consuming the much larger turn limits. A changed page, changed tab list, or different browser action resets the guard, so normal supervised browsing can continue.
 
 Tabs from other EstaCoda browser sessions are excluded. Tabs blocked by URL safety, website policy, cloud metadata protection, or secret detection are hidden and cannot be selected through `browser.switch_tab`.

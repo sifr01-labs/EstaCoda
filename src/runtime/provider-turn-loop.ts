@@ -81,6 +81,11 @@ import { assessExecutionPlanActivation, isPlanToolName } from "./execution-plan-
 import { ExecutionWorkingSetController } from "./execution-working-set.js";
 import type { BrowserSessionLease } from "../browser/session-lifecycle.js";
 import { deriveBrowserSessionKey } from "../browser/session-key.js";
+import type { BrowserBackend, BrowserStateProjection } from "../contracts/browser.js";
+import {
+  projectBrowserStateFromExecutions,
+  refreshBrowserStateProjection
+} from "../browser/browser-state-projection.js";
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
 const BROWSER_NO_PROGRESS_NUDGE = "Repeated browser observations show no state change. Do not call browser.snapshot or browser.tabs again unless another action may have changed the page. Switch tabs or take a different browser action; if progress is blocked, explain what is blocking it.";
@@ -140,6 +145,7 @@ export type ProviderTurnLoopOptions = {
   executionPlanController?: ExecutionPlanControllerApi;
   executionWorkingSet?: ExecutionWorkingSetController;
   browserSessionLease?: BrowserSessionLease;
+  browserBackend?: BrowserBackend;
 };
 
 export class ProviderTurnLoop {
@@ -167,6 +173,7 @@ export class ProviderTurnLoop {
   readonly #executionPlanController: ExecutionPlanControllerApi | undefined;
   readonly #executionWorkingSet: ExecutionWorkingSetController | undefined;
   readonly #browserSessionLease: BrowserSessionLease | undefined;
+  readonly #browserBackend: BrowserBackend | undefined;
   #activeBrowserLease: { sessionId: string; owner: string } | undefined;
   #providerRequestSequence = 0;
   #lastPromptTokens = 0;
@@ -211,6 +218,7 @@ export class ProviderTurnLoop {
     this.#executionPlanReader = options.executionPlanController ?? options.executionPlanReader;
     this.#executionWorkingSet = options.executionWorkingSet;
     this.#browserSessionLease = options.browserSessionLease;
+    this.#browserBackend = options.browserBackend;
     this.#lastActualPromptTokens = options.initialContextWindowUsage?.usedTokens;
   }
 
@@ -957,6 +965,38 @@ export class ProviderTurnLoop {
     }
   }
 
+  async #browserStateForPrompt(input: {
+    intent: IntentRoute;
+    executions: readonly ToolExecutionRecord[];
+  }): Promise<BrowserStateProjection | undefined> {
+    const context = this.#sessionRuntimeContext;
+    const previous = context?.browserState();
+    const runtimeSessionId = context?.currentSessionId() ?? this.#sessionId;
+    const sessionId = deriveBrowserSessionKey({ currentSessionId: () => runtimeSessionId });
+    const projected = projectBrowserStateFromExecutions({
+      executions: input.executions,
+      sessionId,
+      previous
+    });
+    if (projected !== undefined) {
+      context?.setBrowserState(projected);
+      return projected;
+    }
+    if (
+      this.#browserBackend === undefined ||
+      (previous === undefined && !input.intent.suggestedToolsets.includes("browser"))
+    ) {
+      return previous;
+    }
+    const refreshed = await refreshBrowserStateProjection({
+      backend: this.#browserBackend,
+      sessionId,
+      previous
+    });
+    context?.setBrowserState(refreshed);
+    return refreshed;
+  }
+
   #syncBrowserSessionLease(cancelled: boolean): void {
     const plan = this.#executionPlanReader?.current();
     const shouldHold = !cancelled && plan?.status === "active";
@@ -1062,6 +1102,10 @@ export class ProviderTurnLoop {
     }
 
     const sessionHistory = await this.#providerSessionHistory();
+    const browserState = await this.#browserStateForPrompt({
+      intent: input.intent,
+      executions: input.toolExecutions
+    });
     const prompt = assembleProviderPrompt({
       ...input,
       model: this.#model,
@@ -1085,7 +1129,8 @@ export class ProviderTurnLoop {
       executionWorkingSet: this.#executionWorkingSet?.snapshot(
         this.#executionPlanReader?.current(),
         this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId
-      )
+      ),
+      browserState
     });
     if (input.reasoningOnlyPrefill === true) {
       prompt.messages.push(reasoningOnlyPrefillMessage());
@@ -1218,6 +1263,12 @@ export class ProviderTurnLoop {
     }
 
     const sessionHistory = await this.#providerSessionHistory();
+    const browserState = await this.#browserStateForPrompt({
+      intent: input.intent,
+      executions: input.toolFeedbackLedger.latest.flatMap((entry) =>
+        entry.execution === undefined ? [] : [entry.execution]
+      )
+    });
     const prompt = assembleProviderContinuationPrompt({
       ...input,
       model: this.#model,
@@ -1241,7 +1292,8 @@ export class ProviderTurnLoop {
       executionWorkingSet: this.#executionWorkingSet?.snapshot(
         this.#executionPlanReader?.current(),
         this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId
-      )
+      ),
+      browserState
     });
     if (input.emptyResponseNudge === true) {
       prompt.messages.push({

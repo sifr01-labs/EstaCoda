@@ -1125,6 +1125,87 @@ describe("supervised local CDP backend", () => {
     expect(session).toMatchObject({ targetId: "target-1", tabRef: "@t1", supervisor });
   });
 
+  it("follows a manually focused safe tab before projecting current browser state", async () => {
+    const mainSnapshot = {
+      sessionId: "session-1",
+      url: "https://example.com/apps",
+      title: "Apps",
+      text: "Apps",
+      elements: []
+    };
+    const detailSnapshot = {
+      ...mainSnapshot,
+      url: "https://example.com/oauth",
+      title: "OAuth V1",
+      text: "OAuth"
+    };
+    const mainSupervisor = {
+      send: vi.fn(async () => ({})),
+      waitFor: vi.fn(async () => undefined),
+      getSnapshot: vi.fn(async () => mainSnapshot),
+      consoleHistory: vi.fn(() => []),
+      respondToDialog: vi.fn(async () => undefined),
+      close: vi.fn()
+    };
+    const detailSupervisor = {
+      ...mainSupervisor,
+      getSnapshot: vi.fn(async () => detailSnapshot)
+    };
+    const session = {
+      key: "session-1",
+      browserContextId: "context-1",
+      targetId: "target-1",
+      tabRef: "@t1",
+      pageWebSocketDebuggerUrl: "ws://target-1",
+      supervisor: mainSupervisor,
+      lastActiveAt: 1,
+      touch: vi.fn(),
+      close: vi.fn(async () => undefined)
+    };
+    const tabs = () => [
+      { browserContextId: "context-1", targetId: "target-1", pageWebSocketDebuggerUrl: "ws://target-1", url: mainSnapshot.url, title: mainSnapshot.title, ref: "@t1", controlled: session.targetId === "target-1" },
+      { browserContextId: "context-1", targetId: "target-2", pageWebSocketDebuggerUrl: "ws://target-2", url: detailSnapshot.url, title: detailSnapshot.title, ref: "@t2", controlled: session.targetId === "target-2" }
+    ];
+    const sessionManager = {
+      acquire: vi.fn(async () => session),
+      close: vi.fn(async () => undefined),
+      closeAll: vi.fn(async () => undefined),
+      has: vi.fn(() => true),
+      listTabs: vi.fn(async () => tabs()),
+      visibleTab: vi.fn(async () => tabs()[1]),
+      switchTab: vi.fn(async () => {
+        session.targetId = "target-2";
+        session.tabRef = "@t2";
+        session.pageWebSocketDebuggerUrl = "ws://target-2";
+        session.supervisor = detailSupervisor;
+        return session;
+      })
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      resolveHostname: () => ["93.184.216.34"],
+      createTargetManager: () => ({
+        createTarget: vi.fn(async () => { throw new Error("unused"); }),
+        close: vi.fn(async () => undefined)
+      }),
+      createSessionManager: () => sessionManager
+    });
+
+    await backend.navigate({ url: mainSnapshot.url, sessionId: "session-1" });
+    await expect(backend.tabs?.({ sessionId: "session-1" })).resolves.toMatchObject({
+      tabs: [
+        { ref: "@t1", controlled: false },
+        { ref: "@t2", controlled: true }
+      ]
+    });
+    expect(sessionManager.switchTab).toHaveBeenCalledWith("session-1", "@t2");
+    await expect(backend.snapshot?.({ sessionId: "session-1" })).resolves.toMatchObject({
+      url: detailSnapshot.url,
+      tab: { ref: "@t2", controlled: true }
+    });
+  });
+
   it("type() can use AX-derived textbox refs bound to DOM nodes", async () => {
     const socket = new FakeCdpSocket();
     socket.axTree = {

@@ -78,8 +78,12 @@ class FakeTargetManager {
     if (target === undefined) throw new Error("target unavailable");
     this.activated.push(targetId);
   });
+  readonly findVisiblePageTargetId = vi.fn(async (browserContextId: string) =>
+    this.pageTargets.find((target) =>
+      target.browserContextId === browserContextId && target.targetId === this.visibleTargetId)?.targetId);
 
   createError: Error | undefined;
+  visibleTargetId: string | undefined;
 
   constructor(private readonly events: string[] = []) {}
 
@@ -226,6 +230,21 @@ describe("BrowserSessionManager", () => {
       { ref: "@t2", targetId: "target-2", controlled: false }
     ]);
     expect(second.map((tab) => tab.ref)).toEqual(["@t1", "@t2"]);
+  });
+
+  it("reports a manually focused same-context tab without changing control", async () => {
+    const targetManager = new FakeTargetManager();
+    const manager = new BrowserSessionManager({ targetManager });
+    await manager.acquire("session-1");
+    targetManager.addTab("context-1", "target-2", "https://example.com/details");
+    targetManager.visibleTargetId = "target-2";
+
+    await expect(manager.visibleTab("session-1")).resolves.toMatchObject({
+      ref: "@t2",
+      targetId: "target-2",
+      controlled: false
+    });
+    expect(targetManager.activated).toEqual([]);
   });
 
   it("switches the controlled target and returns to the owner without disposing the context", async () => {

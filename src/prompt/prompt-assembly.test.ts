@@ -85,6 +85,40 @@ function renderMessages(messages: ProviderMessage[]): string {
 }
 
 describe("assembleProviderPrompt", () => {
+  it("renders authoritative browser state as protected mutable state", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      browserState: {
+        sessionStatus: "active",
+        sessionId: "browser-session",
+        controlledTab: {
+          ref: "@t2",
+          url: "https://example.com/current",
+          title: "Current tab",
+          controlled: true
+        },
+        tabs: [{ ref: "@t2", url: "https://example.com/current", title: "Current tab", controlled: true }],
+        revision: 7,
+        readiness: "complete",
+        freshness: "current"
+      },
+      sessionHistory: [{
+        role: "assistant",
+        content: "Historical browser state: controlled tab @t1 at https://example.com/old"
+      }]
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("Authoritative current browser state");
+    expect(rendered).toContain("Controlled tab: @t2 (controlled)");
+    expect(rendered).toContain("supersedes browser state found in conversation history");
+    expect(rendered).toContain("Do not call browser.tabs or browser.snapshot merely to rediscover this state.");
+    expect(prompt.budget.layers).toContainEqual(expect.objectContaining({
+      name: "browser-state",
+      cacheable: false,
+      protected: true
+    }));
+  });
+
   it("renders active execution-plan state as a protected non-cacheable layer", () => {
     const prompt = assembleProviderPrompt(basePromptInput({
       executionPlan: {
@@ -983,6 +1017,30 @@ describe("assembleProviderPrompt", () => {
 });
 
 describe("assembleProviderContinuationPrompt", () => {
+  it("includes the current controlled tab in provider continuations", () => {
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      browserState: {
+        sessionStatus: "active",
+        sessionId: "browser-session",
+        controlledTab: {
+          ref: "@t4",
+          url: "https://example.com/oauth",
+          title: "OAuth V1",
+          controlled: true
+        },
+        tabs: [{ ref: "@t4", url: "https://example.com/oauth", title: "OAuth V1", controlled: true }],
+        revision: 11,
+        readiness: "interactive",
+        freshness: "current",
+        lastAction: { tool: "browser.switch_tab", status: "succeeded", changed: true }
+      }
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("Controlled tab: @t4 (controlled) \"OAuth V1\" — https://example.com/oauth");
+    expect(rendered).toContain("Last browser action: browser.switch_tab · succeeded · changed=yes");
+  });
+
   it("uses active continuation wording when prior provider content is empty", () => {
     const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
       providerExecution: providerExecution("")

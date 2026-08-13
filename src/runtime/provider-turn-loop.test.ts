@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { normalizeSessionCompressionConfig } from "../config/runtime-config.js";
 import type { ChannelAttachment } from "../contracts/channel.js";
+import type { BrowserBackend } from "../contracts/browser.js";
 import type { ContextExpansionResult } from "../contracts/context.js";
 import type { ModelProfile, ResolvedModelRoute, ProviderRequest, ProviderResponse, ProviderStreamDiagnostics } from "../contracts/provider.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
@@ -30,6 +31,7 @@ import { ExecutionPlanStore } from "./execution-plan-store.js";
 import { ExecutionPlanController } from "./execution-plan-controller.js";
 import { ExecutionWorkingSetController } from "./execution-working-set.js";
 import { attachEphemeralVisionImages } from "../vision/ephemeral-vision-content.js";
+import { createSessionRuntimeContext } from "./session-runtime-context.js";
 
 function createMockAdapter() {
   return {
@@ -655,6 +657,9 @@ async function createPostToolNudgeHarness(input: {
   executionPlanController?: ProviderTurnLoopOptions["executionPlanController"];
   executionWorkingSet?: ProviderTurnLoopOptions["executionWorkingSet"];
   browserSessionLease?: ProviderTurnLoopOptions["browserSessionLease"];
+  browserBackend?: BrowserBackend;
+  sessionRuntimeContext?: ProviderTurnLoopOptions["sessionRuntimeContext"];
+  sessionId?: string;
   onExecutePlans?: (input: {
     sessionDb: InMemorySessionDB;
     sessionId: string;
@@ -683,7 +688,7 @@ async function createPostToolNudgeHarness(input: {
     complete: completeSpy
   } as unknown as ProviderExecutor;
   const sessionDb = new InMemorySessionDB();
-  const sessionId = `nudge-session-${Date.now()}-${Math.random()}`;
+  const sessionId = input.sessionId ?? `nudge-session-${Date.now()}-${Math.random()}`;
   await sessionDb.createSession({ id: sessionId, profileId: "default", title: "nudge" });
   const trajectoryRecorder = new TrajectoryRecorder({
     profileId: "default",
@@ -751,7 +756,9 @@ async function createPostToolNudgeHarness(input: {
     executionPlanReader: input.executionPlanReader,
     executionPlanController: input.executionPlanController,
     executionWorkingSet: input.executionWorkingSet,
-    browserSessionLease: input.browserSessionLease
+    browserSessionLease: input.browserSessionLease,
+    browserBackend: input.browserBackend,
+    sessionRuntimeContext: input.sessionRuntimeContext
   });
 
   return {
@@ -1838,6 +1845,115 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(continuation).toContain("Confirmed Mission state");
     expect(continuation).toContain("Collection ID: collection-123");
     expect(continuation.match(/RAW COLLECTION PAYLOAD/gu)).toHaveLength(1);
+  });
+
+  it("grounds provider continuations in the current controlled browser tab", async () => {
+    const browserExecution = toolExecutionForTool(
+      "call-browser-state",
+      "browser.snapshot",
+      "Historical-looking snapshot excerpt"
+    );
+    browserExecution.riskClass = "read-only-network";
+    browserExecution.tool.riskClass = "read-only-network";
+    browserExecution.result = {
+      ok: true,
+      content: "Current browser snapshot",
+      metadata: {
+        snapshot: {
+          sessionId: "browser-session",
+          url: "https://example.com/oauth",
+          title: "OAuth V1",
+          revision: 12,
+          observedAt: "2026-08-13T00:00:00.000Z",
+          readiness: "complete",
+          tab: {
+            ref: "@t3",
+            url: "https://example.com/oauth",
+            title: "OAuth V1",
+            controlled: true
+          }
+        }
+      }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-browser-state", "{}", "browser.snapshot")]),
+        providerExecution("Continue on OAuth V1.")
+      ],
+      toolSteps: [{ executions: [browserExecution] }],
+      maxProviderIterations: 2
+    });
+
+    await runBasicProviderTurn(harness.loop);
+
+    const continuation = JSON.stringify((harness.completeSpy.mock.calls[1]?.[0] as ProviderRequest).messages);
+    expect(continuation).toContain("Authoritative current browser state");
+    expect(continuation).toContain("Controlled tab: @t3 (controlled)");
+    expect(continuation).toContain("supersedes browser state found in conversation history");
+  });
+
+  it("refreshes persisted browser state when manual browser changes occur between turns", async () => {
+    const sessionRuntimeContext = createSessionRuntimeContext("runtime-session");
+    sessionRuntimeContext.setBrowserState({
+      sessionStatus: "active",
+      sessionId: "runtime-session:main",
+      controlledTab: { ref: "@t1", url: "https://example.com/old", controlled: true },
+      tabs: [{ ref: "@t1", url: "https://example.com/old", controlled: true }],
+      revision: 4,
+      readiness: "complete",
+      freshness: "current"
+    });
+    const currentSnapshot = {
+      sessionId: "runtime-session:main",
+      url: "https://example.com/manual",
+      title: "Manually selected",
+      revision: 5,
+      observedAt: "2026-08-13T00:01:00.000Z",
+      readiness: "complete" as const,
+      tab: {
+        ref: "@t2",
+        url: "https://example.com/manual",
+        title: "Manually selected",
+        controlled: true
+      }
+    };
+    const browserBackend: BrowserBackend = {
+      kind: "mock",
+      isAvailable: () => true,
+      status: () => ({ backend: "mock", available: true }),
+      navigate: async () => ({
+        session: { id: "runtime-session:main", backend: "mock", createdAt: currentSnapshot.observedAt },
+        snapshot: currentSnapshot
+      }),
+      snapshot: async () => currentSnapshot,
+      tabs: async () => ({
+        sessionId: "runtime-session:main",
+        tabs: [
+          { ref: "@t1", url: "https://example.com/old", controlled: false },
+          currentSnapshot.tab
+        ],
+        blockedCount: 0
+      })
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("Done.")],
+      toolSteps: [],
+      maxProviderIterations: 1,
+      browserBackend,
+      sessionRuntimeContext,
+      sessionId: "runtime-session"
+    });
+
+    await runBasicProviderTurn(harness.loop);
+
+    const initial = JSON.stringify((harness.completeSpy.mock.calls[0]?.[0] as ProviderRequest).messages);
+    expect(initial).toContain("Controlled tab: @t2 (controlled)");
+    expect(initial).toContain("External/manual browser changes were detected");
+    expect(sessionRuntimeContext.browserState()).toMatchObject({
+      controlledTab: { ref: "@t2" },
+      externalChangeDetected: true,
+      freshness: "current"
+    });
   });
 
   it("holds and renews the browser session lease while a foreground Mission remains active", async () => {

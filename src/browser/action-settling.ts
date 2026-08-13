@@ -106,9 +106,20 @@ export function createBrowserActionDelta(input: {
   const removedElements = beforeElements.filter((element) => !afterKeys.has(deltaElementKey(element))).slice(0, MAX_DELTA_ELEMENTS);
   const beforeUrl = input.before === undefined ? undefined : redactUrlForMetadata(input.before.url);
   const afterUrl = redactUrlForMetadata(input.after.url);
+  const sourceTab = input.before?.tab;
+  const destinationTab = input.after.tab;
+  const tabTransition = sourceTab !== undefined &&
+    destinationTab !== undefined &&
+    sourceTab.ref !== destinationTab.ref
+    ? {
+        source: safeDeltaTab(sourceTab),
+        destination: safeDeltaTab(destinationTab)
+      }
+    : undefined;
   const changed = input.before === undefined ||
     input.before.revision !== input.after.revision ||
-    (input.openedTabs?.length ?? 0) > 0;
+    (input.openedTabs?.length ?? 0) > 0 ||
+    tabTransition !== undefined;
 
   return {
     outcome: input.timedOut ? "timeout" : changed ? "changed" : "no-change",
@@ -129,7 +140,8 @@ export function createBrowserActionDelta(input: {
         url: redactUrlForMetadata(tab.url),
         ...(tab.title === undefined ? {} : { title: safeDeltaText(tab.title) })
       }))
-    })
+    }),
+    ...(tabTransition === undefined ? {} : { tabTransition })
   };
 }
 
@@ -189,6 +201,14 @@ function deltaElementKey(element: BrowserActionDeltaElement): string {
 
 function safeDeltaText(value: string): string {
   return redactSensitiveText(value).slice(0, 160);
+}
+
+function safeDeltaTab(tab: BrowserTab): Pick<BrowserTab, "ref" | "url" | "title"> {
+  return {
+    ref: safeDeltaText(tab.ref),
+    url: redactUrlForMetadata(tab.url),
+    ...(tab.title === undefined ? {} : { title: safeDeltaText(tab.title) })
+  };
 }
 
 async function abortableDelay(ms: number, signal: AbortSignal | undefined): Promise<void> {

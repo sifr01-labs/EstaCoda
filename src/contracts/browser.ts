@@ -101,6 +101,10 @@ export type BrowserActionDelta = {
   addedElements?: BrowserActionDeltaElement[];
   removedElements?: BrowserActionDeltaElement[];
   openedTabs?: Array<Pick<BrowserTab, "ref" | "url" | "title">>;
+  tabTransition?: {
+    source: Pick<BrowserTab, "ref" | "url" | "title">;
+    destination: Pick<BrowserTab, "ref" | "url" | "title">;
+  };
 };
 
 export type BrowserSnapshot = {
@@ -157,6 +161,22 @@ export type BrowserTabList = {
   sessionId: string;
   tabs: BrowserTab[];
   blockedCount: number;
+};
+
+export type BrowserStateProjection = {
+  sessionStatus: "active" | "missing" | "unconfigured";
+  sessionId?: string;
+  controlledTab?: BrowserTab;
+  tabs?: BrowserTab[];
+  revision?: number;
+  readiness?: BrowserReadiness;
+  freshness: "current" | "stale";
+  externalChangeDetected?: boolean;
+  lastAction?: {
+    tool: string;
+    status: "succeeded" | "failed";
+    changed: boolean;
+  };
 };
 
 export type BrowserSwitchTabInput = {

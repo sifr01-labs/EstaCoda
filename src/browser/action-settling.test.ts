@@ -7,6 +7,7 @@ function snapshot(input: {
   url?: string;
   text?: string;
   elements?: BrowserSnapshot["elements"];
+  tabRef?: string;
 }): BrowserSnapshot {
   return {
     sessionId: "session-1",
@@ -15,7 +16,14 @@ function snapshot(input: {
     observedAt: new Date(input.revision * 1_000).toISOString(),
     readiness: "complete",
     text: input.text ?? "Loading",
-    elements: input.elements ?? []
+    elements: input.elements ?? [],
+    ...(input.tabRef === undefined ? {} : {
+      tab: {
+        ref: input.tabRef,
+        url: input.url ?? "https://example.com/start",
+        controlled: true
+      }
+    })
   };
 }
 
@@ -138,5 +146,24 @@ describe("browser action settling", () => {
     expect(serialized).not.toContain("abcdefghijklmnopqrstuvwxyz");
     expect(serialized).not.toContain("another-secret");
     expect(serialized).toContain("[REDACTED]");
+  });
+
+  it("preserves source and destination when an action changes the controlled tab", () => {
+    const before = snapshot({ revision: 4, tabRef: "@t1", url: "https://example.com/source" });
+    const after = snapshot({ revision: 5, tabRef: "@t2", url: "https://example.com/destination" });
+    const delta = createBrowserActionDelta({
+      before,
+      after,
+      waitCondition: "dom-stable",
+      conditionMet: true,
+      timedOut: false,
+      openedTabs: [after.tab!]
+    });
+
+    expect(delta.tabTransition).toEqual({
+      source: { ref: "@t1", url: "https://example.com/source" },
+      destination: { ref: "@t2", url: "https://example.com/destination" }
+    });
+    expect(delta.outcome).toBe("changed");
   });
 });

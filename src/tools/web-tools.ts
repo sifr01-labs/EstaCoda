@@ -457,7 +457,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
     },
     {
       name: "browser.tabs",
-      description: "List safe page tabs in the current browser session. The controlled tab is the one EstaCoda will inspect and operate. Use browser.switch_tab rather than polling an unchanged list.",
+      description: "List safe page tabs only when the authoritative browser-state projection is missing or stale. The controlled tab is the one EstaCoda will inspect and operate. Use browser.switch_tab rather than polling an unchanged list.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1566,7 +1566,12 @@ function renderBrowserActionDelta(delta: BrowserActionDelta): string {
     url,
     ...(delta.addedElements ?? []).map((element) => `Added: ${renderDeltaElement(element)}`),
     ...(delta.removedElements ?? []).map((element) => `Removed: ${renderDeltaElement(element)}`),
-    ...(delta.openedTabs ?? []).map((tab) => `Opened tab: ${tab.ref}${tab.title === undefined ? "" : ` ${tab.title}`} — ${tab.url}`)
+    ...(delta.openedTabs ?? []).map((tab) => `Opened tab: ${tab.ref}${tab.title === undefined ? "" : ` ${tab.title}`} — ${tab.url}`),
+    ...(delta.tabTransition === undefined ? [] : [
+      `Controlled tab: ${delta.tabTransition.source.ref} → ${delta.tabTransition.destination.ref}`,
+      `Source: ${delta.tabTransition.source.url}`,
+      `Destination: ${delta.tabTransition.destination.url}`
+    ])
   ].join("\n");
 }
 

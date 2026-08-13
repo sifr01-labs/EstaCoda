@@ -113,6 +113,7 @@ function createHarness(input: {
   fetch?: CdpFetchLike;
   client?: FakeCdpClient;
   supervisorFactory?: (options: CdpTargetSupervisorOptions) => Promise<CdpTargetSupervisor>;
+  pageVisibility?: Record<string, "visible" | "hidden">;
 } = {}) {
   const client = input.client ?? new FakeCdpClient();
   const createdClients: string[] = [];
@@ -127,6 +128,15 @@ function createHarness(input: {
     fetch: input.fetch ?? createFetch(createDefaultRoutes()),
     createClient: vi.fn(async (webSocketUrl: string) => {
       createdClients.push(webSocketUrl);
+      if (webSocketUrl !== "ws://browser" && input.pageVisibility !== undefined) {
+        return {
+          send: vi.fn(async (method: string) => {
+            if (method !== "Runtime.evaluate") throw new Error(`Unexpected CDP method: ${method}`);
+            return { result: { value: input.pageVisibility?.[webSocketUrl] ?? "hidden" } };
+          }),
+          close: vi.fn()
+        };
+      }
       return client;
     }),
     supervisorFactory
@@ -245,6 +255,36 @@ describe("CdpTargetManager", () => {
         title: "Details",
         openerId: "target-1"
       }
+    ]);
+  });
+
+  it("detects the visible page target without reading page content", async () => {
+    const client = new FakeCdpClient();
+    client.targetInfos = [
+      { targetId: "target-1", type: "page", url: "https://example.com/one", browserContextId: "context-1" },
+      { targetId: "target-2", type: "page", url: "https://example.com/two", browserContextId: "context-1" }
+    ];
+    const harness = createHarness({
+      client,
+      fetch: createFetch(createDefaultRoutes({
+        list: {
+          payload: [
+            { id: "target-1", webSocketDebuggerUrl: "ws://page/target-1" },
+            { id: "target-2", webSocketDebuggerUrl: "ws://page/target-2" }
+          ]
+        }
+      })),
+      pageVisibility: {
+        "ws://page/target-1": "hidden",
+        "ws://page/target-2": "visible"
+      }
+    });
+
+    await expect(harness.manager.findVisiblePageTargetId("context-1", "target-1")).resolves.toBe("target-2");
+    expect(harness.createdClients).toEqual([
+      "ws://browser",
+      "ws://page/target-1",
+      "ws://page/target-2"
     ]);
   });
 

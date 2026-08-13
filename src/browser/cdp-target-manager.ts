@@ -180,6 +180,32 @@ export class CdpTargetManager {
     });
   }
 
+  async findVisiblePageTargetId(browserContextId: string, preferredTargetId?: string): Promise<string | undefined> {
+    const targets = await this.listPageTargets(browserContextId);
+    const ordered = preferredTargetId === undefined
+      ? targets
+      : [
+          ...targets.filter((target) => target.targetId === preferredTargetId),
+          ...targets.filter((target) => target.targetId !== preferredTargetId)
+        ];
+    for (const target of ordered.slice(0, 16)) {
+      let client: CdpClientLike | undefined;
+      try {
+        client = await this.#createClient(target.pageWebSocketDebuggerUrl);
+        const result = await client.send("Runtime.evaluate", {
+          expression: "document.visibilityState",
+          returnByValue: true
+        });
+        if (runtimeEvaluationValue(result) === "visible") return target.targetId;
+      } catch {
+        // A closing or transient target is ignored; no page content is read.
+      } finally {
+        client?.close();
+      }
+    }
+    return undefined;
+  }
+
   async attachTarget(browserContextId: string, targetId: string): Promise<AttachedCdpTarget> {
     const contextId = requireNonEmptyString(browserContextId, "browserContextId");
     const requestedTargetId = requireNonEmptyString(targetId, "targetId");
@@ -316,6 +342,11 @@ export class CdpTargetManager {
       });
     }
   }
+}
+
+function runtimeEvaluationValue(value: unknown): unknown {
+  if (!isRecord(value) || !isRecord(value.result)) return undefined;
+  return value.result.value;
 }
 
 function requireNonEmptyString(value: string, name: string): string {
