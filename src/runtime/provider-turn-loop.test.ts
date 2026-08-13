@@ -19,12 +19,14 @@ import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { stableToolCallId, ToolCallPlanner } from "../tools/tool-call-planner.js";
+import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
 import { RunRecorder } from "./run-recorder.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
 import { ProviderTurnLoop, type ProviderTurnLoopOptions } from "./provider-turn-loop.js";
 import { ExecutionPlanStore } from "./execution-plan-store.js";
+import { ExecutionPlanController } from "./execution-plan-controller.js";
 import { attachEphemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 
 function createMockAdapter() {
@@ -350,12 +352,14 @@ async function runBasicProviderTurn(
     toolPlans?: ToolCallPlan[];
     context?: ContextExpansionResult;
     visibleTurnId?: string;
+    userText?: string;
+    providerTools?: OpenAICompatibleToolSchema[];
   } = {}
 ): Promise<Awaited<ReturnType<ProviderTurnLoop["run"]>>> {
   return await loop.run({
     visibleTurnId: callbacks.visibleTurnId,
-    userText: "current user request",
-    routedText: "current user request",
+    userText: callbacks.userText ?? "current user request",
+    routedText: callbacks.userText ?? "current user request",
     selectedSkill: undefined,
     selectedSkillInstructions: undefined,
     selectedSkillResources: undefined,
@@ -367,7 +371,7 @@ async function runBasicProviderTurn(
     projectContext: undefined,
     attachments: callbacks.attachments,
     memoryPromptContext: undefined,
-    providerTools: [],
+    providerTools: callbacks.providerTools ?? [],
     fallbackText: "",
     toolPlans: callbacks.toolPlans ?? [],
     trustedWorkspace: false,
@@ -449,6 +453,21 @@ function providerToolCall(
     name,
     argumentsText
   };
+}
+
+function toolProviderSchema(name: string): OpenAICompatibleToolSchema {
+  return {
+    type: "function",
+    function: {
+      name,
+      description: `${name} test schema`,
+      parameters: { type: "object", properties: {} }
+    }
+  };
+}
+
+function planProviderSchema(): OpenAICompatibleToolSchema {
+  return toolProviderSchema("plan");
 }
 
 function truncatedToolCallExecution(input: {
@@ -629,6 +648,7 @@ async function createPostToolNudgeHarness(input: {
   finalizationReserveMs?: number;
   taskExecution?: ProviderTurnLoopOptions["taskExecution"];
   executionPlanReader?: ProviderTurnLoopOptions["executionPlanReader"];
+  executionPlanController?: ProviderTurnLoopOptions["executionPlanController"];
   onExecutePlans?: (input: {
     sessionDb: InMemorySessionDB;
     sessionId: string;
@@ -722,7 +742,8 @@ async function createPostToolNudgeHarness(input: {
       finalizationReserveMs: input.finalizationReserveMs ?? 0
     },
     taskExecution: input.taskExecution,
-    executionPlanReader: input.executionPlanReader
+    executionPlanReader: input.executionPlanReader,
+    executionPlanController: input.executionPlanController
   });
 
   return {
@@ -1707,6 +1728,178 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(result.providerExecution?.response?.content).toContain("The Mission is incomplete.");
     expect(result.providerExecution?.response?.content).toContain("- Build collection");
     expect(result.providerExecution?.response?.content).toContain("6 consecutive iterations");
+  });
+
+  it("requires a Mission before executing the natural MTN and Postman tool batch", async () => {
+    const planStore = new ExecutionPlanStore();
+    const controller = new ExecutionPlanController(planStore);
+    const firstCalls = [
+      providerToolCall("call-browser", "{}", "browser.snapshot"),
+      providerToolCall("call-postman", "{}", "mcp.postman.getCollection")
+    ];
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-plan", JSON.stringify({
+          operation: "write",
+          objective: "Set up all six MTN products in Postman",
+          items: [
+            { id: "inspect", content: "Inspect MTN product details", status: "in_progress" },
+            { id: "update", content: "Update Postman", status: "pending" },
+            { id: "verify", content: "Verify the collection", status: "pending" }
+          ]
+        }), "plan")]),
+        providerExecution("", firstCalls),
+        providerExecution("Mission complete.")
+      ],
+      toolSteps: [
+        {
+          executions: [{
+            ...toolExecutionForTool("call-plan", "plan", "plan started"),
+            riskClass: "read-only-local",
+            tool: { ...testTool, name: "plan", riskClass: "read-only-local", toolsets: ["core"] }
+          }]
+        },
+        {
+          executions: [
+            toolExecutionForTool("call-browser", "browser.snapshot", "six products"),
+            toolExecutionForTool("call-postman", "mcp.postman.getCollection", "collection")
+          ]
+        },
+        {}
+      ],
+      executionPlanController: controller,
+      maxProviderIterations: 3,
+      onExecutePlans: ({ stepInput }) => {
+        if (stepInput.providerExecution?.toolCalls.some((call) => call.name === "plan")) {
+          return controller.write({
+            objective: "Set up all six MTN products in Postman",
+            items: [
+              { id: "inspect", content: "Inspect MTN product details", status: "in_progress" },
+              { id: "update", content: "Update Postman", status: "pending" },
+              { id: "verify", content: "Verify the collection", status: "pending" }
+            ]
+          }, "visible-turn").then(() => undefined);
+        }
+      }
+    });
+
+    await runBasicProviderTurn(harness.loop, {
+      visibleTurnId: "visible-turn",
+      userText: "Look at the approved app and set up all 6 products in our Postman collection, then verify the result.",
+      providerTools: [planProviderSchema(), toolProviderSchema("browser.snapshot"), toolProviderSchema("mcp.postman.getCollection")]
+    });
+
+    const executedBatches = harness.executePlans.mock.calls
+      .map(([call]) => call.providerExecution?.toolCalls.map((toolCall) => toolCall.name) ?? [])
+      .filter((names) => names.length > 0);
+    expect(executedBatches).toEqual([
+      ["plan"],
+      ["browser.snapshot", "mcp.postman.getCollection"]
+    ]);
+    const firstRequest = harness.completeSpy.mock.calls[0]?.[0] as ProviderRequest;
+    expect((firstRequest.tools as OpenAICompatibleToolSchema[] | undefined)?.map((tool) => tool.function.name)).toEqual(["plan"]);
+    expect(JSON.stringify(firstRequest.messages)).toContain("clearly multi-step foreground work");
+  });
+
+  it("creates a provisional Mission when the model ignores the activation nudge", async () => {
+    const controller = new ExecutionPlanController(new ExecutionPlanStore());
+    const mutationCall = providerToolCall("call-update", "{}", "mcp.postman.updateCollection");
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [mutationCall]),
+        providerExecution("", [mutationCall]),
+        providerExecution("Updated.")
+      ],
+      toolSteps: [
+        { executions: [toolExecutionForTool("call-update", "mcp.postman.updateCollection", "updated")] },
+        {}
+      ],
+      executionPlanController: controller,
+      maxProviderIterations: 3
+    });
+
+    await runBasicProviderTurn(harness.loop, {
+      visibleTurnId: "visible-turn",
+      userText: "Update the collection and then verify the resulting state.",
+      providerTools: [planProviderSchema(), toolProviderSchema("mcp.postman.updateCollection")]
+    });
+
+    const executedBatches = harness.executePlans.mock.calls
+      .map(([call]) => call.providerExecution?.toolCalls.map((toolCall) => toolCall.name) ?? [])
+      .filter((names) => names.length > 0);
+    expect(executedBatches).toEqual([["mcp.postman.updateCollection"]]);
+    expect(controller.current()).toMatchObject({
+      status: "active",
+      originTurnId: "visible-turn",
+      items: [
+        { id: "execute", status: "in_progress" },
+        { id: "verify", status: "pending" }
+      ]
+    });
+  });
+
+  it("does not activate a Mission for simple or read-only multi-part work", async () => {
+    const controller = new ExecutionPlanController(new ExecutionPlanStore());
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("", [providerToolCall("call-nav", "{}", "browser.navigate")])],
+      toolSteps: [{ executions: [toolExecutionForTool("call-nav", "browser.navigate", "opened")] }],
+      executionPlanController: controller,
+      maxProviderIterations: 1
+    });
+
+    await runBasicProviderTurn(harness.loop, {
+      visibleTurnId: "visible-turn",
+      userText: "Open developers.mtn.com.",
+      providerTools: [planProviderSchema(), toolProviderSchema("browser.navigate")]
+    });
+
+    expect(harness.executePlans).toHaveBeenCalledTimes(1);
+    expect(controller.current()).toBeUndefined();
+  });
+
+  it("does not replace an existing Mission during automatic activation assessment", async () => {
+    const controller = new ExecutionPlanController(new ExecutionPlanStore());
+    await controller.write({
+      objective: "Existing Mission",
+      items: [{ id: "existing", content: "Keep working", status: "in_progress" }]
+    }, "older-turn");
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("", [providerToolCall("call-update", "{}", "mcp.postman.updateCollection")])],
+      toolSteps: [{ executions: [toolExecutionForTool("call-update", "mcp.postman.updateCollection", "updated")] }],
+      executionPlanController: controller,
+      maxProviderIterations: 1
+    });
+
+    await runBasicProviderTurn(harness.loop, {
+      visibleTurnId: "newer-turn",
+      userText: "Update the collection and then verify the resulting state.",
+      providerTools: [planProviderSchema(), toolProviderSchema("mcp.postman.updateCollection")]
+    });
+
+    expect(controller.current()).toMatchObject({
+      objective: "Existing Mission",
+      originTurnId: "older-turn",
+      revision: 1
+    });
+  });
+
+  it("does not auto-activate when the foreground plan tool is unavailable", async () => {
+    const controller = new ExecutionPlanController(new ExecutionPlanStore());
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("", [providerToolCall("call-update", "{}", "mcp.postman.updateCollection")])],
+      toolSteps: [{ executions: [toolExecutionForTool("call-update", "mcp.postman.updateCollection", "updated")] }],
+      executionPlanController: controller,
+      maxProviderIterations: 1
+    });
+
+    await runBasicProviderTurn(harness.loop, {
+      visibleTurnId: "visible-turn",
+      userText: "Update the collection and then verify the resulting state.",
+      providerTools: [toolProviderSchema("mcp.postman.updateCollection")]
+    });
+
+    expect(controller.current()).toBeUndefined();
+    expect(harness.executePlans).toHaveBeenCalledTimes(1);
   });
 
   it("resets no-progress counting after a material plan transition", async () => {

@@ -572,7 +572,8 @@ export class AgentLoopBuilder {
       providerRequestDefaults: substrate.executionControls?.providerRequestDefaults,
       initialContextWindowUsage,
       taskExecution: input.taskExecution,
-      executionPlanReader: executionPlanController
+      executionPlanReader: executionPlanController,
+      executionPlanController
     });
     const skillPlaybookRunner = (this.#factories.skillPlaybookRunner ?? ((options) => new SkillPlaybookRunner(options)))({
       toolExecutor,

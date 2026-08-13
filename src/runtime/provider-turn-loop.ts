@@ -1,7 +1,11 @@
 import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
-import type { ExecutionPlan, ExecutionPlanReader } from "../contracts/execution-plan.js";
+import type {
+  ExecutionPlan,
+  ExecutionPlanControllerApi,
+  ExecutionPlanReader
+} from "../contracts/execution-plan.js";
 import type { MemoryPromptContext } from "../contracts/memory.js";
 import type {
   ModelProfile,
@@ -73,11 +77,14 @@ import {
   type TurnToolFeedbackLedger
 } from "./turn-tool-feedback-ledger.js";
 import { ExecutionPlanProgressGuard } from "./execution-plan-progress-guard.js";
+import { assessExecutionPlanActivation, isPlanToolName } from "./execution-plan-activation.js";
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
 const BROWSER_NO_PROGRESS_NUDGE = "Repeated browser observations show no state change. Do not call browser.snapshot or browser.tabs again unless another action may have changed the page. Switch tabs or take a different browser action; if progress is blocked, explain what is blocking it.";
 const BROWSER_NO_PROGRESS_STOP = "I stopped this browser turn because repeated observations showed no state change. I can continue after switching tabs, taking a different browser action, or receiving clarification about the next step.";
 const EXECUTION_PLAN_PROGRESS_NUDGE = "Your active execution plan has made no material progress for several iterations. Change approach and continue executing the original request now. Make progress by transitioning a plan item, collecting new successful evidence, completing an action or verification, changing browser state, or recording a concrete blocker. Do not merely reread the plan, repeat an observation or failure, narrate the next action, or ask whether to continue.";
+const EXECUTION_PLAN_ACTIVATION_NUDGE = "This is clearly multi-step foreground work. Before doing anything else, call plan with operation=write and create a concise Mission with exactly one in_progress item and the remaining items pending. Call only plan in this response; do not call substantive tools yet, narrate the plan, or ask whether to proceed.";
+const PROVISIONAL_EXECUTION_PLAN_OBJECTIVE_MAX_CHARS = 500;
 
 export type ProviderTurnLoopBudgets = {
   maxProviderIterations: number;
@@ -127,6 +134,7 @@ export type ProviderTurnLoopOptions = {
   initialContextWindowUsage?: SessionContextWindowUsage;
   taskExecution?: ProviderUsageTaskAttribution;
   executionPlanReader?: ExecutionPlanReader;
+  executionPlanController?: ExecutionPlanControllerApi;
 };
 
 export class ProviderTurnLoop {
@@ -151,6 +159,7 @@ export class ProviderTurnLoop {
   readonly #profileId: string;
   readonly #taskExecution: ProviderUsageTaskAttribution | undefined;
   readonly #executionPlanReader: ExecutionPlanReader | undefined;
+  readonly #executionPlanController: ExecutionPlanControllerApi | undefined;
   #providerRequestSequence = 0;
   #lastPromptTokens = 0;
   #lastActualPromptTokens: number | undefined;
@@ -190,7 +199,8 @@ export class ProviderTurnLoop {
     this.#providerRequestDefaults = options.providerRequestDefaults ?? {};
     this.#profileId = options.profileId;
     this.#taskExecution = options.taskExecution;
-    this.#executionPlanReader = options.executionPlanReader;
+    this.#executionPlanController = options.executionPlanController;
+    this.#executionPlanReader = options.executionPlanController ?? options.executionPlanReader;
     this.#lastActualPromptTokens = options.initialContextWindowUsage?.usedTokens;
   }
 
@@ -257,6 +267,11 @@ export class ProviderTurnLoop {
     let delegatedAnswerOwnership: PendingDelegatedAnswerOwnership | undefined;
     let pendingExecutionPlanContinuation = false;
     let pendingExecutionPlanProgressNudge = false;
+    const initialExecutionPlanActivation = this.#executionPlanActivation(input, []);
+    let pendingExecutionPlanActivationNudge = initialExecutionPlanActivation.required;
+    let retryExecutionPlanActivation = false;
+    let executionPlanActivationNudged = initialExecutionPlanActivation.required;
+    let automaticExecutionPlanRequired = initialExecutionPlanActivation.required;
     let executionPlanIncomplete = false;
     let emergencyDeadlineReached = false;
     let toolFeedbackLedger = createTurnToolFeedbackLedger();
@@ -324,11 +339,13 @@ export class ProviderTurnLoop {
         );
         break;
       }
-      const phase: "initial" | "continuation" = iteration === 0 || retryEmptyInitialResponse || retryReasoningOnlyInitialResponse
+      const phase: "initial" | "continuation" = iteration === 0 || retryEmptyInitialResponse || retryReasoningOnlyInitialResponse || retryExecutionPlanActivation
         ? "initial"
         : "continuation";
       retryEmptyInitialResponse = false;
       retryReasoningOnlyInitialResponse = false;
+      retryExecutionPlanActivation = false;
+      const activationRestrictedRequest = pendingExecutionPlanActivationNudge;
 
       let execution = phase === "initial"
         ? await this.#completeWithProvider({
@@ -336,7 +353,8 @@ export class ProviderTurnLoop {
             iteration,
             loopStartedAt,
             reasoningOnlyPrefill: pendingReasoningOnlyPrefill,
-            executionPlanProgressNudge: pendingExecutionPlanProgressNudge
+            executionPlanProgressNudge: pendingExecutionPlanProgressNudge,
+            executionPlanActivationNudge: pendingExecutionPlanActivationNudge
           })
         : await this.#continueProviderAfterTools({
           ...input,
@@ -358,6 +376,7 @@ export class ProviderTurnLoop {
       pendingBrowserNoProgressNudge = false;
       pendingExecutionPlanContinuation = false;
       pendingExecutionPlanProgressNudge = false;
+      pendingExecutionPlanActivationNudge = false;
       pendingReasoningOnlyPrefill = false;
 
       if (execution === undefined) {
@@ -535,7 +554,93 @@ export class ProviderTurnLoop {
       }
 
       if (execution.ok === true && execution.toolCalls.length > 0) {
+        const activation = this.#executionPlanActivation(input, execution.toolCalls.map((call) => call.name ?? ""));
+        automaticExecutionPlanRequired ||= activation.required;
+        const onlyPlanCalls = execution.toolCalls.length > 0 &&
+          execution.toolCalls.every((toolCall) => isPlanToolName(toolCall.name));
+        if (activationRestrictedRequest && !onlyPlanCalls) {
+          await this.#writeProvisionalExecutionPlan(input);
+          retryExecutionPlanActivation = true;
+          await this.#runRecorder.recordProviderIteration({
+            iteration,
+            phase,
+            ok: execution.ok,
+            toolCalls: execution.toolCalls.length,
+            executedTools: 0,
+            exhausted: false
+          });
+          if (consumedProviderIterations > 1) iteration += consumedProviderIterations - 1;
+          continue;
+        }
+        if (
+          activation.required &&
+          this.#executionPlanReader?.current() === undefined &&
+          !onlyPlanCalls &&
+          !executionPlanActivationNudged &&
+          iteration + consumedProviderIterations < this.#budgets.maxProviderIterations
+        ) {
+          executionPlanActivationNudged = true;
+          pendingExecutionPlanActivationNudge = true;
+          retryExecutionPlanActivation = true;
+          await this.#runRecorder.recordProviderIteration({
+            iteration,
+            phase,
+            ok: execution.ok,
+            toolCalls: execution.toolCalls.length,
+            executedTools: 0,
+            exhausted: false
+          });
+          if (consumedProviderIterations > 1) iteration += consumedProviderIterations - 1;
+          continue;
+        }
+        if (
+          activation.required &&
+          this.#executionPlanReader?.current() === undefined &&
+          !onlyPlanCalls
+        ) {
+          await this.#writeProvisionalExecutionPlan(input);
+        }
         execution = await this.#persistProviderToolCallTurn(execution);
+      } else if (execution.ok === true) {
+        const activation = this.#executionPlanActivation(input, []);
+        automaticExecutionPlanRequired ||= activation.required;
+        if (activationRestrictedRequest) {
+          await this.#writeProvisionalExecutionPlan(input);
+          retryExecutionPlanActivation = true;
+          await this.#runRecorder.recordProviderIteration({
+            iteration,
+            phase,
+            ok: execution.ok,
+            toolCalls: 0,
+            executedTools: 0,
+            exhausted: false
+          });
+          if (consumedProviderIterations > 1) iteration += consumedProviderIterations - 1;
+          continue;
+        }
+        if (
+          activation.required &&
+          this.#executionPlanReader?.current() === undefined &&
+          !executionPlanActivationNudged &&
+          iteration + consumedProviderIterations < this.#budgets.maxProviderIterations
+        ) {
+          executionPlanActivationNudged = true;
+          pendingExecutionPlanActivationNudge = true;
+          retryExecutionPlanActivation = true;
+          await this.#runRecorder.recordProviderIteration({
+            iteration,
+            phase,
+            ok: execution.ok,
+            toolCalls: 0,
+            executedTools: 0,
+            exhausted: false
+          });
+          if (consumedProviderIterations > 1) iteration += consumedProviderIterations - 1;
+          continue;
+        }
+        if (activation.required && this.#executionPlanReader?.current() === undefined) {
+          await this.#writeProvisionalExecutionPlan(input);
+        }
       }
 
       const beforeExecutions = providerToolExecutions.length;
@@ -556,6 +661,13 @@ export class ProviderTurnLoop {
         onEvent: input.onEvent
       });
       const loopToolExecutions = loopToolExecutionResult.executions;
+      if (
+        automaticExecutionPlanRequired &&
+        this.#executionPlanReader?.current() === undefined &&
+        execution.toolCalls.some((toolCall) => isPlanToolName(toolCall.name))
+      ) {
+        await this.#writeProvisionalExecutionPlan(input);
+      }
       maxObservedRisk = loopToolExecutionResult.maxObservedRisk;
       providerToolExecutions.push(...loopToolExecutions);
       delegatedAnswerOwnership = pendingDelegatedAnswerOwnership(loopToolExecutions) ?? delegatedAnswerOwnership;
@@ -860,6 +972,7 @@ export class ProviderTurnLoop {
     reasoningOnlyPrefill?: boolean;
     executionPlanContinuation?: boolean;
     executionPlanProgressNudge?: boolean;
+    executionPlanActivationNudge?: boolean;
   }): Promise<ProviderExecutionResult | undefined> {
     if (this.#providerExecutor === undefined || this.#model === undefined || this.#model.provider === "unconfigured") {
       return undefined;
@@ -893,6 +1006,9 @@ export class ProviderTurnLoop {
     if (input.executionPlanProgressNudge === true) {
       prompt.messages.push({ role: "user", content: EXECUTION_PLAN_PROGRESS_NUDGE });
     }
+    if (input.executionPlanActivationNudge === true) {
+      prompt.messages.push({ role: "user", content: EXECUTION_PLAN_ACTIVATION_NUDGE });
+    }
     this.#lastPromptTokens = prompt.budget.estimatedTokens;
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
     await this.#recordNativeHistoryDiagnostics(prompt, "primary");
@@ -904,7 +1020,9 @@ export class ProviderTurnLoop {
       messages: prompt.messages,
       ...this.#providerRequestOptions(),
       tools: this.#model.supportsTools && input.providerTools.length > 0
-        ? input.providerTools
+        ? input.executionPlanActivationNudge === true
+          ? input.providerTools.filter((tool) => isPlanToolName(tool.function.name))
+          : input.providerTools
         : undefined
     });
     const providerPreferences = {
@@ -1145,6 +1263,51 @@ export class ProviderTurnLoop {
         ? {}
         : { maxTokens: this.#providerRequestDefaults.maxTokens })
     };
+  }
+
+  #executionPlanActivation(
+    input: { userText: string; providerTools: OpenAICompatibleToolSchema[]; visibleTurnId?: string },
+    proposedToolNames: readonly string[]
+  ) {
+    if (
+      this.#executionPlanController === undefined ||
+      input.visibleTurnId === undefined ||
+      this.#executionPlanReader?.current() !== undefined ||
+      !input.providerTools.some((tool) => isPlanToolName(tool.function.name))
+    ) {
+      return { required: false, reasons: [] } as const;
+    }
+    return assessExecutionPlanActivation({
+      userText: input.userText,
+      proposedToolNames
+    });
+  }
+
+  async #writeProvisionalExecutionPlan(input: {
+    userText: string;
+    visibleTurnId?: string;
+    onEvent?: RuntimeEventSink;
+  }): Promise<void> {
+    if (
+      this.#executionPlanController === undefined ||
+      input.visibleTurnId === undefined ||
+      this.#executionPlanReader?.current() !== undefined
+    ) return;
+    await this.#executionPlanController.write({
+      objective: boundedProvisionalObjective(input.userText),
+      items: [
+        {
+          id: "execute",
+          content: "Complete the requested multi-step work",
+          status: "in_progress"
+        },
+        {
+          id: "verify",
+          content: "Verify the resulting state and report the outcome",
+          status: "pending"
+        }
+      ]
+    }, input.visibleTurnId, input.onEvent);
   }
 
   async #completeProviderRequestWithFinalizationRetries(input: {
@@ -1941,6 +2104,12 @@ function providerExecutionEventMetadata(execution: ProviderExecutionResult): {
 
 function isRecoverableToolPlanStatus(status: ToolCallPlan["status"]): boolean {
   return status === "invalid" || status === "unavailable" || status === "blocked";
+}
+
+function boundedProvisionalObjective(userText: string): string {
+  const normalized = userText.replace(/\s+/gu, " ").trim();
+  if ([...normalized].length <= PROVISIONAL_EXECUTION_PLAN_OBJECTIVE_MAX_CHARS) return normalized;
+  return [...normalized].slice(0, PROVISIONAL_EXECUTION_PLAN_OBJECTIVE_MAX_CHARS - 1).join("").trimEnd() + "…";
 }
 
 function isHousekeepingToolName(name: string | undefined): boolean {

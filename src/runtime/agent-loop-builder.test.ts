@@ -146,11 +146,13 @@ describe("AgentLoopBuilder", () => {
 
   it("shares one read-only execution-plan projection with the root provider and agent loops", async () => {
     const providerReaders: unknown[] = [];
+    const providerControllers: unknown[] = [];
     const agentReaders: unknown[] = [];
     const harness = await createBuilderHarness({
       factories: {
         providerTurnLoop(options) {
           providerReaders.push(options.executionPlanReader);
+          providerControllers.push(options.executionPlanController);
           return { run: vi.fn() } as never;
         },
         agentLoop(options) {
@@ -164,6 +166,7 @@ describe("AgentLoopBuilder", () => {
     await harness.build("child-session", { parentSessionId: "root-session" });
 
     expect(providerReaders).toEqual([root.executionPlanController, undefined]);
+    expect(providerControllers).toEqual([root.executionPlanController, undefined]);
     expect(agentReaders).toEqual([root.executionPlanController, undefined]);
   });
 

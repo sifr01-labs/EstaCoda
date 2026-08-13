@@ -10,7 +10,7 @@ export function createPlanTools(options: {
   return [{
     name: "plan",
     description:
-      "Create, read, or update the bounded execution plan for the current foreground request. Use write to start or replace a Mission, merge as work advances, and read only when the current plan is not already present in context. This tool tracks work but grants no authority and does not create durable Tasks.",
+      "Create, read, or update the bounded execution plan for the current foreground request. Start a Mission with write before actionable work that has 3 or more dependent steps, multiple targets or systems, or an external mutation that must be verified. Merge as work advances, and read only when the current plan is not already present in context. This tool tracks work but grants no authority and does not create durable Tasks.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
