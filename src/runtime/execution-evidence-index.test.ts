@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
-import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
+import { ExecutionEvidenceIndex, executionEvidenceStatus } from "./execution-evidence-index.js";
 import type { SessionEvent } from "../contracts/session.js";
 
 function execution(overrides: Partial<ToolExecutionRecord> = {}): ToolExecutionRecord {
@@ -25,6 +25,13 @@ function execution(overrides: Partial<ToolExecutionRecord> = {}): ToolExecutionR
 }
 
 describe("ExecutionEvidenceIndex", () => {
+  it("shares one deterministic evidence disposition with Mission progress", () => {
+    expect(executionEvidenceStatus(execution())).toBe("success");
+    expect(executionEvidenceStatus(execution({ result: { ok: false, content: "failed" } }))).toBe("failed");
+    expect(executionEvidenceStatus(execution({ decision: "ask", result: undefined }))).toBe("blocked");
+    expect(executionEvidenceStatus(execution({ tool: { ...execution().tool, name: "plan" } }))).toBe("ineligible");
+  });
+
   it("derives a bounded redacted receipt from a successful execution record", () => {
     const index = new ExecutionEvidenceIndex();
     index.record(execution());

@@ -12,19 +12,25 @@ type IndexedExecutionEvidence =
   | { status: "success"; evidence: ExecutionPlanEvidence }
   | { status: "failed" | "blocked" | "unavailable" | "ineligible"; tool: string };
 
+export type ExecutionEvidenceStatus = IndexedExecutionEvidence["status"];
+
+export function executionEvidenceStatus(execution: ToolExecutionRecord): ExecutionEvidenceStatus {
+  return INELIGIBLE_EVIDENCE_TOOLS.has(execution.tool.name)
+    ? "ineligible"
+    : execution.decision !== "allow"
+      ? "blocked"
+      : execution.result?.ok === true
+        ? "success"
+        : "failed";
+}
+
 export class ExecutionEvidenceIndex {
   readonly #byCallId = new Map<string, IndexedExecutionEvidence>();
 
   record(execution: ToolExecutionRecord): ExecutionEvidenceRecord | undefined {
     const toolCallId = execution.toolCallId;
     if (toolCallId === undefined || toolCallId.trim().length === 0) return undefined;
-    const status = INELIGIBLE_EVIDENCE_TOOLS.has(execution.tool.name)
-      ? "ineligible"
-      : execution.decision !== "allow"
-        ? "blocked"
-        : execution.result?.ok === true
-          ? "success"
-          : "failed";
+    const status = executionEvidenceStatus(execution);
     const targetSummary = safeTargetSummary(execution.targetSummary);
     const record: ExecutionEvidenceRecord = status === "success"
       ? {

@@ -1731,6 +1731,68 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(result.providerExecution?.response?.content).toContain("6 consecutive iterations");
   });
 
+  it("stops a bounded MTN discovery loop despite changing read results", async () => {
+    const planStore = new ExecutionPlanStore();
+    planStore.replace({
+      objective: "Configure MTN products in Postman",
+      originTurnId: "turn-mtn-progress",
+      revision: 1,
+      status: "active",
+      items: [
+        { id: "inspect", content: "Inspect MTN products in Postman", status: "in_progress" },
+        { id: "update", content: "Update the Postman collection", status: "pending" },
+        { id: "verify", content: "Verify the collection", status: "pending" }
+      ]
+    });
+    const toolNames = [
+      "mcp.postman.getCollection",
+      "mcp.postman.getWorkspaces",
+      "browser.snapshot",
+      "mcp.postman.getCollection",
+      "browser.navigate",
+      "mcp.postman.getCollection",
+      "mcp.postman.getWorkspaces",
+      "browser.snapshot",
+      "mcp.postman.getCollection"
+    ];
+    const harness = await createPostToolNudgeHarness({
+      responses: toolNames.map((toolName, index) => providerExecution("", [
+        providerToolCall(`call-loop-${index + 1}`, "{}", toolName)
+      ])),
+      toolSteps: toolNames.map((toolName, index) => ({
+        executions: [toolExecutionForTool(
+          `call-loop-${index + 1}`,
+          toolName,
+          `Changing representation ${index + 1}`
+        )]
+      })),
+      executionPlanReader: planStore,
+      maxProviderIterations: 12
+    });
+    const events: RuntimeEvent[] = [];
+
+    const result = await runBasicProviderTurn(harness.loop, {
+      onEvent: (event) => events.push(event)
+    });
+    const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
+    const nudgeText = "Your active execution plan has made no material progress for several iterations.";
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(8);
+    expect(harness.executePlans).toHaveBeenCalledTimes(8);
+    expect(requests.filter((request) => JSON.stringify(request.messages).includes(nudgeText))).toHaveLength(1);
+    expect(result.executionPlanIncomplete).toBe(true);
+    expect(result.providerExecution?.response?.content).toContain("The Mission is incomplete.");
+    expect(result.providerExecution?.response?.content).toContain("no Mission transition, target mutation, verification evidence, or concrete blocker");
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "provider-budget-exhausted",
+        budget: "execution-plan-no-progress-iterations",
+        limit: 6,
+        observed: 6
+      })
+    ]));
+  });
+
   it("requires a Mission before executing the natural MTN and Postman tool batch", async () => {
     const planStore = new ExecutionPlanStore();
     const controller = new ExecutionPlanController(planStore);

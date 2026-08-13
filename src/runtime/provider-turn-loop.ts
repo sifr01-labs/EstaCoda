@@ -82,7 +82,7 @@ import { assessExecutionPlanActivation, isPlanToolName } from "./execution-plan-
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
 const BROWSER_NO_PROGRESS_NUDGE = "Repeated browser observations show no state change. Do not call browser.snapshot or browser.tabs again unless another action may have changed the page. Switch tabs or take a different browser action; if progress is blocked, explain what is blocking it.";
 const BROWSER_NO_PROGRESS_STOP = "I stopped this browser turn because repeated observations showed no state change. I can continue after switching tabs, taking a different browser action, or receiving clarification about the next step.";
-const EXECUTION_PLAN_PROGRESS_NUDGE = "Your active execution plan has made no material progress for several iterations. Change approach and continue executing the original request now. Make progress by transitioning a plan item, collecting new successful evidence, completing an action or verification, changing browser state, or recording a concrete blocker. Do not merely reread the plan, repeat an observation or failure, narrate the next action, or ask whether to continue.";
+const EXECUTION_PLAN_PROGRESS_NUDGE = "Your active execution plan has made no material progress for several iterations. Change approach and continue executing the original request now. Make progress by transitioning the active plan item, performing a relevant target mutation, recording verification evidence, or recording a concrete blocker. Repeated reads, cosmetic browser changes, navigation churn, narration, and failed plan updates do not count as progress. Do not ask whether to continue.";
 const EXECUTION_PLAN_ACTIVATION_NUDGE = "This is clearly multi-step foreground work. Before doing anything else, call plan with operation=write and create a concise Mission with exactly one in_progress item and the remaining items pending. Call only plan in this response; do not call substantive tools yet, narrate the plan, or ask whether to proceed.";
 const PROVISIONAL_EXECUTION_PLAN_OBJECTIVE_MAX_CHARS = 500;
 
@@ -2291,11 +2291,17 @@ function incompletePlanClosing(
   noProgressLimit?: number
 ): string {
   if (locale === "ar") {
-    if (reason === "no_progress") return `توقّف التنفيذ بعد ${noProgressLimit ?? 6} محاولات متتالية بلا تقدم ملموس.`;
+    if (reason === "no_progress") return [
+      `توقّف التنفيذ بعد ${noProgressLimit ?? 6} محاولات متتالية بلا تقدم ملموس.`,
+      "لم يُسجَّل انتقال في خطة التنفيذ أو تغيير في الحالة المستهدفة أو دليل تحقق أو عائق محدد."
+    ].join(" ");
     if (reason === "deadline") return "توقّف بدء عمل جديد عند بلوغ مهلة الطوارئ، مع الحفاظ على وقت لإظهار نتيجة موثوقة.";
     return "توقّف التنفيذ عند بلوغ حد الأمان العام مع بقاء عناصر غير مكتملة.";
   }
-  if (reason === "no_progress") return `Execution stopped after ${noProgressLimit ?? 6} consecutive iterations without material progress.`;
+  if (reason === "no_progress") return [
+    `Execution stopped after ${noProgressLimit ?? 6} consecutive iterations without material progress;`,
+    "no Mission transition, target mutation, verification evidence, or concrete blocker was recorded."
+  ].join(" ");
   if (reason === "deadline") return "New work stopped at the emergency deadline reserve so the runtime could return a truthful local result.";
   return "Execution reached a general safety ceiling with unfinished items remaining.";
 }
