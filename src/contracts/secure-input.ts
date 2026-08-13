@@ -149,8 +149,14 @@ export type SecureInputCollectionResult =
   | { status: "provided"; value: Uint8Array }
   | { status: "cancelled" };
 
+/** Verified metadata supplied to a trusted collector for operator display. */
+export type SecureInputCollectionContext = {
+  verifiedDestinationLabel: string;
+};
+
 /** Trusted UI/channel boundary used to collect a value outside model context. */
 export type SecureInputCollector = (
   request: SecureInputRequestSnapshot,
-  signal: AbortSignal
+  signal: AbortSignal,
+  context: SecureInputCollectionContext
 ) => Promise<SecureInputCollectionResult>;

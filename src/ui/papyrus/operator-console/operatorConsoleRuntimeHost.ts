@@ -18,6 +18,7 @@ import {
   type OperatorConsoleState,
   type PromptSurfaceState,
   type SetupSurfaceState,
+  type SecureInputSurfaceState,
   type SlashMenuState,
   type StartupDashboardState,
   type StatusRailState,
@@ -229,6 +230,14 @@ export class OperatorConsoleRuntimeHost {
     };
   }
 
+  setSecureInput(secureInput: SecureInputSurfaceState | undefined): void {
+    if (this.#disposed) return;
+    this.#state = {
+      ...this.#state,
+      ...(secureInput === undefined ? { secureInput: undefined } : { secureInput: { ...secureInput } }),
+    };
+  }
+
   render(): OperatorConsoleRuntimeFrame {
     const layout = createOperatorConsoleLayout(this.#state, this.#state.terminal);
     return {
@@ -266,6 +275,7 @@ function cloneOperatorConsoleState(state: OperatorConsoleState): OperatorConsole
     locale: state.locale,
     startup: state.startup === undefined ? undefined : cloneStartupDashboardState(state.startup),
     setupPanel: state.setupPanel === undefined ? undefined : cloneSetupSurfaceState(state.setupPanel),
+    secureInput: state.secureInput === undefined ? undefined : { ...state.secureInput },
     transcript: state.transcript.map(cloneTranscriptBlock),
     prompt: clonePromptSurfaceState(state.prompt),
     status: cloneStatusRailState(state.status),

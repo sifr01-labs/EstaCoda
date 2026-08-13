@@ -9,6 +9,7 @@ import type { SessionCostSummary, SpendingBudgetSummary } from "../../../contrac
 import type { TaskCompletionTraceSnapshot } from "../../../contracts/task-completion-trace.js";
 import type { ResolvedBidiMode } from "../screen/bidi.js";
 import type { ExecutionPlan } from "../../../contracts/execution-plan.js";
+import type { SecureInputKind, SecureInputRetention } from "../../../contracts/secure-input.js";
 
 export type OperatorConsoleMode = "session" | "setup";
 
@@ -543,11 +544,28 @@ export type TerminalMetrics = {
   readonly bidiMode?: ResolvedBidiMode;
 };
 
+export const SECURE_INPUT_ACTIONS = ["enter-securely", "enter-directly", "cancel"] as const;
+
+export type SecureInputAction = (typeof SECURE_INPUT_ACTIONS)[number];
+
+/** Metadata-only state. The protected value must remain in the input controller. */
+export type SecureInputSurfaceState = {
+  readonly kind: SecureInputKind;
+  readonly purpose: string;
+  readonly destinationLabel: string;
+  readonly retention: SecureInputRetention;
+  readonly expiresAt: string;
+  readonly maskedCharacterCount: number;
+  readonly validationError?: string;
+  readonly focusedAction: SecureInputAction;
+};
+
 export type OperatorConsoleState = {
   readonly mode: OperatorConsoleMode;
   readonly locale: OperatorConsoleLocale;
   readonly startup?: StartupDashboardState;
   readonly setupPanel?: SetupSurfaceState;
+  readonly secureInput?: SecureInputSurfaceState;
   readonly transcript: readonly TranscriptBlock[];
   readonly prompt: PromptSurfaceState;
   readonly status: StatusRailState;
@@ -570,6 +588,7 @@ export type OperatorConsoleState = {
 export type OperatorConsoleSurface =
   | "startupDashboard"
   | "setupPanel"
+  | "secureInput"
   | "transcript"
   | "streaming"
   | "approvals"
@@ -588,6 +607,7 @@ export type OperatorConsoleSurface =
 export const OPERATOR_CONSOLE_SURFACE_ORDER: readonly OperatorConsoleSurface[] = [
   "startupDashboard",
   "setupPanel",
+  "secureInput",
   "transcript",
   "streaming",
   "approvals",
@@ -609,6 +629,7 @@ export type CreateInitialOperatorConsoleStateInput = {
   readonly locale?: OperatorConsoleLocale;
   readonly startup?: StartupDashboardState;
   readonly setupPanel?: SetupSurfaceState;
+  readonly secureInput?: SecureInputSurfaceState;
   readonly transcript?: readonly TranscriptBlock[];
   readonly prompt?: PromptSurfaceState;
   readonly status?: StatusRailState;
@@ -639,6 +660,7 @@ export function createInitialOperatorConsoleState(
     locale: input.locale ?? "en",
     ...(input.startup === undefined ? {} : { startup: input.startup }),
     ...(input.setupPanel === undefined ? {} : { setupPanel: input.setupPanel }),
+    ...(input.secureInput === undefined ? {} : { secureInput: input.secureInput }),
     transcript: input.transcript ?? [],
     prompt: input.prompt ?? createDefaultPromptSurfaceState(),
     status: input.status ?? createDefaultStatusRailState(),

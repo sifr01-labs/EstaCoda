@@ -8,6 +8,7 @@ import {
   type OperatorConsoleState,
   type PromptSurfaceState,
   type SetupSurfaceState,
+  type SecureInputSurfaceState,
   type SlashMenuState,
   type StatusRailState,
   type SteerState,
@@ -37,6 +38,7 @@ export type OperatorConsoleRawPromptSnapshot = {
   readonly status?: StatusRailState;
   readonly motionElapsedMs?: number;
   readonly setupPanel?: SetupSurfaceState;
+  readonly secureInput?: SecureInputSurfaceState;
   readonly terminal?: Partial<TerminalMetrics>;
   readonly transcript?: readonly TranscriptBlock[];
   readonly attachments?: readonly AttachmentCardState[];
@@ -77,6 +79,7 @@ export function buildOperatorConsoleStateFromRawPrompt(
     locale: snapshot.locale,
     terminal,
     setupPanel: snapshot.setupPanel,
+    secureInput: snapshot.secureInput,
     prompt: {
       value: snapshot.state.text,
       cursorOffset: snapshot.state.cursor,
@@ -134,6 +137,7 @@ export function buildOperatorConsoleRawPromptFrameWithRuntimeHost(
   host.setStatus(snapshot.status ?? createDefaultOperatorConsoleRawPromptStatus());
   host.setMotionElapsedMs(snapshot.motionElapsedMs ?? 0);
   host.setSetupPanel(snapshot.setupPanel);
+  host.setSecureInput(snapshot.secureInput);
   host.setTranscript(snapshot.transcript ?? []);
   host.setTurnActivity(snapshot.turnActivity);
   host.setExecutionPlan(snapshot.executionPlan);

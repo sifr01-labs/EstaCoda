@@ -12,6 +12,7 @@ import { getApprovalSurfaceDesiredHeight } from "./approvalSurface.js";
 import { getAttachmentSurfaceDesiredHeight } from "./attachmentSurface.js";
 import { getPromptSurfaceDesiredHeight } from "./promptSurface.js";
 import { getSetupPanelSurfaceDesiredHeight } from "./setupPanelSurface.js";
+import { getSecureInputSurfaceDesiredHeight } from "./secureInputSurface.js";
 import { getSlashSurfaceDesiredHeight } from "./slashSurface.js";
 import { getStartupDashboardSurfaceDesiredHeight } from "./startupDashboardSurface.js";
 import {
@@ -108,6 +109,15 @@ function createRegionDescriptors(
   state: OperatorConsoleState,
   terminal: TerminalMetrics
 ): readonly RegionDescriptor[] {
+  if (state.secureInput !== undefined) {
+    return [{
+      kind: "secureInput",
+      priority: PROMPT_PRIORITY,
+      minHeight: 1,
+      desiredHeight: getSecureInputSurfaceDesiredHeight(state.secureInput),
+    }];
+  }
+
   if (state.mode === "setup") {
     return createSetupRegionDescriptors(state, terminal);
   }
@@ -345,34 +355,36 @@ function surfaceOrderIndex(kind: OperatorConsoleRegionKind): number {
       return 0;
     case "setupPanel":
       return 1;
-    case "transcript":
+    case "secureInput":
       return 2;
-    case "streaming":
+    case "transcript":
       return 3;
-    case "approvals":
+    case "streaming":
       return 4;
-    case "turnActivity":
+    case "approvals":
       return 5;
-    case "mission":
+    case "turnActivity":
       return 6;
-    case "activeWork":
+    case "mission":
       return 7;
-    case "queuedSteer":
+    case "activeWork":
       return 8;
-    case "taskCards":
+    case "queuedSteer":
       return 9;
-    case "taskInspection":
+    case "taskCards":
       return 10;
-    case "attachments":
+    case "taskInspection":
       return 11;
-    case "promptGap":
+    case "attachments":
       return 12;
-    case "prompt":
+    case "promptGap":
       return 13;
-    case "slashMenu":
+    case "prompt":
       return 14;
-    case "statusRail":
+    case "slashMenu":
       return 15;
+    case "statusRail":
+      return 16;
   }
 }
 

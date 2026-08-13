@@ -363,6 +363,7 @@ export class LiveOperatorConsoleController {
     if (wasMouseModeActive && this.#tasks.mouseModeActive !== true) this.#onMouseModeChange?.(false);
     this.#runtimeHost.setTasks(this.#tasks);
     const focus = this.#runtimeHost.getState().focus;
+    const secureInput = this.#runtimeHost.getState().secureInput;
     this.#renderLoop.render({
       prompt: "",
       state: createLineEditorState(this.#steer?.mode === "drafting" ? this.#steer.draft : ""),
@@ -373,6 +374,7 @@ export class LiveOperatorConsoleController {
         motionElapsedMs,
         tasks: this.#tasks,
         focus,
+        secureInput,
         transcript: this.#transcript,
         turnActivity: this.#turnActivity,
         executionPlan: this.#executionPlan,

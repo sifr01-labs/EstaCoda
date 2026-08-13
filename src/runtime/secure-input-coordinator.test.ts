@@ -38,6 +38,7 @@ describe("SecureInputCoordinator", () => {
     const transport = browserTransport();
     registry.register(transport);
     const collectedBytes = new TextEncoder().encode("sentinel-secret-value");
+    const collect = vi.fn(async () => ({ status: "provided" as const, value: collectedBytes }));
     const waitEvents: unknown[] = [];
     const consumer = vi.fn(async (value: Uint8Array) => {
       expect(new TextDecoder().decode(value)).toBe("sentinel-secret-value");
@@ -45,7 +46,7 @@ describe("SecureInputCoordinator", () => {
     const coordinator = new SecureInputCoordinator({
       broker,
       transports: registry,
-      collect: vi.fn(async () => ({ status: "provided" as const, value: collectedBytes })),
+      collect,
       onWaitStateChange: async (event) => { waitEvents.push(event); }
     });
 
@@ -58,6 +59,11 @@ describe("SecureInputCoordinator", () => {
     });
     expect(transport.verify).toHaveBeenCalledTimes(2);
     expect(consumer).toHaveBeenCalledOnce();
+    expect(collect).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "awaiting_input" }),
+      expect.any(AbortSignal),
+      { verifiedDestinationLabel: "Verified password field" }
+    );
     expect([...collectedBytes]).toEqual(new Array(collectedBytes.length).fill(0));
     expect(broker.stats().consumed).toBe(1);
     expect(waitEvents).toMatchObject([

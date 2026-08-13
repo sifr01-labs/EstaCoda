@@ -39,6 +39,7 @@ describe("Papyrus operator console state model", () => {
     expect(getOperatorConsoleSurfaceOrder()).toEqual([
       "startupDashboard",
       "setupPanel",
+      "secureInput",
       "transcript",
       "streaming",
       "approvals",
@@ -203,6 +204,7 @@ describe("Papyrus operator console state model", () => {
     expect(state.steer).toBeUndefined();
     expect(state.startup).toBeUndefined();
     expect(state.setupPanel).toBeUndefined();
+    expect(state.secureInput).toBeUndefined();
   });
 
   it("constructs startup dashboard and setup panel state without runtime coupling", () => {

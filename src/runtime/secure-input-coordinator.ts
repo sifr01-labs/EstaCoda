@@ -115,7 +115,9 @@ export class SecureInputCoordinator {
         request: structuredClone(snapshot)
       });
 
-      const collected = await this.#collect(structuredClone(snapshot), controller.signal);
+      const collected = await this.#collect(structuredClone(snapshot), controller.signal, {
+        verifiedDestinationLabel: selection.verifiedDestination.label
+      });
       if (collected.status === "cancelled" || controller.signal.aborted) {
         this.#broker.cancelRequest(snapshot.id, input.scope);
         return receipt(selection, "cancelled", false, "Protected input collection was cancelled.");

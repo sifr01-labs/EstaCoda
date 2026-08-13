@@ -10,6 +10,7 @@ import { renderApprovalSurface } from "./approvalSurface.js";
 import { renderAttachmentSurface } from "./attachmentSurface.js";
 import { renderPromptSurface } from "./promptSurface.js";
 import { renderSetupPanelSurface } from "./setupPanelSurface.js";
+import { renderSecureInputSurface } from "./secureInputSurface.js";
 import {
   isSteerInputActive,
   renderQueuedSteerSurface,
@@ -63,6 +64,14 @@ function renderRegionLines(
     return renderSetupPanelSurface(state.setupPanel, {
       width: region.width,
       height: region.height,
+      style: state.style,
+    }).map((text) => ({ region: region.kind, text }));
+  }
+  if (region.kind === "secureInput" && state.secureInput !== undefined) {
+    return renderSecureInputSurface(state.secureInput, {
+      width: region.width,
+      height: region.height,
+      locale: state.locale,
       style: state.style,
     }).map((text) => ({ region: region.kind, text }));
   }
@@ -203,6 +212,8 @@ function regionLabel(
       return `Startup: ${state.startup?.productName ?? "EstaCoda"}`;
     case "setupPanel":
       return `Setup: ${state.setupPanel?.title ?? ""}`;
+    case "secureInput":
+      return "Secure input required";
     case "transcript":
       return "";
     case "streaming":

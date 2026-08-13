@@ -73,6 +73,23 @@ describe("Papyrus operator console layout", () => {
     expect(regionKinds(layout)).toEqual([]);
   });
 
+  it("makes secure input modal over session and setup surfaces", () => {
+    const layout = createOperatorConsoleLayout(createFullState({
+      secureInput: {
+        kind: "password",
+        purpose: "Sign in",
+        destinationLabel: "Verified password field",
+        retention: "use-once",
+        expiresAt: "2026-08-13T10:05:00.000Z",
+        maskedCharacterCount: 0,
+        focusedAction: "enter-securely",
+      },
+    }), { width: 80, height: 24, isTty: true });
+
+    expect(regionKinds(layout)).toEqual(["secureInput"]);
+    expect(visibleRegionKinds(layout)).toEqual(["secureInput"]);
+  });
+
   it("keeps live active work out of the default layout", () => {
     expect(regionKinds(createOperatorConsoleLayout(createState()))).not.toContain("activeWork");
 

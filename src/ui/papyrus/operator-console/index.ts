@@ -22,6 +22,7 @@ export * from "./operatorConsoleStyle.js";
 export * from "./operatorConsoleState.js";
 export * from "./promptSurface.js";
 export * from "./setupPanelSurface.js";
+export * from "./secureInputSurface.js";
 export * from "./setupSelectRuntimeMapper.js";
 export * from "./slashSurface.js";
 export * from "./steerSurface.js";
