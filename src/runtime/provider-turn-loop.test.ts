@@ -11,6 +11,7 @@ import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { ReplacementSessionMessage, SessionDB, SessionEvent } from "../contracts/session.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolDefinition } from "../contracts/tool.js";
+import type { SecureInputRequestHandler } from "../contracts/secure-input.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { createOpenAICompatibleProvider } from "../providers/openai-compatible-provider.js";
@@ -359,6 +360,7 @@ async function runBasicProviderTurn(
     userText?: string;
     providerTools?: OpenAICompatibleToolSchema[];
     signal?: AbortSignal;
+    onSecureInputRequest?: SecureInputRequestHandler;
   } = {}
 ): Promise<Awaited<ReturnType<ProviderTurnLoop["run"]>>> {
   return await loop.run({
@@ -384,6 +386,7 @@ async function runBasicProviderTurn(
     onEvent: callbacks.onEvent,
     onDelta: callbacks.onDelta,
     onSegmentBreak: callbacks.onSegmentBreak,
+    onSecureInputRequest: callbacks.onSecureInputRequest,
     signal: callbacks.signal
   });
 }
@@ -2457,6 +2460,93 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       })]);
       expect(result.executionPlanIncomplete).toBe(true);
       expect(result.providerExecution?.response?.content).toContain("emergency deadline reserve");
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("suspends deterministically when any active Mission item requires user input", async () => {
+    const planStore = new ExecutionPlanStore();
+    planStore.replace({
+      objective: "Sign in and finish setup",
+      originTurnId: "turn-user-input",
+      revision: 1,
+      status: "active",
+      items: [
+        { id: "credentials", content: "Enter credentials", status: "in_progress" },
+        { id: "finish", content: "Finish setup", status: "pending" },
+      ]
+    });
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("", [providerToolCall("call-inspect", "{}", "browser.snapshot")])],
+      toolSteps: [{ executions: [toolExecutionForTool("call-inspect", "browser.snapshot", "login form")] }],
+      executionPlanReader: planStore,
+      maxProviderIterations: 5,
+      onExecutePlans: () => {
+        planStore.replace({
+          objective: "Sign in and finish setup",
+          originTurnId: "turn-user-input",
+          revision: 2,
+          status: "active",
+          items: [
+            {
+              id: "credentials",
+              content: "Enter credentials",
+              status: "blocked",
+              blocker: { kind: "user_input_required", summary: "Enter the email and password in the secure prompt." }
+            },
+            { id: "finish", content: "Finish setup", status: "pending" },
+          ]
+        });
+      }
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(harness.completeSpy).toHaveBeenCalledOnce();
+    expect(harness.executePlans).toHaveBeenCalledOnce();
+    expect(result.providerExecution?.response?.content).toBe(
+      "The Mission needs your input before it can continue: Enter the email and password in the secure prompt."
+    );
+  });
+
+  it("does not charge protected operator input time to the provider wall-clock budget", async () => {
+    let now = 0;
+    const handler: SecureInputRequestHandler = async () => {
+      now = 90;
+      return { status: "delivered", destinationLabel: "Verified field", persisted: false };
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-protected", "{}", "browser.type")]),
+        providerExecution("Sign-in fields are ready.")
+      ],
+      toolSteps: [{ executions: [toolExecutionForTool("call-protected", "browser.type", "delivered")] }],
+      maxProviderIterations: 2,
+      maxProviderWallClockMs: 100,
+      finalizationReserveMs: 20,
+      onExecutePlans: async ({ stepInput }) => {
+        await stepInput.onSecureInputRequest?.({
+          kind: "password",
+          purpose: "Sign in",
+          destination: {
+            type: "browser-field",
+            sessionId: "browser-session",
+            ref: "@e1",
+            expectedOrigin: "https://example.com"
+          },
+          retention: "use-once"
+        }, async () => undefined);
+      }
+    });
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+
+    try {
+      const result = await runBasicProviderTurn(harness.loop, { onSecureInputRequest: handler });
+
+      expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+      expect(result.providerExecution?.response?.content).toContain("Sign-in fields are ready.");
+      expect(result.providerExecution?.response?.content).not.toContain("emergency deadline");
     } finally {
       nowSpy.mockRestore();
     }

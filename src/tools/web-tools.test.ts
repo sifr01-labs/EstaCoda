@@ -5,6 +5,7 @@ import { join, relative } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrowserActionInput, BrowserBackend, BrowserNavigateInput } from "../contracts/browser.js";
+import type { GroupedSecureInputRequestHandler } from "../contracts/secure-input.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import type { ManagedPythonCapabilityInstallStatus } from "../python-env/capability-manager.js";
 import { DDGS_CAPABILITY_ID } from "../python-env/capability-registry.js";
@@ -28,6 +29,7 @@ const expectedToolNames = [
   "browser.find",
   "browser.click",
   "browser.type",
+  "browser.fill_protected_form",
   "browser.select",
   "browser.extract",
   "browser.scroll",
@@ -2020,6 +2022,91 @@ describe("web and browser tools baselines", () => {
     expect(JSON.stringify(result)).not.toContain("handler-sentinel-secret");
   });
 
+  it("requests every related browser credential in one grouped protected form flow", async () => {
+    const prepareProtectedField = vi.fn(async (input: BrowserActionInput) => ({
+      type: "browser-field" as const,
+      sessionId: input.sessionId!,
+      ref: input.ref!,
+      expectedOrigin: "https://portal.example.com",
+      tabRef: input.tabRef,
+      frameId: "main-frame",
+    }));
+    const onSecureInputRequest = vi.fn(async () => ({
+      status: "failed" as const,
+      destinationLabel: "unused",
+      persisted: false,
+    })) as unknown as GroupedSecureInputRequestHandler;
+    onSecureInputRequest.requestGroup = vi.fn(async () => ({
+      status: "delivered" as const,
+      items: [
+        { id: "email", receipt: { status: "delivered" as const, destinationLabel: "Email", persisted: false } },
+        { id: "password", receipt: { status: "delivered" as const, destinationLabel: "Password", persisted: false } },
+      ],
+    }));
+    const protectedForm = tool("browser.fill_protected_form", createTestWebTools({
+      browserBackend: {
+        ...createSessionRecordingBrowserBackend(),
+        kind: "local-cdp",
+        prepareProtectedField,
+      },
+    }));
+
+    const result = await protectedForm.run({
+      purpose: "Sign in to the portal",
+      revision: 7,
+      tabRef: "@t1",
+      fields: [
+        { id: "email", ref: "@e3", kind: "account-identifier" },
+        { id: "password", ref: "@e4", kind: "password" },
+      ],
+    }, { onSecureInputRequest });
+
+    expect(result).toMatchObject({
+      ok: true,
+      metadata: {
+        backend: "local-cdp",
+        secureInputGroupReceipt: { status: "delivered" },
+      },
+    });
+    expect(result.content).toContain("form was not submitted");
+    expect(prepareProtectedField).toHaveBeenCalledTimes(2);
+    expect(onSecureInputRequest).not.toHaveBeenCalled();
+    expect(onSecureInputRequest.requestGroup).toHaveBeenCalledWith(expect.objectContaining({
+      purpose: "Sign in to the portal",
+      items: [
+        expect.objectContaining({ id: "email", request: expect.objectContaining({ kind: "account-identifier", retention: "use-once" }) }),
+        expect.objectContaining({ id: "password", request: expect.objectContaining({ kind: "password", retention: "use-once" }) }),
+      ],
+    }));
+    const serializedCall = JSON.stringify(vi.mocked(onSecureInputRequest.requestGroup).mock.calls);
+    expect(serializedCall).not.toContain("text");
+    expect(serializedCall).not.toContain("value");
+
+    const rejectedPlaintext = await protectedForm.run({
+      purpose: "Sign in to the portal",
+      revision: 7,
+      tabRef: "@t1",
+      fields: [
+        { id: "email", ref: "@e3", kind: "account-identifier", value: "must-not-enter-tool-input" },
+        { id: "password", ref: "@e4", kind: "password" },
+      ],
+    }, { onSecureInputRequest });
+    expect(rejectedPlaintext.ok).toBe(false);
+    expect(onSecureInputRequest.requestGroup).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(rejectedPlaintext)).not.toContain("must-not-enter-tool-input");
+  });
+
+  it("publishes exact protected-input enums instead of inviting invented kinds", () => {
+    const tools = createTestWebTools();
+    const browserType = tool("browser.type", tools);
+    const protectedForm = tool("browser.fill_protected_form", tools);
+    const schemas = JSON.stringify([browserType.inputSchema, protectedForm.inputSchema]);
+
+    expect(schemas).toContain("account-identifier");
+    expect(schemas).toContain("one-time-code");
+    expect(schemas).not.toContain("account-email");
+  });
+
   it("does not require a browser session key for browser.status", async () => {
     const status = tool("browser.status", createWebTools({
       browserBackend: createSessionRecordingBrowserBackend()
@@ -2182,6 +2269,31 @@ describe("web and browser tools baselines", () => {
         elements: [{ ref: "@e1", role: "button", name: "Mock Button" }]
       }
     });
+  });
+
+  it("turns an unambiguous email and password snapshot into one grouped-flow instruction", async () => {
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: {
+        ...createMockBrowserBackend(),
+        snapshot: async () => ({
+          sessionId: "session-1",
+          url: "https://portal.example.com/login",
+          revision: 9,
+          observedAt: "2026-08-13T00:00:00.000Z",
+          tab: { ref: "@t1", url: "https://portal.example.com/login", controlled: true },
+          elements: [
+            { ref: "@e3", role: "textbox", name: "Email" },
+            { ref: "@e4", role: "textbox", name: "Password" },
+            { ref: "@e5", role: "button", name: "Sign in" },
+          ]
+        })
+      }
+    }));
+
+    const result = await snapshot.run({});
+
+    expect(result.content).toContain("request all related values in one browser.fill_protected_form call");
+    expect(result.content).toContain("revision=9, tabRef=@t1, fields=[@e3:account-identifier, @e4:password]");
   });
 
   it("renders full browser snapshot headers and concise element state", async () => {

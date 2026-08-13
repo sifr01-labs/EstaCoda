@@ -1,9 +1,11 @@
 import type {
   SecureInputCollector,
   SecureInputConsumer,
+  SecureInputGroupReceipt,
+  SecureInputGroupRequest,
+  GroupedSecureInputRequestHandler,
   SecureInputReceipt,
   SecureInputRequest,
-  SecureInputRequestHandler,
   SecureInputRequestSnapshot,
   SecureInputScope
 } from "../contracts/secure-input.js";
@@ -61,14 +63,184 @@ export class SecureInputCoordinator {
     this.#onWaitStateChange = options.onWaitStateChange;
   }
 
-  createRequestHandler(scope: SecureInputScope, signal?: AbortSignal): SecureInputRequestHandler {
+  createRequestHandler(scope: SecureInputScope, signal?: AbortSignal): GroupedSecureInputRequestHandler {
     const boundScope = structuredClone(scope);
-    return async (request, consume) => await this.request({
+    const handler = (async (request, consume) => await this.request({
       scope: boundScope,
       request,
       consume,
       signal
+    })) as GroupedSecureInputRequestHandler;
+    handler.requestGroup = async (request) => await this.requestGroup({
+      scope: boundScope,
+      group: request,
+      signal
     });
+    return handler;
+  }
+
+  async requestGroup(input: {
+    scope: SecureInputScope;
+    group: SecureInputGroupRequest;
+    signal?: AbortSignal;
+  }): Promise<SecureInputGroupReceipt> {
+    validateGroup(input.group);
+    const controller = linkedAbortController(input.signal);
+    const entries: Array<{
+      id: string;
+      request: SecureInputRequest;
+      consume: SecureInputConsumer;
+      selection: SelectedSecureInputTransport;
+      snapshot?: SecureInputRequestSnapshot;
+      waitAnnounced: boolean;
+      receipt?: SecureInputReceipt;
+    }> = [];
+
+    try {
+      // Bind and authorize every destination before asking the operator for any value.
+      for (const item of input.group.items) {
+        const selection = await this.#transports.select({
+          request: item.request,
+          signal: controller.signal
+        });
+        entries.push({
+          id: item.id,
+          request: item.request,
+          consume: item.consume,
+          selection,
+          waitAnnounced: false
+        });
+        const assessment = assessSecureInputPolicy(item.request, selection.policy);
+        if (assessment.decision === "deny") {
+          throw new Error("The requested retention is not supported by this destination.");
+        }
+        if (assessment.decision === "ask") {
+          const decision = this.#authorize === undefined
+            ? "denied"
+            : await this.#authorize({
+                request: structuredClone(item.request),
+                transportId: selection.transport.id,
+                destinationLabel: selection.verifiedDestination.label,
+                assessment
+              });
+          if (decision !== "approved" || controller.signal.aborted) {
+            throw new Error("Protected input delivery was not authorized.");
+          }
+        }
+      }
+
+      for (const entry of entries) {
+        entry.snapshot = this.#broker.createRequest({
+          scope: input.scope,
+          request: entry.request,
+          signal: controller.signal
+        });
+        entry.waitAnnounced = true;
+        await this.#onWaitStateChange?.({
+          state: "waiting_for_input",
+          request: structuredClone(entry.snapshot)
+        });
+      }
+
+      // Collection is deliberately sequential inside one runtime call. The model
+      // cannot observe, relay, or run another provider turn between fields.
+      for (const [index, entry] of entries.entries()) {
+        const collected = await this.#collect(
+          structuredClone(entry.snapshot!),
+          controller.signal,
+          {
+            verifiedDestinationLabel: entry.selection.verifiedDestination.label,
+            group: {
+              purpose: input.group.purpose,
+              index: index + 1,
+              total: entries.length
+            }
+          }
+        );
+        if (collected.status === "cancelled" || controller.signal.aborted) {
+          for (const candidate of entries) {
+            if (candidate.snapshot !== undefined) {
+              cancelPending(this.#broker, candidate.snapshot.id, input.scope);
+            }
+          }
+          return groupReceipt(entries, "cancelled", "Protected input collection was cancelled.");
+        }
+        try {
+          this.#broker.provideSecret({
+            requestId: entry.snapshot!.id,
+            scope: input.scope,
+            value: collected.value
+          });
+        } finally {
+          collected.value.fill(0);
+        }
+      }
+
+      // Re-verify the complete form before any value is delivered. This prevents
+      // collection-time navigation or DOM replacement from redirecting a field.
+      for (const entry of entries) {
+        await this.#transports.reverify({
+          selection: entry.selection,
+          request: entry.request,
+          signal: controller.signal
+        });
+      }
+
+      for (const entry of entries) {
+        await this.#deliver({
+          scope: input.scope,
+          request: entry.request,
+          consume: entry.consume,
+          selection: entry.selection,
+          snapshot: entry.snapshot!,
+          signal: controller.signal
+        });
+        entry.receipt = receipt(
+          entry.selection,
+          "delivered",
+          entry.selection.policy.persistence !== "none"
+        );
+      }
+      return groupReceipt(entries, "delivered");
+    } catch (error) {
+      for (const entry of entries) {
+        if (entry.snapshot !== undefined) cancelPending(this.#broker, entry.snapshot.id, input.scope);
+      }
+      const status = error instanceof SecureInputBrokerError && error.code === "expired"
+        ? "expired"
+        : error instanceof SecureInputBrokerError && error.code === "cancelled"
+          ? "cancelled"
+          : "failed";
+      return groupReceipt(
+        entries,
+        status,
+        status === "expired"
+          ? "Protected input expired before delivery."
+          : status === "cancelled"
+            ? "Protected input delivery was cancelled."
+            : "Protected input delivery failed."
+      );
+    } finally {
+      for (const entry of entries) {
+        try {
+          await entry.selection.transport.release?.(structuredClone(entry.request));
+        } catch {
+          // Guard cleanup is best-effort and cannot change the group receipt.
+        }
+        if (entry.waitAnnounced && entry.snapshot !== undefined) {
+          const current = this.#broker.getRequest(entry.snapshot.id, input.scope) ?? entry.snapshot;
+          try {
+            await this.#onWaitStateChange?.({
+              state: "input_resolved",
+              request: structuredClone(current)
+            });
+          } catch {
+            // Delivery outcome remains authoritative after the wait has settled.
+          }
+        }
+      }
+      controller.dispose();
+    }
   }
 
   async request(input: {
@@ -139,27 +311,13 @@ export class SecureInputCoordinator {
         signal: controller.signal
       });
 
-      const selectedTransport = selection.transport;
-      let consumerCalled = false;
-      await this.#broker.consume({
-        requestId: snapshot.id,
+      await this.#deliver({
         scope: input.scope,
-        destination: selection.verifiedDestination.destination,
+        request: input.request,
+        consume: input.consume,
+        selection,
+        snapshot,
         signal: controller.signal
-      }, async (value, context) => {
-        await selectedTransport.deliver({
-          value,
-          context,
-          consume: async (candidate, candidateContext) => {
-            if (consumerCalled) throw new Error("Secure-input consumer replay was blocked.");
-            if (candidate !== value || candidateContext !== context) {
-              throw new Error("Secure-input transport substitution was blocked.");
-            }
-            consumerCalled = true;
-            await input.consume(candidate, candidateContext);
-          }
-        });
-        if (!consumerCalled) throw new Error("Secure-input transport did not invoke its consumer.");
       });
 
       return receipt(
@@ -200,6 +358,74 @@ export class SecureInputCoordinator {
       controller.dispose();
     }
   }
+
+  async #deliver(input: {
+    scope: SecureInputScope;
+    request: SecureInputRequest;
+    consume: SecureInputConsumer;
+    selection: SelectedSecureInputTransport;
+    snapshot: SecureInputRequestSnapshot;
+    signal: AbortSignal;
+  }): Promise<void> {
+    const selectedTransport = input.selection.transport;
+    let consumerCalled = false;
+    await this.#broker.consume({
+      requestId: input.snapshot.id,
+      scope: input.scope,
+      destination: input.selection.verifiedDestination.destination,
+      signal: input.signal
+    }, async (value, context) => {
+      await selectedTransport.deliver({
+        value,
+        context,
+        consume: async (candidate, candidateContext) => {
+          if (consumerCalled) throw new Error("Secure-input consumer replay was blocked.");
+          if (candidate !== value || candidateContext !== context) {
+            throw new Error("Secure-input transport substitution was blocked.");
+          }
+          consumerCalled = true;
+          await input.consume(candidate, candidateContext);
+        }
+      });
+      if (!consumerCalled) throw new Error("Secure-input transport did not invoke its consumer.");
+    });
+  }
+}
+
+function validateGroup(group: SecureInputGroupRequest): void {
+  if (typeof group.purpose !== "string" || group.purpose.trim().length === 0 || group.purpose.length > 500) {
+    throw new Error("A protected-input group requires a bounded purpose.");
+  }
+  if (!Array.isArray(group.items) || group.items.length < 1 || group.items.length > 8) {
+    throw new Error("A protected-input group must contain between one and eight items.");
+  }
+  const ids = new Set<string>();
+  for (const item of group.items) {
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/u.test(item.id) || ids.has(item.id)) {
+      throw new Error("Protected-input group item identifiers must be unique and bounded.");
+    }
+    ids.add(item.id);
+    if (typeof item.consume !== "function") throw new Error("A protected-input group item requires a consumer.");
+  }
+}
+
+function groupReceipt(
+  entries: readonly {
+    id: string;
+    selection: SelectedSecureInputTransport;
+    receipt?: SecureInputReceipt;
+  }[],
+  status: SecureInputReceipt["status"],
+  reason?: string
+): SecureInputGroupReceipt {
+  return {
+    status,
+    items: entries.map((entry) => ({
+      id: entry.id,
+      receipt: entry.receipt ?? receipt(entry.selection, status, false, reason)
+    })),
+    ...(reason === undefined ? {} : { reason })
+  };
 }
 
 function receipt(

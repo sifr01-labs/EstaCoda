@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
+  BrowserFieldSecureInputDestination,
   SecureInputRequest,
   SecureInputScope
 } from "../contracts/secure-input.js";
@@ -30,6 +31,7 @@ const request: SecureInputRequest = {
   },
   retention: "use-once"
 };
+const browserDestination = request.destination as BrowserFieldSecureInputDestination;
 
 describe("SecureInputCoordinator", () => {
   it("announces waiting_for_input, re-verifies, delivers once, and returns only a receipt", async () => {
@@ -102,6 +104,98 @@ describe("SecureInputCoordinator", () => {
     expect([...collectedBytes]).toEqual(new Array(collectedBytes.length).fill(0));
     expect(broker.stats().cancelled).toBe(1);
     expect(JSON.stringify(result)).not.toContain("redirect-sentinel");
+    broker.dispose();
+  });
+
+  it("binds and re-verifies every grouped destination before delivering any field", async () => {
+    const broker = brokerWithStableIds();
+    const registry = new SecureInputTransportRegistry();
+    const events: string[] = [];
+    const transport = browserTransport({
+      verify: vi.fn(({ request: candidate, phase }) => {
+        events.push(`${phase}:${candidate.kind}`);
+        return { status: "verified" as const, destination: candidate.destination };
+      }),
+      deliver: async ({ value, context, consume }) => {
+        events.push(`deliver:${context.request.kind}`);
+        await consume(value, context);
+      }
+    });
+    registry.register(transport);
+    const collected = [
+      new TextEncoder().encode("person@example.com"),
+      new TextEncoder().encode("group-password-sentinel")
+    ];
+    let collectIndex = 0;
+    const collect = vi.fn(async (_snapshot, _signal, context) => {
+      events.push(`collect:${context.group?.index}/${context.group?.total}`);
+      return { status: "provided" as const, value: collected[collectIndex++]! };
+    });
+    const accountRequest: SecureInputRequest = {
+      ...request,
+      kind: "account-identifier",
+      purpose: "Enter account email",
+      destination: { ...browserDestination, ref: "account-field", label: "Verified account field" }
+    };
+    const passwordConsumer = vi.fn(async () => undefined);
+    const accountConsumer = vi.fn(async () => undefined);
+    const coordinator = new SecureInputCoordinator({ broker, transports: registry, collect });
+    const handler = coordinator.createRequestHandler(scope);
+
+    const result = await handler.requestGroup({
+      purpose: "Sign in",
+      items: [
+        { id: "account", request: accountRequest, consume: accountConsumer },
+        { id: "password", request, consume: passwordConsumer }
+      ]
+    });
+
+    expect(result.status).toBe("delivered");
+    expect(result.items.map((item) => item.id)).toEqual(["account", "password"]);
+    expect(events).toEqual([
+      "before-collection:account-identifier",
+      "before-collection:password",
+      "collect:1/2",
+      "collect:2/2",
+      "before-delivery:account-identifier",
+      "before-delivery:password",
+      "deliver:account-identifier",
+      "deliver:password"
+    ]);
+    expect(accountConsumer).toHaveBeenCalledOnce();
+    expect(passwordConsumer).toHaveBeenCalledOnce();
+    expect(collected.every((value) => value.every((byte) => byte === 0))).toBe(true);
+    expect(JSON.stringify(result)).not.toContain("group-password-sentinel");
+    broker.dispose();
+  });
+
+  it("cancels the complete group when one field is cancelled", async () => {
+    const broker = brokerWithStableIds();
+    const registry = new SecureInputTransportRegistry();
+    const deliver = vi.fn();
+    registry.register(browserTransport({ deliver }));
+    let calls = 0;
+    const first = new TextEncoder().encode("first-group-sentinel");
+    const coordinator = new SecureInputCoordinator({
+      broker,
+      transports: registry,
+      collect: async () => ++calls === 1
+        ? { status: "provided", value: first }
+        : { status: "cancelled" }
+    });
+
+    const result = await coordinator.createRequestHandler(scope).requestGroup({
+      purpose: "Sign in",
+      items: [
+        { id: "account", request: { ...request, kind: "account-identifier", destination: { ...browserDestination, ref: "account" } }, consume: vi.fn() },
+        { id: "password", request, consume: vi.fn() }
+      ]
+    });
+
+    expect(result.status).toBe("cancelled");
+    expect(deliver).not.toHaveBeenCalled();
+    expect([...first]).toEqual(new Array(first.length).fill(0));
+    expect(broker.stats().cancelled).toBe(2);
     broker.dispose();
   });
 

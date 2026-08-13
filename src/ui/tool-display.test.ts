@@ -30,6 +30,7 @@ const expectedLabels: Record<string, ToolDisplayLabelSet> = {
   "browser.navigate": { en: "Browser Navigate", ar: "فتح صفحة" },
   "browser.click": { en: "Browser Click", ar: "نقر" },
   "browser.type": { en: "Browser Type", ar: "كتابة" },
+  "browser.fill_protected_form": { en: "Protected Form", ar: "نموذج محمي" },
   "browser.scroll": { en: "Browser Scroll", ar: "تمرير" },
   "browser.press": { en: "Browser Press", ar: "ضغط مفتاح" },
   "browser.back": { en: "Browser Back", ar: "رجوع" },

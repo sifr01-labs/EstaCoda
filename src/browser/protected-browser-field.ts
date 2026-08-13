@@ -51,11 +51,11 @@ export class ProtectedBrowserFieldError extends Error {
 
 /** Owns live DOM bindings and observation guards for supervised local browser delivery. */
 export class ProtectedBrowserFieldController {
-  readonly #active = new Map<string, ActiveProtectedField>();
+  readonly #active = new Map<string, Map<string, ActiveProtectedField>>();
   readonly #sensitiveSessions = new Set<string>();
 
   isActive(sessionId: string): boolean {
-    return this.#active.has(sessionId);
+    return (this.#active.get(sessionId)?.size ?? 0) > 0;
   }
 
   isSensitive(sessionId: string): boolean {
@@ -83,7 +83,12 @@ export class ProtectedBrowserFieldController {
     }
 
     if (input.phase === "before-collection") {
-      if (this.isSensitive(session.key)) {
+      if (this.#sensitiveSessions.has(session.key)) {
+        return { status: "rejected", reason: "field-ambiguous" };
+      }
+      const bindingKey = destinationBindingKey(input.destination);
+      const activeFields = this.#active.get(session.key);
+      if (activeFields?.has(bindingKey) === true) {
         return { status: "rejected", reason: "field-ambiguous" };
       }
       const elementIndex = refToIndex(input.destination.ref);
@@ -96,7 +101,7 @@ export class ProtectedBrowserFieldController {
         await releaseObject(session.supervisor, objectId);
         return rejection;
       }
-      this.#active.set(session.key, {
+      const active: ActiveProtectedField = {
         destination: structuredClone(input.destination),
         kind: input.kind,
         objectId,
@@ -104,12 +109,14 @@ export class ProtectedBrowserFieldController {
         ...(frameId === undefined ? {} : { frameId }),
         supervisor: session.supervisor,
         delivered: false,
-      });
+      };
+      if (activeFields === undefined) this.#active.set(session.key, new Map([[bindingKey, active]]));
+      else activeFields.set(bindingKey, active);
       session.supervisor.setSensitiveInputActive?.(true);
       return { status: "verified" };
     }
 
-    const active = this.#active.get(session.key);
+    const active = findActiveField(this.#active.get(session.key), input.destination);
     if (active === undefined || active.kind !== input.kind || !isDeepStrictEqual(active.destination, input.destination)) {
       return { status: "rejected", reason: "request-not-active" };
     }
@@ -139,7 +146,7 @@ export class ProtectedBrowserFieldController {
         "Protected browser field changed before delivery."
       );
     }
-    const active = this.#active.get(session.key)!;
+    const active = findActiveField(this.#active.get(session.key), input.destination)!;
     const value = new TextDecoder("utf-8", { fatal: true }).decode(input.value);
     try {
       const result = await session.supervisor.send("Runtime.callFunctionOn", {
@@ -167,11 +174,14 @@ export class ProtectedBrowserFieldController {
   }
 
   async release(destination: BrowserFieldSecureInputDestination): Promise<void> {
-    const active = this.#active.get(destination.sessionId);
-    if (active === undefined || !isDeepStrictEqual(active.destination, destination)) return;
-    this.#active.delete(destination.sessionId);
-    if (!active.delivered) this.#sensitiveSessions.delete(destination.sessionId);
-    if (!active.delivered) active.supervisor.setSensitiveInputActive?.(false);
+    const activeFields = this.#active.get(destination.sessionId);
+    const active = findActiveField(activeFields, destination);
+    if (active === undefined || activeFields === undefined) return;
+    activeFields.delete(destinationBindingKey(destination));
+    if (activeFields.size === 0) this.#active.delete(destination.sessionId);
+    if (activeFields.size === 0 && !this.#sensitiveSessions.has(destination.sessionId)) {
+      active.supervisor.setSensitiveInputActive?.(false);
+    }
     await releaseObject(active.supervisor, active.objectId);
   }
 
@@ -181,18 +191,24 @@ export class ProtectedBrowserFieldController {
     session.supervisor.setSensitiveInputActive?.(false);
     if (active === undefined) return;
     this.#active.delete(session.key);
-    if (active.supervisor !== session.supervisor) {
-      active.supervisor.setSensitiveInputActive?.(false);
+    for (const field of active.values()) {
+      if (field.supervisor !== session.supervisor) {
+        field.supervisor.setSensitiveInputActive?.(false);
+      }
+      await releaseObject(field.supervisor, field.objectId);
     }
-    await releaseObject(active.supervisor, active.objectId);
   }
 
   async clearSession(sessionId: string): Promise<void> {
     const active = this.#active.get(sessionId);
     this.#active.delete(sessionId);
     this.#sensitiveSessions.delete(sessionId);
-    active?.supervisor.setSensitiveInputActive?.(false);
-    if (active !== undefined) await releaseObject(active.supervisor, active.objectId);
+    if (active !== undefined) {
+      for (const field of active.values()) {
+        field.supervisor.setSensitiveInputActive?.(false);
+        await releaseObject(field.supervisor, field.objectId);
+      }
+    }
   }
 
   protectSnapshot(sessionId: string, snapshot: BrowserSnapshot): BrowserSnapshot {
@@ -350,6 +366,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function destinationBindingKey(destination: BrowserFieldSecureInputDestination): string {
+  return [destination.tabRef ?? "", destination.frameId ?? "", destination.ref].join("\u0000");
+}
+
+function findActiveField(
+  fields: Map<string, ActiveProtectedField> | undefined,
+  destination: BrowserFieldSecureInputDestination
+): ActiveProtectedField | undefined {
+  const active = fields?.get(destinationBindingKey(destination));
+  return active !== undefined && isDeepStrictEqual(active.destination, destination) ? active : undefined;
+}
+
 const PROTECTED_FIELD_INSPECTION_FUNCTION = `function(index, kind) {
   const field = this;
   const visible = (element) => {
@@ -369,8 +397,14 @@ const PROTECTED_FIELD_INSPECTION_FUNCTION = `function(index, kind) {
     const type = element instanceof HTMLInputElement ? element.type.toLowerCase() : '';
     const autocomplete = String(element.getAttribute?.('autocomplete') || '').toLowerCase().split(/\\s+/);
     const hint = descriptor(element);
+    if (kind === 'account-identifier') return element instanceof HTMLInputElement && (
+      type === 'email' || autocomplete.includes('email') || autocomplete.includes('username') ||
+      /email|e-mail|user[ _-]?name|account|login/.test(hint)
+    );
     if (kind === 'password') return element instanceof HTMLInputElement && type === 'password';
-    if (kind === 'one-time-code') return element instanceof HTMLInputElement && autocomplete.includes('one-time-code');
+    if (kind === 'one-time-code') return element instanceof HTMLInputElement && (
+      autocomplete.includes('one-time-code') || /one[ _-]?time|otp|verification[ _-]?code|security[ _-]?code/.test(hint)
+    );
     if (kind === 'private-key') return editable(element) && /private[ _-]?key|pem/.test(hint);
     if (kind === 'recovery-code') return editable(element) && /recovery|backup[ _-]?code/.test(hint);
     if (kind === 'api-key') return editable(element) && /api[ _-]?key/.test(hint);

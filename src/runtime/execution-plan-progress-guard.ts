@@ -15,6 +15,7 @@ const MUTATION_RISK_CLASSES = new Set<ToolRiskClass>([
 const BROWSER_STATE_CHANGE_TOOLS = new Set([
   "browser.click",
   "browser.type",
+  "browser.fill_protected_form",
   "browser.select",
   "browser.press",
   "browser.dialog",
@@ -307,7 +308,10 @@ function isVerificationItem(item: ExecutionPlanItem): boolean {
 }
 
 function hasUnfinishedExecutionPlan(plan: ExecutionPlan | undefined): boolean {
-  return plan?.status === "active" && plan.items.some((item) =>
+  const waitingForUser = plan?.items.some((item) =>
+    item.status === "blocked" && item.blocker?.kind === "user_input_required"
+  ) === true;
+  return plan?.status === "active" && !waitingForUser && plan.items.some((item) =>
     item.status === "pending" || item.status === "in_progress"
   );
 }

@@ -46,6 +46,8 @@ export type SecureInputSurfaceApplyResult = {
 const COPY = {
   en: {
     title: "Secure input required",
+    flow: "Flow",
+    field: "Field",
     kind: "Request",
     purpose: "Purpose",
     destination: "Verified destination",
@@ -64,6 +66,8 @@ const COPY = {
   },
   ar: {
     title: "مطلوب إدخال آمن",
+    flow: "المسار",
+    field: "الحقل",
     kind: "نوع الطلب",
     purpose: "الغرض",
     destination: "الوجهة المتحقق منها",
@@ -94,6 +98,7 @@ export function createSecureInputSurfaceState(
     expiresAt: snapshot.expiresAt,
     maskedCharacterCount: 0,
     focusedAction: "enter-securely",
+    ...(context.group === undefined ? {} : { group: { ...context.group } }),
   };
 }
 
@@ -248,7 +253,8 @@ export class OperatorConsoleSecureInputCollector {
 }
 
 export function getSecureInputSurfaceDesiredHeight(state: SecureInputSurfaceState): number {
-  return state.validationError === undefined ? 11 : 12;
+  const groupRows = state.group === undefined ? 0 : 2;
+  return (state.validationError === undefined ? 11 : 12) + groupRows;
 }
 
 export function renderSecureInputSurface(
@@ -266,6 +272,10 @@ export function renderSecureInputSurface(
     : "•".repeat(Math.min(normalizeDimension(state.maskedCharacterCount), contentWidth));
   const rows = [
     renderTopBorder(copy.title, width),
+    ...(state.group === undefined ? [] : [
+      renderContentRow(formatField(copy.flow, state.group.purpose, options.locale), contentWidth, width),
+      renderContentRow(formatField(copy.field, `${state.group.index} / ${state.group.total}`, options.locale, true), contentWidth, width),
+    ]),
     renderContentRow(formatField(copy.kind, kindLabel(state.kind, options.locale), options.locale), contentWidth, width),
     renderContentRow(formatField(copy.purpose, state.purpose, options.locale), contentWidth, width),
     renderContentRow(formatField(copy.destination, state.destinationLabel, options.locale, true), contentWidth, width),
@@ -326,11 +336,12 @@ function isCancelKey(event: ParsedKeypress): boolean {
 }
 
 function cloneSurfaceState(state: SecureInputSurfaceState): SecureInputSurfaceState {
-  return { ...state };
+  return { ...state, ...(state.group === undefined ? {} : { group: { ...state.group } }) };
 }
 
 function kindLabel(kind: SecureInputSurfaceState["kind"], locale: OperatorConsoleLocale): string {
   const en: Record<SecureInputSurfaceState["kind"], string> = {
+    "account-identifier": "Email or account ID",
     password: "Password",
     "one-time-code": "One-time code",
     "api-key": "API key",
@@ -341,6 +352,7 @@ function kindLabel(kind: SecureInputSurfaceState["kind"], locale: OperatorConsol
     "generic-secret": "Protected value",
   };
   const ar: Record<SecureInputSurfaceState["kind"], string> = {
+    "account-identifier": "البريد الإلكتروني أو معرّف الحساب",
     password: "كلمة مرور",
     "one-time-code": "رمز لمرة واحدة",
     "api-key": "مفتاح API",

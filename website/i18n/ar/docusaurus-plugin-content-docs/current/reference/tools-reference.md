@@ -229,13 +229,15 @@ sidebar_position: 6
 |------|------|---------------|
 | `browser.*` | `external-side-effect` | حالة جلسة المتصفح |
 
-تشمل أدوات المتصفح المُنفذة `browser.status` و`browser.navigate` و`browser.snapshot` و`browser.find` و`browser.click` و`browser.type` و`browser.select` و`browser.extract` و`browser.scroll` و`browser.press` و`browser.back` و`browser.get_images` و`browser.console` و`browser.tabs` و`browser.switch_tab` و`browser.cdp` و`browser.screenshot` و`browser.vision` و`browser.dialog`.
+تشمل أدوات المتصفح المُنفذة `browser.status` و`browser.navigate` و`browser.snapshot` و`browser.find` و`browser.click` و`browser.type` و`browser.fill_protected_form` و`browser.select` و`browser.extract` و`browser.scroll` و`browser.press` و`browser.back` و`browser.get_images` و`browser.console` و`browser.tabs` و`browser.switch_tab` و`browser.cdp` و`browser.screenshot` و`browser.vision` و`browser.dialog`.
 
 **التوفر:** يتطلب backend متصفح مُهيّأ. يدعم `local-cdp` اتصال CDP اليدوي والتشغيل التلقائي المُشرف عليه. Browserbase مُنفّذ عبر خلفية المتصفح ويبقى محظورًا حتى تكون `browser.cloudSpendApproved === true`. تبقى browser-use وFirecrawl browser وCamofox مزودات مؤجلة مسجلة.
 
 **اللقطات:** تُرجع `browser.snapshot` إخراجًا مضغوطًا افتراضيًا. الإخراج المضغوط هو مجموعة AX محدودة من العناصر القابلة للتنفيذ مع مراجع مثل `@e1`؛ وليس ترشيحًا حقيقيًا للعناصر المرئية في منفذ العرض بعد. تمرير `full: true` يطلب مسار اللقطة الكاملة الأكبر. يوسم الإخراج المعروض اللقطات المضغوطة والكاملة، ويقص النص الضخم، وقد يلخص النتائج الكبيرة عندما يسمح `browser.summarizeSnapshots` و`browser.snapshotSummarizeThreshold` بذلك.
 
 **الأهداف الدلالية:** تقبل `browser.find` و`browser.click` و`browser.type` و`browser.select` و`browser.extract` محددات تحتوي على `role` و`name` و`text` و`label` و`withinText` و`exact` و`revision` الاختياري. تُستبعد العناصر المخفية والمعطلة، وتُرجع المحددات الملتبسة مرشحين بدل التخمين. تتطلب الإجراءات المبنية على مرجع قيمتي `revision` و`tabRef` من اللقطة المصدر؛ ويُرفض المرجع القديم أو التابع لتبويب آخر قبل إرسال الإجراء.
+
+**النماذج المحمية:** تجمع `browser.fill_protected_form` من مرجع واحد إلى ثمانية مراجع حالية من المراجعة وعلامة التبويب والإطار والأصل نفسها. تتحقق EstaCoda من كل الحقول قبل الجمع ومرة أخرى قبل التسليم، وتعرض مسار إدخال واحدًا متصلًا للمشغّل، ولا تعيد القيم المحمية إلى النموذج، ولا ترسل النموذج. تكون معرّفات الحساب وكلمات المرور وتحديات رمز الاستخدام لمرة واحدة اللاحقة طلبات منفصلة محددة النوع.
 
 **استقرار الإجراءات:** تعرض اللقطات مراجعة خاصة بالجلسة، ووقت الملاحظة، وحالة الجاهزية. تقبل عمليات التنقل وإجراءات المتصفح شرط `waitFor` اختياريًا و`waitTimeoutMs` بحد أقصى 10 ثوانٍ. من دون شرط صريح، ينتظر backend المُشرف عليه استقرار DOM ضمن مدة محدودة. تتضمن نتائج الإجراءات العادية فروقًا موجزة ومحجوبة بين الحالة السابقة واللاحقة؛ ويُبلّغ عن الشرط غير المتحقق بوصفه انتهاء مهلة مع أحدث حالة، لا نجاحًا مؤكدًا.
 

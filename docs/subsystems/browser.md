@@ -106,6 +106,8 @@ Snapshots prefer `Accessibility.getFullAXTree`. AX nodes are converted into comp
 
 Element refs are intentionally revision- and tab-scoped. A ref action must include the source snapshot's `revision` and `tabRef`; stale or cross-tab refs fail with structured current-state metadata before an action is dispatched. `browser.find`, `browser.click`, `browser.type`, `browser.select`, and `browser.extract` also accept semantic locators using `role`, `name`, `text`, `label`, `withinText`, and optional exact matching. Semantic resolution uses a fresh policy-checked snapshot, ignores hidden and disabled matches, and returns bounded candidates instead of guessing when a locator is ambiguous.
 
+Protected sign-in fields use a separate field-bound path. `browser.fill_protected_form` accepts one current revision and a bounded set of related refs (for example, account identifier and password), verifies every destination before collection, collects the values through one operator flow, re-verifies the complete form, and delivers without exposing values to the model or tool result. It does not submit the form. Screenshots, vision, extraction, and descriptive snapshots remain suppressed after protected delivery until navigation clears the sensitive state. Human input time inside this flow is excluded from the autonomous provider wall-clock budget.
+
 The default snapshot is a bounded actionable AX subset. It is not true viewport-visible filtering yet. `browser.snapshot` with `full: true` requests a larger full-page snapshot. Snapshot rendering marks compact and full snapshots with headers, truncates oversized text, and can summarize large snapshots when configured.
 
 Every snapshot carries a session-scoped `revision`, `observedAt`, and document `readiness`. Revisions advance only when meaningful captured page state changes. After navigation and ordinary browser actions, the supervised backend waits for an explicit `waitFor` condition or bounded DOM stability, then returns a compact before/after delta instead of replaying the full page. Supported conditions are URL text, page text, an element role/name, a dialog, and DOM stability. `waitTimeoutMs` is capped at 10 seconds; a timeout returns the latest state with an explicit timeout outcome and does not claim that the requested condition succeeded. Delta labels, titles, and URLs are redacted before they are returned.
@@ -141,6 +143,7 @@ Browser tools exposed to the agent:
 | `browser.find` | Find visible, enabled elements by semantic locator |
 | `browser.click` | Click by semantic locator or revision-scoped ref |
 | `browser.type` | Type by semantic locator or revision-scoped ref |
+| `browser.fill_protected_form` | Fill related protected fields in one verified operator flow without submitting |
 | `browser.select` | Select an option by semantic locator or revision-scoped ref |
 | `browser.extract` | Extract one semantically resolved element |
 | `browser.scroll` | Scroll page |

@@ -19,6 +19,7 @@ const DEFAULT_MAX_SECRET_BYTES = 64 * 1_024;
 const MAX_METADATA_TEXT_LENGTH = 512;
 
 const SECURE_INPUT_KINDS = new Set<SecureInputKind>([
+  "account-identifier",
   "password",
   "one-time-code",
   "api-key",

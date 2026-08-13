@@ -558,6 +558,11 @@ export type SecureInputSurfaceState = {
   readonly maskedCharacterCount: number;
   readonly validationError?: string;
   readonly focusedAction: SecureInputAction;
+  readonly group?: {
+    readonly purpose: string;
+    readonly index: number;
+    readonly total: number;
+  };
 };
 
 export type OperatorConsoleState = {

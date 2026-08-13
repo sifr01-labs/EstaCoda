@@ -117,7 +117,8 @@ class FakeCdpSocket implements CdpWebSocketLike {
     }
     if (method === "Runtime.evaluate") {
       if (typeof message.params?.expression === "string" && /^window\.__estacodaElements\?\.\[\d+\]$/u.test(message.params.expression)) {
-        return { result: { objectId: "protected-field-object" } };
+        const index = /\[(\d+)\]/u.exec(message.params.expression)?.[1] ?? "unknown";
+        return { result: { objectId: `protected-field-object-${index}` } };
       }
       return { result: { value: JSON.stringify(this.snapshot) } };
     }
@@ -989,6 +990,56 @@ describe("supervised local CDP backend", () => {
     socket.snapshot.url = "https://accounts.example.com/complete";
     await backend.press?.({ sessionId: "session-1", key: "Enter" });
     await expect(backend.screenshot?.({ sessionId: "session-1" })).resolves.toMatchObject({ base64: "png-data" });
+  });
+
+  it("binds multiple protected fields from one unchanged browser form", async () => {
+    const socket = new FakeCdpSocket();
+    socket.snapshot = {
+      url: "https://accounts.example.com/login",
+      title: "Sign in",
+      text: "Sign in",
+      elements: [
+        { ref: "@e1", role: "textbox", name: "Email" },
+        { ref: "@e2", role: "textbox", name: "Password" },
+      ]
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"]
+    });
+    const navigation = await backend.navigate({
+      url: socket.snapshot.url,
+      sessionId: "session-group"
+    });
+    const common = {
+      sessionId: "session-group",
+      revision: navigation.snapshot.revision,
+      tabRef: navigation.snapshot.tab!.ref
+    };
+    const email = await backend.prepareProtectedField?.({ ...common, ref: "@e1" });
+    const password = await backend.prepareProtectedField?.({ ...common, ref: "@e2" });
+
+    await expect(backend.verifyProtectedField?.({
+      destination: email!, kind: "account-identifier", phase: "before-collection"
+    })).resolves.toEqual({ status: "verified" });
+    await expect(backend.verifyProtectedField?.({
+      destination: password!, kind: "password", phase: "before-collection"
+    })).resolves.toEqual({ status: "verified" });
+    await expect(backend.verifyProtectedField?.({
+      destination: email!, kind: "account-identifier", phase: "before-delivery"
+    })).resolves.toEqual({ status: "verified" });
+    await expect(backend.verifyProtectedField?.({
+      destination: password!, kind: "password", phase: "before-delivery"
+    })).resolves.toEqual({ status: "verified" });
+
+    const evaluatedObjects = socket.sent.filter((message) =>
+      message.method === "Runtime.evaluate" && String(message.params?.expression).startsWith("window.__estacodaElements")
+    );
+    expect(evaluatedObjects).toHaveLength(2);
+    await backend.releaseProtectedField?.(email!);
+    await backend.releaseProtectedField?.(password!);
   });
 
   it("rejects changed origins, frames, fields, and ambiguous credential targets", async () => {

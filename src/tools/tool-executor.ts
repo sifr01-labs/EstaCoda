@@ -725,7 +725,7 @@ function protectedArgumentFailure(content: string): ToolResult {
 }
 
 const SECURE_INPUT_KINDS = new Set<SecureInputKind>([
-  "password", "one-time-code", "api-key", "client-secret", "access-token",
+  "account-identifier", "password", "one-time-code", "api-key", "client-secret", "access-token",
   "private-key", "recovery-code", "generic-secret"
 ]);
 

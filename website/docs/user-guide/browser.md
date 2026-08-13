@@ -67,6 +67,8 @@ Snapshots include a session-scoped revision, observation time, and page readines
 
 Prefer semantic locators for interaction. `browser.find`, `browser.click`, `browser.type`, `browser.select`, and `browser.extract` can target elements by `role`, `name`, `text`, `label`, or surrounding `withinText`; for example, a “View product” button inside the “Security MTN OAuth V1” card. Hidden and disabled matches are skipped, and ambiguous matches return candidates rather than being selected automatically. If you use an `@eN` ref, also pass the snapshot's `revision` and controlled `tabRef`. EstaCoda rejects stale and cross-tab refs before dispatching the action.
 
+When one page requests several related protected values, such as an email and password, EstaCoda uses one secure form flow. It shows each verified destination in sequence, keeps every value outside model context, fills all fields only after the complete form is re-verified, and leaves the final sign-in or continue button for a separate agent action. If the page later asks for a 2FA code, that new page state starts a second secure flow. Waiting for you to enter protected values does not consume the autonomous provider wall-clock budget.
+
 Snapshot summarization is controlled by:
 
 - `browser.summarizeSnapshots`: `false`, `true`, or `"auto"`

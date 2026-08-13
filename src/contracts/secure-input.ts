@@ -1,5 +1,6 @@
 /** Sensitive value categories supported by the protected-input boundary. */
 export type SecureInputKind =
+  | "account-identifier"
   | "password"
   | "one-time-code"
   | "api-key"
@@ -118,6 +119,29 @@ export type SecureInputReceipt = {
   reason?: string;
 };
 
+/** One independently verified destination within a single operator input flow. */
+export type SecureInputGroupItem = {
+  id: string;
+  request: SecureInputRequest;
+  consume: SecureInputConsumer;
+};
+
+/**
+ * A bounded set of related protected values, such as an account identifier and
+ * password. Values are still collected and delivered independently; only safe
+ * request metadata is grouped.
+ */
+export type SecureInputGroupRequest = {
+  purpose: string;
+  items: readonly SecureInputGroupItem[];
+};
+
+export type SecureInputGroupReceipt = {
+  status: SecureInputReceipt["status"];
+  items: readonly { id: string; receipt: SecureInputReceipt }[];
+  reason?: string;
+};
+
 export type SecureInputConsumptionContext = {
   requestId: string;
   scope: SecureInputScope;
@@ -145,6 +169,10 @@ export type SecureInputRequestHandler = (
   consume: SecureInputConsumer
 ) => Promise<SecureInputReceipt>;
 
+export type GroupedSecureInputRequestHandler = SecureInputRequestHandler & {
+  requestGroup: (request: SecureInputGroupRequest) => Promise<SecureInputGroupReceipt>;
+};
+
 export type SecureInputCollectionResult =
   | { status: "provided"; value: Uint8Array }
   | { status: "cancelled" };
@@ -152,6 +180,11 @@ export type SecureInputCollectionResult =
 /** Verified metadata supplied to a trusted collector for operator display. */
 export type SecureInputCollectionContext = {
   verifiedDestinationLabel: string;
+  group?: {
+    purpose: string;
+    index: number;
+    total: number;
+  };
 };
 
 /** Trusted UI/channel boundary used to collect a value outside model context. */

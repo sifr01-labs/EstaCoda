@@ -41,6 +41,24 @@ describe("Papyrus secure-input surface", () => {
     for (const row of rows) expect(stringWidth(row)).toBeLessThanOrEqual(24);
   });
 
+  it("renders grouped progress using metadata only", () => {
+    const groupContext = {
+      ...context,
+      group: { purpose: "Sign in to MTN", index: 1, total: 2 },
+    };
+    const state = createSecureInputSurfaceState(
+      { ...snapshot(), request: { ...snapshot().request, kind: "account-identifier" } },
+      groupContext
+    );
+    const output = renderSecureInputSurface(state, { width: 80, locale: "en" }).join("\n");
+
+    expect(output).toContain("Flow: Sign in to MTN");
+    expect(output).toContain("Field: 1 / 2");
+    expect(output).toContain("Request: Email or account ID");
+    expect(state.group).toEqual(groupContext.group);
+    expect(JSON.stringify(state)).not.toContain("secret");
+  });
+
   it("uses the active Papyrus action color only when terminal color is enabled", () => {
     const style = createOperatorConsoleStyle({
       tokens: resolveTokens("standard", "dark", "kemetBlue"),

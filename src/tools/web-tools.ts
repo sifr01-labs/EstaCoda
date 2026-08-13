@@ -15,7 +15,7 @@ import type {
   BrowserTab,
   WebExtractionResult
 } from "../contracts/browser.js";
-import type { SecureInputKind, SecureInputRetention } from "../contracts/secure-input.js";
+import type { BrowserFieldSecureInputDestination, GroupedSecureInputRequestHandler, SecureInputKind, SecureInputRetention } from "../contracts/secure-input.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import { resolveGlobalStateHome } from "../config/profile-home.js";
 import { createBrowserDebugSession, type BrowserDebugSession } from "../browser/browser-debug.js";
@@ -297,6 +297,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       }
     }),
     createBrowserTypeTool(browserBackend, deriveBrowserInput),
+    createBrowserProtectedFormTool(browserBackend, deriveBrowserInput),
     createBrowserActionTool({
       name: "browser.select",
       description: "Select an option by value or visible option text using a semantic locator, or a ref with its source revision and tabRef.",
@@ -1334,13 +1335,25 @@ type BrowserProtectedInputDescriptor = {
   retention?: SecureInputRetention;
 };
 
+const BROWSER_PROTECTED_INPUT_KINDS = [
+  "account-identifier",
+  "password",
+  "one-time-code",
+  "api-key",
+  "client-secret",
+  "access-token",
+  "private-key",
+  "recovery-code",
+  "generic-secret",
+] as const satisfies readonly SecureInputKind[];
+
 function createBrowserTypeTool(
   browserBackend: BrowserBackend,
   deriveBrowserInput: DeriveBrowserInput
 ): RegisteredTool {
   return {
     name: "browser.type",
-    description: "Type ordinary text or request protected input for a verified field. Protected values bypass model context and browser snapshots.",
+    description: "Type ordinary text or request one protected value for a verified field. If the current form has multiple related protected fields, you must use one browser.fill_protected_form call instead. Protected values bypass model context and browser snapshots.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1348,11 +1361,13 @@ function createBrowserTypeTool(
         text: { type: "string" },
         protectedInput: {
           type: "object",
+          additionalProperties: false,
           properties: {
-            kind: { type: "string" },
+            kind: { type: "string", enum: BROWSER_PROTECTED_INPUT_KINDS },
             purpose: { type: "string" },
-            retention: { type: "string" },
+            retention: { type: "string", enum: ["use-once"] },
           },
+          required: ["kind", "purpose"],
         },
         sessionId: { type: "string" },
         ...browserWaitInputProperties(),
@@ -1422,17 +1437,170 @@ function createBrowserTypeTool(
   };
 }
 
+type BrowserProtectedFormField = {
+  id?: string;
+  ref?: string;
+  kind?: SecureInputKind;
+  purpose?: string;
+};
+
+type BrowserProtectedFormInput = {
+  purpose?: string;
+  fields?: BrowserProtectedFormField[];
+  sessionId?: string;
+  revision?: number;
+  tabRef?: string;
+};
+
+function createBrowserProtectedFormTool(
+  browserBackend: BrowserBackend,
+  deriveBrowserInput: DeriveBrowserInput
+): RegisteredTool {
+  return {
+    name: "browser.fill_protected_form",
+    description: "Request and fill every currently visible protected field in one verified form flow (for example account identifier plus password). Use this once for all related fields instead of separate browser.type calls. Values bypass model context and this tool never submits the form.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        purpose: { type: "string", description: "Overall operator-visible purpose, such as Sign in to MTN." },
+        sessionId: { type: "string" },
+        revision: { type: "number", description: "Snapshot revision that produced every field ref." },
+        tabRef: { type: "string", description: "Controlled tab that produced every field ref." },
+        fields: {
+          type: "array",
+          minItems: 1,
+          maxItems: 8,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              id: { type: "string", description: "Unique safe label for this field, such as email or password." },
+              ref: { type: "string", description: "Element ref from the same current snapshot." },
+              kind: { type: "string", enum: BROWSER_PROTECTED_INPUT_KINDS },
+              purpose: { type: "string", description: "Optional field-specific operator description." },
+            },
+            required: ["id", "ref", "kind"],
+          },
+        },
+      },
+      required: ["purpose", "revision", "tabRef", "fields"],
+    },
+    riskClass: "read-only-network",
+    toolsets: ["browser", "web", "research"],
+    progressLabel: "filling protected browser form",
+    maxResultSizeChars: 8_000,
+    isAvailable: () => browserBackend.isAvailable(),
+    run: async (input: BrowserProtectedFormInput, context) => {
+      const parsed = parseBrowserProtectedForm(input);
+      if (parsed === undefined) {
+        return protectedBrowserFailure("Protected form input requires one to eight unique current refs with supported kinds and a bounded purpose.");
+      }
+      const requestGroup = (context?.onSecureInputRequest as Partial<GroupedSecureInputRequestHandler> | undefined)?.requestGroup;
+      if (requestGroup === undefined || browserBackend.prepareProtectedField === undefined) {
+        return protectedBrowserFailure("Grouped protected browser input is unavailable on this runtime.");
+      }
+
+      const destinations: BrowserFieldSecureInputDestination[] = [];
+      for (const field of parsed.fields) {
+        const destination = await browserBackend.prepareProtectedField(deriveBrowserInput({
+          sessionId: input.sessionId,
+          revision: parsed.revision,
+          tabRef: parsed.tabRef,
+          ref: field.ref,
+        })).catch(() => undefined);
+        if (destination === undefined) {
+          return protectedBrowserFailure("A protected browser field could not be resolved to a current verified destination.");
+        }
+        destinations.push(destination);
+      }
+      const first = destinations[0]!;
+      if (destinations.some((destination) =>
+        destination.sessionId !== first.sessionId ||
+        destination.tabRef !== first.tabRef ||
+        destination.frameId !== first.frameId ||
+        destination.expectedOrigin !== first.expectedOrigin
+      )) {
+        return protectedBrowserFailure("Every protected form field must belong to the same current origin, tab, and frame.");
+      }
+
+      const receipt = await requestGroup({
+        purpose: parsed.purpose,
+        items: parsed.fields.map((field, index) => ({
+          id: field.id,
+          request: {
+            kind: field.kind,
+            purpose: field.purpose ?? `${parsed.purpose}: ${field.id}`,
+            destination: destinations[index]!,
+            retention: "use-once",
+          },
+          consume: async () => undefined,
+        })),
+      }).catch(() => undefined);
+      if (receipt === undefined) {
+        return protectedBrowserFailure("Protected browser form delivery failed.");
+      }
+      return {
+        ok: receipt.status === "delivered",
+        content: receipt.status === "delivered"
+          ? `Protected form fields delivered (${receipt.items.length}). The form was not submitted.`
+          : `Protected form input ${receipt.status}: ${receipt.reason ?? "delivery did not complete."}`,
+        metadata: {
+          backend: browserBackend.kind,
+          secureInputGroupReceipt: receipt,
+        },
+      };
+    },
+  };
+}
+
+function parseBrowserProtectedForm(input: BrowserProtectedFormInput): {
+  purpose: string;
+  revision: number;
+  tabRef: string;
+  fields: Array<{ id: string; ref: string; kind: SecureInputKind; purpose?: string }>;
+} | undefined {
+  if (!hasOnlyKeys(input, ["purpose", "fields", "sessionId", "revision", "tabRef"])) return undefined;
+  if (typeof input.purpose !== "string" || input.purpose.trim().length === 0 || input.purpose.length > 500) return undefined;
+  if (!Number.isSafeInteger(input.revision) || input.revision! < 0) return undefined;
+  if (typeof input.tabRef !== "string" || input.tabRef.length === 0 || input.tabRef.length > 256) return undefined;
+  if (!Array.isArray(input.fields) || input.fields.length < 1 || input.fields.length > 8) return undefined;
+  const ids = new Set<string>();
+  const refs = new Set<string>();
+  const kinds = new Set<SecureInputKind>(BROWSER_PROTECTED_INPUT_KINDS);
+  const fields = [];
+  for (const field of input.fields) {
+    if (!hasOnlyKeys(field, ["id", "ref", "kind", "purpose"])) return undefined;
+    if (typeof field.id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/u.test(field.id) || ids.has(field.id)) return undefined;
+    if (typeof field.ref !== "string" || !/^@e[1-9]\d*$/u.test(field.ref) || refs.has(field.ref)) return undefined;
+    if (field.kind === undefined || !kinds.has(field.kind)) return undefined;
+    if (field.purpose !== undefined && (typeof field.purpose !== "string" || field.purpose.trim().length === 0 || field.purpose.length > 500)) return undefined;
+    ids.add(field.id);
+    refs.add(field.ref);
+    fields.push({
+      id: field.id,
+      ref: field.ref,
+      kind: field.kind,
+      ...(field.purpose === undefined ? {} : { purpose: field.purpose.trim() }),
+    });
+  }
+  return { purpose: input.purpose.trim(), revision: input.revision!, tabRef: input.tabRef, fields };
+}
+
 function parseBrowserProtectedInput(
   value: BrowserProtectedInputDescriptor
 ): { kind: SecureInputKind; purpose: string; retention: "use-once" } | undefined {
-  const kinds = new Set<SecureInputKind>([
-    "password", "one-time-code", "api-key", "client-secret", "access-token",
-    "private-key", "recovery-code", "generic-secret",
-  ]);
+  if (!hasOnlyKeys(value, ["kind", "purpose", "retention"])) return undefined;
+  const kinds = new Set<SecureInputKind>(BROWSER_PROTECTED_INPUT_KINDS);
   if (value.kind === undefined || !kinds.has(value.kind)) return undefined;
   if (typeof value.purpose !== "string" || value.purpose.trim().length === 0 || value.purpose.length > 500) return undefined;
   if (value.retention !== undefined && value.retention !== "use-once") return undefined;
   return { kind: value.kind, purpose: value.purpose.trim(), retention: "use-once" };
+}
+
+function hasOnlyKeys(value: object, allowed: readonly string[]): boolean {
+  const allowedKeys = new Set(allowed);
+  return Object.keys(value).every((key) => allowedKeys.has(key));
 }
 
 function protectedBrowserFailure(content: string): ToolResult {
@@ -1613,6 +1781,7 @@ function renderBrowserSnapshot(snapshot: BrowserSnapshot, options: BrowserSnapsh
   const pendingDialogs = snapshot.pendingDialogs ?? [];
   const frameTree = snapshot.frameTree ?? [];
   const consoleHistory = snapshot.consoleHistory ?? [];
+  const protectedFormGuidance = renderProtectedFormGuidance(snapshot);
   const content = [
     options.full === true ? "[Full page snapshot]" : "[Compact viewport snapshot]",
     `Revision: ${snapshot.revision}`,
@@ -1622,6 +1791,8 @@ function renderBrowserSnapshot(snapshot: BrowserSnapshot, options: BrowserSnapsh
     snapshot.openedTabs === undefined || snapshot.openedTabs.length === 0 ? undefined : `Opened tabs: ${snapshot.openedTabs.map((tab) => tab.ref).join(", ")}`,
     "",
     snapshot.text,
+    protectedFormGuidance === undefined ? undefined : "",
+    protectedFormGuidance,
     pendingDialogs.length === 0 ? undefined : "",
     pendingDialogs.length === 0 ? undefined : "Pending dialogs:",
     ...pendingDialogs.slice(0, 5).map((dialog) => {
@@ -1646,6 +1817,24 @@ function renderBrowserSnapshot(snapshot: BrowserSnapshot, options: BrowserSnapsh
     ...elements.map((element) => renderBrowserSnapshotElement(element))
   ].filter((line) => line !== undefined).join("\n");
   return truncateRenderedBrowserSnapshot(content, options.maxChars);
+}
+
+function renderProtectedFormGuidance(snapshot: BrowserSnapshot): string | undefined {
+  if (snapshot.sensitiveInputActive === true || snapshot.tab === undefined) return undefined;
+  const candidates = (snapshot.elements ?? []).filter((element) =>
+    element.hidden !== true && element.disabled !== true && element.ref.startsWith("@e")
+  );
+  const account = candidates.filter((element) =>
+    /email|e-mail|user\s*name|account(?:\s*id)?|login\s*id/iu.test([element.name, element.label].filter(Boolean).join(" "))
+  );
+  const password = candidates.filter((element) =>
+    /password/iu.test([element.name, element.label].filter(Boolean).join(" "))
+  );
+  if (account.length !== 1 || password.length !== 1 || account[0]!.ref === password[0]!.ref) return undefined;
+  return [
+    "Protected form detected: request all related values in one browser.fill_protected_form call; do not request them one at a time.",
+    `Use revision=${snapshot.revision}, tabRef=${snapshot.tab.ref}, fields=[${account[0]!.ref}:account-identifier, ${password[0]!.ref}:password].`
+  ].join("\n");
 }
 
 function renderBrowserActionDelta(delta: BrowserActionDelta): string {

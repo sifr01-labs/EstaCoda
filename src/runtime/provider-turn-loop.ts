@@ -32,7 +32,7 @@ import type {
 import type { LoadedSkill, SelectedSkillPromptContent, SkillDefinition, SkillCatalogEntry } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
-import type { SecureInputRequestHandler } from "../contracts/secure-input.js";
+import type { GroupedSecureInputRequestHandler, SecureInputRequestHandler } from "../contracts/secure-input.js";
 import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import { PromptCache } from "../prompt/prompt-cache.js";
 import { estimateTextTokensRough } from "../prompt/token-estimator.js";
@@ -278,7 +278,12 @@ export class ProviderTurnLoop {
     let effectiveProviderExecution: ProviderExecutionResult | undefined;
     let previousProviderExecution: ProviderExecutionResult | undefined;
     let iterations = 0;
-    const loopStartedAt = Date.now();
+    let loopStartedAt = Date.now();
+    const onSecureInputRequest = timeSecureInputHandler(input.onSecureInputRequest, (elapsedMs) => {
+      // Operator think/typing time is not autonomous provider work and must not
+      // consume the emergency wall-clock budget.
+      loopStartedAt += elapsedMs;
+    });
     const repeatedFailures = new Map<string, number>();
     const browserObservationGuard = new BrowserObservationGuard(this.#budgets.maxRepeatedBrowserObservations);
     let maxObservedRisk = input.initialRiskClass;
@@ -710,7 +715,7 @@ export class ProviderTurnLoop {
         signal: input.signal,
         onEvent: input.onEvent,
         onApprovalRequest: input.onApprovalRequest,
-        onSecureInputRequest: input.onSecureInputRequest,
+        onSecureInputRequest,
         readLedger: mcpReadLedger,
         readLedgerScope: {
           profileId: this.#profileId,
@@ -764,6 +769,25 @@ export class ProviderTurnLoop {
         this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId
       );
       this.#syncBrowserSessionLease(false);
+      const userInputBlocker = executionPlanUserInputBlocker(this.#executionPlanReader?.current());
+      if (userInputBlocker !== undefined) {
+        execution = userInputRequiredReceipt(
+          execution,
+          userInputBlocker.summary,
+          this.#ui?.language ?? "en"
+        );
+        await this.#runRecorder.recordProviderIteration({
+          iteration,
+          phase,
+          ok: execution.ok,
+          toolCalls: execution.toolCalls.length,
+          executedTools: providerToolExecutions.length - beforeExecutions,
+          exhausted: false
+        });
+        effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+        previousProviderExecution = execution;
+        break;
+      }
       if (browserObservation?.shouldNudge === true) {
         pendingBrowserNoProgressNudge = true;
       }
@@ -2400,9 +2424,68 @@ function emergencyDeadlineReceipt(
 }
 
 function hasUnfinishedExecutionPlan(plan: ExecutionPlan | undefined): boolean {
-  return plan?.status === "active" && plan.items.some((item) =>
+  return plan?.status === "active" && executionPlanUserInputBlocker(plan) === undefined && plan.items.some((item) =>
     item.status === "pending" || item.status === "in_progress"
   );
+}
+
+function executionPlanUserInputBlocker(plan: ExecutionPlan | undefined): { summary: string } | undefined {
+  return plan?.items.find((item) =>
+    item.status === "blocked" && item.blocker?.kind === "user_input_required"
+  )?.blocker;
+}
+
+function userInputRequiredReceipt(
+  execution: ProviderExecutionResult,
+  summary: string,
+  locale: UiLanguage
+): ProviderExecutionResult {
+  const response = execution.response;
+  return {
+    ...execution,
+    ok: true,
+    response: {
+      ok: true,
+      content: locale === "ar"
+        ? `تحتاج خطة التنفيذ إلى إدخالك قبل أن تتابع: ${summary}`
+        : `The Mission needs your input before it can continue: ${summary}`,
+      model: response?.model ?? execution.route?.id ?? "unknown",
+      provider: (response?.provider ?? execution.route?.provider ?? "unknown") as ProviderResponse["provider"],
+      finishReason: "stop",
+      ...(response?.usage === undefined ? {} : { usage: response.usage })
+    },
+    toolCalls: []
+  };
+}
+
+function timeSecureInputHandler(
+  handler: SecureInputRequestHandler | undefined,
+  onElapsed: (elapsedMs: number) => void
+): SecureInputRequestHandler | undefined {
+  if (handler === undefined) return undefined;
+  let activeRequests = 0;
+  let pausedAt = 0;
+  const timedCall = async <T>(call: () => Promise<T>): Promise<T> => {
+    if (activeRequests === 0) pausedAt = Date.now();
+    activeRequests += 1;
+    try {
+      return await call();
+    } finally {
+      activeRequests -= 1;
+      if (activeRequests === 0) onElapsed(Math.max(0, Date.now() - pausedAt));
+    }
+  };
+  const timed: SecureInputRequestHandler = async (request, consume) => {
+    return await timedCall(async () => await handler(request, consume));
+  };
+  const requestGroup = (handler as Partial<GroupedSecureInputRequestHandler>).requestGroup;
+  if (requestGroup !== undefined) {
+    const grouped = timed as GroupedSecureInputRequestHandler;
+    grouped.requestGroup = async (request) => {
+      return await timedCall(async () => await requestGroup(request));
+    };
+  }
+  return timed;
 }
 
 function incompleteExecutionPlanReceipt(
@@ -2413,14 +2496,16 @@ function incompleteExecutionPlanReceipt(
   noProgressLimit?: number
 ): ProviderExecutionResult {
   const response = execution.response;
-  const unfinished = plan?.items.filter((item) => item.status === "pending" || item.status === "in_progress") ?? [];
+  const unfinished = plan?.items.filter((item) =>
+    item.status === "pending" || item.status === "in_progress" || item.status === "blocked"
+  ) ?? [];
   const closing = incompletePlanClosing(reason, locale, noProgressLimit);
   const content = locale === "ar"
     ? [
         "لم تكتمل خطة التنفيذ.",
         "",
         "العناصر المتبقية:",
-        ...unfinished.map((item) => `- ${item.content}`),
+        ...unfinished.map((item) => `- ${item.content}${item.blocker === undefined ? "" : ` — ${item.blocker.summary}`}`),
         "",
         closing
       ].join("\n")
@@ -2428,7 +2513,7 @@ function incompleteExecutionPlanReceipt(
         "The Mission is incomplete.",
         "",
         "Remaining items:",
-        ...unfinished.map((item) => `- ${item.content}`),
+        ...unfinished.map((item) => `- ${item.content}${item.blocker === undefined ? "" : ` — ${item.blocker.summary}`}`),
         "",
         closing
       ].join("\n");
