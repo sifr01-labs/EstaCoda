@@ -1,6 +1,7 @@
 import type { IntentRoute } from "../contracts/intent.js";
 import type { LoadedSkill, SkillDefinition, CompiledSkillPlaybook, CompiledSkillPlaybookStep, SkillPlaybookStepSpec } from "../contracts/skill.js";
 import type { ToolApprovalHandler, ToolsetName } from "../contracts/tool.js";
+import type { SecureInputRequestHandler } from "../contracts/secure-input.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import { compileSkillPlaybook } from "../skills/skill-playbook-planner.js";
 import { packetizeToolExecution, renderToolResultPacket } from "../tools/tool-result-packet.js";
@@ -43,6 +44,7 @@ export class SkillPlaybookRunner {
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
     onApprovalRequest?: ToolApprovalHandler;
+    onSecureInputRequest?: SecureInputRequestHandler;
   }): Promise<ToolExecutionRecord[]> {
     if (input.selectedSkill === undefined || input.intent.confirmationRequired) {
       return [];
@@ -76,7 +78,8 @@ export class SkillPlaybookRunner {
         usedTools,
         text: input.intent.invocation?.args ?? input.text,
         onEvent: input.onEvent,
-        onApprovalRequest: input.onApprovalRequest
+        onApprovalRequest: input.onApprovalRequest,
+        onSecureInputRequest: input.onSecureInputRequest
       });
 
       if (execution === undefined) {
@@ -137,6 +140,7 @@ export class SkillPlaybookRunner {
     text: string;
     onEvent?: RuntimeEventSink;
     onApprovalRequest?: ToolApprovalHandler;
+    onSecureInputRequest?: SecureInputRequestHandler;
   }): Promise<ToolExecutionRecord | undefined> {
     const toolsets = input.step.preferredToolsets;
 
@@ -172,14 +176,16 @@ export class SkillPlaybookRunner {
             trustedWorkspace: input.trustedWorkspace,
             excludedTools: [...input.usedTools, ...NON_EXECUTABLE_PLAYBOOK_TOOLS],
             input: toolInput,
-            onApprovalRequest: input.onApprovalRequest
+            onApprovalRequest: input.onApprovalRequest,
+            onSecureInputRequest: input.onSecureInputRequest
           })
         : await this.#toolExecutor.executeTool({
             tool: preferredTool,
             sessionId: this.#currentSessionId(),
             trustedWorkspace: input.trustedWorkspace,
             input: toolInput,
-            onApprovalRequest: input.onApprovalRequest
+            onApprovalRequest: input.onApprovalRequest,
+            onSecureInputRequest: input.onSecureInputRequest
           });
 
       if (execution === undefined) {

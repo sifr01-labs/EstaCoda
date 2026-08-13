@@ -4,6 +4,7 @@ import type { ProviderUsageLineage } from "./provider-usage.js";
 import type { RuntimeEventSink } from "./runtime-event.js";
 import type { RuntimeToolContext, SessionToolContext } from "./tool-context.js";
 import type { VisionDispatchPhase, VisionInputProvenanceContext } from "./vision.js";
+import type { SecureInputRequestHandler } from "./secure-input.js";
 
 export type ToolRiskClass =
   | "read-only-local"
@@ -71,6 +72,8 @@ export type ToolExecutionContext = {
   onEvent?: RuntimeEventSink;
   /** Suspends an approval-gated call until the active surface approves or denies it. */
   onApprovalRequest?: ToolApprovalHandler;
+  /** Supplies protected data independently from action approval. */
+  onSecureInputRequest?: SecureInputRequestHandler;
 };
 
 export type ToolApprovalRequest = {
@@ -94,7 +97,7 @@ export type ToolSecurityResolution = {
   dataEgress?: SecurityDataEgressContext;
 };
 
-export type ToolSecurityResolverContext = Omit<ToolExecutionContext, "securityResolution" | "onApprovalRequest"> & {
+export type ToolSecurityResolverContext = Omit<ToolExecutionContext, "securityResolution" | "onApprovalRequest" | "onSecureInputRequest"> & {
   trustedWorkspace: boolean;
   sessionId: string;
 };

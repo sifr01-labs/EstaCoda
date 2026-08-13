@@ -12,6 +12,7 @@ import type { ToolApprovalHandler, ToolDefinition, ToolResult, ToolRiskClass, To
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
 import type { VisionDispatchPhase, VisionInputProvenanceContext } from "../contracts/vision.js";
+import type { SecureInputRequestHandler } from "../contracts/secure-input.js";
 import { assessCommandSafety } from "../security/command-safety.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { ToolRegistry } from "./tool-registry.js";
@@ -44,6 +45,7 @@ export type ToolExecutionRequest = {
   visionDispatchPhase?: VisionDispatchPhase;
   signal?: AbortSignal;
   onApprovalRequest?: ToolApprovalHandler;
+  onSecureInputRequest?: SecureInputRequestHandler;
 };
 
 export type NamedToolExecutionRequest = {
@@ -62,6 +64,7 @@ export type NamedToolExecutionRequest = {
   signal?: AbortSignal;
   onEvent?: RuntimeEventSink;
   onApprovalRequest?: ToolApprovalHandler;
+  onSecureInputRequest?: SecureInputRequestHandler;
   delegateCallBudget?: DelegateCallBudget;
   readLedger?: ToolReadLedger;
   readLedgerScope?: ToolReadLedgerScope;
@@ -144,7 +147,8 @@ export class ToolExecutor {
       visionInputProvenance: request.visionInputProvenance,
       visionDispatchPhase: request.visionDispatchPhase,
       signal: request.signal,
-      onApprovalRequest: request.onApprovalRequest
+      onApprovalRequest: request.onApprovalRequest,
+      onSecureInputRequest: request.onSecureInputRequest
     });
   }
 
@@ -343,7 +347,8 @@ export class ToolExecutor {
           signal: request.signal,
           environmentType,
           onEvent: request.onEvent,
-          onApprovalRequest: tool.name === "execute_code" ? request.onApprovalRequest : undefined
+          onApprovalRequest: tool.name === "execute_code" ? request.onApprovalRequest : undefined,
+          onSecureInputRequest: request.onSecureInputRequest
         });
       } catch (error) {
         if (request.signal?.aborted) {
@@ -643,6 +648,9 @@ function toolRiskRank(value: ToolRiskClass): number {
 }
 
 function validateToolInput(tool: ToolDefinition, input: Record<string, unknown>): string | undefined {
+  if (containsProtectedInputPlaintextConflict(input)) {
+    return "protected input cannot include a plaintext 'text' value";
+  }
   const schema = tool.inputSchema;
   if (!isObjectRecord(schema)) {
     return undefined;
@@ -788,9 +796,14 @@ function redactValue(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(redactValue);
   }
+  if (isProtectedInputEnvelope(value)) {
+    return redactProtectedInputEnvelope(value);
+  }
   const result: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(value)) {
-    if (SENSITIVE_KEY_RE.test(key)) {
+    if (isProtectedInputEnvelope(val)) {
+      result[key] = redactProtectedInputEnvelope(val);
+    } else if (SENSITIVE_KEY_RE.test(key)) {
       result[key] = REDACTED_SECRET_VALUE;
     } else if (typeof val === "object" && val !== null) {
       result[key] = redactValue(val);
@@ -801,6 +814,33 @@ function redactValue(value: unknown): unknown {
     }
   }
   return result;
+}
+
+function containsProtectedInputPlaintextConflict(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsProtectedInputPlaintextConflict);
+  if (!isObjectRecord(value)) return false;
+  if (isObjectRecord(value.protectedInput) && typeof value.text === "string") return true;
+  return Object.values(value).some(containsProtectedInputPlaintextConflict);
+}
+
+function isProtectedInputEnvelope(value: unknown): value is Record<string, unknown> & {
+  protectedInput: Record<string, unknown>;
+} {
+  return isObjectRecord(value) && isObjectRecord(value.protectedInput);
+}
+
+function redactProtectedInputEnvelope(value: Record<string, unknown> & {
+  protectedInput: Record<string, unknown>;
+}): Record<string, unknown> {
+  const metadata = value.protectedInput;
+  return {
+    ...(typeof value.ref === "string" ? { ref: redactPersistedText(value.ref) } : {}),
+    protectedInput: {
+      ...(typeof metadata.kind === "string" ? { kind: redactPersistedText(metadata.kind) } : {}),
+      ...(typeof metadata.purpose === "string" ? { purpose: redactPersistedText(metadata.purpose) } : {}),
+      ...(typeof metadata.retention === "string" ? { retention: redactPersistedText(metadata.retention) } : {})
+    }
+  };
 }
 
 function redactProviderNativeToolCallForPersistence(toolName: string, value: unknown): unknown {

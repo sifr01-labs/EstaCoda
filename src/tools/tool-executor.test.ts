@@ -936,6 +936,97 @@ describe("ToolExecutor input redaction", () => {
 });
 
 describe("ToolExecutor tool-call metadata persistence", () => {
+  it("passes secure-input coordination independently from approval", async () => {
+    const onSecureInputRequest = vi.fn(async () => ({
+      status: "delivered" as const,
+      destinationLabel: "Verified destination",
+      persisted: false
+    }));
+    const tool: RegisteredTool = {
+      ...createEchoTool("protected-input-tool"),
+      run: async (_input, context) => {
+        expect(context?.onApprovalRequest).toBeUndefined();
+        expect(context?.onSecureInputRequest).toBe(onSecureInputRequest);
+        const receipt = await context!.onSecureInputRequest!({
+          kind: "api-key",
+          purpose: "Authenticate request",
+          destination: {
+            type: "tool-argument",
+            toolName: "protected-input-tool",
+            argumentPath: "credential"
+          },
+          retention: "use-once"
+        }, async () => undefined);
+        return { ok: receipt.status === "delivered", content: JSON.stringify(receipt) };
+      }
+    };
+    const { executor } = await setupExecutor({ tools: [tool] });
+
+    const execution = await executor.executeTool({
+      tool: "protected-input-tool",
+      input: {},
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      onSecureInputRequest
+    });
+
+    expect(onSecureInputRequest).toHaveBeenCalledOnce();
+    expect(execution?.result?.content).toContain("Verified destination");
+  });
+
+  it("persists only the safe protected-input descriptor under credential-shaped keys", async () => {
+    const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({
+      tools: [createEchoTool("protected-input-metadata")]
+    });
+
+    await executor.executeTool({
+      tool: "protected-input-metadata",
+      input: {
+        credential: {
+          ref: "@password",
+          protectedInput: {
+            kind: "password",
+            purpose: "Sign in",
+            retention: "use-once",
+            value: "must-never-persist"
+          },
+          unexpected: "also-must-not-persist"
+        }
+      },
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    const persisted = await persistedExecutionState(sessionDb, trajectoryRecorder);
+    expect(persisted).toContain("@password");
+    expect(persisted).toContain("Sign in");
+    expect(persisted).not.toContain("must-never-persist");
+    expect(persisted).not.toContain("also-must-not-persist");
+  });
+
+  it("rejects plaintext and protected input in the same envelope", async () => {
+    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "must not run" }));
+    const { executor } = await setupExecutor({
+      tools: [{ ...createEchoTool("protected-input-conflict"), run }]
+    });
+
+    const execution = await executor.executeTool({
+      tool: "protected-input-conflict",
+      input: {
+        credential: {
+          text: "plaintext-secret",
+          protectedInput: { kind: "password" }
+        }
+      },
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    expect(execution?.decision).toBe("deny");
+    expect(execution?.result?.content).toContain("cannot include a plaintext 'text' value");
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("passes the stable tool-call identity into the tool handler context", async () => {
     let observedToolCallId: string | undefined;
     const tool: RegisteredTool = {

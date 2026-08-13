@@ -32,6 +32,7 @@ import type {
 import type { LoadedSkill, SelectedSkillPromptContent, SkillDefinition, SkillCatalogEntry } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
+import type { SecureInputRequestHandler } from "../contracts/secure-input.js";
 import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import { PromptCache } from "../prompt/prompt-cache.js";
 import { estimateTextTokensRough } from "../prompt/token-estimator.js";
@@ -255,6 +256,7 @@ export class ProviderTurnLoop {
     onDelta?: (text: string) => void;
     onSegmentBreak?: (reason?: string) => void | Promise<void>;
     onApprovalRequest?: import("../contracts/tool.js").ToolApprovalHandler;
+    onSecureInputRequest?: SecureInputRequestHandler;
     toolPlans: ToolCallPlan[];
     trustedWorkspace: boolean;
     initialRiskClass: ToolRiskClass;
@@ -708,6 +710,7 @@ export class ProviderTurnLoop {
         signal: input.signal,
         onEvent: input.onEvent,
         onApprovalRequest: input.onApprovalRequest,
+        onSecureInputRequest: input.onSecureInputRequest,
         readLedger: mcpReadLedger,
         readLedgerScope: {
           profileId: this.#profileId,

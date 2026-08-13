@@ -134,3 +134,23 @@ export type SecureInputConsumer = (
   value: Uint8Array,
   context: SecureInputConsumptionContext
 ) => void | Promise<void>;
+
+/**
+ * Runtime-owned request seam exposed to trusted tool implementations. The
+ * protected value is delivered only to the supplied one-shot consumer and the
+ * tool receives a metadata-only receipt.
+ */
+export type SecureInputRequestHandler = (
+  request: SecureInputRequest,
+  consume: SecureInputConsumer
+) => Promise<SecureInputReceipt>;
+
+export type SecureInputCollectionResult =
+  | { status: "provided"; value: Uint8Array }
+  | { status: "cancelled" };
+
+/** Trusted UI/channel boundary used to collect a value outside model context. */
+export type SecureInputCollector = (
+  request: SecureInputRequestSnapshot,
+  signal: AbortSignal
+) => Promise<SecureInputCollectionResult>;

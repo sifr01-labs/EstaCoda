@@ -493,22 +493,31 @@ async function createAgentLoop(input: {
 }
 
 describe("AgentLoop provider availability gating", () => {
-  it("propagates the active approval handler into the provider tool loop", async () => {
+  it("propagates approval and secure-input handlers into the provider tool loop independently", async () => {
     const { loop, providerTurnLoop } = await createAgentLoop({
       canRunProvider: true,
       runSkillPlaybook: vi.fn(async () => []),
       providerExecution: successfulProviderExecution("done")
     });
     const onApprovalRequest = vi.fn(async () => "approved" as const);
+    const onSecureInputRequest = vi.fn(async () => ({
+      status: "cancelled" as const,
+      destinationLabel: "Protected destination",
+      persisted: false
+    }));
 
     await loop.handle({
       text: "use the test skill",
       channel: "cli",
       trustedWorkspace: true,
-      onApprovalRequest
+      onApprovalRequest,
+      onSecureInputRequest
     });
 
-    expect(providerTurnLoop.run).toHaveBeenCalledWith(expect.objectContaining({ onApprovalRequest }));
+    expect(providerTurnLoop.run).toHaveBeenCalledWith(expect.objectContaining({
+      onApprovalRequest,
+      onSecureInputRequest
+    }));
   });
 
   it("fixes one narrowed provider inventory for a high-confidence routed turn", async () => {

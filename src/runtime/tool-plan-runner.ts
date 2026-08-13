@@ -1,5 +1,6 @@
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ToolApprovalHandler, ToolRiskClass } from "../contracts/tool.js";
+import type { SecureInputRequestHandler } from "../contracts/secure-input.js";
 import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
 import type { VisionInputProvenanceContext } from "../contracts/vision.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
@@ -72,6 +73,7 @@ export class ToolPlanRunner {
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
     onApprovalRequest?: ToolApprovalHandler;
+    onSecureInputRequest?: SecureInputRequestHandler;
     readLedger?: ToolReadLedger;
     readLedgerScope?: ToolReadLedgerScope;
   }): Promise<{
@@ -137,6 +139,7 @@ export class ToolPlanRunner {
             signal: input.signal,
             onEvent: input.onEvent,
             onApprovalRequest: input.onApprovalRequest,
+            onSecureInputRequest: input.onSecureInputRequest,
             readLedger: input.readLedger,
             readLedgerScope: input.readLedgerScope
           })
@@ -166,6 +169,7 @@ export class ToolPlanRunner {
           signal: input.signal,
           onEvent: input.onEvent,
           onApprovalRequest: input.onApprovalRequest,
+          onSecureInputRequest: input.onSecureInputRequest,
           readLedger: input.readLedger,
           readLedgerScope: input.readLedgerScope
         });
@@ -198,6 +202,7 @@ export class ToolPlanRunner {
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
     onApprovalRequest?: ToolApprovalHandler;
+    onSecureInputRequest?: SecureInputRequestHandler;
     readLedger?: ToolReadLedger;
     readLedgerScope?: ToolReadLedgerScope;
   }): Promise<ToolExecutionRecord | undefined> {
@@ -225,6 +230,7 @@ export class ToolPlanRunner {
       signal: input.signal,
       onEvent: input.onEvent,
       onApprovalRequest: input.onApprovalRequest,
+      onSecureInputRequest: input.onSecureInputRequest,
       delegateCallBudget: this.#delegateCallBudget,
       readLedger: input.readLedger,
       readLedgerScope: input.readLedgerScope

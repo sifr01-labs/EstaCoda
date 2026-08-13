@@ -285,6 +285,7 @@ export type Runtime = {
     toolInput: Record<string, unknown>;
     toolCallId?: string;
     signal?: AbortSignal;
+    onSecureInputRequest?: import("../contracts/secure-input.js").SecureInputRequestHandler;
   }): Promise<import("../tools/tool-executor.js").ToolExecutionRecord | undefined>;
   transcribeAudio?(input: {
     path: string;
@@ -1245,7 +1246,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         trustedWorkspace,
         sessionId: sessionRuntimeContext.currentSessionId(),
         toolCallId: input.toolCallId,
-        signal: input.signal
+        signal: input.signal,
+        onSecureInputRequest: input.onSecureInputRequest
       });
     },
     async transcribeAudio(input) {

@@ -5,6 +5,7 @@ import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { VisionInputProvenanceContext } from "../contracts/vision.js";
 import type { ToolApprovalHandler } from "../contracts/tool.js";
+import type { SecureInputRequestHandler } from "../contracts/secure-input.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
 import { summarizeSecurityTarget } from "../tools/tool-executor.js";
 import { buildToolDisplayPreview } from "../tools/tool-target-summary.js";
@@ -47,6 +48,7 @@ export class NativeToolExecutor {
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
     onApprovalRequest?: ToolApprovalHandler;
+    onSecureInputRequest?: SecureInputRequestHandler;
   }): Promise<{ executions: ToolExecutionRecord[]; plans: ToolCallPlan[] }> {
     if (input.intent.nativeIntent === "attachment-analysis") {
       return await this.#executeInitialVisionAttachments(input);
@@ -92,7 +94,8 @@ export class NativeToolExecutor {
       visionInputProvenance: input.visionInputProvenance,
       signal: input.signal,
       onEvent: input.onEvent,
-      onApprovalRequest: input.onApprovalRequest
+      onApprovalRequest: input.onApprovalRequest,
+      onSecureInputRequest: input.onSecureInputRequest
     });
 
     if (execution === undefined) {
@@ -144,6 +147,7 @@ export class NativeToolExecutor {
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
     onApprovalRequest?: ToolApprovalHandler;
+    onSecureInputRequest?: SecureInputRequestHandler;
   }): Promise<{ executions: ToolExecutionRecord[]; plans: ToolCallPlan[] }> {
     if (this.#toolExecutor.getToolDefinition("vision.analyze") === undefined) {
       return { executions: [], plans: [] };
@@ -189,7 +193,8 @@ export class NativeToolExecutor {
       visionDispatchPhase: "initial-attachment",
       signal: input.signal,
       onEvent: input.onEvent,
-      onApprovalRequest: input.onApprovalRequest
+      onApprovalRequest: input.onApprovalRequest,
+      onSecureInputRequest: input.onSecureInputRequest
     });
 
     if (execution === undefined) {

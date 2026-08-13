@@ -89,7 +89,8 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
             visionInputProvenance: context?.visionInputProvenance,
             signal: context?.signal,
             onEvent: context?.onEvent,
-            onApprovalRequest: context?.onApprovalRequest
+            onApprovalRequest: context?.onApprovalRequest,
+            onSecureInputRequest: context?.onSecureInputRequest
           });
 
           if (execution === undefined) {

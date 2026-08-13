@@ -24,6 +24,7 @@ import type {
 } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolApprovalHandler, ToolDefinition, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
+import type { SecureInputRequestHandler } from "../contracts/secure-input.js";
 import type { AgentProfileMode, AgentResponseLanguage, SessionCompressionConfig, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { ContextReferenceExpander } from "../context/context-reference-expander.js";
@@ -87,6 +88,7 @@ export type AgentLoopInput = {
   onDelta?: (text: string) => void;
   onSegmentBreak?: (reason?: string) => void | Promise<void>;
   onApprovalRequest?: ToolApprovalHandler;
+  onSecureInputRequest?: SecureInputRequestHandler;
   signal?: AbortSignal;
   inputMetadata?: Record<string, unknown>;
 };
@@ -650,7 +652,8 @@ export class AgentLoop {
       }),
       signal: input.signal,
       onEvent: input.onEvent,
-      onApprovalRequest: input.onApprovalRequest
+      onApprovalRequest: input.onApprovalRequest,
+      onSecureInputRequest: input.onSecureInputRequest
     });
     const useDeterministicSkillPlaybook = !this.#providerTurnLoop.canRunProvider();
     const skillPlaybookToolExecutions = useDeterministicSkillPlaybook
@@ -661,7 +664,8 @@ export class AgentLoop {
       signal: input.signal,
       text: routedText,
       onEvent: input.onEvent,
-      onApprovalRequest: input.onApprovalRequest
+      onApprovalRequest: input.onApprovalRequest,
+      onSecureInputRequest: input.onSecureInputRequest
       })
       : [];
     const toolExecutions = [
@@ -757,6 +761,7 @@ export class AgentLoop {
       onDelta: input.onDelta,
       onSegmentBreak: input.onSegmentBreak,
       onApprovalRequest: input.onApprovalRequest,
+      onSecureInputRequest: input.onSecureInputRequest,
       toolPlans,
       trustedWorkspace,
       initialRiskClass,
