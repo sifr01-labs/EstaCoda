@@ -43,6 +43,11 @@ export type SecureInputSurfaceApplyResult = {
   readonly intent: SecureInputSurfaceIntent;
 };
 
+export type OperatorConsoleSecureInputCollectorOptions = {
+  /** Signals metadata-only surface changes so a live console can redraw immediately. */
+  readonly onSurfaceChange?: () => void;
+};
+
 const COPY = {
   en: {
     title: "Secure input required",
@@ -195,6 +200,7 @@ export class SecureInputSurfaceController {
 /** Bridges the modal Papyrus surface to the runtime collector without storing raw input in console state. */
 export class OperatorConsoleSecureInputCollector {
   readonly #host: OperatorConsoleRuntimeHost;
+  readonly #onSurfaceChange: (() => void) | undefined;
   #active:
     | {
         readonly controller: SecureInputSurfaceController;
@@ -204,8 +210,12 @@ export class OperatorConsoleSecureInputCollector {
       }
     | undefined;
 
-  constructor(host: OperatorConsoleRuntimeHost) {
+  constructor(
+    host: OperatorConsoleRuntimeHost,
+    options: OperatorConsoleSecureInputCollectorOptions = {}
+  ) {
     this.#host = host;
+    this.#onSurfaceChange = options.onSurfaceChange;
   }
 
   readonly collect: SecureInputCollector = async (snapshot, signal, context) => {
@@ -216,11 +226,11 @@ export class OperatorConsoleSecureInputCollector {
       createSecureInputSurfaceState(snapshot, context),
       this.#host.getState().locale
     );
-    this.#host.setSecureInput(controller.renderState);
     return await new Promise<SecureInputCollectionResult>((resolve) => {
       const onAbort = () => this.#finish({ status: "cancelled" });
       this.#active = { controller, resolve, signal, onAbort };
       signal.addEventListener("abort", onAbort, { once: true });
+      this.#setSurface(controller.renderState);
     });
   };
 
@@ -228,11 +238,12 @@ export class OperatorConsoleSecureInputCollector {
     const active = this.#active;
     if (active === undefined) return false;
     const result = active.controller.apply(event);
-    this.#host.setSecureInput(result.state);
     if (result.intent.type === "submit") {
       this.#finish({ status: "provided", value: new TextEncoder().encode(result.intent.value) });
     } else if (result.intent.type === "cancel" || result.intent.type === "enter-directly") {
       this.#finish({ status: "cancelled" });
+    } else {
+      this.#setSurface(result.state);
     }
     return true;
   }
@@ -247,8 +258,13 @@ export class OperatorConsoleSecureInputCollector {
     this.#active = undefined;
     active.signal.removeEventListener("abort", active.onAbort);
     active.controller.clear();
-    this.#host.setSecureInput(undefined);
+    this.#setSurface(undefined);
     active.resolve(result);
+  }
+
+  #setSurface(state: SecureInputSurfaceState | undefined): void {
+    this.#host.setSecureInput(state);
+    this.#onSurfaceChange?.();
   }
 }
 

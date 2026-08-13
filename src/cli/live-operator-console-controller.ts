@@ -536,6 +536,10 @@ export class LiveOperatorConsoleController {
   }
 
   #visibleMotionSignature(elapsedMs: number): string {
+    // Secure input is a modal surface. Work happening underneath it is not visible
+    // and must not keep presenting the console as actively working while the
+    // runtime is waiting for the operator.
+    if (this.#runtimeHost.getState().secureInput !== undefined) return "";
     const motion = this.#runtimeHost.getState().style?.tokens.contract.motion;
     const hasLiveTail = this.#streamingTail.trim().length > 0;
     const hasVisibleStreamingText = hasLiveTail || this.#streamingSegments.some((segment) => segment.text.trim().length > 0);

@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { SecureInputRequestSnapshot } from "../contracts/secure-input.js";
 import { resolveTokens } from "../theme/token-resolver.js";
 import {
   createDefaultStatusRailState,
   createOperatorConsoleRuntimeHost,
   createOperatorConsoleStyle,
+  OperatorConsoleSecureInputCollector,
   type TaskCardState,
 } from "../ui/papyrus/operator-console/index.js";
 import { LiveOperatorConsoleController } from "./live-operator-console-controller.js";
@@ -106,6 +108,97 @@ describe("LiveOperatorConsoleController", () => {
     vi.advanceTimersByTime(75);
 
     expect(output.text()).toBe("");
+  });
+
+  it("redraws the secure-input lifecycle without exposing collected values", async () => {
+    const output = createOutput();
+    const { controller, runtimeHost } = createControllerFixture(output);
+    const collector = new OperatorConsoleSecureInputCollector(runtimeHost, {
+      onSurfaceChange: () => controller.refresh(),
+    });
+    const abort = new AbortController();
+    const context = {
+      verifiedDestinationLabel: "https://developers.mtn.com · Sign in",
+      group: { purpose: "Sign in to MTN", index: 1, total: 2 },
+    };
+
+    output.clear();
+    const emailResultPromise = collector.collect(
+      secureInputSnapshot("account-identifier", "email"),
+      abort.signal,
+      context
+    );
+    let rendered = stripAnsi(output.text());
+    expect(rendered).toContain("Secure input required");
+    expect(rendered).toContain("Flow: Sign in to MTN");
+    expect(rendered).toContain("Field: 1 / 2");
+    expect(rendered).toContain("Verified destination: https://developers.mtn.com · Sign in");
+
+    collector.routeInput({ type: "key", key: "enter" });
+    output.clear();
+    collector.routeInput({ type: "key", key: "enter" });
+    expect(stripAnsi(output.text())).toContain("Enter a value or cancel this request.");
+
+    output.clear();
+    collector.routeInput({ type: "paste", text: "person@example.com" });
+    rendered = stripAnsi(output.text());
+    expect(rendered).toContain("Value: ••••••••••••••••••");
+    expect(rendered).not.toContain("person@example.com");
+    expect(JSON.stringify(runtimeHost.getState())).not.toContain("person@example.com");
+
+    output.clear();
+    collector.routeInput({ type: "key", key: "enter" });
+    const emailResult = await emailResultPromise;
+    expect(emailResult.status).toBe("provided");
+    if (emailResult.status === "provided") emailResult.value.fill(0);
+    expect(runtimeHost.getState().secureInput).toBeUndefined();
+    expect(stripAnsi(output.text())).not.toContain("Secure input required");
+
+    output.clear();
+    const passwordResultPromise = collector.collect(
+      secureInputSnapshot("password", "password"),
+      abort.signal,
+      { ...context, group: { ...context.group, index: 2 } }
+    );
+    rendered = stripAnsi(output.text());
+    expect(rendered).toContain("Field: 2 / 2");
+    expect(rendered).toContain("Request: Password");
+
+    output.clear();
+    collector.routeInput({ type: "key", key: "escape" });
+    await expect(passwordResultPromise).resolves.toEqual({ status: "cancelled" });
+    expect(runtimeHost.getState().secureInput).toBeUndefined();
+    expect(stripAnsi(output.text())).not.toContain("Secure input required");
+    expect(runtimeHost.render().layout.regions.map((region) => region.kind)).toEqual(["prompt", "statusRail"]);
+    controller.clear();
+  });
+
+  it("pauses hidden live motion while secure input is awaiting the operator", async () => {
+    vi.useFakeTimers();
+    const output = createOutput();
+    const { controller, runtimeHost } = createControllerFixture(output);
+    const collector = new OperatorConsoleSecureInputCollector(runtimeHost, {
+      onSurfaceChange: () => controller.refresh(),
+    });
+    const abort = new AbortController();
+
+    controller.setTurnActivity({ phase: "thinking" });
+    const resultPromise = collector.collect(
+      secureInputSnapshot("password", "password"),
+      abort.signal,
+      { verifiedDestinationLabel: "https://developers.mtn.com · Sign in" }
+    );
+    output.clear();
+
+    vi.advanceTimersByTime(180);
+    expect(output.text()).toBe("");
+
+    abort.abort();
+    await expect(resultPromise).resolves.toEqual({ status: "cancelled" });
+    output.clear();
+    vi.advanceTimersByTime(180);
+    expect(output.text()).not.toBe("");
+    controller.clear();
   });
 
   it("does not restart animation from stale turn activity after turn cleanup", () => {
@@ -903,6 +996,30 @@ function makeLiveTaskWithSubagent(): TaskCardState {
       trace: [],
       results: [],
     }],
+  };
+}
+
+function secureInputSnapshot(
+  kind: SecureInputRequestSnapshot["request"]["kind"],
+  ref: string
+): SecureInputRequestSnapshot {
+  return {
+    id: `secure-${ref}`,
+    scope: { profileId: "default", sessionId: "session-1" },
+    request: {
+      kind,
+      purpose: "Sign in to MTN",
+      destination: {
+        type: "browser-field",
+        sessionId: "browser-1",
+        ref,
+        expectedOrigin: "https://developers.mtn.com",
+      },
+      retention: "use-once",
+    },
+    status: "awaiting_input",
+    requestedAt: "2026-08-13T10:00:00.000Z",
+    expiresAt: "2026-08-13T10:05:00.000Z",
   };
 }
 

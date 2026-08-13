@@ -870,7 +870,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           });
         const secureInputCollector = operatorConsoleRuntimeHost === undefined
           ? undefined
-          : new OperatorConsoleSecureInputCollector(operatorConsoleRuntimeHost);
+          : new OperatorConsoleSecureInputCollector(operatorConsoleRuntimeHost, {
+              onSurfaceChange: () => operatorConsoleLiveFrame?.refresh(),
+            });
         let turnWasCancelled = false;
 
         function clearOperatorConsoleLiveFrame(): void {
