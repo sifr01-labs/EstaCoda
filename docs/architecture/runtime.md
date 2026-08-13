@@ -305,6 +305,8 @@ Active foreground Missions also use semantic progress control. A plan item trans
 
 The provider loop has a 30-minute absolute emergency ceiling with a 15-second local-finalization reserve. Remaining absolute time caps each provider transport request without replacing route-level `timeoutMs` or stream-inactivity `staleTimeoutMs`. Near the ceiling the runtime stops starting new provider or tool work and renders its local receipt. It does not abort an already-running consequential tool merely to preserve finalization time. These controls are runtime defaults only; the Setup Editor does not expose Mission-duration settings yet.
 
+High-confidence routed foreground turns narrow the provider-visible tool schemas after normal availability and disabled-toolset resolution. The fixed per-turn inventory contains core and `plan` tools, routed and selected-skill toolsets, available optional skill toolsets, attachment-required tools, and canonical tools referenced by a resumed Mission. Low-confidence routes retain the wider resolved inventory so a weak route cannot make recovery impossible. Narrowing is intersection-only: it cannot reintroduce unavailable tools, disabled toolsets, blocked provider risk classes, or an unavailable MCP capability, and it does not change execution-time security or approval gates. Delegated children and durable Task steps keep their existing inventories and never gain `plan` through this path.
+
 ---
 
 ## Registries

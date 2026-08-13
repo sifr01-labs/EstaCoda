@@ -622,6 +622,7 @@ export class AgentLoopBuilder {
       contextReferenceExpander: substrate.contextReferenceExpander,
       projectContext: input.projectContext ?? substrate.projectContext,
       providerTools: providerToolSchemaCatalog.tools,
+      providerToolSchemaCatalog: ownsExecutionPlan ? providerToolSchemaCatalog : undefined,
       soul: undefined,
       skillsIndex: sessionSkillCatalog,
       skillConfig: input.skillConfig,

@@ -112,6 +112,38 @@ describe("AgentLoopBuilder", () => {
     expect(taskWorker.providerTools.map((tool) => tool.function.name)).not.toContain("plan");
   });
 
+  it("enables routed provider narrowing only for the root foreground loop", async () => {
+    const catalogs: unknown[] = [];
+    const harness = await createBuilderHarness({
+      factories: {
+        agentLoop(options) {
+          catalogs.push(options.providerToolSchemaCatalog);
+          return { handle: vi.fn() } as never;
+        }
+      }
+    });
+
+    await harness.build("root-session");
+    await harness.build("child-session", { parentSessionId: "root-session" });
+    await harness.build("task-worker", {
+      parentSessionId: "root-session",
+      taskExecution: {
+        taskId: "task-1",
+        rootTaskId: "task-1",
+        planRevisionId: "revision-1",
+        stepId: "step-1",
+        attemptId: "attempt-1"
+      }
+    });
+
+    expect(catalogs[0]).toEqual(expect.objectContaining({
+      tools: expect.any(Array),
+      entries: expect.any(Array),
+      aliases: expect.any(Map)
+    }));
+    expect(catalogs.slice(1)).toEqual([undefined, undefined]);
+  });
+
   it("shares one read-only execution-plan projection with the root provider and agent loops", async () => {
     const providerReaders: unknown[] = [];
     const agentReaders: unknown[] = [];

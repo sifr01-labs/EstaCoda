@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ArtifactRecord } from "../contracts/artifact.js";
+import type { ChannelAttachment } from "../contracts/channel.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryProvider } from "../contracts/memory.js";
 import type { ModelProfile, ProviderStreamDiagnostics } from "../contracts/provider.js";
@@ -14,6 +15,7 @@ import type { TrajectoryStore } from "../contracts/trajectory-store.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import { providerSpendDenialMessage } from "../providers/provider-spend-policy.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import { buildProviderToolSchemaCatalog } from "../tools/tool-schema.js";
 import { deriveAgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE, type SessionRecallService } from "../session/session-recall-service.js";
@@ -322,6 +324,9 @@ async function createAgentLoop(input: {
   skillRouteShadowReranker?: SkillRouteShadowReranker;
   agentEvolutionPolicy?: ReturnType<typeof deriveAgentEvolutionPolicy>;
   onProviderTurnRun?: () => void;
+  routeIntent?: IntentRoute;
+  routeAttachments?: ChannelAttachment[];
+  providerToolDefinitions?: ToolDefinition[];
 }) {
   const sessionDb = new InMemorySessionDB();
   const sessionId = `agent-loop-test-${Date.now()}-${Math.random()}`;
@@ -371,14 +376,18 @@ async function createAgentLoop(input: {
 
   const runtimeRouter = {
     route: vi.fn(() => ({
-      intent,
+      intent: input.routeIntent ?? intent,
       selectedSkill,
       selectedSkillInstructions: undefined,
       selectedSkillResources: undefined,
       selectedSkillSetup: undefined,
-      attachments: undefined
+      attachments: input.routeAttachments
     }))
   } as unknown as RuntimeRouter;
+
+  const providerToolSchemaCatalog = buildProviderToolSchemaCatalog({
+    tools: input.providerToolDefinitions ?? []
+  });
 
   const providerTurnLoop = {
     canRunProvider: vi.fn(() => input.canRunProvider),
@@ -457,7 +466,8 @@ async function createAgentLoop(input: {
     profileId: "default",
     toolExecutor: {} as any,
     model,
-    providerTools: [],
+    providerTools: providerToolSchemaCatalog.tools,
+    providerToolSchemaCatalog,
     memoryProvider: input.memoryProvider,
     memoryRecallOrchestrator,
     sessionCompressionService: input.sessionCompressionService,
@@ -480,6 +490,57 @@ async function createAgentLoop(input: {
 }
 
 describe("AgentLoop provider availability gating", () => {
+  it("fixes one narrowed provider inventory for a high-confidence routed turn", async () => {
+    const providerToolDefinitions: ToolDefinition[] = [
+      { ...tool, name: "plan", toolsets: ["core"] },
+      tool,
+      { ...tool, name: "browser.snapshot", toolsets: ["browser"] },
+      { ...tool, name: "mcp.postman.getCollection", toolsets: ["mcp"] }
+    ];
+    const { loop, providerTurnLoop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      providerToolDefinitions
+    });
+
+    await loop.handle({ text: "use the test skill", channel: "cli", trustedWorkspace: true });
+
+    const runInput = vi.mocked(providerTurnLoop.run).mock.calls[0]?.[0] as {
+      providerTools: Array<{ function: { name: string } }>;
+    };
+    expect(runInput.providerTools.map((entry) => entry.function.name)).toEqual([
+      "plan",
+      "files_read"
+    ]);
+  });
+
+  it("keeps the wide provider inventory when routing confidence is low", async () => {
+    const providerToolDefinitions: ToolDefinition[] = [
+      { ...tool, name: "plan", toolsets: ["core"] },
+      tool,
+      { ...tool, name: "browser.snapshot", toolsets: ["browser"] }
+    ];
+    const { loop, providerTurnLoop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      providerToolDefinitions,
+      routeIntent: { ...intent, confidence: 0.35, suggestedToolsets: [] }
+    });
+
+    await loop.handle({ text: "hello", channel: "cli", trustedWorkspace: true });
+
+    const runInput = vi.mocked(providerTurnLoop.run).mock.calls[0]?.[0] as {
+      providerTools: Array<{ function: { name: string } }>;
+    };
+    expect(runInput.providerTools.map((entry) => entry.function.name)).toEqual([
+      "plan",
+      "files_read",
+      "browser_snapshot"
+    ]);
+  });
+
   it("persists the bounded parent abort source for provider-loop cancellation", async () => {
     const controller = new AbortController();
     const liveEvents: RuntimeEvent[] = [];

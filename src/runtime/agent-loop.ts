@@ -31,7 +31,7 @@ import type { ProviderExecutionResult, ProviderRuntimeEvent } from "../providers
 import type { ProviderUsageTaskAttribution } from "../providers/provider-usage-ledger.js";
 import { providerSpendDenialMessage } from "../providers/provider-spend-policy.js";
 import type { ToolCallPlanner } from "../tools/tool-call-planner.js";
-import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
+import type { OpenAICompatibleToolSchema, ProviderToolSchemaCatalog } from "../tools/tool-schema.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { resolveProjectFactPromotion, resolveUserPreferencePromotion } from "../memory/memory-promotion.js";
@@ -75,6 +75,7 @@ import {
   deriveExecutionFinalOutcome,
   learningOutcomeStatus
 } from "./execution-outcome.js";
+import { narrowProviderToolsForTurn } from "./provider-tool-narrowing.js";
 
 export type AgentLoopInput = {
   text: string;
@@ -151,6 +152,7 @@ export type AgentLoopOptions = {
   contextReferenceExpander?: ContextReferenceExpander;
   projectContext?: ProjectContextSnapshot;
   providerTools?: OpenAICompatibleToolSchema[];
+  providerToolSchemaCatalog?: ProviderToolSchemaCatalog;
   soul?: string;
   skillsIndex?: SkillCatalogEntry[];
   skillConfig?: Record<string, Record<string, unknown>>;
@@ -239,6 +241,7 @@ export class AgentLoop {
   readonly #contextReferenceExpander: ContextReferenceExpander | undefined;
   readonly #projectContext: ProjectContextSnapshot | undefined;
   readonly #providerTools: OpenAICompatibleToolSchema[];
+  readonly #providerToolSchemaCatalog: ProviderToolSchemaCatalog | undefined;
   readonly #providerTurnLoop: ProviderTurnLoop;
   readonly #skillPlaybookRunner: SkillPlaybookRunner;
   readonly #nativeToolExecutor: NativeToolExecutor;
@@ -286,6 +289,7 @@ export class AgentLoop {
     this.#contextReferenceExpander = options.contextReferenceExpander;
     this.#projectContext = options.projectContext;
     this.#providerTools = options.providerTools ?? [];
+    this.#providerToolSchemaCatalog = options.providerToolSchemaCatalog;
     this.#providerTurnLoop = options.providerTurnLoop;
     this.#skillPlaybookRunner = options.skillPlaybookRunner;
     this.#nativeToolExecutor = options.nativeToolExecutor;
@@ -700,7 +704,14 @@ export class AgentLoop {
     });
     const setupApprovals = buildSetupApprovalRequests(selectedSkillSetup, selectedSkill?.name);
     const deterministicImageGenerationRan = deterministicNativeTools.executions.some((execution) => execution.tool.name === "image.generate");
-    const providerTools = this.#model?.supportsTools === true ? this.#providerTools : [];
+    const providerTools = this.#model?.supportsTools === true
+      ? this.#providerToolsForTurn({
+          intent,
+          selectedSkill,
+          attachments,
+          executionPlan: this.#executionPlanReader?.current()
+        })
+      : [];
     const preflightCompression = await this.#compactBeforeProviderTurn(input.signal, input.onEvent);
     const previousConversationContinuationState = await this.#latestConversationContinuationState();
     await this.#emitLiveContextUsageEstimate({
@@ -1073,9 +1084,23 @@ export class AgentLoop {
     );
   }
 
-
-
-
+  #providerToolsForTurn(input: {
+    intent: IntentRoute;
+    selectedSkill?: LoadedSkill | SkillDefinition;
+    attachments?: readonly ChannelAttachment[];
+    executionPlan?: ExecutionPlan;
+  }): OpenAICompatibleToolSchema[] {
+    if (this.#providerToolSchemaCatalog === undefined || this.#taskExecution !== undefined) {
+      return this.#providerTools;
+    }
+    return narrowProviderToolsForTurn({
+      catalog: this.#providerToolSchemaCatalog,
+      intent: input.intent,
+      selectedSkill: input.selectedSkill,
+      attachments: input.attachments,
+      resumedExecutionPlan: input.executionPlan
+    });
+  }
 
   async #emitLiveContextUsageEstimate(input: {
     onEvent?: RuntimeEventSink;

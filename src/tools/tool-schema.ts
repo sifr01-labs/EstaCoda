@@ -3,6 +3,12 @@ import type { ToolDefinition, ToolRiskClass } from "../contracts/tool.js";
 export type ProviderToolSchemaCatalog = {
   tools: OpenAICompatibleToolSchema[];
   aliases: Map<string, string>;
+  entries: ProviderToolSchemaCatalogEntry[];
+};
+
+export type ProviderToolSchemaCatalogEntry = {
+  tool: ToolDefinition;
+  schema: OpenAICompatibleToolSchema;
 };
 
 export type OpenAICompatibleToolSchema = {
@@ -30,23 +36,28 @@ export function buildProviderToolSchemaCatalog(input: {
   const selected = input.tools
     .filter((tool) => !BLOCKED_PROVIDER_RISKS.has(tool.riskClass))
     .slice(0, input.maxTools ?? DEFAULT_MAX_PROVIDER_TOOLS);
+  const entries = selected.map((tool) => {
+    const alias = toProviderToolName(tool.name, aliases);
 
-  return {
-    aliases,
-    tools: selected.map((tool) => {
-      const alias = toProviderToolName(tool.name, aliases);
+    aliases.set(alias, tool.name);
 
-      aliases.set(alias, tool.name);
-
-      return {
-        type: "function",
+    return {
+      tool,
+      schema: {
+        type: "function" as const,
         function: {
           name: alias,
           description: tool.description,
           parameters: normalizeSchema(tool.inputSchema)
         }
-      };
-    })
+      }
+    };
+  });
+
+  return {
+    aliases,
+    entries,
+    tools: entries.map((entry) => entry.schema)
   };
 }
 
