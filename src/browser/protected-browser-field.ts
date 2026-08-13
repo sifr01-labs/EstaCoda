@@ -26,6 +26,10 @@ type ActiveProtectedField = {
   frameId?: string;
   supervisor: ProtectedFieldPageSession["supervisor"];
   delivered: boolean;
+  submit?: {
+    objectId: string;
+    elementIndex: number;
+  };
 };
 
 type FieldInspection = {
@@ -36,6 +40,19 @@ type FieldInspection = {
   editable: boolean;
   semanticsMatch: boolean;
   conflictCount: number;
+};
+
+type SubmitInspection = {
+  connected: boolean;
+  current: boolean;
+  visible: boolean;
+  disabled: boolean;
+  clickable: boolean;
+  semanticsMatch: boolean;
+};
+
+export type ProtectedFieldDeliveryOutcome = {
+  submission: "not-requested" | "clicked" | "automatic" | "failed";
 };
 
 export class ProtectedBrowserFieldError extends Error {
@@ -101,6 +118,11 @@ export class ProtectedBrowserFieldController {
         await releaseObject(session.supervisor, objectId);
         return rejection;
       }
+      const submit = await bindSubmit(session.supervisor, input.destination.submit?.ref);
+      if (input.destination.submit !== undefined && submit === undefined) {
+        await releaseObject(session.supervisor, objectId);
+        return { status: "rejected", reason: "field-missing" };
+      }
       const active: ActiveProtectedField = {
         destination: structuredClone(input.destination),
         kind: input.kind,
@@ -109,6 +131,7 @@ export class ProtectedBrowserFieldController {
         ...(frameId === undefined ? {} : { frameId }),
         supervisor: session.supervisor,
         delivered: false,
+        ...(submit === undefined ? {} : { submit }),
       };
       if (activeFields === undefined) this.#active.set(session.key, new Map([[bindingKey, active]]));
       else activeFields.set(bindingKey, active);
@@ -127,13 +150,25 @@ export class ProtectedBrowserFieldController {
       active.elementIndex,
       active.kind
     );
-    return inspectionRejection(inspection, true) ?? { status: "verified" };
+    const rejection = inspectionRejection(inspection, true);
+    if (rejection !== undefined) return rejection;
+    if (active.submit !== undefined) {
+      const submitInspection = await inspectSubmit(
+        session.supervisor,
+        active.submit.objectId,
+        active.submit.elementIndex
+      );
+      if (!submitIsActionable(submitInspection)) {
+        return { status: "rejected", reason: "field-replaced" };
+      }
+    }
+    return { status: "verified" };
   }
 
   async deliver(
     session: ProtectedFieldPageSession,
     input: BrowserProtectedFieldDeliveryInput
-  ): Promise<void> {
+  ): Promise<ProtectedFieldDeliveryOutcome> {
     const verified = await this.verify(session, {
       destination: input.destination,
       kind: input.kind,
@@ -164,6 +199,37 @@ export class ProtectedBrowserFieldController {
       }
       active.delivered = true;
       this.#sensitiveSessions.add(session.key);
+      if (active.submit === undefined) return { submission: "not-requested" };
+
+      // Give synchronous/very-fast auto-submit handlers a chance to replace the
+      // challenge before dispatching an explicit click. This stays entirely in
+      // the local runtime; no provider turn occurs between delivery and submit.
+      await shortDelay(75, input.signal);
+      const fieldInspection = await inspectField(
+        session.supervisor,
+        active.objectId,
+        active.elementIndex,
+        active.kind
+      );
+      if (fieldInspection === undefined || !fieldInspection.connected || !fieldInspection.current) {
+        return {
+          submission: fieldInspection?.conflictCount === 0 ? "automatic" : "failed"
+        };
+      }
+      const submitInspection = await inspectSubmit(
+        session.supervisor,
+        active.submit.objectId,
+        active.submit.elementIndex
+      );
+      if (!submitIsActionable(submitInspection)) return { submission: "failed" };
+      const clicked = await session.supervisor.send("Runtime.callFunctionOn", {
+        objectId: active.submit.objectId,
+        functionDeclaration: PROTECTED_SUBMIT_FUNCTION,
+        arguments: [{ value: active.submit.elementIndex }],
+        returnByValue: true,
+        awaitPromise: true,
+      }) as { result?: { value?: unknown } };
+      return { submission: clicked.result?.value === true ? "clicked" : "failed" };
     } catch (error) {
       throw new ProtectedBrowserFieldError(
         "protected-field-delivery-failed",
@@ -183,6 +249,7 @@ export class ProtectedBrowserFieldController {
       active.supervisor.setSensitiveInputActive?.(false);
     }
     await releaseObject(active.supervisor, active.objectId);
+    if (active.submit !== undefined) await releaseObject(active.supervisor, active.submit.objectId);
   }
 
   async invalidateSession(session: ProtectedFieldPageSession): Promise<void> {
@@ -196,6 +263,7 @@ export class ProtectedBrowserFieldController {
         field.supervisor.setSensitiveInputActive?.(false);
       }
       await releaseObject(field.supervisor, field.objectId);
+      if (field.submit !== undefined) await releaseObject(field.supervisor, field.submit.objectId);
     }
   }
 
@@ -207,8 +275,26 @@ export class ProtectedBrowserFieldController {
       for (const field of active.values()) {
         field.supervisor.setSensitiveInputActive?.(false);
         await releaseObject(field.supervisor, field.objectId);
+        if (field.submit !== undefined) await releaseObject(field.supervisor, field.submit.objectId);
       }
     }
+  }
+
+  async isChallengeCurrent(
+    session: ProtectedFieldPageSession,
+    destination: BrowserFieldSecureInputDestination
+  ): Promise<boolean | undefined> {
+    const active = findActiveField(this.#active.get(session.key), destination);
+    if (active === undefined) return undefined;
+    const inspection = await inspectField(
+      session.supervisor,
+      active.objectId,
+      active.elementIndex,
+      active.kind
+    );
+    if (inspection === undefined) return undefined;
+    if (inspection.connected && inspection.current) return true;
+    return inspection.conflictCount > 0;
   }
 
   protectSnapshot(sessionId: string, snapshot: BrowserSnapshot): BrowserSnapshot {
@@ -285,6 +371,74 @@ async function resolveFieldObjectId(
   return typeof resolved.result?.objectId === "string" && resolved.result.subtype !== "null"
     ? resolved.result.objectId
     : undefined;
+}
+
+async function bindSubmit(
+  supervisor: ProtectedFieldPageSession["supervisor"],
+  ref: string | undefined
+): Promise<ActiveProtectedField["submit"] | undefined> {
+  if (ref === undefined) return undefined;
+  const elementIndex = refToIndex(ref);
+  if (elementIndex === undefined) return undefined;
+  const objectId = await resolveFieldObjectId(supervisor, elementIndex);
+  if (objectId === undefined) return undefined;
+  const inspection = await inspectSubmit(supervisor, objectId, elementIndex);
+  if (!submitIsActionable(inspection)) {
+    await releaseObject(supervisor, objectId);
+    return undefined;
+  }
+  return { objectId, elementIndex };
+}
+
+async function inspectSubmit(
+  supervisor: ProtectedFieldPageSession["supervisor"],
+  objectId: string,
+  elementIndex: number
+): Promise<SubmitInspection | undefined> {
+  try {
+    const result = await supervisor.send("Runtime.callFunctionOn", {
+      objectId,
+      functionDeclaration: PROTECTED_SUBMIT_INSPECTION_FUNCTION,
+      arguments: [{ value: elementIndex }],
+      returnByValue: true,
+      awaitPromise: true,
+    }) as { result?: { value?: unknown } };
+    const value = result.result?.value;
+    if (!isRecord(value)) return undefined;
+    return {
+      connected: value.connected === true,
+      current: value.current === true,
+      visible: value.visible === true,
+      disabled: value.disabled === true,
+      clickable: value.clickable === true,
+      semanticsMatch: value.semanticsMatch === true,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function submitIsActionable(inspection: SubmitInspection | undefined): boolean {
+  return inspection !== undefined && inspection.connected && inspection.current &&
+    inspection.visible && !inspection.disabled && inspection.clickable && inspection.semanticsMatch;
+}
+
+async function shortDelay(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(new Error("Protected browser submission cancelled."));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(new Error("Protected browser submission cancelled."));
+    };
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 async function inspectField(
@@ -440,5 +594,41 @@ const PROTECTED_FIELD_DELIVERY_FUNCTION = `function(index, protectedValue) {
   }
   this.dispatchEvent(new Event('input', { bubbles: true }));
   this.dispatchEvent(new Event('change', { bubbles: true }));
+  return true;
+}`;
+
+const PROTECTED_SUBMIT_INSPECTION_FUNCTION = `function(index) {
+  const control = this;
+  const visible = control?.isConnected === true && (() => {
+    const style = getComputedStyle(control);
+    return style.display !== 'none' && style.visibility !== 'hidden' && style.visibility !== 'collapse' && control.getClientRects().length > 0;
+  })();
+  const descriptor = [
+    control?.innerText,
+    control?.textContent,
+    control?.getAttribute?.('aria-label'),
+    control?.getAttribute?.('name'),
+    control?.getAttribute?.('id'),
+    control?.getAttribute?.('value')
+  ].filter(Boolean).join(' ').toLowerCase().slice(0, 500);
+  const buttonLike = control instanceof HTMLButtonElement ||
+    (control instanceof HTMLInputElement && ['submit', 'button'].includes(control.type.toLowerCase())) ||
+    control?.getAttribute?.('role') === 'button';
+  return {
+    connected: control?.isConnected === true,
+    current: window.__estacodaElements?.[index] === control,
+    visible,
+    disabled: control?.matches?.(':disabled,[aria-disabled="true"]') === true,
+    clickable: typeof control?.click === 'function',
+    semanticsMatch: buttonLike && /authenticat|verify|continue|submit|sign[ _-]?in|log[ _-]?in|next|confirm|تحقق|تأكيد|تاكيد|دخول|متابعة/.test(descriptor)
+  };
+}`;
+
+const PROTECTED_SUBMIT_FUNCTION = `function(index) {
+  if (!this?.isConnected || window.__estacodaElements?.[index] !== this) return false;
+  const style = getComputedStyle(this);
+  if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || this.getClientRects().length === 0) return false;
+  if (this.matches?.(':disabled,[aria-disabled="true"]') === true || typeof this.click !== 'function') return false;
+  this.click();
   return true;
 }`;

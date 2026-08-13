@@ -2022,6 +2022,96 @@ describe("web and browser tools baselines", () => {
     expect(JSON.stringify(result)).not.toContain("handler-sentinel-secret");
   });
 
+  it("requests atomic local submission for a one-time-code and returns only settled metadata", async () => {
+    const prepareProtectedField = vi.fn(async (input: BrowserActionInput) => ({
+      type: "browser-field" as const,
+      sessionId: input.sessionId!,
+      ref: input.ref!,
+      expectedOrigin: "https://portal.example.com",
+      tabRef: input.tabRef,
+      frameId: "main-frame",
+      label: "Browser field and submit control at https://portal.example.com",
+      submit: { ref: input.submitRef! },
+    }));
+    const takeProtectedFieldDeliveryResult = vi.fn(() => ({
+      delivery: "delivered" as const,
+      submission: "clicked" as const,
+      challengeState: "departed" as const,
+      beforeRevision: 8,
+      afterRevision: 10,
+      sensitiveInputActive: false,
+      snapshot: {
+        sessionId: "test-runtime-session:main",
+        url: "https://portal.example.com/home",
+        revision: 10,
+        observedAt: "2026-08-13T00:00:00.000Z",
+        title: "Portal home",
+      },
+    }));
+    const browserType = tool("browser.type", createTestWebTools({
+      browserBackend: {
+        ...createSessionRecordingBrowserBackend(),
+        kind: "local-cdp",
+        prepareProtectedField,
+        takeProtectedFieldDeliveryResult,
+      },
+    }));
+    const onSecureInputRequest = vi.fn(async () => ({
+      status: "delivered" as const,
+      destinationLabel: "Browser field and submit control at https://portal.example.com",
+      persisted: false,
+    }));
+
+    const result = await browserType.run({
+      ref: "@e19",
+      submitRef: "@e20",
+      revision: 8,
+      tabRef: "@t1",
+      protectedInput: {
+        kind: "one-time-code",
+        purpose: "Enter and submit the portal authentication code",
+      },
+    }, { onSecureInputRequest });
+
+    expect(result).toMatchObject({
+      ok: true,
+      metadata: {
+        protectedDelivery: {
+          submission: "clicked",
+          challengeState: "departed",
+          sensitiveInputActive: false,
+        },
+        snapshot: { revision: 10, title: "Portal home" },
+      },
+    });
+    expect(result.content).toContain("authentication itself still requires post-submit verification");
+    expect(prepareProtectedField).toHaveBeenCalledWith(expect.objectContaining({ submitRef: "@e20" }));
+    expect(onSecureInputRequest).toHaveBeenCalledTimes(1);
+    expect(takeProtectedFieldDeliveryResult).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(result)).not.toContain("123456");
+  });
+
+  it("rejects atomic protected submission for non-OTP secrets", async () => {
+    const prepareProtectedField = vi.fn();
+    const browserType = tool("browser.type", createTestWebTools({
+      browserBackend: {
+        ...createSessionRecordingBrowserBackend(),
+        kind: "local-cdp",
+        prepareProtectedField,
+      },
+    }));
+
+    const result = await browserType.run({
+      ref: "@e1",
+      submitRef: "@e2",
+      protectedInput: { kind: "password", purpose: "Sign in" },
+    }, { onSecureInputRequest: vi.fn() });
+
+    expect(result.ok).toBe(false);
+    expect(result.content).toContain("limited to one-time-code");
+    expect(prepareProtectedField).not.toHaveBeenCalled();
+  });
+
   it("requests every related browser credential in one grouped protected form flow", async () => {
     const prepareProtectedField = vi.fn(async (input: BrowserActionInput) => ({
       type: "browser-field" as const,

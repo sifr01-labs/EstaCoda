@@ -3,6 +3,7 @@ const VERIFICATION_PATTERN = /\b(?:confirm|read\s+back|validate|verification|ver
 const SEQUENCE_PATTERN = /\b(?:after(?:wards)?|before|finally|first|next|then)\b|(?:أولاً|أولا|ثم|بعد ذلك|أخيراً|أخيرا|قبل ذلك)/iu;
 const QUANTIFIED_TARGET_PATTERN = /\b(?:all\s+(?:of\s+)?(?:the\s+)?|[3-9]|[1-9]\d+)\b|(?:كل|جميع|[٣-٩]|[١-٩][٠-٩]+)/iu;
 const REASONING_ONLY_REQUEST_PATTERN = /^(?:can|could|would) you (?:explain|describe|tell me how)|^(?:explain|describe|tell me how|how (?:can|do|should|would) i|what (?:is|are|should|would))\b|^(?:اشرح|صف|أخبرني كيف|اخبرني كيف|كيف|ما هو|ما هي|ماذا)\b/iu;
+const AUTHENTICATION_EXECUTION_PATTERN = /\b(?:(?:log|sign)\s+(?:me|us)\s+in|sign\s+in\s+to|log\s+in\s+to|get\s+(?:me|us)\s+into.{0,80}\b(?:account|portal|console|dashboard)|authenticate\s+(?:me|us|with)|complete\s+(?:the\s+)?(?:login|sign[ -]?in|authentication|2fa|mfa))\b|(?:سجّل\s+دخولي|سجل\s+دخولي|سجّلنا\s+الدخول|سجلنا\s+الدخول|أدخلني.{0,60}(?:الحساب|البوابة)|ادخلني.{0,60}(?:الحساب|البوابة)|أكمل.{0,40}(?:تسجيل الدخول|المصادقة)|اكمل.{0,40}(?:تسجيل الدخول|المصادقة))/iu;
 
 export type ExecutionPlanActivationAssessment = {
   required: boolean;
@@ -12,6 +13,7 @@ export type ExecutionPlanActivationAssessment = {
     | "multiple-targets"
     | "sequenced-work"
     | "verification"
+    | "authentication"
   >;
 };
 
@@ -26,6 +28,9 @@ export function assessExecutionPlanActivation(input: {
 }): ExecutionPlanActivationAssessment {
   const text = input.userText.normalize("NFKC");
   if (REASONING_ONLY_REQUEST_PATTERN.test(text.trim())) return { required: false, reasons: [] };
+  if (AUTHENTICATION_EXECUTION_PATTERN.test(text)) {
+    return { required: true, reasons: ["authentication"] };
+  }
   const actions = distinctMatches(text, MUTATION_OR_EXECUTION_PATTERN);
   if (actions.length === 0) return { required: false, reasons: [] };
 

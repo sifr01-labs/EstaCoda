@@ -36,6 +36,16 @@ class FakeCdpSocket implements CdpWebSocketLike {
     semanticsMatch: true,
     conflictCount: 1
   };
+  protectedSubmitInspection = {
+    connected: true,
+    current: true,
+    visible: true,
+    disabled: false,
+    clickable: true,
+    semanticsMatch: true
+  };
+  onProtectedDelivery?: () => void;
+  onProtectedSubmit?: () => void;
   onRuntimeEvaluate?: (expression: string) => void;
 
   send(data: string): void {
@@ -131,6 +141,17 @@ class FakeCdpSocket implements CdpWebSocketLike {
     if (method === "Runtime.callFunctionOn") {
       if (typeof message.params?.functionDeclaration === "string" && message.params.functionDeclaration.includes("conflictCount")) {
         return { result: { value: this.protectedFieldInspection } };
+      }
+      if (typeof message.params?.functionDeclaration === "string" && message.params.functionDeclaration.includes("clickable:")) {
+        return { result: { value: this.protectedSubmitInspection } };
+      }
+      if (typeof message.params?.functionDeclaration === "string" && message.params.functionDeclaration.includes("protectedValue")) {
+        this.onProtectedDelivery?.();
+        return { result: { value: true } };
+      }
+      if (typeof message.params?.functionDeclaration === "string" && message.params.functionDeclaration.includes("this.click();")) {
+        this.onProtectedSubmit?.();
+        return { result: { value: true } };
       }
       return { result: { value: true } };
     }
@@ -908,7 +929,10 @@ describe("supervised local CDP backend", () => {
       url: "https://accounts.example.com/login",
       title: "Sign in",
       text: "Sign in",
-      elements: [{ ref: "@e1", role: "textbox", name: "Password" }]
+      elements: [
+        { ref: "@e1", role: "textbox", name: "Password" },
+        { ref: "@e2", role: "button", name: "Help" },
+      ]
     };
     const backend = createSupervisedLocalCdpBrowserBackend({
       cdpUrl: "http://127.0.0.1:9222",
@@ -1040,6 +1064,140 @@ describe("supervised local CDP backend", () => {
     expect(evaluatedObjects).toHaveLength(2);
     await backend.releaseProtectedField?.(email!);
     await backend.releaseProtectedField?.(password!);
+  });
+
+  it("binds, delivers, and submits a one-time-code challenge as one local transaction", async () => {
+    const socket = new FakeCdpSocket();
+    socket.snapshot = {
+      url: "https://accounts.example.com/challenge",
+      title: "Verify account",
+      text: "Enter authenticator code",
+      elements: [
+        { ref: "@e1", role: "textbox", name: "One-time code" },
+        { ref: "@e2", role: "button", name: "Authenticate" },
+      ]
+    };
+    socket.onProtectedSubmit = () => {
+      socket.protectedFieldInspection.current = false;
+      socket.protectedFieldInspection.conflictCount = 0;
+      socket.protectedSubmitInspection.current = false;
+      socket.snapshot = {
+        url: "https://accounts.example.com/home",
+        title: "Account home",
+        text: "Welcome",
+        elements: [{ ref: "@e1", role: "link", name: "My profile" }]
+      };
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"],
+      settling: { pollIntervalMs: 5, stableWindowMs: 10, minimumObservationMs: 10 }
+    });
+    const navigation = await backend.navigate({
+      url: socket.snapshot.url,
+      sessionId: "session-otp"
+    });
+    const destination = await backend.prepareProtectedField?.({
+      sessionId: "session-otp",
+      ref: "@e1",
+      submitRef: "@e2",
+      revision: navigation.snapshot.revision,
+      tabRef: navigation.snapshot.tab!.ref
+    });
+
+    expect(destination).toMatchObject({
+      ref: "@e1",
+      submit: { ref: "@e2" },
+      label: "Browser field with verified submit control \"Authenticate\" at https://accounts.example.com"
+    });
+    socket.protectedSubmitInspection.semanticsMatch = false;
+    await expect(backend.verifyProtectedField?.({
+      destination: destination!,
+      kind: "one-time-code",
+      phase: "before-collection"
+    })).resolves.toEqual({ status: "rejected", reason: "field-missing" });
+    socket.protectedSubmitInspection.semanticsMatch = true;
+    await expect(backend.verifyProtectedField?.({
+      destination: destination!,
+      kind: "one-time-code",
+      phase: "before-collection"
+    })).resolves.toEqual({ status: "verified" });
+
+    const secret = "123456";
+    await backend.deliverProtectedField?.({
+      destination: destination!,
+      kind: "one-time-code",
+      value: new TextEncoder().encode(secret)
+    });
+    await backend.releaseProtectedField?.(destination!);
+    const result = backend.takeProtectedFieldDeliveryResult?.(destination!);
+
+    expect(result).toMatchObject({
+      delivery: "delivered",
+      submission: "clicked",
+      challengeState: "departed",
+      sensitiveInputActive: false,
+      snapshot: { url: "https://accounts.example.com/home", title: "Account home" }
+    });
+    expect(result!.afterRevision).toBeGreaterThanOrEqual(result!.beforeRevision);
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(socket.sent.filter((message) =>
+      message.method === "Runtime.callFunctionOn" &&
+      String(message.params?.functionDeclaration).includes("this.click();")
+    )).toHaveLength(1);
+  });
+
+  it("does not double-submit when protected code entry replaces the challenge", async () => {
+    const socket = new FakeCdpSocket();
+    socket.snapshot = {
+      url: "https://accounts.example.com/challenge",
+      title: "Verify account",
+      text: "Enter authenticator code",
+      elements: [
+        { ref: "@e1", role: "textbox", name: "One-time code" },
+        { ref: "@e2", role: "button", name: "Authenticate" },
+      ]
+    };
+    socket.onProtectedDelivery = () => {
+      socket.failMethods.set("Runtime.callFunctionOn", "Execution context was destroyed during redirect");
+      socket.snapshot = {
+        url: "https://accounts.example.com/home",
+        title: "Account home",
+        text: "Welcome",
+        elements: [{ ref: "@e1", role: "link", name: "My profile" }]
+      };
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"],
+      settling: { pollIntervalMs: 5, stableWindowMs: 10, minimumObservationMs: 10 }
+    });
+    const navigation = await backend.navigate({ url: socket.snapshot.url, sessionId: "session-auto-otp" });
+    const destination = await backend.prepareProtectedField?.({
+      sessionId: "session-auto-otp",
+      ref: "@e1",
+      submitRef: "@e2",
+      revision: navigation.snapshot.revision,
+      tabRef: navigation.snapshot.tab!.ref
+    });
+    await backend.verifyProtectedField?.({
+      destination: destination!, kind: "one-time-code", phase: "before-collection"
+    });
+
+    await backend.deliverProtectedField?.({
+      destination: destination!, kind: "one-time-code", value: new TextEncoder().encode("654321")
+    });
+    const result = backend.takeProtectedFieldDeliveryResult?.(destination!);
+
+    expect(result).toMatchObject({ submission: "automatic", challengeState: "departed" });
+    expect(socket.sent.some((message) =>
+      message.method === "Runtime.callFunctionOn" &&
+      String(message.params?.functionDeclaration).includes("this.click();")
+    )).toBe(false);
   });
 
   it("rejects changed origins, frames, fields, and ambiguous credential targets", async () => {

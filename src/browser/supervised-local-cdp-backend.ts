@@ -7,6 +7,7 @@ import type {
   BrowserNavigateInput,
   BrowserNavigateResult,
   BrowserProtectedFieldDeliveryInput,
+  BrowserProtectedFieldDeliveryResult,
   BrowserProtectedFieldInput,
   BrowserScreenshotResult,
   BrowserSnapshot,
@@ -99,6 +100,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
   const latestSnapshotScopes = new Map<string, boolean>();
   const latestObservedUrls = new Map<string, string>();
   const fallbackSnapshotRevisions = new Map<string, BrowserSnapshotRevisionState>();
+  const protectedDeliveryResults = new Map<string, BrowserProtectedFieldDeliveryResult>();
   const protectedFields = new ProtectedBrowserFieldController();
   let launchedChrome: LaunchedChrome | undefined;
   let launchPromise: Promise<LaunchedChrome> | undefined;
@@ -117,6 +119,9 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       latestSnapshotScopes.delete(sessionId);
       latestObservedUrls.delete(sessionId);
       fallbackSnapshotRevisions.delete(sessionId);
+      for (const key of protectedDeliveryResults.keys()) {
+        if (key.startsWith(`${sessionId}\u0000`)) protectedDeliveryResults.delete(key);
+      }
       throw new BrowserSessionStateError("session_missing", `Browser session not found: ${sessionId}`);
     }
     return asBackendSession(await stack.sessionManager.acquire(sessionId));
@@ -183,15 +188,19 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     return manager?.listTabs !== undefined && manager.switchTab !== undefined;
   };
 
-  const observeSessionSnapshot = (
+  const observeSessionSnapshot = async (
     session: ManagedBackendSession,
     snapshot: BrowserSnapshot
-  ): BrowserSnapshot => {
+  ): Promise<BrowserSnapshot> => {
     const manager = sessionStacks.get(session.key)?.sessionManager;
-    latestObservedUrls.set(session.key, snapshot.url);
+    const previousUrl = latestObservedUrls.get(session.key);
     const fallbackRevision = fallbackSnapshotRevisions.get(session.key) ?? { revision: 0 };
     fallbackSnapshotRevisions.set(session.key, fallbackRevision);
     const observed = manager?.observeSnapshot?.(session.key, snapshot) ?? observeBrowserSnapshot(snapshot, fallbackRevision);
+    latestObservedUrls.set(session.key, observed.url);
+    if (previousUrl !== undefined && previousUrl !== observed.url && protectedFields.isSensitive(session.key)) {
+      await protectedFields.invalidateSession(session);
+    }
     const protectedSnapshot = protectedFields.protectSnapshot(session.key, observed);
     latestSnapshots.set(session.key, protectedSnapshot);
     return protectedSnapshot;
@@ -208,7 +217,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       openedTabs
     );
     latestSnapshotScopes.set(session.key, full);
-    return observeSessionSnapshot(session, raw);
+    return await observeSessionSnapshot(session, raw);
   };
 
   const captureSafeTargetSnapshot = async (
@@ -285,7 +294,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       }
       throw new Error("Browser tab changed to a URL blocked by browser policy before it could be controlled.");
     }
-    const snapshot = observeSessionSnapshot(session, rawSnapshot);
+    const snapshot = await observeSessionSnapshot(session, rawSnapshot);
     const tab: BrowserTab = {
       ref: session.tabRef,
       url: redactUrlForMetadata(snapshot.url),
@@ -308,6 +317,9 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       latestSnapshotScopes.delete(sessionId);
       latestObservedUrls.delete(sessionId);
       fallbackSnapshotRevisions.delete(sessionId);
+      for (const key of protectedDeliveryResults.keys()) {
+        if (key.startsWith(`${sessionId}\u0000`)) protectedDeliveryResults.delete(key);
+      }
       lifecycle?.unregister(sessionId);
       await closeLaunchedChromeIfIdle();
       return;
@@ -931,6 +943,17 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       const session = await getSession(input);
       const { snapshot } = await captureSafeTargetSnapshot(session, input);
       const target = resolveBrowserTarget(snapshot, input);
+      const submit = input.submitRef === undefined
+        ? undefined
+        : resolveBrowserTarget(snapshot, {
+            sessionId: input.sessionId,
+            ref: input.submitRef,
+            revision: input.revision,
+            tabRef: input.tabRef,
+          });
+      if (submit?.ref === target.ref) {
+        throw new Error("Protected browser input and submit controls must be different elements.");
+      }
       const origin = originForUrl(snapshot.url);
       if (origin === "null") {
         throw new Error("Protected browser input requires an HTTP or HTTPS origin.");
@@ -948,6 +971,12 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         expectedOrigin: origin,
         tabRef: target.tabRef,
         ...(frameId === undefined ? {} : { frameId }),
+        ...(submit === undefined ? {} : {
+          label: submit.name === undefined
+            ? `Browser field and verified submit control at ${origin}`
+            : `Browser field with verified submit control ${JSON.stringify(submit.name)} at ${origin}`,
+          submit: { ref: submit.ref },
+        }),
       };
     },
     verifyProtectedField: async (input: BrowserProtectedFieldInput) => {
@@ -956,7 +985,46 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     },
     deliverProtectedField: async (input: BrowserProtectedFieldDeliveryInput) => {
       const session = await getSession({ sessionId: input.destination.sessionId });
-      await protectedFields.deliver(session, input);
+      const before = latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session);
+      const outcome = await protectedFields.deliver(session, input);
+      if (input.destination.submit === undefined) return;
+      let snapshot = await settleAction({
+        session,
+        before,
+        actionInput: { signal: input.signal },
+      });
+      let challengeCurrent = await protectedFields.isChallengeCurrent(session, input.destination);
+      if (challengeCurrent === undefined && protectedFields.isSensitive(session.key)) {
+        const raw = withSessionTab(session, await session.supervisor.getSnapshot(session.key));
+        challengeCurrent = protectedChallengePresent(raw, input.kind);
+      }
+      if (challengeCurrent === false) {
+        await protectedFields.invalidateSession(session);
+        snapshot = await captureSessionSnapshot(session);
+      }
+      const sensitiveInputActive = protectedFields.isSensitive(session.key);
+      const submission = outcome.submission === "failed" && challengeCurrent !== true && !sensitiveInputActive
+        ? "automatic"
+        : outcome.submission;
+      protectedDeliveryResults.set(protectedDeliveryKey(input.destination), {
+        delivery: "delivered",
+        submission,
+        challengeState: challengeCurrent === true
+          ? "still-present"
+          : !sensitiveInputActive
+            ? "departed"
+            : "unknown",
+        beforeRevision: before.revision,
+        afterRevision: snapshot.revision,
+        sensitiveInputActive,
+        snapshot,
+      });
+    },
+    takeProtectedFieldDeliveryResult: (destination) => {
+      const key = protectedDeliveryKey(destination);
+      const result = protectedDeliveryResults.get(key);
+      protectedDeliveryResults.delete(key);
+      return result;
     },
     releaseProtectedField: async (destination) => {
       await protectedFields.release(destination);
@@ -985,6 +1053,30 @@ function toBrowserTab(tab: BrowserManagedTab): BrowserTab {
     ...(tab.title === undefined ? {} : { title: tab.title }),
     controlled: tab.controlled
   };
+}
+
+function protectedDeliveryKey(
+  destination: BrowserProtectedFieldDeliveryInput["destination"]
+): string {
+  return [destination.sessionId, destination.tabRef ?? "", destination.frameId ?? "", destination.ref]
+    .join("\u0000");
+}
+
+function protectedChallengePresent(
+  snapshot: BrowserSnapshot,
+  kind: BrowserProtectedFieldDeliveryInput["kind"]
+): boolean | undefined {
+  if (snapshot.elements === undefined) return undefined;
+  if (kind !== "one-time-code") return undefined;
+  return snapshot.elements.some((element) => {
+    if (element.hidden === true || element.disabled === true) return false;
+    const hint = [element.name, element.label, element.text]
+      .filter((value): value is string => typeof value === "string")
+      .join(" ")
+      .normalize("NFKC")
+      .toLocaleLowerCase("en-US");
+    return /one[ _-]?time|otp|authenticator|verification[ _-]?code|security[ _-]?code/iu.test(hint);
+  });
 }
 
 function withSessionTab(

@@ -356,6 +356,12 @@ describe("EphemeralSecretBroker", () => {
           ...destination,
           password: "must-not-enter-destination-metadata"
         } as SecureInputDestination
+      }),
+      request({
+        destination: {
+          ...destination,
+          submit: { ref: "@e2", action: "delete-account" }
+        } as SecureInputDestination
       })
     ];
 
@@ -363,6 +369,16 @@ describe("EphemeralSecretBroker", () => {
       expect(() => makeBroker().createRequest({ scope, request: invalid }))
         .toThrowError(expect.objectContaining({ code: "invalid_request" }));
     }
+  });
+
+  it("accepts a bounded same-document browser submit binding", () => {
+    const broker = new EphemeralSecretBroker({ idFactory: () => "secure_input_submit" });
+    const created = broker.createRequest({
+      scope,
+      request: request({ destination: { ...destination, submit: { ref: "@e2" } } })
+    });
+
+    expect(created.request.destination).toEqual({ ...destination, submit: { ref: "@e2" } });
   });
 
   it("bounds retained terminal metadata and clears all state on disposal", () => {

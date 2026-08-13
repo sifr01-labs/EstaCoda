@@ -2595,7 +2595,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     );
 
     const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
-    const nudge = "Repeated browser observations show no state change. Do not call browser.snapshot or browser.tabs again unless another action may have changed the page. Switch tabs or take a different browser action; if progress is blocked, explain what is blocking it.";
+    const nudge = "Repeated browser observations show no semantic state change. Do not alternate snapshot, tabs, find, extract, screenshot, console, or CDP calls to inspect the same state. Take a relevant browser action; if protected input or another external condition blocks progress, record that precise blocker.";
     expect(requests.filter((request) => JSON.stringify(request.messages).includes(nudge))).toHaveLength(1);
 
     const budgetEvent = events.find((event) =>

@@ -79,15 +79,33 @@ describe("BrowserObservationGuard", () => {
     expect(guard.observe([later])).toMatchObject({ count: 2, shouldNudge: true });
   });
 
-  it("resets after a browser action or failed observation", () => {
+  it("resets after a browser action but counts failed observations", () => {
     const guard = new BrowserObservationGuard(3);
     const observation = execution();
 
     guard.observe([observation]);
     expect(guard.observe([execution({ tool: "browser.switch_tab" })])).toBeUndefined();
     expect(guard.observe([observation])).toMatchObject({ count: 1 });
-    expect(guard.observe([execution({ ok: false })])).toBeUndefined();
-    expect(guard.observe([observation])).toMatchObject({ count: 1 });
+    expect(guard.observe([execution({ ok: false })])).toMatchObject({ count: 2, shouldNudge: true });
+    expect(guard.observe([observation])).toMatchObject({ count: 3, shouldStop: true });
+  });
+
+  it("does not let alternating empty or blocked observation tools evade the limit", () => {
+    const guard = new BrowserObservationGuard(3);
+
+    expect(guard.observe([execution({
+      tool: "browser.find",
+      content: "No visible element matched."
+    })])).toMatchObject({ count: 1 });
+    expect(guard.observe([execution({
+      tool: "browser.screenshot",
+      ok: false,
+      content: "Browser screenshots are blocked while protected input is active."
+    })])).toMatchObject({ count: 2, shouldNudge: true });
+    expect(guard.observe([execution({
+      tool: "browser.extract",
+      content: "No bounded text was available."
+    })])).toMatchObject({ count: 3, shouldStop: true });
   });
 
   it("does not treat concurrent observation ordering as a state change", () => {

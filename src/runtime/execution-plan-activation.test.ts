@@ -19,6 +19,27 @@ describe("execution plan activation", () => {
     }).required).toBe(false);
   });
 
+  it("activates for an authentication objective that hides multiple runtime phases", () => {
+    expect(assessExecutionPlanActivation({
+      userText: "Spin up a browser and get us into our developer account.",
+      proposedToolNames: ["browser.navigate"]
+    })).toEqual({ required: true, reasons: ["authentication"] });
+    expect(assessExecutionPlanActivation({
+      userText: "Sign me in to the MTN portal.",
+      proposedToolNames: ["browser.navigate"]
+    })).toEqual({ required: true, reasons: ["authentication"] });
+  });
+
+  it("keeps login explanations and opening a login page out of Mission activation", () => {
+    expect(assessExecutionPlanActivation({
+      userText: "How do I sign in to the MTN portal?"
+    }).required).toBe(false);
+    expect(assessExecutionPlanActivation({
+      userText: "Open the MTN login page.",
+      proposedToolNames: ["browser.navigate"]
+    }).required).toBe(false);
+  });
+
   it("does not activate for multi-part read-only questions", () => {
     expect(assessExecutionPlanActivation({
       userText: "What products are listed, which tabs are open, and what is the current collection name?",

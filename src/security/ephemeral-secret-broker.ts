@@ -405,7 +405,7 @@ function validateDestination(destination: SecureInputDestination): void {
   if (typeof destination !== "object" || destination === null) invalidRequest();
   switch (destination.type) {
     case "browser-field":
-      if (!hasOnlyKeys(destination, ["type", "sessionId", "ref", "expectedOrigin", "tabRef", "frameId", "label"])) {
+      if (!hasOnlyKeys(destination, ["type", "sessionId", "ref", "expectedOrigin", "tabRef", "frameId", "label", "submit"])) {
         invalidRequest();
       }
       requireIdentifier(destination.sessionId, "browser session id");
@@ -414,6 +414,11 @@ function validateDestination(destination: SecureInputDestination): void {
       optionalMetadataText(destination.tabRef, "browser tab ref");
       optionalMetadataText(destination.frameId, "browser frame id");
       optionalMetadataText(destination.label, "destination label");
+      if (destination.submit !== undefined) {
+        if (typeof destination.submit !== "object" || destination.submit === null ||
+          !hasOnlyKeys(destination.submit, ["ref"])) invalidRequest();
+        requireIdentifier(destination.submit.ref, "browser submit ref");
+      }
       return;
     case "application-field":
       if (!hasOnlyKeys(destination, ["type", "applicationId", "fieldId", "windowId", "label"])) invalidRequest();

@@ -90,7 +90,7 @@ import {
 } from "../browser/browser-state-projection.js";
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
-const BROWSER_NO_PROGRESS_NUDGE = "Repeated browser observations show no state change. Do not call browser.snapshot or browser.tabs again unless another action may have changed the page. Switch tabs or take a different browser action; if progress is blocked, explain what is blocking it.";
+const BROWSER_NO_PROGRESS_NUDGE = "Repeated browser observations show no semantic state change. Do not alternate snapshot, tabs, find, extract, screenshot, console, or CDP calls to inspect the same state. Take a relevant browser action; if protected input or another external condition blocks progress, record that precise blocker.";
 const BROWSER_NO_PROGRESS_STOP = "I stopped this browser turn because repeated observations showed no state change. I can continue after switching tabs, taking a different browser action, or receiving clarification about the next step.";
 const EXECUTION_PLAN_PROGRESS_NUDGE = "Your active execution plan has made no material progress for several iterations. Change approach and continue executing the original request now. Make progress by transitioning the active plan item, performing a relevant target mutation, recording verification evidence, or recording a concrete blocker. Repeated reads, cosmetic browser changes, navigation churn, narration, and failed plan updates do not count as progress. Do not ask whether to continue.";
 const EXECUTION_PLAN_ACTIVATION_NUDGE = "This is clearly multi-step foreground work. Before doing anything else, call plan with operation=write and create a concise Mission with exactly one in_progress item and the remaining items pending. Call only plan in this response; do not call substantive tools yet, narrate the plan, or ask whether to proceed.";
@@ -807,7 +807,7 @@ export class ProviderTurnLoop {
         );
       }
       if (browserObservation?.shouldStop === true) {
-        const reason = `Tool ${browserObservation.tool} returned the same browser observation without progress.`;
+        const reason = `Browser observation tools (${browserObservation.tool}) repeated without semantic progress.`;
         await this.#runRecorder.recordProviderBudgetExhausted({
           budget: "repeated-browser-observations",
           limit: this.#budgets.maxRepeatedBrowserObservations,

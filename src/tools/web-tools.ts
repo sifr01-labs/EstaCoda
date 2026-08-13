@@ -1353,7 +1353,7 @@ function createBrowserTypeTool(
 ): RegisteredTool {
   return {
     name: "browser.type",
-    description: "Type ordinary text or request one protected value for a verified field. If the current form has multiple related protected fields, you must use one browser.fill_protected_form call instead. Protected values bypass model context and browser snapshots.",
+    description: "Type ordinary text or request one protected value for a verified field. For a one-time-code challenge, include submitRef from the same snapshot to bind, enter, and immediately submit the code without another model turn. If the current form has multiple related protected fields, use one browser.fill_protected_form call instead. Protected values bypass model context and browser snapshots.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1368,6 +1368,10 @@ function createBrowserTypeTool(
             retention: { type: "string", enum: ["use-once"] },
           },
           required: ["kind", "purpose"],
+        },
+        submitRef: {
+          type: "string",
+          description: "Optional same-revision submit control for one-time-code protected input. Providing the code will immediately submit this control locally.",
         },
         sessionId: { type: "string" },
         ...browserWaitInputProperties(),
@@ -1385,6 +1389,9 @@ function createBrowserTypeTool(
     run: async (toolInput: BrowserActionInput & { protectedInput?: BrowserProtectedInputDescriptor }, context) => {
       const browserInput = deriveBrowserInput(toolInput);
       if (toolInput.protectedInput === undefined) {
+        if (toolInput.submitRef !== undefined) {
+          return protectedBrowserFailure("submitRef is available only with one-time-code protected browser input.");
+        }
         if (typeof toolInput.text !== "string" || browserBackend.type === undefined) {
           return unsupportedBrowserTool(browserBackend, "browser.type");
         }
@@ -1407,6 +1414,9 @@ function createBrowserTypeTool(
       if (descriptor === undefined) {
         return protectedBrowserFailure("Protected browser input requires a supported kind, purpose, and use-once retention.");
       }
+      if (toolInput.submitRef !== undefined && descriptor.kind !== "one-time-code") {
+        return protectedBrowserFailure("Atomic protected submission is limited to one-time-code challenges.");
+      }
       if (context?.onSecureInputRequest === undefined || browserBackend.prepareProtectedField === undefined) {
         return protectedBrowserFailure("Protected browser input is unavailable on this runtime.");
       }
@@ -1423,18 +1433,62 @@ function createBrowserTypeTool(
       if (receipt === undefined) {
         return protectedBrowserFailure("Protected browser input delivery failed.");
       }
+      const deliveryResult = receipt.status === "delivered"
+        ? browserBackend.takeProtectedFieldDeliveryResult?.(destination)
+        : undefined;
+      if (toolInput.submitRef !== undefined && deliveryResult === undefined) {
+        return protectedBrowserFailure("Protected input was delivered, but its browser submission result was unavailable.");
+      }
+      const submissionFailed = deliveryResult?.submission === "failed" || deliveryResult?.challengeState === "still-present";
       return {
-        ok: receipt.status === "delivered",
+        ok: receipt.status === "delivered" && !submissionFailed,
         content: receipt.status === "delivered"
-          ? `Protected input delivered to ${receipt.destinationLabel}.`
+          ? deliveryResult === undefined
+            ? `Protected input delivered to ${receipt.destinationLabel}.`
+            : renderProtectedDeliveryResult(deliveryResult)
           : `Protected input ${receipt.status}: ${receipt.reason ?? "delivery did not complete."}`,
         metadata: {
           backend: browserBackend.kind,
           secureInputReceipt: receipt,
+          ...(deliveryResult === undefined ? {} : {
+            protectedDelivery: {
+              delivery: deliveryResult.delivery,
+              submission: deliveryResult.submission,
+              challengeState: deliveryResult.challengeState,
+              beforeRevision: deliveryResult.beforeRevision,
+              afterRevision: deliveryResult.afterRevision,
+              sensitiveInputActive: deliveryResult.sensitiveInputActive,
+            },
+            snapshot: deliveryResult.snapshot,
+          }),
         },
       };
     },
   };
+}
+
+function renderProtectedDeliveryResult(
+  result: import("../contracts/browser.js").BrowserProtectedFieldDeliveryResult
+): string {
+  if (result.submission === "not-requested") {
+    return `Protected input delivered. Current browser revision: ${result.afterRevision}.`;
+  }
+  const submission = result.submission === "automatic"
+    ? "The page submitted the challenge automatically."
+    : result.submission === "clicked"
+      ? "The bound submit control was clicked immediately."
+      : "The bound submit control could not be activated.";
+  const challenge = result.challengeState === "departed"
+    ? "The original challenge is no longer present; authentication itself still requires post-submit verification."
+    : result.challengeState === "still-present"
+      ? "The original challenge is still present, so the authentication attempt did not complete."
+      : "The resulting challenge state is unknown; do not claim authentication is complete without fresh evidence.";
+  return [
+    "Protected input delivered without exposing its value.",
+    submission,
+    challenge,
+    `Revision: ${result.beforeRevision} → ${result.afterRevision}.`,
+  ].join("\n");
 }
 
 type BrowserProtectedFormField = {

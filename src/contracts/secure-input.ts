@@ -27,6 +27,10 @@ export type BrowserFieldSecureInputDestination = {
   tabRef?: string;
   frameId?: string;
   label?: string;
+  /** Optional same-document control that the runtime clicks immediately after one-use delivery. */
+  submit?: {
+    ref: string;
+  };
 };
 
 export type ApplicationFieldSecureInputDestination = {

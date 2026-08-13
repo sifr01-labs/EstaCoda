@@ -106,7 +106,7 @@ Snapshots prefer `Accessibility.getFullAXTree`. AX nodes are converted into comp
 
 Element refs are intentionally revision- and tab-scoped. A ref action must include the source snapshot's `revision` and `tabRef`; stale or cross-tab refs fail with structured current-state metadata before an action is dispatched. `browser.find`, `browser.click`, `browser.type`, `browser.select`, and `browser.extract` also accept semantic locators using `role`, `name`, `text`, `label`, `withinText`, and optional exact matching. Semantic resolution uses a fresh policy-checked snapshot, ignores hidden and disabled matches, and returns bounded candidates instead of guessing when a locator is ambiguous.
 
-Protected sign-in fields use a separate field-bound path. `browser.fill_protected_form` accepts one current revision and a bounded set of related refs (for example, account identifier and password), verifies every destination before collection, collects the values through one operator flow, re-verifies the complete form, and delivers without exposing values to the model or tool result. It does not submit the form. Screenshots, vision, extraction, and descriptive snapshots remain suppressed after protected delivery until navigation clears the sensitive state. Human input time inside this flow is excluded from the autonomous provider wall-clock budget.
+Protected sign-in fields use a separate field-bound path. `browser.fill_protected_form` accepts one current revision and a bounded set of related refs (for example, account identifier and password), verifies every destination before collection, collects the values through one operator flow, re-verifies the complete form, and delivers without exposing values to the model or tool result. It does not submit the form. For a later one-time-code challenge, `browser.type` may include a same-revision `submitRef`; EstaCoda binds both controls before collection, enters the code and immediately submits it inside one local transaction, and returns only a sanitized settlement receipt and current snapshot. A submission receipt does not itself prove authentication. Screenshots, vision, extraction, and descriptive snapshots remain suppressed while protected input is active; URL transitions and verified challenge departure clear that state. Human input time inside this flow is excluded from the autonomous provider wall-clock budget.
 
 The default snapshot is a bounded actionable AX subset. It is not true viewport-visible filtering yet. `browser.snapshot` with `full: true` requests a larger full-page snapshot. Snapshot rendering marks compact and full snapshots with headers, truncates oversized text, and can summarize large snapshots when configured.
 
@@ -142,7 +142,7 @@ Browser tools exposed to the agent:
 | `browser.snapshot` | Get accessible page snapshot |
 | `browser.find` | Find visible, enabled elements by semantic locator |
 | `browser.click` | Click by semantic locator or revision-scoped ref |
-| `browser.type` | Type by semantic locator or revision-scoped ref |
+| `browser.type` | Type by semantic locator or revision-scoped ref; optionally bind and immediately submit a one-time-code challenge |
 | `browser.fill_protected_form` | Fill related protected fields in one verified operator flow without submitting |
 | `browser.select` | Select an option by semantic locator or revision-scoped ref |
 | `browser.extract` | Extract one semantically resolved element |

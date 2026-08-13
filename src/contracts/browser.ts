@@ -201,6 +201,8 @@ export type BrowserActionInput = {
   revision?: number;
   tabRef?: string;
   locator?: BrowserLocator;
+  /** Same-revision control bound for immediate local submission after protected delivery. */
+  submitRef?: string;
   text?: string;
   value?: string;
   key?: string;
@@ -259,6 +261,16 @@ export type BrowserProtectedFieldDeliveryInput = {
   kind: import("./secure-input.js").SecureInputKind;
   value: Uint8Array;
   signal?: AbortSignal;
+};
+
+export type BrowserProtectedFieldDeliveryResult = {
+  delivery: "delivered";
+  submission: "not-requested" | "clicked" | "automatic" | "failed";
+  challengeState: "departed" | "still-present" | "unknown";
+  beforeRevision: number;
+  afterRevision: number;
+  sensitiveInputActive: boolean;
+  snapshot: BrowserSnapshot;
 };
 
 export type BrowserNavigateInput = {
@@ -320,6 +332,8 @@ export type BrowserBackend = {
   verifyProtectedField?(input: BrowserProtectedFieldInput): Promise<BrowserProtectedFieldVerification>;
   /** Runtime-only one-use delivery. The value must not be embedded in evaluated source. */
   deliverProtectedField?(input: BrowserProtectedFieldDeliveryInput): Promise<void>;
+  /** Returns and clears the metadata-only settlement produced by the last protected delivery. */
+  takeProtectedFieldDeliveryResult?(destination: import("./secure-input.js").BrowserFieldSecureInputDestination): BrowserProtectedFieldDeliveryResult | undefined;
   releaseProtectedField?(destination: import("./secure-input.js").BrowserFieldSecureInputDestination): Promise<void> | void;
   isSensitiveInputActive?(sessionId: string): boolean;
   dialog?(input?: BrowserActionInput): Promise<BrowserSnapshot>;
