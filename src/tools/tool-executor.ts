@@ -63,6 +63,26 @@ export type NamedToolExecutionRequest = {
   onEvent?: RuntimeEventSink;
   onApprovalRequest?: ToolApprovalHandler;
   delegateCallBudget?: DelegateCallBudget;
+  readLedger?: ToolReadLedger;
+  readLedgerScope?: ToolReadLedgerScope;
+};
+
+export type ToolReadLedgerScope = {
+  profileId: string;
+  sessionId: string;
+};
+
+export type ToolReadLedger = {
+  reuse(input: {
+    scope: ToolReadLedgerScope;
+    tool: ToolDefinition;
+    input: Record<string, unknown>;
+    toolCallId?: string;
+  }): ToolResult | undefined;
+  observe(input: {
+    scope: ToolReadLedgerScope;
+    execution: ToolExecutionRecord;
+  }): void;
 };
 
 export type ToolExecutionRecord = {
@@ -293,6 +313,15 @@ export class ToolExecutor {
     });
 
     let result: ToolResult;
+    const definition = toDefinition(tool);
+    const reusableResult = request.readLedger === undefined || request.readLedgerScope === undefined
+      ? undefined
+      : request.readLedger.reuse({
+          scope: request.readLedgerScope,
+          tool: definition,
+          input: request.input,
+          toolCallId: request.toolCallId
+        });
 
     if (request.signal?.aborted === true) {
       result = {
@@ -300,6 +329,8 @@ export class ToolExecutor {
         content: "Tool execution cancelled.",
         metadata: { reason: "cancelled" }
       };
+    } else if (reusableResult !== undefined) {
+      result = reusableResult;
     } else {
       try {
         result = await tool.run(request.input, {
@@ -360,8 +391,8 @@ export class ToolExecutor {
       result: storedResult
     });
 
-    return {
-      tool: toDefinition(tool),
+    const execution: ToolExecutionRecord = {
+      tool: definition,
       input: request.input,
       decision,
       riskClass,
@@ -372,6 +403,13 @@ export class ToolExecutor {
       toolCallName: request.toolCallName,
       providerNativeToolCall: request.providerNativeToolCall
     };
+    if (request.readLedger !== undefined && request.readLedgerScope !== undefined) {
+      request.readLedger.observe({
+        scope: request.readLedgerScope,
+        execution
+      });
+    }
+    return execution;
   }
 
   getToolDefinition(name: string): ToolDefinition | undefined {

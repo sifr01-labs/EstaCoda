@@ -351,6 +351,7 @@ export type MCPServerConfig = {
   connectTimeoutMs?: number;
   trust?: MCPServerTrust;
   toolRiskClass?: ToolRiskClass;
+  toolRiskClasses?: Record<string, ToolRiskClass>;
   resourceReadRiskClass?: ToolRiskClass;
   promptGetRiskClass?: ToolRiskClass;
 };
@@ -792,6 +793,7 @@ export type MCPSetupInput = {
   connectTimeoutMs?: number;
   trust?: MCPServerTrust;
   toolRiskClass?: ToolRiskClass;
+  toolRiskClasses?: Record<string, ToolRiskClass>;
   resourceReadRiskClass?: ToolRiskClass;
   promptGetRiskClass?: ToolRiskClass;
 };
@@ -2343,11 +2345,21 @@ function normalizeMcpServers(
         ? record.trust
         : undefined,
       toolRiskClass: isToolRiskClass(record.toolRiskClass) ? record.toolRiskClass : undefined,
+      toolRiskClasses: normalizeToolRiskClasses(record.toolRiskClasses),
       resourceReadRiskClass: isToolRiskClass(record.resourceReadRiskClass) ? record.resourceReadRiskClass : undefined,
       promptGetRiskClass: isToolRiskClass(record.promptGetRiskClass) ? record.promptGetRiskClass : undefined
     };
   }
   return normalized;
+}
+
+function normalizeToolRiskClasses(value: unknown): Record<string, ToolRiskClass> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const entries = Object.entries(value)
+    .filter((entry): entry is [string, ToolRiskClass] => entry[0].trim().length > 0 && isToolRiskClass(entry[1]));
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
 }
 
 export function buildProviderRegistry(config: EstaCodaConfig, options: {
@@ -3065,6 +3077,7 @@ export async function setupMcpConfig(options: {
     connectTimeoutMs: options.input.connectTimeoutMs,
     trust: options.input.trust,
     toolRiskClass: options.input.toolRiskClass,
+    toolRiskClasses: options.input.toolRiskClasses,
     resourceReadRiskClass: options.input.resourceReadRiskClass,
     promptGetRiskClass: options.input.promptGetRiskClass
   };
@@ -3745,6 +3758,10 @@ function validateMcpSetupInput(input: MCPSetupInput): void {
   }
   validateOptionalUrl(input.url, "url");
   validateRiskClass(input.toolRiskClass, "toolRiskClass");
+  for (const [toolName, riskClass] of Object.entries(input.toolRiskClasses ?? {})) {
+    requireNonEmpty(toolName, "MCP tool risk override name");
+    validateRiskClass(riskClass, `toolRiskClasses.${toolName}`);
+  }
   validateRiskClass(input.resourceReadRiskClass, "resourceReadRiskClass");
   validateRiskClass(input.promptGetRiskClass, "promptGetRiskClass");
   for (const [targetName, sourceName] of Object.entries(input.envRefs ?? {})) {

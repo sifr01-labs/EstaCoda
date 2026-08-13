@@ -74,6 +74,7 @@ import { BrowserObservationGuard } from "./browser-observation-guard.js";
 import {
   createTurnToolFeedbackLedger,
   recordTurnToolFeedbackBatch,
+  TurnMcpReadLedger,
   type TurnToolFeedbackLedger
 } from "./turn-tool-feedback-ledger.js";
 import { ExecutionPlanProgressGuard } from "./execution-plan-progress-guard.js";
@@ -93,6 +94,8 @@ const BROWSER_NO_PROGRESS_STOP = "I stopped this browser turn because repeated o
 const EXECUTION_PLAN_PROGRESS_NUDGE = "Your active execution plan has made no material progress for several iterations. Change approach and continue executing the original request now. Make progress by transitioning the active plan item, performing a relevant target mutation, recording verification evidence, or recording a concrete blocker. Repeated reads, cosmetic browser changes, navigation churn, narration, and failed plan updates do not count as progress. Do not ask whether to continue.";
 const EXECUTION_PLAN_ACTIVATION_NUDGE = "This is clearly multi-step foreground work. Before doing anything else, call plan with operation=write and create a concise Mission with exactly one in_progress item and the remaining items pending. Call only plan in this response; do not call substantive tools yet, narrate the plan, or ask whether to proceed.";
 const PROVISIONAL_EXECUTION_PLAN_OBJECTIVE_MAX_CHARS = 500;
+const PROVIDER_CALL_EFFICIENCY_WARNING_THRESHOLD = 12;
+const PROVIDER_TOKEN_EFFICIENCY_WARNING_THRESHOLD = 500_000;
 
 export type ProviderTurnLoopBudgets = {
   maxProviderIterations: number;
@@ -297,7 +300,13 @@ export class ProviderTurnLoop {
     let executionPlanIncomplete = false;
     let emergencyDeadlineReached = false;
     let toolFeedbackLedger = createTurnToolFeedbackLedger();
+    let providerCallsThisTurn = 0;
+    let providerTokensThisTurn = 0;
     const workingSessionId = this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
+    const mcpReadLedger = new TurnMcpReadLedger({
+      profileId: this.#profileId,
+      sessionId: workingSessionId
+    });
     this.#executionWorkingSet?.beginTurn(this.#executionPlanReader?.current(), workingSessionId);
     this.#executionWorkingSet?.observe(
       this.#executionPlanReader?.current(),
@@ -401,7 +410,12 @@ export class ProviderTurnLoop {
           browserNoProgressNudge: pendingBrowserNoProgressNudge,
           executionPlanContinuation: pendingExecutionPlanContinuation,
           executionPlanProgressNudge: pendingExecutionPlanProgressNudge,
-          reasoningOnlyPrefill: pendingReasoningOnlyPrefill
+          reasoningOnlyPrefill: pendingReasoningOnlyPrefill,
+          efficiencySignals: providerEfficiencySignals({
+            providerCalls: providerCallsThisTurn,
+            providerTokens: providerTokensThisTurn,
+            repeatedMcpReads: toolFeedbackLedger.repeatedMcpReadCount ?? 0
+          })
         });
       pendingEmptyResponseNudge = false;
       pendingBrowserNoProgressNudge = false;
@@ -413,6 +427,9 @@ export class ProviderTurnLoop {
       if (execution === undefined) {
         break;
       }
+
+      providerCallsThisTurn += execution.attempts.length;
+      providerTokensThisTurn += providerExecutionTokenUse(execution);
 
       const consumedProviderIterations = providerIterationCost(execution);
       iterations += consumedProviderIterations;
@@ -690,7 +707,12 @@ export class ProviderTurnLoop {
         riskBaseline: maxObservedRisk,
         signal: input.signal,
         onEvent: input.onEvent,
-        onApprovalRequest: input.onApprovalRequest
+        onApprovalRequest: input.onApprovalRequest,
+        readLedger: mcpReadLedger,
+        readLedgerScope: {
+          profileId: this.#profileId,
+          sessionId: this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId
+        }
       });
       const loopToolExecutions = loopToolExecutionResult.executions;
       if (
@@ -1240,6 +1262,7 @@ export class ProviderTurnLoop {
     executionPlanContinuation?: boolean;
     executionPlanProgressNudge?: boolean;
     reasoningOnlyPrefill?: boolean;
+    efficiencySignals?: string[];
     signal?: AbortSignal;
   }): Promise<ProviderExecutionResult | undefined> {
     if (
@@ -2505,6 +2528,39 @@ function providerIterationCost(execution: ProviderExecutionResult): number {
   }
   cost += execution.runtimeMetadata?.continuation?.attempts ?? 0;
   return cost;
+}
+
+function providerExecutionTokenUse(execution: ProviderExecutionResult): number {
+  const attemptTokens = execution.attempts
+    .map((attempt) => attempt.usage)
+    .filter((usage): usage is ProviderUsage => usage !== undefined)
+    .reduce((sum, usage) => sum + providerUsageTokenTotal(usage), 0);
+  return attemptTokens > 0
+    ? attemptTokens
+    : providerUsageTokenTotal(execution.response?.usage);
+}
+
+function providerUsageTokenTotal(usage: ProviderUsage | undefined): number {
+  if (usage === undefined) return 0;
+  return usage.totalTokens ?? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+}
+
+function providerEfficiencySignals(input: {
+  providerCalls: number;
+  providerTokens: number;
+  repeatedMcpReads: number;
+}): string[] {
+  return [
+    input.repeatedMcpReads > 0
+      ? `${input.repeatedMcpReads} identical MCP read${input.repeatedMcpReads === 1 ? " was" : "s were"} already reused. Do not request those facts again unless a mutation or input change makes them stale.`
+      : undefined,
+    input.providerCalls >= PROVIDER_CALL_EFFICIENCY_WARNING_THRESHOLD
+      ? `${input.providerCalls} provider calls have been used this turn. Prefer the shortest remaining path to mutation, verification, completion, or a concrete blocker.`
+      : undefined,
+    input.providerTokens >= PROVIDER_TOKEN_EFFICIENCY_WARNING_THRESHOLD
+      ? `Provider usage has exceeded ${PROVIDER_TOKEN_EFFICIENCY_WARNING_THRESHOLD.toLocaleString("en-US")} tokens this turn. Reuse confirmed facts and avoid broad repeated reads.`
+      : undefined
+  ].filter((signal): signal is string => signal !== undefined);
 }
 
 function createProviderToolCallEventBuffer(input: {

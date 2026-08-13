@@ -1,5 +1,6 @@
 import type { MCPServerConfig } from "../config/runtime-config.js";
 import type { RegisteredTool, ToolResult, ToolRiskClass } from "../contracts/tool.js";
+import { redactObject } from "../utils/redaction.js";
 import { MCPClient, type MCPFetchLike, type MCPPromptDescriptor, type MCPResourceDescriptor, type MCPToolDescriptor } from "./mcp-client.js";
 
 export type MCPServerSnapshot = {
@@ -161,14 +162,15 @@ function createMcpTool(
   tool: MCPToolDescriptor
 ): RegisteredTool {
   const toolName = prefixTool(serverName, config, tool.name);
+  const riskClass = resolveMcpToolRiskClass(config, client.transport, tool.name);
   return {
     name: toolName,
-    description: tool.description ?? `Call MCP tool ${tool.name} from ${serverName}.`,
+    description: mcpToolDescription(serverName, tool, riskClass),
     inputSchema: tool.inputSchema ?? {
       type: "object",
       additionalProperties: true
     },
-    riskClass: config.toolRiskClass ?? defaultMcpRisk(config, client.transport, "tool"),
+    riskClass,
     toolsets: ["mcp"],
     progressLabel: `calling MCP ${serverName}`,
     maxResultSizeChars: 12_000,
@@ -178,6 +180,30 @@ function createMcpTool(
       return normalizeMcpResult(result);
     }
   };
+}
+
+function mcpToolDescription(
+  serverName: string,
+  tool: MCPToolDescriptor,
+  riskClass: ToolRiskClass
+): string {
+  const base = tool.description ?? `Call MCP tool ${tool.name} from ${serverName}.`;
+  if (riskClass !== "read-only-local" && riskClass !== "read-only-network") return base;
+  const detailGuidance = /getCollection$/iu.test(tool.name)
+    ? " Prefer collection outlines and request metadata when sufficient; request full collection detail only when exact bodies or definitions are required."
+    : "";
+  return `${base}${detailGuidance} Identical confirmed reads are reused within the current turn; do not poll unchanged facts.`;
+}
+
+export function resolveMcpToolRiskClass(
+  config: MCPServerConfig,
+  transport: "stdio" | "http",
+  toolName: string
+): ToolRiskClass {
+  if (config.toolRiskClasses !== undefined) {
+    return config.toolRiskClasses[toolName] ?? defaultMcpRisk(config, transport, "tool");
+  }
+  return config.toolRiskClass ?? defaultMcpRisk(config, transport, "tool");
 }
 
 function createResourceTools(
@@ -359,7 +385,7 @@ function promptsEnabled(config: MCPServerConfig): boolean {
   return config.exposePrompts ?? config.tools?.prompts ?? false;
 }
 
-function normalizeMcpResult(result: unknown): ToolResult {
+export function normalizeMcpResult(result: unknown): ToolResult {
   if (typeof result === "string") {
     return {
       ok: true,
@@ -379,14 +405,67 @@ function normalizeMcpResult(result: unknown): ToolResult {
     ? record.content.map(renderContentPart).filter((part) => part.length > 0).join("\n\n")
     : undefined;
   const isError = record.isError === true;
+  const rendered = content?.length ? content : JSON.stringify(result, null, 2);
+  const structuralSummary = mcpStructuralSummary(rendered);
+  const {
+    content: _rawContent,
+    _estacoda_context_summary: _untrustedContextSummary,
+    ...boundedMetadata
+  } = record;
 
   return {
     ok: !isError,
-    content: content?.length
-      ? content
-      : JSON.stringify(result, null, 2),
-    metadata: record
+    content: rendered.length > 1_800 && structuralSummary !== undefined
+      ? [
+          "MCP structural summary (request narrower or explicit full detail only when omitted fields are required):",
+          structuralSummary,
+          "",
+          "Full MCP response:",
+          rendered
+        ].join("\n")
+      : rendered,
+    metadata: {
+      ...boundedMetadata,
+      ...(structuralSummary === undefined ? {} : { _estacoda_context_summary: structuralSummary })
+    }
   };
+}
+
+function mcpStructuralSummary(content: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return content.length > 1_800
+      ? `MCP response contains ${content.length} unstructured characters; exact content was delivered in the current tool result.`
+      : undefined;
+  }
+
+  const summary = JSON.stringify(summarizeMcpValue(redactObject(parsed, { strict: true }), 0), null, 2);
+  return summary.length <= 1_200 ? summary : `${summary.slice(0, 1_200)}\n[structural summary truncated]`;
+}
+
+function summarizeMcpValue(value: unknown, depth: number): unknown {
+  if (depth >= 4) {
+    if (Array.isArray(value)) return `[${value.length} items]`;
+    if (typeof value === "object" && value !== null) return `{${Object.keys(value).length} fields}`;
+  }
+  if (Array.isArray(value)) {
+    return {
+      count: value.length,
+      items: value.slice(0, 12).map((item) => summarizeMcpValue(item, depth + 1)),
+      ...(value.length > 12 ? { omitted: value.length - 12 } : {})
+    };
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).slice(0, 30).map(([key, entry]) => [key, summarizeMcpValue(entry, depth + 1)])
+    );
+  }
+  if (typeof value === "string") {
+    return value.length <= 180 ? value : `${value.slice(0, 180)}...`;
+  }
+  return value;
 }
 
 function renderContentPart(part: unknown): string {

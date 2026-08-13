@@ -38,8 +38,41 @@ description: "MCP client transport, discovery, and trust metadata."
 ## Trust
 
 - Server-level trust metadata maps MCP tools into EstaCoda risk classes.
+- `toolRiskClasses` can override the risk of individual discovered operations by their unprefixed MCP tool name.
 - Default trust is conservative: arbitrary third-party MCP tools start as `external-side-effect` unless configured otherwise.
+- Unknown operations remain conservative even when known read operations have explicit overrides.
 - Trusted workspaces can execute `read-only-local` MCP tools after explicit workspace trust.
+
+Example Postman classification:
+
+```json
+{
+  "mcpServers": {
+    "postman": {
+      "toolRiskClasses": {
+        "getAuthenticatedUser": "read-only-network",
+        "getWorkspaces": "read-only-network",
+        "getCollections": "read-only-network",
+        "getCollection": "read-only-network",
+        "updateCollection": "external-side-effect",
+        "updateCollectionRequest": "external-side-effect"
+      }
+    }
+  }
+}
+```
+
+The CLI accepts the same map with `--tool-risk-classes TOOL=RISK,...`. When a per-tool map is present, unlisted operations use conservative server trust instead of inheriting the older broad `toolRiskClass` override. Without a map, `toolRiskClass` remains the legacy server-wide override.
+
+## Read Reuse
+
+- Successful, complete read-only MCP results are reusable only within the current provider turn, selected profile, and Session.
+- The key combines the tool name, normalized input hash, and current target revision. Raw inputs and raw results are not stored in the read ledger.
+- Repeating an identical read returns a compact, redacted unchanged receipt instead of calling the MCP server again.
+- Any allowed consequential MCP operation advances the target revision and invalidates prior MCP read receipts.
+- Failed, partial, paginated, or truncated results are not authoritative cache entries.
+- Large structured responses put a bounded, redacted outline before the full captured response so the model can usually work from request and collection metadata. A call with different explicit detail inputs remains a distinct read.
+- Repeated-read, high-provider-call, and high-token-use notices are soft continuation guidance. They do not add a short user-facing timeout.
 
 ## Reload Semantics
 
@@ -58,5 +91,4 @@ pnpm run dev -- mcp reload
 ## Limitations
 
 - HTTP transport is not live-proven against real remote servers.
-- Per-tool trust metadata is missing; only per-server trust exists.
 - Broader third-party server coverage needs operator validation.

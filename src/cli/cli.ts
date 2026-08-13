@@ -3092,7 +3092,8 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
         "  estacoda mcp setup --name docs --command npx --args @modelcontextprotocol/server-filesystem,/path",
         "  estacoda mcp setup --name docs --command uvx --args mcp-server-fetch",
         "  estacoda mcp setup --name remote --transport http --url http://127.0.0.1:3000/mcp --server-trust read-only-network",
-        "  --env-ref CHILD_KEY=PROFILE_ENV_KEY forwards an explicitly named profile secret without storing its value in config"
+        "  --env-ref CHILD_KEY=PROFILE_ENV_KEY forwards an explicitly named profile secret without storing its value in config",
+        "  --tool-risk-classes TOOL=RISK,... classifies individual discovered operations; unknown tools stay conservative"
       ].join("\n")
     };
   }
@@ -3884,6 +3885,9 @@ function parseMcpArgs(args: string[]): Partial<MCPSetupInput> {
       index += 1;
     } else if (arg === "--tool-risk-class") {
       parsed.toolRiskClass = next as MCPSetupInput["toolRiskClass"];
+      index += 1;
+    } else if (arg === "--tool-risk-classes") {
+      parsed.toolRiskClasses = parseKeyValueList(next ?? "") as Record<string, import("../contracts/tool.js").ToolRiskClass>;
       index += 1;
     } else if (arg === "--resource-read-risk-class") {
       parsed.resourceReadRiskClass = next as MCPSetupInput["resourceReadRiskClass"];

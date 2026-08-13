@@ -87,4 +87,29 @@ describe("cli mcp setup", () => {
       await rm(tmpDir, { recursive: true, force: true });
     }
   });
+
+  it("stores per-tool MCP risk overrides", async () => {
+    const tmpDir = await makeTempDir();
+    try {
+      const result = await runCliCommand({
+        argv: [
+          "mcp", "setup", "--name", "postman", "--command", "npx",
+          "--tool-risk-classes",
+          "getCollection=read-only-network,updateCollection=external-side-effect"
+        ],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+      expect(result.exitCode).toBe(0);
+      const config = JSON.parse(await readFile(profileConfigPath(tmpDir), "utf8")) as {
+        mcpServers?: Record<string, { toolRiskClasses?: Record<string, string> }>;
+      };
+      expect(config.mcpServers?.postman?.toolRiskClasses).toEqual({
+        getCollection: "read-only-network",
+        updateCollection: "external-side-effect"
+      });
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
 });

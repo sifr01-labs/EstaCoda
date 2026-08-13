@@ -12,6 +12,7 @@ import { ToolRegistry } from "./tool-registry.js";
 import { summarizeSecurityTarget, ToolExecutor } from "./tool-executor.js";
 import { attachEphemeralVisionImages, ephemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 import { WorkspaceApprovalController, WorkspaceApprovalStore } from "../security/workspace-approval-controller.js";
+import { TurnMcpReadLedger } from "../runtime/turn-tool-feedback-ledger.js";
 
 function createMockPolicy(decision: "allow" | "deny" = "allow"): SecurityPolicy {
   return {
@@ -260,6 +261,90 @@ describe("ToolExecutor exception containment", () => {
     expect(record?.result?.ok).toBe(false);
     expect(record?.result?.content).toBe("Tool execution cancelled.");
     expect(record?.result?.metadata).toMatchObject({ reason: "cancelled" });
+  });
+});
+
+describe("ToolExecutor MCP read deduplication", () => {
+  it("executes one Postman workspace and collection discovery chain per turn", async () => {
+    const calls = new Map<string, ReturnType<typeof vi.fn>>();
+    const readNames = ["getAuthenticatedUser", "getWorkspaces", "getCollections", "getCollection"];
+    const tools = readNames.map((name): RegisteredTool => {
+      const run = vi.fn(async () => ({
+        ok: true,
+        content: JSON.stringify({ name, id: `${name}-confirmed` })
+      }));
+      calls.set(name, run);
+      return {
+        name: `mcp.postman.${name}`,
+        description: `Postman ${name}`,
+        inputSchema: { type: "object", additionalProperties: true },
+        riskClass: "read-only-network",
+        toolsets: ["mcp"],
+        progressLabel: "reading Postman",
+        maxResultSizeChars: 12_000,
+        isAvailable: () => true,
+        run
+      };
+    });
+    const mutationRun = vi.fn(async () => ({ ok: true, content: "updated" }));
+    tools.push({
+      name: "mcp.postman.updateCollection",
+      description: "Update collection",
+      inputSchema: { type: "object", additionalProperties: true },
+      riskClass: "external-side-effect",
+      toolsets: ["mcp"],
+      progressLabel: "updating Postman",
+      maxResultSizeChars: 12_000,
+      isAvailable: () => true,
+      run: mutationRun
+    });
+    const { executor } = await setupExecutor({ tools });
+    const scope = { profileId: "test", sessionId: "test-session" };
+    const ledger = new TurnMcpReadLedger(scope);
+    const inputs: Record<string, Record<string, unknown>> = {
+      getAuthenticatedUser: {},
+      getWorkspaces: {},
+      getCollections: { workspaceId: "mtn-workspace" },
+      getCollection: { collectionId: "mtn-products" }
+    };
+
+    for (const name of [...readNames, ...readNames]) {
+      await executor.executeTool({
+        tool: `mcp.postman.${name}`,
+        input: inputs[name]!,
+        trustedWorkspace: true,
+        sessionId: "test-session",
+        readLedger: ledger,
+        readLedgerScope: scope
+      });
+    }
+
+    expect(Object.fromEntries([...calls].map(([name, run]) => [name, run.mock.calls.length]))).toEqual({
+      getAuthenticatedUser: 1,
+      getWorkspaces: 1,
+      getCollections: 1,
+      getCollection: 1
+    });
+
+    await executor.executeTool({
+      tool: "mcp.postman.updateCollection",
+      input: { collectionId: "mtn-products", name: "MTN Products" },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      readLedger: ledger,
+      readLedgerScope: scope
+    });
+    await executor.executeTool({
+      tool: "mcp.postman.getCollection",
+      input: inputs.getCollection!,
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      readLedger: ledger,
+      readLedgerScope: scope
+    });
+
+    expect(mutationRun).toHaveBeenCalledTimes(1);
+    expect(calls.get("getCollection")).toHaveBeenCalledTimes(2);
   });
 });
 

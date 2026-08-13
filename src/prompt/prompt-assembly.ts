@@ -141,6 +141,7 @@ export type ProviderContinuationPromptInput = ProviderPromptInput & {
   providerExecution: ProviderExecutionResult | undefined;
   toolPlans: ToolCallPlan[];
   toolFeedbackLedger?: TurnToolFeedbackLedger;
+  efficiencySignals?: string[];
 };
 
 export const ACTIVE_NATIVE_HISTORY_MAX_TOKENS = 12_000;
@@ -213,7 +214,8 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
   const continuationContent = renderBoundedContinuationFeedback({
     ledger: feedbackLedger,
     nativeToolResultIds,
-    hasUnresolvedPlans: unresolvedPlans.length > 0
+    hasUnresolvedPlans: unresolvedPlans.length > 0,
+    efficiencySignals: input.efficiencySignals
   });
   const continuationLayer = layer({
     name: "provider-continuation",
@@ -267,7 +269,8 @@ function fallbackToolFeedbackLedger(toolPlans: readonly ToolCallPlan[]): TurnToo
   return {
     latest: toolPlans.map((plan) => ({ plan })),
     consumed: [],
-    omittedCount: 0
+    omittedCount: 0,
+    repeatedMcpReadCount: 0
   };
 }
 
@@ -301,6 +304,7 @@ function renderBoundedContinuationFeedback(input: {
   ledger: TurnToolFeedbackLedger;
   nativeToolResultIds: ReadonlySet<string>;
   hasUnresolvedPlans: boolean;
+  efficiencySignals?: readonly string[];
 }): string {
   const header = [
     input.hasUnresolvedPlans
@@ -310,6 +314,9 @@ function renderBoundedContinuationFeedback(input: {
     "Do not ask the user to run these tools again.",
     input.nativeToolResultIds.size > 0
       ? "Some tool results are already included as structured tool messages above."
+      : undefined,
+    input.efficiencySignals !== undefined && input.efficiencySignals.length > 0
+      ? `Efficiency guidance: ${input.efficiencySignals.join(" ")}`
       : undefined,
     "",
     "Newest tool batch:",

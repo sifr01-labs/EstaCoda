@@ -6,7 +6,12 @@ import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { FileChangePreviewViewModel } from "../contracts/view-model.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import type { ToolCallPlanner } from "../tools/tool-call-planner.js";
-import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
+import type {
+  ToolExecutor,
+  ToolExecutionRecord,
+  ToolReadLedger,
+  ToolReadLedgerScope
+} from "../tools/tool-executor.js";
 import { summarizeSecurityTarget } from "../tools/tool-executor.js";
 import { buildToolDisplayPreview } from "../tools/tool-target-summary.js";
 import { packetizeToolExecution } from "../tools/tool-result-packet.js";
@@ -67,6 +72,8 @@ export class ToolPlanRunner {
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
     onApprovalRequest?: ToolApprovalHandler;
+    readLedger?: ToolReadLedger;
+    readLedgerScope?: ToolReadLedgerScope;
   }): Promise<{
     executions: ToolExecutionRecord[];
     maxObservedRisk: ToolRiskClass;
@@ -119,7 +126,7 @@ export class ToolPlanRunner {
         maxObservedRisk = nextRisk;
       }
 
-      if (group.concurrent) {
+      if (group.concurrent && !group.entries.some((entry) => entry.definition?.toolsets.includes("mcp") === true)) {
         const groupExecutions = await Promise.all(group.entries.map(async ({ plan }) =>
           this.#executeProviderToolPlan({
             plan,
@@ -129,7 +136,9 @@ export class ToolPlanRunner {
             visionInputProvenance: input.visionInputProvenance,
             signal: input.signal,
             onEvent: input.onEvent,
-            onApprovalRequest: input.onApprovalRequest
+            onApprovalRequest: input.onApprovalRequest,
+            readLedger: input.readLedger,
+            readLedgerScope: input.readLedgerScope
           })
         ));
 
@@ -156,7 +165,9 @@ export class ToolPlanRunner {
           visionInputProvenance: input.visionInputProvenance,
           signal: input.signal,
           onEvent: input.onEvent,
-          onApprovalRequest: input.onApprovalRequest
+          onApprovalRequest: input.onApprovalRequest,
+          readLedger: input.readLedger,
+          readLedgerScope: input.readLedgerScope
         });
         if (execution !== undefined) {
           executions.push(execution);
@@ -187,6 +198,8 @@ export class ToolPlanRunner {
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
     onApprovalRequest?: ToolApprovalHandler;
+    readLedger?: ToolReadLedger;
+    readLedgerScope?: ToolReadLedgerScope;
   }): Promise<ToolExecutionRecord | undefined> {
     const plan = input.plan;
 
@@ -212,7 +225,9 @@ export class ToolPlanRunner {
       signal: input.signal,
       onEvent: input.onEvent,
       onApprovalRequest: input.onApprovalRequest,
-      delegateCallBudget: this.#delegateCallBudget
+      delegateCallBudget: this.#delegateCallBudget,
+      readLedger: input.readLedger,
+      readLedgerScope: input.readLedgerScope
     });
 
     if (execution === undefined) {

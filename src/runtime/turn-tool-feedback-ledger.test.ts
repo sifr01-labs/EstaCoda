@@ -3,7 +3,8 @@ import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import {
   createTurnToolFeedbackLedger,
-  recordTurnToolFeedbackBatch
+  recordTurnToolFeedbackBatch,
+  TurnMcpReadLedger
 } from "./turn-tool-feedback-ledger.js";
 
 describe("turn tool feedback ledger", () => {
@@ -49,6 +50,94 @@ describe("turn tool feedback ledger", () => {
   });
 });
 
+describe("turn MCP read ledger", () => {
+  const scope = { profileId: "default", sessionId: "session-1" };
+  const readTool = {
+    name: "mcp.postman.getCollection",
+    description: "Read a collection",
+    inputSchema: {},
+    riskClass: "read-only-network" as const,
+    toolsets: ["mcp"],
+    progressLabel: "reading",
+    maxResultSizeChars: 12_000
+  };
+  const mutationTool = {
+    ...readTool,
+    name: "mcp.postman.updateCollection",
+    riskClass: "external-side-effect" as const
+  };
+
+  it("deduplicates normalized identical reads and invalidates them after mutation", () => {
+    const ledger = new TurnMcpReadLedger(scope);
+    ledger.observe({
+      scope,
+      execution: mcpExecution(readTool, { collectionId: "mtn", page: 1 }, { ok: true, content: "collection outline" }, "read-1")
+    });
+
+    expect(ledger.reuse({
+      scope,
+      tool: readTool,
+      input: { page: 1, collectionId: "mtn" },
+      toolCallId: "read-2"
+    })).toMatchObject({
+      ok: true,
+      metadata: { mcpReadReuse: true, sourceToolCallId: "read-1", targetRevision: 0 }
+    });
+
+    ledger.observe({
+      scope,
+      execution: mcpExecution(mutationTool, { collectionId: "mtn" }, { ok: true, content: "updated" }, "write-1")
+    });
+    expect(ledger.reuse({ scope, tool: readTool, input: { collectionId: "mtn", page: 1 } })).toBeUndefined();
+  });
+
+  it("does not cache failed or partial reads", () => {
+    const ledger = new TurnMcpReadLedger(scope);
+    ledger.observe({
+      scope,
+      execution: mcpExecution(readTool, { collectionId: "failed" }, { ok: false, content: "failed" }, "failed")
+    });
+    ledger.observe({
+      scope,
+      execution: mcpExecution(readTool, { collectionId: "partial" }, {
+        ok: true,
+        content: "partial",
+        metadata: { structuredContent: { pagination: { next_cursor: "page-2" } } }
+      }, "partial")
+    });
+    expect(ledger.reuse({ scope, tool: readTool, input: { collectionId: "failed" } })).toBeUndefined();
+    expect(ledger.reuse({ scope, tool: readTool, input: { collectionId: "partial" } })).toBeUndefined();
+  });
+
+  it("cannot reuse across profiles or sessions", () => {
+    const ledger = new TurnMcpReadLedger(scope);
+    ledger.observe({
+      scope,
+      execution: mcpExecution(readTool, { collectionId: "mtn" }, { ok: true, content: "outline" }, "read-1")
+    });
+    expect(ledger.reuse({
+      scope: { profileId: "other", sessionId: "session-1" },
+      tool: readTool,
+      input: { collectionId: "mtn" }
+    })).toBeUndefined();
+    expect(ledger.reuse({ scope, tool: readTool, input: { collectionId: "mtn" } })).toBeUndefined();
+  });
+
+  it("redacts secrets from cached receipts", () => {
+    const ledger = new TurnMcpReadLedger(scope);
+    ledger.observe({
+      scope,
+      execution: mcpExecution(readTool, { collectionId: "mtn" }, {
+        ok: true,
+        content: JSON.stringify({ name: "MTN", apiKey: "postman-secret-value" })
+      }, "read-1")
+    });
+    const reused = ledger.reuse({ scope, tool: readTool, input: { collectionId: "mtn" } });
+    expect(reused?.content).toContain("[REDACTED]");
+    expect(JSON.stringify(reused)).not.toContain("postman-secret-value");
+  });
+});
+
 function toolPlan(id: string, content: string): ToolCallPlan {
   return {
     id,
@@ -75,6 +164,22 @@ function toolExecution(toolCallId: string, content: string): ToolExecutionRecord
     riskClass: "read-only-local",
     targetSummary: "README.md",
     result: { ok: true, content },
+    toolCallId
+  };
+}
+
+function mcpExecution(
+  tool: ToolExecutionRecord["tool"],
+  input: Record<string, unknown>,
+  result: NonNullable<ToolExecutionRecord["result"]>,
+  toolCallId: string
+): ToolExecutionRecord {
+  return {
+    tool,
+    input,
+    decision: "allow",
+    riskClass: tool.riskClass,
+    result,
     toolCallId
   };
 }

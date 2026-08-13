@@ -1054,6 +1054,23 @@ describe("assembleProviderContinuationPrompt", () => {
     expect(rendered).not.toContain("I will now process these results");
   });
 
+  it("renders soft efficiency guidance without changing continuation eligibility", () => {
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      efficiencySignals: [
+        "2 identical MCP reads were already reused.",
+        "12 provider calls have been used this turn.",
+        "Provider usage has exceeded 500,000 tokens this turn."
+      ]
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("Efficiency guidance:");
+    expect(rendered).toContain("2 identical MCP reads were already reused.");
+    expect(rendered).toContain("12 provider calls have been used this turn.");
+    expect(rendered).toContain("500,000 tokens");
+    expect(rendered).toContain("Continue executing the user's original request.");
+  });
+
   it("preserves non-empty prior provider content unchanged", () => {
     const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
       providerExecution: providerExecution("I found the relevant files and will summarize them.")
