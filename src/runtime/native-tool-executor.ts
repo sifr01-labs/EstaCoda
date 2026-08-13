@@ -4,6 +4,7 @@ import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { VisionInputProvenanceContext } from "../contracts/vision.js";
+import type { ToolApprovalHandler } from "../contracts/tool.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
 import { summarizeSecurityTarget } from "../tools/tool-executor.js";
 import { buildToolDisplayPreview } from "../tools/tool-target-summary.js";
@@ -45,6 +46,7 @@ export class NativeToolExecutor {
     visionInputProvenance?: VisionInputProvenanceContext;
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
+    onApprovalRequest?: ToolApprovalHandler;
   }): Promise<{ executions: ToolExecutionRecord[]; plans: ToolCallPlan[] }> {
     if (input.intent.nativeIntent === "attachment-analysis") {
       return await this.#executeInitialVisionAttachments(input);
@@ -88,7 +90,8 @@ export class NativeToolExecutor {
       providerUsageLineage: input.providerUsageLineage,
       visionInputProvenance: input.visionInputProvenance,
       signal: input.signal,
-      onEvent: input.onEvent
+      onEvent: input.onEvent,
+      onApprovalRequest: input.onApprovalRequest
     });
 
     if (execution === undefined) {
@@ -139,6 +142,7 @@ export class NativeToolExecutor {
     visionInputProvenance?: VisionInputProvenanceContext;
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
+    onApprovalRequest?: ToolApprovalHandler;
   }): Promise<{ executions: ToolExecutionRecord[]; plans: ToolCallPlan[] }> {
     if (this.#toolExecutor.getToolDefinition("vision.analyze") === undefined) {
       return { executions: [], plans: [] };
@@ -182,7 +186,8 @@ export class NativeToolExecutor {
       visionInputProvenance: input.visionInputProvenance,
       visionDispatchPhase: "initial-attachment",
       signal: input.signal,
-      onEvent: input.onEvent
+      onEvent: input.onEvent,
+      onApprovalRequest: input.onApprovalRequest
     });
 
     if (execution === undefined) {

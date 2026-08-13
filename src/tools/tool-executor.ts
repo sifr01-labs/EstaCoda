@@ -8,7 +8,7 @@ import {
   type SecurityPolicy
 } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
-import type { ToolDefinition, ToolResult, ToolRiskClass, ToolSecurityResolution, ToolsetName } from "../contracts/tool.js";
+import type { ToolApprovalHandler, ToolDefinition, ToolResult, ToolRiskClass, ToolSecurityResolution, ToolsetName } from "../contracts/tool.js";
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
 import type { VisionDispatchPhase, VisionInputProvenanceContext } from "../contracts/vision.js";
@@ -43,6 +43,7 @@ export type ToolExecutionRequest = {
   visionInputProvenance?: VisionInputProvenanceContext;
   visionDispatchPhase?: VisionDispatchPhase;
   signal?: AbortSignal;
+  onApprovalRequest?: ToolApprovalHandler;
 };
 
 export type NamedToolExecutionRequest = {
@@ -60,6 +61,7 @@ export type NamedToolExecutionRequest = {
   providerNativeToolCall?: unknown;
   signal?: AbortSignal;
   onEvent?: RuntimeEventSink;
+  onApprovalRequest?: ToolApprovalHandler;
   delegateCallBudget?: DelegateCallBudget;
 };
 
@@ -121,7 +123,8 @@ export class ToolExecutor {
       providerUsageLineage: request.providerUsageLineage,
       visionInputProvenance: request.visionInputProvenance,
       visionDispatchPhase: request.visionDispatchPhase,
-      signal: request.signal
+      signal: request.signal,
+      onApprovalRequest: request.onApprovalRequest
     });
   }
 
@@ -208,25 +211,47 @@ export class ToolExecutor {
           : { dataEgress: securityResolution.dataEgress })
       }
     };
-    const assessment = await assessSecurityPolicy(this.#securityPolicy, securityRequest);
-    const decision = assessment.decision;
+    let assessment = await assessSecurityPolicy(this.#securityPolicy, securityRequest);
+    await this.#recordSecurityAssessment(request.sessionId, tool.name, riskClass, persistedTargetKey, persistedTargetSummary, assessment);
 
-    await this.#sessionDb.appendEvent(request.sessionId, {
-      kind: "security-assessed",
-      tool: tool.name,
-      riskClass,
-      targetKey: persistedTargetKey,
-      targetSummary: persistedTargetSummary,
-      assessment
-    });
-    this.#trajectoryRecorder.record("progress", {
-      message: `security assessed for ${tool.name}`,
-      tool: tool.name,
-      decision: assessment.decision,
-      mode: assessment.mode,
-      reason: assessment.reason,
-      riskClass
-    });
+    if (assessment.decision === "ask" && request.onApprovalRequest !== undefined && !isAbortSignalAborted(request.signal)) {
+      let operatorDecision: Awaited<ReturnType<ToolApprovalHandler>> = "denied";
+      try {
+        operatorDecision = await request.onApprovalRequest({
+          tool: toDefinition(tool),
+          input: structuredClone(request.input),
+          riskClass,
+          targetKey: persistedTargetKey,
+          targetSummary: persistedTargetSummary,
+          toolCallId: request.toolCallId,
+          toolCallName: request.toolCallName
+        });
+      } catch {
+        operatorDecision = "denied";
+      }
+
+      if (operatorDecision === "approved" && !isAbortSignalAborted(request.signal)) {
+        assessment = await assessSecurityPolicy(this.#securityPolicy, securityRequest);
+        await this.#recordSecurityAssessment(request.sessionId, tool.name, riskClass, persistedTargetKey, persistedTargetSummary, assessment);
+        if (assessment.decision === "ask") {
+          assessment = {
+            ...assessment,
+            decision: "deny",
+            reason: "The approval did not authorize this exact tool call."
+          };
+        }
+      } else {
+        assessment = {
+          ...assessment,
+          decision: "deny",
+          reason: isAbortSignalAborted(request.signal)
+            ? "Tool approval was cancelled before execution."
+            : "Tool approval was denied by the operator."
+        };
+      }
+    }
+
+    const decision = assessment.decision;
 
     if (decision !== "allow") {
       await this.#sessionDb.appendEvent(request.sessionId, {
@@ -286,7 +311,8 @@ export class ToolExecutor {
           securityResolution,
           signal: request.signal,
           environmentType,
-          onEvent: request.onEvent
+          onEvent: request.onEvent,
+          onApprovalRequest: tool.name === "execute_code" ? request.onApprovalRequest : undefined
         });
       } catch (error) {
         if (request.signal?.aborted) {
@@ -352,6 +378,32 @@ export class ToolExecutor {
     const tool = this.#registry.get(name);
 
     return tool === undefined ? undefined : toDefinition(tool);
+  }
+
+  async #recordSecurityAssessment(
+    sessionId: string,
+    toolName: string,
+    riskClass: ToolRiskClass,
+    targetKey: string | undefined,
+    targetSummary: string | undefined,
+    assessment: Awaited<ReturnType<typeof assessSecurityPolicy>>
+  ): Promise<void> {
+    await this.#sessionDb.appendEvent(sessionId, {
+      kind: "security-assessed",
+      tool: toolName,
+      riskClass,
+      targetKey,
+      targetSummary,
+      assessment
+    });
+    this.#trajectoryRecorder.record("progress", {
+      message: `security assessed for ${toolName}`,
+      tool: toolName,
+      decision: assessment.decision,
+      mode: assessment.mode,
+      reason: assessment.reason,
+      riskClass
+    });
   }
 
   async #availableToolsFor(toolset: ToolsetName) {
@@ -509,6 +561,10 @@ export class ToolExecutor {
       providerNativeToolCall: request.providerNativeToolCall
     };
   }
+}
+
+function isAbortSignalAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
 }
 
 function classifyEffectiveRisk(

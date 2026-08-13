@@ -233,6 +233,7 @@ export class ProviderTurnLoop {
     onEvent?: RuntimeEventSink;
     onDelta?: (text: string) => void;
     onSegmentBreak?: (reason?: string) => void | Promise<void>;
+    onApprovalRequest?: import("../contracts/tool.js").ToolApprovalHandler;
     toolPlans: ToolCallPlan[];
     trustedWorkspace: boolean;
     initialRiskClass: ToolRiskClass;
@@ -658,7 +659,8 @@ export class ProviderTurnLoop {
         remainingToolCalls: Math.max(0, this.#budgets.maxProviderToolCalls - providerToolExecutions.length),
         riskBaseline: maxObservedRisk,
         signal: input.signal,
-        onEvent: input.onEvent
+        onEvent: input.onEvent,
+        onApprovalRequest: input.onApprovalRequest
       });
       const loopToolExecutions = loopToolExecutionResult.executions;
       if (

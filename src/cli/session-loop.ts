@@ -4,7 +4,7 @@ import type { Readable } from "node:stream";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SessionEvent } from "../contracts/session.js";
-import type { ToolResult } from "../contracts/tool.js";
+import type { ToolApprovalHandler, ToolResult } from "../contracts/tool.js";
 import type { ProviderExecutionSummary, ProviderId } from "../contracts/provider.js";
 import type { ModelSwitchContext } from "../providers/model-switch-resolver.js";
 import { renderSessionRecallResult } from "../session/session-recall-service.js";
@@ -1103,6 +1103,49 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         }
         renderSpinner("thinking");
 
+        let approvalPromptQueue: Promise<void> = Promise.resolve();
+        const onApprovalRequest: ToolApprovalHandler = (request) => {
+          const pendingPrompt = approvalPromptQueue.then(async () => {
+            disposeOperatorConsoleSteerInput?.();
+            disposeOperatorConsoleSteerInput = undefined;
+            clearSpinner();
+            try {
+              const resolution = await maybeHandleApprovalGate({
+                runtime,
+                prompt,
+                input: cliInput,
+                output,
+                renderer,
+                approvalPromptAdapter,
+                locale: renderer.locale === "ar" ? "ar" : "en",
+                operatorConsoleHost: operatorConsoleRuntimeHost,
+                resumeExactTool: true,
+                execution: {
+                  tool: request.tool,
+                  input: request.input,
+                  decision: "ask",
+                  riskClass: request.riskClass,
+                  targetKey: request.targetKey,
+                  targetSummary: request.targetSummary,
+                  toolCallId: request.toolCallId,
+                  toolCallName: request.toolCallName
+                }
+              });
+              if (resolution.message !== undefined) {
+                output.write(`${resolution.message}\n\n`);
+              }
+              return resolution.retry ? "approved" as const : "denied" as const;
+            } finally {
+              if (activeTurn?.signal.aborted !== true) {
+                disposeOperatorConsoleSteerInput = startOperatorConsoleSteerInput();
+                renderSpinner("tool");
+              }
+            }
+          });
+          approvalPromptQueue = pendingPrompt.then(() => undefined, () => undefined);
+          return pendingPrompt;
+        };
+
         disposeOperatorConsoleSteerInput = startOperatorConsoleSteerInput();
         const responsePromise = runtime.handle({
             text: retryText,
@@ -1118,6 +1161,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
               : (reason) => {
                   operatorConsoleLiveFrame.flushStreamingSegment(reason);
                 },
+	            onApprovalRequest,
 	            onEvent: (event) => {
 	              const executionPlan = executionPlanFromRuntimeEvent(event);
 	              if (executionPlan !== undefined) {
@@ -2344,6 +2388,7 @@ async function maybeHandleApprovalGate(input: {
   approvalPromptAdapter: ApprovalPromptAdapter;
   locale?: import("../ui/tool-display.js").ToolDisplayLocale;
   operatorConsoleHost?: OperatorConsoleRuntimeHost;
+  resumeExactTool?: boolean;
   execution: ToolExecutionRecord | undefined;
 }): Promise<{
   retry: boolean;
@@ -2394,8 +2439,8 @@ async function maybeHandleApprovalGate(input: {
     return {
       retry: true,
       message: scope === "always"
-        ? "Approval granted (persistent for this workspace). Retrying now."
-        : `Approval granted (${scope}). Retrying now.`
+        ? `Approval granted (persistent for this workspace). ${input.resumeExactTool ? "Continuing now." : "Retrying now."}`
+        : `Approval granted (${scope}). ${input.resumeExactTool ? "Continuing now." : "Retrying now."}`
     };
   }
 }

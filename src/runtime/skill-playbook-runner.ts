@@ -1,6 +1,6 @@
 import type { IntentRoute } from "../contracts/intent.js";
 import type { LoadedSkill, SkillDefinition, CompiledSkillPlaybook, CompiledSkillPlaybookStep, SkillPlaybookStepSpec } from "../contracts/skill.js";
-import type { ToolsetName } from "../contracts/tool.js";
+import type { ToolApprovalHandler, ToolsetName } from "../contracts/tool.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import { compileSkillPlaybook } from "../skills/skill-playbook-planner.js";
 import { packetizeToolExecution, renderToolResultPacket } from "../tools/tool-result-packet.js";
@@ -42,6 +42,7 @@ export class SkillPlaybookRunner {
     text: string;
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
+    onApprovalRequest?: ToolApprovalHandler;
   }): Promise<ToolExecutionRecord[]> {
     if (input.selectedSkill === undefined || input.intent.confirmationRequired) {
       return [];
@@ -74,7 +75,8 @@ export class SkillPlaybookRunner {
         previousResults,
         usedTools,
         text: input.intent.invocation?.args ?? input.text,
-        onEvent: input.onEvent
+        onEvent: input.onEvent,
+        onApprovalRequest: input.onApprovalRequest
       });
 
       if (execution === undefined) {
@@ -134,6 +136,7 @@ export class SkillPlaybookRunner {
     usedTools: Set<string>;
     text: string;
     onEvent?: RuntimeEventSink;
+    onApprovalRequest?: ToolApprovalHandler;
   }): Promise<ToolExecutionRecord | undefined> {
     const toolsets = input.step.preferredToolsets;
 
@@ -168,13 +171,15 @@ export class SkillPlaybookRunner {
             sessionId: this.#currentSessionId(),
             trustedWorkspace: input.trustedWorkspace,
             excludedTools: [...input.usedTools, ...NON_EXECUTABLE_PLAYBOOK_TOOLS],
-            input: toolInput
+            input: toolInput,
+            onApprovalRequest: input.onApprovalRequest
           })
         : await this.#toolExecutor.executeTool({
             tool: preferredTool,
             sessionId: this.#currentSessionId(),
             trustedWorkspace: input.trustedWorkspace,
-            input: toolInput
+            input: toolInput,
+            onApprovalRequest: input.onApprovalRequest
           });
 
       if (execution === undefined) {

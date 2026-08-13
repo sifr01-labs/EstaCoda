@@ -54,7 +54,7 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
     progressLabel: "executing code",
     maxResultSizeChars: 48_000,
     isAvailable: () => true,
-    run: async (input: Record<string, unknown>) => {
+    run: async (input: Record<string, unknown>, context) => {
       if (typeof input.code !== "string" || input.code.trim().length === 0) {
         return errorResult("execute_code requires non-empty Python code");
       }
@@ -83,7 +83,13 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
             tool,
             input: toolInput,
             trustedWorkspace: await options.trustedWorkspace(),
-            sessionId: typeof options.sessionId === "function" ? options.sessionId() : options.sessionId
+            sessionId: typeof options.sessionId === "function" ? options.sessionId() : options.sessionId,
+            visibleTurnId: context?.visibleTurnId,
+            providerUsageLineage: context?.providerUsageLineage,
+            visionInputProvenance: context?.visionInputProvenance,
+            signal: context?.signal,
+            onEvent: context?.onEvent,
+            onApprovalRequest: context?.onApprovalRequest
           });
 
           if (execution === undefined) {

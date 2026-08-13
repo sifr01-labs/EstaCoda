@@ -1,13 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { capabilityFirstDefaults, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
-import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
+import type { RegisteredTool, ToolExecutionContext, ToolResult } from "../contracts/tool.js";
 import { DelegateCallBudget } from "../delegation/delegate-call-budget.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { ToolRegistry } from "./tool-registry.js";
 import { summarizeSecurityTarget, ToolExecutor } from "./tool-executor.js";
 import { attachEphemeralVisionImages, ephemeralVisionImages } from "../vision/ephemeral-vision-content.js";
+import { WorkspaceApprovalController, WorkspaceApprovalStore } from "../security/workspace-approval-controller.js";
 
 function createMockPolicy(decision: "allow" | "deny" = "allow"): SecurityPolicy {
   return {
@@ -1081,6 +1085,153 @@ describe("ToolExecutor browser CDP gating", () => {
     });
 
     expect(record?.decision).toBe("ask");
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("resumes the exact browser.cdp call once after an in-turn approval", async () => {
+    let approved = false;
+    const run = vi.fn(async (_input: Record<string, unknown>, context?: ToolExecutionContext): Promise<ToolResult> => {
+      expect(context?.onApprovalRequest).toBeUndefined();
+      return { ok: true, content: "ran once" };
+    });
+    const policy: SecurityPolicy = {
+      decide: () => approved ? "allow" : "ask",
+      assess: (request) => ({
+        decision: approved ? "allow" : "ask",
+        mode: "adaptive",
+        reason: approved ? "Exact call approved." : "Raw CDP requires approval.",
+        risk: request.riskClass === "external-side-effect" ? "medium" : "high"
+      })
+    };
+    const cdpTool: RegisteredTool = {
+      name: "browser.cdp",
+      description: "raw cdp",
+      inputSchema: { type: "object", properties: { method: { type: "string" } }, required: ["method"] },
+      riskClass: "external-side-effect",
+      toolsets: ["dangerous"],
+      progressLabel: "running cdp",
+      maxResultSizeChars: 1000,
+      isAvailable: () => true,
+      run
+    };
+    const { executor } = await setupExecutor({ policy, tools: [cdpTool] });
+    const onApprovalRequest = vi.fn(async (request) => {
+      expect(request.tool.name).toBe("browser.cdp");
+      expect(request.input).toEqual({ method: "Runtime.evaluate" });
+      approved = true;
+      return "approved" as const;
+    });
+
+    const record = await executor.executeTool({
+      tool: "browser.cdp",
+      input: { method: "Runtime.evaluate" },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      onApprovalRequest
+    });
+
+    expect(onApprovalRequest).toHaveBeenCalledOnce();
+    expect(record?.decision).toBe("allow");
+    expect(record?.result?.content).toBe("ran once");
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("binds a one-time grant to the redacted security target and consumes it once", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "estacoda-tool-approval-"));
+    try {
+      const controller = new WorkspaceApprovalController({
+        store: new WorkspaceApprovalStore({ path: join(directory, "approvals.json") })
+      });
+      const basePolicy: SecurityPolicy = { decide: () => "ask" };
+      const policy: SecurityPolicy = {
+        decide: (request) => basePolicy.decide(request),
+        assess: async (request) => await controller.assess(basePolicy, request, {
+          workspaceRoot: process.cwd(),
+          sessionId: "test-session",
+          mode: "adaptive"
+        })
+      };
+      const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "extracted" }));
+      const { executor } = await setupExecutor({
+        policy,
+        tools: [{ ...createRequiredUrlTool("web.extract"), run }]
+      });
+      const secret = "approval-secret";
+      const input = { url: `https://example.test/page?token=${secret}` };
+
+      const approved = await executor.executeTool({
+        tool: "web.extract",
+        input,
+        trustedWorkspace: true,
+        sessionId: "test-session",
+        onApprovalRequest: async (request) => {
+          expect(request.targetKey).not.toContain(secret);
+          await controller.grant({
+            workspaceRoot: process.cwd(),
+            sessionId: "test-session",
+            toolName: request.tool.name,
+            riskClass: request.riskClass,
+            targetKey: request.targetKey,
+            targetSummary: request.targetSummary,
+            scope: "once"
+          });
+          return "approved";
+        }
+      });
+      const second = await executor.executeTool({
+        tool: "web.extract",
+        input,
+        trustedWorkspace: true,
+        sessionId: "test-session"
+      });
+
+      expect(approved?.decision).toBe("allow");
+      expect(second?.decision).toBe("ask");
+      expect(run).toHaveBeenCalledOnce();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not run an in-turn call when the operator denies approval", async () => {
+    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "must not run" }));
+    const askPolicy: SecurityPolicy = {
+      decide: () => "ask"
+    };
+    const tool = { ...createEchoTool("approval.test"), run };
+    const { executor } = await setupExecutor({ policy: askPolicy, tools: [tool] });
+
+    const record = await executor.executeTool({
+      tool: "approval.test",
+      input: { value: "one" },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      onApprovalRequest: async () => "denied"
+    });
+
+    expect(record?.decision).toBe("deny");
+    expect(record?.result).toBeUndefined();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("never invokes the approval handler for a policy denial", async () => {
+    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "must not run" }));
+    const onApprovalRequest = vi.fn(async () => "approved" as const);
+    const { executor } = await setupExecutor({
+      policy: createMockPolicy("deny"),
+      tools: [{ ...createEchoTool("hardline.test"), run }]
+    });
+
+    const record = await executor.executeTool({
+      tool: "hardline.test",
+      input: {},
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      onApprovalRequest
+    });
+
+    expect(record?.decision).toBe("deny");
+    expect(onApprovalRequest).not.toHaveBeenCalled();
     expect(run).not.toHaveBeenCalled();
   });
 });

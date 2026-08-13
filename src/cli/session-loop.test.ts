@@ -5901,6 +5901,73 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.rendered).toContain("Approval granted (once). Retrying now.");
   });
 
+  it("surfaces approval during the active turn and resumes without replaying the user input", async () => {
+    const outputChunks: string[] = [];
+    const grants: ApprovalGrantInput[] = [];
+    const decisions: string[] = [];
+    const handle = vi.fn(async (input: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
+      const decision = await input.onApprovalRequest?.({
+        tool: {
+          name: "browser.cdp",
+          description: "Raw browser protocol call",
+          inputSchema: {},
+          riskClass: "external-side-effect",
+          toolsets: ["dangerous"],
+          progressLabel: "running cdp",
+          maxResultSizeChars: 1000
+        },
+        input: { method: "Runtime.evaluate" },
+        riskClass: "external-side-effect",
+        targetKey: "browser.cdp:Runtime.evaluate",
+        targetSummary: "Runtime.evaluate"
+      });
+      decisions.push(decision ?? "missing");
+      return { ...approvalAllowResponse(), text: "Exact CDP call completed." };
+    });
+    const runtime = {
+      ...createMockRuntime(),
+      revokeApproval: async () => true,
+      grantApproval: async (grant) => {
+        grants.push(grant);
+      },
+      handle
+    } as Runtime;
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: false,
+        columns: 100
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ isTTY: false, supportsAnimation: false }),
+      prompt: Object.assign(async () => {
+        const answers = ["use raw cdp", "once", "/exit"];
+        return answers[promptIndex++] ?? "/exit";
+      }, { close: () => {} }),
+      close: () => {}
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(handle).toHaveBeenCalledOnce();
+    expect(decisions).toEqual(["approved"]);
+    expect(grants).toHaveLength(1);
+    expect(grants[0]).toMatchObject({
+      toolName: "browser.cdp",
+      riskClass: "external-side-effect",
+      targetKey: "browser.cdp:Runtime.evaluate",
+      scope: "once"
+    });
+    expect(rendered).toContain("Approval granted (once). Continuing now.");
+    expect(rendered.indexOf("Approval granted (once). Continuing now.")).toBeLessThan(
+      rendered.indexOf("Exact CDP call completed.")
+    );
+  });
+
   it("/approve session grants session approval and retries", async () => {
     const result = await runApprovalPromptScenario(["/approve session"]);
 

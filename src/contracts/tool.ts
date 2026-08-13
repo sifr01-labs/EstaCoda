@@ -69,7 +69,23 @@ export type ToolExecutionContext = {
   signal?: AbortSignal;
   environmentType?: EnvironmentType;
   onEvent?: RuntimeEventSink;
+  /** Suspends an approval-gated call until the active surface approves or denies it. */
+  onApprovalRequest?: ToolApprovalHandler;
 };
+
+export type ToolApprovalRequest = {
+  tool: ToolDefinition;
+  input: Record<string, unknown>;
+  riskClass: ToolRiskClass;
+  targetKey?: string;
+  targetSummary?: string;
+  toolCallId?: string;
+  toolCallName?: string;
+};
+
+export type ToolApprovalDecision = "approved" | "denied";
+
+export type ToolApprovalHandler = (request: ToolApprovalRequest) => Promise<ToolApprovalDecision>;
 
 export type ToolSecurityResolution = {
   riskClass: ToolRiskClass;
@@ -78,7 +94,7 @@ export type ToolSecurityResolution = {
   dataEgress?: SecurityDataEgressContext;
 };
 
-export type ToolSecurityResolverContext = Omit<ToolExecutionContext, "securityResolution"> & {
+export type ToolSecurityResolverContext = Omit<ToolExecutionContext, "securityResolution" | "onApprovalRequest"> & {
   trustedWorkspace: boolean;
   sessionId: string;
 };

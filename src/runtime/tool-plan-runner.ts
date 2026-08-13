@@ -1,5 +1,5 @@
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
-import type { ToolRiskClass } from "../contracts/tool.js";
+import type { ToolApprovalHandler, ToolRiskClass } from "../contracts/tool.js";
 import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
 import type { VisionInputProvenanceContext } from "../contracts/vision.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
@@ -66,6 +66,7 @@ export class ToolPlanRunner {
     visionInputProvenance?: VisionInputProvenanceContext;
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
+    onApprovalRequest?: ToolApprovalHandler;
   }): Promise<{
     executions: ToolExecutionRecord[];
     maxObservedRisk: ToolRiskClass;
@@ -127,7 +128,8 @@ export class ToolPlanRunner {
             providerUsageLineage: input.providerUsageLineage,
             visionInputProvenance: input.visionInputProvenance,
             signal: input.signal,
-            onEvent: input.onEvent
+            onEvent: input.onEvent,
+            onApprovalRequest: input.onApprovalRequest
           })
         ));
 
@@ -153,7 +155,8 @@ export class ToolPlanRunner {
           providerUsageLineage: input.providerUsageLineage,
           visionInputProvenance: input.visionInputProvenance,
           signal: input.signal,
-          onEvent: input.onEvent
+          onEvent: input.onEvent,
+          onApprovalRequest: input.onApprovalRequest
         });
         if (execution !== undefined) {
           executions.push(execution);
@@ -183,6 +186,7 @@ export class ToolPlanRunner {
     visionInputProvenance?: VisionInputProvenanceContext;
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
+    onApprovalRequest?: ToolApprovalHandler;
   }): Promise<ToolExecutionRecord | undefined> {
     const plan = input.plan;
 
@@ -207,6 +211,7 @@ export class ToolPlanRunner {
       providerNativeToolCall: plan.raw,
       signal: input.signal,
       onEvent: input.onEvent,
+      onApprovalRequest: input.onApprovalRequest,
       delegateCallBudget: this.#delegateCallBudget
     });
 
