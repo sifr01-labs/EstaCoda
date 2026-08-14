@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
@@ -1382,6 +1383,8 @@ function createBrowserTypeTool(
       ]),
     },
     riskClass: "read-only-network",
+    resolveSecurity: (input: BrowserActionInput, context) =>
+      resolveProtectedBrowserSubmitSecurity(input, context.sessionId, deriveBrowserInput),
     toolsets: ["browser", "web", "research"],
     progressLabel: "typing in browser",
     maxResultSizeChars: 8_000,
@@ -1504,6 +1507,7 @@ type BrowserProtectedFormInput = {
   sessionId?: string;
   revision?: number;
   tabRef?: string;
+  submitRef?: string;
 };
 
 function createBrowserProtectedFormTool(
@@ -1512,7 +1516,7 @@ function createBrowserProtectedFormTool(
 ): RegisteredTool {
   return {
     name: "browser.fill_protected_form",
-    description: "Request and fill every currently visible protected field in one verified form flow (for example account identifier plus password). Use this once for all related fields instead of separate browser.type calls. Values bypass model context and this tool never submits the form.",
+    description: "Request and fill every currently visible protected field in one verified form flow (for example account identifier plus password). Use this once for all related fields instead of separate browser.type calls. Values bypass model context. When submitRef is provided, supplying the values also submits that prebound authentication control locally without another model turn.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -1521,6 +1525,10 @@ function createBrowserProtectedFormTool(
         sessionId: { type: "string" },
         revision: { type: "number", description: "Snapshot revision that produced every field ref." },
         tabRef: { type: "string", description: "Controlled tab that produced every field ref." },
+        submitRef: {
+          type: "string",
+          description: "Optional same-revision authentication control. Supplying every protected value will immediately submit this prebound control locally.",
+        },
         fields: {
           type: "array",
           minItems: 1,
@@ -1541,6 +1549,8 @@ function createBrowserProtectedFormTool(
       required: ["purpose", "revision", "tabRef", "fields"],
     },
     riskClass: "read-only-network",
+    resolveSecurity: (input: BrowserProtectedFormInput, context) =>
+      resolveProtectedBrowserSubmitSecurity(input, context.sessionId, deriveBrowserInput),
     toolsets: ["browser", "web", "research"],
     progressLabel: "filling protected browser form",
     maxResultSizeChars: 8_000,
@@ -1562,6 +1572,7 @@ function createBrowserProtectedFormTool(
           revision: parsed.revision,
           tabRef: parsed.tabRef,
           ref: field.ref,
+          ...(parsed.submitRef === undefined ? {} : { submitRef: parsed.submitRef }),
         })).catch(() => undefined);
         if (destination === undefined) {
           return protectedBrowserFailure("A protected browser field could not be resolved to a current verified destination.");
@@ -1594,14 +1605,34 @@ function createBrowserProtectedFormTool(
       if (receipt === undefined) {
         return protectedBrowserFailure("Protected browser form delivery failed.");
       }
+      const deliveryResult = receipt.status === "delivered" && parsed.submitRef !== undefined
+        ? browserBackend.takeProtectedFieldDeliveryResult?.(destinations.at(-1)!)
+        : undefined;
+      if (receipt.status === "delivered" && parsed.submitRef !== undefined && deliveryResult === undefined) {
+        return protectedBrowserFailure("Protected form values were delivered, but the bound browser submission result was unavailable.");
+      }
+      const submissionFailed = deliveryResult?.submission === "failed" || deliveryResult?.challengeState === "still-present";
       return {
-        ok: receipt.status === "delivered",
+        ok: receipt.status === "delivered" && !submissionFailed,
         content: receipt.status === "delivered"
-          ? `Protected form fields delivered (${receipt.items.length}). The form was not submitted.`
+          ? deliveryResult === undefined
+            ? `Protected form fields delivered (${receipt.items.length}). The form was not submitted.`
+            : [`Protected form fields delivered (${receipt.items.length}).`, renderProtectedDeliveryResult(deliveryResult)].join("\n")
           : `Protected form input ${receipt.status}: ${receipt.reason ?? "delivery did not complete."}`,
         metadata: {
           backend: browserBackend.kind,
           secureInputGroupReceipt: receipt,
+          ...(deliveryResult === undefined ? {} : {
+            protectedDelivery: {
+              delivery: deliveryResult.delivery,
+              submission: deliveryResult.submission,
+              challengeState: deliveryResult.challengeState,
+              beforeRevision: deliveryResult.beforeRevision,
+              afterRevision: deliveryResult.afterRevision,
+              sensitiveInputActive: deliveryResult.sensitiveInputActive,
+            },
+            snapshot: deliveryResult.snapshot,
+          }),
         },
       };
     },
@@ -1612,12 +1643,14 @@ function parseBrowserProtectedForm(input: BrowserProtectedFormInput): {
   purpose: string;
   revision: number;
   tabRef: string;
+  submitRef?: string;
   fields: Array<{ id: string; ref: string; kind: SecureInputKind; purpose?: string }>;
 } | undefined {
-  if (!hasOnlyKeys(input, ["purpose", "fields", "sessionId", "revision", "tabRef"])) return undefined;
+  if (!hasOnlyKeys(input, ["purpose", "fields", "sessionId", "revision", "tabRef", "submitRef"])) return undefined;
   if (typeof input.purpose !== "string" || input.purpose.trim().length === 0 || input.purpose.length > 500) return undefined;
   if (!Number.isSafeInteger(input.revision) || input.revision! < 0) return undefined;
   if (typeof input.tabRef !== "string" || input.tabRef.length === 0 || input.tabRef.length > 256) return undefined;
+  if (input.submitRef !== undefined && (typeof input.submitRef !== "string" || !/^@e[1-9]\d*$/u.test(input.submitRef))) return undefined;
   if (!Array.isArray(input.fields) || input.fields.length < 1 || input.fields.length > 8) return undefined;
   const ids = new Set<string>();
   const refs = new Set<string>();
@@ -1638,7 +1671,35 @@ function parseBrowserProtectedForm(input: BrowserProtectedFormInput): {
       ...(field.purpose === undefined ? {} : { purpose: field.purpose.trim() }),
     });
   }
-  return { purpose: input.purpose.trim(), revision: input.revision!, tabRef: input.tabRef, fields };
+  if (input.submitRef !== undefined && refs.has(input.submitRef)) return undefined;
+  return {
+    purpose: input.purpose.trim(),
+    revision: input.revision!,
+    tabRef: input.tabRef,
+    ...(input.submitRef === undefined ? {} : { submitRef: input.submitRef }),
+    fields,
+  };
+}
+
+function resolveProtectedBrowserSubmitSecurity(
+  input: { sessionId?: string; tabRef?: string; submitRef?: string },
+  runtimeSessionId: string,
+  deriveBrowserInput: DeriveBrowserInput
+): import("../contracts/tool.js").ToolSecurityResolution | undefined {
+  if (typeof input.submitRef !== "string" || input.submitRef.length === 0) return undefined;
+  const sessionId = (() => {
+    try {
+      return deriveBrowserInput(input).sessionId;
+    } catch {
+      return runtimeSessionId;
+    }
+  })();
+  const identity = [sessionId, typeof input.tabRef === "string" ? input.tabRef : "", input.submitRef].join("\u0000");
+  return {
+    riskClass: "external-side-effect",
+    targetKey: `browser-protected-submit:${createHash("sha256").update(identity).digest("hex")}`,
+    targetSummary: "Submit a verified protected browser authentication control",
+  };
 }
 
 function parseBrowserProtectedInput(

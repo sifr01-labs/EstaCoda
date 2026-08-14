@@ -332,6 +332,8 @@ export type BrowserBackend = {
   verifyProtectedField?(input: BrowserProtectedFieldInput): Promise<BrowserProtectedFieldVerification>;
   /** Runtime-only one-use delivery. The value must not be embedded in evaluated source. */
   deliverProtectedField?(input: BrowserProtectedFieldDeliveryInput): Promise<void>;
+  /** Clears any values delivered by an incomplete grouped transaction before bindings are released. */
+  abortProtectedFieldGroup?(destinations: readonly import("./secure-input.js").BrowserFieldSecureInputDestination[]): Promise<void>;
   /** Returns and clears the metadata-only settlement produced by the last protected delivery. */
   takeProtectedFieldDeliveryResult?(destination: import("./secure-input.js").BrowserFieldSecureInputDestination): BrowserProtectedFieldDeliveryResult | undefined;
   releaseProtectedField?(destination: import("./secure-input.js").BrowserFieldSecureInputDestination): Promise<void> | void;

@@ -850,6 +850,98 @@ describe("supervised local CDP backend", () => {
     expect(new Set(releasedObjectIds).size).toBe(3);
   });
 
+  it("completes grouped credentials and OTP through prebound controls across revision changes", async () => {
+    const socket = new FakeCdpSocket();
+    showCredentialLoginPage(socket);
+    const events: string[] = [];
+    let credentialDeliveries = 0;
+    socket.onProtectedDelivery = () => {
+      events.push(`credential-delivery-${++credentialDeliveries}`);
+      if (credentialDeliveries === 1) socket.snapshot.text = "Sign in details received";
+    };
+    socket.onProtectedSubmit = () => {
+      events.push("login-submit");
+      showOtpChallengePage(socket);
+      socket.documentCurrent = false;
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"],
+      settling: { pollIntervalMs: 5, stableWindowMs: 10, minimumObservationMs: 10 },
+    });
+    const login = await backend.navigate({ url: socket.snapshot.url, sessionId: "session-full-auth" });
+    const loginInput = {
+      sessionId: "session-full-auth",
+      revision: login.snapshot.revision,
+      tabRef: login.snapshot.tab!.ref,
+      submitRef: "@e3",
+    };
+    const email = await backend.prepareProtectedField?.({ ...loginInput, ref: "@e1" });
+    const password = await backend.prepareProtectedField?.({ ...loginInput, ref: "@e2" });
+    await backend.verifyProtectedField?.({ destination: email!, kind: "account-identifier", phase: "before-collection" });
+    await backend.verifyProtectedField?.({ destination: password!, kind: "password", phase: "before-collection" });
+    await backend.verifyProtectedField?.({ destination: email!, kind: "account-identifier", phase: "before-delivery" });
+    await backend.verifyProtectedField?.({ destination: password!, kind: "password", phase: "before-delivery" });
+
+    await backend.deliverProtectedField?.({
+      destination: email!, kind: "account-identifier", value: new TextEncoder().encode("person@example.com"),
+    });
+    expect(events).toEqual(["credential-delivery-1"]);
+    await backend.deliverProtectedField?.({
+      destination: password!, kind: "password", value: new TextEncoder().encode("password-sentinel"),
+    });
+    const loginResult = backend.takeProtectedFieldDeliveryResult?.(password!);
+    expect(events).toEqual(["credential-delivery-1", "credential-delivery-2", "login-submit"]);
+    expect(loginResult).toMatchObject({
+      submission: "clicked",
+      challengeState: "departed",
+      snapshot: { url: "https://accounts.example.com/challenge", title: "Verify account" },
+    });
+    expect(loginResult!.afterRevision).toBeGreaterThan(login.snapshot.revision);
+    await backend.releaseProtectedField?.(email!);
+    await backend.releaseProtectedField?.(password!);
+
+    socket.documentCurrent = true;
+    socket.onProtectedDelivery = () => events.push("otp-delivery");
+    socket.onProtectedSubmit = () => {
+      events.push("authenticate-submit");
+      showAuthenticatedHome(socket);
+    };
+    const otp = await backend.prepareProtectedField?.({
+      sessionId: "session-full-auth",
+      revision: loginResult!.snapshot.revision,
+      tabRef: loginResult!.snapshot.tab!.ref,
+      ref: "@e1",
+      submitRef: "@e2",
+    });
+    await expect(backend.verifyProtectedField?.({
+      destination: otp!, kind: "one-time-code", phase: "before-collection",
+    })).resolves.toEqual({ status: "verified" });
+    await backend.deliverProtectedField?.({
+      destination: otp!, kind: "one-time-code", value: new TextEncoder().encode("123456"),
+    });
+    const otpResult = backend.takeProtectedFieldDeliveryResult?.(otp!);
+
+    expect(events).toEqual([
+      "credential-delivery-1",
+      "credential-delivery-2",
+      "login-submit",
+      "otp-delivery",
+      "authenticate-submit",
+    ]);
+    expect(otpResult).toMatchObject({
+      submission: "clicked",
+      challengeState: "departed",
+      sensitiveInputActive: false,
+      snapshot: { url: "https://accounts.example.com/home", title: "Account home" },
+    });
+    expect(JSON.stringify([loginResult, otpResult])).not.toContain("person@example.com");
+    expect(JSON.stringify([loginResult, otpResult])).not.toContain("password-sentinel");
+    expect(JSON.stringify([loginResult, otpResult])).not.toContain("123456");
+  });
+
   it("binds, delivers, and submits a one-time-code challenge as one local transaction", async () => {
     const socket = new FakeCdpSocket();
     showOtpChallengePage(socket);
@@ -961,6 +1053,128 @@ describe("supervised local CDP backend", () => {
     )).toBe(false);
   });
 
+  it("clears partially delivered grouped values before releasing browser protection", async () => {
+    const socket = new FakeCdpSocket();
+    showCredentialLoginPage(socket);
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"],
+    });
+    const navigation = await backend.navigate({ url: socket.snapshot.url, sessionId: "session-partial-clear" });
+    const common = {
+      sessionId: "session-partial-clear",
+      revision: navigation.snapshot.revision,
+      tabRef: navigation.snapshot.tab!.ref,
+      submitRef: "@e3",
+    };
+    const email = await backend.prepareProtectedField?.({ ...common, ref: "@e1" });
+    const password = await backend.prepareProtectedField?.({ ...common, ref: "@e2" });
+    await backend.verifyProtectedField?.({ destination: email!, kind: "account-identifier", phase: "before-collection" });
+    await backend.verifyProtectedField?.({ destination: password!, kind: "password", phase: "before-collection" });
+    await backend.deliverProtectedField?.({
+      destination: email!, kind: "account-identifier", value: new TextEncoder().encode("person@example.com"),
+    });
+
+    await backend.abortProtectedFieldGroup?.([email!, password!]);
+    await backend.releaseProtectedField?.(email!);
+    await backend.releaseProtectedField?.(password!);
+
+    expect(socket.sent.filter((message) =>
+      message.method === "Runtime.callFunctionOn" &&
+      String(message.params?.functionDeclaration).includes("setter.call(this, '')")
+    )).toHaveLength(1);
+    expect(socket.sent.filter((message) =>
+      message.method === "Runtime.callFunctionOn" &&
+      String(message.params?.functionDeclaration).includes("this.value === ''")
+    )).toHaveLength(1);
+    await expect(backend.screenshot?.({ sessionId: "session-partial-clear" })).resolves.toMatchObject({ base64: "png-data" });
+    expect(socket.sent.some((message) =>
+      message.method === "Runtime.callFunctionOn" && String(message.params?.functionDeclaration).includes("this.click();")
+    )).toBe(false);
+  });
+
+  it("keeps the browser protected when failed-submission clearing cannot be verified", async () => {
+    const socket = new FakeCdpSocket();
+    showOtpChallengePage(socket);
+    socket.onProtectedDelivery = () => {
+      socket.protectedSubmitInspection.current = false;
+      socket.protectedClearVerification = false;
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"],
+      settling: { pollIntervalMs: 5, stableWindowMs: 10, minimumObservationMs: 10 },
+    });
+    const navigation = await backend.navigate({ url: socket.snapshot.url, sessionId: "session-clear-blocked" });
+    const destination = await backend.prepareProtectedField?.({
+      sessionId: "session-clear-blocked",
+      revision: navigation.snapshot.revision,
+      tabRef: navigation.snapshot.tab!.ref,
+      ref: "@e1",
+      submitRef: "@e2",
+    });
+    await backend.verifyProtectedField?.({ destination: destination!, kind: "one-time-code", phase: "before-collection" });
+
+    await expect(backend.deliverProtectedField?.({
+      destination: destination!, kind: "one-time-code", value: new TextEncoder().encode("123456"),
+    })).rejects.toMatchObject({
+      code: "protected-field-clear-unverified",
+      message: "Protected browser values could not be verified as cleared. The browser remains protected; review it locally before retrying.",
+    });
+    await expect(backend.releaseProtectedField?.(destination!)).rejects.toMatchObject({
+      code: "protected-field-clear-unverified",
+    });
+    await expect(backend.screenshot?.({ sessionId: "session-clear-blocked" })).rejects.toMatchObject({
+      code: "sensitive-input-active",
+    });
+    await backend.closeSession?.("session-clear-blocked");
+  });
+
+  it("verifiably clears delivered values after a failed protected submission", async () => {
+    const socket = new FakeCdpSocket();
+    showOtpChallengePage(socket);
+    socket.onProtectedDelivery = () => {
+      socket.protectedSubmitInspection.current = false;
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"],
+      settling: { pollIntervalMs: 5, stableWindowMs: 10, minimumObservationMs: 10 },
+    });
+    const navigation = await backend.navigate({ url: socket.snapshot.url, sessionId: "session-failed-submit-clear" });
+    const destination = await backend.prepareProtectedField?.({
+      sessionId: "session-failed-submit-clear",
+      revision: navigation.snapshot.revision,
+      tabRef: navigation.snapshot.tab!.ref,
+      ref: "@e1",
+      submitRef: "@e2",
+    });
+    await backend.verifyProtectedField?.({ destination: destination!, kind: "one-time-code", phase: "before-collection" });
+
+    await backend.deliverProtectedField?.({
+      destination: destination!, kind: "one-time-code", value: new TextEncoder().encode("123456"),
+    });
+    const result = backend.takeProtectedFieldDeliveryResult?.(destination!);
+    await backend.releaseProtectedField?.(destination!);
+
+    expect(result).toMatchObject({ submission: "failed", challengeState: "still-present" });
+    expect(socket.sent.some((message) =>
+      message.method === "Runtime.callFunctionOn" &&
+      String(message.params?.functionDeclaration).includes("setter.call(this, '')")
+    )).toBe(true);
+    expect(socket.sent.some((message) =>
+      message.method === "Runtime.callFunctionOn" &&
+      String(message.params?.functionDeclaration).includes("this.value === ''")
+    )).toBe(true);
+    await expect(backend.screenshot?.({ sessionId: "session-failed-submit-clear" })).resolves.toMatchObject({ base64: "png-data" });
+  });
+
   it("reverifies the prebound submit control and blocks delivery when it detaches", async () => {
     const socket = new FakeCdpSocket();
     showOtpChallengePage(socket);
@@ -983,6 +1197,11 @@ describe("supervised local CDP backend", () => {
       destination: destination!, kind: "one-time-code", phase: "before-collection"
     })).resolves.toEqual({ status: "rejected", reason: "field-missing" });
     socket.protectedSubmitInspection.semanticsMatch = true;
+    socket.protectedSubmitInspection.conflictCount = 2;
+    await expect(backend.verifyProtectedField?.({
+      destination: destination!, kind: "one-time-code", phase: "before-collection"
+    })).resolves.toEqual({ status: "rejected", reason: "field-missing" });
+    socket.protectedSubmitInspection.conflictCount = 1;
     await expect(backend.verifyProtectedField?.({
       destination: destination!, kind: "one-time-code", phase: "before-collection"
     })).resolves.toEqual({ status: "verified" });

@@ -114,6 +114,7 @@ function localBackend(overrides: Partial<BrowserBackend> = {}): BrowserBackend {
     }),
     verifyProtectedField: async () => ({ status: "verified" }),
     deliverProtectedField: async () => undefined,
+    abortProtectedFieldGroup: async () => undefined,
     releaseProtectedField: async () => undefined,
     ...overrides,
   };

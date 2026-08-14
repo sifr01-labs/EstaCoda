@@ -35,6 +35,7 @@ type ProtectedFieldBinding = {
   kind: SecureInputKind;
   objectId: string;
   elementIndex: number;
+  deliveryAttempted: boolean;
   delivered: boolean;
   released: boolean;
 };
@@ -78,6 +79,7 @@ type SubmitInspection = {
   disabled: boolean;
   clickable: boolean;
   semanticsMatch: boolean;
+  conflictCount: number;
 };
 
 export type ProtectedFieldDeliveryOutcome = {
@@ -86,7 +88,7 @@ export type ProtectedFieldDeliveryOutcome = {
 
 export class ProtectedBrowserFieldError extends Error {
   constructor(
-    public readonly code: "sensitive-input-active" | "protected-field-delivery-failed",
+    public readonly code: "sensitive-input-active" | "protected-field-delivery-failed" | "protected-field-clear-unverified",
     message: string,
     options?: ErrorOptions
   ) {
@@ -173,6 +175,14 @@ export class ProtectedBrowserFormTransactionController {
         if (compatible === undefined) await releaseObject(session.supervisor, documentObjectId);
         return { status: "rejected", reason: "field-missing" };
       }
+      if (compatible?.submit !== undefined && !submitIsActionable(await inspectSubmit(
+        session.supervisor,
+        compatible.submit.objectId,
+        compatible.submit.elementIndex
+      ))) {
+        await releaseObject(session.supervisor, objectId);
+        return { status: "rejected", reason: "field-replaced" };
+      }
       const transaction = compatible ?? this.#createTransaction({
         session,
         destination: input.destination,
@@ -185,6 +195,7 @@ export class ProtectedBrowserFormTransactionController {
         kind: input.kind,
         objectId,
         elementIndex,
+        deliveryAttempted: false,
         delivered: false,
         released: false,
       };
@@ -254,6 +265,7 @@ export class ProtectedBrowserFormTransactionController {
     const value = new TextDecoder("utf-8", { fatal: true }).decode(input.value);
     try {
       transaction.state = "delivering";
+      active.deliveryAttempted = true;
       const result = await session.supervisor.send("Runtime.callFunctionOn", {
         objectId: active.objectId,
         functionDeclaration: PROTECTED_FIELD_DELIVERY_FUNCTION,
@@ -320,10 +332,28 @@ export class ProtectedBrowserFormTransactionController {
     const key = destinationBindingKey(destination);
     const field = transaction?.fields.get(key);
     if (transaction === undefined || field === undefined || field.released) return;
+    const finalRelease = [...transaction.fields.values()].every((candidate) => candidate === field || candidate.released);
+    const fields = [...transaction.fields.values()];
+    if (finalRelease && fields.some((candidate) => candidate.deliveryAttempted) &&
+        (fields.some((candidate) => !candidate.delivered) || ["blocked", "still-present"].includes(transaction.state))) {
+      await this.#clearDeliveredValues(transaction);
+    }
     field.released = true;
     this.#transactionsByBinding.get(destination.sessionId)?.delete(key);
     if ([...transaction.fields.values()].every((candidate) => candidate.released)) {
       await this.#releaseTransaction(transaction);
+    }
+  }
+
+  async abort(destinations: readonly BrowserFieldSecureInputDestination[]): Promise<void> {
+    const transactions = new Set(destinations.flatMap((destination) => {
+      const transaction = this.#findTransaction(destination);
+      return transaction === undefined ? [] : [transaction];
+    }));
+    for (const transaction of transactions) {
+      if ([...transaction.fields.values()].some((field) => field.deliveryAttempted)) {
+        await this.#clearDeliveredValues(transaction);
+      }
     }
   }
 
@@ -381,6 +411,9 @@ export class ProtectedBrowserFormTransactionController {
       snapshot = await settlement.captureAfterDeparture();
     } else if (transaction !== undefined) {
       transaction.state = challengeCurrent === true ? "still-present" : "blocked";
+      if (transaction.submit !== undefined && submission !== "not-requested") {
+        await this.#clearDeliveredValues(transaction);
+      }
     }
     const sensitiveInputActive = this.isSensitive(session.key);
     const result: BrowserProtectedFieldDeliveryResult = {
@@ -518,6 +551,56 @@ export class ProtectedBrowserFormTransactionController {
     return unknown ? undefined : false;
   }
 
+  async #clearDeliveredValues(transaction: ActiveProtectedFormTransaction): Promise<void> {
+    const fields = [...transaction.fields.values()].filter((field) => field.deliveryAttempted);
+    if (fields.length === 0) return;
+    let verified = true;
+    for (const field of fields) {
+      try {
+        const cleared = await transaction.supervisor.send("Runtime.callFunctionOn", {
+          objectId: field.objectId,
+          functionDeclaration: PROTECTED_FIELD_CLEAR_FUNCTION,
+          arguments: [{ value: field.elementIndex }],
+          returnByValue: true,
+          awaitPromise: true,
+        }) as { result?: { value?: unknown } };
+        verified = cleared.result?.value === true && verified;
+      } catch {
+        verified = false;
+      }
+    }
+    // Allow controlled-input frameworks a brief render turn, then verify every
+    // bound field stayed empty without dispatching events that could submit it.
+    await shortDelay(25, undefined);
+    for (const field of fields) {
+      try {
+        const inspected = await transaction.supervisor.send("Runtime.callFunctionOn", {
+          objectId: field.objectId,
+          functionDeclaration: PROTECTED_FIELD_CLEAR_VERIFICATION_FUNCTION,
+          arguments: [{ value: field.elementIndex }],
+          returnByValue: true,
+        }) as { result?: { value?: unknown } };
+        verified = inspected.result?.value === true && verified;
+      } catch {
+        verified = false;
+      }
+    }
+    if (!verified) {
+      transaction.state = "blocked";
+      throw new ProtectedBrowserFieldError(
+        "protected-field-clear-unverified",
+        "Protected browser values could not be verified as cleared. The browser remains protected; review it locally before retrying."
+      );
+    }
+    for (const field of fields) {
+      field.deliveryAttempted = false;
+      field.delivered = false;
+    }
+    const anotherUnclearedField = [...(this.#transactions.get(transaction.sessionId)?.values() ?? [])]
+      .some((candidate) => [...candidate.fields.values()].some((field) => field.deliveryAttempted));
+    if (!anotherUnclearedField) this.#sensitiveSessions.delete(transaction.sessionId);
+  }
+
   async #releaseTransaction(transaction: ActiveProtectedFormTransaction): Promise<void> {
     if (transaction.released) return;
     transaction.released = true;
@@ -650,6 +733,9 @@ async function inspectSubmit(
       disabled: value.disabled === true,
       clickable: value.clickable === true,
       semanticsMatch: value.semanticsMatch === true,
+      conflictCount: typeof value.conflictCount === "number" && Number.isSafeInteger(value.conflictCount)
+        ? value.conflictCount
+        : 0,
     };
   } catch {
     return undefined;
@@ -658,7 +744,8 @@ async function inspectSubmit(
 
 function submitIsActionable(inspection: SubmitInspection | undefined): boolean {
   return inspection !== undefined && inspection.connected && inspection.current &&
-    inspection.visible && !inspection.disabled && inspection.clickable && inspection.semanticsMatch;
+    inspection.visible && !inspection.disabled && inspection.clickable && inspection.semanticsMatch &&
+    inspection.conflictCount === 1;
 }
 
 async function shortDelay(ms: number, signal: AbortSignal | undefined): Promise<void> {
@@ -836,6 +923,23 @@ const PROTECTED_FIELD_DELIVERY_FUNCTION = `function(index, protectedValue) {
   return true;
 }`;
 
+const PROTECTED_FIELD_CLEAR_FUNCTION = `function(index) {
+  if (!this?.isConnected || window.__estacodaElements?.[index] !== this) return false;
+  if (this.isContentEditable) {
+    this.textContent = '';
+  } else {
+    const prototype = this instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+    if (setter) setter.call(this, ''); else this.value = '';
+  }
+  return true;
+}`;
+
+const PROTECTED_FIELD_CLEAR_VERIFICATION_FUNCTION = `function(index) {
+  if (!this?.isConnected || window.__estacodaElements?.[index] !== this) return false;
+  return this.isContentEditable ? (this.textContent || '') === '' : this.value === '';
+}`;
+
 const PROTECTED_SUBMIT_INSPECTION_FUNCTION = `function(index) {
   const control = this;
   const visible = control?.isConnected === true && (() => {
@@ -853,13 +957,36 @@ const PROTECTED_SUBMIT_INSPECTION_FUNCTION = `function(index) {
   const buttonLike = control instanceof HTMLButtonElement ||
     (control instanceof HTMLInputElement && ['submit', 'button'].includes(control.type.toLowerCase())) ||
     control?.getAttribute?.('role') === 'button';
+  const authenticationShaped = (element) => {
+    const candidateDescriptor = [
+      element?.innerText,
+      element?.textContent,
+      element?.getAttribute?.('aria-label'),
+      element?.getAttribute?.('name'),
+      element?.getAttribute?.('id'),
+      element?.getAttribute?.('value')
+    ].filter(Boolean).join(' ').toLowerCase().slice(0, 500);
+    const candidateButtonLike = element instanceof HTMLButtonElement ||
+      (element instanceof HTMLInputElement && ['submit', 'button'].includes(element.type.toLowerCase())) ||
+      element?.getAttribute?.('role') === 'button';
+    return candidateButtonLike && /authenticat|verify|continue|submit|sign[ _-]?in|log[ _-]?in|next|confirm|تحقق|تأكيد|تاكيد|دخول|متابعة/.test(candidateDescriptor);
+  };
+  const scope = control?.form || document;
+  const candidates = Array.from(scope.querySelectorAll('button,input[type="submit"],input[type="button"],[role="button"]'))
+    .filter((element) => {
+      if (!element?.isConnected || element.matches?.(':disabled,[aria-disabled="true"]')) return false;
+      const style = getComputedStyle(element);
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.visibility !== 'collapse' &&
+        element.getClientRects().length > 0 && authenticationShaped(element);
+    });
   return {
     connected: control?.isConnected === true,
     current: window.__estacodaElements?.[index] === control,
     visible,
     disabled: control?.matches?.(':disabled,[aria-disabled="true"]') === true,
     clickable: typeof control?.click === 'function',
-    semanticsMatch: buttonLike && /authenticat|verify|continue|submit|sign[ _-]?in|log[ _-]?in|next|confirm|تحقق|تأكيد|تاكيد|دخول|متابعة/.test(descriptor)
+    semanticsMatch: buttonLike && /authenticat|verify|continue|submit|sign[ _-]?in|log[ _-]?in|next|confirm|تحقق|تأكيد|تاكيد|دخول|متابعة/.test(descriptor),
+    conflictCount: candidates.length
   };
 }`;
 

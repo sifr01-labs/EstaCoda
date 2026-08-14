@@ -20,6 +20,7 @@ export function createProtectedBrowserFieldTransport(
       backend.kind === "local-cdp" &&
       backend.verifyProtectedField !== undefined &&
       backend.deliverProtectedField !== undefined &&
+      backend.abortProtectedFieldGroup !== undefined &&
       await backend.isAvailable(),
     verify: async ({ request, phase, signal }) => {
       if (request.destination.type !== "browser-field" || backend.verifyProtectedField === undefined) {
@@ -49,6 +50,16 @@ export function createProtectedBrowserFieldTransport(
         signal: context.signal,
       });
       await consume(value, context);
+    },
+    abort: async (requests) => {
+      const destinations = requests.flatMap((request) =>
+        request.destination.type === "browser-field" ? [request.destination] : []
+      );
+      if (destinations.length === 0) return;
+      if (backend.abortProtectedFieldGroup === undefined) {
+        throw new Error("Protected local browser cleanup is unavailable.");
+      }
+      await backend.abortProtectedFieldGroup(destinations);
     },
     release: async (request: SecureInputRequest) => {
       if (request.destination.type !== "browser-field") return;

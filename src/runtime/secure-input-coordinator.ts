@@ -163,7 +163,17 @@ export class SecureInputCoordinator {
               cancelPending(this.#broker, candidate.snapshot.id, input.scope);
             }
           }
-          return groupReceipt(entries, "cancelled", "Protected input collection was cancelled.");
+          const cleared = await this.#abort(entries.map((entry) => ({
+            request: entry.request,
+            selection: entry.selection
+          })));
+          return groupReceipt(
+            entries,
+            cleared ? "cancelled" : "failed",
+            cleared
+              ? "Protected input collection was cancelled."
+              : protectedInputClearBlocker()
+          );
         }
         try {
           this.#broker.provideSecret({
@@ -206,6 +216,10 @@ export class SecureInputCoordinator {
       for (const entry of entries) {
         if (entry.snapshot !== undefined) cancelPending(this.#broker, entry.snapshot.id, input.scope);
       }
+      const cleared = await this.#abort(entries.map((entry) => ({
+        request: entry.request,
+        selection: entry.selection
+      })));
       const status = error instanceof SecureInputBrokerError && error.code === "expired"
         ? "expired"
         : error instanceof SecureInputBrokerError && error.code === "cancelled"
@@ -213,8 +227,10 @@ export class SecureInputCoordinator {
           : "failed";
       return groupReceipt(
         entries,
-        status,
-        status === "expired"
+        cleared ? status : "failed",
+        !cleared
+          ? protectedInputClearBlocker()
+          : status === "expired"
           ? "Protected input expired before delivery."
           : status === "cancelled"
             ? "Protected input delivery was cancelled."
@@ -292,7 +308,13 @@ export class SecureInputCoordinator {
       });
       if (collected.status === "cancelled" || controller.signal.aborted) {
         this.#broker.cancelRequest(snapshot.id, input.scope);
-        return receipt(selection, "cancelled", false, "Protected input collection was cancelled.");
+        const cleared = await this.#abort([{ request: input.request, selection }]);
+        return receipt(
+          selection,
+          cleared ? "cancelled" : "failed",
+          false,
+          cleared ? "Protected input collection was cancelled." : protectedInputClearBlocker()
+        );
       }
 
       try {
@@ -327,6 +349,12 @@ export class SecureInputCoordinator {
       );
     } catch (error) {
       if (snapshot !== undefined) cancelPending(this.#broker, snapshot.id, input.scope);
+      const cleared = selection === undefined
+        ? true
+        : await this.#abort([{ request: input.request, selection }]);
+      if (!cleared) {
+        return receipt(selection, "failed", false, protectedInputClearBlocker());
+      }
       if (error instanceof SecureInputBrokerError) {
         if (error.code === "expired") {
           return receipt(selection, "expired", false, "Protected input expired before delivery.");
@@ -389,6 +417,26 @@ export class SecureInputCoordinator {
       });
       if (!consumerCalled) throw new Error("Secure-input transport did not invoke its consumer.");
     });
+  }
+
+  async #abort(entries: readonly {
+    request: SecureInputRequest;
+    selection: SelectedSecureInputTransport;
+  }[]): Promise<boolean> {
+    const byTransport = new Map<SelectedSecureInputTransport["transport"], SecureInputRequest[]>();
+    for (const entry of entries) {
+      const requests = byTransport.get(entry.selection.transport) ?? [];
+      requests.push(structuredClone(entry.request));
+      byTransport.set(entry.selection.transport, requests);
+    }
+    try {
+      for (const [transport, requests] of byTransport) {
+        await transport.abort?.(requests);
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -455,6 +503,10 @@ function cancelPending(broker: EphemeralSecretBroker, requestId: string, scope: 
   } catch {
     // A terminal or already-pruned request needs no further cleanup.
   }
+}
+
+function protectedInputClearBlocker(): string {
+  return "Protected input delivery failed and clearing could not be verified. The destination remains protected; review it locally before retrying.";
 }
 
 function linkedAbortController(signal: AbortSignal | undefined): AbortController & { dispose(): void } {

@@ -988,8 +988,8 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     deliverProtectedField: async (input: BrowserProtectedFieldDeliveryInput) => {
       const session = await getSession({ sessionId: input.destination.sessionId });
       const before = latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session);
-      await protectedFields.deliver(session, input);
-      if (input.destination.submit === undefined) return;
+      const outcome = await protectedFields.deliver(session, input);
+      if (input.destination.submit === undefined || outcome.submission === "not-requested") return;
       protectedFields.beginSettlement(input.destination);
       const snapshot = await settleAction({
         session,
@@ -1007,6 +1007,9 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         fallbackChallengeCurrent: challengeCurrent,
         captureAfterDeparture: async () => await captureSessionSnapshot(session),
       });
+    },
+    abortProtectedFieldGroup: async (destinations) => {
+      await protectedFields.abort(destinations);
     },
     takeProtectedFieldDeliveryResult: (destination) => protectedFields.takeDeliveryResult(destination),
     releaseProtectedField: async (destination) => {

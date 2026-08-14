@@ -41,6 +41,8 @@ export type SecureInputTransport = {
   verify: SecureInputDestinationVerifier;
   /** Reviewed delivery boundary. Generic transports may delegate to a trusted consumer. */
   deliver: SecureInputTransportDelivery;
+  /** Reverses any partial delivery before transport-local guards are released. */
+  abort?(requests: readonly SecureInputRequest[]): Promise<void> | void;
   /** Releases transport-local collection guards after every terminal outcome. */
   release?(request: SecureInputRequest): Promise<void> | void;
 };
@@ -197,6 +199,7 @@ function validateTransport(transport: SecureInputTransport): void {
       !["local-runtime", "destination", "third-party-service"].includes(transport.disclosureBoundary) ||
       typeof transport.requiresApproval !== "boolean" || typeof transport.isAvailable !== "function" ||
       typeof transport.verify !== "function" || typeof transport.deliver !== "function" ||
+      (transport.abort !== undefined && typeof transport.abort !== "function") ||
       (transport.release !== undefined && typeof transport.release !== "function")) {
     throw new SecureInputTransportRegistryError("invalid_transport", "Invalid secure-input transport declaration.");
   }

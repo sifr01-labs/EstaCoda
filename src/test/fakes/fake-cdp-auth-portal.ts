@@ -59,7 +59,10 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
     disabled: false,
     clickable: true,
     semanticsMatch: true,
+    conflictCount: 1,
   };
+  protectedClearSucceeds = true;
+  protectedClearVerification = true;
   documentCurrent = true;
   frameId = "main-frame";
   onProtectedDelivery?: () => void;
@@ -186,6 +189,7 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
       }
       if (
         typeof message.params?.functionDeclaration === "string" &&
+        message.params.functionDeclaration.includes("const field = this") &&
         message.params.functionDeclaration.includes("conflictCount")
       ) {
         return { result: { value: this.protectedFieldInspection } };
@@ -195,6 +199,18 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
         message.params.functionDeclaration.includes("clickable:")
       ) {
         return { result: { value: this.protectedSubmitInspection } };
+      }
+      if (
+        typeof message.params?.functionDeclaration === "string" &&
+        message.params.functionDeclaration.includes("this.value === ''")
+      ) {
+        return { result: { value: this.protectedClearVerification } };
+      }
+      if (
+        typeof message.params?.functionDeclaration === "string" &&
+        message.params.functionDeclaration.includes("setter.call(this, '')")
+      ) {
+        return { result: { value: this.protectedClearSucceeds } };
       }
       if (
         typeof message.params?.functionDeclaration === "string" &&
@@ -310,7 +326,10 @@ function resetProtectedInspections(socket: FakeCdpAuthPortalSocket): void {
     disabled: false,
     clickable: true,
     semanticsMatch: true,
+    conflictCount: 1,
   });
+  socket.protectedClearSucceeds = true;
+  socket.protectedClearVerification = true;
 }
 
 export function createFakeCdpFetch(overrides?: {

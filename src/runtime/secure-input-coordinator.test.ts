@@ -199,6 +199,47 @@ describe("SecureInputCoordinator", () => {
     broker.dispose();
   });
 
+  it("aborts the complete transport group after partial delivery and reports unverifiable clearing precisely", async () => {
+    const broker = brokerWithStableIds();
+    const registry = new SecureInputTransportRegistry();
+    let deliveries = 0;
+    const abort = vi.fn(async (requests: readonly SecureInputRequest[]) => {
+      expect(requests.map((candidate) => candidate.kind)).toEqual(["account-identifier", "password"]);
+      throw new Error("clear verification failed");
+    });
+    registry.register(browserTransport({
+      deliver: async ({ value, context, consume }) => {
+        if (++deliveries === 2) throw new Error("second field rejected delivery");
+        await consume(value, context);
+      },
+      abort,
+    }));
+    const values = [new TextEncoder().encode("person@example.com"), new TextEncoder().encode("password-sentinel")];
+    let index = 0;
+    const coordinator = new SecureInputCoordinator({
+      broker,
+      transports: registry,
+      collect: async () => ({ status: "provided", value: values[index++]! }),
+    });
+
+    const result = await coordinator.createRequestHandler(scope).requestGroup({
+      purpose: "Sign in",
+      items: [
+        { id: "account", request: { ...request, kind: "account-identifier", destination: { ...browserDestination, ref: "account" } }, consume: vi.fn() },
+        { id: "password", request, consume: vi.fn() },
+      ],
+    });
+
+    expect(abort).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({
+      status: "failed",
+      reason: "Protected input delivery failed and clearing could not be verified. The destination remains protected; review it locally before retrying.",
+    });
+    expect(values.every((value) => value.every((byte) => byte === 0))).toBe(true);
+    expect(JSON.stringify(result)).not.toContain("person@example.com");
+    broker.dispose();
+  });
+
   it("blocks a transport replay and invalidates the broker request", async () => {
     const broker = brokerWithStableIds();
     const registry = new SecureInputTransportRegistry();

@@ -1179,6 +1179,7 @@ describe("createRuntime MCP trust gating", () => {
               "purpose",
               "revision",
               "sessionId",
+              "submitRef",
               "tabRef",
             ],
             "toolsets": [

@@ -2186,6 +2186,106 @@ describe("web and browser tools baselines", () => {
     expect(JSON.stringify(rejectedPlaintext)).not.toContain("must-not-enter-tool-input");
   });
 
+  it("binds grouped protected fields to one local authentication submission", async () => {
+    const prepareProtectedField = vi.fn(async (input: BrowserActionInput) => ({
+      type: "browser-field" as const,
+      sessionId: input.sessionId!,
+      ref: input.ref!,
+      expectedOrigin: "https://portal.example.com",
+      tabRef: input.tabRef,
+      frameId: "main-frame",
+      label: "Browser field with verified submit control at https://portal.example.com",
+      submit: { ref: input.submitRef! },
+    }));
+    const onSecureInputRequest = vi.fn() as unknown as GroupedSecureInputRequestHandler;
+    onSecureInputRequest.requestGroup = vi.fn(async () => ({
+      status: "delivered" as const,
+      items: [
+        { id: "email", receipt: { status: "delivered" as const, destinationLabel: "Email", persisted: false } },
+        { id: "password", receipt: { status: "delivered" as const, destinationLabel: "Password", persisted: false } },
+      ],
+    }));
+    const takeProtectedFieldDeliveryResult = vi.fn(() => ({
+      delivery: "delivered" as const,
+      submission: "clicked" as const,
+      challengeState: "departed" as const,
+      beforeRevision: 7,
+      afterRevision: 9,
+      sensitiveInputActive: false,
+      snapshot: {
+        sessionId: "test-runtime-session:main",
+        url: "https://portal.example.com/challenge",
+        revision: 9,
+        observedAt: "2026-08-14T00:00:00.000Z",
+        title: "Verify account",
+      },
+    }));
+    const protectedForm = tool("browser.fill_protected_form", createTestWebTools({
+      browserBackend: {
+        ...createSessionRecordingBrowserBackend(),
+        kind: "local-cdp",
+        prepareProtectedField,
+        takeProtectedFieldDeliveryResult,
+      },
+    }));
+
+    const result = await protectedForm.run({
+      purpose: "model-authored-purpose-must-not-be-approval-metadata",
+      revision: 7,
+      tabRef: "@t1",
+      submitRef: "@e5",
+      fields: [
+        { id: "email", ref: "@e3", kind: "account-identifier" },
+        { id: "password", ref: "@e4", kind: "password" },
+      ],
+    }, { onSecureInputRequest });
+
+    expect(result).toMatchObject({
+      ok: true,
+      metadata: {
+        protectedDelivery: { submission: "clicked", challengeState: "departed" },
+        snapshot: { revision: 9, title: "Verify account" },
+      },
+    });
+    expect(prepareProtectedField).toHaveBeenCalledTimes(2);
+    expect(prepareProtectedField).toHaveBeenNthCalledWith(1, expect.objectContaining({ ref: "@e3", submitRef: "@e5" }));
+    expect(prepareProtectedField).toHaveBeenNthCalledWith(2, expect.objectContaining({ ref: "@e4", submitRef: "@e5" }));
+    expect(takeProtectedFieldDeliveryResult).toHaveBeenCalledWith(expect.objectContaining({ ref: "@e4" }));
+  });
+
+  it("raises only bound protected submissions to external side effect with safe stable metadata", async () => {
+    const tools = createTestWebTools({ currentSessionId: () => "runtime-security-session" });
+    const browserType = tool("browser.type", tools);
+    const protectedForm = tool("browser.fill_protected_form", tools);
+    const context = { trustedWorkspace: true, sessionId: "runtime-security-session" };
+
+    expect(await browserType.resolveSecurity?.({ ref: "@e1", protectedInput: { kind: "one-time-code", purpose: "secret purpose" } }, context))
+      .toBeUndefined();
+    expect(await protectedForm.resolveSecurity?.({ revision: 1, tabRef: "@t1", fields: [], purpose: "secret purpose" }, context))
+      .toBeUndefined();
+    const typeResolution = await browserType.resolveSecurity?.({
+      ref: "@e1",
+      tabRef: "@t1",
+      submitRef: "@e2",
+      protectedInput: { kind: "one-time-code", purpose: "account@example.com" },
+    }, context);
+    const formResolution = await protectedForm.resolveSecurity?.({
+      revision: 1,
+      tabRef: "@t1",
+      submitRef: "@e2",
+      fields: [{ id: "password", ref: "@e1", kind: "password" }],
+      purpose: "account@example.com",
+    }, context);
+
+    expect(typeResolution).toEqual(formResolution);
+    expect(typeResolution).toMatchObject({
+      riskClass: "external-side-effect",
+      targetKey: expect.stringMatching(/^browser-protected-submit:[a-f0-9]{64}$/u),
+      targetSummary: "Submit a verified protected browser authentication control",
+    });
+    expect(JSON.stringify(typeResolution)).not.toContain("account@example.com");
+  });
+
   it("publishes exact protected-input enums instead of inviting invented kinds", () => {
     const tools = createTestWebTools();
     const browserType = tool("browser.type", tools);
