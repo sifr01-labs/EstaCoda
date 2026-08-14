@@ -837,14 +837,28 @@ describe("supervised local CDP backend", () => {
       message.method === "Runtime.evaluate" && String(message.params?.expression).startsWith("window.__estacodaElements")
     );
     expect(evaluatedObjects).toHaveLength(2);
+    expect(socket.sent.filter((message) =>
+      message.method === "Runtime.evaluate" && message.params?.expression === "document"
+    )).toHaveLength(1);
     await backend.releaseProtectedField?.(email!);
     await backend.releaseProtectedField?.(password!);
+    await backend.releaseProtectedField?.(password!);
+    const releasedObjectIds = socket.sent
+      .filter((message) => message.method === "Runtime.releaseObject")
+      .map((message) => message.params?.objectId);
+    expect(releasedObjectIds).toHaveLength(3);
+    expect(new Set(releasedObjectIds).size).toBe(3);
   });
 
   it("binds, delivers, and submits a one-time-code challenge as one local transaction", async () => {
     const socket = new FakeCdpSocket();
     showOtpChallengePage(socket);
+    const localTransactionEvents: string[] = [];
+    socket.onProtectedDelivery = () => {
+      localTransactionEvents.push("delivery");
+    };
     socket.onProtectedSubmit = () => {
+      localTransactionEvents.push("submit");
       showAuthenticatedHome(socket);
     };
     const backend = createSupervisedLocalCdpBrowserBackend({
@@ -871,13 +885,7 @@ describe("supervised local CDP backend", () => {
       submit: { ref: "@e2" },
       label: "Browser field with verified submit control \"Authenticate\" at https://accounts.example.com"
     });
-    socket.protectedSubmitInspection.semanticsMatch = false;
-    await expect(backend.verifyProtectedField?.({
-      destination: destination!,
-      kind: "one-time-code",
-      phase: "before-collection"
-    })).resolves.toEqual({ status: "rejected", reason: "field-missing" });
-    socket.protectedSubmitInspection.semanticsMatch = true;
+    expect(destination).not.toHaveProperty("transactionId");
     await expect(backend.verifyProtectedField?.({
       destination: destination!,
       kind: "one-time-code",
@@ -890,6 +898,8 @@ describe("supervised local CDP backend", () => {
       kind: "one-time-code",
       value: new TextEncoder().encode(secret)
     });
+    expect(localTransactionEvents).toEqual(["delivery", "submit"]);
+    await backend.releaseProtectedField?.(destination!);
     await backend.releaseProtectedField?.(destination!);
     const result = backend.takeProtectedFieldDeliveryResult?.(destination!);
 
@@ -902,18 +912,23 @@ describe("supervised local CDP backend", () => {
     });
     expect(result!.afterRevision).toBeGreaterThanOrEqual(result!.beforeRevision);
     expect(JSON.stringify(result)).not.toContain(secret);
+    expect(result).not.toHaveProperty("transactionId");
     expect(socket.sent.filter((message) =>
       message.method === "Runtime.callFunctionOn" &&
       String(message.params?.functionDeclaration).includes("this.click();")
     )).toHaveLength(1);
+    const releasedObjectIds = socket.sent
+      .filter((message) => message.method === "Runtime.releaseObject")
+      .map((message) => message.params?.objectId);
+    expect(releasedObjectIds).toHaveLength(3);
+    expect(new Set(releasedObjectIds).size).toBe(3);
   });
 
   it("does not double-submit when protected code entry replaces the challenge", async () => {
     const socket = new FakeCdpSocket();
     showOtpChallengePage(socket);
     socket.onProtectedDelivery = () => {
-      socket.failMethods.set("Runtime.callFunctionOn", "Execution context was destroyed during redirect");
-      showAuthenticatedHome(socket);
+      showAuthenticatedHome(socket, { documentChanged: false });
     };
     const backend = createSupervisedLocalCdpBrowserBackend({
       cdpUrl: "http://127.0.0.1:9222",
@@ -944,6 +959,43 @@ describe("supervised local CDP backend", () => {
       message.method === "Runtime.callFunctionOn" &&
       String(message.params?.functionDeclaration).includes("this.click();")
     )).toBe(false);
+  });
+
+  it("reverifies the prebound submit control and blocks delivery when it detaches", async () => {
+    const socket = new FakeCdpSocket();
+    showOtpChallengePage(socket);
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"]
+    });
+    const navigation = await backend.navigate({ url: socket.snapshot.url, sessionId: "session-detached-submit" });
+    const destination = await backend.prepareProtectedField?.({
+      sessionId: "session-detached-submit",
+      ref: "@e1",
+      submitRef: "@e2",
+      revision: navigation.snapshot.revision,
+      tabRef: navigation.snapshot.tab!.ref
+    });
+    socket.protectedSubmitInspection.semanticsMatch = false;
+    await expect(backend.verifyProtectedField?.({
+      destination: destination!, kind: "one-time-code", phase: "before-collection"
+    })).resolves.toEqual({ status: "rejected", reason: "field-missing" });
+    socket.protectedSubmitInspection.semanticsMatch = true;
+    await expect(backend.verifyProtectedField?.({
+      destination: destination!, kind: "one-time-code", phase: "before-collection"
+    })).resolves.toEqual({ status: "verified" });
+
+    socket.protectedSubmitInspection.connected = false;
+    await expect(backend.verifyProtectedField?.({
+      destination: destination!, kind: "one-time-code", phase: "before-delivery"
+    })).resolves.toEqual({ status: "rejected", reason: "field-replaced" });
+    expect(socket.sent.some((message) =>
+      message.method === "Runtime.callFunctionOn" &&
+      String(message.params?.functionDeclaration).includes("protectedValue")
+    )).toBe(false);
+    await backend.releaseProtectedField?.(destination!);
   });
 
   it("rejects changed origins, frames, fields, and ambiguous credential targets", async () => {
@@ -980,6 +1032,11 @@ describe("supervised local CDP backend", () => {
       kind: "password",
       phase: "before-collection"
     })).resolves.toEqual({ status: "rejected", reason: "frame-mismatch" });
+    await expect(backend.verifyProtectedField?.({
+      destination: { ...base, tabRef: "@t999" },
+      kind: "password",
+      phase: "before-collection"
+    })).resolves.toEqual({ status: "rejected", reason: "tab-mismatch" });
 
     socket.protectedFieldInspection.conflictCount = 2;
     await expect(backend.verifyProtectedField?.({
@@ -993,6 +1050,32 @@ describe("supervised local CDP backend", () => {
       kind: "password",
       phase: "before-collection"
     })).resolves.toEqual({ status: "verified" });
+    await expect(backend.verifyProtectedField?.({
+      destination: { ...base, tabRef: "@t999" },
+      kind: "password",
+      phase: "before-delivery"
+    })).resolves.toEqual({ status: "rejected", reason: "tab-mismatch" });
+    socket.snapshot.url = "https://attacker.example/redirect";
+    await expect(backend.verifyProtectedField?.({
+      destination: base,
+      kind: "password",
+      phase: "before-delivery"
+    })).resolves.toEqual({ status: "rejected", reason: "origin-mismatch" });
+    socket.snapshot.url = "https://accounts.example.com/login";
+    socket.frameId = "replacement-main-frame";
+    await expect(backend.verifyProtectedField?.({
+      destination: base,
+      kind: "password",
+      phase: "before-delivery"
+    })).resolves.toEqual({ status: "rejected", reason: "frame-mismatch" });
+    socket.frameId = "main-frame";
+    socket.documentCurrent = false;
+    await expect(backend.verifyProtectedField?.({
+      destination: base,
+      kind: "password",
+      phase: "before-delivery"
+    })).resolves.toEqual({ status: "rejected", reason: "field-replaced" });
+    socket.documentCurrent = true;
     socket.protectedFieldInspection.current = false;
     await expect(backend.verifyProtectedField?.({
       destination: base,

@@ -60,6 +60,8 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
     clickable: true,
     semanticsMatch: true,
   };
+  documentCurrent = true;
+  frameId = "main-frame";
   onProtectedDelivery?: () => void;
   onProtectedSubmit?: () => void;
   onRuntimeEvaluate?: (expression: string) => void;
@@ -157,6 +159,9 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
       };
     }
     if (method === "Runtime.evaluate") {
+      if (message.params?.expression === "document") {
+        return { result: { objectId: "protected-document-object" } };
+      }
       if (
         typeof message.params?.expression === "string" &&
         /^window\.__estacodaElements\?\.\[\d+\]$/u.test(message.params.expression)
@@ -173,6 +178,12 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
       return { object: { objectId: `object-${this.sent.at(-1)?.params?.backendNodeId ?? "unknown"}` } };
     }
     if (method === "Runtime.callFunctionOn") {
+      if (
+        typeof message.params?.functionDeclaration === "string" &&
+        message.params.functionDeclaration.includes("this === document")
+      ) {
+        return { result: { value: this.documentCurrent } };
+      }
       if (
         typeof message.params?.functionDeclaration === "string" &&
         message.params.functionDeclaration.includes("conflictCount")
@@ -202,7 +213,7 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
       return { result: { value: true } };
     }
     if (method === "Page.getFrameTree") {
-      return { frameTree: { frame: { id: "main-frame", url: this.snapshot.url } } };
+      return { frameTree: { frame: { id: this.frameId, url: this.snapshot.url } } };
     }
     if (method === "Page.captureScreenshot") {
       return { data: "png-data" };
@@ -244,10 +255,14 @@ export function showOtpChallengePage(socket: FakeCdpAuthPortalSocket): void {
   };
 }
 
-export function showAuthenticatedHome(socket: FakeCdpAuthPortalSocket): void {
+export function showAuthenticatedHome(
+  socket: FakeCdpAuthPortalSocket,
+  options: { documentChanged?: boolean } = {}
+): void {
   socket.protectedFieldInspection.current = false;
   socket.protectedFieldInspection.conflictCount = 0;
   socket.protectedSubmitInspection.current = false;
+  if (options.documentChanged ?? true) socket.documentCurrent = false;
   socket.snapshot = {
     url: "https://accounts.example.com/home",
     title: "Account home",
@@ -277,6 +292,8 @@ export function createFakeCdpAuthPortalSocketFactory(): {
 }
 
 function resetProtectedInspections(socket: FakeCdpAuthPortalSocket): void {
+  socket.documentCurrent = true;
+  socket.frameId = "main-frame";
   Object.assign(socket.protectedFieldInspection, {
     connected: true,
     current: true,

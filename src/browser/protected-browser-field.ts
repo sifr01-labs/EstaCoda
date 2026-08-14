@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import type {
   BrowserProtectedFieldDeliveryInput,
+  BrowserProtectedFieldDeliveryResult,
   BrowserProtectedFieldInput,
   BrowserProtectedFieldVerification,
   BrowserSnapshot,
@@ -18,18 +19,46 @@ export type ProtectedFieldPageSession = {
   };
 };
 
-type ActiveProtectedField = {
+type ProtectedFormTransactionState =
+  | "bound"
+  | "awaiting-values"
+  | "delivering"
+  | "submitted"
+  | "automatic"
+  | "settling"
+  | "departed"
+  | "still-present"
+  | "blocked";
+
+type ProtectedFieldBinding = {
   destination: BrowserFieldSecureInputDestination;
   kind: SecureInputKind;
   objectId: string;
   elementIndex: number;
-  frameId?: string;
-  supervisor: ProtectedFieldPageSession["supervisor"];
   delivered: boolean;
-  submit?: {
-    objectId: string;
-    elementIndex: number;
-  };
+  released: boolean;
+};
+
+type ProtectedSubmitBinding = {
+  ref: string;
+  objectId: string;
+  elementIndex: number;
+};
+
+type ActiveProtectedFormTransaction = {
+  /** Backend-private identity. It is never placed in a destination or tool result. */
+  id: number;
+  sessionId: string;
+  tabRef: string;
+  expectedOrigin: string;
+  frameId?: string;
+  documentObjectId: string;
+  supervisor: ProtectedFieldPageSession["supervisor"];
+  fields: Map<string, ProtectedFieldBinding>;
+  submit?: ProtectedSubmitBinding;
+  state: ProtectedFormTransactionState;
+  submission: ProtectedFieldDeliveryOutcome["submission"];
+  released: boolean;
 };
 
 type FieldInspection = {
@@ -66,17 +95,25 @@ export class ProtectedBrowserFieldError extends Error {
   }
 }
 
-/** Owns live DOM bindings and observation guards for supervised local browser delivery. */
-export class ProtectedBrowserFieldController {
-  readonly #active = new Map<string, Map<string, ActiveProtectedField>>();
+/** Owns protected-form bindings, delivery, submission, settlement, and CDP object lifetime. */
+export class ProtectedBrowserFormTransactionController {
+  readonly #transactions = new Map<string, Map<number, ActiveProtectedFormTransaction>>();
+  readonly #transactionsByBinding = new Map<string, Map<string, ActiveProtectedFormTransaction>>();
+  readonly #deliveryResults = new Map<string, BrowserProtectedFieldDeliveryResult>();
   readonly #sensitiveSessions = new Set<string>();
+  #nextTransactionId = 1;
 
   isActive(sessionId: string): boolean {
-    return (this.#active.get(sessionId)?.size ?? 0) > 0;
+    return (this.#transactions.get(sessionId)?.size ?? 0) > 0;
   }
 
   isSensitive(sessionId: string): boolean {
     return this.isActive(sessionId) || this.#sensitiveSessions.has(sessionId);
+  }
+
+  isSettling(sessionId: string): boolean {
+    return [...(this.#transactions.get(sessionId)?.values() ?? [])]
+      .some((transaction) => transaction.state === "settling");
   }
 
   async verify(
@@ -104,59 +141,90 @@ export class ProtectedBrowserFieldController {
         return { status: "rejected", reason: "field-ambiguous" };
       }
       const bindingKey = destinationBindingKey(input.destination);
-      const activeFields = this.#active.get(session.key);
-      if (activeFields?.has(bindingKey) === true) {
+      if (this.#transactionsByBinding.get(session.key)?.has(bindingKey) === true) {
         return { status: "rejected", reason: "field-ambiguous" };
       }
+      const compatible = await this.#findCompatibleTransaction(session, input.destination, frameId);
+      if (compatible !== undefined && await inspectDocument(session.supervisor, compatible.documentObjectId) !== true) {
+        return { status: "rejected", reason: "field-replaced" };
+      }
+      const documentObjectId = compatible?.documentObjectId ?? await resolveDocumentObjectId(session.supervisor);
+      if (documentObjectId === undefined) return { status: "rejected", reason: "field-missing" };
       const elementIndex = refToIndex(input.destination.ref);
-      if (elementIndex === undefined) return { status: "rejected", reason: "field-missing" };
+      if (elementIndex === undefined) {
+        if (compatible === undefined) await releaseObject(session.supervisor, documentObjectId);
+        return { status: "rejected", reason: "field-missing" };
+      }
       const objectId = await resolveFieldObjectId(session.supervisor, elementIndex);
-      if (objectId === undefined) return { status: "rejected", reason: "field-missing" };
+      if (objectId === undefined) {
+        if (compatible === undefined) await releaseObject(session.supervisor, documentObjectId);
+        return { status: "rejected", reason: "field-missing" };
+      }
       const inspection = await inspectField(session.supervisor, objectId, elementIndex, input.kind);
       const rejection = inspectionRejection(inspection, false);
       if (rejection !== undefined) {
         await releaseObject(session.supervisor, objectId);
+        if (compatible === undefined) await releaseObject(session.supervisor, documentObjectId);
         return rejection;
       }
-      const submit = await bindSubmit(session.supervisor, input.destination.submit?.ref);
+      const submit = compatible?.submit ?? await bindSubmit(session.supervisor, input.destination.submit?.ref);
       if (input.destination.submit !== undefined && submit === undefined) {
         await releaseObject(session.supervisor, objectId);
+        if (compatible === undefined) await releaseObject(session.supervisor, documentObjectId);
         return { status: "rejected", reason: "field-missing" };
       }
-      const active: ActiveProtectedField = {
+      const transaction = compatible ?? this.#createTransaction({
+        session,
+        destination: input.destination,
+        frameId,
+        documentObjectId,
+        submit,
+      });
+      const field: ProtectedFieldBinding = {
         destination: structuredClone(input.destination),
         kind: input.kind,
         objectId,
         elementIndex,
-        ...(frameId === undefined ? {} : { frameId }),
-        supervisor: session.supervisor,
         delivered: false,
-        ...(submit === undefined ? {} : { submit }),
+        released: false,
       };
-      if (activeFields === undefined) this.#active.set(session.key, new Map([[bindingKey, active]]));
-      else activeFields.set(bindingKey, active);
+      transaction.fields.set(bindingKey, field);
+      transaction.state = "awaiting-values";
+      const bindings = this.#transactionsByBinding.get(session.key) ?? new Map();
+      bindings.set(bindingKey, transaction);
+      this.#transactionsByBinding.set(session.key, bindings);
       session.supervisor.setSensitiveInputActive?.(true);
       return { status: "verified" };
     }
 
-    const active = findActiveField(this.#active.get(session.key), input.destination);
-    if (active === undefined || active.kind !== input.kind || !isDeepStrictEqual(active.destination, input.destination)) {
+    const transaction = this.#findTransaction(input.destination);
+    const active = transaction?.fields.get(destinationBindingKey(input.destination));
+    if (transaction === undefined || active === undefined || active.kind !== input.kind ||
+        !isDeepStrictEqual(active.destination, input.destination) ||
+        !["awaiting-values", "delivering"].includes(transaction.state)) {
       return { status: "rejected", reason: "request-not-active" };
     }
-    if (active.frameId !== frameId) return { status: "rejected", reason: "frame-mismatch" };
-    const inspection = await inspectField(
-      session.supervisor,
-      active.objectId,
-      active.elementIndex,
-      active.kind
-    );
-    const rejection = inspectionRejection(inspection, true);
-    if (rejection !== undefined) return rejection;
-    if (active.submit !== undefined) {
+    if (transaction.supervisor !== session.supervisor) return { status: "rejected", reason: "field-replaced" };
+    if (transaction.tabRef !== session.tabRef) return { status: "rejected", reason: "tab-mismatch" };
+    if (transaction.frameId !== frameId) return { status: "rejected", reason: "frame-mismatch" };
+    if (await inspectDocument(session.supervisor, transaction.documentObjectId) !== true) {
+      return { status: "rejected", reason: "field-replaced" };
+    }
+    for (const field of transaction.fields.values()) {
+      const inspection = await inspectField(
+        session.supervisor,
+        field.objectId,
+        field.elementIndex,
+        field.kind
+      );
+      const rejection = inspectionRejection(inspection, true);
+      if (rejection !== undefined) return rejection;
+    }
+    if (transaction.submit !== undefined) {
       const submitInspection = await inspectSubmit(
         session.supervisor,
-        active.submit.objectId,
-        active.submit.elementIndex
+        transaction.submit.objectId,
+        transaction.submit.elementIndex
       );
       if (!submitIsActionable(submitInspection)) {
         return { status: "rejected", reason: "field-replaced" };
@@ -181,9 +249,11 @@ export class ProtectedBrowserFieldController {
         "Protected browser field changed before delivery."
       );
     }
-    const active = findActiveField(this.#active.get(session.key), input.destination)!;
+    const transaction = this.#findTransaction(input.destination)!;
+    const active = transaction.fields.get(destinationBindingKey(input.destination))!;
     const value = new TextDecoder("utf-8", { fatal: true }).decode(input.value);
     try {
+      transaction.state = "delivering";
       const result = await session.supervisor.send("Runtime.callFunctionOn", {
         objectId: active.objectId,
         functionDeclaration: PROTECTED_FIELD_DELIVERY_FUNCTION,
@@ -199,38 +269,44 @@ export class ProtectedBrowserFieldController {
       }
       active.delivered = true;
       this.#sensitiveSessions.add(session.key);
-      if (active.submit === undefined) return { submission: "not-requested" };
+      if (transaction.submit === undefined || ![...transaction.fields.values()].every((field) => field.delivered)) {
+        transaction.submission = "not-requested";
+        return { submission: "not-requested" };
+      }
 
       // Give synchronous/very-fast auto-submit handlers a chance to replace the
       // challenge before dispatching an explicit click. This stays entirely in
       // the local runtime; no provider turn occurs between delivery and submit.
       await shortDelay(75, input.signal);
-      const fieldInspection = await inspectField(
-        session.supervisor,
-        active.objectId,
-        active.elementIndex,
-        active.kind
-      );
-      if (fieldInspection === undefined || !fieldInspection.connected || !fieldInspection.current) {
-        return {
-          submission: fieldInspection?.conflictCount === 0 ? "automatic" : "failed"
-        };
+      const challengeCurrent = await this.#isTransactionChallengeCurrent(transaction);
+      if (challengeCurrent === false) {
+        transaction.state = "automatic";
+        transaction.submission = "automatic";
+        return { submission: "automatic" };
       }
       const submitInspection = await inspectSubmit(
         session.supervisor,
-        active.submit.objectId,
-        active.submit.elementIndex
+        transaction.submit.objectId,
+        transaction.submit.elementIndex
       );
-      if (!submitIsActionable(submitInspection)) return { submission: "failed" };
+      if (!submitIsActionable(submitInspection)) {
+        transaction.state = "blocked";
+        transaction.submission = "failed";
+        return { submission: "failed" };
+      }
       const clicked = await session.supervisor.send("Runtime.callFunctionOn", {
-        objectId: active.submit.objectId,
+        objectId: transaction.submit.objectId,
         functionDeclaration: PROTECTED_SUBMIT_FUNCTION,
-        arguments: [{ value: active.submit.elementIndex }],
+        arguments: [{ value: transaction.submit.elementIndex }],
         returnByValue: true,
         awaitPromise: true,
       }) as { result?: { value?: unknown } };
-      return { submission: clicked.result?.value === true ? "clicked" : "failed" };
+      transaction.submission = clicked.result?.value === true ? "clicked" : "failed";
+      transaction.state = transaction.submission === "clicked" ? "submitted" : "blocked";
+      return { submission: transaction.submission };
     } catch (error) {
+      transaction.state = "blocked";
+      transaction.submission = "failed";
       throw new ProtectedBrowserFieldError(
         "protected-field-delivery-failed",
         "Protected browser field delivery failed.",
@@ -240,61 +316,97 @@ export class ProtectedBrowserFieldController {
   }
 
   async release(destination: BrowserFieldSecureInputDestination): Promise<void> {
-    const activeFields = this.#active.get(destination.sessionId);
-    const active = findActiveField(activeFields, destination);
-    if (active === undefined || activeFields === undefined) return;
-    activeFields.delete(destinationBindingKey(destination));
-    if (activeFields.size === 0) this.#active.delete(destination.sessionId);
-    if (activeFields.size === 0 && !this.#sensitiveSessions.has(destination.sessionId)) {
-      active.supervisor.setSensitiveInputActive?.(false);
+    const transaction = this.#findTransaction(destination);
+    const key = destinationBindingKey(destination);
+    const field = transaction?.fields.get(key);
+    if (transaction === undefined || field === undefined || field.released) return;
+    field.released = true;
+    this.#transactionsByBinding.get(destination.sessionId)?.delete(key);
+    if ([...transaction.fields.values()].every((candidate) => candidate.released)) {
+      await this.#releaseTransaction(transaction);
     }
-    await releaseObject(active.supervisor, active.objectId);
-    if (active.submit !== undefined) await releaseObject(active.supervisor, active.submit.objectId);
   }
 
   async invalidateSession(session: ProtectedFieldPageSession): Promise<void> {
-    const active = this.#active.get(session.key);
+    const active = this.#transactions.get(session.key);
     this.#sensitiveSessions.delete(session.key);
     session.supervisor.setSensitiveInputActive?.(false);
     if (active === undefined) return;
-    this.#active.delete(session.key);
-    for (const field of active.values()) {
-      if (field.supervisor !== session.supervisor) {
-        field.supervisor.setSensitiveInputActive?.(false);
-      }
-      await releaseObject(field.supervisor, field.objectId);
-      if (field.submit !== undefined) await releaseObject(field.supervisor, field.submit.objectId);
+    for (const transaction of [...active.values()]) {
+      transaction.state = "departed";
+      await this.#releaseTransaction(transaction);
     }
   }
 
   async clearSession(sessionId: string): Promise<void> {
-    const active = this.#active.get(sessionId);
-    this.#active.delete(sessionId);
+    const active = this.#transactions.get(sessionId);
     this.#sensitiveSessions.delete(sessionId);
     if (active !== undefined) {
-      for (const field of active.values()) {
-        field.supervisor.setSensitiveInputActive?.(false);
-        await releaseObject(field.supervisor, field.objectId);
-        if (field.submit !== undefined) await releaseObject(field.supervisor, field.submit.objectId);
+      for (const transaction of [...active.values()]) {
+        transaction.supervisor.setSensitiveInputActive?.(false);
+        await this.#releaseTransaction(transaction);
       }
+    }
+    for (const key of this.#deliveryResults.keys()) {
+      if (key.startsWith(`${sessionId}\u0000`)) this.#deliveryResults.delete(key);
     }
   }
 
-  async isChallengeCurrent(
+  beginSettlement(destination: BrowserFieldSecureInputDestination): void {
+    const transaction = this.#findTransaction(destination);
+    if (transaction !== undefined && ["submitted", "automatic", "blocked"].includes(transaction.state)) {
+      transaction.state = "settling";
+    }
+  }
+
+  async settle(
     session: ProtectedFieldPageSession,
-    destination: BrowserFieldSecureInputDestination
-  ): Promise<boolean | undefined> {
-    const active = findActiveField(this.#active.get(session.key), destination);
-    if (active === undefined) return undefined;
-    const inspection = await inspectField(
-      session.supervisor,
-      active.objectId,
-      active.elementIndex,
-      active.kind
-    );
-    if (inspection === undefined) return undefined;
-    if (inspection.connected && inspection.current) return true;
-    return inspection.conflictCount > 0;
+    input: BrowserProtectedFieldDeliveryInput,
+    settlement: {
+      before: BrowserSnapshot;
+      snapshot: BrowserSnapshot;
+      fallbackChallengeCurrent?: boolean;
+      captureAfterDeparture: () => Promise<BrowserSnapshot>;
+    }
+  ): Promise<BrowserProtectedFieldDeliveryResult> {
+    const transaction = this.#findTransaction(input.destination);
+    const submission = transaction?.submission ?? "failed";
+    const challengeCurrent = transaction === undefined
+      ? settlement.fallbackChallengeCurrent
+      : await this.#isTransactionChallengeCurrent(transaction) ?? settlement.fallbackChallengeCurrent;
+    let snapshot = settlement.snapshot;
+    if (challengeCurrent === false) {
+      if (transaction !== undefined) transaction.state = "departed";
+      await this.invalidateSession(session);
+      snapshot = await settlement.captureAfterDeparture();
+    } else if (transaction !== undefined) {
+      transaction.state = challengeCurrent === true ? "still-present" : "blocked";
+    }
+    const sensitiveInputActive = this.isSensitive(session.key);
+    const result: BrowserProtectedFieldDeliveryResult = {
+      delivery: "delivered",
+      submission: submission === "failed" && challengeCurrent === false && !sensitiveInputActive
+        ? "automatic"
+        : submission,
+      challengeState: challengeCurrent === true
+        ? "still-present"
+        : !sensitiveInputActive
+          ? "departed"
+          : "unknown",
+      beforeRevision: settlement.before.revision,
+      afterRevision: snapshot.revision,
+      sensitiveInputActive,
+      snapshot,
+    };
+    this.#deliveryResults.set(protectedDeliveryKey(input.destination), result);
+    return result;
+  }
+
+  takeDeliveryResult(destination: BrowserFieldSecureInputDestination): BrowserProtectedFieldDeliveryResult | undefined {
+    const key = protectedDeliveryKey(destination);
+    const result = this.#deliveryResults.get(key);
+    this.#deliveryResults.delete(key);
+    return result;
   }
 
   protectSnapshot(sessionId: string, snapshot: BrowserSnapshot): BrowserSnapshot {
@@ -331,6 +443,100 @@ export class ProtectedBrowserFieldController {
       "sensitive-input-active",
       "Browser screenshots and vision are blocked while protected input is active."
     );
+  }
+
+  #createTransaction(input: {
+    session: ProtectedFieldPageSession;
+    destination: BrowserFieldSecureInputDestination;
+    frameId?: string;
+    documentObjectId: string;
+    submit?: ProtectedSubmitBinding;
+  }): ActiveProtectedFormTransaction {
+    const transaction: ActiveProtectedFormTransaction = {
+      id: this.#nextTransactionId++,
+      sessionId: input.session.key,
+      tabRef: input.session.tabRef,
+      expectedOrigin: input.destination.expectedOrigin,
+      ...(input.frameId === undefined ? {} : { frameId: input.frameId }),
+      documentObjectId: input.documentObjectId,
+      supervisor: input.session.supervisor,
+      fields: new Map(),
+      ...(input.submit === undefined ? {} : { submit: input.submit }),
+      state: "bound",
+      submission: "not-requested",
+      released: false,
+    };
+    const transactions = this.#transactions.get(input.session.key) ?? new Map();
+    transactions.set(transaction.id, transaction);
+    this.#transactions.set(input.session.key, transactions);
+    return transaction;
+  }
+
+  async #findCompatibleTransaction(
+    session: ProtectedFieldPageSession,
+    destination: BrowserFieldSecureInputDestination,
+    frameId: string | undefined
+  ): Promise<ActiveProtectedFormTransaction | undefined> {
+    const submitRef = destination.submit?.ref;
+    for (const transaction of this.#transactions.get(session.key)?.values() ?? []) {
+      if (transaction.state !== "awaiting-values" || transaction.supervisor !== session.supervisor ||
+          transaction.tabRef !== session.tabRef || transaction.expectedOrigin !== destination.expectedOrigin ||
+          transaction.frameId !== frameId || transaction.submit?.ref !== submitRef) continue;
+      return transaction;
+    }
+    return undefined;
+  }
+
+  #findTransaction(destination: BrowserFieldSecureInputDestination): ActiveProtectedFormTransaction | undefined {
+    const transaction = this.#transactionsByBinding.get(destination.sessionId)
+      ?.get(destinationBindingKey(destination));
+    const field = transaction?.fields.get(destinationBindingKey(destination));
+    return field !== undefined && isDeepStrictEqual(field.destination, destination) ? transaction : undefined;
+  }
+
+  async #isTransactionChallengeCurrent(
+    transaction: ActiveProtectedFormTransaction
+  ): Promise<boolean | undefined> {
+    const documentCurrent = await inspectDocument(transaction.supervisor, transaction.documentObjectId);
+    if (documentCurrent === false) return false;
+    if (documentCurrent === undefined) return undefined;
+    let unknown = false;
+    for (const field of transaction.fields.values()) {
+      const inspection = await inspectField(
+        transaction.supervisor,
+        field.objectId,
+        field.elementIndex,
+        field.kind
+      );
+      if (inspection === undefined) {
+        unknown = true;
+        continue;
+      }
+      if (inspection.connected && inspection.current) return true;
+      if (inspection.conflictCount > 0) return true;
+    }
+    return unknown ? undefined : false;
+  }
+
+  async #releaseTransaction(transaction: ActiveProtectedFormTransaction): Promise<void> {
+    if (transaction.released) return;
+    transaction.released = true;
+    this.#transactions.get(transaction.sessionId)?.delete(transaction.id);
+    if (this.#transactions.get(transaction.sessionId)?.size === 0) {
+      this.#transactions.delete(transaction.sessionId);
+    }
+    const bindings = this.#transactionsByBinding.get(transaction.sessionId);
+    for (const key of transaction.fields.keys()) bindings?.delete(key);
+    if (bindings?.size === 0) this.#transactionsByBinding.delete(transaction.sessionId);
+    if (!this.isActive(transaction.sessionId) && !this.#sensitiveSessions.has(transaction.sessionId)) {
+      transaction.supervisor.setSensitiveInputActive?.(false);
+    }
+    const objectIds = new Set([
+      transaction.documentObjectId,
+      ...[...transaction.fields.values()].map((field) => field.objectId),
+      ...(transaction.submit === undefined ? [] : [transaction.submit.objectId]),
+    ]);
+    for (const objectId of objectIds) await releaseObject(transaction.supervisor, objectId);
   }
 }
 
@@ -373,10 +579,42 @@ async function resolveFieldObjectId(
     : undefined;
 }
 
+async function resolveDocumentObjectId(
+  supervisor: ProtectedFieldPageSession["supervisor"]
+): Promise<string | undefined> {
+  try {
+    const resolved = await supervisor.send("Runtime.evaluate", {
+      expression: "document",
+      returnByValue: false,
+    }) as { result?: { objectId?: unknown; subtype?: unknown } };
+    return typeof resolved.result?.objectId === "string" && resolved.result.subtype !== "null"
+      ? resolved.result.objectId
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function inspectDocument(
+  supervisor: ProtectedFieldPageSession["supervisor"],
+  objectId: string
+): Promise<boolean | undefined> {
+  try {
+    const inspected = await supervisor.send("Runtime.callFunctionOn", {
+      objectId,
+      functionDeclaration: PROTECTED_DOCUMENT_INSPECTION_FUNCTION,
+      returnByValue: true,
+    }) as { result?: { value?: unknown } };
+    return typeof inspected.result?.value === "boolean" ? inspected.result.value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function bindSubmit(
   supervisor: ProtectedFieldPageSession["supervisor"],
   ref: string | undefined
-): Promise<ActiveProtectedField["submit"] | undefined> {
+): Promise<ProtectedSubmitBinding | undefined> {
   if (ref === undefined) return undefined;
   const elementIndex = refToIndex(ref);
   if (elementIndex === undefined) return undefined;
@@ -387,7 +625,7 @@ async function bindSubmit(
     await releaseObject(supervisor, objectId);
     return undefined;
   }
-  return { objectId, elementIndex };
+  return { ref, objectId, elementIndex };
 }
 
 async function inspectSubmit(
@@ -524,13 +762,14 @@ function destinationBindingKey(destination: BrowserFieldSecureInputDestination):
   return [destination.tabRef ?? "", destination.frameId ?? "", destination.ref].join("\u0000");
 }
 
-function findActiveField(
-  fields: Map<string, ActiveProtectedField> | undefined,
-  destination: BrowserFieldSecureInputDestination
-): ActiveProtectedField | undefined {
-  const active = fields?.get(destinationBindingKey(destination));
-  return active !== undefined && isDeepStrictEqual(active.destination, destination) ? active : undefined;
+function protectedDeliveryKey(destination: BrowserFieldSecureInputDestination): string {
+  return [destination.sessionId, destination.tabRef ?? "", destination.frameId ?? "", destination.ref]
+    .join("\u0000");
 }
+
+const PROTECTED_DOCUMENT_INSPECTION_FUNCTION = `function() {
+  return this === document;
+}`;
 
 const PROTECTED_FIELD_INSPECTION_FUNCTION = `function(index, kind) {
   const field = this;
