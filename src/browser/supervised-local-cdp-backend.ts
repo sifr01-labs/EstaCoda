@@ -197,6 +197,8 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     if (previousUrl !== undefined && previousUrl !== observed.url && protectedFields.isSensitive(session.key) &&
         !protectedFields.isSettling(session.key)) {
       await protectedFields.invalidateSession(session);
+    } else {
+      await protectedFields.reconcile(session);
     }
     const protectedSnapshot = protectedFields.protectSnapshot(session.key, observed);
     latestSnapshots.set(session.key, protectedSnapshot);
@@ -824,16 +826,9 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     extract: async (input): Promise<BrowserExtractResult> => {
       const session = await getSession(input);
       const { snapshot } = await captureSafeTargetSnapshot(session, input);
+      protectedFields.assertContentObservationAllowed(session.key);
       const target = resolveBrowserTarget(snapshot, input);
       const element = snapshot.elements?.find((candidate) => candidate.ref === target.ref);
-      if (protectedFields.isSensitive(session.key)) {
-        return {
-          sessionId: snapshot.sessionId,
-          revision: snapshot.revision,
-          tabRef: target.tabRef,
-          target,
-        };
-      }
       return {
         sessionId: snapshot.sessionId,
         revision: snapshot.revision,
@@ -875,6 +870,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     },
     getImages: async (input = {}) => {
       const session = await getSession(input);
+      await protectedFields.reconcile(session);
       if (protectedFields.isSensitive(session.key)) return [];
       const evaluated = await session.supervisor.send("Runtime.evaluate", {
         expression: "JSON.stringify(Array.from(document.images).slice(0, 100).map((img) => ({ src: img.currentSrc || img.src, alt: img.alt || undefined })))",
@@ -884,6 +880,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     },
     console: async (input = {}): Promise<BrowserConsoleEntry[]> => {
       const session = await getSession(input);
+      await protectedFields.reconcile(session);
       if (protectedFields.isSensitive(session.key)) return [];
       return session.supervisor.consoleHistory({ clear: input.clear });
     },
@@ -918,6 +915,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     },
     cdp: async (input) => {
       const session = await getSession(input);
+      await protectedFields.reconcile(session);
       if (protectedFields.isSensitive(session.key)) {
         throw new Error("Raw browser CDP access is blocked while protected input is active.");
       }
@@ -928,6 +926,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     },
     screenshot: async (input = {}) => {
       const session = await getSession(input);
+      await protectedFields.reconcile(session);
       protectedFields.assertVisualObservationAllowed(session.key);
       const result = await session.supervisor.send("Page.captureScreenshot", {
         format: "png",

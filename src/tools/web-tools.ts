@@ -1457,7 +1457,9 @@ function createBrowserTypeTool(
             protectedDelivery: {
               delivery: deliveryResult.delivery,
               submission: deliveryResult.submission,
+              documentChanged: deliveryResult.documentChanged,
               challengeState: deliveryResult.challengeState,
+              conditionMet: deliveryResult.conditionMet,
               beforeRevision: deliveryResult.beforeRevision,
               afterRevision: deliveryResult.afterRevision,
               sensitiveInputActive: deliveryResult.sensitiveInputActive,
@@ -1473,6 +1475,13 @@ function createBrowserTypeTool(
 function renderProtectedDeliveryResult(
   result: import("../contracts/browser.js").BrowserProtectedFieldDeliveryResult
 ): string {
+  if (result.sensitiveInputActive) {
+    return [
+      "Protected authentication transaction active.",
+      "Page content is intentionally suppressed.",
+      "State: settling.",
+    ].join("\n");
+  }
   if (result.submission === "not-requested") {
     return `Protected input delivered. Current browser revision: ${result.afterRevision}.`;
   }
@@ -1626,7 +1635,9 @@ function createBrowserProtectedFormTool(
             protectedDelivery: {
               delivery: deliveryResult.delivery,
               submission: deliveryResult.submission,
+              documentChanged: deliveryResult.documentChanged,
               challengeState: deliveryResult.challengeState,
+              conditionMet: deliveryResult.conditionMet,
               beforeRevision: deliveryResult.beforeRevision,
               afterRevision: deliveryResult.afterRevision,
               sensitiveInputActive: deliveryResult.sensitiveInputActive,
@@ -1892,6 +1903,13 @@ type BrowserSnapshotRenderOptions = {
 };
 
 function renderBrowserSnapshot(snapshot: BrowserSnapshot, options: BrowserSnapshotRenderOptions = {}): string {
+  if (snapshot.sensitiveInputActive === true) {
+    return [
+      "Protected authentication transaction active.",
+      "Page content is intentionally suppressed.",
+      "State: settling.",
+    ].join("\n");
+  }
   const elements = snapshot.elements ?? [];
   const pendingDialogs = snapshot.pendingDialogs ?? [];
   const frameTree = snapshot.frameTree ?? [];

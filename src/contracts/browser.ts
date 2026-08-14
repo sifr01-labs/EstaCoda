@@ -266,7 +266,9 @@ export type BrowserProtectedFieldDeliveryInput = {
 export type BrowserProtectedFieldDeliveryResult = {
   delivery: "delivered";
   submission: "not-requested" | "clicked" | "automatic" | "failed";
+  documentChanged: boolean;
   challengeState: "departed" | "still-present" | "unknown";
+  conditionMet: boolean;
   beforeRevision: number;
   afterRevision: number;
   sensitiveInputActive: boolean;

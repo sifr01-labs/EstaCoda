@@ -781,12 +781,17 @@ describe("supervised local CDP backend", () => {
     expect(sent.some((message) => String(message.params?.functionDeclaration ?? "").includes(secret))).toBe(false);
     const afterDeliverySnapshot = await backend.snapshot?.({ sessionId: "session-1" });
     expect(JSON.stringify(afterDeliverySnapshot)).not.toContain(secret);
-    expect(JSON.stringify(await backend.extract?.({
+    expect(afterDeliverySnapshot).not.toHaveProperty("title");
+    expect(afterDeliverySnapshot).not.toHaveProperty("text");
+    expect(afterDeliverySnapshot?.elements?.every((element) =>
+      element.name === undefined && element.label === undefined && element.value === undefined
+    )).toBe(true);
+    await expect(backend.extract?.({
       sessionId: "session-1",
       ref: "@e1",
       revision: afterDeliverySnapshot!.revision,
       tabRef: afterDeliverySnapshot!.tab!.ref
-    }))).not.toContain(secret);
+    })).rejects.toMatchObject({ code: "sensitive-input-active" });
     await expect(backend.getImages?.({ sessionId: "session-1" })).resolves.toEqual([]);
     const protectedTabs = await backend.tabs?.({ sessionId: "session-1" });
     expect(protectedTabs?.tabs.every((tab) => tab.title === undefined && new URL(tab.url).pathname === "/")).toBe(true);
@@ -794,9 +799,17 @@ describe("supervised local CDP backend", () => {
       code: "sensitive-input-active"
     });
 
-    socket.snapshot.url = "https://accounts.example.com/complete";
+    showAuthenticatedHome(socket);
     await backend.press?.({ sessionId: "session-1", key: "Enter" });
     await expect(backend.screenshot?.({ sessionId: "session-1" })).resolves.toMatchObject({ base64: "png-data" });
+    await expect(backend.cdp?.({ sessionId: "session-1", method: "Browser.getVersion" })).resolves.toBeDefined();
+    const restoredSnapshot = await backend.snapshot?.({ sessionId: "session-1" });
+    await expect(backend.extract?.({
+      sessionId: "session-1",
+      ref: "@e1",
+      revision: restoredSnapshot!.revision,
+      tabRef: restoredSnapshot!.tab!.ref,
+    })).resolves.toMatchObject({ text: "My profile" });
   });
 
   it("binds multiple protected fields from one unchanged browser form", async () => {
@@ -896,9 +909,16 @@ describe("supervised local CDP backend", () => {
     expect(events).toEqual(["credential-delivery-1", "credential-delivery-2", "login-submit"]);
     expect(loginResult).toMatchObject({
       submission: "clicked",
+      documentChanged: true,
       challengeState: "departed",
+      conditionMet: true,
+      sensitiveInputActive: false,
       snapshot: { url: "https://accounts.example.com/challenge", title: "Verify account" },
     });
+    expect(loginResult?.snapshot.elements).toEqual([
+      expect.objectContaining({ ref: "@e1", name: "One-time code" }),
+      expect.objectContaining({ ref: "@e2", name: "Authenticate" }),
+    ]);
     expect(loginResult!.afterRevision).toBeGreaterThan(login.snapshot.revision);
     await backend.releaseProtectedField?.(email!);
     await backend.releaseProtectedField?.(password!);
@@ -933,7 +953,9 @@ describe("supervised local CDP backend", () => {
     ]);
     expect(otpResult).toMatchObject({
       submission: "clicked",
+      documentChanged: true,
       challengeState: "departed",
+      conditionMet: true,
       sensitiveInputActive: false,
       snapshot: { url: "https://accounts.example.com/home", title: "Account home" },
     });
@@ -1046,11 +1068,30 @@ describe("supervised local CDP backend", () => {
     });
     const result = backend.takeProtectedFieldDeliveryResult?.(destination!);
 
-    expect(result).toMatchObject({ submission: "automatic", challengeState: "departed" });
+    expect(result).toMatchObject({
+      submission: "automatic",
+      documentChanged: false,
+      challengeState: "departed",
+      conditionMet: true,
+      sensitiveInputActive: false,
+      snapshot: {
+        title: "Account home",
+        elements: [expect.objectContaining({ ref: "@e1", name: "My profile" })],
+      },
+    });
     expect(socket.sent.some((message) =>
       message.method === "Runtime.callFunctionOn" &&
       String(message.params?.functionDeclaration).includes("this.click();")
     )).toBe(false);
+    await backend.releaseProtectedField?.(destination!);
+    await expect(backend.screenshot?.({ sessionId: "session-auto-otp" })).resolves.toMatchObject({ base64: "png-data" });
+    await expect(backend.cdp?.({ sessionId: "session-auto-otp", method: "Browser.getVersion" })).resolves.toBeDefined();
+    await expect(backend.extract?.({
+      sessionId: "session-auto-otp",
+      ref: "@e1",
+      revision: result!.snapshot.revision,
+      tabRef: result!.snapshot.tab!.ref,
+    })).resolves.toMatchObject({ text: "My profile" });
   });
 
   it("clears partially delivered grouped values before releasing browser protection", async () => {
@@ -1131,6 +1172,16 @@ describe("supervised local CDP backend", () => {
     await expect(backend.screenshot?.({ sessionId: "session-clear-blocked" })).rejects.toMatchObject({
       code: "sensitive-input-active",
     });
+    await expect(backend.cdp?.({ sessionId: "session-clear-blocked", method: "Browser.getVersion" })).rejects.toThrow(
+      "Raw browser CDP access is blocked"
+    );
+    const protectedSnapshot = await backend.snapshot?.({ sessionId: "session-clear-blocked" });
+    await expect(backend.extract?.({
+      sessionId: "session-clear-blocked",
+      ref: "@e1",
+      revision: protectedSnapshot!.revision,
+      tabRef: protectedSnapshot!.tab!.ref,
+    })).rejects.toMatchObject({ code: "sensitive-input-active" });
     await backend.closeSession?.("session-clear-blocked");
   });
 
@@ -1163,7 +1214,18 @@ describe("supervised local CDP backend", () => {
     const result = backend.takeProtectedFieldDeliveryResult?.(destination!);
     await backend.releaseProtectedField?.(destination!);
 
-    expect(result).toMatchObject({ submission: "failed", challengeState: "still-present" });
+    expect(result).toMatchObject({
+      submission: "failed",
+      documentChanged: false,
+      challengeState: "still-present",
+      conditionMet: true,
+      sensitiveInputActive: false,
+      snapshot: {
+        elements: expect.arrayContaining([
+          expect.objectContaining({ ref: "@e1", name: "One-time code" }),
+        ]),
+      },
+    });
     expect(socket.sent.some((message) =>
       message.method === "Runtime.callFunctionOn" &&
       String(message.params?.functionDeclaration).includes("setter.call(this, '')")
@@ -1173,6 +1235,13 @@ describe("supervised local CDP backend", () => {
       String(message.params?.functionDeclaration).includes("this.value === ''")
     )).toBe(true);
     await expect(backend.screenshot?.({ sessionId: "session-failed-submit-clear" })).resolves.toMatchObject({ base64: "png-data" });
+    await expect(backend.cdp?.({ sessionId: "session-failed-submit-clear", method: "Browser.getVersion" })).resolves.toBeDefined();
+    await expect(backend.extract?.({
+      sessionId: "session-failed-submit-clear",
+      ref: "@e1",
+      revision: result!.snapshot.revision,
+      tabRef: result!.snapshot.tab!.ref,
+    })).resolves.toMatchObject({ target: expect.objectContaining({ ref: "@e1" }) });
   });
 
   it("reverifies the prebound submit control and blocks delivery when it detaches", async () => {

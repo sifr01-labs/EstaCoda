@@ -102,7 +102,6 @@ export class ProtectedBrowserFormTransactionController {
   readonly #transactions = new Map<string, Map<number, ActiveProtectedFormTransaction>>();
   readonly #transactionsByBinding = new Map<string, Map<string, ActiveProtectedFormTransaction>>();
   readonly #deliveryResults = new Map<string, BrowserProtectedFieldDeliveryResult>();
-  readonly #sensitiveSessions = new Set<string>();
   #nextTransactionId = 1;
 
   isActive(sessionId: string): boolean {
@@ -110,7 +109,8 @@ export class ProtectedBrowserFormTransactionController {
   }
 
   isSensitive(sessionId: string): boolean {
-    return this.isActive(sessionId) || this.#sensitiveSessions.has(sessionId);
+    return [...(this.#transactions.get(sessionId)?.values() ?? [])]
+      .some((transaction) => this.#requiresProtection(transaction));
   }
 
   isSettling(sessionId: string): boolean {
@@ -139,14 +139,15 @@ export class ProtectedBrowserFormTransactionController {
     }
 
     if (input.phase === "before-collection") {
-      if (this.#sensitiveSessions.has(session.key)) {
-        return { status: "rejected", reason: "field-ambiguous" };
-      }
       const bindingKey = destinationBindingKey(input.destination);
       if (this.#transactionsByBinding.get(session.key)?.has(bindingKey) === true) {
         return { status: "rejected", reason: "field-ambiguous" };
       }
       const compatible = await this.#findCompatibleTransaction(session, input.destination, frameId);
+      if ([...(this.#transactions.get(session.key)?.values() ?? [])]
+        .some((transaction) => transaction !== compatible && this.#requiresProtection(transaction))) {
+        return { status: "rejected", reason: "field-ambiguous" };
+      }
       if (compatible !== undefined && await inspectDocument(session.supervisor, compatible.documentObjectId) !== true) {
         return { status: "rejected", reason: "field-replaced" };
       }
@@ -204,7 +205,7 @@ export class ProtectedBrowserFormTransactionController {
       const bindings = this.#transactionsByBinding.get(session.key) ?? new Map();
       bindings.set(bindingKey, transaction);
       this.#transactionsByBinding.set(session.key, bindings);
-      session.supervisor.setSensitiveInputActive?.(true);
+      this.#syncSensitiveState(session.key, session.supervisor);
       return { status: "verified" };
     }
 
@@ -280,7 +281,7 @@ export class ProtectedBrowserFormTransactionController {
         throw new Error("Protected browser field rejected delivery.");
       }
       active.delivered = true;
-      this.#sensitiveSessions.add(session.key);
+      this.#syncSensitiveState(session.key, session.supervisor);
       if (transaction.submit === undefined || ![...transaction.fields.values()].every((field) => field.delivered)) {
         transaction.submission = "not-requested";
         return { submission: "not-requested" };
@@ -341,7 +342,12 @@ export class ProtectedBrowserFormTransactionController {
     field.released = true;
     this.#transactionsByBinding.get(destination.sessionId)?.delete(key);
     if ([...transaction.fields.values()].every((candidate) => candidate.released)) {
-      await this.#releaseTransaction(transaction);
+      if (this.#requiresProtection(transaction)) {
+        if (transaction.state === "delivering") transaction.state = "still-present";
+        this.#syncSensitiveState(transaction.sessionId, transaction.supervisor);
+      } else {
+        await this.#releaseTransaction(transaction);
+      }
     }
   }
 
@@ -359,7 +365,6 @@ export class ProtectedBrowserFormTransactionController {
 
   async invalidateSession(session: ProtectedFieldPageSession): Promise<void> {
     const active = this.#transactions.get(session.key);
-    this.#sensitiveSessions.delete(session.key);
     session.supervisor.setSensitiveInputActive?.(false);
     if (active === undefined) return;
     for (const transaction of [...active.values()]) {
@@ -370,7 +375,6 @@ export class ProtectedBrowserFormTransactionController {
 
   async clearSession(sessionId: string): Promise<void> {
     const active = this.#transactions.get(sessionId);
-    this.#sensitiveSessions.delete(sessionId);
     if (active !== undefined) {
       for (const transaction of [...active.values()]) {
         transaction.supervisor.setSensitiveInputActive?.(false);
@@ -389,6 +393,27 @@ export class ProtectedBrowserFormTransactionController {
     }
   }
 
+  async reconcile(session: ProtectedFieldPageSession): Promise<void> {
+    const active = this.#transactions.get(session.key);
+    if (active === undefined) return;
+    for (const transaction of [...active.values()]) {
+      if (transaction.state === "settling" ||
+          ![...transaction.fields.values()].every((field) => field.released)) continue;
+      if (!this.#requiresProtection(transaction)) {
+        await this.#releaseTransaction(transaction);
+        continue;
+      }
+      const challengeCurrent = await this.#isTransactionChallengeCurrent(transaction);
+      if (challengeCurrent === false) {
+        transaction.state = "departed";
+        await this.#releaseTransaction(transaction);
+      } else {
+        transaction.state = challengeCurrent === true ? "still-present" : "blocked";
+      }
+    }
+    this.#syncSensitiveState(session.key, session.supervisor);
+  }
+
   async settle(
     session: ProtectedFieldPageSession,
     input: BrowserProtectedFieldDeliveryInput,
@@ -401,9 +426,16 @@ export class ProtectedBrowserFormTransactionController {
   ): Promise<BrowserProtectedFieldDeliveryResult> {
     const transaction = this.#findTransaction(input.destination);
     const submission = transaction?.submission ?? "failed";
-    const challengeCurrent = transaction === undefined
-      ? settlement.fallbackChallengeCurrent
-      : await this.#isTransactionChallengeCurrent(transaction) ?? settlement.fallbackChallengeCurrent;
+    const documentCurrent = transaction === undefined
+      ? undefined
+      : await inspectDocument(transaction.supervisor, transaction.documentObjectId);
+    const documentChanged = documentCurrent === false;
+    const challengeCurrent = documentChanged
+      ? false
+      : transaction === undefined
+        ? settlement.fallbackChallengeCurrent
+        : await this.#isTransactionChallengeCurrent(transaction) ?? settlement.fallbackChallengeCurrent;
+    const conditionMet = settlement.snapshot.actionDelta?.conditionMet ?? challengeCurrent === false;
     let snapshot = settlement.snapshot;
     if (challengeCurrent === false) {
       if (transaction !== undefined) transaction.state = "departed";
@@ -413,6 +445,7 @@ export class ProtectedBrowserFormTransactionController {
       transaction.state = challengeCurrent === true ? "still-present" : "blocked";
       if (transaction.submit !== undefined && submission !== "not-requested") {
         await this.#clearDeliveredValues(transaction);
+        snapshot = await settlement.captureAfterDeparture();
       }
     }
     const sensitiveInputActive = this.isSensitive(session.key);
@@ -421,11 +454,13 @@ export class ProtectedBrowserFormTransactionController {
       submission: submission === "failed" && challengeCurrent === false && !sensitiveInputActive
         ? "automatic"
         : submission,
+      documentChanged,
       challengeState: challengeCurrent === true
         ? "still-present"
         : !sensitiveInputActive
           ? "departed"
           : "unknown",
+      conditionMet,
       beforeRevision: settlement.before.revision,
       afterRevision: snapshot.revision,
       sensitiveInputActive,
@@ -451,6 +486,22 @@ export class ProtectedBrowserFormTransactionController {
       observedAt: snapshot.observedAt,
       readiness: snapshot.readiness,
       sensitiveInputActive: true,
+      ...(snapshot.actionDelta === undefined ? {} : {
+        actionDelta: {
+          outcome: snapshot.actionDelta.outcome,
+          beforeRevision: snapshot.actionDelta.beforeRevision,
+          afterRevision: snapshot.actionDelta.afterRevision,
+          waitCondition: snapshot.actionDelta.waitCondition,
+          conditionMet: snapshot.actionDelta.conditionMet,
+          url: {
+            changed: snapshot.actionDelta.url.changed,
+            ...(snapshot.actionDelta.url.before === undefined
+              ? {}
+              : { before: sensitiveUrl(snapshot.actionDelta.url.before) }),
+            after: sensitiveUrl(snapshot.actionDelta.url.after),
+          },
+        },
+      }),
       ...(snapshot.tab === undefined ? {} : {
         tab: {
           ref: snapshot.tab.ref,
@@ -475,6 +526,14 @@ export class ProtectedBrowserFormTransactionController {
     throw new ProtectedBrowserFieldError(
       "sensitive-input-active",
       "Browser screenshots and vision are blocked while protected input is active."
+    );
+  }
+
+  assertContentObservationAllowed(sessionId: string): void {
+    if (!this.isSensitive(sessionId)) return;
+    throw new ProtectedBrowserFieldError(
+      "sensitive-input-active",
+      "Browser extraction is blocked while protected input is active."
     );
   }
 
@@ -596,9 +655,22 @@ export class ProtectedBrowserFormTransactionController {
       field.deliveryAttempted = false;
       field.delivered = false;
     }
-    const anotherUnclearedField = [...(this.#transactions.get(transaction.sessionId)?.values() ?? [])]
-      .some((candidate) => [...candidate.fields.values()].some((field) => field.deliveryAttempted));
-    if (!anotherUnclearedField) this.#sensitiveSessions.delete(transaction.sessionId);
+    this.#syncSensitiveState(transaction.sessionId, transaction.supervisor);
+  }
+
+  #requiresProtection(transaction: ActiveProtectedFormTransaction): boolean {
+    if (transaction.released || transaction.state === "departed") return false;
+    if (transaction.state === "bound" || transaction.state === "awaiting-values") {
+      return [...transaction.fields.values()].some((field) => !field.released);
+    }
+    return [...transaction.fields.values()].some((field) => field.deliveryAttempted || field.delivered);
+  }
+
+  #syncSensitiveState(
+    sessionId: string,
+    supervisor: ProtectedFieldPageSession["supervisor"]
+  ): void {
+    supervisor.setSensitiveInputActive?.(this.isSensitive(sessionId));
   }
 
   async #releaseTransaction(transaction: ActiveProtectedFormTransaction): Promise<void> {
@@ -611,9 +683,7 @@ export class ProtectedBrowserFormTransactionController {
     const bindings = this.#transactionsByBinding.get(transaction.sessionId);
     for (const key of transaction.fields.keys()) bindings?.delete(key);
     if (bindings?.size === 0) this.#transactionsByBinding.delete(transaction.sessionId);
-    if (!this.isActive(transaction.sessionId) && !this.#sensitiveSessions.has(transaction.sessionId)) {
-      transaction.supervisor.setSensitiveInputActive?.(false);
-    }
+    this.#syncSensitiveState(transaction.sessionId, transaction.supervisor);
     const objectIds = new Set([
       transaction.documentObjectId,
       ...[...transaction.fields.values()].map((field) => field.objectId),

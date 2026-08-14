@@ -2036,7 +2036,9 @@ describe("web and browser tools baselines", () => {
     const takeProtectedFieldDeliveryResult = vi.fn(() => ({
       delivery: "delivered" as const,
       submission: "clicked" as const,
+      documentChanged: true,
       challengeState: "departed" as const,
+      conditionMet: true,
       beforeRevision: 8,
       afterRevision: 10,
       sensitiveInputActive: false,
@@ -2089,6 +2091,59 @@ describe("web and browser tools baselines", () => {
     expect(onSecureInputRequest).toHaveBeenCalledTimes(1);
     expect(takeProtectedFieldDeliveryResult).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(result)).not.toContain("123456");
+  });
+
+  it("renders only the explicit protected-transaction notice for an unsettled delivery", async () => {
+    const takeProtectedFieldDeliveryResult = vi.fn(() => ({
+      delivery: "delivered" as const,
+      submission: "clicked" as const,
+      documentChanged: false,
+      challengeState: "unknown" as const,
+      conditionMet: false,
+      beforeRevision: 8,
+      afterRevision: 9,
+      sensitiveInputActive: true,
+      snapshot: {
+        sessionId: "test-runtime-session:main",
+        url: "https://portal.example.com/challenge",
+        revision: 9,
+        observedAt: "2026-08-14T00:00:00.000Z",
+        sensitiveInputActive: true as const,
+      },
+    }));
+    const browserType = tool("browser.type", createTestWebTools({
+      browserBackend: {
+        ...createSessionRecordingBrowserBackend(),
+        kind: "local-cdp",
+        prepareProtectedField: async (input) => ({
+          type: "browser-field",
+          sessionId: input.sessionId!,
+          ref: input.ref!,
+          expectedOrigin: "https://portal.example.com",
+          submit: { ref: input.submitRef! },
+        }),
+        takeProtectedFieldDeliveryResult,
+      },
+    }));
+
+    const result = await browserType.run({
+      ref: "@e1",
+      submitRef: "@e2",
+      protectedInput: { kind: "one-time-code", purpose: "Authenticate" },
+    }, {
+      onSecureInputRequest: async () => ({
+        status: "delivered",
+        destinationLabel: "Protected browser field",
+        persisted: false,
+      }),
+    });
+
+    expect(result.content).toBe([
+      "Protected authentication transaction active.",
+      "Page content is intentionally suppressed.",
+      "State: settling.",
+    ].join("\n"));
+    expect(result.content).not.toContain("authenticated");
   });
 
   it("rejects atomic protected submission for non-OTP secrets", async () => {
@@ -2208,7 +2263,9 @@ describe("web and browser tools baselines", () => {
     const takeProtectedFieldDeliveryResult = vi.fn(() => ({
       delivery: "delivered" as const,
       submission: "clicked" as const,
+      documentChanged: false,
       challengeState: "departed" as const,
+      conditionMet: true,
       beforeRevision: 7,
       afterRevision: 9,
       sensitiveInputActive: false,
@@ -2459,6 +2516,31 @@ describe("web and browser tools baselines", () => {
         elements: [{ ref: "@e1", role: "button", name: "Mock Button" }]
       }
     });
+  });
+
+  it("renders only the explicit protected-transaction notice while page observation is suppressed", async () => {
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: {
+        ...createMockBrowserBackend(),
+        snapshot: async () => ({
+          sessionId: "session-protected",
+          url: "https://portal.example.com",
+          revision: 4,
+          observedAt: "2026-08-14T00:00:00.000Z",
+          sensitiveInputActive: true,
+          tab: { ref: "@t1", url: "https://portal.example.com", controlled: true },
+          elements: [{ ref: "@e1", role: "textbox" }],
+        }),
+      },
+    }));
+
+    const result = await snapshot.run({});
+
+    expect(result.content).toBe([
+      "Protected authentication transaction active.",
+      "Page content is intentionally suppressed.",
+      "State: settling.",
+    ].join("\n"));
   });
 
   it("turns an unambiguous email and password snapshot into one grouped-flow instruction", async () => {
@@ -2947,6 +3029,49 @@ describe("web and browser tools baselines", () => {
     expect(ephemeralVisionImages(result)).toHaveLength(1);
     expect(screenshot).toHaveBeenCalledTimes(1);
     expect(executor.complete).not.toHaveBeenCalled();
+  });
+
+  it("blocks browser.vision only while protected screenshot observation remains active", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-browser-protected-vision-"));
+    tempRoots.push(workspaceRoot);
+    let sensitiveInputActive = true;
+    const screenshot = vi.fn(async () => {
+      if (sensitiveInputActive) {
+        throw Object.assign(
+          new Error("Browser screenshot is blocked while protected input is active."),
+          { code: "sensitive-input-active" },
+        );
+      }
+      return {
+        mimeType: "image/png" as const,
+        base64: VALID_PNG.toString("base64"),
+      };
+    });
+    const dispatcher = createGovernedVisionArtifactDispatcher({
+      workspaceRoot,
+      mainRoute: visionRoute,
+      visionAuxiliaryRoute: visionAuxiliaryRoute("auto-main"),
+      currentSessionId: () => "session-protected-vision",
+    });
+    const dispatch = vi.spyOn(dispatcher, "dispatch");
+    const browserVision = tool("browser.vision", createTestWebTools({
+      browserBackend: createVisionScreenshotBackend(screenshot),
+      workspaceRoot,
+      visionDispatcher: dispatcher,
+    }));
+
+    const blocked = await browserVision.run({ prompt: "Inspect the page" });
+    expect(blocked).toMatchObject({
+      ok: false,
+      metadata: { backend: "mock" },
+    });
+    expect(blocked.content).toBe("Browser screenshot is blocked while protected input is active.");
+    expect(dispatch).not.toHaveBeenCalled();
+
+    sensitiveInputActive = false;
+    const resumed = await browserVision.run({ prompt: "Inspect the page" });
+    expect(resumed.ok).toBe(true);
+    expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
   it("uses exactly one auxiliary analysis call for a browser screenshot with a text-only main route", async () => {
