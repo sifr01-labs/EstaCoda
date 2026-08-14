@@ -397,6 +397,7 @@ const providerToolNameGroups = [
       "browser.find",
       "browser.click",
       "browser.type",
+      "browser.fill_protected_form",
       "browser.select",
       "browser.extract",
       "browser.scroll",
@@ -1153,6 +1154,7 @@ describe("createRuntime MCP trust gating", () => {
               "ref",
               "revision",
               "sessionId",
+              "submitRef",
               "tabRef",
               "text",
               "waitFor",
@@ -1166,8 +1168,29 @@ describe("createRuntime MCP trust gating", () => {
           },
           {
             "maxResultSizeChars": 8000,
-            "name": "browser.select",
+            "name": "browser.fill_protected_form",
             "orderIndex": 13,
+            "providerKind": "session",
+            "providerPhase": "pre-skill-visibility",
+            "requiredConfig": undefined,
+            "riskClass": "read-only-network",
+            "schemaAliasOrder": [
+              "fields",
+              "purpose",
+              "revision",
+              "sessionId",
+              "tabRef",
+            ],
+            "toolsets": [
+              "browser",
+              "web",
+              "research",
+            ],
+          },
+          {
+            "maxResultSizeChars": 8000,
+            "name": "browser.select",
+            "orderIndex": 14,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1191,7 +1214,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 5000,
             "name": "browser.extract",
-            "orderIndex": 14,
+            "orderIndex": 15,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1212,7 +1235,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 8000,
             "name": "browser.scroll",
-            "orderIndex": 15,
+            "orderIndex": 16,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1233,7 +1256,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 8000,
             "name": "browser.press",
-            "orderIndex": 16,
+            "orderIndex": 17,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1253,7 +1276,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 8000,
             "name": "browser.back",
-            "orderIndex": 17,
+            "orderIndex": 18,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1272,7 +1295,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 5000,
             "name": "browser.get_images",
-            "orderIndex": 18,
+            "orderIndex": 19,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1289,7 +1312,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 8000,
             "name": "browser.console",
-            "orderIndex": 19,
+            "orderIndex": 20,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1307,7 +1330,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 5000,
             "name": "browser.tabs",
-            "orderIndex": 20,
+            "orderIndex": 21,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1324,7 +1347,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 8000,
             "name": "browser.switch_tab",
-            "orderIndex": 21,
+            "orderIndex": 22,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1344,7 +1367,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 8000,
             "name": "browser.cdp",
-            "orderIndex": 22,
+            "orderIndex": 23,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1361,7 +1384,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 3000,
             "name": "browser.screenshot",
-            "orderIndex": 23,
+            "orderIndex": 24,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1378,7 +1401,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 8000,
             "name": "browser.vision",
-            "orderIndex": 24,
+            "orderIndex": 25,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1397,7 +1420,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 8000,
             "name": "browser.dialog",
-            "orderIndex": 25,
+            "orderIndex": 26,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1418,7 +1441,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "browser.navigate",
-            "orderIndex": 26,
+            "orderIndex": 27,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1439,7 +1462,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 48000,
             "name": "file.read",
-            "orderIndex": 27,
+            "orderIndex": 28,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1458,7 +1481,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 2000,
             "name": "file.write",
-            "orderIndex": 28,
+            "orderIndex": 29,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1477,7 +1500,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 3000,
             "name": "file.patch",
-            "orderIndex": 29,
+            "orderIndex": 30,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1501,7 +1524,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 12000,
             "name": "file.search",
-            "orderIndex": 30,
+            "orderIndex": 31,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1520,7 +1543,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 16000,
             "name": "terminal.inspect",
-            "orderIndex": 31,
+            "orderIndex": 32,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1537,7 +1560,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 16000,
             "name": "terminal.run",
-            "orderIndex": 32,
+            "orderIndex": 33,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1556,7 +1579,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 20000,
             "name": "file.glob",
-            "orderIndex": 33,
+            "orderIndex": 34,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1578,7 +1601,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 150000,
             "name": "file.grep",
-            "orderIndex": 34,
+            "orderIndex": 35,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1611,7 +1634,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "notebook.edit",
-            "orderIndex": 35,
+            "orderIndex": 36,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1632,7 +1655,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 2000,
             "name": "media.probe-ffmpeg",
-            "orderIndex": 36,
+            "orderIndex": 37,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1646,7 +1669,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 8000,
             "name": "media.inspect",
-            "orderIndex": 37,
+            "orderIndex": 38,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1663,7 +1686,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "media.extract-frame",
-            "orderIndex": 38,
+            "orderIndex": 39,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1681,7 +1704,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "artifact.record",
-            "orderIndex": 39,
+            "orderIndex": 40,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1700,7 +1723,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "voice.speak",
-            "orderIndex": 40,
+            "orderIndex": 41,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1719,7 +1742,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 8000,
             "name": "voice.transcribe",
-            "orderIndex": 41,
+            "orderIndex": 42,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1738,7 +1761,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "image.generate",
-            "orderIndex": 42,
+            "orderIndex": 43,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1757,7 +1780,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "image.edit",
-            "orderIndex": 43,
+            "orderIndex": 44,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1777,7 +1800,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 8000,
             "name": "vision.analyze",
-            "orderIndex": 44,
+            "orderIndex": 45,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1800,7 +1823,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 3000,
             "name": "process.start",
-            "orderIndex": 45,
+            "orderIndex": 46,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1818,7 +1841,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 3000,
             "name": "process.input",
-            "orderIndex": 46,
+            "orderIndex": 47,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1837,7 +1860,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 6000,
             "name": "process.list",
-            "orderIndex": 47,
+            "orderIndex": 48,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1852,7 +1875,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 12000,
             "name": "process.logs",
-            "orderIndex": 48,
+            "orderIndex": 49,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1870,7 +1893,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 3000,
             "name": "process.stop",
-            "orderIndex": 49,
+            "orderIndex": 50,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1888,7 +1911,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 2000,
             "name": "workspace.trust.status",
-            "orderIndex": 50,
+            "orderIndex": 51,
             "providerKind": "runtime",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1903,7 +1926,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 2000,
             "name": "workspace.trust.grant",
-            "orderIndex": 51,
+            "orderIndex": 52,
             "providerKind": "runtime",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1920,7 +1943,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 2000,
             "name": "workspace.trust.revoke",
-            "orderIndex": 52,
+            "orderIndex": 53,
             "providerKind": "runtime",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1935,7 +1958,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "config.provider.status",
-            "orderIndex": 53,
+            "orderIndex": 54,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1948,7 +1971,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "config.provider.execution_status",
-            "orderIndex": 54,
+            "orderIndex": 55,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1961,7 +1984,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 3000,
             "name": "config.security.status",
-            "orderIndex": 55,
+            "orderIndex": 56,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1974,7 +1997,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 5000,
             "name": "config.compression.status",
-            "orderIndex": 56,
+            "orderIndex": 57,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -1987,7 +2010,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 3000,
             "name": "config.security.setup",
-            "orderIndex": 57,
+            "orderIndex": 58,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -2006,7 +2029,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 3000,
             "name": "config.web.setup",
-            "orderIndex": 58,
+            "orderIndex": 59,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -2028,7 +2051,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 3000,
             "name": "config.browser.setup",
-            "orderIndex": 59,
+            "orderIndex": 60,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -2049,7 +2072,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 5000,
             "name": "config.mcp.status",
-            "orderIndex": 60,
+            "orderIndex": 61,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -2063,7 +2086,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 5000,
             "name": "config.mcp.setup",
-            "orderIndex": 61,
+            "orderIndex": 62,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -2098,7 +2121,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 5000,
             "name": "config.telegram.setup",
-            "orderIndex": 62,
+            "orderIndex": 63,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -2120,7 +2143,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 3000,
             "name": "config.telegram.status",
-            "orderIndex": 63,
+            "orderIndex": 64,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -2133,7 +2156,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 3000,
             "name": "config.image.status",
-            "orderIndex": 64,
+            "orderIndex": 65,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -2147,7 +2170,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 6000,
             "name": "config.provider.setup",
-            "orderIndex": 65,
+            "orderIndex": 66,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -2168,7 +2191,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 5000,
             "name": "config.image.setup",
-            "orderIndex": 66,
+            "orderIndex": 67,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -2190,7 +2213,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "cronjob",
-            "orderIndex": 67,
+            "orderIndex": 68,
             "providerKind": "runtime",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -2229,7 +2252,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 2000,
             "name": "memory.curate",
-            "orderIndex": 68,
+            "orderIndex": 69,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -2249,7 +2272,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 20000,
             "name": "memory.read",
-            "orderIndex": 69,
+            "orderIndex": 70,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -2268,7 +2291,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 20000,
             "name": "memory.search",
-            "orderIndex": 70,
+            "orderIndex": 71,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -2287,7 +2310,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 6000,
             "name": "memory.file_compact",
-            "orderIndex": 71,
+            "orderIndex": 72,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -2304,7 +2327,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 2000,
             "name": "memory.file_compaction_restore",
-            "orderIndex": 72,
+            "orderIndex": 73,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -2321,7 +2344,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 20000,
             "name": "session_search",
-            "orderIndex": 73,
+            "orderIndex": 74,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -2344,7 +2367,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 8000,
             "name": "session.usage",
-            "orderIndex": 74,
+            "orderIndex": 75,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
@@ -2359,7 +2382,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 12000,
             "name": "skill.list",
-            "orderIndex": 75,
+            "orderIndex": 76,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2375,7 +2398,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 24000,
             "name": "skill.read",
-            "orderIndex": 76,
+            "orderIndex": 77,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2393,7 +2416,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 16000,
             "name": "skill.search",
-            "orderIndex": 77,
+            "orderIndex": 78,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2411,7 +2434,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 24000,
             "name": "skill.view",
-            "orderIndex": 78,
+            "orderIndex": 79,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2429,22 +2452,6 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 16000,
             "name": "skill.inspect",
-            "orderIndex": 79,
-            "providerKind": "session",
-            "providerPhase": "post-skill-visibility",
-            "requiredConfig": undefined,
-            "riskClass": "read-only-local",
-            "schemaAliasOrder": [
-              "name",
-            ],
-            "toolsets": [
-              "core",
-              "research",
-            ],
-          },
-          {
-            "maxResultSizeChars": 12000,
-            "name": "skill.eval",
             "orderIndex": 80,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
@@ -2460,8 +2467,24 @@ describe("createRuntime MCP trust gating", () => {
           },
           {
             "maxResultSizeChars": 12000,
-            "name": "skill.usage",
+            "name": "skill.eval",
             "orderIndex": 81,
+            "providerKind": "session",
+            "providerPhase": "post-skill-visibility",
+            "requiredConfig": undefined,
+            "riskClass": "read-only-local",
+            "schemaAliasOrder": [
+              "name",
+            ],
+            "toolsets": [
+              "core",
+              "research",
+            ],
+          },
+          {
+            "maxResultSizeChars": 12000,
+            "name": "skill.usage",
+            "orderIndex": 82,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2477,7 +2500,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.observe",
-            "orderIndex": 82,
+            "orderIndex": 83,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2501,7 +2524,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.propose_patch",
-            "orderIndex": 83,
+            "orderIndex": 84,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2524,7 +2547,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 12000,
             "name": "skill.list_proposals",
-            "orderIndex": 84,
+            "orderIndex": 85,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2541,7 +2564,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 16000,
             "name": "skill.review_proposals",
-            "orderIndex": 85,
+            "orderIndex": 86,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2558,7 +2581,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 12000,
             "name": "skill.review_proposal",
-            "orderIndex": 86,
+            "orderIndex": 87,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2575,7 +2598,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.approve_patch",
-            "orderIndex": 87,
+            "orderIndex": 88,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2593,7 +2616,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.reject_patch",
-            "orderIndex": 88,
+            "orderIndex": 89,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2610,7 +2633,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.promote_patch",
-            "orderIndex": 89,
+            "orderIndex": 90,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2628,7 +2651,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.create",
-            "orderIndex": 90,
+            "orderIndex": 91,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2651,7 +2674,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.patch",
-            "orderIndex": 91,
+            "orderIndex": 92,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2674,7 +2697,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.edit",
-            "orderIndex": 92,
+            "orderIndex": 93,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2692,7 +2715,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.delete",
-            "orderIndex": 93,
+            "orderIndex": 94,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2709,7 +2732,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.rollback",
-            "orderIndex": 94,
+            "orderIndex": 95,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2728,7 +2751,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.reset",
-            "orderIndex": 95,
+            "orderIndex": 96,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2746,7 +2769,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.write_file",
-            "orderIndex": 96,
+            "orderIndex": 97,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2767,7 +2790,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.remove_file",
-            "orderIndex": 97,
+            "orderIndex": 98,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2786,7 +2809,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 8000,
             "name": "skill.import",
-            "orderIndex": 98,
+            "orderIndex": 99,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2803,7 +2826,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "skill.export",
-            "orderIndex": 99,
+            "orderIndex": 100,
             "providerKind": "session",
             "providerPhase": "post-skill-visibility",
             "requiredConfig": undefined,
@@ -2821,7 +2844,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 4000,
             "name": "knowledge.memory.inspect",
-            "orderIndex": 100,
+            "orderIndex": 101,
             "providerKind": "session",
             "providerPhase": "post-memory-provider",
             "requiredConfig": undefined,
@@ -2841,7 +2864,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 2000,
             "name": "knowledge.memory.deactivate",
-            "orderIndex": 101,
+            "orderIndex": 102,
             "providerKind": "session",
             "providerPhase": "post-memory-provider",
             "requiredConfig": undefined,
@@ -2857,7 +2880,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 8000,
             "name": "knowledge.code.query",
-            "orderIndex": 102,
+            "orderIndex": 103,
             "providerKind": "session",
             "providerPhase": "post-memory-provider",
             "requiredConfig": undefined,
@@ -2874,7 +2897,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 48000,
             "name": "execute_code",
-            "orderIndex": 103,
+            "orderIndex": 104,
             "providerKind": "session",
             "providerPhase": "post-tool-executor",
             "requiredConfig": undefined,
@@ -2907,6 +2930,7 @@ describe("createRuntime MCP trust gating", () => {
           "browser.find",
           "browser.click",
           "browser.type",
+          "browser.fill_protected_form",
           "browser.select",
           "browser.extract",
           "browser.scroll",
