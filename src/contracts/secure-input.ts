@@ -1,3 +1,5 @@
+import type { BrowserStateIdentity } from "./browser.js";
+
 /** Sensitive value categories supported by the protected-input boundary. */
 export type SecureInputKind =
   | "account-identifier"
@@ -23,6 +25,8 @@ export type BrowserFieldSecureInputDestination = {
   type: "browser-field";
   sessionId: string;
   ref: string;
+  /** Canonical browser state that was used to bind this destination. Required by the browser transport. */
+  identity?: BrowserStateIdentity;
   expectedOrigin: string;
   tabRef?: string;
   frameId?: string;

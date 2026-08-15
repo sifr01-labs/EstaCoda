@@ -342,6 +342,12 @@ describe("EphemeralSecretBroker", () => {
       }),
       request({
         destination: {
+          ...destination,
+          identity: { documentEpoch: 1, actionRevision: 0, observationId: 1 }
+        }
+      }),
+      request({
+        destination: {
           type: "process-environment",
           processId: "process-a",
           variableName: "INVALID-NAME"

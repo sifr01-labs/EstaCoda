@@ -32,6 +32,7 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
   readonly sent: Array<{ id: number; method: string; params?: Record<string, unknown> }> = [];
   readonly #listeners = new Map<string, Array<(event: CdpWebSocketEvent) => void>>();
   readonly failMethods = new Map<string, string>();
+  readonly failNextMethods = new Map<string, { remaining: number; message: string }>();
   readonly missingElementIndexes = new Set<number>();
   #contextCounter = 0;
   #targetCounter = 0;
@@ -90,6 +91,18 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
         });
         return;
       }
+    }
+    const transientFailure = this.failNextMethods.get(message.method);
+    if (transientFailure !== undefined && transientFailure.remaining > 0) {
+      transientFailure.remaining -= 1;
+      if (transientFailure.remaining === 0) this.failNextMethods.delete(message.method);
+      this.#emit("message", {
+        data: JSON.stringify({
+          id: message.id,
+          error: { message: transientFailure.message },
+        }),
+      });
+      return;
     }
     const failure = this.failMethods.get(message.method);
     if (failure !== undefined) {

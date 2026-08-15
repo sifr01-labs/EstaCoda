@@ -65,6 +65,54 @@ describe("authentication execution effects", () => {
     ]);
   });
 
+  it("attributes credential settlement failure to the credential phase without regressing completed navigation", async () => {
+    const evidence = new ExecutionEvidenceIndex();
+    evidence.record({
+      tool: toolDefinition("browser.navigate"),
+      decision: "allow",
+      riskClass: "read-only-network",
+      toolCallId: "navigation-call",
+      result: { ok: true, content: "Reached the login form" },
+    });
+    const controller = new ExecutionPlanController(new ExecutionPlanStore(), undefined, evidence);
+    await controller.write({
+      objective: "Open the developer portal and authenticate",
+      items: [
+        {
+          id: "navigate-login",
+          content: "Navigate to the portal and reach the login form",
+          status: "completed",
+          evidenceCallIds: ["navigation-call"],
+        },
+        { id: "authenticate", content: "Fill the account credentials through the protected form", status: "in_progress" },
+        { id: "verify-account", content: "Verify the authenticated state", status: "pending" },
+      ],
+    }, "turn-auth");
+    const failure = protectedExecution("browser.fill_protected_form", "credentials-failure", {
+      secureInputGroupReceipt: { status: "failed" },
+    }, false);
+
+    await applyAuthenticationExecutionEffects({
+      controller,
+      effects: deriveAuthenticationExecutionEffects([failure]),
+      objective: "ignored",
+      originTurnId: "turn-auth",
+    });
+
+    expect(controller.current()?.items).toMatchObject([
+      { id: "navigate-login", status: "completed" },
+      {
+        id: "authenticate",
+        status: "blocked",
+        blocker: {
+          kind: "external_state",
+          summary: "Protected credential delivery failed before authentication could continue.",
+        },
+      },
+      { id: "verify-account", status: "pending" },
+    ]);
+  });
+
   it("turns a post-submit authentication error page into a blocker instead of a candidate", () => {
     const execution = protectedExecution("browser.fill_protected_form", "credentials-call", {
       secureInputGroupReceipt: { status: "delivered" },

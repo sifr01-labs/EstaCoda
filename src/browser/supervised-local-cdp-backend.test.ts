@@ -750,10 +750,14 @@ describe("supervised local CDP backend", () => {
       tabRef: navigation.snapshot.tab!.ref
     });
 
-    expect(destination).toEqual({
+    expect(destination).toMatchObject({
       type: "browser-field",
       sessionId: "session-1",
       ref: "@e1",
+      identity: {
+        documentEpoch: navigation.snapshot.identity.documentEpoch,
+        actionRevision: navigation.snapshot.identity.actionRevision,
+      },
       expectedOrigin: "https://accounts.example.com",
       tabRef: navigation.snapshot.tab!.ref,
       frameId: "main-frame"
@@ -978,6 +982,75 @@ describe("supervised local CDP backend", () => {
     expect(JSON.stringify([loginResult, otpResult])).not.toContain("person@example.com");
     expect(JSON.stringify([loginResult, otpResult])).not.toContain("password-sentinel");
     expect(JSON.stringify([loginResult, otpResult])).not.toContain("123456");
+  });
+
+  it("settles protected authentication when submission replaces the document and the first observation fails", async () => {
+    const socket = new FakeCdpSocket();
+    showCredentialLoginPage(socket);
+    socket.onProtectedSubmit = () => {
+      showOtpChallengePage(socket);
+      socket.emitMessage({
+        method: "Page.frameNavigated",
+        params: { frame: { id: "main-frame", loaderId: "challenge-loader", url: socket.snapshot.url } },
+      });
+      socket.failNextMethods.set("Runtime.evaluate", {
+        remaining: 1,
+        message: "Execution context was destroyed, most likely because of a navigation.",
+      });
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"],
+      settling: { pollIntervalMs: 5, stableWindowMs: 10, minimumObservationMs: 10 },
+    });
+    await backend.navigate({ url: socket.snapshot.url, sessionId: "session-transient-transition" });
+    socket.emitMessage({
+      method: "Page.frameNavigated",
+      params: { frame: { id: "main-frame", loaderId: "login-loader", url: socket.snapshot.url } },
+    });
+    const boundLogin = await backend.snapshot?.({ sessionId: "session-transient-transition" });
+    const common = {
+      sessionId: "session-transient-transition",
+      identity: boundLogin!.identity,
+      tabRef: boundLogin!.tab!.ref,
+      submitRef: "@e3",
+    };
+    const email = await backend.prepareProtectedField?.({ ...common, ref: "@e1" });
+    const password = await backend.prepareProtectedField?.({ ...common, ref: "@e2" });
+    await backend.verifyProtectedField?.({ destination: email!, kind: "account-identifier", phase: "before-collection" });
+    await backend.verifyProtectedField?.({ destination: password!, kind: "password", phase: "before-collection" });
+
+    await backend.deliverProtectedField?.({
+      destination: email!, kind: "account-identifier", value: new TextEncoder().encode("person@example.com"),
+    });
+    await backend.deliverProtectedField?.({
+      destination: password!, kind: "password", value: new TextEncoder().encode("password-sentinel"),
+    });
+    const result = backend.takeProtectedFieldDeliveryResult?.(password!);
+
+    expect(result).toMatchObject({
+      submission: "clicked",
+      documentChanged: true,
+      challengeState: "departed",
+      sensitiveInputActive: false,
+      snapshot: {
+        url: "https://accounts.example.com/challenge",
+        title: "Verify account",
+        elements: expect.arrayContaining([expect.objectContaining({ name: "One-time code" })]),
+      },
+    });
+    expect(result!.afterIdentity.documentEpoch).toBeGreaterThan(email!.identity!.documentEpoch);
+    expect(socket.sent.some((message) =>
+      message.method === "Runtime.callFunctionOn" &&
+      String(message.params?.functionDeclaration).includes("setter.call(this, '')")
+    )).toBe(false);
+    await backend.abortProtectedFieldGroup?.([email!, password!]);
+    await backend.releaseProtectedField?.(email!);
+    await backend.releaseProtectedField?.(password!);
+    await expect(backend.screenshot?.({ sessionId: "session-transient-transition" }))
+      .resolves.toMatchObject({ base64: "png-data" });
   });
 
   it("binds, delivers, and submits a one-time-code challenge as one local transaction", async () => {
@@ -1321,6 +1394,7 @@ describe("supervised local CDP backend", () => {
       type: "browser-field" as const,
       sessionId: "session-1",
       ref: "@e1",
+      identity: navigation.snapshot.identity,
       expectedOrigin: "https://accounts.example.com",
       tabRef: navigation.snapshot.tab!.ref,
       frameId: "main-frame"

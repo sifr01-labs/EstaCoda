@@ -405,11 +405,18 @@ function validateDestination(destination: SecureInputDestination): void {
   if (typeof destination !== "object" || destination === null) invalidRequest();
   switch (destination.type) {
     case "browser-field":
-      if (!hasOnlyKeys(destination, ["type", "sessionId", "ref", "expectedOrigin", "tabRef", "frameId", "label", "submit"])) {
+      if (!hasOnlyKeys(destination, ["type", "sessionId", "ref", "identity", "expectedOrigin", "tabRef", "frameId", "label", "submit"])) {
         invalidRequest();
       }
       requireIdentifier(destination.sessionId, "browser session id");
       requireIdentifier(destination.ref, "browser field ref");
+      if (destination.identity !== undefined) {
+        if (typeof destination.identity !== "object" || destination.identity === null ||
+          !hasOnlyKeys(destination.identity, ["documentEpoch", "actionRevision", "observationId"])) invalidRequest();
+        positiveInteger(destination.identity.documentEpoch, "browser document epoch");
+        positiveInteger(destination.identity.actionRevision, "browser action revision");
+        positiveInteger(destination.identity.observationId, "browser observation id");
+      }
       requireHttpsOrigin(destination.expectedOrigin);
       optionalMetadataText(destination.tabRef, "browser tab ref");
       optionalMetadataText(destination.frameId, "browser frame id");

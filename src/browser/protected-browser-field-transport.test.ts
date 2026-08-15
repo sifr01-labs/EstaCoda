@@ -10,6 +10,7 @@ const destination: BrowserFieldSecureInputDestination = {
   type: "browser-field",
   sessionId: "browser-session",
   ref: "@e1",
+  identity: { documentEpoch: 1, actionRevision: 1, observationId: 1 },
   expectedOrigin: "https://example.com",
   tabRef: "@t1",
   frameId: "main-frame",

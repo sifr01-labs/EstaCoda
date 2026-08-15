@@ -10,6 +10,7 @@ import type {
   BrowserProtectedFieldInput,
   BrowserScreenshotResult,
   BrowserSnapshot,
+  BrowserStateIdentity,
   BrowserSwitchTabInput,
   BrowserTab,
   BrowserTabList
@@ -221,6 +222,23 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     );
     latestSnapshotScopes.set(session.key, full);
     return await observeSessionSnapshot(session, raw);
+  };
+
+  const captureProtectedSettlementSnapshot = async (
+    session: ManagedBackendSession,
+    signal?: AbortSignal
+  ): Promise<BrowserSnapshot> => {
+    const attempts = 12;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      if (signal?.aborted === true) throw new Error("Protected browser settlement was cancelled.");
+      try {
+        return await captureSessionSnapshot(session);
+      } catch (error) {
+        if (attempt === attempts || !isTransientNavigationObservationError(error)) throw error;
+        await abortableProtectedSettlementDelay(75, signal);
+      }
+    }
+    throw new Error("Protected browser settlement did not produce a snapshot.");
   };
 
   const captureSafeTargetSnapshot = async (
@@ -969,6 +987,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         type: "browser-field",
         sessionId: session.key,
         ref: target.ref,
+        identity: { ...snapshot.identity },
         expectedOrigin: origin,
         tabRef: target.tabRef,
         ...(frameId === undefined ? {} : { frameId }),
@@ -994,9 +1013,13 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         session,
         before,
         actionInput: { signal: input.signal },
+        capture: async () => await captureProtectedSettlementSnapshot(session, input.signal),
       });
       let challengeCurrent: boolean | undefined;
-      if (protectedFields.isSensitive(session.key)) {
+      if (
+        protectedFields.isSensitive(session.key) &&
+        snapshot.identity.documentEpoch <= input.destination.identity!.documentEpoch
+      ) {
         const raw = withSessionTab(session, await session.supervisor.getSnapshot(session.key));
         challengeCurrent = protectedChallengePresent(raw, input.kind);
       }
@@ -1004,11 +1027,21 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         before,
         snapshot,
         fallbackChallengeCurrent: challengeCurrent,
-        captureAfterDeparture: async () => await captureSessionSnapshot(session),
+        captureAfterDeparture: async () => await captureProtectedSettlementSnapshot(session, input.signal),
       });
     },
     abortProtectedFieldGroup: async (destinations) => {
-      await protectedFields.abort(destinations);
+      const sessionId = destinations[0]?.sessionId;
+      let currentIdentity: BrowserStateIdentity | undefined;
+      if (sessionId !== undefined && destinations.every((destination) => destination.sessionId === sessionId)) {
+        try {
+          const session = await getSession({ sessionId });
+          currentIdentity = (await captureProtectedSettlementSnapshot(session)).identity;
+        } catch {
+          // The controller still verifies its bound document before attempting cleanup.
+        }
+      }
+      await protectedFields.abort(destinations, currentIdentity);
     },
     takeProtectedFieldDeliveryResult: (destination) => protectedFields.takeDeliveryResult(destination),
     releaseProtectedField: async (destination) => {
@@ -1121,6 +1154,29 @@ function parseJsonArray(value: unknown): Array<{ src: string; alt?: string }> {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isTransientNavigationObservationError(error: unknown): boolean {
+  return /execution context was destroyed|cannot find (?:context|execution context)|context with specified id|no frame with given id|inspected target navigated|target closed|session closed/iu
+    .test(errorMessage(error));
+}
+
+async function abortableProtectedSettlementDelay(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(new Error("Protected browser settlement was cancelled."));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(new Error("Protected browser settlement was cancelled."));
+    };
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function requireSessionId(sessionId: string | undefined): string {

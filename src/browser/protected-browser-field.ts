@@ -5,6 +5,7 @@ import type {
   BrowserProtectedFieldInput,
   BrowserProtectedFieldVerification,
   BrowserSnapshot,
+  BrowserStateIdentity,
 } from "../contracts/browser.js";
 import type { BrowserSnapshotInput } from "./snapshot-state.js";
 import type { BrowserFieldSecureInputDestination, SecureInputKind } from "../contracts/secure-input.js";
@@ -54,6 +55,7 @@ type ActiveProtectedFormTransaction = {
   tabRef: string;
   expectedOrigin: string;
   frameId?: string;
+  sourceIdentity: BrowserStateIdentity;
   documentObjectId: string;
   supervisor: ProtectedFieldPageSession["supervisor"];
   fields: Map<string, ProtectedFieldBinding>;
@@ -125,6 +127,9 @@ export class ProtectedBrowserFormTransactionController {
   ): Promise<BrowserProtectedFieldVerification> {
     if (input.signal?.aborted === true || input.destination.sessionId !== session.key) {
       return { status: "rejected", reason: "session-mismatch" };
+    }
+    if (input.destination.identity === undefined) {
+      return { status: "rejected", reason: "field-replaced" };
     }
     if (input.destination.tabRef !== undefined && input.destination.tabRef !== session.tabRef) {
       return { status: "rejected", reason: "tab-mismatch" };
@@ -321,6 +326,13 @@ export class ProtectedBrowserFormTransactionController {
     } catch (error) {
       transaction.state = "blocked";
       transaction.submission = "failed";
+      if (
+        transaction.submit !== undefined &&
+        [...transaction.fields.values()].every((field) => field === active || field.delivered) &&
+        isNavigationTransitionError(error)
+      ) {
+        return { submission: "failed" };
+      }
       throw new ProtectedBrowserFieldError(
         "protected-field-delivery-failed",
         "Protected browser field delivery failed.",
@@ -352,12 +364,20 @@ export class ProtectedBrowserFormTransactionController {
     }
   }
 
-  async abort(destinations: readonly BrowserFieldSecureInputDestination[]): Promise<void> {
+  async abort(
+    destinations: readonly BrowserFieldSecureInputDestination[],
+    currentIdentity?: BrowserStateIdentity
+  ): Promise<void> {
     const transactions = new Set(destinations.flatMap((destination) => {
       const transaction = this.#findTransaction(destination);
       return transaction === undefined ? [] : [transaction];
     }));
     for (const transaction of transactions) {
+      if (await this.#hasDeparted(transaction, currentIdentity)) {
+        transaction.state = "departed";
+        await this.#releaseTransaction(transaction);
+        continue;
+      }
       if ([...transaction.fields.values()].some((field) => field.deliveryAttempted)) {
         await this.#clearDeliveredValues(transaction);
       }
@@ -427,10 +447,10 @@ export class ProtectedBrowserFormTransactionController {
   ): Promise<BrowserProtectedFieldDeliveryResult> {
     const transaction = this.#findTransaction(input.destination);
     const submission = transaction?.submission ?? "failed";
-    const documentCurrent = transaction === undefined
-      ? undefined
-      : await inspectDocument(transaction.supervisor, transaction.documentObjectId);
-    const documentChanged = documentCurrent === false;
+    const documentChanged = transaction !== undefined && await this.#hasDeparted(
+      transaction,
+      settlement.snapshot.identity
+    );
     const challengeCurrent = documentChanged
       ? false
       : transaction === undefined
@@ -441,7 +461,11 @@ export class ProtectedBrowserFormTransactionController {
     if (challengeCurrent === false) {
       if (transaction !== undefined) transaction.state = "departed";
       await this.invalidateSession(session);
-      snapshot = await settlement.captureAfterDeparture();
+      try {
+        snapshot = await settlement.captureAfterDeparture();
+      } catch {
+        snapshot = releasedProtectedSnapshot(settlement.snapshot);
+      }
     } else if (transaction !== undefined) {
       transaction.state = challengeCurrent === true ? "still-present" : "blocked";
       if (transaction.submit !== undefined && submission !== "not-requested") {
@@ -551,6 +575,7 @@ export class ProtectedBrowserFormTransactionController {
       tabRef: input.session.tabRef,
       expectedOrigin: input.destination.expectedOrigin,
       ...(input.frameId === undefined ? {} : { frameId: input.frameId }),
+      sourceIdentity: { ...input.destination.identity! },
       documentObjectId: input.documentObjectId,
       supervisor: input.session.supervisor,
       fields: new Map(),
@@ -574,7 +599,9 @@ export class ProtectedBrowserFormTransactionController {
     for (const transaction of this.#transactions.get(session.key)?.values() ?? []) {
       if (transaction.state !== "awaiting-values" || transaction.supervisor !== session.supervisor ||
           transaction.tabRef !== session.tabRef || transaction.expectedOrigin !== destination.expectedOrigin ||
-          transaction.frameId !== frameId || transaction.submit?.ref !== submitRef) continue;
+          transaction.frameId !== frameId || transaction.submit?.ref !== submitRef ||
+          destination.identity === undefined ||
+          !sameActionState(transaction.sourceIdentity, destination.identity)) continue;
       return transaction;
     }
     return undefined;
@@ -614,6 +641,11 @@ export class ProtectedBrowserFormTransactionController {
   async #clearDeliveredValues(transaction: ActiveProtectedFormTransaction): Promise<void> {
     const fields = [...transaction.fields.values()].filter((field) => field.deliveryAttempted);
     if (fields.length === 0) return;
+    if (await this.#hasDeparted(transaction)) {
+      transaction.state = "departed";
+      await this.#releaseTransaction(transaction);
+      return;
+    }
     let verified = true;
     for (const field of fields) {
       try {
@@ -657,6 +689,19 @@ export class ProtectedBrowserFormTransactionController {
       field.delivered = false;
     }
     this.#syncSensitiveState(transaction.sessionId, transaction.supervisor);
+  }
+
+  async #hasDeparted(
+    transaction: ActiveProtectedFormTransaction,
+    currentIdentity?: BrowserStateIdentity
+  ): Promise<boolean> {
+    if (
+      currentIdentity !== undefined &&
+      currentIdentity.documentEpoch > transaction.sourceIdentity.documentEpoch
+    ) {
+      return true;
+    }
+    return await inspectDocument(transaction.supervisor, transaction.documentObjectId) === false;
   }
 
   #requiresProtection(transaction: ActiveProtectedFormTransaction): boolean {
@@ -918,6 +963,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function destinationBindingKey(destination: BrowserFieldSecureInputDestination): string {
   return [destination.tabRef ?? "", destination.frameId ?? "", destination.ref].join("\u0000");
+}
+
+function sameActionState(left: BrowserStateIdentity, right: BrowserStateIdentity): boolean {
+  return left.documentEpoch === right.documentEpoch && left.actionRevision === right.actionRevision;
+}
+
+function isNavigationTransitionError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /execution context was destroyed|cannot find (?:context|execution context)|context with specified id|no frame with given id|inspected target navigated/iu
+    .test(message);
+}
+
+function releasedProtectedSnapshot(snapshot: BrowserSnapshot): BrowserSnapshot {
+  const { sensitiveInputActive: _sensitiveInputActive, ...released } = snapshot;
+  return released;
 }
 
 function protectedDeliveryKey(destination: BrowserFieldSecureInputDestination): string {
