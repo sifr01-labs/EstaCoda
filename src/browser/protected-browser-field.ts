@@ -6,6 +6,7 @@ import type {
   BrowserProtectedFieldVerification,
   BrowserSnapshot,
 } from "../contracts/browser.js";
+import type { BrowserSnapshotInput } from "./snapshot-state.js";
 import type { BrowserFieldSecureInputDestination, SecureInputKind } from "../contracts/secure-input.js";
 import { redactUrlForMetadata } from "./url-safety.js";
 
@@ -14,7 +15,7 @@ export type ProtectedFieldPageSession = {
   tabRef: string;
   supervisor: {
     send(method: string, params?: Record<string, unknown>): Promise<unknown>;
-    getSnapshot(sessionId?: string): Promise<BrowserSnapshot>;
+    getSnapshot(sessionId?: string): Promise<BrowserSnapshotInput>;
     setSensitiveInputActive?(active: boolean): void;
   };
 };

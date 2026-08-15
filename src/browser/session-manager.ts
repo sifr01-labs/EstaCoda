@@ -1,7 +1,13 @@
 import type { BrowserSessionLifecycle } from "./session-lifecycle.js";
 import { BrowserSessionStateError } from "./session-state.js";
-import type { BrowserSnapshot } from "../contracts/browser.js";
-import { observeBrowserSnapshot, type BrowserSnapshotRevisionState } from "./snapshot-state.js";
+import {
+  createBrowserSnapshotIdentityState,
+  observeBrowserState,
+  type BrowserDocumentSignal,
+  type BrowserSnapshotIdentityState,
+  type BrowserSnapshotInput,
+  type BrowserSnapshotObservation
+} from "./snapshot-state.js";
 import type {
   AttachedCdpTarget,
   CdpPageTarget,
@@ -41,7 +47,7 @@ type StoredBrowserSession = BrowserManagedSession & {
   retiredAttachments: AttachedCdpTarget[];
   tabRefs: Map<string, string>;
   nextTabNumber: number;
-  snapshotRevision: BrowserSnapshotRevisionState;
+  snapshotIdentity: BrowserSnapshotIdentityState;
 };
 
 export class BrowserSessionManager {
@@ -85,7 +91,7 @@ export class BrowserSessionManager {
       retiredAttachments: [],
       tabRefs: new Map([[target.targetId, "@t1"]]),
       nextTabNumber: 2,
-      snapshotRevision: { revision: 0 },
+      snapshotIdentity: createBrowserSnapshotIdentityState(),
       touch: () => {
         this.#touch(session);
       },
@@ -237,10 +243,14 @@ export class BrowserSessionManager {
     return this.#sessions.has(sessionKey);
   }
 
-  observeSnapshot(key: string, snapshot: BrowserSnapshot): BrowserSnapshot {
+  observeSnapshot(
+    key: string,
+    snapshot: BrowserSnapshotInput,
+    documentSignal?: BrowserDocumentSignal
+  ): BrowserSnapshotObservation {
     const session = this.#requireSession(key);
     this.#touch(session);
-    return observeBrowserSnapshot(snapshot, session.snapshotRevision, this.#now);
+    return observeBrowserState(snapshot, session.snapshotIdentity, documentSignal, this.#now);
   }
 
   #touch(session: StoredBrowserSession): void {

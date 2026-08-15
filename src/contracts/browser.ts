@@ -37,6 +37,12 @@ export type WebExtractionResult = {
 
 export type BrowserReadiness = "loading" | "interactive" | "complete" | "unknown";
 
+export type BrowserStateIdentity = {
+  documentEpoch: number;
+  actionRevision: number;
+  observationId: number;
+};
+
 export type BrowserWaitCondition =
   | { kind: "url"; contains: string }
   | { kind: "text"; value: string }

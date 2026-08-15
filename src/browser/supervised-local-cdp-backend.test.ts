@@ -11,6 +11,18 @@ import {
 import { createBrowserBackendFromConfig } from "./browser-backend.js";
 import { createSupervisedLocalCdpBrowserBackend } from "./supervised-local-cdp-backend.js";
 import { BrowserSessionLifecycle } from "./session-lifecycle.js";
+import {
+  createBrowserSnapshotIdentityState,
+  observeBrowserState,
+  type BrowserDocumentSignal,
+  type BrowserSnapshotInput
+} from "./snapshot-state.js";
+
+function createSnapshotObserver() {
+  const state = createBrowserSnapshotIdentityState();
+  return vi.fn((_key: string, snapshot: BrowserSnapshotInput, signal?: BrowserDocumentSignal) =>
+    observeBrowserState(snapshot, state, signal));
+}
 
 function createFetchWithFailingEndpoint(failingEndpoint: string): CdpFetchLike {
   const fallback = createFetch();
@@ -542,18 +554,18 @@ describe("supervised local CDP backend", () => {
 
     expect(compact?.elements).toEqual([{ ref: "@e1", role: "button", name: "Open" }]);
     expect(full?.elements).toEqual([
-      { ref: "@e1", role: "heading", name: "Overview" },
-      { ref: "@e2", role: "button", name: "Open" }
+      { ref: "@e1", role: "button", name: "Open" },
+      { ref: "@e2", role: "heading", name: "Overview" }
     ]);
     await backend.click?.({
       sessionId: "session-1",
-      ref: "@e2",
+      ref: "@e1",
       revision: full!.revision,
       tabRef: full!.tab!.ref
     });
     expect(socket.sent).toContainEqual(expect.objectContaining({
       method: "Runtime.evaluate",
-      params: expect.objectContaining({ expression: expect.stringContaining("__estacodaElements?.[1]") })
+      params: expect.objectContaining({ expression: expect.stringContaining("__estacodaElements?.[0]") })
     }));
   });
 
@@ -636,7 +648,11 @@ describe("supervised local CDP backend", () => {
       resolveHostname: () => ["93.184.216.34"]
     });
     const navigation = await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
-    socket.snapshot = { ...socket.snapshot, text: "Externally changed" };
+    socket.snapshot = {
+      ...socket.snapshot,
+      text: "Externally changed",
+      elements: [{ ref: "@e1", role: "button", name: "Open updated view" }]
+    };
 
     await expect(backend.click?.({
       sessionId: "session-1",
@@ -1472,6 +1488,7 @@ describe("supervised local CDP backend", () => {
       close: vi.fn(async () => undefined),
       closeAll: vi.fn(async () => undefined),
       has: vi.fn(() => true),
+      observeSnapshot: createSnapshotObserver(),
       listTabs: vi.fn(async () => {
         tabListCalls += 1;
         return [
@@ -1571,6 +1588,7 @@ describe("supervised local CDP backend", () => {
       close: vi.fn(async () => undefined),
       closeAll: vi.fn(async () => undefined),
       has: vi.fn(() => true),
+      observeSnapshot: createSnapshotObserver(),
       listTabs: vi.fn(async () => [
         { browserContextId: "context-1", targetId: "target-1", pageWebSocketDebuggerUrl: "ws://target-1", url: snapshot.url, title: snapshot.title, ref: "@t1", controlled: true },
         { browserContextId: "context-1", targetId: "target-2", pageWebSocketDebuggerUrl: "ws://target-2", url: "http://169.254.169.254/latest", title: "Metadata", ref: "@t2", controlled: false },
@@ -1662,6 +1680,7 @@ describe("supervised local CDP backend", () => {
       close: vi.fn(async () => undefined),
       closeAll: vi.fn(async () => undefined),
       has: vi.fn(() => true),
+      observeSnapshot: createSnapshotObserver(),
       listTabs: vi.fn(async () => tabs()),
       visibleTab: vi.fn(async () => tabs()[1]),
       switchTab: vi.fn(async () => {

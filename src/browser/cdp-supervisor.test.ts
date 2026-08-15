@@ -167,15 +167,14 @@ describe("CDPSupervisor", () => {
     await expect(supervisor.getSnapshot("session-1")).resolves.toEqual({
       sessionId: "session-1",
       url: "https://example.com/page",
-      revision: 1,
-      observedAt: expect.any(String),
       readiness: "unknown",
       title: "Example",
       text: "Readable text",
       elements: [{ ref: "@e1", role: "button", name: "Continue" }],
       pendingDialogs: [],
       frameTree: [],
-      consoleHistory: []
+      consoleHistory: [],
+      documentSignal: {}
     });
   });
 
@@ -398,8 +397,8 @@ describe("CDPSupervisor", () => {
 
     expect(compact.elements).toEqual([{ ref: "@e1", role: "button", name: "Save" }]);
     expect(full.elements).toEqual([
-      { ref: "@e1", role: "heading", name: "Account Settings" },
-      { ref: "@e2", role: "button", name: "Save" },
+      { ref: "@e1", role: "button", name: "Save" },
+      { ref: "@e2", role: "heading", name: "Account Settings" },
       { ref: "@e3", role: "paragraph", name: "Profile details" }
     ]);
     expect((compact.elements ?? []).length).toBeLessThan((full.elements ?? []).length);
@@ -563,6 +562,57 @@ describe("CDPSupervisor", () => {
         isOopif: false
       }]
     });
+  });
+
+  it("reports manual same-URL document replacement through main-frame loader signals", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1");
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+
+    await supervisor.start();
+    socket.emitMessage({
+      method: "Page.frameNavigated",
+      params: { frame: { id: "main", loaderId: "loader-1", url: "https://example.com/page" } }
+    });
+    const before = await supervisor.getSnapshot("session-1");
+    socket.emitMessage({
+      method: "Page.frameNavigated",
+      params: { frame: { id: "main", loaderId: "loader-2", url: "https://example.com/page" } }
+    });
+    const after = await supervisor.getSnapshot("session-1");
+
+    expect(before.url).toBe(after.url);
+    expect(before.documentSignal).toEqual({ frameId: "main", loaderId: "loader-1" });
+    expect(after.documentSignal).toEqual({ frameId: "main", loaderId: "loader-2" });
+  });
+
+  it("uses the default main-frame execution context when a loader id is unavailable", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1");
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+
+    await supervisor.start();
+    socket.emitMessage({
+      method: "Page.frameNavigated",
+      params: { frame: { id: "main", url: "https://example.com/page" } }
+    });
+    socket.emitMessage({
+      method: "Runtime.executionContextCreated",
+      params: { context: { id: 41, auxData: { frameId: "main", isDefault: true } } }
+    });
+    const before = await supervisor.getSnapshot("session-1");
+    socket.emitMessage({
+      method: "Runtime.executionContextCreated",
+      params: { context: { id: 42, auxData: { frameId: "main", isDefault: true } } }
+    });
+    const after = await supervisor.getSnapshot("session-1");
+
+    expect(before.documentSignal).toEqual({ frameId: "main", executionContextId: 41 });
+    expect(after.documentSignal).toEqual({ frameId: "main", executionContextId: 42 });
   });
 
   it("request interception aborts metadata, private, policy, and secret URLs", async () => {

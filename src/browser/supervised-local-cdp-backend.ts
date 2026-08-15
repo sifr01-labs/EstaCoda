@@ -32,7 +32,7 @@ import {
   type BrowserManagedTab,
   type BrowserSessionManagerOptions
 } from "./session-manager.js";
-import { observeBrowserSnapshot, type BrowserSnapshotRevisionState } from "./snapshot-state.js";
+import type { BrowserDocumentSignal, BrowserSnapshotInput } from "./snapshot-state.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import { ProtectedBrowserFormTransactionController } from "./protected-browser-field.js";
 
@@ -62,8 +62,8 @@ export type SupervisedLocalCdpBackendOptions = {
 
 type TargetManagerLike = Pick<CdpTargetManager, "createTarget" | "close">;
 
-type BrowserSessionManagerLike = Pick<BrowserSessionManager, "acquire" | "close" | "closeAll" | "has"> &
-  Partial<Pick<BrowserSessionManager, "listTabs" | "visibleTab" | "switchTab" | "observeSnapshot">>;
+type BrowserSessionManagerLike = Pick<BrowserSessionManager, "acquire" | "close" | "closeAll" | "has" | "observeSnapshot"> &
+  Partial<Pick<BrowserSessionManager, "listTabs" | "visibleTab" | "switchTab">>;
 
 type BrowserSessionStack = {
   endpoint: string;
@@ -86,6 +86,10 @@ type PageSupervisor = Pick<CDPSupervisor,
   | "close"
 >;
 
+type BackendRawSnapshot = BrowserSnapshotInput & {
+  documentSignal?: BrowserDocumentSignal;
+};
+
 type ManagedBackendSession = BrowserManagedSession & {
   supervisor: PageSupervisor;
 };
@@ -98,7 +102,6 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
   const latestSnapshots = new Map<string, BrowserSnapshot>();
   const latestSnapshotScopes = new Map<string, boolean>();
   const latestObservedUrls = new Map<string, string>();
-  const fallbackSnapshotRevisions = new Map<string, BrowserSnapshotRevisionState>();
   const protectedFields = new ProtectedBrowserFormTransactionController();
   let launchedChrome: LaunchedChrome | undefined;
   let launchPromise: Promise<LaunchedChrome> | undefined;
@@ -116,7 +119,6 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       latestSnapshots.delete(sessionId);
       latestSnapshotScopes.delete(sessionId);
       latestObservedUrls.delete(sessionId);
-      fallbackSnapshotRevisions.delete(sessionId);
       await protectedFields.clearSession(sessionId);
       throw new BrowserSessionStateError("session_missing", `Browser session not found: ${sessionId}`);
     }
@@ -186,13 +188,15 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
 
   const observeSessionSnapshot = async (
     session: ManagedBackendSession,
-    snapshot: BrowserSnapshot
+    snapshot: BackendRawSnapshot
   ): Promise<BrowserSnapshot> => {
     const manager = sessionStacks.get(session.key)?.sessionManager;
+    if (manager === undefined) {
+      throw new BrowserSessionStateError("session_missing", `Browser session not found: ${session.key}`);
+    }
     const previousUrl = latestObservedUrls.get(session.key);
-    const fallbackRevision = fallbackSnapshotRevisions.get(session.key) ?? { revision: 0 };
-    fallbackSnapshotRevisions.set(session.key, fallbackRevision);
-    const observed = manager?.observeSnapshot?.(session.key, snapshot) ?? observeBrowserSnapshot(snapshot, fallbackRevision);
+    const { documentSignal, ...rawSnapshot } = snapshot;
+    const observed = manager.observeSnapshot(session.key, rawSnapshot, documentSignal).snapshot;
     latestObservedUrls.set(session.key, observed.url);
     if (previousUrl !== undefined && previousUrl !== observed.url && protectedFields.isSensitive(session.key) &&
         !protectedFields.isSettling(session.key)) {
@@ -316,7 +320,6 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       latestSnapshots.delete(sessionId);
       latestSnapshotScopes.delete(sessionId);
       latestObservedUrls.delete(sessionId);
-      fallbackSnapshotRevisions.delete(sessionId);
       lifecycle?.unregister(sessionId);
       await closeLaunchedChromeIfIdle();
       return;
@@ -334,7 +337,6 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       latestSnapshots.delete(sessionId);
       latestSnapshotScopes.delete(sessionId);
       latestObservedUrls.delete(sessionId);
-      fallbackSnapshotRevisions.delete(sessionId);
     }
 
     try {
@@ -376,7 +378,6 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         latestSnapshots.delete(sessionId);
         latestSnapshotScopes.delete(sessionId);
         latestObservedUrls.delete(sessionId);
-        fallbackSnapshotRevisions.delete(sessionId);
       }
     }
   };
@@ -565,7 +566,6 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     lostSessions.clear();
     latestSnapshots.clear();
     latestSnapshotScopes.clear();
-    fallbackSnapshotRevisions.clear();
     configuredStack = undefined;
     launchedStack = undefined;
     try {
@@ -1041,7 +1041,7 @@ function toBrowserTab(tab: BrowserManagedTab): BrowserTab {
 }
 
 function protectedChallengePresent(
-  snapshot: BrowserSnapshot,
+  snapshot: BrowserSnapshotInput,
   kind: BrowserProtectedFieldDeliveryInput["kind"]
 ): boolean | undefined {
   if (snapshot.elements === undefined) return undefined;
@@ -1059,9 +1059,9 @@ function protectedChallengePresent(
 
 function withSessionTab(
   session: ManagedBackendSession,
-  snapshot: BrowserSnapshot,
+  snapshot: BackendRawSnapshot,
   openedTabs: BrowserTab[] = []
-): BrowserSnapshot {
+): BackendRawSnapshot {
   return {
     ...snapshot,
     tab: {

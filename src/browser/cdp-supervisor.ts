@@ -1,5 +1,9 @@
 import type { BrowserSnapshot } from "../contracts/browser.js";
-import { observeBrowserSnapshot, type BrowserSnapshotRevisionState } from "./snapshot-state.js";
+import {
+  isActionableBrowserRole,
+  type BrowserDocumentSignal,
+  type BrowserSnapshotInput
+} from "./snapshot-state.js";
 import { type CdpClient, type CdpWebSocketEvent, type CdpWebSocketFactory, type CdpWebSocketLike } from "./cdp-client.js";
 import { CdpClient as PersistentCdpClient } from "./cdp-client.js";
 import {
@@ -14,10 +18,11 @@ import {
   type WebsitePolicyConfig
 } from "./website-policy.js";
 
-export type SupervisorSnapshot = BrowserSnapshot & {
+export type SupervisorSnapshot = BrowserSnapshotInput & {
   pendingDialogs: NonNullable<BrowserSnapshot["pendingDialogs"]>;
   frameTree: NonNullable<BrowserSnapshot["frameTree"]>;
   consoleHistory: NonNullable<BrowserSnapshot["consoleHistory"]>;
+  documentSignal: BrowserDocumentSignal;
 };
 
 export type BrowserSnapshotOptions = {
@@ -47,7 +52,9 @@ export class CDPSupervisor {
   #consoleHistory: NonNullable<BrowserSnapshot["consoleHistory"]> = [];
   #sensitiveInputActive = false;
   #frameTree: NonNullable<BrowserSnapshot["frameTree"]> = [];
-  readonly #snapshotRevision: BrowserSnapshotRevisionState = { revision: 0 };
+  #mainFrameId: string | undefined;
+  #mainLoaderId: string | undefined;
+  #mainExecutionContextId: number | undefined;
 
   constructor(options: CDPSupervisorOptions) {
     this.#webSocketUrl = options.webSocketUrl;
@@ -95,13 +102,19 @@ export class CDPSupervisor {
   }
 
   async getSnapshot(sessionId = "cdp-supervisor", options: BrowserSnapshotOptions = {}): Promise<SupervisorSnapshot> {
-    const snapshot = await evaluateCdpSnapshot(this.#requireClient(), sessionId, options);
-    return observeBrowserSnapshot({
+    const { revision: _revision, observedAt: _observedAt, ...snapshot } =
+      await evaluateCdpSnapshot(this.#requireClient(), sessionId, options);
+    return {
       ...snapshot,
       pendingDialogs: [...this.#pendingDialogs.values()],
       frameTree: [...this.#frameTree],
       consoleHistory: [...this.#consoleHistory],
-    }, this.#snapshotRevision) as SupervisorSnapshot;
+      documentSignal: {
+        ...(this.#mainFrameId === undefined ? {} : { frameId: this.#mainFrameId }),
+        ...(this.#mainLoaderId === undefined ? {} : { loaderId: this.#mainLoaderId }),
+        ...(this.#mainExecutionContextId === undefined ? {} : { executionContextId: this.#mainExecutionContextId })
+      }
+    };
   }
 
   async respondToDialog(input: {
@@ -199,6 +212,10 @@ export class CDPSupervisor {
       this.#handleFrameNavigated(message.params);
       return;
     }
+    if (message.method === "Runtime.executionContextCreated") {
+      this.#handleExecutionContextCreated(message.params);
+      return;
+    }
     if (message.method === "Fetch.requestPaused") {
       void this.#handleRequestPaused(message.params);
     }
@@ -250,6 +267,14 @@ export class CDPSupervisor {
       return;
     }
     const parentFrameId = typeof frame.parentId === "string" ? frame.parentId : undefined;
+    if (parentFrameId === undefined) {
+      const loaderId = typeof frame.loaderId === "string" && frame.loaderId !== "" ? frame.loaderId : undefined;
+      if (this.#mainFrameId !== frameId || (loaderId !== undefined && this.#mainLoaderId !== loaderId)) {
+        this.#mainExecutionContextId = undefined;
+      }
+      this.#mainFrameId = frameId;
+      this.#mainLoaderId = loaderId;
+    }
     const origin = originForUrl(url);
     const entry = {
       frameId,
@@ -262,6 +287,18 @@ export class CDPSupervisor {
       ...this.#frameTree.filter((candidate) => candidate.frameId !== frameId),
       entry
     ].slice(-30);
+  }
+
+  #handleExecutionContextCreated(params: unknown): void {
+    if (!isRecord(params) || !isRecord(params.context)) return;
+    const context = params.context;
+    const contextId = typeof context.id === "number" ? context.id : undefined;
+    const auxData = isRecord(context.auxData) ? context.auxData : undefined;
+    const frameId = auxData !== undefined && typeof auxData.frameId === "string" ? auxData.frameId : undefined;
+    const isDefault = auxData?.isDefault === true;
+    if (contextId === undefined || frameId === undefined || !isDefault) return;
+    if (this.#mainFrameId === undefined) this.#mainFrameId = frameId;
+    if (frameId === this.#mainFrameId) this.#mainExecutionContextId = contextId;
   }
 
   async #handleRequestPaused(params: unknown): Promise<void> {
@@ -424,7 +461,7 @@ export function snapshotExpression(): string {
     const labelText = (el) => clean(Array.from(el.labels || []).map((label) => label.innerText || label.textContent || '').join(' ') || el.getAttribute('aria-label') || el.closest('label')?.innerText || '');
     const elementText = (el) => clean(el.innerText || el.textContent || '');
     const sensitive = (el) => el instanceof HTMLInputElement && el.type.toLowerCase() === 'password';
-    const name = (el) => clean(el.getAttribute('aria-label') || labelText(el) || el.innerText || (sensitive(el) ? '' : el.value) || el.getAttribute('title') || el.getAttribute('name') || el.id || '', 160);
+    const name = (el) => clean(el.getAttribute('aria-label') || labelText(el) || el.innerText || el.getAttribute('title') || el.getAttribute('name') || el.id || '', 160);
     const role = (el) => {
       const explicit = el.getAttribute('role');
       if (explicit) return explicit;
@@ -477,26 +514,6 @@ type BoundElementMetadata = Pick<BrowserSnapshotElement, "text" | "label" | "wit
   sensitive?: boolean;
 };
 
-const AX_INTERACTIVE_ROLES = new Set([
-  "button",
-  "checkbox",
-  "combobox",
-  "link",
-  "listbox",
-  "menuitem",
-  "menuitemcheckbox",
-  "menuitemradio",
-  "option",
-  "radio",
-  "searchbox",
-  "slider",
-  "spinbutton",
-  "switch",
-  "tab",
-  "textbox",
-  "treeitem"
-]);
-
 const AX_UNHELPFUL_ROLES = new Set([
   "generic",
   "ignored",
@@ -541,7 +558,7 @@ function parseAxElement(value: unknown, index: number, options: BrowserSnapshotO
   const checked = axCheckedProperty(value);
   const backendDOMNodeId = axBackendDomNodeId(value);
 
-  const isInteractive = AX_INTERACTIVE_ROLES.has(role);
+  const isInteractive = isActionableBrowserRole(role);
   // Compact AX snapshots are currently a bounded actionable subset, not a
   // viewport-geometry filter. Do not pretend viewport visibility without real
   // DOM/bounding data from CDP.
@@ -582,7 +599,10 @@ async function bindAxElements(
   }
 
   const elements: BrowserSnapshotElement[] = [];
-  for (const candidate of candidates) {
+  const orderedCandidates = options.full === true
+    ? [...candidates.filter((candidate) => candidate.actionable), ...candidates.filter((candidate) => !candidate.actionable)]
+    : candidates;
+  for (const candidate of orderedCandidates) {
     const binding = candidate.backendDOMNodeId === undefined
       ? undefined
       : await bindAxElement(client, candidate.backendDOMNodeId, elements.length);
