@@ -88,6 +88,10 @@ import {
   projectBrowserStateFromExecutions,
   refreshBrowserStateProjection
 } from "../browser/browser-state-projection.js";
+import {
+  applyAuthenticationExecutionEffects,
+  deriveAuthenticationExecutionEffects
+} from "./authentication-execution-effects.js";
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
 const BROWSER_NO_PROGRESS_NUDGE = "Repeated browser observations show no semantic state change. Do not alternate snapshot, tabs, find, extract, screenshot, console, or CDP calls to inspect the same state. Take a relevant browser action; if protected input or another external condition blocks progress, record that precise blocker.";
@@ -723,6 +727,21 @@ export class ProviderTurnLoop {
         }
       });
       const loopToolExecutions = loopToolExecutionResult.executions;
+      const authenticationEffects = deriveAuthenticationExecutionEffects(loopToolExecutions);
+      if (
+        authenticationEffects.length > 0 &&
+        this.#executionPlanController !== undefined &&
+        input.visibleTurnId !== undefined
+      ) {
+        await applyAuthenticationExecutionEffects({
+          controller: this.#executionPlanController,
+          effects: authenticationEffects,
+          objective: boundedProvisionalObjective(input.userText),
+          originTurnId: input.visibleTurnId,
+          sink: input.onEvent,
+        });
+        automaticExecutionPlanRequired = true;
+      }
       if (
         automaticExecutionPlanRequired &&
         this.#executionPlanReader?.current() === undefined &&

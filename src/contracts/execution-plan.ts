@@ -8,6 +8,15 @@ export const EXECUTION_PLAN_MAX_EVIDENCE_CALL_IDS = 16;
 
 export type ExecutionPlanOperation = "read" | "write" | "merge";
 
+/** Trusted runtime progress emitted by protected browser authentication receipts. */
+export type AuthenticationExecutionEffect =
+  | "credentials-required"
+  | "credentials-submitted"
+  | "challenge-required"
+  | "authentication-candidate"
+  | "authentication-verified"
+  | "authentication-blocked";
+
 export type ExecutionPlanItemStatus =
   | "pending"
   | "in_progress"

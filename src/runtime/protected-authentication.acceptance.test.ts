@@ -17,6 +17,7 @@ import type {
   SecureInputRequestSnapshot,
 } from "../contracts/secure-input.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
+import { latestExecutionPlanSnapshot } from "../session/execution-plan-state.js";
 import {
   FakeCdpAuthPortalSocket,
   createFakeCdpFetch,
@@ -242,9 +243,23 @@ describe("protected authentication journey acceptance", () => {
         assertNoProviderSeam(harness.timeline, "otp-delivery", ["otp-submit", "otp-auto-submit"]);
       }
 
+      const messages = await harness.runtime.sessionDb.listMessages(harness.runtime.sessionId);
+      const events = await harness.runtime.sessionDb.listEvents(harness.runtime.sessionId);
+      const mission = latestExecutionPlanSnapshot(events);
+      expect(mission).toBeDefined();
+
       if (scenario.authenticated) {
-        expect(response!.text).toContain("Authentication confirmed from the authenticated account page.");
-        expect(response!.text).not.toContain("could not be confirmed");
+        expect(response!.text).toContain("The Mission is incomplete.");
+        expect(response!.text).toContain("Verify the authenticated state");
+        expect(response!.text).not.toContain("Authentication confirmed from the authenticated account page.");
+        expect(mission).toMatchObject({
+          status: "active",
+          items: [
+            { id: "authentication.credentials", status: "completed" },
+            { id: "authentication.verify", status: "in_progress" },
+            { id: "authentication.challenge", status: "completed" },
+          ],
+        });
         const usable = await harness.runtime.executeTool?.({
           tool: "browser.snapshot",
           toolInput: {},
@@ -253,12 +268,15 @@ describe("protected authentication journey acceptance", () => {
         expect(usable?.result?.content).toContain("My profile");
         expect(JSON.stringify(response)).not.toMatch(/browser observation guard|repeated browser observations/iu);
       } else {
-        expect(response!.text).toContain("Authentication could not be confirmed");
         expect(response!.text).not.toContain("Authentication confirmed from the authenticated account page.");
+        expect(mission!.items.some((item) => item.status === "blocked" && item.blocker !== undefined)).toBe(true);
+        if (scenario.cancelCollection) {
+          expect(response!.text).toContain("The Mission needs your input before it can continue");
+        } else {
+          expect(response!.text).toContain("The Mission is incomplete.");
+        }
       }
 
-      const messages = await harness.runtime.sessionDb.listMessages(harness.runtime.sessionId);
-      const events = await harness.runtime.sessionDb.listEvents(harness.runtime.sessionId);
       await harness.runtime.dispose();
       disposed = true;
       const leakSurfaces = {

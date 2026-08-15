@@ -2219,6 +2219,53 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     });
   });
 
+  it("creates a Mission from a trusted browser effect when authentication wording classification misses", async () => {
+    const controller = new ExecutionPlanController(new ExecutionPlanStore());
+    const protectedFormExecution: ToolExecutionRecord = {
+      ...toolExecutionForTool("call-auth", "browser.fill_protected_form", "credentials not provided"),
+      result: {
+        ok: false,
+        content: "Protected form input cancelled.",
+        metadata: {
+          secureInputGroupReceipt: { status: "cancelled" }
+        }
+      }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-auth", "{}", "browser.fill_protected_form")])
+      ],
+      toolSteps: [{ executions: [protectedFormExecution] }],
+      executionPlanController: controller,
+      maxProviderIterations: 2
+    });
+
+    await runBasicProviderTurn(harness.loop, {
+      visibleTurnId: "visible-auth-turn",
+      userText: "Access the developer workspace and update its Postman collection.",
+      providerTools: [planProviderSchema(), toolProviderSchema("browser.fill_protected_form")]
+    });
+
+    expect(harness.executePlans).toHaveBeenCalledTimes(1);
+    expect(controller.current()).toMatchObject({
+      objective: "Access the developer workspace and update its Postman collection.",
+      originTurnId: "visible-auth-turn",
+      items: [
+        {
+          id: "authentication.credentials",
+          content: "Submit the required authentication credentials",
+          status: "blocked",
+          blocker: {
+            kind: "user_input_required",
+            summary: "The required authentication credentials were not provided."
+          }
+        },
+        { id: "authentication.verify", content: "Verify the authenticated state", status: "pending" },
+        { id: "authentication.continue", content: "Continue the requested post-login work", status: "pending" }
+      ]
+    });
+  });
+
   it("keeps a repaired five-step MTN Mission instead of substituting the provisional fallback", async () => {
     const controller = new ExecutionPlanController(new ExecutionPlanStore());
     const planTool = createPlanTools({ controller })[0]!;

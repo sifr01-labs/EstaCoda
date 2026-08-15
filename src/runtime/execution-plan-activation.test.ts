@@ -28,6 +28,18 @@ describe("execution plan activation", () => {
       userText: "Sign me in to the MTN portal.",
       proposedToolNames: ["browser.navigate"]
     })).toEqual({ required: true, reasons: ["authentication"] });
+    expect(assessExecutionPlanActivation({
+      userText: "Get us logged in to our dev account.",
+      proposedToolNames: ["browser.navigate"]
+    })).toEqual({ required: true, reasons: ["authentication"] });
+    expect(assessExecutionPlanActivation({
+      userText: "سجّل دخولنا إلى حساب المطور.",
+      proposedToolNames: ["browser.navigate"]
+    })).toEqual({ required: true, reasons: ["authentication"] });
+    expect(assessExecutionPlanActivation({
+      userText: "ادخلنا إلى حساب المطور.",
+      proposedToolNames: ["browser.navigate"]
+    })).toEqual({ required: true, reasons: ["authentication"] });
   });
 
   it("keeps login explanations and opening a login page out of Mission activation", () => {
@@ -37,6 +49,12 @@ describe("execution plan activation", () => {
     expect(assessExecutionPlanActivation({
       userText: "Open the MTN login page.",
       proposedToolNames: ["browser.navigate"]
+    }).required).toBe(false);
+    expect(assessExecutionPlanActivation({
+      userText: "How do I log in?"
+    }).required).toBe(false);
+    expect(assessExecutionPlanActivation({
+      userText: "What would happen if we logged in?"
     }).required).toBe(false);
   });
 
