@@ -1493,6 +1493,16 @@ describe("web and browser tools baselines", () => {
     ]);
   });
 
+  it("guides target discovery away from local browser profiles", () => {
+    const navigate = tool("browser.navigate");
+
+    expect(navigate.description).toContain("a URL supplied by the user");
+    expect(navigate.description).toContain("existing controlled tabs");
+    expect(navigate.description).toContain("normal permitted web lookup");
+    expect(navigate.description).toContain("one focused clarification");
+    expect(navigate.description).toContain("local browser profile data requires explicit authorization");
+  });
+
   it("blocks browser.cdp Page.navigate to metadata and private URLs before the backend call", async () => {
     const calls: BrowserActionInput[] = [];
     const cdp = tool("browser.cdp", createTestWebTools({

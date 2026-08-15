@@ -1291,6 +1291,65 @@ describe("ToolExecutor command environment", () => {
     expect(observedRequest?.environmentType).toBe("host");
     expect(observedRequest?.riskClass).toBe("destructive-local");
   });
+
+  it("requires an exact operator approval before reading a browser profile database", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "estacoda-browser-profile-approval-"));
+    try {
+      const controller = new WorkspaceApprovalController({
+        store: new WorkspaceApprovalStore({ path: join(directory, "approvals.json") })
+      });
+      const policy: SecurityPolicy = {
+        decide: (request) => capabilityFirstDefaults.decide(request),
+        assess: async (request) => await controller.assess(capabilityFirstDefaults, request, {
+          workspaceRoot: process.cwd(),
+          sessionId: "test-session",
+          mode: "strict"
+        })
+      };
+      const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "history inspected" }));
+      const { executor } = await setupExecutor({
+        policy,
+        tools: [{ ...createTerminalEchoTool(), run }]
+      });
+      const input = {
+        command: 'sqlite3 "$HOME/Library/Application Support/Google/Chrome/Default/History" "select url from urls"'
+      };
+
+      const approved = await executor.executeTool({
+        tool: "terminal.run",
+        input,
+        trustedWorkspace: true,
+        sessionId: "test-session",
+        onApprovalRequest: async (request) => {
+          expect(run).not.toHaveBeenCalled();
+          expect(request.riskClass).toBe("credential-access");
+          await controller.grant({
+            workspaceRoot: process.cwd(),
+            sessionId: "test-session",
+            toolName: request.tool.name,
+            riskClass: request.riskClass,
+            targetKey: request.targetKey,
+            targetSummary: request.targetSummary,
+            scope: "once"
+          });
+          return "approved";
+        }
+      });
+      const withoutAnotherApproval = await executor.executeTool({
+        tool: "terminal.run",
+        input,
+        trustedWorkspace: true,
+        sessionId: "test-session"
+      });
+
+      expect(approved?.decision).toBe("allow");
+      expect(approved?.riskClass).toBe("credential-access");
+      expect(withoutAnotherApproval?.decision).toBe("ask");
+      expect(run).toHaveBeenCalledOnce();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("ToolExecutor browser CDP gating", () => {

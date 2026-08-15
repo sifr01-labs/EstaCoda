@@ -70,6 +70,8 @@ export type WebToolOptions = {
   visionDispatcher?: GovernedVisionArtifactDispatcher;
 };
 
+const BROWSER_TARGET_DISCOVERY_GUIDANCE = "For target discovery, prefer a URL supplied by the user, then existing controlled tabs, then normal permitted web lookup, then one focused clarification. Reading local browser profile data requires explicit authorization and is not an ordinary discovery shortcut.";
+
 export type FetchLike = (url: string, init?: {
   method?: string;
   headers?: Record<string, string>;
@@ -722,7 +724,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
     }),
     {
       name: "browser.navigate",
-      description: "Navigate a browser backend to a URL, wait for the requested or stable state, and return a concise action delta.",
+      description: `Navigate a browser backend to a URL, wait for the requested or stable state, and return a concise action delta. ${BROWSER_TARGET_DISCOVERY_GUIDANCE}`,
       inputSchema: {
         type: "object",
         properties: {
