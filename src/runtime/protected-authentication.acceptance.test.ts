@@ -523,7 +523,7 @@ function createProviderScript(input: {
       credentialsRequested = true;
       return call("browser.fill_protected_form", {
         purpose: "Sign in to the test portal",
-        revision: latestRevision(request),
+        identity: latestIdentity(request),
         tabRef: "@t1",
         submitRef: "@e3",
         fields: [
@@ -537,7 +537,7 @@ function createProviderScript(input: {
       otpRequested = true;
       return call("browser.type", {
         ref: "@e1",
-        revision: latestRevision(request),
+        identity: latestIdentity(request),
         tabRef: "@t1",
         submitRef: "@e2",
         protectedInput: {
@@ -558,19 +558,28 @@ function createProviderScript(input: {
   };
 }
 
-function latestRevision(request: ProviderRequest): number {
+function latestIdentity(request: ProviderRequest): {
+  documentEpoch: number;
+  actionRevision: number;
+  observationId: number;
+} {
   const text = request.messages.map((message) =>
     typeof message.content === "string" ? message.content : JSON.stringify(message.content)
   ).join("\n");
   const matches = [
-    ...text.matchAll(/Revision:\s*(?:\d+\s*→\s*)?(\d+)/gu),
-    ...text.matchAll(/\brevision[=:]\s*(\d+)/giu),
+    ...text.matchAll(/documentEpoch=(\d+)\s+actionRevision=(\d+)\s+observationId=(\d+)/gu),
+    ...text.matchAll(/"documentEpoch":(\d+),"actionRevision":(\d+),"observationId":(\d+)/gu),
   ].sort((left, right) => (left.index ?? 0) - (right.index ?? 0));
-  const revision = Math.max(...matches.map((match) => Number(match[1])).filter((value) => value > 0));
-  if (!Number.isSafeInteger(revision) || revision <= 0) {
-    throw new Error("The acceptance provider did not receive a current browser revision.");
+  const latest = matches.at(-1);
+  const identity = latest === undefined ? undefined : {
+    documentEpoch: Number(latest[1]),
+    actionRevision: Number(latest[2]),
+    observationId: Number(latest[3]),
+  };
+  if (identity === undefined || Object.values(identity).some((value) => !Number.isSafeInteger(value) || value <= 0)) {
+    throw new Error("The acceptance provider did not receive a current browser identity.");
   }
-  return revision;
+  return identity;
 }
 
 function toolCallResponse(

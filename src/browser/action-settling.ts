@@ -41,7 +41,7 @@ export async function settleBrowserAction(input: {
   const now = input.now ?? monotonicNow;
   const startedAt = now();
   let snapshot = input.initialSnapshot ?? await input.capture();
-  let lastRevision = snapshot.revision;
+  let lastActionIdentity = browserActionIdentityKey(snapshot);
   let stableSince = startedAt;
 
   while (true) {
@@ -63,8 +63,9 @@ export async function settleBrowserAction(input: {
 
     await abortableDelay(Math.min(pollIntervalMs, timeoutMs - elapsed), input.signal);
     snapshot = await input.capture();
-    if (snapshot.revision !== lastRevision) {
-      lastRevision = snapshot.revision;
+    const actionIdentity = browserActionIdentityKey(snapshot);
+    if (actionIdentity !== lastActionIdentity) {
+      lastActionIdentity = actionIdentity;
       stableSince = now();
     }
   }
@@ -117,14 +118,15 @@ export function createBrowserActionDelta(input: {
       }
     : undefined;
   const changed = input.before === undefined ||
-    input.before.revision !== input.after.revision ||
+    !sameBrowserActionIdentity(input.before.identity, input.after.identity) ||
+    beforeUrl !== afterUrl ||
     (input.openedTabs?.length ?? 0) > 0 ||
     tabTransition !== undefined;
 
   return {
     outcome: input.timedOut ? "timeout" : changed ? "changed" : "no-change",
-    beforeRevision: input.before?.revision ?? 0,
-    afterRevision: input.after.revision,
+    ...(input.before === undefined ? {} : { beforeIdentity: { ...input.before.identity } }),
+    afterIdentity: { ...input.after.identity },
     waitCondition: input.waitCondition,
     conditionMet: input.conditionMet,
     url: {
@@ -143,6 +145,17 @@ export function createBrowserActionDelta(input: {
     }),
     ...(tabTransition === undefined ? {} : { tabTransition })
   };
+}
+
+function browserActionIdentityKey(snapshot: BrowserSnapshot): string {
+  return `${snapshot.identity.documentEpoch}:${snapshot.identity.actionRevision}`;
+}
+
+function sameBrowserActionIdentity(
+  left: BrowserSnapshot["identity"],
+  right: BrowserSnapshot["identity"]
+): boolean {
+  return left.documentEpoch === right.documentEpoch && left.actionRevision === right.actionRevision;
 }
 
 export function browserWaitConditionMet(snapshot: BrowserSnapshot, condition: BrowserWaitCondition): boolean {

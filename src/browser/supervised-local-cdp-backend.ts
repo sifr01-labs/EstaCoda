@@ -831,7 +831,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       const element = snapshot.elements?.find((candidate) => candidate.ref === target.ref);
       return {
         sessionId: snapshot.sessionId,
-        revision: snapshot.revision,
+        identity: { ...snapshot.identity },
         tabRef: target.tabRef,
         target,
         ...(element?.text === undefined && element?.name === undefined ? {} : { text: redactSensitiveText(element.text ?? element.name ?? "").slice(0, 4_000) }),
@@ -949,7 +949,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         : resolveBrowserTarget(snapshot, {
             sessionId: input.sessionId,
             ref: input.submitRef,
-            revision: input.revision,
+            identity: input.identity,
             tabRef: input.tabRef,
           });
       if (submit?.ref === target.ref) {

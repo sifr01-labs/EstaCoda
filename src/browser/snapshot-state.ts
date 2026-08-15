@@ -7,7 +7,7 @@ export type BrowserDocumentSignal = {
   executionContextId?: number;
 };
 
-export type BrowserSnapshotInput = Omit<BrowserSnapshot, "revision" | "observedAt">;
+export type BrowserSnapshotInput = Omit<BrowserSnapshot, "identity" | "observedAt">;
 
 export type BrowserSnapshotIdentityState = {
   identity: BrowserStateIdentity;
@@ -63,9 +63,7 @@ export function observeBrowserState(
     identity,
     snapshot: {
       ...snapshot,
-      // Compatibility bridge for pre-canonical locator/action contracts. Commit 8
-      // removes this overloaded field after callers carry documentEpoch too.
-      revision: identity.actionRevision,
+      identity,
       observedAt: new Date(now()).toISOString()
     }
   };

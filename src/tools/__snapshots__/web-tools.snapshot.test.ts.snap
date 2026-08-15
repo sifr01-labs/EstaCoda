@@ -8,7 +8,7 @@ URL: https://example.com/
 Title: Test Page
 
 [Compact viewport snapshot]
-Revision: 1
+Identity: documentEpoch=1 actionRevision=1 observationId=1
 Observed: <timestamp>
 Readiness: complete
 Controlled tab: @t1 [controlled] Test Page — https://example.com/
@@ -33,9 +33,13 @@ Interactive elements:
           "role": "button",
         },
       ],
+      "identity": {
+        "actionRevision": 1,
+        "documentEpoch": 1,
+        "observationId": 1,
+      },
       "observedAt": "<timestamp>",
       "readiness": "complete",
-      "revision": 1,
       "sessionId": "<session-id>",
       "tab": {
         "controlled": true,
@@ -56,7 +60,7 @@ Interactive elements:
 exports[`web and browser golden snapshots > browser.snapshot output matches golden > browser-snapshot-mock 1`] = `
 {
   "content": "[Compact viewport snapshot]
-Revision: 1
+Identity: documentEpoch=1 actionRevision=1 observationId=1
 Observed: <timestamp>
 Readiness: complete
 Controlled tab: @t1 [controlled] Test Page — mock://browser
@@ -75,9 +79,13 @@ Interactive elements:
           "role": "button",
         },
       ],
+      "identity": {
+        "actionRevision": 1,
+        "documentEpoch": 1,
+        "observationId": 1,
+      },
       "observedAt": "<timestamp>",
       "readiness": "complete",
-      "revision": 1,
       "sessionId": "<session-id>",
       "tab": {
         "controlled": true,

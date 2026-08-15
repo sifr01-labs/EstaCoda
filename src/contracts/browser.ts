@@ -57,12 +57,12 @@ export type BrowserLocator = {
   label?: string;
   withinText?: string;
   exact?: boolean;
-  revision?: number;
+  identity?: BrowserStateIdentity;
 };
 
 export type BrowserLocatorCandidate = {
   ref: string;
-  revision: number;
+  identity: BrowserStateIdentity;
   tabRef: string;
   role?: string;
   name?: string;
@@ -73,7 +73,7 @@ export type BrowserLocatorCandidate = {
 
 export type BrowserFindResult = {
   sessionId: string;
-  revision: number;
+  identity: BrowserStateIdentity;
   tabRef: string;
   status: "found" | "ambiguous" | "not-found";
   candidates: BrowserLocatorCandidate[];
@@ -81,7 +81,7 @@ export type BrowserFindResult = {
 
 export type BrowserExtractResult = {
   sessionId: string;
-  revision: number;
+  identity: BrowserStateIdentity;
   tabRef: string;
   target: BrowserLocatorCandidate;
   text?: string;
@@ -95,8 +95,8 @@ export type BrowserActionDeltaElement = {
 
 export type BrowserActionDelta = {
   outcome: "changed" | "no-change" | "timeout";
-  beforeRevision: number;
-  afterRevision: number;
+  beforeIdentity?: BrowserStateIdentity;
+  afterIdentity: BrowserStateIdentity;
   waitCondition: BrowserWaitCondition["kind"];
   conditionMet: boolean;
   url: {
@@ -116,7 +116,7 @@ export type BrowserActionDelta = {
 export type BrowserSnapshot = {
   sessionId: string;
   url: string;
-  revision: number;
+  identity: BrowserStateIdentity;
   observedAt: string;
   readiness?: BrowserReadiness;
   /** Observation content is intentionally suppressed while protected entry is active. */
@@ -176,7 +176,7 @@ export type BrowserStateProjection = {
   sessionId?: string;
   controlledTab?: BrowserTab;
   tabs?: BrowserTab[];
-  revision?: number;
+  identity?: BrowserStateIdentity;
   readiness?: BrowserReadiness;
   freshness: "current" | "stale";
   externalChangeDetected?: boolean;
@@ -204,10 +204,10 @@ export type BrowserActionInput = {
   sessionId?: string;
   full?: boolean;
   ref?: string;
-  revision?: number;
+  identity?: BrowserStateIdentity;
   tabRef?: string;
   locator?: BrowserLocator;
-  /** Same-revision control bound for immediate local submission after protected delivery. */
+  /** Same-state control bound for immediate local submission after protected delivery. */
   submitRef?: string;
   text?: string;
   value?: string;
@@ -275,8 +275,8 @@ export type BrowserProtectedFieldDeliveryResult = {
   documentChanged: boolean;
   challengeState: "departed" | "still-present" | "unknown";
   conditionMet: boolean;
-  beforeRevision: number;
-  afterRevision: number;
+  beforeIdentity: BrowserStateIdentity;
+  afterIdentity: BrowserStateIdentity;
   sensitiveInputActive: boolean;
   snapshot: BrowserSnapshot;
 };

@@ -17,7 +17,7 @@ function createSnapshot(input: { sessionId: string; url?: string; backend?: "loc
   return {
     sessionId: input.sessionId,
     url: input.url ?? "https://example.com",
-    revision: 1,
+    identity: { documentEpoch: 1, actionRevision: 1, observationId: 1 },
     observedAt: "2026-08-13T00:00:00.000Z",
     title: "Fake page",
     text: "Fake snapshot.",

@@ -29,7 +29,7 @@ function activeBackend(input: {
 }
 
 function snapshot(input: {
-  revision: number;
+  actionRevision: number;
   tabRef?: string;
   url?: string;
   title?: string;
@@ -38,7 +38,7 @@ function snapshot(input: {
   return {
     sessionId: "browser-session",
     url,
-    revision: input.revision,
+    identity: { documentEpoch: 1, actionRevision: input.actionRevision, observationId: input.actionRevision },
     observedAt: "2026-08-13T00:00:00.000Z",
     readiness: "complete",
     tab: {
@@ -53,12 +53,12 @@ function snapshot(input: {
 describe("browser state projection", () => {
   it("detects manual changes while refreshing authoritative state", async () => {
     const previous = await refreshBrowserStateProjection({
-      backend: activeBackend({ snapshot: snapshot({ revision: 2, tabRef: "@t1" }) }),
+      backend: activeBackend({ snapshot: snapshot({ actionRevision: 2, tabRef: "@t1" }) }),
       sessionId: "browser-session"
     });
     const refreshed = await refreshBrowserStateProjection({
       backend: activeBackend({
-        snapshot: snapshot({ revision: 3, tabRef: "@t2", url: "https://example.com/manual" }),
+        snapshot: snapshot({ actionRevision: 3, tabRef: "@t2", url: "https://example.com/manual" }),
         tabs: [
           { ref: "@t1", url: "https://example.com/current", controlled: false },
           { ref: "@t2", url: "https://example.com/manual", controlled: true }
@@ -72,7 +72,7 @@ describe("browser state projection", () => {
       sessionStatus: "active",
       freshness: "current",
       externalChangeDetected: true,
-      revision: 3,
+      identity: { documentEpoch: 1, actionRevision: 3, observationId: 3 },
       controlledTab: { ref: "@t2", url: "https://example.com/manual" }
     });
   });
@@ -117,7 +117,7 @@ describe("browser state projection", () => {
     }));
     const projection = await refreshBrowserStateProjection({
       backend: activeBackend({
-        snapshot: snapshot({ revision: 4, url: `https://example.com/0?token=${secret}`, title: `Bearer ${secret}` }),
+        snapshot: snapshot({ actionRevision: 4, url: `https://example.com/0?token=${secret}`, title: `Bearer ${secret}` }),
         tabs
       }),
       sessionId: "browser-session"
@@ -130,11 +130,11 @@ describe("browser state projection", () => {
   });
 
   it("derives current state and last action from trusted browser tool metadata", () => {
-    const current = snapshot({ revision: 9, tabRef: "@t3" });
+    const current = snapshot({ actionRevision: 9, tabRef: "@t3" });
     current.actionDelta = {
       outcome: "changed",
-      beforeRevision: 8,
-      afterRevision: 9,
+      beforeIdentity: { documentEpoch: 1, actionRevision: 8, observationId: 8 },
+      afterIdentity: current.identity,
       waitCondition: "dom-stable",
       conditionMet: true,
       url: { changed: false, after: current.url }
@@ -160,7 +160,7 @@ describe("browser state projection", () => {
     expect(projection).toMatchObject({
       sessionStatus: "active",
       controlledTab: { ref: "@t3" },
-      revision: 9,
+      identity: current.identity,
       lastAction: { tool: "browser.click", status: "succeeded", changed: true }
     });
   });

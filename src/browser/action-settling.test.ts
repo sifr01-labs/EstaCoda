@@ -3,7 +3,8 @@ import type { BrowserSnapshot } from "../contracts/browser.js";
 import { createBrowserActionDelta, settleBrowserAction, withBrowserActionDelta } from "./action-settling.js";
 
 function snapshot(input: {
-  revision: number;
+  actionRevision: number;
+  documentEpoch?: number;
   url?: string;
   text?: string;
   elements?: BrowserSnapshot["elements"];
@@ -12,8 +13,8 @@ function snapshot(input: {
   return {
     sessionId: "session-1",
     url: input.url ?? "https://example.com/start",
-    revision: input.revision,
-    observedAt: new Date(input.revision * 1_000).toISOString(),
+    identity: { documentEpoch: input.documentEpoch ?? 1, actionRevision: input.actionRevision, observationId: input.actionRevision },
+    observedAt: new Date(input.actionRevision * 1_000).toISOString(),
     readiness: "complete",
     text: input.text ?? "Loading",
     elements: input.elements ?? [],
@@ -29,9 +30,9 @@ function snapshot(input: {
 
 describe("browser action settling", () => {
   it("captures an asynchronous React-style update after an action", async () => {
-    const before = snapshot({ revision: 4 });
+    const before = snapshot({ actionRevision: 4 });
     const after = snapshot({
-      revision: 5,
+      actionRevision: 5,
       text: "Loaded asynchronously",
       elements: [{ ref: "@e1", role: "button", name: "View product" }]
     });
@@ -44,13 +45,13 @@ describe("browser action settling", () => {
       pollIntervalMs: 1
     });
 
-    expect(settlement).toMatchObject({ conditionMet: true, timedOut: false, snapshot: { revision: 5 } });
+    expect(settlement).toMatchObject({ conditionMet: true, timedOut: false, snapshot: { identity: { actionRevision: 5 } } });
   });
 
   it("detects URL transitions and added elements in a compact delta", () => {
-    const before = snapshot({ revision: 8 });
+    const before = snapshot({ actionRevision: 8 });
     const after = snapshot({
-      revision: 9,
+      actionRevision: 9,
       url: "https://example.com/products/loans",
       elements: [{ ref: "@e2", role: "button", name: "View product" }]
     });
@@ -66,15 +67,15 @@ describe("browser action settling", () => {
 
     expect(result.actionDelta).toMatchObject({
       outcome: "changed",
-      beforeRevision: 8,
-      afterRevision: 9,
+      beforeIdentity: before.identity,
+      afterIdentity: after.identity,
       url: { changed: true, after: "https://example.com/products/loans" },
       addedElements: [{ role: "button", name: "View product" }]
     });
   });
 
   it("returns current state on timeout without claiming success", async () => {
-    const current = snapshot({ revision: 2 });
+    const current = snapshot({ actionRevision: 2 });
     const settlement = await settleBrowserAction({
       capture: async () => current,
       waitFor: { kind: "text", value: "Never appears" },
@@ -86,8 +87,8 @@ describe("browser action settling", () => {
     expect(result.actionDelta).toMatchObject({
       outcome: "timeout",
       conditionMet: false,
-      beforeRevision: 2,
-      afterRevision: 2
+      beforeIdentity: current.identity,
+      afterIdentity: current.identity
     });
   });
 
@@ -95,7 +96,7 @@ describe("browser action settling", () => {
     const wallClock = vi.spyOn(Date, "now").mockReturnValue(1_000);
     try {
       const settlement = await settleBrowserAction({
-        capture: async () => snapshot({ revision: 2 }),
+        capture: async () => snapshot({ actionRevision: 2 }),
         waitFor: { kind: "text", value: "Never appears" },
         waitTimeoutMs: 5,
         pollIntervalMs: 1
@@ -108,7 +109,7 @@ describe("browser action settling", () => {
   });
 
   it("makes a stale no-change action explicit", () => {
-    const current = snapshot({ revision: 3 });
+    const current = snapshot({ actionRevision: 3 });
     const delta = createBrowserActionDelta({
       before: current,
       after: current,
@@ -121,9 +122,9 @@ describe("browser action settling", () => {
   });
 
   it("redacts secret-looking labels, titles, and URLs from deltas", () => {
-    const before = snapshot({ revision: 1 });
+    const before = snapshot({ actionRevision: 1 });
     const after = snapshot({
-      revision: 2,
+      actionRevision: 2,
       url: "https://example.com/?token=do-not-render",
       elements: [{ ref: "@e1", role: "button", name: "api_key=abcdefghijklmnopqrstuvwxyz" }]
     });
@@ -149,8 +150,8 @@ describe("browser action settling", () => {
   });
 
   it("preserves source and destination when an action changes the controlled tab", () => {
-    const before = snapshot({ revision: 4, tabRef: "@t1", url: "https://example.com/source" });
-    const after = snapshot({ revision: 5, tabRef: "@t2", url: "https://example.com/destination" });
+    const before = snapshot({ actionRevision: 4, tabRef: "@t1", url: "https://example.com/source" });
+    const after = snapshot({ actionRevision: 5, tabRef: "@t2", url: "https://example.com/destination" });
     const delta = createBrowserActionDelta({
       before,
       after,

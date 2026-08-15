@@ -462,8 +462,8 @@ export class ProtectedBrowserFormTransactionController {
           ? "departed"
           : "unknown",
       conditionMet,
-      beforeRevision: settlement.before.revision,
-      afterRevision: snapshot.revision,
+      beforeIdentity: { ...settlement.before.identity },
+      afterIdentity: { ...snapshot.identity },
       sensitiveInputActive,
       snapshot,
     };
@@ -483,15 +483,15 @@ export class ProtectedBrowserFormTransactionController {
     return {
       sessionId: snapshot.sessionId,
       url: sensitiveUrl(snapshot.url),
-      revision: snapshot.revision,
+      identity: { ...snapshot.identity },
       observedAt: snapshot.observedAt,
       readiness: snapshot.readiness,
       sensitiveInputActive: true,
       ...(snapshot.actionDelta === undefined ? {} : {
         actionDelta: {
           outcome: snapshot.actionDelta.outcome,
-          beforeRevision: snapshot.actionDelta.beforeRevision,
-          afterRevision: snapshot.actionDelta.afterRevision,
+          ...(snapshot.actionDelta.beforeIdentity === undefined ? {} : { beforeIdentity: { ...snapshot.actionDelta.beforeIdentity } }),
+          afterIdentity: { ...snapshot.actionDelta.afterIdentity },
           waitCondition: snapshot.actionDelta.waitCondition,
           conditionMet: snapshot.actionDelta.conditionMet,
           url: {

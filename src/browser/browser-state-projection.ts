@@ -154,7 +154,7 @@ function currentProjection(input: {
     sessionId: boundedText(input.sessionId),
     ...(controlledTab === undefined ? {} : { controlledTab }),
     ...(tabs.length === 0 ? {} : { tabs }),
-    ...(input.snapshot?.revision === undefined ? input.previous?.revision === undefined ? {} : { revision: input.previous.revision } : { revision: input.snapshot.revision }),
+    ...(input.snapshot?.identity === undefined ? input.previous?.identity === undefined ? {} : { identity: input.previous.identity } : { identity: { ...input.snapshot.identity } }),
     ...(input.snapshot?.readiness === undefined ? input.previous?.readiness === undefined ? {} : { readiness: input.previous.readiness } : { readiness: input.snapshot.readiness }),
     freshness: "current",
     ...(input.lastAction ?? input.previous?.lastAction) === undefined
@@ -192,7 +192,7 @@ function preserveLastAction(
 }
 
 function browserSnapshot(value: unknown): BrowserSnapshot | undefined {
-  if (!isRecord(value) || typeof value.sessionId !== "string" || typeof value.url !== "string" || typeof value.revision !== "number") {
+  if (!isRecord(value) || typeof value.sessionId !== "string" || typeof value.url !== "string" || !isBrowserStateIdentity(value.identity)) {
     return undefined;
   }
   return value as BrowserSnapshot;
@@ -230,8 +230,17 @@ function browserStateChanged(previous: BrowserStateProjection | undefined, next:
   if (previous?.sessionStatus !== "active") return false;
   if (previous.controlledTab?.ref !== next.controlledTab?.ref) return true;
   if (previous.controlledTab?.url !== next.controlledTab?.url) return true;
-  if (previous.revision !== undefined && next.revision !== undefined && previous.revision !== next.revision) return true;
+  if (previous.identity !== undefined && next.identity !== undefined &&
+    (previous.identity.documentEpoch !== next.identity.documentEpoch ||
+      previous.identity.actionRevision !== next.identity.actionRevision)) return true;
   return tabKeys(previous.tabs).join("\n") !== tabKeys(next.tabs).join("\n");
+}
+
+function isBrowserStateIdentity(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return typeof value.documentEpoch === "number" && Number.isSafeInteger(value.documentEpoch) && value.documentEpoch > 0 &&
+    typeof value.actionRevision === "number" && Number.isSafeInteger(value.actionRevision) && value.actionRevision > 0 &&
+    typeof value.observationId === "number" && Number.isSafeInteger(value.observationId) && value.observationId > 0;
 }
 
 function tabKeys(tabs: readonly BrowserTab[] | undefined): string[] {

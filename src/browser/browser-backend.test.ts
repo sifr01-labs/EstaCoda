@@ -47,7 +47,7 @@ function createHybridSnapshot(sessionId: string, url = "https://example.com"): B
   return {
     sessionId,
     url,
-    revision: 1,
+    identity: { documentEpoch: 1, actionRevision: 1, observationId: 1 },
     observedAt: "2026-08-13T00:00:00.000Z",
     title: "Hybrid test page",
     text: `Snapshot for ${url}.`,

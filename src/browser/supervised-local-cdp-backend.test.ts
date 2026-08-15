@@ -427,7 +427,7 @@ describe("supervised local CDP backend", () => {
     await backend.click?.({
       sessionId: "launched-session",
       ref: "@e1",
-      revision: launchedNavigation.snapshot.revision,
+      identity: launchedNavigation.snapshot.identity,
       tabRef: launchedNavigation.snapshot.tab!.ref
     });
     expect(launchedPage?.sent.filter((message) => message.method === "Runtime.evaluate").length).toBeGreaterThan(launchedEvalCount + 1);
@@ -560,7 +560,7 @@ describe("supervised local CDP backend", () => {
     await backend.click?.({
       sessionId: "session-1",
       ref: "@e1",
-      revision: full!.revision,
+      identity: full!.identity,
       tabRef: full!.tab!.ref
     });
     expect(socket.sent).toContainEqual(expect.objectContaining({
@@ -587,7 +587,7 @@ describe("supervised local CDP backend", () => {
     await expect(backend.click?.({
       sessionId: "session-1",
       ref: "@e1",
-      revision: navigation.snapshot.revision,
+      identity: navigation.snapshot.identity,
       tabRef: navigation.snapshot.tab!.ref
     })).resolves.toMatchObject({
       sessionId: "session-1"
@@ -605,7 +605,7 @@ describe("supervised local CDP backend", () => {
     ]));
   });
 
-  it("resolves card-scoped semantic locators against the current revision", async () => {
+  it("resolves card-scoped semantic locators against the current identity", async () => {
     const socket = new FakeCdpSocket();
     socket.snapshot = {
       ...socket.snapshot,
@@ -657,13 +657,13 @@ describe("supervised local CDP backend", () => {
     await expect(backend.click?.({
       sessionId: "session-1",
       ref: "@e1",
-      revision: navigation.snapshot.revision,
+      identity: navigation.snapshot.identity,
       tabRef: navigation.snapshot.tab!.ref
-    })).rejects.toMatchObject({ reason: "stale-browser-ref", currentRevision: navigation.snapshot.revision + 1 });
+    })).rejects.toMatchObject({ reason: "stale-browser-ref", currentIdentity: expect.objectContaining({ actionRevision: navigation.snapshot.identity.actionRevision + 1 }) });
     await expect(backend.click?.({
       sessionId: "session-1",
       ref: "@e1",
-      revision: navigation.snapshot.revision + 1,
+      identity: { ...navigation.snapshot.identity, actionRevision: navigation.snapshot.identity.actionRevision + 1 },
       tabRef: "@t99"
     })).rejects.toMatchObject({ reason: "browser-ref-wrong-tab", currentTabRef: navigation.snapshot.tab!.ref });
   });
@@ -746,7 +746,7 @@ describe("supervised local CDP backend", () => {
     const destination = await backend.prepareProtectedField?.({
       sessionId: "session-1",
       ref: "@e1",
-      revision: navigation.snapshot.revision,
+      identity: navigation.snapshot.identity,
       tabRef: navigation.snapshot.tab!.ref
     });
 
@@ -805,7 +805,7 @@ describe("supervised local CDP backend", () => {
     await expect(backend.extract?.({
       sessionId: "session-1",
       ref: "@e1",
-      revision: afterDeliverySnapshot!.revision,
+      identity: afterDeliverySnapshot!.identity,
       tabRef: afterDeliverySnapshot!.tab!.ref
     })).rejects.toMatchObject({ code: "sensitive-input-active" });
     await expect(backend.getImages?.({ sessionId: "session-1" })).resolves.toEqual([]);
@@ -823,7 +823,7 @@ describe("supervised local CDP backend", () => {
     await expect(backend.extract?.({
       sessionId: "session-1",
       ref: "@e1",
-      revision: restoredSnapshot!.revision,
+      identity: restoredSnapshot!.identity,
       tabRef: restoredSnapshot!.tab!.ref,
     })).resolves.toMatchObject({ text: "My profile" });
   });
@@ -843,7 +843,7 @@ describe("supervised local CDP backend", () => {
     });
     const common = {
       sessionId: "session-group",
-      revision: navigation.snapshot.revision,
+      identity: navigation.snapshot.identity,
       tabRef: navigation.snapshot.tab!.ref
     };
     const email = await backend.prepareProtectedField?.({ ...common, ref: "@e1" });
@@ -879,7 +879,7 @@ describe("supervised local CDP backend", () => {
     expect(new Set(releasedObjectIds).size).toBe(3);
   });
 
-  it("completes grouped credentials and OTP through prebound controls across revision changes", async () => {
+  it("completes grouped credentials and OTP through prebound controls across identity changes", async () => {
     const socket = new FakeCdpSocket();
     showCredentialLoginPage(socket);
     const events: string[] = [];
@@ -903,7 +903,7 @@ describe("supervised local CDP backend", () => {
     const login = await backend.navigate({ url: socket.snapshot.url, sessionId: "session-full-auth" });
     const loginInput = {
       sessionId: "session-full-auth",
-      revision: login.snapshot.revision,
+      identity: login.snapshot.identity,
       tabRef: login.snapshot.tab!.ref,
       submitRef: "@e3",
     };
@@ -935,7 +935,7 @@ describe("supervised local CDP backend", () => {
       expect.objectContaining({ ref: "@e1", name: "One-time code" }),
       expect.objectContaining({ ref: "@e2", name: "Authenticate" }),
     ]);
-    expect(loginResult!.afterRevision).toBeGreaterThan(login.snapshot.revision);
+    expect(loginResult!.afterIdentity.actionRevision).toBeGreaterThan(login.snapshot.identity.actionRevision);
     await backend.releaseProtectedField?.(email!);
     await backend.releaseProtectedField?.(password!);
 
@@ -947,7 +947,7 @@ describe("supervised local CDP backend", () => {
     };
     const otp = await backend.prepareProtectedField?.({
       sessionId: "session-full-auth",
-      revision: loginResult!.snapshot.revision,
+      identity: loginResult!.snapshot.identity,
       tabRef: loginResult!.snapshot.tab!.ref,
       ref: "@e1",
       submitRef: "@e2",
@@ -1006,7 +1006,7 @@ describe("supervised local CDP backend", () => {
       sessionId: "session-otp",
       ref: "@e1",
       submitRef: "@e2",
-      revision: navigation.snapshot.revision,
+      identity: navigation.snapshot.identity,
       tabRef: navigation.snapshot.tab!.ref
     });
 
@@ -1040,7 +1040,7 @@ describe("supervised local CDP backend", () => {
       sensitiveInputActive: false,
       snapshot: { url: "https://accounts.example.com/home", title: "Account home" }
     });
-    expect(result!.afterRevision).toBeGreaterThanOrEqual(result!.beforeRevision);
+    expect(result!.afterIdentity.actionRevision).toBeGreaterThanOrEqual(result!.beforeIdentity.actionRevision);
     expect(JSON.stringify(result)).not.toContain(secret);
     expect(result).not.toHaveProperty("transactionId");
     expect(socket.sent.filter((message) =>
@@ -1072,7 +1072,7 @@ describe("supervised local CDP backend", () => {
       sessionId: "session-auto-otp",
       ref: "@e1",
       submitRef: "@e2",
-      revision: navigation.snapshot.revision,
+      identity: navigation.snapshot.identity,
       tabRef: navigation.snapshot.tab!.ref
     });
     await backend.verifyProtectedField?.({
@@ -1105,7 +1105,7 @@ describe("supervised local CDP backend", () => {
     await expect(backend.extract?.({
       sessionId: "session-auto-otp",
       ref: "@e1",
-      revision: result!.snapshot.revision,
+      identity: result!.snapshot.identity,
       tabRef: result!.snapshot.tab!.ref,
     })).resolves.toMatchObject({ text: "My profile" });
   });
@@ -1122,7 +1122,7 @@ describe("supervised local CDP backend", () => {
     const navigation = await backend.navigate({ url: socket.snapshot.url, sessionId: "session-partial-clear" });
     const common = {
       sessionId: "session-partial-clear",
-      revision: navigation.snapshot.revision,
+      identity: navigation.snapshot.identity,
       tabRef: navigation.snapshot.tab!.ref,
       submitRef: "@e3",
     };
@@ -1169,7 +1169,7 @@ describe("supervised local CDP backend", () => {
     const navigation = await backend.navigate({ url: socket.snapshot.url, sessionId: "session-clear-blocked" });
     const destination = await backend.prepareProtectedField?.({
       sessionId: "session-clear-blocked",
-      revision: navigation.snapshot.revision,
+      identity: navigation.snapshot.identity,
       tabRef: navigation.snapshot.tab!.ref,
       ref: "@e1",
       submitRef: "@e2",
@@ -1195,7 +1195,7 @@ describe("supervised local CDP backend", () => {
     await expect(backend.extract?.({
       sessionId: "session-clear-blocked",
       ref: "@e1",
-      revision: protectedSnapshot!.revision,
+      identity: protectedSnapshot!.identity,
       tabRef: protectedSnapshot!.tab!.ref,
     })).rejects.toMatchObject({ code: "sensitive-input-active" });
     await backend.closeSession?.("session-clear-blocked");
@@ -1217,7 +1217,7 @@ describe("supervised local CDP backend", () => {
     const navigation = await backend.navigate({ url: socket.snapshot.url, sessionId: "session-failed-submit-clear" });
     const destination = await backend.prepareProtectedField?.({
       sessionId: "session-failed-submit-clear",
-      revision: navigation.snapshot.revision,
+      identity: navigation.snapshot.identity,
       tabRef: navigation.snapshot.tab!.ref,
       ref: "@e1",
       submitRef: "@e2",
@@ -1255,7 +1255,7 @@ describe("supervised local CDP backend", () => {
     await expect(backend.extract?.({
       sessionId: "session-failed-submit-clear",
       ref: "@e1",
-      revision: result!.snapshot.revision,
+      identity: result!.snapshot.identity,
       tabRef: result!.snapshot.tab!.ref,
     })).resolves.toMatchObject({ target: expect.objectContaining({ ref: "@e1" }) });
   });
@@ -1274,7 +1274,7 @@ describe("supervised local CDP backend", () => {
       sessionId: "session-detached-submit",
       ref: "@e1",
       submitRef: "@e2",
-      revision: navigation.snapshot.revision,
+      identity: navigation.snapshot.identity,
       tabRef: navigation.snapshot.tab!.ref
     });
     socket.protectedSubmitInspection.semanticsMatch = false;
@@ -1424,7 +1424,7 @@ describe("supervised local CDP backend", () => {
     const result = await backend.click?.({
       sessionId: "session-1",
       ref: "@e1",
-      revision: navigation.snapshot.revision,
+      identity: navigation.snapshot.identity,
       tabRef: navigation.snapshot.tab!.ref,
       waitFor: { kind: "text", value: "React update complete" },
       waitTimeoutMs: 200
@@ -1434,12 +1434,15 @@ describe("supervised local CDP backend", () => {
       text: "React update complete",
       actionDelta: {
         outcome: "changed",
-        beforeRevision: navigation.snapshot.revision,
+        beforeIdentity: expect.objectContaining({
+          documentEpoch: navigation.snapshot.identity.documentEpoch,
+          actionRevision: navigation.snapshot.identity.actionRevision,
+        }),
         conditionMet: true,
         addedElements: [{ role: "button", name: "View product" }]
       }
     });
-    expect(result!.revision).toBeGreaterThan(navigation.snapshot.revision);
+    expect(result!.identity.actionRevision).toBeGreaterThan(navigation.snapshot.identity.actionRevision);
   });
 
   it("click() follows one newly opened safe tab and focuses its snapshot", async () => {
@@ -1519,7 +1522,7 @@ describe("supervised local CDP backend", () => {
     const result = await backend.click?.({
       sessionId: "session-1",
       ref: "@e1",
-      revision: navigation.snapshot.revision,
+      identity: navigation.snapshot.identity,
       tabRef: navigation.snapshot.tab!.ref
     });
 
@@ -1734,7 +1737,7 @@ describe("supervised local CDP backend", () => {
     await expect(backend.type?.({
       sessionId: "session-1",
       ref: "@e1",
-      revision: navigation.snapshot.revision,
+      identity: navigation.snapshot.identity,
       tabRef: navigation.snapshot.tab!.ref,
       text: "ada@example.com"
     })).resolves.toMatchObject({
@@ -1771,7 +1774,7 @@ describe("supervised local CDP backend", () => {
     await expect(backend.click?.({
       sessionId: "session-1",
       ref: "@e99",
-      revision: navigation.snapshot.revision,
+      identity: navigation.snapshot.identity,
       tabRef: navigation.snapshot.tab!.ref
     })).rejects.toThrow(
       "Browser element ref not found"

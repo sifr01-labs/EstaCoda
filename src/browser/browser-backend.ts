@@ -12,7 +12,7 @@ import type {
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { connectCdp, type CdpClient, type CdpFetchLike, type CdpWebSocketFactory } from "./cdp-client.js";
 import { evaluateCdpSnapshot } from "./cdp-supervisor.js";
-import { createBrowserSnapshotIdentityState, observeBrowserSnapshot } from "./snapshot-state.js";
+import { createBrowserSnapshotIdentityState, observeBrowserSnapshot, type BrowserSnapshotIdentityState } from "./snapshot-state.js";
 import { findBrowserLocator, resolveBrowserTarget } from "./browser-locator.js";
 import { registerDefaultBrowserProviders, selectBrowserProvider } from "./browser-registry.js";
 import { createSupervisedLocalCdpBrowserBackend } from "./supervised-local-cdp-backend.js";
@@ -92,7 +92,7 @@ export function createMockBrowserBackend(input: {
       const element = current.elements?.find((candidate) => candidate.ref === target.ref);
       return {
         sessionId: current.sessionId,
-        revision: current.revision,
+        identity: { ...current.identity },
         tabRef: target.tabRef,
         target,
         ...(element?.text === undefined && element?.name === undefined ? {} : { text: element.text ?? element.name }),
@@ -131,6 +131,7 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
     id: string;
     webSocketDebuggerUrl: string;
   }>();
+  const snapshotIdentityStates = new Map<string, BrowserSnapshotIdentityState>();
   let latestSessionId: string | undefined;
 
   return {
@@ -146,7 +147,8 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
         sessions,
         setLatestSessionId: (sessionId) => {
           latestSessionId = sessionId;
-        }
+        },
+        snapshotIdentityStates
       });
     },
     snapshot: (input) => runCdpSessionAction({
@@ -154,7 +156,7 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
       latestSessionId,
       input,
       webSocketFactory: options.webSocketFactory,
-      action: async (client, sessionId) => evaluateCdpSnapshot(client, sessionId)
+      action: async (client, sessionId) => observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates)
     }),
     click: (input) => runCdpSessionAction({
       sessions,
@@ -162,11 +164,13 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
       input,
       webSocketFactory: options.webSocketFactory,
       action: async (client, sessionId) => {
+        const current = await observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
+        const target = resolveBrowserTarget(current, input);
         await client.send("Runtime.evaluate", {
-          expression: refActionExpression(input.ref, "click"),
+          expression: refActionExpression(target.ref, "click"),
           awaitPromise: true
         });
-        return evaluateCdpSnapshot(client, sessionId);
+        return observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
       }
     }),
     type: (input) => runCdpSessionAction({
@@ -175,11 +179,13 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
       input,
       webSocketFactory: options.webSocketFactory,
       action: async (client, sessionId) => {
+        const current = await observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
+        const target = resolveBrowserTarget(current, input);
         await client.send("Runtime.evaluate", {
-          expression: refActionExpression(input.ref, "type", input.text ?? ""),
+          expression: refActionExpression(target.ref, "type", input.text ?? ""),
           awaitPromise: true
         });
-        return evaluateCdpSnapshot(client, sessionId);
+        return observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
       }
     }),
     scroll: (input) => runCdpSessionAction({
@@ -194,7 +200,7 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
           expression: `window.scrollBy(0, ${JSON.stringify(delta)}); "ok";`,
           returnByValue: true
         });
-        return evaluateCdpSnapshot(client, sessionId);
+        return observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
       }
     }),
     press: (input) => runCdpSessionAction({
@@ -206,7 +212,7 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
         const key = input.key ?? "Enter";
         await client.send("Input.dispatchKeyEvent", { type: "keyDown", key });
         await client.send("Input.dispatchKeyEvent", { type: "keyUp", key });
-        return evaluateCdpSnapshot(client, sessionId);
+        return observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
       }
     }),
     back: (input = {}) => runCdpSessionAction({
@@ -220,7 +226,7 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
           returnByValue: true
         });
         await client.waitFor("Page.loadEventFired", 2_000).catch(() => undefined);
-        return evaluateCdpSnapshot(client, sessionId);
+        return observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
       }
     }),
     getImages: (input = {}) => runCdpSessionAction({
@@ -295,7 +301,7 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
           accept: input.action !== "dismiss",
           promptText: input.promptText ?? ""
         });
-        return evaluateCdpSnapshot(client, sessionId);
+        return observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
       }
     })
   };
@@ -406,6 +412,7 @@ async function navigateWithLocalCdp(input: {
   webSocketFactory: CdpWebSocketFactory | undefined;
   sessions: Map<string, { id: string; webSocketDebuggerUrl: string }>;
   setLatestSessionId(sessionId: string): void;
+  snapshotIdentityStates: Map<string, BrowserSnapshotIdentityState>;
 }): Promise<BrowserNavigateResult> {
   if (input.endpoint === undefined) {
     throw new Error("CDP URL is not configured.");
@@ -431,7 +438,7 @@ async function navigateWithLocalCdp(input: {
     await client.waitFor("Page.loadEventFired", 5_000).catch(() => undefined);
 
     const sessionId = input.input.sessionId ?? target.id ?? `cdp-${Date.now()}`;
-    const snapshot = await evaluateCdpSnapshot(client, sessionId);
+    const snapshot = await observeLocalCdpSnapshot(client, sessionId, input.snapshotIdentityStates);
     input.sessions.set(sessionId, {
       id: sessionId,
       webSocketDebuggerUrl: target.webSocketDebuggerUrl
@@ -450,6 +457,26 @@ async function navigateWithLocalCdp(input: {
   } finally {
     client.close();
   }
+}
+
+async function observeLocalCdpSnapshot(
+  client: CdpClient,
+  sessionId: string,
+  states: Map<string, BrowserSnapshotIdentityState>
+): Promise<BrowserSnapshot> {
+  let state = states.get(sessionId);
+  if (state === undefined) {
+    state = createBrowserSnapshotIdentityState();
+    states.set(sessionId, state);
+  }
+  const frameTree = await client.send("Page.getFrameTree").catch(() => undefined) as {
+    frameTree?: { frame?: { id?: unknown; loaderId?: unknown } };
+  } | undefined;
+  const frame = frameTree?.frameTree?.frame;
+  return observeBrowserSnapshot(await evaluateCdpSnapshot(client, sessionId), state, Date.now, {
+    ...(typeof frame?.id === "string" ? { frameId: frame.id } : {}),
+    ...(typeof frame?.loaderId === "string" ? { loaderId: frame.loaderId } : {}),
+  });
 }
 
 async function createCdpTarget(input: {

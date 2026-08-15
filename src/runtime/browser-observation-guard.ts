@@ -116,7 +116,7 @@ function stableBrowserSnapshot(value: unknown): unknown {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
   const {
     observedAt: _observedAt,
-    revision: _revision,
+    identity: _identity,
     actionDelta: _actionDelta,
     ...stable
   } = value as Record<string, unknown>;

@@ -6,7 +6,7 @@ function snapshot(elements: BrowserSnapshot["elements"], overrides: Partial<Brow
   return {
     sessionId: "session-1",
     url: "https://example.com/products",
-    revision: 7,
+    identity: { documentEpoch: 3, actionRevision: 7, observationId: 9 },
     observedAt: "2026-08-13T00:00:00.000Z",
     readiness: "complete",
     tab: { ref: "@t2", url: "https://example.com/products", controlled: true },
@@ -24,7 +24,7 @@ describe("semantic browser locators", () => {
 
     expect(resolveBrowserTarget(current, {
       locator: { role: "button", name: "View product", withinText: "OAuth V1" }
-    })).toMatchObject({ ref: "@e2", revision: 7, tabRef: "@t2" });
+    })).toMatchObject({ ref: "@e2", identity: { documentEpoch: 3, actionRevision: 7, observationId: 9 }, tabRef: "@t2" });
   });
 
   it("finds a form input by its label", () => {
@@ -55,23 +55,46 @@ describe("semantic browser locators", () => {
   it("rejects stale refs and refs from another tab", () => {
     const current = snapshot([{ ref: "@e1", role: "button", name: "Open" }]);
 
-    expect(() => resolveBrowserTarget(current, { ref: "@e1", revision: 6, tabRef: "@t2" })).toThrowError(
-      expect.objectContaining({ reason: "stale-browser-ref", currentRevision: 7 })
+    expect(() => resolveBrowserTarget(current, { sessionId: "session-1", ref: "@e1", identity: { ...current.identity, actionRevision: 6 }, tabRef: "@t2" })).toThrowError(
+      expect.objectContaining({ reason: "stale-browser-ref", currentIdentity: current.identity })
     );
-    expect(() => resolveBrowserTarget(current, { ref: "@e1", revision: 7, tabRef: "@t1" })).toThrowError(
+    expect(() => resolveBrowserTarget(current, { sessionId: "session-1", ref: "@e1", identity: current.identity, tabRef: "@t1" })).toThrowError(
       expect.objectContaining({ reason: "browser-ref-wrong-tab", currentTabRef: "@t2" })
     );
+  });
+
+  it("scopes refs to session, document, and action state without invalidating a fresh observation", () => {
+    const current = snapshot([{ ref: "@e1", role: "button", name: "Open" }]);
+
+    expect(resolveBrowserTarget(current, {
+      sessionId: current.sessionId,
+      ref: "@e1",
+      identity: { ...current.identity, observationId: current.identity.observationId - 1 },
+      tabRef: current.tab!.ref,
+    })).toMatchObject({ ref: "@e1" });
+    expect(() => resolveBrowserTarget(current, {
+      sessionId: "another-session",
+      ref: "@e1",
+      identity: current.identity,
+      tabRef: current.tab!.ref,
+    })).toThrowError(expect.objectContaining({ reason: "browser-ref-wrong-session" }));
+    expect(() => resolveBrowserTarget(current, {
+      sessionId: current.sessionId,
+      ref: "@e1",
+      identity: { ...current.identity, documentEpoch: current.identity.documentEpoch - 1 },
+      tabRef: current.tab!.ref,
+    })).toThrowError(expect.objectContaining({ reason: "stale-browser-ref" }));
   });
 
   it("resolves semantically after element order changes", () => {
     const before = snapshot([
       { ref: "@e1", role: "button", name: "Cancel" },
       { ref: "@e2", role: "button", name: "Continue" }
-    ], { revision: 2 });
+    ], { identity: { documentEpoch: 1, actionRevision: 2, observationId: 2 } });
     const after = snapshot([
       { ref: "@e1", role: "button", name: "Continue" },
       { ref: "@e2", role: "button", name: "Cancel" }
-    ], { revision: 3 });
+    ], { identity: { documentEpoch: 1, actionRevision: 3, observationId: 3 } });
 
     expect(resolveBrowserTarget(before, { locator: { role: "button", name: "Continue", exact: true } }).ref).toBe("@e2");
     expect(resolveBrowserTarget(after, { locator: { role: "button", name: "Continue", exact: true } }).ref).toBe("@e1");

@@ -1866,7 +1866,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
           sessionId: "browser-session",
           url: "https://example.com/oauth",
           title: "OAuth V1",
-          revision: 12,
+          identity: { documentEpoch: 4, actionRevision: 12, observationId: 15 },
           observedAt: "2026-08-13T00:00:00.000Z",
           readiness: "complete",
           tab: {
@@ -1902,7 +1902,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       sessionId: "runtime-session:main",
       controlledTab: { ref: "@t1", url: "https://example.com/old", controlled: true },
       tabs: [{ ref: "@t1", url: "https://example.com/old", controlled: true }],
-      revision: 4,
+      identity: { documentEpoch: 2, actionRevision: 4, observationId: 6 },
       readiness: "complete",
       freshness: "current"
     });
@@ -1910,7 +1910,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       sessionId: "runtime-session:main",
       url: "https://example.com/manual",
       title: "Manually selected",
-      revision: 5,
+      identity: { documentEpoch: 3, actionRevision: 5, observationId: 7 },
       observedAt: "2026-08-13T00:01:00.000Z",
       readiness: "complete" as const,
       tab: {

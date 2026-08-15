@@ -7,7 +7,7 @@ import type {
   CdpTargetSupervisor,
   ManagedCdpTarget
 } from "./cdp-target-manager.js";
-import type { BrowserSnapshot } from "../contracts/browser.js";
+import type { BrowserSnapshotInput } from "./snapshot-state.js";
 import { resolveBrowserTarget } from "./browser-locator.js";
 
 class FakeSupervisor implements CdpTargetSupervisor {
@@ -140,11 +140,9 @@ describe("BrowserSessionManager", () => {
     const manager = new BrowserSessionManager({ targetManager: new FakeTargetManager() });
     await manager.acquire("session-a");
     await manager.acquire("session-b");
-    const base = (sessionId: string, text: string): BrowserSnapshot => ({
+    const base = (sessionId: string, text: string): BrowserSnapshotInput => ({
       sessionId,
       url: "https://example.com",
-      revision: 0,
-      observedAt: "1970-01-01T00:00:00.000Z",
       text,
       elements: []
     });
@@ -167,16 +165,14 @@ describe("BrowserSessionManager", () => {
     expect(secondSession.identity).toEqual({ documentEpoch: 1, actionRevision: 1, observationId: 1 });
   });
 
-  it("keeps refs from other tabs and replaced documents invalid during compatibility", async () => {
+  it("keeps refs from other tabs and replaced documents invalid", async () => {
     const targetManager = new FakeTargetManager();
     const manager = new BrowserSessionManager({ targetManager });
     const session = await manager.acquire("session-1");
     targetManager.addTab(session.browserContextId, "target-2", "https://example.com");
-    const base = (tabRef: string): BrowserSnapshot => ({
+    const base = (tabRef: string): BrowserSnapshotInput => ({
       sessionId: "session-1",
       url: "https://example.com",
-      revision: 0,
-      observedAt: "1970-01-01T00:00:00.000Z",
       tab: { ref: tabRef, url: "https://example.com", controlled: true },
       elements: [{ ref: "@e1", role: "button", name: "Continue" }]
     });
@@ -193,8 +189,9 @@ describe("BrowserSessionManager", () => {
 
     expect(switched.identity.documentEpoch).toBe(first.identity.documentEpoch + 1);
     expect(() => resolveBrowserTarget(switched.snapshot, {
+      sessionId: "session-1",
       ref: "@e1",
-      revision: first.snapshot.revision,
+      identity: first.snapshot.identity,
       tabRef: "@t1"
     })).toThrow("belongs to tab @t1");
 
@@ -203,10 +200,11 @@ describe("BrowserSessionManager", () => {
       loaderId: "loader-2"
     });
     expect(() => resolveBrowserTarget(replaced.snapshot, {
+      sessionId: "session-1",
       ref: "@e1",
-      revision: switched.snapshot.revision,
+      identity: switched.snapshot.identity,
       tabRef: "@t2"
-    })).toThrow("came from revision");
+    })).toThrow("came from documentEpoch");
   });
 
   it("acquire() reuses an existing session for the same key", async () => {

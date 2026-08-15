@@ -222,13 +222,17 @@ function createSummaryExecutor(content: string): Pick<ProviderExecutor, "complet
   };
 }
 
+function browserIdentity(actionRevision: number, documentEpoch = 1, observationId = actionRevision) {
+  return { documentEpoch, actionRevision, observationId };
+}
+
 function createLargeSnapshotBackend(text = "Snapshot text. ".repeat(800)): BrowserBackend {
   return {
     ...createMockBrowserBackend(),
     snapshot: async () => ({
       sessionId: "session-1",
       url: "https://example.com/",
-      revision: 1,
+      identity: browserIdentity(1),
       observedAt: "2026-08-13T00:00:00.000Z",
       title: "Large Snapshot",
       text,
@@ -267,7 +271,7 @@ function createSessionRecordingBrowserBackend(calls: Array<{ method: string; inp
   const snapshotFor = (input: BrowserActionInput | BrowserNavigateInput = {}): ReturnType<NonNullable<BrowserBackend["snapshot"]>> extends Promise<infer T> ? T : never => ({
     sessionId: input.sessionId ?? "missing-session",
     url: "https://example.com/",
-    revision: 1,
+    identity: browserIdentity(1),
     observedAt: "2026-08-13T00:00:00.000Z",
     title: "Recorded Browser Page",
     text: `Recorded browser snapshot for ${input.sessionId ?? "missing-session"}.`,
@@ -302,10 +306,10 @@ function createSessionRecordingBrowserBackend(calls: Array<{ method: string; inp
       calls.push({ method: "find", input });
       return {
         sessionId: input.sessionId ?? "missing-session",
-        revision: 1,
+        identity: browserIdentity(1),
         tabRef: "@t1",
         status: "found",
-        candidates: [{ ref: "@e1", revision: 1, tabRef: "@t1", role: "button", name: "Recorded Button" }]
+        candidates: [{ ref: "@e1", identity: browserIdentity(1), tabRef: "@t1", role: "button", name: "Recorded Button" }]
       };
     },
     click: async (input) => {
@@ -324,9 +328,9 @@ function createSessionRecordingBrowserBackend(calls: Array<{ method: string; inp
       calls.push({ method: "extract", input });
       return {
         sessionId: input.sessionId ?? "missing-session",
-        revision: 1,
+        identity: browserIdentity(1),
         tabRef: "@t1",
-        target: { ref: "@e1", revision: 1, tabRef: "@t1", role: "button", name: "Recorded Button" },
+        target: { ref: "@e1", identity: browserIdentity(1), tabRef: "@t1", role: "button", name: "Recorded Button" },
         text: "Recorded Button"
       };
     },
@@ -1148,7 +1152,7 @@ describe("web and browser tools baselines", () => {
     expect(result.content).toContain("Browser: mock");
     expect(result.content).toContain("Session: test-runtime-session:main");
     expect(result.content).toContain("URL: https://example.com/app");
-    expect(result.content).toContain("[Compact viewport snapshot]");
+    expect(result.content).toContain("Identity: documentEpoch=1 actionRevision=1 observationId=1");
     expect(result.metadata).toMatchObject({
       url: "https://example.com/app",
       backend: "mock",
@@ -1175,7 +1179,7 @@ describe("web and browser tools baselines", () => {
           snapshot: {
             sessionId: input.sessionId ?? "nav-session",
             url: input.url,
-            revision: 1,
+            identity: browserIdentity(1),
             observedAt: "2026-08-13T00:00:00.000Z",
             text: "Fallback snapshot."
           },
@@ -1350,7 +1354,7 @@ describe("web and browser tools baselines", () => {
           snapshot: {
             sessionId: input.sessionId ?? "redirect-session",
             url: input.url === "about:blank" ? "about:blank" : "http://169.254.169.254/latest",
-            revision: 1,
+            identity: browserIdentity(1),
             observedAt: "2026-08-13T00:00:00.000Z",
             text: "redirected"
           }
@@ -1390,7 +1394,7 @@ describe("web and browser tools baselines", () => {
           snapshot: {
             sessionId: input.sessionId ?? "private-redirect-session",
             url: input.url === "about:blank" ? "about:blank" : "http://192.168.1.1/admin",
-            revision: 1,
+            identity: browserIdentity(1),
             observedAt: "2026-08-13T00:00:00.000Z",
             text: "redirected"
           }
@@ -1430,7 +1434,7 @@ describe("web and browser tools baselines", () => {
           snapshot: {
             sessionId: input.sessionId ?? "policy-redirect-session",
             url: input.url === "about:blank" ? "about:blank" : "https://blocked.test/final",
-            revision: 1,
+            identity: browserIdentity(1),
             observedAt: "2026-08-13T00:00:00.000Z",
             text: "redirected"
           }
@@ -2049,13 +2053,13 @@ describe("web and browser tools baselines", () => {
       documentChanged: true,
       challengeState: "departed" as const,
       conditionMet: true,
-      beforeRevision: 8,
-      afterRevision: 10,
+      beforeIdentity: browserIdentity(8),
+      afterIdentity: browserIdentity(10),
       sensitiveInputActive: false,
       snapshot: {
         sessionId: "test-runtime-session:main",
         url: "https://portal.example.com/home",
-        revision: 10,
+        identity: browserIdentity(10),
         observedAt: "2026-08-13T00:00:00.000Z",
         title: "Portal home",
       },
@@ -2077,7 +2081,7 @@ describe("web and browser tools baselines", () => {
     const result = await browserType.run({
       ref: "@e19",
       submitRef: "@e20",
-      revision: 8,
+      identity: browserIdentity(8),
       tabRef: "@t1",
       protectedInput: {
         kind: "one-time-code",
@@ -2093,7 +2097,7 @@ describe("web and browser tools baselines", () => {
           challengeState: "departed",
           sensitiveInputActive: false,
         },
-        snapshot: { revision: 10, title: "Portal home" },
+        snapshot: { identity: browserIdentity(10), title: "Portal home" },
       },
     });
     expect(result.content).toContain("authentication itself still requires post-submit verification");
@@ -2110,13 +2114,13 @@ describe("web and browser tools baselines", () => {
       documentChanged: false,
       challengeState: "unknown" as const,
       conditionMet: false,
-      beforeRevision: 8,
-      afterRevision: 9,
+      beforeIdentity: browserIdentity(8),
+      afterIdentity: browserIdentity(9),
       sensitiveInputActive: true,
       snapshot: {
         sessionId: "test-runtime-session:main",
         url: "https://portal.example.com/challenge",
-        revision: 9,
+        identity: browserIdentity(9),
         observedAt: "2026-08-14T00:00:00.000Z",
         sensitiveInputActive: true as const,
       },
@@ -2208,7 +2212,7 @@ describe("web and browser tools baselines", () => {
 
     const result = await protectedForm.run({
       purpose: "Sign in to the portal",
-      revision: 7,
+      identity: browserIdentity(7),
       tabRef: "@t1",
       fields: [
         { id: "email", ref: "@e3", kind: "account-identifier" },
@@ -2239,7 +2243,7 @@ describe("web and browser tools baselines", () => {
 
     const rejectedPlaintext = await protectedForm.run({
       purpose: "Sign in to the portal",
-      revision: 7,
+      identity: browserIdentity(7),
       tabRef: "@t1",
       fields: [
         { id: "email", ref: "@e3", kind: "account-identifier", value: "must-not-enter-tool-input" },
@@ -2276,13 +2280,13 @@ describe("web and browser tools baselines", () => {
       documentChanged: false,
       challengeState: "departed" as const,
       conditionMet: true,
-      beforeRevision: 7,
-      afterRevision: 9,
+      beforeIdentity: browserIdentity(7),
+      afterIdentity: browserIdentity(9),
       sensitiveInputActive: false,
       snapshot: {
         sessionId: "test-runtime-session:main",
         url: "https://portal.example.com/challenge",
-        revision: 9,
+        identity: browserIdentity(9),
         observedAt: "2026-08-14T00:00:00.000Z",
         title: "Verify account",
       },
@@ -2298,7 +2302,7 @@ describe("web and browser tools baselines", () => {
 
     const result = await protectedForm.run({
       purpose: "model-authored-purpose-must-not-be-approval-metadata",
-      revision: 7,
+      identity: browserIdentity(7),
       tabRef: "@t1",
       submitRef: "@e5",
       fields: [
@@ -2311,7 +2315,7 @@ describe("web and browser tools baselines", () => {
       ok: true,
       metadata: {
         protectedDelivery: { submission: "clicked", challengeState: "departed" },
-        snapshot: { revision: 9, title: "Verify account" },
+        snapshot: { identity: browserIdentity(9), title: "Verify account" },
       },
     });
     expect(prepareProtectedField).toHaveBeenCalledTimes(2);
@@ -2328,7 +2332,7 @@ describe("web and browser tools baselines", () => {
 
     expect(await browserType.resolveSecurity?.({ ref: "@e1", protectedInput: { kind: "one-time-code", purpose: "secret purpose" } }, context))
       .toBeUndefined();
-    expect(await protectedForm.resolveSecurity?.({ revision: 1, tabRef: "@t1", fields: [], purpose: "secret purpose" }, context))
+    expect(await protectedForm.resolveSecurity?.({ identity: browserIdentity(1), tabRef: "@t1", fields: [], purpose: "secret purpose" }, context))
       .toBeUndefined();
     const typeResolution = await browserType.resolveSecurity?.({
       ref: "@e1",
@@ -2337,7 +2341,7 @@ describe("web and browser tools baselines", () => {
       protectedInput: { kind: "one-time-code", purpose: "account@example.com" },
     }, context);
     const formResolution = await protectedForm.resolveSecurity?.({
-      revision: 1,
+      identity: browserIdentity(1),
       tabRef: "@t1",
       submitRef: "@e2",
       fields: [{ id: "password", ref: "@e1", kind: "password" }],
@@ -2408,7 +2412,7 @@ describe("web and browser tools baselines", () => {
         snapshot: {
           sessionId: input.sessionId ?? "missing",
           url: input.url,
-          revision: 1,
+          identity: browserIdentity(1),
           observedAt: "2026-08-13T00:00:00.000Z"
         },
         metadata: {
@@ -2514,7 +2518,7 @@ describe("web and browser tools baselines", () => {
     const result = await snapshot.run({});
 
     expect(result.ok).toBe(true);
-    expect(result.content).toContain("[Compact viewport snapshot]");
+    expect(result.content).toContain("Identity: documentEpoch=1 actionRevision=1 observationId=1");
     expect(result.content).toContain("Snapshot text.");
     expect(result.content).toContain("Interactive elements:");
     expect(result.content).toContain("@e1 button Mock Button");
@@ -2535,7 +2539,7 @@ describe("web and browser tools baselines", () => {
         snapshot: async () => ({
           sessionId: "session-protected",
           url: "https://portal.example.com",
-          revision: 4,
+          identity: browserIdentity(4),
           observedAt: "2026-08-14T00:00:00.000Z",
           sensitiveInputActive: true,
           tab: { ref: "@t1", url: "https://portal.example.com", controlled: true },
@@ -2560,7 +2564,7 @@ describe("web and browser tools baselines", () => {
         snapshot: async () => ({
           sessionId: "session-1",
           url: "https://portal.example.com/login",
-          revision: 9,
+          identity: browserIdentity(9),
           observedAt: "2026-08-13T00:00:00.000Z",
           tab: { ref: "@t1", url: "https://portal.example.com/login", controlled: true },
           elements: [
@@ -2575,7 +2579,7 @@ describe("web and browser tools baselines", () => {
     const result = await snapshot.run({});
 
     expect(result.content).toContain("request all related values in one browser.fill_protected_form call");
-    expect(result.content).toContain("revision=9, tabRef=@t1, fields=[@e3:account-identifier, @e4:password]");
+    expect(result.content).toContain(`identity=${JSON.stringify(browserIdentity(9))}, tabRef=@t1, fields=[@e3:account-identifier, @e4:password]`);
   });
 
   it("renders full browser snapshot headers and concise element state", async () => {
@@ -2585,7 +2589,7 @@ describe("web and browser tools baselines", () => {
         snapshot: async () => ({
           sessionId: "session-1",
           url: "https://example.com",
-          revision: 1,
+          identity: browserIdentity(1),
           observedAt: "2026-08-13T00:00:00.000Z",
           title: "Snapshot Title",
           text: "Snapshot text.",
@@ -2625,7 +2629,7 @@ describe("web and browser tools baselines", () => {
         snapshot: async () => ({
           sessionId: "session-1",
           url: "https://example.com",
-          revision: 1,
+          identity: browserIdentity(1),
           observedAt: "2026-08-13T00:00:00.000Z",
           text: "x".repeat(9_000),
           elements: []
@@ -2774,7 +2778,7 @@ describe("web and browser tools baselines", () => {
       snapshot: async () => ({
         sessionId: "session-1",
         url: "https://example.com",
-        revision: 1,
+        identity: browserIdentity(1),
         observedAt: "2026-08-13T00:00:00.000Z",
         text: "Page text.",
         pendingDialogs: [{ id: "dialog-1", type: "alert", message: "Careful" }],
@@ -2825,7 +2829,7 @@ describe("web and browser tools baselines", () => {
       locator: { role: "button", name: "Recorded Button" }
     });
 
-    expect(found.content).toContain("@e1 revision=1 tab=@t1 button \"Recorded Button\"");
+    expect(found.content).toContain(`@e1 identity=${JSON.stringify(browserIdentity(1))} tab=@t1 button \"Recorded Button\"`);
     expect(selected.ok).toBe(true);
     expect(extracted.content).toContain("Text: Recorded Button");
     expect(calls).toEqual(expect.arrayContaining([
@@ -2842,11 +2846,11 @@ describe("web and browser tools baselines", () => {
         throw new BrowserTargetError({
           reason: "browser-target-ambiguous",
           message: "Browser locator matched 2 current elements; refine the locator instead of guessing.",
-          currentRevision: 9,
+          currentIdentity: browserIdentity(9),
           currentTabRef: "@t2",
           candidates: [
-            { ref: "@e1", revision: 9, tabRef: "@t2", role: "button", name: "Open" },
-            { ref: "@e2", revision: 9, tabRef: "@t2", role: "button", name: "Open" }
+            { ref: "@e1", identity: browserIdentity(9), tabRef: "@t2", role: "button", name: "Open" },
+            { ref: "@e2", identity: browserIdentity(9), tabRef: "@t2", role: "button", name: "Open" }
           ]
         });
       }
@@ -2861,7 +2865,7 @@ describe("web and browser tools baselines", () => {
       metadata: {
         backend: "mock",
         reason: "browser-target-ambiguous",
-        currentRevision: 9,
+        currentIdentity: browserIdentity(9),
         currentTabRef: "@t2",
         candidates: [{ ref: "@e1" }, { ref: "@e2" }]
       }
@@ -2877,15 +2881,15 @@ describe("web and browser tools baselines", () => {
         return {
           sessionId: input.sessionId ?? "session-1",
           url: "https://example.com/products/loans",
-          revision: 7,
+          identity: browserIdentity(7),
           observedAt: "2026-08-13T00:00:00.000Z",
           readiness: "complete",
           text: "This full snapshot text should not be repeated after an action.",
           elements: [{ ref: "@e2", role: "button", name: "View product" }],
           actionDelta: {
             outcome: "changed",
-            beforeRevision: 6,
-            afterRevision: 7,
+            beforeIdentity: browserIdentity(6),
+            afterIdentity: browserIdentity(7),
             waitCondition: "text",
             conditionMet: true,
             url: {
@@ -2915,7 +2919,7 @@ describe("web and browser tools baselines", () => {
       waitTimeoutMs: 3_000
     });
     expect(result.content).toContain("Action completed with an observable page change.");
-    expect(result.content).toContain("Revision: 6 → 7");
+    expect(result.content).toContain("Identity: documentEpoch=1 actionRevision=6 observationId=6 → documentEpoch=1 actionRevision=7 observationId=7");
     expect(result.content).toContain("Added: button \"View product\"");
     expect(result.content).not.toContain("full snapshot text");
   });
@@ -2926,12 +2930,12 @@ describe("web and browser tools baselines", () => {
       press: async (input) => ({
         sessionId: input.sessionId ?? "session-1",
         url: "https://example.com",
-        revision: 2,
+        identity: browserIdentity(2),
         observedAt: "2026-08-13T00:00:00.000Z",
         actionDelta: {
           outcome: "timeout",
-          beforeRevision: 2,
-          afterRevision: 2,
+          beforeIdentity: browserIdentity(2),
+          afterIdentity: browserIdentity(2),
           waitCondition: "dialog",
           conditionMet: false,
           url: { changed: false, after: "https://example.com" }
@@ -2945,7 +2949,8 @@ describe("web and browser tools baselines", () => {
     expect(result.content).toContain("Action wait timed out");
     expect(result.content).not.toContain("Action completed");
     expect(result.content).toContain("Current state:");
-    expect(result.content).toContain("[Compact viewport snapshot]");
+    expect(result.content).toContain("Identity: documentEpoch=1 actionRevision=2 observationId=2");
+    expect(result.content).toContain("Actionable refs: none");
   });
 
   it("writes browser.screenshot under a temp workspace root", async () => {

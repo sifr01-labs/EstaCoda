@@ -13,6 +13,7 @@ import type {
   BrowserLocatorCandidate,
   BrowserNavigateInput,
   BrowserSnapshot,
+  BrowserStateIdentity,
   BrowserTab,
   WebExtractionResult
 } from "../contracts/browser.js";
@@ -22,7 +23,8 @@ import { resolveGlobalStateHome } from "../config/profile-home.js";
 import { createBrowserDebugSession, type BrowserDebugSession } from "../browser/browser-debug.js";
 import { createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
 import { browserSessionStateReason } from "../browser/session-state.js";
-import { browserTargetFailureMetadata } from "../browser/browser-locator.js";
+import { browserTargetFailureMetadata, isBrowserStateIdentity } from "../browser/browser-locator.js";
+import { isActionableBrowserRole } from "../browser/snapshot-state.js";
 import { deriveBrowserSessionKey } from "../browser/session-key.js";
 import { maybeSummarizeSnapshot, truncateSnapshotText } from "../browser/snapshot-summarizer.js";
 import { isAlwaysBlockedUrl, isSafeUrl, redactUrlForMetadata, scanUrlForSecrets, type ResolveHostnameFn } from "../browser/url-safety.js";
@@ -34,6 +36,7 @@ import {
 } from "./vision-tools.js";
 import { inheritEphemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 import { createTimeoutSignal } from "../utils/timeout-signal.js";
+import { redactSensitiveText } from "../utils/redaction.js";
 import {
   registerDefaultWebResearchProviders,
   selectWebResearchProvider,
@@ -284,7 +287,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
     createBrowserFindTool(browserBackend, deriveBrowserInput),
     createBrowserActionTool({
       name: "browser.click",
-      description: "Click by semantic locator, or by a ref with its source revision and tabRef. Ambiguous locators return candidates instead of guessing.",
+      description: "Click by semantic locator, or by a ref with its source canonical identity and tabRef. Ambiguous locators return candidates instead of guessing.",
       progressLabel: "clicking browser element",
       browserBackend,
       deriveBrowserInput,
@@ -303,7 +306,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
     createBrowserProtectedFormTool(browserBackend, deriveBrowserInput),
     createBrowserActionTool({
       name: "browser.select",
-      description: "Select an option by value or visible option text using a semantic locator, or a ref with its source revision and tabRef.",
+      description: "Select an option by value or visible option text using a semantic locator, or a ref with its source canonical identity and tabRef.",
       progressLabel: "selecting browser option",
       browserBackend,
       deriveBrowserInput,
@@ -1374,7 +1377,7 @@ function createBrowserTypeTool(
         },
         submitRef: {
           type: "string",
-          description: "Optional same-revision submit control for one-time-code protected input. Providing the code will immediately submit this control locally.",
+          description: "Optional same-state submit control for one-time-code protected input. Providing the code will immediately submit this control locally.",
         },
         sessionId: { type: "string" },
         ...browserWaitInputProperties(),
@@ -1462,8 +1465,8 @@ function createBrowserTypeTool(
               documentChanged: deliveryResult.documentChanged,
               challengeState: deliveryResult.challengeState,
               conditionMet: deliveryResult.conditionMet,
-              beforeRevision: deliveryResult.beforeRevision,
-              afterRevision: deliveryResult.afterRevision,
+              beforeIdentity: deliveryResult.beforeIdentity,
+              afterIdentity: deliveryResult.afterIdentity,
               sensitiveInputActive: deliveryResult.sensitiveInputActive,
             },
             snapshot: deliveryResult.snapshot,
@@ -1485,7 +1488,7 @@ function renderProtectedDeliveryResult(
     ].join("\n");
   }
   if (result.submission === "not-requested") {
-    return `Protected input delivered. Current browser revision: ${result.afterRevision}.`;
+    return `Protected input delivered. Current browser identity: ${renderBrowserIdentity(result.afterIdentity)}.`;
   }
   const submission = result.submission === "automatic"
     ? "The page submitted the challenge automatically."
@@ -1501,7 +1504,7 @@ function renderProtectedDeliveryResult(
     "Protected input delivered without exposing its value.",
     submission,
     challenge,
-    `Revision: ${result.beforeRevision} → ${result.afterRevision}.`,
+    `Identity: ${renderBrowserIdentity(result.beforeIdentity)} → ${renderBrowserIdentity(result.afterIdentity)}.`,
   ].join("\n");
 }
 
@@ -1516,7 +1519,7 @@ type BrowserProtectedFormInput = {
   purpose?: string;
   fields?: BrowserProtectedFormField[];
   sessionId?: string;
-  revision?: number;
+  identity?: BrowserStateIdentity;
   tabRef?: string;
   submitRef?: string;
 };
@@ -1534,11 +1537,11 @@ function createBrowserProtectedFormTool(
       properties: {
         purpose: { type: "string", description: "Overall operator-visible purpose, such as Sign in to MTN." },
         sessionId: { type: "string" },
-        revision: { type: "number", description: "Snapshot revision that produced every field ref." },
+        identity: browserStateIdentitySchema("Canonical snapshot identity that produced every field ref."),
         tabRef: { type: "string", description: "Controlled tab that produced every field ref." },
         submitRef: {
           type: "string",
-          description: "Optional same-revision authentication control. Supplying every protected value will immediately submit this prebound control locally.",
+          description: "Optional same-state authentication control. Supplying every protected value will immediately submit this prebound control locally.",
         },
         fields: {
           type: "array",
@@ -1557,7 +1560,7 @@ function createBrowserProtectedFormTool(
           },
         },
       },
-      required: ["purpose", "revision", "tabRef", "fields"],
+      required: ["purpose", "identity", "tabRef", "fields"],
     },
     riskClass: "read-only-network",
     resolveSecurity: (input: BrowserProtectedFormInput, context) =>
@@ -1580,7 +1583,7 @@ function createBrowserProtectedFormTool(
       for (const field of parsed.fields) {
         const destination = await browserBackend.prepareProtectedField(deriveBrowserInput({
           sessionId: input.sessionId,
-          revision: parsed.revision,
+          identity: parsed.identity,
           tabRef: parsed.tabRef,
           ref: field.ref,
           ...(parsed.submitRef === undefined ? {} : { submitRef: parsed.submitRef }),
@@ -1640,8 +1643,8 @@ function createBrowserProtectedFormTool(
               documentChanged: deliveryResult.documentChanged,
               challengeState: deliveryResult.challengeState,
               conditionMet: deliveryResult.conditionMet,
-              beforeRevision: deliveryResult.beforeRevision,
-              afterRevision: deliveryResult.afterRevision,
+              beforeIdentity: deliveryResult.beforeIdentity,
+              afterIdentity: deliveryResult.afterIdentity,
               sensitiveInputActive: deliveryResult.sensitiveInputActive,
             },
             snapshot: deliveryResult.snapshot,
@@ -1654,14 +1657,14 @@ function createBrowserProtectedFormTool(
 
 function parseBrowserProtectedForm(input: BrowserProtectedFormInput): {
   purpose: string;
-  revision: number;
+  identity: BrowserStateIdentity;
   tabRef: string;
   submitRef?: string;
   fields: Array<{ id: string; ref: string; kind: SecureInputKind; purpose?: string }>;
 } | undefined {
-  if (!hasOnlyKeys(input, ["purpose", "fields", "sessionId", "revision", "tabRef", "submitRef"])) return undefined;
+  if (!hasOnlyKeys(input, ["purpose", "fields", "sessionId", "identity", "tabRef", "submitRef"])) return undefined;
   if (typeof input.purpose !== "string" || input.purpose.trim().length === 0 || input.purpose.length > 500) return undefined;
-  if (!Number.isSafeInteger(input.revision) || input.revision! < 0) return undefined;
+  if (!isBrowserStateIdentity(input.identity)) return undefined;
   if (typeof input.tabRef !== "string" || input.tabRef.length === 0 || input.tabRef.length > 256) return undefined;
   if (input.submitRef !== undefined && (typeof input.submitRef !== "string" || !/^@e[1-9]\d*$/u.test(input.submitRef))) return undefined;
   if (!Array.isArray(input.fields) || input.fields.length < 1 || input.fields.length > 8) return undefined;
@@ -1687,7 +1690,7 @@ function parseBrowserProtectedForm(input: BrowserProtectedFormInput): {
   if (input.submitRef !== undefined && refs.has(input.submitRef)) return undefined;
   return {
     purpose: input.purpose.trim(),
-    revision: input.revision!,
+    identity: { ...input.identity },
     tabRef: input.tabRef,
     ...(input.submitRef === undefined ? {} : { submitRef: input.submitRef }),
     fields,
@@ -1784,7 +1787,7 @@ function createBrowserExtractTool(
 ): RegisteredTool {
   return {
     name: "browser.extract",
-    description: "Extract bounded text/value from one current browser element selected semantically, or by a ref with its source revision and tabRef.",
+    description: "Extract bounded text/value from one current browser element selected semantically, or by a ref with its source canonical identity and tabRef.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1919,10 +1922,10 @@ function renderBrowserSnapshot(snapshot: BrowserSnapshot, options: BrowserSnapsh
   const protectedFormGuidance = renderProtectedFormGuidance(snapshot);
   const content = [
     options.full === true ? "[Full page snapshot]" : "[Compact viewport snapshot]",
-    `Revision: ${snapshot.revision}`,
+    `Identity: ${renderBrowserIdentity(snapshot.identity)}`,
     `Observed: ${snapshot.observedAt}`,
     snapshot.readiness === undefined ? undefined : `Readiness: ${snapshot.readiness}`,
-    snapshot.tab === undefined ? undefined : `Controlled tab: ${renderBrowserTab(snapshot.tab)}`,
+    snapshot.tab === undefined ? undefined : `Controlled tab: ${renderSafeBrowserTab(snapshot.tab)}`,
     snapshot.openedTabs === undefined || snapshot.openedTabs.length === 0 ? undefined : `Opened tabs: ${snapshot.openedTabs.map((tab) => tab.ref).join(", ")}`,
     "",
     snapshot.text,
@@ -1954,6 +1957,13 @@ function renderBrowserSnapshot(snapshot: BrowserSnapshot, options: BrowserSnapsh
   return truncateRenderedBrowserSnapshot(content, options.maxChars);
 }
 
+function renderSafeBrowserTab(tab: BrowserTab): string {
+  const title = tab.title?.trim() === "" || tab.title === undefined
+    ? "Untitled"
+    : redactSensitiveText(tab.title).slice(0, 240);
+  return `${redactSensitiveText(tab.ref).slice(0, 64)}${tab.controlled ? " [controlled]" : ""} ${title} — ${redactUrlForMetadata(tab.url)}`;
+}
+
 function renderProtectedFormGuidance(snapshot: BrowserSnapshot): string | undefined {
   if (snapshot.sensitiveInputActive === true || snapshot.tab === undefined) return undefined;
   const candidates = (snapshot.elements ?? []).filter((element) =>
@@ -1968,7 +1978,7 @@ function renderProtectedFormGuidance(snapshot: BrowserSnapshot): string | undefi
   if (account.length !== 1 || password.length !== 1 || account[0]!.ref === password[0]!.ref) return undefined;
   return [
     "Protected form detected: request all related values in one browser.fill_protected_form call; do not request them one at a time.",
-    `Use revision=${snapshot.revision}, tabRef=${snapshot.tab.ref}, fields=[${account[0]!.ref}:account-identifier, ${password[0]!.ref}:password].`
+    `Use identity=${JSON.stringify(snapshot.identity)}, tabRef=${snapshot.tab.ref}, fields=[${account[0]!.ref}:account-identifier, ${password[0]!.ref}:password].`
   ].join("\n");
 }
 
@@ -1983,7 +1993,7 @@ function renderBrowserActionDelta(delta: BrowserActionDelta): string {
     : `URL: unchanged (${delta.url.after})`;
   return [
     heading,
-    `Revision: ${delta.beforeRevision} → ${delta.afterRevision}`,
+    `Identity: ${delta.beforeIdentity === undefined ? "new session" : renderBrowserIdentity(delta.beforeIdentity)} → ${renderBrowserIdentity(delta.afterIdentity)}`,
     `Wait: ${delta.waitCondition} (${delta.conditionMet ? "met" : "not met"})`,
     url,
     ...(delta.addedElements ?? []).map((element) => `Added: ${renderDeltaElement(element)}`),
@@ -2001,16 +2011,41 @@ function renderBrowserActionResult(snapshot: BrowserSnapshot, maxChars: number):
   if (snapshot.actionDelta === undefined) {
     return renderBrowserSnapshot(snapshot, { maxChars });
   }
-  const delta = renderBrowserActionDelta(snapshot.actionDelta);
-  if (snapshot.actionDelta.outcome !== "timeout") {
-    return delta;
-  }
   return truncateRenderedBrowserSnapshot([
-    delta,
+    renderBrowserActionDelta(snapshot.actionDelta),
     "",
     "Current state:",
-    renderBrowserSnapshot(snapshot)
+    renderBrowserActionCurrentState(snapshot)
   ].join("\n"), maxChars);
+}
+
+function renderBrowserActionCurrentState(snapshot: BrowserSnapshot): string {
+  if (snapshot.sensitiveInputActive === true) {
+    return [
+      `Identity: ${renderBrowserIdentity(snapshot.identity)}`,
+      "Protected authentication transaction active.",
+      "Page content and actionable refs are intentionally suppressed.",
+    ].join("\n");
+  }
+  const refs = (snapshot.elements ?? [])
+    .filter((element) => element.hidden !== true && element.disabled !== true && isActionableBrowserRole(element.role))
+    .slice(0, 20);
+  return [
+    `Identity: ${renderBrowserIdentity(snapshot.identity)}`,
+    `URL: ${redactUrlForMetadata(snapshot.url)}`,
+    snapshot.title === undefined ? undefined : `Title: ${redactSensitiveText(snapshot.title).slice(0, 240)}`,
+    snapshot.readiness === undefined ? undefined : `Readiness: ${snapshot.readiness}`,
+    snapshot.tab === undefined ? undefined : `Controlled tab: ${renderSafeBrowserTab(snapshot.tab)}`,
+    refs.length === 0 ? "Actionable refs: none" : "Current actionable refs:",
+    ...refs.map((element) => [
+      element.ref,
+      `identity=${JSON.stringify(snapshot.identity)}`,
+      snapshot.tab === undefined ? undefined : `tab=${snapshot.tab.ref}`,
+      element.role,
+      element.name === undefined ? undefined : JSON.stringify(redactSensitiveText(element.name).slice(0, 160)),
+      element.label === undefined ? undefined : `label=${JSON.stringify(redactSensitiveText(element.label).slice(0, 160))}`,
+    ].filter((part): part is string => part !== undefined).join(" ")),
+  ].filter((line): line is string => line !== undefined).join("\n");
 }
 
 function renderDeltaElement(element: BrowserActionDeltaElement): string {
@@ -2021,7 +2056,7 @@ function renderDeltaElement(element: BrowserActionDeltaElement): string {
 
 function renderBrowserFindResult(result: BrowserFindResult): string {
   if (result.status === "not-found") {
-    return `No visible, enabled browser element matched at revision ${result.revision} on tab ${result.tabRef}.`;
+    return `No visible, enabled browser element matched at ${renderBrowserIdentity(result.identity)} on tab ${result.tabRef}.`;
   }
   const heading = result.status === "ambiguous"
     ? `Locator is ambiguous: ${result.candidates.length} candidates matched. Refine it instead of guessing.`
@@ -2031,7 +2066,7 @@ function renderBrowserFindResult(result: BrowserFindResult): string {
 
 function renderBrowserLocatorCandidate(candidate: BrowserLocatorCandidate): string {
   return [
-    `${candidate.ref} revision=${candidate.revision} tab=${candidate.tabRef}`,
+    `${candidate.ref} identity=${JSON.stringify(candidate.identity)} tab=${candidate.tabRef}`,
     candidate.role,
     candidate.name === undefined ? undefined : JSON.stringify(candidate.name),
     candidate.label === undefined ? undefined : `label=${JSON.stringify(candidate.label)}`,
@@ -2049,15 +2084,15 @@ function browserLocatorSchema(): Record<string, unknown> {
       label: { type: "string" },
       withinText: { type: "string" },
       exact: { type: "boolean" },
-      revision: { type: "number" }
+      identity: browserStateIdentitySchema("Optional canonical state binding for this semantic locator.")
     }
   };
 }
 
 function browserTargetInputProperties(): Record<string, unknown> {
   return {
-    ref: { type: "string", description: "Element ref from a snapshot; revision and tabRef are required with refs." },
-    revision: { type: "number", description: "Snapshot revision that produced ref." },
+    ref: { type: "string", description: "Element ref from a snapshot; canonical identity and tabRef are required with refs." },
+    identity: browserStateIdentitySchema("Canonical snapshot identity that produced ref."),
     tabRef: { type: "string", description: "Controlled tab that produced ref." },
     locator: browserLocatorSchema()
   };
@@ -2066,8 +2101,26 @@ function browserTargetInputProperties(): Record<string, unknown> {
 function browserTargetOneOf(): Array<{ required: string[] }> {
   return [
     { required: ["locator"] },
-    { required: ["ref", "revision", "tabRef"] }
+    { required: ["ref", "identity", "tabRef"] }
   ];
+}
+
+function browserStateIdentitySchema(description: string): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    description,
+    properties: {
+      documentEpoch: { type: "integer", minimum: 1 },
+      actionRevision: { type: "integer", minimum: 1 },
+      observationId: { type: "integer", minimum: 1 },
+    },
+    required: ["documentEpoch", "actionRevision", "observationId"],
+  };
+}
+
+function renderBrowserIdentity(identity: BrowserStateIdentity): string {
+  return `documentEpoch=${identity.documentEpoch} actionRevision=${identity.actionRevision} observationId=${identity.observationId}`;
 }
 
 function browserWaitInputProperties(): Record<string, unknown> {

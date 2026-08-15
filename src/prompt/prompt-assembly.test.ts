@@ -97,7 +97,7 @@ describe("assembleProviderPrompt", () => {
           controlled: true
         },
         tabs: [{ ref: "@t2", url: "https://example.com/current", title: "Current tab", controlled: true }],
-        revision: 7,
+        identity: { documentEpoch: 2, actionRevision: 7, observationId: 9 },
         readiness: "complete",
         freshness: "current"
       },
@@ -1029,7 +1029,7 @@ describe("assembleProviderContinuationPrompt", () => {
           controlled: true
         },
         tabs: [{ ref: "@t4", url: "https://example.com/oauth", title: "OAuth V1", controlled: true }],
-        revision: 11,
+        identity: { documentEpoch: 3, actionRevision: 11, observationId: 14 },
         readiness: "interactive",
         freshness: "current",
         lastAction: { tool: "browser.switch_tab", status: "succeeded", changed: true }

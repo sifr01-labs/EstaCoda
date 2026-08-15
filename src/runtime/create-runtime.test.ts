@@ -1126,9 +1126,9 @@ describe("createRuntime MCP trust gating", () => {
             "requiredConfig": undefined,
             "riskClass": "read-only-network",
             "schemaAliasOrder": [
+              "identity",
               "locator",
               "ref",
-              "revision",
               "sessionId",
               "tabRef",
               "waitFor",
@@ -1149,10 +1149,10 @@ describe("createRuntime MCP trust gating", () => {
             "requiredConfig": undefined,
             "riskClass": "read-only-network",
             "schemaAliasOrder": [
+              "identity",
               "locator",
               "protectedInput",
               "ref",
-              "revision",
               "sessionId",
               "submitRef",
               "tabRef",
@@ -1176,8 +1176,8 @@ describe("createRuntime MCP trust gating", () => {
             "riskClass": "read-only-network",
             "schemaAliasOrder": [
               "fields",
+              "identity",
               "purpose",
-              "revision",
               "sessionId",
               "submitRef",
               "tabRef",
@@ -1197,9 +1197,9 @@ describe("createRuntime MCP trust gating", () => {
             "requiredConfig": undefined,
             "riskClass": "read-only-network",
             "schemaAliasOrder": [
+              "identity",
               "locator",
               "ref",
-              "revision",
               "sessionId",
               "tabRef",
               "value",
@@ -1221,9 +1221,9 @@ describe("createRuntime MCP trust gating", () => {
             "requiredConfig": undefined,
             "riskClass": "read-only-network",
             "schemaAliasOrder": [
+              "identity",
               "locator",
               "ref",
-              "revision",
               "sessionId",
               "tabRef",
             ],
@@ -3838,7 +3838,7 @@ describe("createRuntime browser backend wiring", () => {
           snapshot: {
             sessionId: "injected",
             url: input.url,
-            revision: 1,
+            identity: { documentEpoch: 1, actionRevision: 1, observationId: 1 },
             observedAt: "1970-01-01T00:00:00.000Z",
             text: "Injected backend",
             elements: []
@@ -3878,7 +3878,7 @@ describe("createRuntime browser backend wiring", () => {
         snapshot: {
           sessionId: "injected",
           url: input.url,
-          revision: 1,
+          identity: { documentEpoch: 1, actionRevision: 1, observationId: 1 },
           observedAt: "1970-01-01T00:00:00.000Z",
           text: "Injected backend",
           elements: []

@@ -102,8 +102,7 @@ export class CDPSupervisor {
   }
 
   async getSnapshot(sessionId = "cdp-supervisor", options: BrowserSnapshotOptions = {}): Promise<SupervisorSnapshot> {
-    const { revision: _revision, observedAt: _observedAt, ...snapshot } =
-      await evaluateCdpSnapshot(this.#requireClient(), sessionId, options);
+    const snapshot = await evaluateCdpSnapshot(this.#requireClient(), sessionId, options);
     return {
       ...snapshot,
       pendingDialogs: [...this.#pendingDialogs.values()],
@@ -403,7 +402,7 @@ function originForUrl(url: string): string {
   }
 }
 
-export async function evaluateCdpSnapshot(client: CdpClient, sessionId: string, options: BrowserSnapshotOptions = {}): Promise<BrowserSnapshot> {
+export async function evaluateCdpSnapshot(client: CdpClient, sessionId: string, options: BrowserSnapshotOptions = {}): Promise<BrowserSnapshotInput> {
   const axSnapshot = await evaluateAxSnapshot(client, sessionId, options).catch(() => undefined);
   if (axSnapshot !== undefined) {
     return axSnapshot;
@@ -416,7 +415,7 @@ export async function evaluateCdpSnapshot(client: CdpClient, sessionId: string, 
   return parseCdpSnapshot(evaluated.result?.value, sessionId);
 }
 
-async function evaluateAxSnapshot(client: CdpClient, sessionId: string, options: BrowserSnapshotOptions): Promise<BrowserSnapshot | undefined> {
+async function evaluateAxSnapshot(client: CdpClient, sessionId: string, options: BrowserSnapshotOptions): Promise<BrowserSnapshotInput | undefined> {
   const axTree = await client.send("Accessibility.getFullAXTree") as unknown;
   const candidates = parseAxElements(axTree, options);
   const elements = await bindAxElements(client, candidates, options);
@@ -436,7 +435,7 @@ async function evaluateAxSnapshot(client: CdpClient, sessionId: string, options:
   };
 }
 
-async function evaluatePageSnapshotMetadata(client: CdpClient): Promise<Omit<BrowserSnapshot, "sessionId" | "elements"> | undefined> {
+async function evaluatePageSnapshotMetadata(client: CdpClient): Promise<Omit<BrowserSnapshotInput, "sessionId" | "elements"> | undefined> {
   const evaluated = await client.send("Runtime.evaluate", {
     expression: pageSnapshotMetadataExpression(),
     returnByValue: true
@@ -725,16 +724,14 @@ function axBackendDomNodeId(node: Record<string, unknown>): number | undefined {
   return typeof raw === "number" && Number.isInteger(raw) && raw > 0 ? raw : undefined;
 }
 
-function parsePageSnapshotMetadata(value: unknown): Omit<BrowserSnapshot, "sessionId" | "elements"> | undefined {
+function parsePageSnapshotMetadata(value: unknown): Omit<BrowserSnapshotInput, "sessionId" | "elements"> | undefined {
   if (typeof value !== "string") {
     return undefined;
   }
   try {
-    const parsed = JSON.parse(value) as Partial<BrowserSnapshot>;
+    const parsed = JSON.parse(value) as Partial<BrowserSnapshotInput>;
     return {
       url: typeof parsed.url === "string" ? parsed.url : "about:blank",
-      revision: 1,
-      observedAt: new Date().toISOString(),
       ...(typeof parsed.title === "string" ? { title: parsed.title } : {}),
       readiness: parseReadiness(parsed.readiness),
       ...(typeof parsed.text === "string" ? { text: parsed.text } : { text: "" })
@@ -744,17 +741,15 @@ function parsePageSnapshotMetadata(value: unknown): Omit<BrowserSnapshot, "sessi
   }
 }
 
-export function parseCdpSnapshot(value: unknown, sessionId: string): BrowserSnapshot {
+export function parseCdpSnapshot(value: unknown, sessionId: string): BrowserSnapshotInput {
   if (typeof value !== "string") {
     return emptySnapshot(sessionId, "");
   }
   try {
-    const parsed = JSON.parse(value) as BrowserSnapshot;
+    const parsed = JSON.parse(value) as BrowserSnapshotInput;
     return {
       sessionId,
       url: parsed.url,
-      revision: 1,
-      observedAt: new Date().toISOString(),
       readiness: parseReadiness(parsed.readiness),
       title: parsed.title,
       text: parsed.text,
@@ -765,12 +760,10 @@ export function parseCdpSnapshot(value: unknown, sessionId: string): BrowserSnap
   }
 }
 
-function emptySnapshot(sessionId: string, text: string): BrowserSnapshot {
+function emptySnapshot(sessionId: string, text: string): BrowserSnapshotInput {
   return {
     sessionId,
     url: "about:blank",
-    revision: 1,
-    observedAt: new Date().toISOString(),
     readiness: "unknown",
     text,
     elements: []

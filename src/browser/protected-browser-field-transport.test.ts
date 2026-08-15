@@ -108,7 +108,7 @@ function localBackend(overrides: Partial<BrowserBackend> = {}): BrowserBackend {
       snapshot: {
         sessionId: input.sessionId ?? "browser-session",
         url: input.url,
-        revision: 1,
+        identity: { documentEpoch: 1, actionRevision: 1, observationId: 1 },
         observedAt: "2026-08-13T00:00:00.000Z",
       },
     }),

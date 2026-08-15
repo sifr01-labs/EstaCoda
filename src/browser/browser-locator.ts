@@ -3,7 +3,8 @@ import type {
   BrowserFindResult,
   BrowserLocator,
   BrowserLocatorCandidate,
-  BrowserSnapshot
+  BrowserSnapshot,
+  BrowserStateIdentity
 } from "../contracts/browser.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 
@@ -13,6 +14,7 @@ const MAX_CANDIDATES = 8;
 export type BrowserTargetFailureReason =
   | "invalid-browser-target"
   | "stale-browser-ref"
+  | "browser-ref-wrong-session"
   | "browser-ref-wrong-tab"
   | "browser-target-not-found"
   | "browser-target-ambiguous"
@@ -22,21 +24,24 @@ export type BrowserTargetFailureReason =
 export class BrowserTargetError extends Error {
   readonly reason: BrowserTargetFailureReason;
   readonly candidates: BrowserLocatorCandidate[];
-  readonly currentRevision?: number;
+  readonly currentSessionId?: string;
+  readonly currentIdentity?: BrowserStateIdentity;
   readonly currentTabRef?: string;
 
   constructor(input: {
     reason: BrowserTargetFailureReason;
     message: string;
     candidates?: BrowserLocatorCandidate[];
-    currentRevision?: number;
+    currentSessionId?: string;
+    currentIdentity?: BrowserStateIdentity;
     currentTabRef?: string;
   }) {
     super(input.message);
     this.name = "BrowserTargetError";
     this.reason = input.reason;
     this.candidates = input.candidates?.slice(0, MAX_CANDIDATES) ?? [];
-    this.currentRevision = input.currentRevision;
+    this.currentSessionId = input.currentSessionId;
+    this.currentIdentity = input.currentIdentity;
     this.currentTabRef = input.currentTabRef;
   }
 }
@@ -44,15 +49,15 @@ export class BrowserTargetError extends Error {
 export function findBrowserLocator(snapshot: BrowserSnapshot, locator: BrowserLocator): BrowserFindResult {
   const normalized = normalizeBrowserLocator(locator);
   const tabRef = requireSnapshotTab(snapshot);
-  assertLocatorRevision(normalized, snapshot, tabRef);
+  assertLocatorIdentity(normalized, snapshot, tabRef);
   const available = (snapshot.elements ?? []).filter((element) => element.hidden !== true && element.disabled !== true);
   const candidates = available
     .filter((element) => locatorMatches(element, normalized))
     .slice(0, MAX_CANDIDATES)
-    .map((element) => locatorCandidate(element, snapshot.revision, tabRef));
+    .map((element) => locatorCandidate(element, snapshot.identity, tabRef));
   return {
     sessionId: snapshot.sessionId,
-    revision: snapshot.revision,
+    identity: { ...snapshot.identity },
     tabRef,
     status: candidates.length === 0 ? "not-found" : candidates.length === 1 ? "found" : "ambiguous",
     candidates
@@ -84,17 +89,26 @@ export function resolveBrowserTarget(snapshot: BrowserSnapshot, input: BrowserAc
         reason: "browser-target-ambiguous",
         message: `Browser locator matched ${result.candidates.length} current elements; refine the locator instead of guessing.`,
         candidates: result.candidates,
-        currentRevision: snapshot.revision,
+        currentSessionId: snapshot.sessionId,
+        currentIdentity: snapshot.identity,
         currentTabRef: tabRef
       });
     }
     return result.candidates[0]!;
   }
 
-  if (!Number.isInteger(input.revision) || (input.revision ?? 0) <= 0 || input.tabRef?.trim().length === 0 || input.tabRef === undefined) {
+  if (input.sessionId?.trim().length === 0 || input.sessionId === undefined || !isBrowserStateIdentity(input.identity) || input.tabRef?.trim().length === 0 || input.tabRef === undefined) {
     throw targetError(
       "invalid-browser-target",
-      "Ref-based browser actions require the snapshot revision and tabRef that produced the ref.",
+      "Ref-based browser actions require the sessionId, canonical identity, and tabRef that produced the ref.",
+      snapshot,
+      tabRef
+    );
+  }
+  if (input.sessionId !== snapshot.sessionId) {
+    throw targetError(
+      "browser-ref-wrong-session",
+      `Browser ref ${input.ref} belongs to session ${input.sessionId}, but the current session is ${snapshot.sessionId}.`,
       snapshot,
       tabRef
     );
@@ -107,10 +121,10 @@ export function resolveBrowserTarget(snapshot: BrowserSnapshot, input: BrowserAc
       tabRef
     );
   }
-  if (input.revision !== snapshot.revision) {
+  if (!sameRefValidityIdentity(input.identity, snapshot.identity)) {
     throw targetError(
       "stale-browser-ref",
-      `Browser ref ${input.ref} came from revision ${input.revision}, but the current revision is ${snapshot.revision}. Take a fresh snapshot or use a semantic locator.`,
+      `Browser ref ${input.ref} came from documentEpoch=${input.identity.documentEpoch}, actionRevision=${input.identity.actionRevision}, but the current identity is documentEpoch=${snapshot.identity.documentEpoch}, actionRevision=${snapshot.identity.actionRevision}. Take a fresh snapshot or use a semantic locator.`,
       snapshot,
       tabRef
     );
@@ -125,14 +139,15 @@ export function resolveBrowserTarget(snapshot: BrowserSnapshot, input: BrowserAc
   if (element.disabled === true) {
     throw targetError("browser-target-disabled", `Browser element ref is disabled: ${input.ref}`, snapshot, tabRef);
   }
-  return locatorCandidate(element, snapshot.revision, tabRef);
+  return locatorCandidate(element, snapshot.identity, tabRef);
 }
 
 export function browserTargetFailureMetadata(error: unknown): Record<string, unknown> | undefined {
   if (!(error instanceof BrowserTargetError)) return undefined;
   return {
     reason: error.reason,
-    ...(error.currentRevision === undefined ? {} : { currentRevision: error.currentRevision }),
+    ...(error.currentSessionId === undefined ? {} : { currentSessionId: error.currentSessionId }),
+    ...(error.currentIdentity === undefined ? {} : { currentIdentity: error.currentIdentity }),
     ...(error.currentTabRef === undefined ? {} : { currentTabRef: error.currentTabRef }),
     ...(error.candidates.length === 0 ? {} : { candidates: error.candidates })
   };
@@ -146,18 +161,12 @@ function normalizeBrowserLocator(locator: BrowserLocator): BrowserLocator {
     ...(locator.label === undefined ? {} : { label: bounded(locator.label, "label") }),
     ...(locator.withinText === undefined ? {} : { withinText: bounded(locator.withinText, "withinText") }),
     ...(locator.exact === undefined ? {} : { exact: locator.exact }),
-    ...(locator.revision === undefined ? {} : { revision: locator.revision })
+    ...(locator.identity === undefined ? {} : { identity: normalizeBrowserStateIdentity(locator.identity) })
   };
   if (normalized.role === undefined && normalized.name === undefined && normalized.text === undefined && normalized.label === undefined && normalized.withinText === undefined) {
     throw new BrowserTargetError({
       reason: "invalid-browser-target",
       message: "Browser locator requires role, name, text, label, or withinText."
-    });
-  }
-  if (normalized.revision !== undefined && (!Number.isInteger(normalized.revision) || normalized.revision <= 0)) {
-    throw new BrowserTargetError({
-      reason: "invalid-browser-target",
-      message: "Browser locator revision must be a positive integer."
     });
   }
   return normalized;
@@ -196,12 +205,12 @@ function bounded(value: string, field: string): string {
 
 function locatorCandidate(
   element: NonNullable<BrowserSnapshot["elements"]>[number],
-  revision: number,
+  identity: BrowserStateIdentity,
   tabRef: string
 ): BrowserLocatorCandidate {
   return {
     ref: element.ref,
-    revision,
+    identity: { ...identity },
     tabRef,
     ...(element.role === undefined ? {} : { role: safeCandidateText(element.role) }),
     ...(element.name === undefined ? {} : { name: safeCandidateText(element.name) }),
@@ -217,15 +226,15 @@ function safeCandidateText(value: string): string {
 
 function findUnavailableMatch(snapshot: BrowserSnapshot, locator: BrowserLocator, tabRef: string) {
   const normalized = normalizeBrowserLocator(locator);
-  assertLocatorRevision(normalized, snapshot, tabRef);
+  assertLocatorIdentity(normalized, snapshot, tabRef);
   return (snapshot.elements ?? []).find((element) => locatorMatches(element, normalized));
 }
 
-function assertLocatorRevision(locator: BrowserLocator, snapshot: BrowserSnapshot, tabRef: string): void {
-  if (locator.revision !== undefined && locator.revision !== snapshot.revision) {
+function assertLocatorIdentity(locator: BrowserLocator, snapshot: BrowserSnapshot, tabRef: string): void {
+  if (locator.identity !== undefined && !sameRefValidityIdentity(locator.identity, snapshot.identity)) {
     throw targetError(
       "stale-browser-ref",
-      `Browser locator revision ${locator.revision} is stale; the current revision is ${snapshot.revision}.`,
+      `Browser locator identity is stale; the current identity is documentEpoch=${snapshot.identity.documentEpoch}, actionRevision=${snapshot.identity.actionRevision}.`,
       snapshot,
       tabRef
     );
@@ -238,7 +247,8 @@ function requireSnapshotTab(snapshot: BrowserSnapshot): string {
     throw new BrowserTargetError({
       reason: "invalid-browser-target",
       message: "Browser target resolution requires a controlled tab reference.",
-      currentRevision: snapshot.revision
+      currentIdentity: snapshot.identity,
+      currentSessionId: snapshot.sessionId
     });
   }
   return tabRef;
@@ -253,7 +263,30 @@ function targetError(
   return new BrowserTargetError({
     reason,
     message,
-    currentRevision: snapshot.revision,
+    currentIdentity: snapshot.identity,
+    currentSessionId: snapshot.sessionId,
     currentTabRef: tabRef
   });
+}
+
+export function isBrowserStateIdentity(value: unknown): value is BrowserStateIdentity {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const identity = value as Partial<BrowserStateIdentity>;
+  return Number.isSafeInteger(identity.documentEpoch) && (identity.documentEpoch ?? 0) > 0 &&
+    Number.isSafeInteger(identity.actionRevision) && (identity.actionRevision ?? 0) > 0 &&
+    Number.isSafeInteger(identity.observationId) && (identity.observationId ?? 0) > 0;
+}
+
+function normalizeBrowserStateIdentity(identity: BrowserStateIdentity): BrowserStateIdentity {
+  if (!isBrowserStateIdentity(identity)) {
+    throw new BrowserTargetError({
+      reason: "invalid-browser-target",
+      message: "Browser identity requires positive integer documentEpoch, actionRevision, and observationId values."
+    });
+  }
+  return { ...identity };
+}
+
+function sameRefValidityIdentity(left: BrowserStateIdentity, right: BrowserStateIdentity): boolean {
+  return left.documentEpoch === right.documentEpoch && left.actionRevision === right.actionRevision;
 }

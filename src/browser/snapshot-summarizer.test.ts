@@ -216,7 +216,7 @@ describe("maybeSummarizeSnapshot", () => {
     const request = vi.mocked(executor.complete).mock.calls[0]?.[0];
     const prompt = JSON.stringify(request?.messages);
     expect(prompt).toContain("Preserve all useful interactive elements and their exact @eN refs");
-    expect(prompt).toContain("Preserve the snapshot revision and controlled tab ref");
+    expect(prompt).toContain("Preserve the snapshot identity and controlled tab ref");
     expect(prompt).toContain("Revision: 4");
     expect(prompt).toContain("Controlled tab: @t2");
     expect(prompt).toContain("@e1 button Save");

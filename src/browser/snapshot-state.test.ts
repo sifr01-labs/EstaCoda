@@ -1,16 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { BrowserSnapshot } from "../contracts/browser.js";
 import {
   createBrowserSnapshotIdentityState,
-  observeBrowserState
+  observeBrowserState,
+  type BrowserSnapshotInput
 } from "./snapshot-state.js";
 
-function snapshot(overrides: Partial<BrowserSnapshot> = {}): BrowserSnapshot {
+function snapshot(overrides: Partial<BrowserSnapshotInput> = {}): BrowserSnapshotInput {
   return {
     sessionId: "session-1",
     url: "https://example.com",
-    revision: 0,
-    observedAt: "1970-01-01T00:00:00.000Z",
     readiness: "complete",
     text: "Initial",
     tab: { ref: "@t1", url: "https://example.com", controlled: true },
@@ -34,7 +32,7 @@ describe("browser snapshot state identity", () => {
     expect(repeated.snapshot.observedAt).toBe("1970-01-01T00:00:02.000Z");
   });
 
-  it("keeps compact and full observations on the same actionable revision", () => {
+  it("keeps compact and full observations on the same actionable identity", () => {
     const state = createBrowserSnapshotIdentityState();
     const compact = observeBrowserState(snapshot(), state, { frameId: "main", loaderId: "loader-1" });
     const full = observeBrowserState(snapshot({
@@ -45,7 +43,7 @@ describe("browser snapshot state identity", () => {
     }), state, { frameId: "main", loaderId: "loader-1" });
 
     expect(full.identity.actionRevision).toBe(compact.identity.actionRevision);
-    expect(full.snapshot.revision).toBe(compact.snapshot.revision);
+    expect(full.snapshot.identity.actionRevision).toBe(compact.snapshot.identity.actionRevision);
   });
 
   it("does not invalidate unrelated actions when field values change", () => {
