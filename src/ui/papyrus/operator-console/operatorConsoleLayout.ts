@@ -114,7 +114,11 @@ function createRegionDescriptors(
       kind: "secureInput",
       priority: PROMPT_PRIORITY,
       minHeight: 1,
-      desiredHeight: getSecureInputSurfaceDesiredHeight(state.secureInput),
+      desiredHeight: getSecureInputSurfaceDesiredHeight(
+        state.secureInput,
+        terminal.width,
+        state.locale
+      ),
     }];
   }
 

@@ -556,6 +556,7 @@ export type SecureInputSurfaceState = {
   readonly retention: SecureInputRetention;
   readonly expiresAt: string;
   readonly maskedCharacterCount: number;
+  readonly entryActive: boolean;
   readonly validationError?: string;
   readonly focusedAction: SecureInputAction;
   readonly group?: {

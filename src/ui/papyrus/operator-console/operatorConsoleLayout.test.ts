@@ -82,6 +82,7 @@ describe("Papyrus operator console layout", () => {
         retention: "use-once",
         expiresAt: "2026-08-13T10:05:00.000Z",
         maskedCharacterCount: 0,
+        entryActive: false,
         focusedAction: "enter-securely",
       },
     }), { width: 80, height: 24, isTty: true });

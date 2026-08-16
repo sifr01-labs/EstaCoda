@@ -12,13 +12,24 @@ import {
   isolateTechnicalTokens,
   sanitizeBidiControls,
 } from "../../bidi.js";
-import { truncateVisible } from "../../renderers/layout.js";
 import type { ParsedKeypress } from "../../input/parseKeypress.js";
 import { SecretPromptController } from "../input/secretPromptController.js";
 import { stringWidth } from "../screen/stringWidth.js";
 import type { OperatorConsoleRuntimeHost } from "./operatorConsoleRuntimeHost.js";
-import { styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
+import {
+  styleBgColor,
+  styleBold,
+  styleColor,
+  type OperatorConsoleStyle,
+} from "./operatorConsoleStyle.js";
 import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
+import {
+  renderAttentionCardBottomBorder,
+  renderAttentionCardRow,
+  renderAttentionCardTopBorder,
+  resolveAttentionCardGeometry,
+  type AttentionCardGeometry,
+} from "./attentionCardFrame.js";
 import {
   SECURE_INPUT_ACTIONS,
   type SecureInputAction,
@@ -52,42 +63,44 @@ const COPY = {
   en: {
     title: "Secure input required",
     flow: "Flow",
-    field: "Field",
-    kind: "Request",
     purpose: "Purpose",
     destination: "Verified destination",
-    retention: "Retention",
     expires: "Expires",
     value: "Value",
     emptyValue: "not entered",
     enterValue: "Select secure entry, then type or paste; input is masked",
+    activeValue: "Typing securely; input is masked",
     required: "Enter a value or cancel this request.",
     actions: {
       "enter-securely": "Enter securely",
-      "enter-directly": "Enter directly in destination",
+      "enter-directly": "Type in browser",
       cancel: "Cancel",
     },
-    footer: "Tab move · Enter select · Esc cancel · value never enters model context",
+    actionFooter: "Tab move · Enter select · Esc cancel",
+    entryFooter: "Enter submit · Tab return · Esc cancel",
+    safety: "Value never enters model context",
+    groupProgress: (index: number, total: number) => `${index} of ${total}`,
   },
   ar: {
     title: "مطلوب إدخال آمن",
     flow: "المسار",
-    field: "الحقل",
-    kind: "نوع الطلب",
     purpose: "الغرض",
     destination: "الوجهة المتحقق منها",
-    retention: "الاحتفاظ",
     expires: "تنتهي الصلاحية",
     value: "القيمة",
     emptyValue: "لم تُدخل",
     enterValue: "اختر الإدخال الآمن، ثم اكتب القيمة أو الصقها؛ سيبقى الإدخال مخفياً",
+    activeValue: "تتم الكتابة بأمان؛ سيبقى الإدخال مخفياً",
     required: "أدخل قيمة أو ألغِ هذا الطلب.",
     actions: {
       "enter-securely": "إدخال آمن",
-      "enter-directly": "إدخال مباشر في الوجهة",
+      "enter-directly": "اكتب في المتصفح",
       cancel: "إلغاء",
     },
-    footer: "Tab تنقّل · Enter اختيار · Esc إلغاء · القيمة لا تدخل سياق النموذج",
+    actionFooter: "Tab تنقّل · Enter اختيار · Esc إلغاء",
+    entryFooter: "Enter إرسال · Tab عودة · Esc إلغاء",
+    safety: "القيمة لا تدخل سياق النموذج",
+    groupProgress: (index: number, total: number) => `${index} من ${total}`,
   },
 } as const;
 
@@ -102,6 +115,7 @@ export function createSecureInputSurfaceState(
     retention: snapshot.request.retention,
     expiresAt: snapshot.expiresAt,
     maskedCharacterCount: 0,
+    entryActive: false,
     focusedAction: "enter-securely",
     ...(context.group === undefined ? {} : { group: { ...context.group } }),
   };
@@ -111,7 +125,6 @@ export class SecureInputSurfaceController {
   readonly #secret: SecretPromptController;
   readonly #locale: OperatorConsoleLocale;
   #state: SecureInputSurfaceState;
-  #phase: "actions" | "entry" = "actions";
 
   constructor(state: SecureInputSurfaceState, locale: OperatorConsoleLocale = "en") {
     this.#state = cloneSurfaceState(state);
@@ -129,11 +142,10 @@ export class SecureInputSurfaceController {
       return { state: this.renderState, intent: { type: "cancel" } };
     }
 
-    if (this.#phase === "actions") return this.#applyActionEvent(event);
+    if (!this.#state.entryActive) return this.#applyActionEvent(event);
 
     if (event.type === "key" && event.key === "tab") {
-      this.#phase = "actions";
-      this.#state = { ...this.#state, validationError: undefined };
+      this.#state = { ...this.#state, entryActive: false, validationError: undefined };
       return { state: this.renderState, intent: { type: "none" } };
     }
 
@@ -162,10 +174,10 @@ export class SecureInputSurfaceController {
 
   clear(): void {
     this.#secret.clear();
-    this.#phase = "actions";
     this.#state = {
       ...this.#state,
       maskedCharacterCount: 0,
+      entryActive: false,
       validationError: undefined,
       focusedAction: "enter-securely",
     };
@@ -184,8 +196,7 @@ export class SecureInputSurfaceController {
     }
     if (event.key !== "enter") return { state: this.renderState, intent: { type: "none" } };
     if (this.#state.focusedAction === "enter-securely") {
-      this.#phase = "entry";
-      this.#state = { ...this.#state, validationError: undefined };
+      this.#state = { ...this.#state, entryActive: true, validationError: undefined };
       return { state: this.renderState, intent: { type: "none" } };
     }
     if (this.#state.focusedAction === "enter-directly") {
@@ -268,9 +279,12 @@ export class OperatorConsoleSecureInputCollector {
   }
 }
 
-export function getSecureInputSurfaceDesiredHeight(state: SecureInputSurfaceState): number {
-  const groupRows = state.group === undefined ? 0 : 2;
-  return (state.validationError === undefined ? 11 : 12) + groupRows;
+export function getSecureInputSurfaceDesiredHeight(
+  state: SecureInputSurfaceState,
+  width = 80,
+  locale: OperatorConsoleLocale = "en"
+): number {
+  return renderSecureInputSurface(state, { width, locale }).length;
 }
 
 export function renderSecureInputSurface(
@@ -282,52 +296,198 @@ export function renderSecureInputSurface(
   const copy = COPY[options.locale];
   if (width < 4) return [truncateVisibleCells(copy.title, width)];
 
-  const contentWidth = Math.max(0, width - 4);
-  const value = state.maskedCharacterCount === 0
-    ? copy.emptyValue
-    : "•".repeat(Math.min(normalizeDimension(state.maskedCharacterCount), contentWidth));
-  const rows = [
-    renderTopBorder(copy.title, width),
-    ...(state.group === undefined ? [] : [
-      renderContentRow(formatField(copy.flow, state.group.purpose, options.locale), contentWidth, width),
-      renderContentRow(formatField(copy.field, `${state.group.index} / ${state.group.total}`, options.locale, true), contentWidth, width),
-    ]),
-    renderContentRow(formatField(copy.kind, kindLabel(state.kind, options.locale), options.locale), contentWidth, width),
-    renderContentRow(formatField(copy.purpose, state.purpose, options.locale), contentWidth, width),
-    renderContentRow(formatField(copy.destination, state.destinationLabel, options.locale, true), contentWidth, width),
-    renderContentRow(formatField(copy.retention, retentionLabel(state.retention, options.locale), options.locale), contentWidth, width),
-    renderContentRow(formatField(copy.expires, state.expiresAt, options.locale, true), contentWidth, width),
-    renderContentRow(formatField(copy.value, value, options.locale), contentWidth, width),
-    renderContentRow(prepareValue(copy.enterValue, options.locale), contentWidth, width),
-    ...(state.validationError === undefined
-      ? []
-      : [renderContentRow(`! ${prepareValue(state.validationError, options.locale)}`, contentWidth, width)]),
-    renderContentRow(formatActions(state.focusedAction, copy.actions, options), contentWidth, width),
-    renderContentRow(prepareValue(copy.footer, options.locale), contentWidth, width),
-    renderBottomBorder(width),
-  ];
+  const geometry = resolveAttentionCardGeometry(width);
+  if (geometry.frameWidth < 4) return [truncateVisibleCells(copy.title, width)];
+  const style = options.style;
+  const rightLabel = state.group === undefined
+    ? undefined
+    : prepareTechnicalValue(copy.groupProgress(state.group.index, state.group.total), options.locale);
+  const rows: string[] = [renderAttentionCardTopBorder({
+    geometry,
+    title: prepareValue(copy.title, options.locale),
+    ...(rightLabel === undefined ? {} : { rightLabel }),
+    style,
+    titleColor: style?.tokens.contract.palette.action,
+    rightLabelColor: style?.tokens.contract.text.secondary,
+  })];
+
+  rows.push(...renderPrimaryText(kindLabel(state.kind, options.locale), geometry, options));
+  if (state.group !== undefined) {
+    rows.push(...renderSecondaryDetail(copy.flow, state.group.purpose, geometry, options));
+  }
+  rows.push(...renderSecondaryDetail(copy.purpose, state.purpose, geometry, options));
+  rows.push(renderAttentionCardRow("", geometry, style));
+  rows.push(renderAttentionCardRow(
+    styleColor(style, prepareValue(`✓ ${copy.destination}`, options.locale), style?.tokens.contract.severity.ok ?? ""),
+    geometry,
+    style
+  ));
+  rows.push(...renderSecondaryText(state.destinationLabel, geometry, options, true));
+  rows.push(...renderMutedMetadata(state, geometry, options));
+  rows.push(renderAttentionCardRow("", geometry, style));
+  rows.push(...renderValue(state, geometry, options));
+  rows.push(...renderMutedText(state.entryActive ? copy.activeValue : copy.enterValue, geometry, options));
+  if (state.validationError !== undefined) {
+    rows.push(...renderError(state.validationError, geometry, options));
+  }
+  rows.push(renderAttentionCardRow("", geometry, style));
+  rows.push(...renderActions(state, geometry, options));
+  rows.push(...renderMutedText(state.entryActive ? copy.entryFooter : copy.actionFooter, geometry, options));
+  rows.push(...renderMutedText(copy.safety, geometry, options));
+  rows.push(renderAttentionCardBottomBorder(geometry, style));
   const height = normalizeDimension(options.height ?? rows.length);
   return rows.slice(0, height);
 }
 
-function formatActions(
-  focused: SecureInputAction,
-  actions: (typeof COPY)[OperatorConsoleLocale]["actions"],
+function renderPrimaryText(
+  value: string,
+  geometry: AttentionCardGeometry,
   options: SecureInputSurfaceRenderOptions
-): string {
-  return SECURE_INPUT_ACTIONS.map((action) => {
-    const label = prepareValue(actions[action], options.locale);
-    const marker = focused === action ? "❯" : " ";
-    const color = options.style?.tokens.contract.palette.action;
-    const styledMarker = focused === action && color !== undefined
-      ? styleColor(options.style, marker, color)
-      : marker;
-    return `${styledMarker} ${label}`;
-  }).join("   ");
+): readonly string[] {
+  return wrapDynamicText(value, geometry.contentWidth, options.locale).map((line) => renderAttentionCardRow(
+    styleBold(options.style, styleColor(
+      options.style,
+      line,
+      options.style?.tokens.contract.text.primary ?? ""
+    )),
+    geometry,
+    options.style
+  ));
 }
 
-function formatField(label: string, value: string, locale: OperatorConsoleLocale, technical = false): string {
-  return `${label}: ${technical ? prepareTechnicalValue(value, locale) : prepareValue(value, locale)}`;
+function renderSecondaryDetail(
+  label: string,
+  value: string,
+  geometry: AttentionCardGeometry,
+  options: SecureInputSurfaceRenderOptions
+): readonly string[] {
+  return renderSecondaryText(`${label} · ${value}`, geometry, options);
+}
+
+function renderSecondaryText(
+  value: string,
+  geometry: AttentionCardGeometry,
+  options: SecureInputSurfaceRenderOptions,
+  technical = false
+): readonly string[] {
+  return wrapDynamicText(value, geometry.contentWidth, options.locale, technical).map((line) => renderAttentionCardRow(
+    styleColor(options.style, line, options.style?.tokens.contract.text.secondary ?? ""),
+    geometry,
+    options.style
+  ));
+}
+
+function renderMutedMetadata(
+  state: SecureInputSurfaceState,
+  geometry: AttentionCardGeometry,
+  options: SecureInputSurfaceRenderOptions
+): readonly string[] {
+  const copy = COPY[options.locale];
+  return renderMutedText([
+    retentionLabel(state.retention, options.locale),
+    `${copy.expires} ${formatAbsoluteTimestamp(state.expiresAt)}`,
+  ].join(" · "), geometry, options, true);
+}
+
+function renderValue(
+  state: SecureInputSurfaceState,
+  geometry: AttentionCardGeometry,
+  options: SecureInputSurfaceRenderOptions
+): readonly string[] {
+  const copy = COPY[options.locale];
+  const empty = state.maskedCharacterCount === 0;
+  const value = empty
+    ? copy.emptyValue
+    : "•".repeat(Math.min(normalizeDimension(state.maskedCharacterCount), geometry.contentWidth));
+  const prepared = prepareValue(`${copy.value} · ${value}`, options.locale);
+  const color = empty
+    ? options.style?.tokens.contract.text.muted
+    : state.entryActive
+      ? options.style?.tokens.contract.palette.action
+      : options.style?.tokens.contract.text.primary;
+  return [renderAttentionCardRow(
+    styleColor(options.style, truncateVisibleCells(prepared, geometry.contentWidth), color ?? ""),
+    geometry,
+    options.style
+  )];
+}
+
+function renderMutedText(
+  value: string,
+  geometry: AttentionCardGeometry,
+  options: SecureInputSurfaceRenderOptions,
+  technical = false
+): readonly string[] {
+  return wrapDynamicText(value, geometry.contentWidth, options.locale, technical).map((line) => renderAttentionCardRow(
+    styleColor(options.style, line, options.style?.tokens.contract.text.muted ?? ""),
+    geometry,
+    options.style
+  ));
+}
+
+function renderError(
+  value: string,
+  geometry: AttentionCardGeometry,
+  options: SecureInputSurfaceRenderOptions
+): readonly string[] {
+  return wrapDynamicText(`! ${value}`, geometry.contentWidth, options.locale).map((line) => renderAttentionCardRow(
+    styleColor(options.style, line, options.style?.tokens.contract.severity.error ?? ""),
+    geometry,
+    options.style
+  ));
+}
+
+function renderActions(
+  state: SecureInputSurfaceState,
+  geometry: AttentionCardGeometry,
+  options: SecureInputSurfaceRenderOptions
+): readonly string[] {
+  const copy = COPY[options.locale];
+  const rawActions = SECURE_INPUT_ACTIONS.map((action) => {
+    const active = state.focusedAction === action;
+    return {
+      action,
+      active,
+      raw: `${active ? "❯" : " "} ${copy.actions[action]}`,
+    };
+  });
+  const separator = "   ";
+  const horizontal = rawActions.reduce((width, action) => width + stringWidth(action.raw), 0) +
+    (separator.length * (rawActions.length - 1));
+  if (horizontal <= geometry.contentWidth) {
+    return [renderAttentionCardRow(
+      rawActions.map((action) => styleAction(action.action, action.raw, action.active, options)).join(separator),
+      geometry,
+      options.style
+    )];
+  }
+  return rawActions.map((action) => renderAttentionCardRow(
+    styleAction(action.action, action.raw, action.active, options),
+    geometry,
+    options.style
+  ));
+}
+
+function styleAction(
+  action: SecureInputAction,
+  raw: string,
+  active: boolean,
+  options: SecureInputSurfaceRenderOptions
+): string {
+  const prepared = prepareValue(raw, options.locale);
+  if (active && options.style !== undefined) {
+    return styleBgColor(
+      options.style,
+      styleColor(options.style, prepared, options.style.tokens.contract.interactive.selected),
+      options.style.tokens.contract.interactive.selectedBg
+    );
+  }
+  const color = action === "enter-securely"
+    ? options.style?.tokens.contract.palette.action
+    : action === "enter-directly"
+      ? options.style?.tokens.contract.severity.info
+      : options.style?.tokens.contract.severity.error;
+  return styleColor(options.style, prepared, color ?? "");
 }
 
 function prepareValue(value: string, locale: OperatorConsoleLocale): string {
@@ -340,6 +500,24 @@ function prepareTechnicalValue(value: string, locale: OperatorConsoleLocale): st
   const safe = sanitizeBidiControls(value);
   if (locale === "ar" && !hasRtlText(safe)) return isolateLtr(safe);
   return hasRtlText(safe) ? isolateAuto(safe) : safe;
+}
+
+function wrapDynamicText(
+  value: string,
+  width: number,
+  locale: OperatorConsoleLocale,
+  technical = false
+): readonly string[] {
+  const safe = sanitizeBidiControls(value).replace(/\r\n?|\n/gu, " ");
+  return wrapVisibleCells(safe, width).map((line) => (
+    technical ? prepareTechnicalValue(line, locale) : prepareValue(line, locale)
+  ));
+}
+
+function formatAbsoluteTimestamp(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return sanitizeBidiControls(value);
+  return `${parsed.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
 function moveAction(action: SecureInputAction, direction: 1 | -1): SecureInputAction {
@@ -387,28 +565,49 @@ function retentionLabel(retention: SecureInputSurfaceState["retention"], locale:
   return (locale === "ar" ? ar : en)[retention];
 }
 
-function renderTopBorder(title: string, width: number): string {
-  if (width <= 1) return "╭".slice(0, width);
-  const label = `─ ${title} `;
-  const remaining = Math.max(0, width - 2 - stringWidth(label));
-  return truncateVisibleCells(`╭${label}${"─".repeat(remaining)}╮`, width);
-}
-
-function renderBottomBorder(width: number): string {
-  if (width <= 1) return "╰".slice(0, width);
-  return `╰${"─".repeat(Math.max(0, width - 2))}╯`;
-}
-
-function renderContentRow(value: string, contentWidth: number, width: number): string {
-  const content = truncateVisibleCells(value, contentWidth);
-  const padding = " ".repeat(Math.max(0, contentWidth - stringWidth(content)));
-  return truncateVisibleCells(`│ ${content}${padding} │`, width);
-}
-
 function truncateVisibleCells(value: string, maxCells: number): string {
   const width = normalizeDimension(maxCells);
   if (width <= 0) return "";
-  return closeOpenBidiIsolates(truncateVisible(value, width, ""));
+  if (stringWidth(value) <= width) return value;
+  let output = "";
+  for (const char of value) {
+    if (stringWidth(output + char) > width) break;
+    output += char;
+  }
+  return closeOpenBidiIsolates(output);
+}
+
+function wrapVisibleCells(value: string, maxCells: number): readonly string[] {
+  const width = normalizeDimension(maxCells);
+  if (width <= 0 || value.length === 0) return [];
+  if (stringWidth(value) <= width) return [value];
+
+  const words = value.split(/(\s+)/u).filter((part) => part.length > 0);
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const next = current.length === 0 ? word.trimStart() : `${current}${word}`;
+    if (stringWidth(next) <= width) {
+      current = next;
+      continue;
+    }
+    if (current.trim().length > 0) lines.push(current.trimEnd());
+    current = word.trim();
+    while (stringWidth(current) > width) {
+      const chunk = truncateVisibleCells(current, width);
+      if (chunk.length === 0) {
+        const first = Array.from(current)[0];
+        if (first === undefined) break;
+        lines.push(first);
+        current = current.slice(first.length).trimStart();
+        continue;
+      }
+      lines.push(chunk);
+      current = current.slice(chunk.length).trimStart();
+    }
+  }
+  if (current.trim().length > 0) lines.push(current.trimEnd());
+  return lines.length === 0 ? [truncateVisibleCells(value, width)] : lines;
 }
 
 function normalizeDimension(value: number): number {

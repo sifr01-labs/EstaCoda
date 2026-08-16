@@ -248,6 +248,12 @@ pastes remain inline. Multiline and large pastes become attachment cards. Secret
 prompts bypass paste preview/storage and do not emit shortcut hints or live
 slash hints.
 
+Runtime protected-input cards keep **Enter securely**, **Type in browser**, and
+**Cancel** visible while you type. Entered characters are shown only as masked
+bullets. Press `Tab` to return to the action menu without clearing the protected
+value, `Enter` to submit while secure entry is active, or `Esc` to cancel. The
+raw value does not enter model context or Operator Console state.
+
 Arabic setup chrome is direction-aware for localized setup selectors, rails, onboarding summaries, prompt cards, raw setup prompts, verification reports, and the startup dashboard. Arabic picker rows are RTL/right-aligned, selected output uses `تم تحديد`, and technical selected values are LTR-isolated. The Arabic startup dashboard uses two RTL-aware columns at normal widths and a bounded stacked layout at narrow widths. This is not full runtime Arabic localization.
 
 Onboarding provider credential prompts and Telegram token prompts share setup editor prompt copy. Arabic display strings isolate technical tokens, while stored config, env, auth, and state values remain raw. Secret prompts remain masked.

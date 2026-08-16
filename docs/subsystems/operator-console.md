@@ -669,6 +669,23 @@ Feedback, amend, session approval, and persistent approval controls are out of
 scope for approval v1 unless the implementation adds a separately reviewed
 runtime path.
 
+Protected input is also a modal attention card. It presents the request kind as
+the primary heading, verified destination separately from retention and compact
+absolute expiry metadata, and keeps the three existing actions visible while a
+value is being entered. **Enter securely** remains selected during entry, masked
+bullets use the active Papyrus action color, and the footer changes to
+`Enter submit · Tab return · Esc cancel`. `Tab` returns to the action menu
+without clearing the protected value. At narrow widths the actions stack; at
+normal widths they remain horizontal.
+
+No raw value enters Operator Console state. Beyond the request metadata, the
+surface exposes only `maskedCharacterCount` and the metadata-only `entryActive`
+flag. The raw value remains exclusively inside
+`SecretPromptController`, is cleared on submission, cancellation, abort, and
+collector cleanup, and must never enter rendered output, logs, snapshots, error
+messages, or model context. The user-facing **Type in browser** action preserves
+the existing `enter-directly` intent and cancellation semantics.
+
 ### Phase G: Setup And Secret Panels
 
 Provider/model table:

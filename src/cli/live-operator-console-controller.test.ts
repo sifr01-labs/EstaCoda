@@ -162,9 +162,10 @@ describe("LiveOperatorConsoleController", () => {
     );
     let rendered = stripAnsi(output.text());
     expect(rendered).toContain("Secure input required");
-    expect(rendered).toContain("Flow: Sign in to MTN");
-    expect(rendered).toContain("Field: 1 / 2");
-    expect(rendered).toContain("Verified destination: https://developers.mtn.com · Sign in");
+    expect(rendered).toContain("1 of 2");
+    expect(rendered).toContain("Flow · Sign in to MTN");
+    expect(rendered).toContain("✓ Verified destination");
+    expect(rendered).toContain("https://developers.mtn.com · Sign in");
 
     collector.routeInput({ type: "key", key: "enter" });
     output.clear();
@@ -174,7 +175,9 @@ describe("LiveOperatorConsoleController", () => {
     output.clear();
     collector.routeInput({ type: "paste", text: "person@example.com" });
     rendered = stripAnsi(output.text());
-    expect(rendered).toContain("Value: ••••••••••••••••••");
+    expect(rendered).toContain("Value · ••••••••••••••••••");
+    expect(rendered).toContain("Enter submit · Tab return · Esc cancel");
+    expect(rendered).toContain("Type in browser");
     expect(rendered).not.toContain("person@example.com");
     expect(JSON.stringify(runtimeHost.getState())).not.toContain("person@example.com");
 
@@ -193,8 +196,8 @@ describe("LiveOperatorConsoleController", () => {
       { ...context, group: { ...context.group, index: 2 } }
     );
     rendered = stripAnsi(output.text());
-    expect(rendered).toContain("Field: 2 / 2");
-    expect(rendered).toContain("Request: Password");
+    expect(rendered).toContain("2 of 2");
+    expect(rendered).toContain("Password");
 
     output.clear();
     collector.routeInput({ type: "key", key: "escape" });

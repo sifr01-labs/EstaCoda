@@ -91,6 +91,7 @@ describe("Papyrus operator console raw prompt host", () => {
       retention: "use-once" as const,
       expiresAt: "2026-08-13T10:05:00.000Z",
       maskedCharacterCount: 8,
+      entryActive: false,
       focusedAction: "enter-securely" as const,
     };
 
@@ -104,7 +105,7 @@ describe("Papyrus operator console raw prompt host", () => {
 
     expect(frame.layout.regions.map((region) => region.kind)).toEqual(["secureInput"]);
     expect(frame.state.secureInput).toEqual(secureInput);
-    expect(frame.rows.join("\n")).toContain("Value: ••••••••");
+    expect(frame.rows.join("\n")).toContain("Value · ••••••••");
     expect(frame.rows.join("\n")).not.toContain("prompt content must be hidden");
   });
 
