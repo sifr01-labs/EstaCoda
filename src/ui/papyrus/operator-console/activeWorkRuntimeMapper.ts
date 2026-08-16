@@ -54,15 +54,16 @@ export type ActiveWorkRuntimeEventMapperOptions = {
   readonly now?: () => number;
 };
 
-export function executionPlanFromRuntimeEvent(event: RuntimeEvent): ExecutionPlan | undefined {
+export function executionPlanFromRuntimeEvent(event: RuntimeEvent): ExecutionPlan | null | undefined {
   switch (event.kind) {
     case "execution-plan-started":
     case "execution-plan-updated":
-    case "execution-plan-completed":
     case "execution-plan-blocked":
+      return event.plan;
+    case "execution-plan-completed":
     case "execution-plan-transferred":
     case "execution-plan-abandoned":
-      return event.plan;
+      return null;
     default:
       return undefined;
   }

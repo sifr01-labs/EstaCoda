@@ -40,6 +40,7 @@ export type AuthenticationExecutionEffectReceipt = {
   stage: AuthenticationExecutionStage;
   toolCallId: string;
   blocker?: ExecutionPlanBlocker;
+  failureProof?: "authentication-error" | "signed-out";
 };
 
 export function deriveAuthenticationExecutionEffects(
@@ -127,7 +128,12 @@ function credentialEffects(
     return [blockedEffect(toolCallId, "credentials", "The protected credential transaction could not be safely settled.")];
   }
   if (snapshotReportsAuthenticationError(metadata.snapshot)) {
-    return [blockedEffect(toolCallId, "credentials", "The protected credential submission reached an authentication error state.")];
+    return [blockedEffect(
+      toolCallId,
+      "credentials",
+      "The protected credential submission reached an authentication error state.",
+      "authentication-error"
+    )];
   }
   if (!succeeded || (delivery.submission !== "clicked" && delivery.submission !== "automatic")) return [];
 
@@ -181,7 +187,12 @@ function challengeEffects(
     return [blockedEffect(toolCallId, "challenge", "The protected authentication challenge could not be safely settled.")];
   }
   if (snapshotReportsAuthenticationError(metadata.snapshot)) {
-    return [blockedEffect(toolCallId, "challenge", "The protected authentication challenge reached an error state.")];
+    return [blockedEffect(
+      toolCallId,
+      "challenge",
+      "The protected authentication challenge reached an error state.",
+      "authentication-error"
+    )];
   }
   if (!succeeded || (delivery.submission !== "clicked" && delivery.submission !== "automatic")) return [];
   return [{ effect: "authentication-candidate", stage: "challenge", toolCallId }];
@@ -223,6 +234,14 @@ function authenticationEffectPatches(
   const ids = resolveAuthenticationItemIds(plan);
   const patches: ExecutionPlanMergeItemInput[] = [];
   const provisional = isProvisionalPlan(plan);
+  const verificationCompleted = plan.items.find((item) => item.id === ids.verify)?.status === "completed";
+  if (
+    verificationCompleted &&
+    effect.effect !== "authentication-verified" &&
+    !(effect.effect === "authentication-blocked" && effect.failureProof !== undefined)
+  ) {
+    return patches;
+  }
   if (provisional) {
     patches.push({ id: "verify", content: VERIFY_CONTENT });
     if (hasPostLoginObjective(plan.objective) && !plan.items.some((item) => item.id === POST_LOGIN_ITEM_ID)) {
@@ -403,13 +422,15 @@ function planHasCapacityForPatches(
 function blockedEffect(
   toolCallId: string,
   stage: AuthenticationExecutionStage,
-  summary: string
+  summary: string,
+  failureProof?: AuthenticationExecutionEffectReceipt["failureProof"]
 ): AuthenticationExecutionEffectReceipt {
   return {
     effect: "authentication-blocked",
     stage,
     toolCallId,
     blocker: { kind: "external_state", summary },
+    ...(failureProof === undefined ? {} : { failureProof }),
   };
 }
 

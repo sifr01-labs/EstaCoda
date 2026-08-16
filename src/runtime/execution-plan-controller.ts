@@ -161,6 +161,13 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
       }
     }
 
+    if (isTerminalExtension(current, items)) {
+      throw new ExecutionPlanValidationError(
+        "merge cannot extend a Mission while completing its final unfinished objective item. " +
+        "Report optional follow-up work in the final response or wait for a separate user-authorized request."
+      );
+    }
+
     const plan = validatePlan({
       ...current,
       objective: input.objective === undefined
@@ -273,6 +280,27 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
     }
     await sink?.(event);
   }
+}
+
+function isTerminalExtension(current: ExecutionPlan, nextItems: readonly ExecutionPlanItem[]): boolean {
+  const existingIds = new Set(current.items.map((item) => item.id));
+  const unfinishedExisting = current.items.filter((item) => !isTerminalItemStatus(item.status));
+  if (unfinishedExisting.length === 0 || deriveStatus([...nextItems]) !== "active") return false;
+
+  const nextById = new Map(nextItems.map((item) => [item.id, item]));
+  const completesExistingWork = unfinishedExisting.some((item) => nextById.get(item.id)?.status === "completed");
+  const settlesAllExistingWork = unfinishedExisting.every((item) => {
+    const next = nextById.get(item.id);
+    return next !== undefined && isTerminalItemStatus(next.status);
+  });
+  const appendsUnfinishedWork = nextItems.some((item) =>
+    !existingIds.has(item.id) && !isTerminalItemStatus(item.status)
+  );
+  return completesExistingWork && settlesAllExistingWork && appendsUnfinishedWork;
+}
+
+function isTerminalItemStatus(status: ExecutionPlanItemStatus): boolean {
+  return status === "completed" || status === "cancelled";
 }
 
 function isExecutionPlanResumeRequest(text: string): boolean {

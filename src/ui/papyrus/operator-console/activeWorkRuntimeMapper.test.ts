@@ -21,6 +21,14 @@ describe("active work runtime mapper", () => {
     };
 
     expect(executionPlanFromRuntimeEvent({ kind: "execution-plan-started", plan })).toEqual(plan);
+    expect(executionPlanFromRuntimeEvent({
+      kind: "execution-plan-completed",
+      plan: { ...plan, status: "completed", items: [{ ...plan.items[0]!, status: "completed" }] },
+    })).toBeNull();
+    expect(executionPlanFromRuntimeEvent({
+      kind: "execution-plan-abandoned",
+      plan: { ...plan, status: "abandoned" },
+    })).toBeNull();
     expect(executionPlanFromRuntimeEvent({ kind: "agent-start", sessionId: "session", input: "test" }))
       .toBeUndefined();
   });

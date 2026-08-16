@@ -68,6 +68,62 @@ describe("authentication evidence tracker", () => {
     ]);
   });
 
+  it("verifies an MFA departure into an authenticated destination when signals were visible behind the challenge", () => {
+    const tracker = new AuthenticationEvidenceTracker();
+    const before = {
+      ...pageSnapshot(identity(4, 8, 12), "MFA verification", [
+        { ref: "@e1", role: "textbox", name: "Verification code" },
+        { ref: "@e2", role: "button", name: "Verify" },
+        { ref: "@e3", role: "link", name: "Sign out" },
+      ]),
+      url: "https://developers.mtn.com/notifications/count",
+    };
+    tracker.observe([snapshotExecution("before-mfa", before)]);
+    const after = {
+      ...authenticatedSnapshot(identity(5, 9, 13)),
+      url: "https://developers.mtn.com/apps",
+    };
+
+    const verified = tracker.observe([
+      protectedExecution("browser.type", "submit-mfa", {
+        before: before.identity,
+        after: after.identity,
+        snapshot: after,
+      }),
+    ]);
+
+    expect(verified.effects).toContainEqual({
+      effect: "authentication-verified",
+      stage: "verification",
+      toolCallId: "submit-mfa",
+    });
+    expect(verified.assessments).toEqual([
+      expect.objectContaining({
+        outcome: "verified",
+        reason: "authenticated-evidence-observed",
+        challengeDeparted: true,
+        stateTransitionObserved: true,
+        postSubmitEvidence: true,
+        preexistingEvidence: true,
+      }),
+    ]);
+
+    const noOpCancel = {
+      ...after,
+      identity: identity(5, 9, 14),
+      actionDelta: {
+        outcome: "no-change" as const,
+        afterIdentity: identity(5, 9, 14),
+        waitCondition: "dom-stable" as const,
+        conditionMet: false,
+        url: { changed: false, before: after.url, after: after.url },
+      },
+    };
+    expect(tracker.observe([
+      browserActionExecution("cancel-dialog", "browser.click", noOpCancel),
+    ])).toEqual({ effects: [], assessments: [] });
+  });
+
   it("accepts a later causal observation without treating arbitrary successful tools as evidence", () => {
     const tracker = new AuthenticationEvidenceTracker();
     const before = loginSnapshot(identity(1, 1, 1));
@@ -133,6 +189,75 @@ describe("authentication evidence tracker", () => {
     expect(tracker.observe([
       snapshotExecution("guessed-proof", authenticatedSnapshot(identity(3, 3, 4))),
     ]).effects).toEqual([]);
+  });
+
+  it("does not invalidate pending authentication after a failed or no-change browser action", () => {
+    const tracker = new AuthenticationEvidenceTracker();
+    const before = loginSnapshot(identity(1, 1, 1));
+    const after = pageSnapshot(identity(2, 2, 2), "Completing sign in", []);
+    tracker.observe([snapshotExecution("before", before)]);
+    tracker.observe([
+      protectedExecution("browser.fill_protected_form", "submit", {
+        before: before.identity,
+        after: after.identity,
+        snapshot: after,
+      }),
+    ]);
+
+    const failedAction: ToolExecutionRecord = {
+      ...browserActionExecution("failed-click", "browser.click", after),
+      result: { ok: false, content: "The click did not execute.", metadata: { snapshot: after } },
+    };
+    expect(tracker.observe([failedAction])).toEqual({ effects: [], assessments: [] });
+
+    const noChange = {
+      ...after,
+      identity: identity(2, 2, 3),
+      actionDelta: {
+        outcome: "no-change" as const,
+        afterIdentity: identity(2, 2, 3),
+        waitCondition: "dom-stable" as const,
+        conditionMet: false,
+        url: { changed: false, before: after.url, after: after.url },
+      },
+    };
+    expect(tracker.observe([
+      browserActionExecution("cancel-no-op", "browser.click", noChange),
+    ])).toEqual({ effects: [], assessments: [] });
+
+    const verified = tracker.observe([
+      snapshotExecution("verify", authenticatedSnapshot(identity(2, 3, 4))),
+    ]);
+    expect(verified.effects).toEqual([expect.objectContaining({ effect: "authentication-verified" })]);
+  });
+
+  it("keeps verified authentication monotonic until explicit error or signed-out evidence appears", () => {
+    const errorTracker = verifiedChallengeTracker();
+    const error = errorTracker.observe([
+      snapshotExecution(
+        "auth-error",
+        pageSnapshot(identity(3, 3, 4), "Authentication failed", [])
+      ),
+    ]);
+    expect(error.effects).toEqual([expect.objectContaining({
+      effect: "authentication-blocked",
+      failureProof: "authentication-error",
+    })]);
+    expect(error.assessments).toEqual([
+      expect.objectContaining({ outcome: "blocked", reason: "authentication-error" }),
+    ]);
+
+    const signedOutTracker = verifiedChallengeTracker();
+    const signedOut = signedOutTracker.observe([
+      snapshotExecution("signed-out", loginSnapshot(identity(3, 3, 4))),
+    ]);
+    expect(signedOut.effects).toEqual([expect.objectContaining({
+      effect: "authentication-blocked",
+      failureProof: "signed-out",
+    })]);
+    expect(signedOut.assessments).toEqual([
+      expect.objectContaining({ outcome: "blocked", reason: "signed-out" }),
+    ]);
   });
 
   it("keeps error pages and persistent challenges blocked", () => {
@@ -212,6 +337,20 @@ function protectedExecution(
       },
     },
   };
+}
+
+function verifiedChallengeTracker(): AuthenticationEvidenceTracker {
+  const tracker = new AuthenticationEvidenceTracker();
+  const before = loginSnapshot(identity(1, 1, 1));
+  tracker.observe([snapshotExecution("before", before)]);
+  tracker.observe([
+    protectedExecution("browser.type", "challenge", {
+      before: before.identity,
+      after: identity(2, 2, 2),
+      snapshot: authenticatedSnapshot(identity(2, 2, 2)),
+    }),
+  ]);
+  return tracker;
 }
 
 function snapshotExecution(toolCallId: string, snapshot: BrowserSnapshot): ToolExecutionRecord {

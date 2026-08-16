@@ -250,7 +250,8 @@ export type AuthenticationEvidenceAssessmentEvent = {
     | "challenge-still-present"
     | "preexisting-authenticated-evidence"
     | "protected-settlement-inconclusive"
-    | "protected-submission-failed";
+    | "protected-submission-failed"
+    | "signed-out";
   submissionToolCallId: string;
   evidenceToolCallId?: string;
   challengeDeparted: boolean;

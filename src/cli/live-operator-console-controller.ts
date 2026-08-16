@@ -342,7 +342,7 @@ export class LiveOperatorConsoleController {
   }
 
   setExecutionPlan(plan: ExecutionPlan | undefined): void {
-    this.#executionPlan = plan;
+    this.#executionPlan = plan === undefined || isTerminalExecutionPlan(plan) ? undefined : plan;
     this.#runtimeHost.setExecutionPlan(this.#executionPlan);
     this.refresh({ dirtyRegions: ["mission"] });
   }
@@ -708,6 +708,10 @@ function withoutSubagentItems(state: ToolActivityState): ToolActivityState {
 
 function isTerminalActiveWorkStatus(status: ActiveWorkItem["status"]): boolean {
   return status === "succeeded" || status === "failed" || status === "cancelled";
+}
+
+function isTerminalExecutionPlan(plan: ExecutionPlan): boolean {
+  return plan.status === "completed" || plan.status === "abandoned" || plan.status === "transferred";
 }
 
 function resolveToolTrailDurationMs(

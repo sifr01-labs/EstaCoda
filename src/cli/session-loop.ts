@@ -1257,7 +1257,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	            onEvent: (event) => {
 	              const executionPlan = executionPlanFromRuntimeEvent(event);
 	              if (executionPlan !== undefined) {
-	                operatorConsoleLiveFrame?.setExecutionPlan(executionPlan);
+	                operatorConsoleLiveFrame?.setExecutionPlan(executionPlan ?? undefined);
 	              }
 	              if (event.kind === "context-window-usage") {
 	                latestContextUsage = { filled: event.usedTokens, total: event.totalTokens };

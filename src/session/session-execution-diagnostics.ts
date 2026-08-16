@@ -309,5 +309,6 @@ function isAuthenticationAssessment(
       "preexisting-authenticated-evidence",
       "protected-settlement-inconclusive",
       "protected-submission-failed",
+      "signed-out",
     ].includes(event.reason);
 }

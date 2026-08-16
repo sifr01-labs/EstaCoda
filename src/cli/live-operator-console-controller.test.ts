@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ExecutionPlan } from "../contracts/execution-plan.js";
 import type { SecureInputRequestSnapshot } from "../contracts/secure-input.js";
 import { resolveTokens } from "../theme/token-resolver.js";
 import {
@@ -13,6 +14,37 @@ import { LiveOperatorConsoleController } from "./live-operator-console-controlle
 describe("LiveOperatorConsoleController", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("clears terminal Missions from the live region while unfinished Missions remain visible", () => {
+    const output = createOutput();
+    const { controller, runtimeHost } = createControllerFixture(output);
+    const active: ExecutionPlan = {
+      objective: "Authenticate the developer account",
+      originTurnId: "turn-1",
+      revision: 1,
+      status: "active",
+      items: [{ id: "verify", content: "Verify authentication", status: "in_progress" }],
+    };
+
+    controller.setExecutionPlan(active);
+    expect(runtimeHost.getState().executionPlan).toEqual(active);
+    expect(stripAnsi(output.text())).toContain("Mission · Authenticate the developer account");
+
+    output.clear();
+    controller.setExecutionPlan({
+      ...active,
+      revision: 2,
+      status: "completed",
+      items: [{ ...active.items[0]!, status: "completed" }],
+    });
+    expect(runtimeHost.getState().executionPlan).toBeUndefined();
+    expect(stripAnsi(output.text())).not.toContain("Mission · Authenticate the developer account");
+
+    controller.setExecutionPlan({ ...active, revision: 3, status: "abandoned" });
+    expect(runtimeHost.getState().executionPlan).toBeUndefined();
+    controller.setExecutionPlan({ ...active, revision: 4, status: "transferred" });
+    expect(runtimeHost.getState().executionPlan).toBeUndefined();
   });
 
   it("advances visible motion from elapsed time and the token cadence", () => {

@@ -128,6 +128,7 @@ describe("authentication execution effects", () => {
       effect: "authentication-blocked",
       stage: "credentials",
       toolCallId: "credentials-call",
+      failureProof: "authentication-error",
       blocker: {
         kind: "external_state",
         summary: "The protected credential submission reached an authentication error state.",
@@ -212,6 +213,43 @@ describe("authentication execution effects", () => {
         { id: "postman", content: "Update the Postman collection", status: "in_progress" },
       ],
     });
+
+    await applyAuthenticationExecutionEffects({
+      controller,
+      effects: [{
+        effect: "authentication-blocked",
+        stage: "verification",
+        toolCallId: "no-op-action",
+        blocker: { kind: "external_state", summary: "An unrelated browser action did not prove authentication failure." },
+      }],
+      objective: "ignored",
+      originTurnId: "turn-1",
+    });
+    expect(controller.current()?.items).toMatchObject([
+      { id: "login", status: "completed" },
+      { id: "otp", status: "completed" },
+      { id: "verify-login", status: "completed" },
+      { id: "postman", status: "in_progress" },
+    ]);
+
+    await applyAuthenticationExecutionEffects({
+      controller,
+      effects: [{
+        effect: "authentication-blocked",
+        stage: "verification",
+        toolCallId: "explicit-auth-error",
+        failureProof: "authentication-error",
+        blocker: { kind: "external_state", summary: "The authenticated session explicitly reached an authentication error." },
+      }],
+      objective: "ignored",
+      originTurnId: "turn-1",
+    });
+    expect(controller.current()?.items).toMatchObject([
+      { id: "login", status: "completed" },
+      { id: "otp", status: "completed" },
+      { id: "verify-login", status: "blocked" },
+      { id: "postman", status: "pending" },
+    ]);
   });
 
   it("creates a catch-up Mission when linguistic activation missed a credential request", async () => {

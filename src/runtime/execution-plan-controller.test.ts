@@ -148,7 +148,10 @@ describe("ExecutionPlanController", () => {
     const target = controller();
     await target.write({
       objective: "Build collection",
-      items: [{ id: "build", content: "Build it", status: "in_progress" }]
+      items: [
+        { id: "build", content: "Build it", status: "in_progress" },
+        { id: "publish", content: "Publish it", status: "pending" }
+      ]
     }, "turn-1");
 
     const plan = await target.merge({
@@ -165,6 +168,53 @@ describe("ExecutionPlanController", () => {
       status: "active",
       items: [
         { id: "build", status: "completed", evidenceCallIds: ["call-1"] },
+        { id: "publish", status: "pending" },
+        { id: "verify", status: "in_progress" }
+      ]
+    });
+  });
+
+  it("rejects appending follow-up work while completing the final unfinished objective item", async () => {
+    const target = controller();
+    await target.write({
+      objective: "Authenticate the account",
+      items: [{ id: "verify-login", content: "Verify authenticated state", status: "in_progress" }]
+    }, "turn-1");
+
+    await expect(target.merge({
+      items: [
+        { id: "verify-login", status: "completed", evidenceCallIds: ["call-1"] },
+        { id: "cancel-dialogs", content: "Cancel optional pending dialogs", status: "pending" }
+      ]
+    })).rejects.toThrow("cannot extend a Mission while completing its final unfinished objective item");
+    expect(target.current()).toMatchObject({
+      revision: 1,
+      status: "active",
+      items: [{ id: "verify-login", status: "in_progress" }]
+    });
+  });
+
+  it("allows a required discovered step while meaningful original work remains", async () => {
+    const target = controller();
+    await target.write({
+      objective: "Build and publish the collection",
+      items: [
+        { id: "build", content: "Build the collection", status: "in_progress" },
+        { id: "publish", content: "Publish the collection", status: "pending" }
+      ]
+    }, "turn-1");
+
+    const plan = await target.merge({
+      items: [
+        { id: "build", status: "completed", evidenceCallIds: ["call-1"] },
+        { id: "verify", content: "Verify the collection before publishing", status: "in_progress" }
+      ]
+    });
+    expect(plan).toMatchObject({
+      status: "active",
+      items: [
+        { id: "build", status: "completed" },
+        { id: "publish", status: "pending" },
         { id: "verify", status: "in_progress" }
       ]
     });

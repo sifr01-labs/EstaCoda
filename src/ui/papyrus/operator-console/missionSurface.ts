@@ -8,7 +8,7 @@ export type MissionSurfaceRenderOptions = {
 };
 
 export function getMissionSurfaceDesiredHeight(plan: ExecutionPlan | undefined): number {
-  return plan === undefined ? 0 : Math.min(17, 1 + plan.items.length);
+  return isLiveMission(plan) ? Math.min(17, 1 + plan.items.length) : 0;
 }
 
 export function renderMissionSurface(
@@ -17,12 +17,16 @@ export function renderMissionSurface(
 ): readonly string[] {
   const width = Math.max(0, Math.floor(options.width));
   const height = Math.max(0, Math.floor(options.height ?? getMissionSurfaceDesiredHeight(plan)));
-  if (plan === undefined || width === 0 || height === 0) return [];
-  const label = options.locale === "ar" ? "خطة التنفيذ" : "Mission";
+  if (!isLiveMission(plan) || width === 0 || height === 0) return [];
+  return missionRows(plan, width, options.locale).slice(0, height);
+}
+
+function missionRows(plan: ExecutionPlan, width: number, locale: "en" | "ar" | undefined): string[] {
+  const label = locale === "ar" ? "خطة التنفيذ" : "Mission";
   return [
     truncateVisible(`${label} · ${plan.objective}`, width, ""),
     ...plan.items.map((item) => truncateVisible(`${statusGlyph(item.status)} ${item.content}`, width, ""))
-  ].slice(0, height);
+  ];
 }
 
 export function formatPlainExecutionPlan(
@@ -30,11 +34,14 @@ export function formatPlainExecutionPlan(
   locale: "en" | "ar" = "en"
 ): string | undefined {
   if (plan === undefined) return undefined;
-  return renderMissionSurface(plan, {
-    width: Number.MAX_SAFE_INTEGER,
-    height: getMissionSurfaceDesiredHeight(plan),
-    locale
-  }).join("\n");
+  return missionRows(plan, Number.MAX_SAFE_INTEGER, locale).slice(0, 17).join("\n");
+}
+
+function isLiveMission(plan: ExecutionPlan | undefined): plan is ExecutionPlan {
+  return plan !== undefined &&
+    plan.status !== "completed" &&
+    plan.status !== "abandoned" &&
+    plan.status !== "transferred";
 }
 
 function statusGlyph(status: ExecutionPlanItemStatus): string {

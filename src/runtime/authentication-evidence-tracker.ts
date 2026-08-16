@@ -28,6 +28,8 @@ const AUTHENTICATED_TEXT_SIGNALS: Array<[string, RegExp]> = [
   ["signed-in", /\b(?:signed|logged)\s+in\s+as\b|(?:تم تسجيل الدخول باسم|مسجل الدخول باسم)/iu],
   ["sign-out", /\b(?:log|sign)[ -]?out\b|\blogout\b|(?:تسجيل الخروج|خروج من الحساب)/iu],
 ];
+const SIGNED_OUT_PAGE_TERMS = /\b(?:log|sign)[ -]?in\b|(?:تسجيل الدخول|سجّل الدخول|سجل الدخول)/iu;
+const PASSWORD_FIELD_TERMS = /\bpassword\b|(?:كلمة المرور)/iu;
 const MAX_REMEMBERED_SNAPSHOTS = 64;
 
 type ProtectedDeliveryReceipt = {
@@ -56,6 +58,11 @@ type PendingAuthenticationEvidence = {
   stateTransitionObserved: boolean;
 };
 
+type VerifiedAuthenticationEvidence = {
+  pending: PendingAuthenticationEvidence;
+  identity: BrowserStateIdentity;
+};
+
 export type AuthenticationEvidenceObservation = {
   effects: AuthenticationExecutionEffectReceipt[];
   assessments: AuthenticationEvidenceAssessmentEvent[];
@@ -69,6 +76,7 @@ export type AuthenticationEvidenceObservation = {
 export class AuthenticationEvidenceTracker {
   readonly #snapshots: RememberedSnapshot[] = [];
   #pending: PendingAuthenticationEvidence | undefined;
+  #verified: VerifiedAuthenticationEvidence | undefined;
 
   constructor(existingExecutions: readonly ToolExecutionRecord[] = []) {
     for (const execution of existingExecutions) this.#rememberExecutionSnapshot(execution);
@@ -80,8 +88,17 @@ export class AuthenticationEvidenceTracker {
 
     for (const execution of executions) {
       const baseEffects = deriveAuthenticationExecutionEffects([execution]);
-      effects.push(...baseEffects);
       const protectedReceipt = protectedDeliveryReceipt(execution);
+
+      if (this.#verified !== undefined) {
+        const observation = this.#observeAfterVerification(execution, baseEffects);
+        effects.push(...observation.effects);
+        assessments.push(...observation.assessments);
+        this.#rememberExecutionSnapshot(execution);
+        continue;
+      }
+
+      effects.push(...baseEffects);
 
       if (protectedReceipt !== undefined) {
         const assessment = this.#observeProtectedSubmission(execution, protectedReceipt, baseEffects, effects);
@@ -90,20 +107,30 @@ export class AuthenticationEvidenceTracker {
         continue;
       }
 
-      if (this.#pending !== undefined && interruptsCausalChain(execution)) {
+      const invalidationReason = this.#pending === undefined
+        ? undefined
+        : pendingInvalidationReason(execution, this.#pending);
+      if (this.#pending !== undefined && invalidationReason !== undefined) {
         const pending = this.#pending;
         const evidenceToolCallId = requiredToolCallId(execution);
         if (evidenceToolCallId !== undefined) {
           effects.push(blockedVerificationEffect(
             evidenceToolCallId,
-            "Authentication verification lost its causal chain after an intervening browser action."
+            invalidationReason === "authentication-error"
+              ? "The post-submit authentication state reached an error page."
+              : invalidationReason === "signed-out"
+                ? "The browser reached an explicit signed-out state after authentication submission."
+                : "Authentication verification lost its causal chain after a consequential intervening browser action.",
+            invalidationReason === "authentication-error" || invalidationReason === "signed-out"
+              ? invalidationReason
+              : undefined
           ));
           assessments.push(assessmentEvent({
             pending,
-            outcome: "invalidated",
-            reason: "causal-chain-interrupted",
+            outcome: invalidationReason === "causal-chain-interrupted" ? "invalidated" : "blocked",
+            reason: invalidationReason,
             evidenceToolCallId,
-            navigationInterrupted: true,
+            navigationInterrupted: invalidationReason === "causal-chain-interrupted",
           }));
         }
         this.#pending = undefined;
@@ -211,7 +238,12 @@ export class AuthenticationEvidenceTracker {
       challengeDeparted,
       stateTransitionObserved,
     };
-    if (baseline !== undefined && newEvidence.size > 0) {
+    const authenticatedDestination = stage === "challenge" &&
+      challengeDeparted &&
+      stateTransitionObserved &&
+      postSubmitEvidence;
+    if ((baseline !== undefined && newEvidence.size > 0) || authenticatedDestination) {
+      this.#verified = { pending, identity: snapshot.identity };
       effects.push({
         effect: "authentication-verified",
         stage: "verification",
@@ -259,7 +291,8 @@ export class AuthenticationEvidenceTracker {
       return {
         effects: [blockedVerificationEffect(
           evidenceToolCallId,
-          "The post-submit authentication state reached an error page."
+          "The post-submit authentication state reached an error page.",
+          "authentication-error"
         )],
         assessments: [assessmentEvent({
           pending,
@@ -272,7 +305,11 @@ export class AuthenticationEvidenceTracker {
 
     const signals = authenticatedEvidenceSignals(snapshot);
     const newEvidence = difference(signals, pending.baselineSignals);
-    if (newEvidence.size === 0) {
+    const authenticatedDestination = pending.stage === "challenge" &&
+      pending.challengeDeparted &&
+      pending.stateTransitionObserved &&
+      signals.size > 0;
+    if (newEvidence.size === 0 && !authenticatedDestination) {
       return {
         effects: [],
         assessments: [assessmentEvent({
@@ -289,6 +326,7 @@ export class AuthenticationEvidenceTracker {
     }
 
     this.#pending = undefined;
+    this.#verified = { pending, identity: snapshot.identity };
     return {
       effects: [{
         effect: "authentication-verified",
@@ -302,6 +340,51 @@ export class AuthenticationEvidenceTracker {
         evidenceToolCallId,
         postSubmitEvidence: true,
         preexistingEvidence: intersects(signals, pending.baselineSignals),
+      })],
+    };
+  }
+
+  #observeAfterVerification(
+    execution: ToolExecutionRecord,
+    baseEffects: readonly AuthenticationExecutionEffectReceipt[]
+  ): AuthenticationEvidenceObservation {
+    const verified = this.#verified;
+    const snapshot = executionSnapshot(execution);
+    const evidenceToolCallId = requiredToolCallId(execution);
+    if (
+      verified === undefined ||
+      snapshot === undefined ||
+      evidenceToolCallId === undefined ||
+      snapshotScope(snapshot, execution) !== verified.pending.scope ||
+      !identityObservedAfter(snapshot.identity, verified.identity)
+    ) {
+      return { effects: [], assessments: [] };
+    }
+
+    const reason = snapshotReportsAuthenticationError(snapshot)
+      ? "authentication-error" as const
+      : snapshotReportsSignedOut(snapshot)
+        ? "signed-out" as const
+        : undefined;
+    if (reason === undefined) return { effects: [], assessments: [] };
+
+    const explicitEffect = baseEffects.find((effect) =>
+      effect.effect === "authentication-blocked" && effect.failureProof === reason
+    );
+    this.#verified = undefined;
+    return {
+      effects: [explicitEffect ?? blockedVerificationEffect(
+        evidenceToolCallId,
+        reason === "authentication-error"
+          ? "The authenticated browser state reached an explicit authentication error."
+          : "The browser reached an explicit signed-out state.",
+        reason
+      )],
+      assessments: [assessmentEvent({
+        pending: verified.pending,
+        outcome: "blocked",
+        reason,
+        evidenceToolCallId,
       })],
     };
   }
@@ -352,13 +435,15 @@ function assessmentEvent(input: {
 
 function blockedVerificationEffect(
   toolCallId: string,
-  summary: string
+  summary: string,
+  failureProof?: AuthenticationExecutionEffectReceipt["failureProof"]
 ): AuthenticationExecutionEffectReceipt {
   return {
     effect: "authentication-blocked",
     stage: "verification",
     toolCallId,
     blocker: { kind: "external_state", summary },
+    ...(failureProof === undefined ? {} : { failureProof }),
   };
 }
 
@@ -421,10 +506,33 @@ function snapshotScope(snapshot: BrowserSnapshot, execution: ToolExecutionRecord
   return `${snapshot.sessionId}\u0000${snapshot.tab?.ref ?? inputTab ?? ""}`;
 }
 
-function interruptsCausalChain(execution: ToolExecutionRecord): boolean {
-  return execution.decision === "allow" &&
-    execution.tool.name.startsWith("browser.") &&
-    !BROWSER_OBSERVATION_TOOLS.has(execution.tool.name);
+function pendingInvalidationReason(
+  execution: ToolExecutionRecord,
+  pending: PendingAuthenticationEvidence
+): "authentication-error" | "signed-out" | "causal-chain-interrupted" | undefined {
+  const snapshot = executionSnapshot(execution);
+  if (snapshot !== undefined && snapshotReportsAuthenticationError(snapshot)) return "authentication-error";
+  if (!isConsequentialBrowserAction(execution, snapshot, pending.afterIdentity)) return undefined;
+  return snapshot !== undefined && snapshotReportsSignedOut(snapshot)
+    ? "signed-out"
+    : "causal-chain-interrupted";
+}
+
+function isConsequentialBrowserAction(
+  execution: ToolExecutionRecord,
+  snapshot: BrowserSnapshot | undefined,
+  anchor: BrowserStateIdentity
+): boolean {
+  if (
+    execution.decision !== "allow" ||
+    execution.result?.ok !== true ||
+    !execution.tool.name.startsWith("browser.") ||
+    BROWSER_OBSERVATION_TOOLS.has(execution.tool.name) ||
+    snapshot === undefined
+  ) return false;
+  if (snapshot.actionDelta?.outcome === "no-change") return false;
+  if (snapshot.actionDelta?.outcome === "changed") return true;
+  return actionStateAdvanced(anchor, snapshot.identity);
 }
 
 function isCausalObservation(execution: ToolExecutionRecord): boolean {
@@ -453,6 +561,22 @@ function identityObservedAfter(current: BrowserStateIdentity, anchor: BrowserSta
 
 function sameBrowserState(left: BrowserStateIdentity, right: BrowserStateIdentity): boolean {
   return left.documentEpoch === right.documentEpoch && left.actionRevision === right.actionRevision;
+}
+
+function snapshotReportsSignedOut(snapshot: BrowserSnapshot): boolean {
+  if (snapshot.sensitiveInputActive === true) return false;
+  const visibleElements = (snapshot.elements ?? []).filter((element) =>
+    element.hidden !== true && element.disabled !== true
+  );
+  const pageEvidence = [snapshot.url, snapshot.title, snapshot.text]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ");
+  const hasPasswordField = visibleElements.some((element) =>
+    [element.name, element.label, element.text].some((value) =>
+      typeof value === "string" && PASSWORD_FIELD_TERMS.test(value)
+    )
+  );
+  return hasPasswordField && SIGNED_OUT_PAGE_TERMS.test(pageEvidence);
 }
 
 function difference(left: ReadonlySet<string>, right: ReadonlySet<string>): Set<string> {
