@@ -79,6 +79,37 @@ export type BrowserFindResult = {
   candidates: BrowserLocatorCandidate[];
 };
 
+export type BrowserActionPreflightKind = "click" | "press" | "dialog";
+
+export type BrowserActionTargetKind =
+  | "link"
+  | "button"
+  | "form-control"
+  | "scripted-control"
+  | "dialog"
+  | "other";
+
+/** Runtime-observed structural metadata. Page-provided text is bounded and redacted. */
+export type BrowserActionTargetSemantics = {
+  ref?: string;
+  kind: BrowserActionTargetKind;
+  tag?: string;
+  role?: string;
+  label?: string;
+  href?: string;
+  formAssociated: boolean;
+  submit: boolean;
+};
+
+export type BrowserActionPreflight = {
+  action: BrowserActionPreflightKind;
+  sessionId: string;
+  identity: BrowserStateIdentity;
+  tabRef: string;
+  url: string;
+  target?: BrowserActionTargetSemantics;
+};
+
 export type BrowserExtractResult = {
   sessionId: string;
   identity: BrowserStateIdentity;
@@ -318,6 +349,8 @@ export type BrowserBackend = {
   navigate(input: BrowserNavigateInput): Promise<BrowserNavigateResult>;
   snapshot?(input?: BrowserActionInput): Promise<BrowserSnapshot>;
   find?(input: BrowserActionInput): Promise<BrowserFindResult>;
+  /** Read-only structural inspection used before policy assessment and again before dispatch. */
+  preflightAction?(action: BrowserActionPreflightKind, input: BrowserActionInput): Promise<BrowserActionPreflight>;
   click?(input: BrowserActionInput): Promise<BrowserSnapshot>;
   type?(input: BrowserActionInput): Promise<BrowserSnapshot>;
   select?(input: BrowserActionInput): Promise<BrowserSnapshot>;

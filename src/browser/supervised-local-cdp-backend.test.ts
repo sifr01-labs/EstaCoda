@@ -1519,6 +1519,63 @@ describe("supervised local CDP backend", () => {
     expect(result!.identity.actionRevision).toBeGreaterThan(navigation.snapshot.identity.actionRevision);
   });
 
+  it("preflights current click targets structurally without activating them", async () => {
+    const sockets = createSocketFactory();
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: sockets.webSocketFactory,
+      resolveHostname: () => ["93.184.216.34"]
+    });
+    await backend.navigate({ url: "https://example.com/start", sessionId: "session-preflight" });
+    const page = sockets.pageSocket()!;
+    page.snapshot = {
+      url: "https://example.com/start",
+      title: "Actions",
+      text: "Continue",
+      elements: [{ ref: "@e1", role: "link", name: "Continue" }]
+    };
+    page.browserActionPreflight = {
+      kind: "link",
+      tag: "a",
+      role: "link",
+      label: "Continue token=secret-value",
+      href: "https://example.com/next?token=secret-value",
+      formAssociated: false,
+      submit: false
+    };
+    const current = await backend.snapshot?.({ sessionId: "session-preflight" });
+
+    const beforeClicks = page.sent.filter((message) =>
+      message.method === "Runtime.evaluate" && String(message.params?.expression).includes(".click()")
+    ).length;
+    const result = await backend.preflightAction?.("click", {
+      sessionId: "session-preflight",
+      ref: "@e1",
+      identity: current!.identity,
+      tabRef: current!.tab!.ref
+    });
+
+    expect(result).toMatchObject({
+      action: "click",
+      sessionId: "session-preflight",
+      url: "https://example.com/start",
+      target: {
+        ref: "@e1",
+        kind: "link",
+        tag: "a",
+        role: "link",
+        label: "Continue token=[REDACTED]",
+        href: "[REDACTED_URL_WITH_SECRET]",
+        formAssociated: false,
+        submit: false
+      }
+    });
+    expect(page.sent.filter((message) =>
+      message.method === "Runtime.evaluate" && String(message.params?.expression).includes(".click()")
+    )).toHaveLength(beforeClicks);
+  });
+
   it("click() follows one newly opened safe tab and focuses its snapshot", async () => {
     const mainSnapshot = {
       sessionId: "session-1",

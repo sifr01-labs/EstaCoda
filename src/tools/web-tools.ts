@@ -6,6 +6,8 @@ import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
 import type { SessionToolProvider } from "../contracts/tool.js";
 import type {
   BrowserActionInput,
+  BrowserActionPreflight,
+  BrowserActionPreflightKind,
   BrowserActionDelta,
   BrowserActionDeltaElement,
   BrowserBackend,
@@ -37,6 +39,7 @@ import {
 import { inheritEphemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 import { createTimeoutSignal } from "../utils/timeout-signal.js";
 import { redactSensitiveText } from "../utils/redaction.js";
+import { buildBrowserActionSecuritySummary } from "./tool-target-summary.js";
 import {
   registerDefaultWebResearchProviders,
   selectWebResearchProvider,
@@ -1303,6 +1306,7 @@ function createBrowserActionTool(input: {
   method: "click" | "type" | "select" | "scroll" | "press" | "back" | "dialog";
   inputSchema: RegisteredTool["inputSchema"];
 }): RegisteredTool {
+  const securityAction = browserSecurityAction(input.method);
   return {
     name: input.name,
     description: input.description,
@@ -1312,10 +1316,31 @@ function createBrowserActionTool(input: {
     progressLabel: input.progressLabel,
     maxResultSizeChars: 8000,
     isAvailable: () => input.browserBackend.isAvailable(),
-    run: async (toolInput: BrowserActionInput) => {
+    ...(securityAction === undefined ? {} : {
+      resolveSecurity: async (toolInput: BrowserActionInput) => (
+        await resolveBrowserActionSecurity(securityAction, toolInput, input.browserBackend, input.deriveBrowserInput)
+      ).resolution
+    }),
+    run: async (toolInput: BrowserActionInput, context) => {
       const method = input.browserBackend[input.method];
       if (method === undefined) {
         return unsupportedBrowserTool(input.browserBackend, input.name);
+      }
+      if (securityAction !== undefined && context?.securityResolution !== undefined) {
+        const verified = await resolveBrowserActionSecurity(
+          securityAction,
+          toolInput,
+          input.browserBackend,
+          input.deriveBrowserInput
+        );
+        if (!verified.executable || verified.resolution.targetKey !== context.securityResolution.targetKey ||
+            verified.resolution.riskClass !== context.securityResolution.riskClass) {
+          return {
+            ok: false,
+            content: "Browser action target changed or could not be re-verified after security review. Take a fresh snapshot and retry.",
+            metadata: { reason: "browser-action-security-preflight-mismatch" }
+          };
+        }
       }
       const browserInput = input.deriveBrowserInput(toolInput);
       const snapshot = await method(browserInput).catch((error: unknown) => ({ error }));
@@ -1333,6 +1358,119 @@ function createBrowserActionTool(input: {
       };
     }
   };
+}
+
+function browserSecurityAction(value: string): BrowserActionPreflightKind | undefined {
+  return value === "click" || value === "press" || value === "dialog" ? value : undefined;
+}
+
+type BrowserActionSecurityResult = {
+  resolution: {
+    riskClass: "read-only-network" | "external-side-effect";
+    targetKey: string;
+    targetSummary: string;
+  };
+  executable: boolean;
+};
+
+const SAFE_BROWSER_KEYS = new Set([
+  "arrowdown", "arrowleft", "arrowright", "arrowup", "end", "escape", "home",
+  "pagedown", "pageup", "tab"
+]);
+
+async function resolveBrowserActionSecurity(
+  action: BrowserActionPreflightKind,
+  toolInput: BrowserActionInput,
+  browserBackend: BrowserBackend,
+  deriveBrowserInput: DeriveBrowserInput
+): Promise<BrowserActionSecurityResult> {
+  const browserInput = deriveBrowserInput(toolInput);
+  const key = action === "press" ? normalizedBrowserKey(toolInput.key) : action === "dialog" ? toolInput.action : undefined;
+  if ((action === "press" && key !== undefined && SAFE_BROWSER_KEYS.has(key)) ||
+      (action === "dialog" && key === "dismiss")) {
+    return browserActionSecurityResult(action, browserInput, key, undefined, "read-only-network", true);
+  }
+
+  if (browserBackend.preflightAction === undefined) {
+    return browserActionSecurityResult(action, browserInput, key, undefined, "external-side-effect", false);
+  }
+
+  let preflight: BrowserActionPreflight;
+  try {
+    preflight = await browserBackend.preflightAction(action, browserInput);
+  } catch {
+    return browserActionSecurityResult(action, browserInput, key, undefined, "external-side-effect", false);
+  }
+  const safeLink = action === "click" && preflight.target?.kind === "link" &&
+    preflight.target.tag === "a" && preflight.target.submit === false && isHttpUrl(preflight.target.href);
+  const targetBound = preflight.action === action && preflight.target?.ref !== undefined;
+  return browserActionSecurityResult(
+    action,
+    browserInput,
+    key,
+    preflight,
+    safeLink ? "read-only-network" : "external-side-effect",
+    targetBound
+  );
+}
+
+function browserActionSecurityResult(
+  action: BrowserActionPreflightKind,
+  browserInput: BrowserActionInput,
+  key: string | undefined,
+  preflight: BrowserActionPreflight | undefined,
+  riskClass: "read-only-network" | "external-side-effect",
+  executable: boolean
+): BrowserActionSecurityResult {
+  const targetKeyMaterial = preflight === undefined
+    ? {
+        action,
+        sessionId: browserInput.sessionId,
+        ref: browserInput.ref,
+        tabRef: browserInput.tabRef,
+        identity: browserInput.identity,
+        key,
+        unresolved: true
+      }
+    : {
+        action,
+        sessionId: preflight.sessionId,
+        tabRef: preflight.tabRef,
+        documentEpoch: preflight.identity.documentEpoch,
+        actionRevision: preflight.identity.actionRevision,
+        ref: preflight.target?.ref,
+        kind: preflight.target?.kind,
+        tag: preflight.target?.tag,
+        role: preflight.target?.role,
+        href: preflight.target?.href,
+        formAssociated: preflight.target?.formAssociated,
+        submit: preflight.target?.submit,
+        key
+      };
+  return {
+    resolution: {
+      riskClass,
+      targetKey: `browser-action:${createHash("sha256").update(JSON.stringify(targetKeyMaterial)).digest("hex")}`,
+      targetSummary: buildBrowserActionSecuritySummary({ action, key, preflight })
+    },
+    executable
+  };
+}
+
+function normalizedBrowserKey(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.normalize("NFKC").trim().toLocaleLowerCase("en-US");
+  return normalized.length === 0 ? undefined : normalized.slice(0, 32);
+}
+
+function isHttpUrl(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 type BrowserProtectedInputDescriptor = {

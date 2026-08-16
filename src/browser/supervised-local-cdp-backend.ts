@@ -1,5 +1,8 @@
 import type {
   BrowserActionInput,
+  BrowserActionPreflight,
+  BrowserActionPreflightKind,
+  BrowserActionTargetSemantics,
   BrowserBackend,
   BrowserConsoleEntry,
   BrowserBackendStatus,
@@ -766,6 +769,42 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       const { snapshot } = await captureSafeTargetSnapshot(session, input);
       return findBrowserLocator(snapshot, input.locator);
     },
+    preflightAction: async (action, input) => {
+      const session = await getSession(input);
+      if (action === "dialog") {
+        const snapshot = latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session);
+        const dialog = snapshot.pendingDialogs?.[0];
+        if (dialog === undefined) {
+          throw new Error("No current browser dialog is available for security preflight.");
+        }
+        return browserActionPreflight(snapshot, action, {
+          ref: dialog.id,
+          kind: "dialog",
+          role: dialog.type,
+          label: boundedRedactedActionLabel(dialog.message),
+          formAssociated: false,
+          submit: false
+        });
+      }
+
+      const { snapshot } = await captureSafeTargetSnapshot(session, input);
+      if (action === "press") {
+        const inspected = await inspectBrowserActionTarget(session, undefined);
+        return browserActionPreflight(snapshot, action, inspected);
+      }
+
+      const target = resolveBrowserTarget(snapshot, input);
+      const inspected = await inspectBrowserActionTarget(session, target.ref);
+      if (inspected === undefined) {
+        throw new Error("Browser action target structure could not be inspected safely.");
+      }
+      return browserActionPreflight(snapshot, action, {
+        ...inspected,
+        ref: target.ref,
+        role: inspected?.role ?? target.role,
+        label: inspected?.label ?? boundedRedactedActionLabel(target.name ?? target.label ?? target.text)
+      });
+    },
     click: async (input) => {
       let session = await getSession(input);
       const targetState = await captureSafeTargetSnapshot(session, input);
@@ -1113,6 +1152,99 @@ function refActionExpression(ref: string | undefined, action: "click" | "type", 
     return `(() => { const el = window.__estacodaElements?.[${index}]; if (!el || !el.isConnected) throw new Error('Browser element ref not found: ${ref ?? ""}'); if (el.matches(':disabled,[aria-disabled="true"]')) throw new Error('Browser element is disabled: ${ref ?? ""}'); const style = getComputedStyle(el); if (style.display === 'none' || style.visibility === 'hidden' || el.getClientRects().length === 0) throw new Error('Browser element is hidden: ${ref ?? ""}'); el.click(); return 'clicked'; })()`;
   }
   return `(() => { const el = window.__estacodaElements?.[${index}]; if (!el || !el.isConnected) throw new Error('Browser element ref not found: ${ref ?? ""}'); if (el.matches(':disabled,[aria-disabled="true"]')) throw new Error('Browser element is disabled: ${ref ?? ""}'); const style = getComputedStyle(el); if (style.display === 'none' || style.visibility === 'hidden' || el.getClientRects().length === 0) throw new Error('Browser element is hidden: ${ref ?? ""}'); if (!(el instanceof HTMLInputElement) && !(el instanceof HTMLTextAreaElement) && !el.isContentEditable) throw new Error('Browser target does not accept text: ${ref ?? ""}'); el.focus(); if (el.isContentEditable) el.textContent = ${JSON.stringify(text)}; else el.value = ${JSON.stringify(text)}; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return 'typed'; })()`;
+}
+
+async function inspectBrowserActionTarget(
+  session: ManagedBackendSession,
+  ref: string | undefined
+): Promise<BrowserActionTargetSemantics | undefined> {
+  const index = ref === undefined ? undefined : refToIndex(ref);
+  const result = await session.supervisor.send("Runtime.evaluate", {
+    expression: browserActionPreflightExpression(index),
+    returnByValue: true
+  }) as { result?: { value?: unknown } };
+  return parseBrowserActionTargetSemantics(result.result?.value);
+}
+
+function browserActionPreflightExpression(index: number | undefined): string {
+  const target = index === undefined
+    ? "document.activeElement"
+    : `window.__estacodaElements?.[${index}]`;
+  return `(() => {
+    const el = ${target};
+    if (!(el instanceof Element) || !el.isConnected) return undefined;
+    const clean = (value, max = 96) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, max);
+    const tag = el.tagName.toLowerCase();
+    const role = clean(el.getAttribute('role') || '');
+    const inputType = tag === 'input' ? String(el.getAttribute('type') || 'text').toLowerCase() : undefined;
+    const href = el instanceof HTMLAnchorElement ? el.href : undefined;
+    const inlineScripted = el.hasAttribute('onclick') || typeof el.onclick === 'function';
+    const boundIndex = Array.isArray(window.__estacodaElements) ? window.__estacodaElements.indexOf(el) : -1;
+    const formAssociated = Boolean(el.form || el.closest('form'));
+    const submit = (el instanceof HTMLButtonElement && el.type === 'submit') ||
+      (el instanceof HTMLInputElement && (inputType === 'submit' || inputType === 'image'));
+    const controlRole = /^(?:button|checkbox|combobox|listbox|menuitem|option|radio|searchbox|slider|spinbutton|switch|tab|textbox)$/u.test(role);
+    let kind = 'other';
+    if (el instanceof HTMLAnchorElement && /^https?:$/u.test(el.protocol) && !inlineScripted) kind = 'link';
+    else if (el instanceof HTMLButtonElement || (el instanceof HTMLInputElement && /^(?:button|image|reset|submit)$/u.test(inputType || ''))) kind = 'button';
+    else if (el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement) kind = 'form-control';
+    else if (inlineScripted || controlRole) kind = 'scripted-control';
+    const label = clean(el.getAttribute('aria-label') || el.innerText || el.textContent || el.getAttribute('value') || el.getAttribute('title') || '');
+    return { ref: boundIndex >= 0 ? '@e' + (boundIndex + 1) : undefined, kind, tag, role: role || undefined, label: label || undefined, href, formAssociated, submit };
+  })()`;
+}
+
+function parseBrowserActionTargetSemantics(value: unknown): BrowserActionTargetSemantics | undefined {
+  if (!isRecord(value) || !isBrowserActionTargetKind(value.kind) ||
+      typeof value.formAssociated !== "boolean" || typeof value.submit !== "boolean") {
+    return undefined;
+  }
+  return {
+    kind: value.kind,
+    ...(typeof value.ref === "string" && /^@e\d+$/u.test(value.ref) ? { ref: value.ref } : {}),
+    ...(boundedStructuralValue(value.tag, 24) === undefined ? {} : { tag: boundedStructuralValue(value.tag, 24) }),
+    ...(boundedStructuralValue(value.role, 48) === undefined ? {} : { role: boundedStructuralValue(value.role, 48) }),
+    ...(boundedRedactedActionLabel(value.label) === undefined ? {} : { label: boundedRedactedActionLabel(value.label) }),
+    ...(typeof value.href !== "string" ? {} : { href: redactUrlForMetadata(value.href) }),
+    formAssociated: value.formAssociated,
+    submit: value.submit
+  };
+}
+
+function browserActionPreflight(
+  snapshot: BrowserSnapshot,
+  action: BrowserActionPreflightKind,
+  target: BrowserActionTargetSemantics | undefined
+): BrowserActionPreflight {
+  const tabRef = snapshot.tab?.ref;
+  if (tabRef === undefined) {
+    throw new Error("Browser action security preflight requires a controlled tab.");
+  }
+  return {
+    action,
+    sessionId: snapshot.sessionId,
+    identity: { ...snapshot.identity },
+    tabRef,
+    url: redactUrlForMetadata(snapshot.url),
+    ...(target === undefined ? {} : { target })
+  };
+}
+
+function boundedStructuralValue(value: unknown, maxChars: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.normalize("NFKC").replace(/\s+/gu, " ").trim().toLocaleLowerCase("en-US");
+  return normalized.length === 0 ? undefined : normalized.slice(0, maxChars);
+}
+
+function boundedRedactedActionLabel(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = redactSensitiveText(value.normalize("NFKC").replace(/\s+/gu, " ").trim());
+  return normalized.length === 0 ? undefined : normalized.slice(0, 96);
+}
+
+function isBrowserActionTargetKind(value: unknown): value is BrowserActionTargetSemantics["kind"] {
+  return value === "link" || value === "button" || value === "form-control" ||
+    value === "scripted-control" || value === "dialog" || value === "other";
 }
 
 function selectActionExpression(ref: string | undefined, value: string): string {

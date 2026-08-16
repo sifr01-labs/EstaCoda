@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildToolDisplayPreview,
+  buildBrowserActionSecuritySummary,
   buildToolSecurityTargetSummary,
   redactToolDisplayPreview
 } from "./tool-target-summary.js";
@@ -89,5 +90,34 @@ describe("buildToolDisplayPreview", () => {
   it("falls back to security target summaries for ordinary tools", () => {
     expect(buildToolDisplayPreview("web.search", { query: "OpenAI Responses API" })).toBe("OpenAI Responses API");
     expect(buildToolDisplayPreview("browser.press", { key: "Enter" })).toBe("Enter");
+  });
+});
+
+describe("buildBrowserActionSecuritySummary", () => {
+  it("bounds and redacts untrusted page labels and exposes only the hostname", () => {
+    const summary = buildBrowserActionSecuritySummary({
+      action: "click",
+      preflight: {
+        action: "click",
+        sessionId: "session-1",
+        identity: { documentEpoch: 1, actionRevision: 2, observationId: 3 },
+        tabRef: "@t1",
+        url: "https://developers.mtn.com/apps/private?token=must-not-display",
+        target: {
+          ref: "@e9",
+          kind: "button",
+          tag: "button",
+          role: "button",
+          label: "DELETE password=hunter2",
+          formAssociated: true,
+          submit: true
+        }
+      }
+    });
+
+    expect(summary).toBe("Click button “DELETE password=[redacted]” on developers.mtn.com");
+    expect(summary).not.toContain("hunter2");
+    expect(summary).not.toContain("must-not-display");
+    expect(summary).not.toContain("/apps/private");
   });
 });

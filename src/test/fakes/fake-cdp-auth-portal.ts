@@ -69,6 +69,14 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
   onProtectedDelivery?: () => void;
   onProtectedSubmit?: () => void;
   onRuntimeEvaluate?: (expression: string) => void;
+  browserActionPreflight: Record<string, unknown> = {
+    kind: "button",
+    tag: "button",
+    role: "button",
+    label: "Submit",
+    formAssociated: true,
+    submit: true,
+  };
 
   send(data: string): void {
     const message = JSON.parse(data) as {
@@ -184,6 +192,9 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
       ) {
         const index = /\[(\d+)\]/u.exec(message.params.expression)?.[1] ?? "unknown";
         return { result: { objectId: `protected-field-object-${index}` } };
+      }
+      if (typeof message.params?.expression === "string" && message.params.expression.includes("const inlineScripted")) {
+        return { result: { value: this.browserActionPreflight } };
       }
       return { result: { value: JSON.stringify(this.snapshot) } };
     }

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { BrowserActionInput, BrowserBackend, BrowserNavigateInput } from "../contracts/browser.js";
+import type { BrowserActionInput, BrowserActionPreflight, BrowserBackend, BrowserNavigateInput } from "../contracts/browser.js";
 import type { GroupedSecureInputRequestHandler } from "../contracts/secure-input.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import type { ManagedPythonCapabilityInstallStatus } from "../python-env/capability-manager.js";
@@ -1469,6 +1469,131 @@ describe("web and browser tools baselines", () => {
 
     expect(cdp.riskClass).toBe("external-side-effect");
     expect(cdp.toolsets).toEqual(["dangerous"]);
+  });
+
+  it("raises consequential click targets while preserving structurally safe links", async () => {
+    const current = browserIdentity(4);
+    const labels = new Map([
+      ["@e2", "DELETE password=hunter2"],
+      ["@e3", "Renew credential"],
+      ["@e4", "Submit"],
+      ["@e5", "Confirm"],
+      ["@e6", "Purchase"],
+      ["@e7", "Continue"],
+      ["@e8", "Unknown scripted control"]
+    ]);
+    const preflightAction = vi.fn(async (_action: "click" | "press" | "dialog", input: BrowserActionInput): Promise<BrowserActionPreflight> => ({
+      action: "click",
+      sessionId: input.sessionId!,
+      identity: current,
+      tabRef: "@t1",
+      url: "https://developers.mtn.com/apps?token=must-redact",
+      target: {
+        ref: input.ref,
+        kind: input.ref === "@e1" ? "link" : input.ref === "@e8" ? "scripted-control" : "button",
+        tag: input.ref === "@e1" ? "a" : input.ref === "@e8" ? "div" : "button",
+        role: input.ref === "@e1" ? "link" : "button",
+        label: input.ref === "@e1" ? "API docs" : labels.get(input.ref!)!,
+        ...(input.ref === "@e1" ? { href: "https://developers.mtn.com/docs" } : {}),
+        formAssociated: input.ref !== "@e1",
+        submit: input.ref !== "@e1"
+      }
+    }));
+    const browserBackend = { ...createSessionRecordingBrowserBackend(), preflightAction };
+    const click = tool("browser.click", createTestWebTools({ browserBackend }));
+    const base = { sessionId: "runtime:main", identity: current, tabRef: "@t1" };
+
+    const link = await click.resolveSecurity?.({ ...base, ref: "@e1" }, { trustedWorkspace: true, sessionId: "runtime" });
+    expect(link).toMatchObject({ riskClass: "read-only-network", targetSummary: "Click link “API docs” on developers.mtn.com" });
+
+    for (const [ref, label] of labels) {
+      const resolution = await click.resolveSecurity?.({ ...base, ref }, { trustedWorkspace: true, sessionId: "runtime" });
+      expect(resolution).toMatchObject({
+        riskClass: "external-side-effect",
+        targetKey: expect.stringMatching(/^browser-action:[a-f0-9]{64}$/u),
+        targetSummary: expect.stringContaining(label.startsWith("DELETE") ? "DELETE password=[redacted]" : label)
+      });
+      expect(JSON.stringify(resolution)).not.toContain("hunter2");
+      expect(JSON.stringify(resolution)).not.toContain("must-redact");
+    }
+  });
+
+  it("fails closed for stale targets and keeps approvals bound to the inspected control", async () => {
+    const clickMethod = vi.fn(async () => createSessionRecordingBrowserBackend().snapshot!({ sessionId: "runtime:main" }));
+    let targetRef = "@e2";
+    const preflightAction = vi.fn(async (_action: "click" | "press" | "dialog", input: BrowserActionInput): Promise<BrowserActionPreflight> => {
+      if (input.ref === "@stale") throw new BrowserTargetError({ reason: "stale-browser-ref", message: "stale" });
+      return {
+        action: "click",
+        sessionId: input.sessionId!,
+        identity: browserIdentity(9),
+        tabRef: "@t1",
+        url: "https://developers.mtn.com/apps",
+        target: { ref: targetRef, kind: "button", tag: "button", role: "button", label: "DELETE", formAssociated: true, submit: true }
+      };
+    });
+    const browserBackend = { ...createSessionRecordingBrowserBackend(), click: clickMethod, preflightAction };
+    const click = tool("browser.click", createTestWebTools({ browserBackend }));
+    const context = { trustedWorkspace: true, sessionId: "runtime" };
+    const input = { sessionId: "runtime:main", identity: browserIdentity(9), tabRef: "@t1", ref: "@e2" };
+    const approved = await click.resolveSecurity?.(input, context);
+
+    targetRef = "@e3";
+    await expect(click.run(input, { securityResolution: approved })).resolves.toMatchObject({
+      ok: false,
+      metadata: { reason: "browser-action-security-preflight-mismatch" }
+    });
+    expect(clickMethod).not.toHaveBeenCalled();
+
+    const stale = await click.resolveSecurity?.({ ...input, ref: "@stale" }, context);
+    expect(stale).toMatchObject({ riskClass: "external-side-effect" });
+    await expect(click.run({ ...input, ref: "@stale" }, { securityResolution: stale })).resolves.toMatchObject({ ok: false });
+    expect(clickMethod).not.toHaveBeenCalled();
+  });
+
+  it("keeps navigation keys read-only and raises Enter on a focused form control", async () => {
+    const preflightAction = vi.fn(async (_action: "click" | "press" | "dialog", input: BrowserActionInput): Promise<BrowserActionPreflight> => ({
+      action: "press",
+      sessionId: input.sessionId!,
+      identity: browserIdentity(5),
+      tabRef: "@t1",
+      url: "https://developers.mtn.com/login",
+      target: { ref: "@e4", kind: "form-control", tag: "input", role: "textbox", label: "Email", formAssociated: true, submit: false }
+    }));
+    const press = tool("browser.press", createTestWebTools({
+      browserBackend: { ...createSessionRecordingBrowserBackend(), preflightAction }
+    }));
+    const context = { trustedWorkspace: true, sessionId: "runtime" };
+
+    await expect(press.resolveSecurity?.({ key: "Escape" }, context)).resolves.toMatchObject({ riskClass: "read-only-network" });
+    expect(preflightAction).not.toHaveBeenCalled();
+    await expect(press.resolveSecurity?.({ key: "Enter" }, context)).resolves.toMatchObject({
+      riskClass: "external-side-effect",
+      targetSummary: "Press enter on “Email” on developers.mtn.com"
+    });
+  });
+
+  it("raises dialog acceptance while leaving dismissal read-only", async () => {
+    const preflightAction = vi.fn(async (_action: "click" | "press" | "dialog", input: BrowserActionInput): Promise<BrowserActionPreflight> => ({
+      action: "dialog",
+      sessionId: input.sessionId!,
+      identity: browserIdentity(6),
+      tabRef: "@t1",
+      url: "https://developers.mtn.com/apps",
+      target: { ref: "dialog-7", kind: "dialog", role: "confirm", label: "Delete this app?", formAssociated: false, submit: false }
+    }));
+    const dialog = tool("browser.dialog", createTestWebTools({
+      browserBackend: { ...createSessionRecordingBrowserBackend(), preflightAction }
+    }));
+    const context = { trustedWorkspace: true, sessionId: "runtime" };
+
+    await expect(dialog.resolveSecurity?.({ action: "accept" }, context)).resolves.toMatchObject({
+      riskClass: "external-side-effect",
+      targetSummary: "Accept browser dialog “Delete this app?” on developers.mtn.com"
+    });
+    await expect(dialog.resolveSecurity?.({ action: "dismiss" }, context)).resolves.toMatchObject({
+      riskClass: "read-only-network"
+    });
   });
 
   it("exposes safe tab discovery and explicit switching as concise browser tools", async () => {

@@ -139,6 +139,7 @@ Current protection coverage:
 
 - `web.extract` guards the initial URL and every manual redirect before reading the response body.
 - `browser.navigate` guards the initial URL and checks the final post-navigation URL, with best-effort cleanup to `about:blank` when a redirect lands on a blocked target.
+- `browser.click`, consequential keyboard actions, and dialog acceptance run a read-only structural preflight. Ordinary HTTP(S) anchors remain read-only; buttons, form submissions, scripted/unknown controls, Enter or ambiguous keys, and dialog acceptance require `external-side-effect` approval. The target is revalidated after approval and exact target keys prevent one control's approval from authorizing another. Stale or unavailable structural evidence fails closed, and untrusted page labels can never reduce risk.
 - `browser.cdp` is an `external-side-effect` tool. URL-capable CDP methods including `Page.navigate`, `Target.createTarget`, `Runtime.evaluate`, and `Runtime.callFunctionOn` apply URL-safety, secret scanning, and website-policy checks to explicit URLs and obvious network/navigation literal URL expressions.
 - Supervised local CDP request interception aborts metadata, private/internal, website-policy-blocked, and secret-bearing browser subresource requests. It does not proxy content and does not read response bodies.
 
@@ -155,6 +156,8 @@ Hybrid routing uses the same URL classifier as browser and web tools:
 - Unsafe redirects are blanked to `about:blank` when possible; if blanking fails, the unsafe session is closed.
 
 Known limits: there is no socket-level DNS rebinding or TOCTOU protection, runtime-expression guarding is not full JavaScript static analysis, and debug telemetry is not persistent session recording, video capture, or a dashboard.
+
+Security risk note: browser controls can mutate remote accounts even when the tool name is generic. Dynamic classification therefore raises uncertain controls instead of inferring safety from words such as “view” or “continue.” Approval metadata contains only a bounded redacted label and hostname, while approval scope binds to runtime-observed structural identity rather than page text. Existing workspace trust, URL policy, hardline command checks, protected-authentication authorization, cloud-spend approval, and raw CDP gating remain independent floors.
 
 ## Channel Security Model
 

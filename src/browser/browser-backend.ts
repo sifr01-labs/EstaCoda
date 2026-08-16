@@ -850,6 +850,13 @@ export function createHybridBrowserBackend(options: HybridBrowserBackendOptions)
       const result = await method(actionInputForRoute(input, route));
       return { ...result, sessionId: browserKeyForInput(input.sessionId) };
     },
+    preflightAction: async (action, input) => {
+      const route = resolveActionRoute(input);
+      const method = backendForRoute(route.route).preflightAction;
+      if (method === undefined) throw new Error(`Hybrid browser ${route.route} backend does not support action preflight.`);
+      const result = await method(action, actionInputForRoute(input, route));
+      return { ...result, sessionId: browserKeyForInput(input.sessionId) };
+    },
     click: (input) => runSnapshotAction(input, "click", "click"),
     type: (input) => runSnapshotAction(input, "type", "type"),
     select: (input) => runSnapshotAction(input, "select", "select"),

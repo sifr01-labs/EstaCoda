@@ -291,6 +291,7 @@ export function createBrowserbaseBrowserBackend(options: BrowserbaseBrowserBacke
     ),
     snapshot: (input) => runWithBackend((delegate) => requiredMethod(delegate.snapshot, "snapshot")(input)),
     find: (input) => runWithBackend((delegate) => requiredMethod(delegate.find, "find")(input)),
+    preflightAction: (action, input) => runWithBackend((delegate) => requiredMethod(delegate.preflightAction, "preflightAction")(action, input)),
     click: (input) => runWithBackend((delegate) => requiredMethod(delegate.click, "click")(input)),
     type: (input) => runWithBackend((delegate) => requiredMethod(delegate.type, "type")(input)),
     select: (input) => runWithBackend((delegate) => requiredMethod(delegate.select, "select")(input)),
