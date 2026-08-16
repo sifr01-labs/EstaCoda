@@ -1,11 +1,7 @@
 import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
-import type {
-  ExecutionPlan,
-  ExecutionPlanControllerApi,
-  ExecutionPlanReader
-} from "../contracts/execution-plan.js";
+import type { ExecutionPlanControllerApi, ExecutionPlanReader } from "../contracts/execution-plan.js";
 import type { MemoryPromptContext } from "../contracts/memory.js";
 import type {
   ModelProfile,
@@ -71,15 +67,13 @@ import {
   pendingDelegatedAnswerOwnership,
   type PendingDelegatedAnswerOwnership
 } from "./delegated-answer-ownership.js";
-import { BrowserObservationGuard } from "./browser-observation-guard.js";
 import {
   createTurnToolFeedbackLedger,
   recordTurnToolFeedbackBatch,
   TurnMcpReadLedger,
   type TurnToolFeedbackLedger
 } from "./turn-tool-feedback-ledger.js";
-import { ExecutionPlanProgressGuard } from "./execution-plan-progress-guard.js";
-import { assessExecutionPlanActivation, isPlanToolName } from "./execution-plan-activation.js";
+import { isPlanToolName } from "./execution-plan-activation.js";
 import { ExecutionWorkingSetController } from "./execution-working-set.js";
 import type { BrowserSessionLease } from "../browser/session-lifecycle.js";
 import { deriveBrowserSessionKey } from "../browser/session-key.js";
@@ -88,15 +82,12 @@ import {
   projectBrowserStateFromExecutions,
   refreshBrowserStateProjection
 } from "../browser/browser-state-projection.js";
-import { applyAuthenticationExecutionEffects } from "./authentication-execution-effects.js";
-import { AuthenticationEvidenceTracker } from "./authentication-evidence-tracker.js";
+import {
+  ExecutionSupervisionController,
+  EXECUTION_SUPERVISION_PROMPTS
+} from "./execution-supervision-controller.js";
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
-const BROWSER_NO_PROGRESS_NUDGE = "Repeated browser observations show no semantic state change. Do not alternate snapshot, tabs, find, extract, screenshot, console, or CDP calls to inspect the same state. Take a relevant browser action; if protected input or another external condition blocks progress, record that precise blocker.";
-const BROWSER_NO_PROGRESS_STOP = "I stopped this browser turn because repeated observations showed no state change. I can continue after switching tabs, taking a different browser action, or receiving clarification about the next step.";
-const EXECUTION_PLAN_PROGRESS_NUDGE = "Your active execution plan has made no material progress for several iterations. Change approach and continue executing the original request now. Make progress by transitioning the active plan item, performing a relevant target mutation, recording verification evidence, or recording a concrete blocker. Repeated reads, cosmetic browser changes, navigation churn, narration, and failed plan updates do not count as progress. Do not ask whether to continue.";
-const EXECUTION_PLAN_ACTIVATION_NUDGE = "This is clearly multi-step foreground work. Before doing anything else, call plan with operation=write and create a concise Mission with exactly one in_progress item and the remaining items pending. Call only plan in this response; do not call substantive tools yet, narrate the plan, or ask whether to proceed.";
-const PROVISIONAL_EXECUTION_PLAN_OBJECTIVE_MAX_CHARS = 500;
 const PROVIDER_CALL_EFFICIENCY_WARNING_THRESHOLD = 12;
 const PROVIDER_TOKEN_EFFICIENCY_WARNING_THRESHOLD = 500_000;
 
@@ -287,10 +278,8 @@ export class ProviderTurnLoop {
       loopStartedAt += elapsedMs;
     });
     const repeatedFailures = new Map<string, number>();
-    const browserObservationGuard = new BrowserObservationGuard(this.#budgets.maxRepeatedBrowserObservations);
     let maxObservedRisk = input.initialRiskClass;
     let pendingEmptyResponseNudge = false;
-    let pendingBrowserNoProgressNudge = false;
     let postToolEmptyRetried = false;
     let capturedContentWithHousekeepingTools: string | undefined;
     let emptyContentRetries = 0;
@@ -299,14 +288,6 @@ export class ProviderTurnLoop {
     let pendingReasoningOnlyPrefill = false;
     let retryReasoningOnlyInitialResponse = false;
     let delegatedAnswerOwnership: PendingDelegatedAnswerOwnership | undefined;
-    let pendingExecutionPlanContinuation = false;
-    let pendingExecutionPlanProgressNudge = false;
-    const initialExecutionPlanActivation = this.#executionPlanActivation(input, []);
-    let pendingExecutionPlanActivationNudge = initialExecutionPlanActivation.required;
-    let retryExecutionPlanActivation = false;
-    let executionPlanActivationNudged = initialExecutionPlanActivation.required;
-    let automaticExecutionPlanRequired = initialExecutionPlanActivation.required;
-    let executionPlanIncomplete = false;
     let emergencyDeadlineReached = false;
     let toolFeedbackLedger = createTurnToolFeedbackLedger();
     let providerCallsThisTurn = 0;
@@ -316,20 +297,23 @@ export class ProviderTurnLoop {
       profileId: this.#profileId,
       sessionId: workingSessionId
     });
-    this.#executionWorkingSet?.beginTurn(this.#executionPlanReader?.current(), workingSessionId);
-    this.#executionWorkingSet?.observe(
-      this.#executionPlanReader?.current(),
-      input.toolExecutions,
-      workingSessionId
-    );
     this.#syncBrowserSessionLease(false);
-    const executionPlanProgressGuard = new ExecutionPlanProgressGuard({
-      plan: this.#executionPlanReader?.current(),
+    const executionSupervision = new ExecutionSupervisionController({
+      userText: input.userText,
+      visibleTurnId: input.visibleTurnId,
+      providerTools: input.providerTools,
       existingExecutions: input.toolExecutions,
+      currentSessionId: () => this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId,
+      locale: this.#ui?.language ?? "en",
+      maxRepeatedBrowserObservations: this.#budgets.maxRepeatedBrowserObservations,
       noProgressNudgeIteration: this.#budgets.noProgressNudgeIteration,
-      maxNoProgressIterations: this.#budgets.maxNoProgressIterations
+      maxNoProgressIterations: this.#budgets.maxNoProgressIterations,
+      executionPlanReader: this.#executionPlanReader,
+      executionPlanController: this.#executionPlanController,
+      executionWorkingSet: this.#executionWorkingSet,
+      runRecorder: this.#runRecorder,
+      onEvent: input.onEvent
     });
-    const authenticationEvidenceTracker = new AuthenticationEvidenceTracker(input.toolExecutions);
 
     for (let iteration = 0; iteration < this.#budgets.maxProviderIterations; iteration += 1) {
       this.#syncBrowserSessionLease(false);
@@ -360,20 +344,9 @@ export class ProviderTurnLoop {
           { kind: "budget", budget: "provider-wall-clock-ms", limit: this.#budgets.maxProviderWallClockMs, observed: elapsedMs, reason: "Provider loop reached its emergency finalization reserve." },
           "provider-budget-exhausted"
         );
-        if (hasUnfinishedExecutionPlan(this.#executionPlanReader?.current())) {
-          executionPlanIncomplete = true;
-          effectiveProviderExecution = incompleteExecutionPlanReceipt(
-            effectiveProviderExecution ?? localReceiptExecution(this.#model),
-            this.#executionPlanReader?.current(),
-            this.#ui?.language ?? "en",
-            "deadline"
-          );
-        } else {
-          effectiveProviderExecution = emergencyDeadlineReceipt(
-            effectiveProviderExecution ?? localReceiptExecution(this.#model),
-            this.#ui?.language ?? "en"
-          );
-        }
+        effectiveProviderExecution = executionSupervision.emergencyDeadlineReceipt(
+          effectiveProviderExecution ?? localReceiptExecution(this.#model)
+        );
         break;
       }
       if (providerToolExecutions.length >= this.#budgets.maxProviderToolCalls) {
@@ -389,13 +362,12 @@ export class ProviderTurnLoop {
         );
         break;
       }
-      const phase: "initial" | "continuation" = iteration === 0 || retryEmptyInitialResponse || retryReasoningOnlyInitialResponse || retryExecutionPlanActivation
+      const supervisionPrompt = executionSupervision.consumePromptState();
+      const phase: "initial" | "continuation" = iteration === 0 || retryEmptyInitialResponse || retryReasoningOnlyInitialResponse || supervisionPrompt.retryInitialProviderRequest
         ? "initial"
         : "continuation";
       retryEmptyInitialResponse = false;
       retryReasoningOnlyInitialResponse = false;
-      retryExecutionPlanActivation = false;
-      const activationRestrictedRequest = pendingExecutionPlanActivationNudge;
 
       let execution = phase === "initial"
         ? await this.#completeWithProvider({
@@ -403,8 +375,8 @@ export class ProviderTurnLoop {
             iteration,
             loopStartedAt,
             reasoningOnlyPrefill: pendingReasoningOnlyPrefill,
-            executionPlanProgressNudge: pendingExecutionPlanProgressNudge,
-            executionPlanActivationNudge: pendingExecutionPlanActivationNudge
+            executionPlanProgressNudge: supervisionPrompt.executionPlanProgressNudge,
+            executionPlanActivationNudge: supervisionPrompt.executionPlanActivationNudge
           })
         : await this.#continueProviderAfterTools({
           ...input,
@@ -417,9 +389,9 @@ export class ProviderTurnLoop {
           iteration,
           loopStartedAt,
           emptyResponseNudge: pendingEmptyResponseNudge,
-          browserNoProgressNudge: pendingBrowserNoProgressNudge,
-          executionPlanContinuation: pendingExecutionPlanContinuation,
-          executionPlanProgressNudge: pendingExecutionPlanProgressNudge,
+          browserNoProgressNudge: supervisionPrompt.browserNoProgressNudge,
+          executionPlanContinuation: supervisionPrompt.executionPlanContinuation,
+          executionPlanProgressNudge: supervisionPrompt.executionPlanProgressNudge,
           reasoningOnlyPrefill: pendingReasoningOnlyPrefill,
           efficiencySignals: providerEfficiencySignals({
             providerCalls: providerCallsThisTurn,
@@ -428,10 +400,6 @@ export class ProviderTurnLoop {
           })
         });
       pendingEmptyResponseNudge = false;
-      pendingBrowserNoProgressNudge = false;
-      pendingExecutionPlanContinuation = false;
-      pendingExecutionPlanProgressNudge = false;
-      pendingExecutionPlanActivationNudge = false;
       pendingReasoningOnlyPrefill = false;
 
       if (execution === undefined) {
@@ -480,10 +448,7 @@ export class ProviderTurnLoop {
           break;
         }
 
-        const executionPlanProgress = executionPlanProgressGuard.observe({
-          plan: this.#executionPlanReader?.current(),
-          executions: []
-        });
+        const executionPlanProgress = executionSupervision.observeReasoningOnly();
         if (executionPlanProgress.active) {
           await this.#runRecorder.recordProviderIteration({
             iteration,
@@ -513,17 +478,9 @@ export class ProviderTurnLoop {
               },
               "provider-budget-exhausted"
             );
-            executionPlanIncomplete = true;
-            effectiveProviderExecution = incompleteExecutionPlanReceipt(
-              execution,
-              this.#executionPlanReader?.current(),
-              this.#ui?.language ?? "en",
-              "no_progress",
-              this.#budgets.maxNoProgressIterations
-            );
+            effectiveProviderExecution = executionSupervision.executionPlanNoProgressStopReceipt(execution);
             break;
           }
-          pendingExecutionPlanProgressNudge = executionPlanProgress.shouldNudge;
           pendingReasoningOnlyPrefill = reasoningOnlyPrefillRetries < 2;
           if (pendingReasoningOnlyPrefill) reasoningOnlyPrefillRetries += 1;
           retryReasoningOnlyInitialResponse = phase === "initial";
@@ -594,31 +551,19 @@ export class ProviderTurnLoop {
           },
           "provider-budget-exhausted"
         );
-        const plan = this.#executionPlanReader?.current();
-        if (hasUnfinishedExecutionPlan(plan)) {
-          executionPlanIncomplete = true;
-          execution = incompleteExecutionPlanReceipt(
-            execution,
-            plan,
-            this.#ui?.language ?? "en",
-            "deadline"
-          );
-        } else {
-          execution = emergencyDeadlineReceipt(execution, this.#ui?.language ?? "en");
-        }
+        execution = executionSupervision.emergencyDeadlineReceipt(execution);
         effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
         previousProviderExecution = execution;
         break;
       }
 
       if (execution.ok === true && execution.toolCalls.length > 0) {
-        const activation = this.#executionPlanActivation(input, execution.toolCalls.map((call) => call.name ?? ""));
-        automaticExecutionPlanRequired ||= activation.required;
-        const onlyPlanCalls = execution.toolCalls.length > 0 &&
-          execution.toolCalls.every((toolCall) => isPlanToolName(toolCall.name));
-        if (activationRestrictedRequest && !onlyPlanCalls) {
-          await this.#writeProvisionalExecutionPlan(input);
-          retryExecutionPlanActivation = true;
+        const activation = await executionSupervision.superviseActivation({
+          toolNames: execution.toolCalls.map((call) => call.name ?? ""),
+          activationRestrictedRequest: supervisionPrompt.activationRestrictedRequest,
+          canRetry: iteration + consumedProviderIterations < this.#budgets.maxProviderIterations
+        });
+        if (activation.retryProvider) {
           await this.#runRecorder.recordProviderIteration({
             iteration,
             phase,
@@ -629,42 +574,15 @@ export class ProviderTurnLoop {
           });
           if (consumedProviderIterations > 1) iteration += consumedProviderIterations - 1;
           continue;
-        }
-        if (
-          activation.required &&
-          this.#executionPlanReader?.current() === undefined &&
-          !onlyPlanCalls &&
-          !executionPlanActivationNudged &&
-          iteration + consumedProviderIterations < this.#budgets.maxProviderIterations
-        ) {
-          executionPlanActivationNudged = true;
-          pendingExecutionPlanActivationNudge = true;
-          retryExecutionPlanActivation = true;
-          await this.#runRecorder.recordProviderIteration({
-            iteration,
-            phase,
-            ok: execution.ok,
-            toolCalls: execution.toolCalls.length,
-            executedTools: 0,
-            exhausted: false
-          });
-          if (consumedProviderIterations > 1) iteration += consumedProviderIterations - 1;
-          continue;
-        }
-        if (
-          activation.required &&
-          this.#executionPlanReader?.current() === undefined &&
-          !onlyPlanCalls
-        ) {
-          await this.#writeProvisionalExecutionPlan(input);
         }
         execution = await this.#persistProviderToolCallTurn(execution);
       } else if (execution.ok === true) {
-        const activation = this.#executionPlanActivation(input, []);
-        automaticExecutionPlanRequired ||= activation.required;
-        if (activationRestrictedRequest) {
-          await this.#writeProvisionalExecutionPlan(input);
-          retryExecutionPlanActivation = true;
+        const activation = await executionSupervision.superviseActivation({
+          toolNames: [],
+          activationRestrictedRequest: supervisionPrompt.activationRestrictedRequest,
+          canRetry: iteration + consumedProviderIterations < this.#budgets.maxProviderIterations
+        });
+        if (activation.retryProvider) {
           await this.#runRecorder.recordProviderIteration({
             iteration,
             phase,
@@ -675,29 +593,6 @@ export class ProviderTurnLoop {
           });
           if (consumedProviderIterations > 1) iteration += consumedProviderIterations - 1;
           continue;
-        }
-        if (
-          activation.required &&
-          this.#executionPlanReader?.current() === undefined &&
-          !executionPlanActivationNudged &&
-          iteration + consumedProviderIterations < this.#budgets.maxProviderIterations
-        ) {
-          executionPlanActivationNudged = true;
-          pendingExecutionPlanActivationNudge = true;
-          retryExecutionPlanActivation = true;
-          await this.#runRecorder.recordProviderIteration({
-            iteration,
-            phase,
-            ok: execution.ok,
-            toolCalls: 0,
-            executedTools: 0,
-            exhausted: false
-          });
-          if (consumedProviderIterations > 1) iteration += consumedProviderIterations - 1;
-          continue;
-        }
-        if (activation.required && this.#executionPlanReader?.current() === undefined) {
-          await this.#writeProvisionalExecutionPlan(input);
         }
       }
 
@@ -726,32 +621,10 @@ export class ProviderTurnLoop {
         }
       });
       const loopToolExecutions = loopToolExecutionResult.executions;
-      const authenticationObservation = authenticationEvidenceTracker.observe(loopToolExecutions);
-      for (const assessment of authenticationObservation.assessments) {
-        await this.#runRecorder.recordAuthenticationEvidenceAssessment(assessment);
-      }
-      const authenticationEffects = authenticationObservation.effects;
-      if (
-        authenticationEffects.length > 0 &&
-        this.#executionPlanController !== undefined &&
-        input.visibleTurnId !== undefined
-      ) {
-        await applyAuthenticationExecutionEffects({
-          controller: this.#executionPlanController,
-          effects: authenticationEffects,
-          objective: boundedProvisionalObjective(input.userText),
-          originTurnId: input.visibleTurnId,
-          sink: input.onEvent,
-        });
-        automaticExecutionPlanRequired = true;
-      }
-      if (
-        automaticExecutionPlanRequired &&
-        this.#executionPlanReader?.current() === undefined &&
-        execution.toolCalls.some((toolCall) => isPlanToolName(toolCall.name))
-      ) {
-        await this.#writeProvisionalExecutionPlan(input);
-      }
+      await executionSupervision.applyRuntimeMissionEffects({
+        executions: loopToolExecutions,
+        providerToolNames: execution.toolCalls.map((toolCall) => toolCall.name ?? "")
+      });
       maxObservedRisk = loopToolExecutionResult.maxObservedRisk;
       providerToolExecutions.push(...loopToolExecutions);
       delegatedAnswerOwnership = pendingDelegatedAnswerOwnership(loopToolExecutions) ?? delegatedAnswerOwnership;
@@ -780,24 +653,11 @@ export class ProviderTurnLoop {
       );
       const hasRecoverableToolFeedback = currentPlans.some((plan) => isRecoverableToolPlanStatus(plan.status));
       const repeatedFailureBudgetExceeded = this.#recordRepeatedToolFailures(loopToolExecutions, repeatedFailures);
-      const browserObservation = browserObservationGuard.observe(loopToolExecutions);
-      const executionPlanProgress = executionPlanProgressGuard.observe({
-        plan: this.#executionPlanReader?.current(),
-        executions: loopToolExecutions
-      });
-      this.#executionWorkingSet?.observe(
-        this.#executionPlanReader?.current(),
-        loopToolExecutions,
-        this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId
-      );
+      const supervisionAssessment = executionSupervision.assessProgress(loopToolExecutions);
+      const { browserObservation, executionPlanProgress, userInputBlocker } = supervisionAssessment;
       this.#syncBrowserSessionLease(false);
-      const userInputBlocker = executionPlanUserInputBlocker(this.#executionPlanReader?.current());
       if (userInputBlocker !== undefined) {
-        execution = userInputRequiredReceipt(
-          execution,
-          userInputBlocker.summary,
-          this.#ui?.language ?? "en"
-        );
+        execution = executionSupervision.userInputRequiredReceipt(execution, userInputBlocker.summary);
         await this.#runRecorder.recordProviderIteration({
           iteration,
           phase,
@@ -809,12 +669,6 @@ export class ProviderTurnLoop {
         effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
         previousProviderExecution = execution;
         break;
-      }
-      if (browserObservation?.shouldNudge === true) {
-        pendingBrowserNoProgressNudge = true;
-      }
-      if (executionPlanProgress.shouldNudge) {
-        pendingExecutionPlanProgressNudge = true;
       }
       if (repeatedFailureBudgetExceeded !== undefined) {
         await this.#runRecorder.recordProviderBudgetExhausted({
@@ -905,7 +759,7 @@ export class ProviderTurnLoop {
       });
 
       if (browserObservation?.shouldStop === true) {
-        execution = browserNoProgressStopExecution(execution);
+        execution = executionSupervision.browserNoProgressStopReceipt(execution);
       }
 
       if (delegatedAnswerOwnership !== undefined) {
@@ -918,40 +772,20 @@ export class ProviderTurnLoop {
       }
 
       if (executionPlanProgress.shouldStop) {
-        executionPlanIncomplete = true;
-        execution = incompleteExecutionPlanReceipt(
-          execution,
-          this.#executionPlanReader?.current(),
-          this.#ui?.language ?? "en",
-          "no_progress",
-          this.#budgets.maxNoProgressIterations
-        );
+        execution = executionSupervision.executionPlanNoProgressStopReceipt(execution);
       }
 
-      const stoppedWithoutToolsWithPendingPlan =
-        execution.ok === true &&
-        execution.toolCalls.length === 0 &&
-        hasUnfinishedExecutionPlan(this.#executionPlanReader?.current());
-      if (stoppedWithoutToolsWithPendingPlan) {
-        if (
-          !executionPlanProgress.shouldStop &&
-          iteration + consumedProviderIterations < this.#budgets.maxProviderIterations
-        ) {
-          pendingExecutionPlanContinuation = !executionPlanProgress.shouldNudge;
-          effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
-          previousProviderExecution = execution;
-          if (consumedProviderIterations > 1) iteration += consumedProviderIterations - 1;
-          continue;
-        }
-        if (!executionPlanProgress.shouldStop) {
-          executionPlanIncomplete = true;
-          execution = incompleteExecutionPlanReceipt(
-            execution,
-            this.#executionPlanReader?.current(),
-            this.#ui?.language ?? "en",
-            "hard_limit"
-          );
-        }
+      const supervisionFinalization = executionSupervision.finalizeProviderExecution({
+        execution,
+        executionPlanProgress,
+        canContinue: iteration + consumedProviderIterations < this.#budgets.maxProviderIterations
+      });
+      execution = supervisionFinalization.execution;
+      if (supervisionFinalization.continueExecutionPlan) {
+        effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+        previousProviderExecution = execution;
+        if (consumedProviderIterations > 1) iteration += consumedProviderIterations - 1;
+        continue;
       }
 
       if (
@@ -1027,7 +861,7 @@ export class ProviderTurnLoop {
       toolExecutions: providerToolExecutions,
       iterations,
       ...(delegatedAnswerOwnership === undefined ? {} : { delegatedAnswerOwnership }),
-      ...(executionPlanIncomplete ? { executionPlanIncomplete: true } : {}),
+      ...(executionSupervision.executionPlanIncomplete ? { executionPlanIncomplete: true } : {}),
       ...(emergencyDeadlineReached ? { emergencyDeadlineReached: true } : {})
     };
     } finally {
@@ -1207,10 +1041,10 @@ export class ProviderTurnLoop {
       prompt.messages.push(reasoningOnlyPrefillMessage());
     }
     if (input.executionPlanProgressNudge === true) {
-      prompt.messages.push({ role: "user", content: EXECUTION_PLAN_PROGRESS_NUDGE });
+      prompt.messages.push({ role: "user", content: EXECUTION_SUPERVISION_PROMPTS.executionPlanProgress });
     }
     if (input.executionPlanActivationNudge === true) {
-      prompt.messages.push({ role: "user", content: EXECUTION_PLAN_ACTIVATION_NUDGE });
+      prompt.messages.push({ role: "user", content: EXECUTION_SUPERVISION_PROMPTS.executionPlanActivation });
     }
     this.#lastPromptTokens = prompt.budget.estimatedTokens;
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
@@ -1376,17 +1210,17 @@ export class ProviderTurnLoop {
     if (input.browserNoProgressNudge === true) {
       prompt.messages.push({
         role: "user",
-        content: BROWSER_NO_PROGRESS_NUDGE
+        content: EXECUTION_SUPERVISION_PROMPTS.browserNoProgress
       });
     }
     if (input.executionPlanContinuation === true) {
       prompt.messages.push({
         role: "user",
-        content: "Your active execution plan still has unfinished items. Continue executing the original request now. Do not stop to narrate the next step or ask whether to continue."
+        content: EXECUTION_SUPERVISION_PROMPTS.executionPlanContinuation
       });
     }
     if (input.executionPlanProgressNudge === true) {
-      prompt.messages.push({ role: "user", content: EXECUTION_PLAN_PROGRESS_NUDGE });
+      prompt.messages.push({ role: "user", content: EXECUTION_SUPERVISION_PROMPTS.executionPlanProgress });
     }
     if (input.reasoningOnlyPrefill === true) {
       prompt.messages.push(reasoningOnlyPrefillMessage());
@@ -1478,51 +1312,6 @@ export class ProviderTurnLoop {
         ? {}
         : { maxTokens: this.#providerRequestDefaults.maxTokens })
     };
-  }
-
-  #executionPlanActivation(
-    input: { userText: string; providerTools: OpenAICompatibleToolSchema[]; visibleTurnId?: string },
-    proposedToolNames: readonly string[]
-  ) {
-    if (
-      this.#executionPlanController === undefined ||
-      input.visibleTurnId === undefined ||
-      this.#executionPlanReader?.current() !== undefined ||
-      !input.providerTools.some((tool) => isPlanToolName(tool.function.name))
-    ) {
-      return { required: false, reasons: [] } as const;
-    }
-    return assessExecutionPlanActivation({
-      userText: input.userText,
-      proposedToolNames
-    });
-  }
-
-  async #writeProvisionalExecutionPlan(input: {
-    userText: string;
-    visibleTurnId?: string;
-    onEvent?: RuntimeEventSink;
-  }): Promise<void> {
-    if (
-      this.#executionPlanController === undefined ||
-      input.visibleTurnId === undefined ||
-      this.#executionPlanReader?.current() !== undefined
-    ) return;
-    await this.#executionPlanController.write({
-      objective: boundedProvisionalObjective(input.userText),
-      items: [
-        {
-          id: "execute",
-          content: "Complete the requested multi-step work",
-          status: "in_progress"
-        },
-        {
-          id: "verify",
-          content: "Verify the resulting state and report the outcome",
-          status: "pending"
-        }
-      ]
-    }, input.visibleTurnId, input.onEvent);
   }
 
   async #completeProviderRequestWithFinalizationRetries(input: {
@@ -2321,12 +2110,6 @@ function isRecoverableToolPlanStatus(status: ToolCallPlan["status"]): boolean {
   return status === "invalid" || status === "unavailable" || status === "blocked";
 }
 
-function boundedProvisionalObjective(userText: string): string {
-  const normalized = userText.replace(/\s+/gu, " ").trim();
-  if ([...normalized].length <= PROVISIONAL_EXECUTION_PLAN_OBJECTIVE_MAX_CHARS) return normalized;
-  return [...normalized].slice(0, PROVISIONAL_EXECUTION_PLAN_OBJECTIVE_MAX_CHARS - 1).join("").trimEnd() + "…";
-}
-
 function isHousekeepingToolName(name: string | undefined): boolean {
   return name === "memory.curate" ||
     name === "knowledge.memory.inspect" ||
@@ -2408,78 +2191,6 @@ function reasoningOnlySafeGuidanceExecution(
   };
 }
 
-function browserNoProgressStopExecution(execution: ProviderExecutionResult): ProviderExecutionResult {
-  const response = execution.response;
-  return {
-    ...execution,
-    response: {
-      ok: true,
-      content: BROWSER_NO_PROGRESS_STOP,
-      model: response?.model ?? execution.route?.id ?? "unknown",
-      provider: (response?.provider ?? execution.route?.provider ?? "unknown") as ProviderResponse["provider"],
-      finishReason: "stop",
-      ...(response?.usage === undefined ? {} : { usage: response.usage })
-    }
-  };
-}
-
-function emergencyDeadlineReceipt(
-  execution: ProviderExecutionResult,
-  locale: UiLanguage
-): ProviderExecutionResult {
-  const response = execution.response;
-  return {
-    ...execution,
-    ok: true,
-    response: {
-      ok: true,
-      content: locale === "ar"
-        ? "توقّف بدء عمل جديد عند بلوغ مهلة الطوارئ، مع الحفاظ على وقت لإظهار نتيجة موثوقة."
-        : "New work stopped at the emergency deadline reserve so the runtime could return a truthful local result.",
-      model: response?.model ?? execution.route?.id ?? "unknown",
-      provider: (response?.provider ?? execution.route?.provider ?? "unknown") as ProviderResponse["provider"],
-      finishReason: "stop",
-      ...(response?.usage === undefined ? {} : { usage: response.usage })
-    },
-    toolCalls: []
-  };
-}
-
-function hasUnfinishedExecutionPlan(plan: ExecutionPlan | undefined): boolean {
-  return plan?.status === "active" && executionPlanUserInputBlocker(plan) === undefined && plan.items.some((item) =>
-    item.status === "pending" || item.status === "in_progress"
-  );
-}
-
-function executionPlanUserInputBlocker(plan: ExecutionPlan | undefined): { summary: string } | undefined {
-  return plan?.items.find((item) =>
-    item.status === "blocked" && item.blocker?.kind === "user_input_required"
-  )?.blocker;
-}
-
-function userInputRequiredReceipt(
-  execution: ProviderExecutionResult,
-  summary: string,
-  locale: UiLanguage
-): ProviderExecutionResult {
-  const response = execution.response;
-  return {
-    ...execution,
-    ok: true,
-    response: {
-      ok: true,
-      content: locale === "ar"
-        ? `تحتاج خطة التنفيذ إلى إدخالك قبل أن تتابع: ${summary}`
-        : `The Mission needs your input before it can continue: ${summary}`,
-      model: response?.model ?? execution.route?.id ?? "unknown",
-      provider: (response?.provider ?? execution.route?.provider ?? "unknown") as ProviderResponse["provider"],
-      finishReason: "stop",
-      ...(response?.usage === undefined ? {} : { usage: response.usage })
-    },
-    toolCalls: []
-  };
-}
-
 function timeSecureInputHandler(
   handler: SecureInputRequestHandler | undefined,
   onElapsed: (elapsedMs: number) => void
@@ -2508,71 +2219,6 @@ function timeSecureInputHandler(
     };
   }
   return timed;
-}
-
-function incompleteExecutionPlanReceipt(
-  execution: ProviderExecutionResult,
-  plan: ExecutionPlan | undefined,
-  locale: UiLanguage,
-  reason: "no_progress" | "deadline" | "hard_limit",
-  noProgressLimit?: number
-): ProviderExecutionResult {
-  const response = execution.response;
-  const unfinished = plan?.items.filter((item) =>
-    item.status === "pending" || item.status === "in_progress" || item.status === "blocked"
-  ) ?? [];
-  const closing = incompletePlanClosing(reason, locale, noProgressLimit);
-  const content = locale === "ar"
-    ? [
-        "لم تكتمل خطة التنفيذ.",
-        "",
-        "العناصر المتبقية:",
-        ...unfinished.map((item) => `- ${item.content}${item.blocker === undefined ? "" : ` — ${item.blocker.summary}`}`),
-        "",
-        closing
-      ].join("\n")
-    : [
-        "The Mission is incomplete.",
-        "",
-        "Remaining items:",
-        ...unfinished.map((item) => `- ${item.content}${item.blocker === undefined ? "" : ` — ${item.blocker.summary}`}`),
-        "",
-        closing
-      ].join("\n");
-  return {
-    ...execution,
-    ok: true,
-    response: {
-      ok: true,
-      content,
-      model: response?.model ?? execution.route?.id ?? "unknown",
-      provider: (response?.provider ?? execution.route?.provider ?? "unknown") as ProviderResponse["provider"],
-      finishReason: "stop",
-      ...(response?.usage === undefined ? {} : { usage: response.usage })
-    },
-    toolCalls: []
-  };
-}
-
-function incompletePlanClosing(
-  reason: "no_progress" | "deadline" | "hard_limit",
-  locale: UiLanguage,
-  noProgressLimit?: number
-): string {
-  if (locale === "ar") {
-    if (reason === "no_progress") return [
-      `توقّف التنفيذ بعد ${noProgressLimit ?? 6} محاولات متتالية بلا تقدم ملموس.`,
-      "لم يُسجَّل انتقال في خطة التنفيذ أو تغيير في الحالة المستهدفة أو دليل تحقق أو عائق محدد."
-    ].join(" ");
-    if (reason === "deadline") return "توقّف بدء عمل جديد عند بلوغ مهلة الطوارئ، مع الحفاظ على وقت لإظهار نتيجة موثوقة.";
-    return "توقّف التنفيذ عند بلوغ حد الأمان العام مع بقاء عناصر غير مكتملة.";
-  }
-  if (reason === "no_progress") return [
-    `Execution stopped after ${noProgressLimit ?? 6} consecutive iterations without material progress;`,
-    "no Mission transition, target mutation, verification evidence, or concrete blocker was recorded."
-  ].join(" ");
-  if (reason === "deadline") return "New work stopped at the emergency deadline reserve so the runtime could return a truthful local result.";
-  return "Execution reached a general safety ceiling with unfinished items remaining.";
 }
 
 function localReceiptExecution(model: ModelProfile | undefined): ProviderExecutionResult {
