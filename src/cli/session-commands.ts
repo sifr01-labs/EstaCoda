@@ -7,6 +7,7 @@ import { loadRuntimeConfig, type LoadRuntimeConfigOptions } from "../config/runt
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { renderSessionRecallResult, SessionRecallService } from "../session/session-recall-service.js";
+import { diagnoseSessionExecution } from "../session/session-execution-diagnostics.js";
 import { renderSessionCompactionResult, type CompactResult } from "../prompt/session-compression-service.js";
 import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolver.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
@@ -16,6 +17,7 @@ import {
   buildSessionsHelpViewModel,
   buildSessionsListViewModel,
   buildSessionShowViewModel,
+  buildSessionExecutionDiagnosisViewModel,
   buildSessionCurrentViewModel,
   buildSessionAttachViewModel,
   buildSessionDetachViewModel,
@@ -310,6 +312,39 @@ export async function runSessionsCommand(
         })),
       });
       return { ok: true, output: renderer(viewModel) };
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (subcommand === "diagnose") {
+    const sessionId = rest[0];
+    if (sessionId === undefined || rest.length !== 1) {
+      const viewModel = buildSessionUsageErrorViewModel({
+        message: "Usage: estacoda sessions diagnose <session-id>",
+      });
+      return { ok: false, output: renderer(viewModel) };
+    }
+    const db = await createSQLiteSessionDB({ path: globalPaths.sessionsSqlitePath });
+    try {
+      const session = await db.getSessionForProfile(sessionId, profileId);
+      if (session === undefined) {
+        const viewModel = buildSessionNotFoundViewModel({ sessionId });
+        return { ok: false, output: renderer(viewModel) };
+      }
+      const [events, providerUsage] = await Promise.all([
+        db.listEvents(session.id),
+        db.listProviderUsageEntries(profileId, { sessionId: session.id }),
+      ]);
+      const diagnosis = diagnoseSessionExecution({
+        sessionId: session.id,
+        events,
+        providerUsage,
+      });
+      return {
+        ok: true,
+        output: renderer(buildSessionExecutionDiagnosisViewModel(diagnosis)),
+      };
     } finally {
       await db.close();
     }

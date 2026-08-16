@@ -129,6 +129,14 @@ estacoda sessions compact <session-id> [--topic <topic>]
 
 This calls the active runtime's session compaction service. It is semantic session compression for a session transcript; it does not rewrite durable Task state or run Memory File Compaction. This top-level CLI command is non-rotating in the current implementation; it does not create/adopt a compacted child session.
 
+Read-only execution diagnostics:
+
+```bash
+estacoda sessions diagnose <session-id>
+```
+
+The command authorizes the target against the selected profile, then projects bounded provider usage, tool activity, Mission transitions, execution evidence, and protected-authentication receipts. It never reconstructs or prints prompts, messages, tool inputs or results, protected labels, browser page content, URLs, private paths, secrets, or token-derived identifiers. Protected authentication is limited to transition verdicts; delivery-to-submit is reported as having no provider seam only when an atomic protected-delivery receipt proves it, and otherwise remains unknown.
+
 Memory-file compaction is exposed as runtime tools, not as a top-level CLI command in this implementation:
 
 | Tool | Purpose |

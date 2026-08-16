@@ -449,6 +449,7 @@ exports[`Session surfaces — help > renders in narrow width > sessions-help-nar
 • estacoda sessions recall <query>            Summarize historical session matches
 • estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
 • estacoda sessions show <session-id>         Show session details
+• estacoda sessions diagnose <session-id>     Diagnose session execution
 • estacoda sessions current                   Show current session
 • estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
 • estacoda sessions detach <surface> <id>     Detach surface from session"
@@ -463,6 +464,7 @@ exports[`Session surfaces — help > renders in no Unicode > sessions-help-no Un
 - estacoda sessions recall <query>            Summarize historical session matches
 - estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
 - estacoda sessions show <session-id>         Show session details
+- estacoda sessions diagnose <session-id>     Diagnose session execution
 - estacoda sessions current                   Show current session
 - estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
 - estacoda sessions detach <surface> <id>     Detach surface from session"
@@ -477,6 +479,7 @@ exports[`Session surfaces — help > renders in no color > sessions-help-no colo
 • estacoda sessions recall <query>            Summarize historical session matches
 • estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
 • estacoda sessions show <session-id>         Show session details
+• estacoda sessions diagnose <session-id>     Diagnose session execution
 • estacoda sessions current                   Show current session
 • estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
 • estacoda sessions detach <surface> <id>     Detach surface from session"
@@ -491,6 +494,7 @@ exports[`Session surfaces — help > renders in plain > sessions-help-plain 1`] 
 - estacoda sessions recall <query>            Summarize historical session matches
 - estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
 - estacoda sessions show <session-id>         Show session details
+- estacoda sessions diagnose <session-id>     Diagnose session execution
 - estacoda sessions current                   Show current session
 - estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
 - estacoda sessions detach <surface> <id>     Detach surface from session"
@@ -505,6 +509,7 @@ exports[`Session surfaces — help > renders in standard dark > sessions-help-st
 • estacoda sessions recall <query>            Summarize historical session matches
 • estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
 • estacoda sessions show <session-id>         Show session details
+• estacoda sessions diagnose <session-id>     Diagnose session execution
 • estacoda sessions current                   Show current session
 • estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
 • estacoda sessions detach <surface> <id>     Detach surface from session"
@@ -519,6 +524,7 @@ exports[`Session surfaces — help > renders in standard light > sessions-help-s
 • estacoda sessions recall <query>            Summarize historical session matches
 • estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
 • estacoda sessions show <session-id>         Show session details
+• estacoda sessions diagnose <session-id>     Diagnose session execution
 • estacoda sessions current                   Show current session
 • estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
 • estacoda sessions detach <surface> <id>     Detach surface from session"

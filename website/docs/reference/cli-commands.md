@@ -294,6 +294,7 @@ estacoda sessions                       # interactively choose and resume a rece
 estacoda sessions open <session-id>     # resume a known session by id
 estacoda sessions list                  # recent sessions with attached surfaces
 estacoda sessions show <session-id>     # session detail + surface pointers
+estacoda sessions diagnose <session-id> # bounded, redacted execution diagnostics
 estacoda sessions current               # current runtime session
 estacoda sessions attach <surface> <id> <session-id>
 estacoda sessions detach <surface> <id>
@@ -307,6 +308,8 @@ Valid surfaces: `cli`, `telegram`, `discord`, `whatsapp`, `email`.
 **State touched:** SQLite session DB (`~/.estacoda/sessions.sqlite`) and the version 2 CLI continuation index (`~/.estacoda/cli-sessions.json`) when a conversational runtime launches or switches.
 
 **Profile boundary:** Resume targets and continuation pointers are keyed and revalidated by selected profile and current workspace. Ended, internal, child, cross-profile, and cross-workspace sessions are rejected. `sessions recall` is bounded to the active profile and workspace when metadata is available.
+
+**Execution diagnosis:** `sessions diagnose` is read-only and profile-authorized. It summarizes provider usage, tool activity, Mission progress, execution evidence, and protected-authentication transition receipts without printing prompts, messages, tool payloads, protected labels, browser content, URLs, private paths, secrets, or token-derived identifiers. A protected delivery-to-submit provider seam is reported as `no` only when an atomic receipt proves it; otherwise it is `unknown`.
 
 **Picker behavior:** In a TTY, bare `estacoda sessions` shows up to 20 resumable user-facing root sessions with user activity from the selected profile and current workspace. It displays session number and a sanitized description, with start time, last activity, and immutable origin on the focused row. Enter resumes the selection through normal setup and workspace-trust checks; Escape cancels. `sessions list` remains the non-interactive operator listing.
 

@@ -65,6 +65,7 @@ estacoda sessions list
 
 # Show session detail and surface pointers
 estacoda sessions show <session-id>
+estacoda sessions diagnose <session-id>
 
 # Current runtime session
 estacoda sessions current
@@ -89,6 +90,8 @@ In an interactive terminal, `estacoda sessions` opens a responsive picker contai
 `estacoda sessions open <session-id>` bypasses the picker but not the safety boundary. The target must contain user activity and be an active, user-facing root session in the selected profile and current workspace. `estacoda --continue` applies the same validation to the profile/workspace-scoped last-session pointer. Neither path changes channel attachments or the session's original CLI/Telegram origin. `sessions show` displays the session's origin and workspace for operator inspection.
 
 `sessions recall` is bounded historical recall. It is profile-scoped and workspace-scoped when workspace metadata is available. Recalled content is labeled as untrusted context and cannot override current instructions.
+
+`sessions diagnose` is a read-only, profile-authorized summary of execution. It reports bounded provider/tool counts, usage, Mission progress, evidence, and protected-authentication transition verdicts without exposing raw prompts, messages, tool payloads, browser state, protected labels, private paths, secrets, or token-derived identifiers.
 
 `sessions compact` is semantic session compression. It compacts older history for the target session. It is non-rotating in this implementation; it does not create or adopt a compacted child session. Gateway `/compact` has separate rotation logic.
 

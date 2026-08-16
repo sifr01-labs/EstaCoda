@@ -10,6 +10,8 @@ import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-servi
 import type { Prompt } from "./prompt-contract.js";
 import type { SelectPromptInput } from "./interactive-select.js";
 import { InteractiveSelectCancelledError } from "./interactive-select.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
+import type { ProviderUsageEntry } from "../contracts/provider-usage.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-cli-sess-test-"));
@@ -467,6 +469,154 @@ describe("CLI session commands", () => {
     });
   });
 
+  describe("sessions diagnose", () => {
+    it("renders profile-authorized, bounded execution diagnostics without raw event payloads", async () => {
+      const rawDb = openDefaultSQLiteDatabase({ path: dbPath });
+      rawDb.query("insert into sessions (id, profile_id, title, created_at, updated_at) values (?, ?, ?, ?, ?)")
+        .run("sess-diagnose", "default", "Diagnostic Session", "2026-08-16T08:00:00Z", "2026-08-16T08:10:00Z");
+      rawDb.query("insert into messages (id, session_id, role, content, created_at) values (?, ?, ?, ?, ?)")
+        .run("turn-diagnose", "sess-diagnose", "user", "diagnose this session", "2026-08-16T08:00:00Z");
+      rawDb.close();
+
+      const db = await createSQLiteSessionDB({ path: dbPath });
+      await db.appendEvent("sess-diagnose", {
+        kind: "tool-called",
+        tool: "browser.snapshot",
+        input: { page: "RAW-PAGE-SENTINEL", url: "https://private.example/account" },
+        toolCallId: "TOKEN-DERIVED-CALL-ID",
+      });
+      await db.appendEvent("sess-diagnose", {
+        kind: "tool-result",
+        tool: "browser.snapshot",
+        result: { ok: true, content: "RAW-RESULT-SENTINEL" },
+      });
+      for (const callId of ["observation-1", "observation-2"]) {
+        await db.appendEvent("sess-diagnose", {
+          kind: "execution-evidence-recorded",
+          toolCallId: callId,
+          tool: "browser.snapshot",
+          status: "success",
+          riskClass: "read-only-network",
+          targetSummary: "PROTECTED-LABEL-SENTINEL",
+        });
+      }
+      await db.appendEvent("sess-diagnose", {
+        kind: "execution-plan-started",
+        plan: {
+          objective: "MISSION-OBJECTIVE-SENTINEL",
+          originTurnId: "TOKEN-DERIVED-TURN-ID",
+          revision: 1,
+          status: "active",
+          items: [{ id: "private-item", content: "MISSION-ITEM-SENTINEL", status: "in_progress" }],
+        },
+      });
+      await db.appendEvent("sess-diagnose", {
+        kind: "execution-plan-completed",
+        plan: {
+          objective: "MISSION-OBJECTIVE-SENTINEL",
+          originTurnId: "TOKEN-DERIVED-TURN-ID",
+          revision: 2,
+          status: "completed",
+          items: [{ id: "private-item", content: "MISSION-ITEM-SENTINEL", status: "completed" }],
+        },
+      });
+      await db.appendEvent("sess-diagnose", {
+        kind: "authentication-evidence-assessed",
+        stage: "credentials",
+        outcome: "verified",
+        reason: "authenticated-evidence-observed",
+        submissionToolCallId: "TOKEN-DERIVED-CALL-ID",
+        evidenceToolCallId: "TOKEN-DERIVED-EVIDENCE-ID",
+        challengeDeparted: true,
+        stateTransitionObserved: true,
+        postSubmitEvidence: true,
+        preexistingEvidence: false,
+        navigationInterrupted: false,
+        sensitiveInputActive: false,
+      });
+      await db.appendEvent("sess-diagnose", diagnosticProviderCompletion(11_500));
+      await db.recordProviderUsageEntries([diagnosticProviderUsage("sess-diagnose")]);
+      const eventsBefore = (await db.listEvents("sess-diagnose")).length;
+      const usageBefore = (await db.listProviderUsageEntries("default", { sessionId: "sess-diagnose" })).length;
+      await db.close();
+
+      const result = await runCliCommand({
+        argv: ["sessions", "diagnose", "sess-diagnose"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Session execution diagnosis");
+      expect(result.output).toContain("Provider calls: 1");
+      expect(result.output).toContain("Tokens: 30");
+      expect(result.output).toContain("Estimated cost: $0.0020");
+      expect(result.output).toContain("Slow provider calls: 1 of 1 timed; slowest 11.5s");
+      expect(result.output).toContain("Repeated observation calls: 1");
+      expect(result.output).toContain("Status: completed");
+      expect(result.output).toContain("Final cause: Mission completed");
+      expect(result.output).toContain("Submission observed: yes");
+      expect(result.output).toContain("Causal evidence: verified");
+      expect(result.output).toContain("Provider seam: no");
+      for (const sentinel of [
+        "RAW-PAGE-SENTINEL",
+        "RAW-RESULT-SENTINEL",
+        "PROTECTED-LABEL-SENTINEL",
+        "MISSION-OBJECTIVE-SENTINEL",
+        "MISSION-ITEM-SENTINEL",
+        "TOKEN-DERIVED",
+        "https://private.example/account",
+      ]) {
+        expect(result.output).not.toContain(sentinel);
+      }
+
+      const reopened = await createSQLiteSessionDB({ path: dbPath });
+      expect(await reopened.listEvents("sess-diagnose")).toHaveLength(eventsBefore);
+      expect(await reopened.listProviderUsageEntries("default", { sessionId: "sess-diagnose" }))
+        .toHaveLength(usageBefore);
+      await reopened.close();
+    });
+
+    it("does not disclose sessions from another profile", async () => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      db.query("insert into sessions (id, profile_id, title, created_at, updated_at) values (?, ?, ?, ?, ?)")
+        .run("work-secret-session", "work", "PRIVATE-TITLE-SENTINEL", "2026-08-16T08:00:00Z", "2026-08-16T08:10:00Z");
+      db.query("insert into session_events (id, session_id, created_at, event_json) values (?, ?, ?, ?)")
+        .run("private-event", "work-secret-session", "2026-08-16T08:05:00Z", JSON.stringify({
+          kind: "provider-budget-exhausted",
+          budget: "PRIVATE-BUDGET-SENTINEL",
+          limit: 1,
+          observed: 2,
+          reason: "PRIVATE-REASON-SENTINEL",
+        }));
+      db.close();
+
+      const result = await runCliCommand({
+        argv: ["sessions", "diagnose", "work-secret-session"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("Session not found");
+      expect(result.output).not.toContain("PRIVATE-TITLE-SENTINEL");
+      expect(result.output).not.toContain("PRIVATE-BUDGET-SENTINEL");
+      expect(result.output).not.toContain("PRIVATE-REASON-SENTINEL");
+    });
+
+    it("requires exactly one session id", async () => {
+      for (const argv of [
+        ["sessions", "diagnose"],
+        ["sessions", "diagnose", "one", "two"],
+      ]) {
+        const result = await runCliCommand({ argv, workspaceRoot: tmpDir, homeDir: tmpDir });
+        expect(result.exitCode).toBe(1);
+        expect(result.output).toContain("Usage: estacoda sessions diagnose <session-id>");
+      }
+    });
+  });
+
   describe("sessions current", () => {
     it("shows current runtime session", async () => {
       const result = await runCliCommand({
@@ -825,5 +975,61 @@ function compactResult(overrides: {
       ineffectiveCompressionCount: 0
     },
     userFacingMessage: "Session history compacted"
+  };
+}
+
+function diagnosticProviderCompletion(durationMs: number) {
+  return {
+    kind: "provider-completion" as const,
+    ok: true,
+    fallbackUsed: false,
+    attempts: [{
+      state: "dispatched" as const,
+      dispatchedAt: "2026-08-16T08:00:00.000Z",
+      provider: "test",
+      model: "test-model",
+      ok: true,
+      streamDiagnostics: {
+        stream: true as const,
+        startedAtMs: 0,
+        endedAtMs: durationMs,
+        durationMs,
+        eventCount: 1,
+        tokenChunks: 1,
+        visibleChars: 1,
+        toolCallChunks: 0,
+        transportDone: true,
+        finish: "done" as const,
+      },
+    }],
+  };
+}
+
+function diagnosticProviderUsage(sessionId: string): ProviderUsageEntry {
+  return {
+    id: "usage-diagnose",
+    profileId: "default",
+    sessionId,
+    visibleTurnId: "turn-diagnose",
+    requestKey: "sha256:diagnose",
+    provider: "test",
+    model: "test-model",
+    routeRole: "primary",
+    routeIndex: 0,
+    providerAttemptIndex: 0,
+    sourceKind: "main",
+    pricing: { currency: "USD", fingerprint: "sha256:pricing" },
+    pricingFingerprint: "sha256:pricing",
+    inputTokens: 20,
+    outputTokens: 10,
+    reasoningTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    totalTokens: 30,
+    estimatedCostUsd: 0.002,
+    usageComplete: true,
+    pricingComplete: true,
+    incompleteReasons: [],
+    dispatchedAt: "2026-08-16T08:00:00.000Z",
   };
 }
