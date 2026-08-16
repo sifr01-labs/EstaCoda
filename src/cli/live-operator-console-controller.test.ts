@@ -29,7 +29,7 @@ describe("LiveOperatorConsoleController", () => {
 
     controller.setExecutionPlan(active);
     expect(runtimeHost.getState().executionPlan).toEqual(active);
-    expect(stripAnsi(output.text())).toContain("Mission · Authenticate the developer account");
+    expect(stripAnsi(output.text())).toContain("Mission · 0 / 1 · Authenticate the developer account");
 
     output.clear();
     controller.setExecutionPlan({
@@ -39,7 +39,7 @@ describe("LiveOperatorConsoleController", () => {
       items: [{ ...active.items[0]!, status: "completed" }],
     });
     expect(runtimeHost.getState().executionPlan).toBeUndefined();
-    expect(stripAnsi(output.text())).not.toContain("Mission · Authenticate the developer account");
+    expect(stripAnsi(output.text())).not.toContain("Mission · 0 / 1 · Authenticate the developer account");
 
     controller.setExecutionPlan({ ...active, revision: 3, status: "abandoned" });
     expect(runtimeHost.getState().executionPlan).toBeUndefined();

@@ -1,7 +1,10 @@
 import { chromeCopy } from "../../cli-ui-copy.js";
+import { closeOpenBidiIsolates } from "../../bidi.js";
 import { truncateVisible } from "../../renderers/layout.js";
 import { semanticMotionForPhase, semanticMotionFrame } from "../../semantic-motion.js";
+import { stringWidth, stripAnsi } from "../screen/stringWidth.js";
 import { formatLiveActiveWorkStatus } from "./activeWorkSurface.js";
+import { resolveActiveWorkCopy } from "./activeWorkCopy.js";
 import type { ToolActivityState, TurnActivityState } from "./operatorConsoleState.js";
 import { styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
@@ -28,9 +31,13 @@ export function renderTurnActivitySurface(
   const activeWorkStatus = formatLiveActiveWorkStatus(options.activeWork ?? { items: [], scrollOffset: 0, expanded: false }, {
     locale: options.locale,
   });
-  const fullLabel = activeWorkStatus === undefined ? label : `${label} · ${activeWorkStatus}`;
-  const styledFullLabel = styleColor(options.style, fullLabel, options.style?.tokens.contract.text.secondary ?? "");
-  return [truncateVisible(`${spinner} ${styledFullLabel}`, width, "")];
+  const activityLabel = resolveActiveWorkCopy(options.locale).activity;
+  const fullLabel = activeWorkStatus === undefined ? label : `${label} · ${activityLabel}: ${activeWorkStatus}`;
+  const spinnerWidth = stringWidth(spinner);
+  if (spinnerWidth >= width) return [truncateVisible(stripAnsi(spinner), width, "")];
+  const fittedLabel = closeOpenBidiIsolates(truncateVisible(fullLabel, width - spinnerWidth - 1, ""));
+  const styledFullLabel = styleColor(options.style, fittedLabel, options.style?.tokens.contract.text.secondary ?? "");
+  return [`${spinner} ${styledFullLabel}`];
 }
 
 function turnActivitySpinner(

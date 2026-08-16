@@ -167,6 +167,7 @@ function renderRegionLines(
       width: region.width,
       height: region.height,
       locale: state.locale,
+      style: state.style,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "approvals") {
