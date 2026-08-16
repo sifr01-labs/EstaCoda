@@ -247,19 +247,34 @@ describe("protected authentication journey acceptance", () => {
       const events = await harness.runtime.sessionDb.listEvents(harness.runtime.sessionId);
       const mission = latestExecutionPlanSnapshot(events);
       expect(mission).toBeDefined();
+      const authenticationAssessments = events.filter((event) => event.kind === "authentication-evidence-assessed");
 
       if (scenario.authenticated) {
-        expect(response!.text).toContain("The Mission is incomplete.");
-        expect(response!.text).toContain("Verify the authenticated state");
-        expect(response!.text).not.toContain("Authentication confirmed from the authenticated account page.");
+        expect(response!.text).toContain("Authentication confirmed from the authenticated account page.");
+        expect(response!.text).not.toContain("The Mission is incomplete.");
         expect(mission).toMatchObject({
-          status: "active",
+          status: "completed",
           items: [
             { id: "authentication.credentials", status: "completed" },
-            { id: "authentication.verify", status: "in_progress" },
+            {
+              id: "authentication.verify",
+              status: "completed",
+              evidenceCallIds: ["acceptance-call-3"],
+            },
             { id: "authentication.challenge", status: "completed" },
           ],
         });
+        expect(authenticationAssessments).toContainEqual(expect.objectContaining({
+          outcome: "verified",
+          reason: "authenticated-evidence-observed",
+          submissionToolCallId: "acceptance-call-3",
+          evidenceToolCallId: "acceptance-call-3",
+          challengeDeparted: true,
+          stateTransitionObserved: true,
+          postSubmitEvidence: true,
+          navigationInterrupted: false,
+          sensitiveInputActive: false,
+        }));
         const usable = await harness.runtime.executeTool?.({
           tool: "browser.snapshot",
           toolInput: {},
@@ -269,6 +284,7 @@ describe("protected authentication journey acceptance", () => {
         expect(JSON.stringify(response)).not.toMatch(/browser observation guard|repeated browser observations/iu);
       } else {
         expect(response!.text).not.toContain("Authentication confirmed from the authenticated account page.");
+        expect(authenticationAssessments.some((event) => event.outcome === "verified")).toBe(false);
         expect(mission!.items.some((item) => item.status === "blocked" && item.blocker !== undefined)).toBe(true);
         if (scenario.cancelCollection) {
           expect(response!.text).toContain("The Mission needs your input before it can continue");

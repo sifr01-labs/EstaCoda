@@ -238,9 +238,33 @@ export type StructuredToolHistoryDiagnosticEvent = {
   reason?: StructuredToolHistoryDiagnosticReason;
 };
 
+export type AuthenticationEvidenceAssessmentEvent = {
+  kind: "authentication-evidence-assessed";
+  stage: "credentials" | "challenge" | "verification";
+  outcome: "candidate" | "verified" | "blocked" | "invalidated" | "inconclusive";
+  reason:
+    | "authenticated-evidence-observed"
+    | "authentication-error"
+    | "causal-chain-interrupted"
+    | "challenge-departed-without-authenticated-evidence"
+    | "challenge-still-present"
+    | "preexisting-authenticated-evidence"
+    | "protected-settlement-inconclusive"
+    | "protected-submission-failed";
+  submissionToolCallId: string;
+  evidenceToolCallId?: string;
+  challengeDeparted: boolean;
+  stateTransitionObserved: boolean;
+  postSubmitEvidence: boolean;
+  preexistingEvidence: boolean;
+  navigationInterrupted: boolean;
+  sensitiveInputActive: boolean;
+};
+
 export type SessionEvent =
   | ExecutionPlanLifecycleEvent
   | ExecutionEvidenceRecord
+  | AuthenticationEvidenceAssessmentEvent
   | {
       kind: "intent-routed";
       route: IntentRoute;

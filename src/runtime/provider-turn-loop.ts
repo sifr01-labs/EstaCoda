@@ -88,10 +88,8 @@ import {
   projectBrowserStateFromExecutions,
   refreshBrowserStateProjection
 } from "../browser/browser-state-projection.js";
-import {
-  applyAuthenticationExecutionEffects,
-  deriveAuthenticationExecutionEffects
-} from "./authentication-execution-effects.js";
+import { applyAuthenticationExecutionEffects } from "./authentication-execution-effects.js";
+import { AuthenticationEvidenceTracker } from "./authentication-evidence-tracker.js";
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
 const BROWSER_NO_PROGRESS_NUDGE = "Repeated browser observations show no semantic state change. Do not alternate snapshot, tabs, find, extract, screenshot, console, or CDP calls to inspect the same state. Take a relevant browser action; if protected input or another external condition blocks progress, record that precise blocker.";
@@ -331,6 +329,7 @@ export class ProviderTurnLoop {
       noProgressNudgeIteration: this.#budgets.noProgressNudgeIteration,
       maxNoProgressIterations: this.#budgets.maxNoProgressIterations
     });
+    const authenticationEvidenceTracker = new AuthenticationEvidenceTracker(input.toolExecutions);
 
     for (let iteration = 0; iteration < this.#budgets.maxProviderIterations; iteration += 1) {
       this.#syncBrowserSessionLease(false);
@@ -727,7 +726,11 @@ export class ProviderTurnLoop {
         }
       });
       const loopToolExecutions = loopToolExecutionResult.executions;
-      const authenticationEffects = deriveAuthenticationExecutionEffects(loopToolExecutions);
+      const authenticationObservation = authenticationEvidenceTracker.observe(loopToolExecutions);
+      for (const assessment of authenticationObservation.assessments) {
+        await this.#runRecorder.recordAuthenticationEvidenceAssessment(assessment);
+      }
+      const authenticationEffects = authenticationObservation.effects;
       if (
         authenticationEffects.length > 0 &&
         this.#executionPlanController !== undefined &&

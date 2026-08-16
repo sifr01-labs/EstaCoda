@@ -430,7 +430,7 @@ function snapshotRequiresChallenge(value: unknown): boolean {
   return CHALLENGE_TERMS.test(evidence);
 }
 
-function snapshotReportsAuthenticationError(value: unknown): boolean {
+export function snapshotReportsAuthenticationError(value: unknown): boolean {
   const snapshot = record(value);
   if (snapshot === undefined) return false;
   const evidence = [snapshot.url, snapshot.title, typeof snapshot.text === "string" ? snapshot.text.slice(0, 4_000) : undefined]

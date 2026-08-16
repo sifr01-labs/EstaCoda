@@ -7,6 +7,7 @@ import type { PromptBudgetReport } from "../contracts/prompt.js";
 import type { SecurityDecision } from "../contracts/security.js";
 import type {
   AgentCancellationSource,
+  AuthenticationEvidenceAssessmentEvent,
   SessionDB,
   StructuredToolHistoryDiagnosticEvent
 } from "../contracts/session.js";
@@ -94,6 +95,12 @@ export class RunRecorder {
     const persisted = { ...record };
     await this.#sessionDb.appendEvent(this.#currentSessionId(), persisted);
     this.#trajectoryRecorder.record(persisted.kind, persisted);
+  }
+
+  async recordAuthenticationEvidenceAssessment(
+    event: AuthenticationEvidenceAssessmentEvent
+  ): Promise<void> {
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), { ...event });
   }
 
   async recordSkillPlaybookStep(input: {
