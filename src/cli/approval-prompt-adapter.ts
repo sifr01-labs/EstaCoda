@@ -5,6 +5,7 @@ import {
   approvalCardStateFromToolExecution,
   createApprovalFocusTarget,
   createInitialOperatorConsoleState,
+  DEFAULT_APPROVAL_FOCUS_CONTROL,
   routeApprovalKey,
   type ApprovalCardState,
   type ApprovalIntent,
@@ -92,7 +93,10 @@ async function readInlineOperatorConsoleApproval(input: {
     status: input.host.getState().status,
     approvals: [input.approval],
     focus: {
-      target: createApprovalFocusTarget(input.approval.id, input.approval.focusedControl ?? "approve"),
+      target: createApprovalFocusTarget(
+        input.approval.id,
+        input.approval.focusedControl ?? DEFAULT_APPROVAL_FOCUS_CONTROL
+      ),
     },
   });
   let renderedRows = 0;

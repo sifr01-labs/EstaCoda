@@ -440,10 +440,10 @@ async function waitForNoTtyDataListener(input: NodeJS.ReadStream): Promise<void>
 
 function approvalAnswerKeypresses(answer: string): readonly string[] {
   const normalized = answer.trim().toLowerCase().replace(/\s+/gu, " ");
-  if (normalized === "inspect") return ["\x1b[C", "\x1b[C", "\r"];
-  if (normalized === "reject" || normalized === "deny" || normalized === "no") return ["\t", "\r"];
+  if (normalized === "inspect") return ["\r"];
+  if (normalized === "reject" || normalized === "deny" || normalized === "no") return ["\x1b[A", "\r"];
   if (normalized === "escape" || normalized === "esc" || normalized === "cancel") return ["\x1b"];
-  return ["\r"];
+  return ["\x1b[B", "\r"];
 }
 
 describe("runSessionLoop — user prompt rail behavior", () => {
@@ -6221,7 +6221,7 @@ describe("runSessionLoop — active turn spinner", () => {
         action: "Run Command",
         target: "npm install left-pad",
         risk: "destructive-local",
-        focusedControl: "approve",
+        focusedControl: "inspect",
       }),
     ]);
     expect(result.grants).toEqual([

@@ -2,6 +2,8 @@ export const APPROVAL_FOCUS_CONTROLS = ["inspect", "approve", "reject"] as const
 
 export type ApprovalFocusControl = typeof APPROVAL_FOCUS_CONTROLS[number];
 
+export const DEFAULT_APPROVAL_FOCUS_CONTROL: ApprovalFocusControl = "inspect";
+
 export type FocusTarget =
   | { readonly kind: "prompt" }
   | { readonly kind: "attachment"; readonly attachmentId: string }
@@ -54,6 +56,10 @@ export function createApprovalFocusTarget(
     throw new Error(`Unsupported approval focus control: ${String(control)}`);
   }
   return { kind: "approval", approvalId, control };
+}
+
+export function createDefaultApprovalFocusTarget(approvalId: string): FocusTarget {
+  return createApprovalFocusTarget(approvalId, DEFAULT_APPROVAL_FOCUS_CONTROL);
 }
 
 export function isApprovalFocusControl(value: string): value is ApprovalFocusControl {

@@ -32,7 +32,7 @@ import {
   type PapyrusVimKeymapState,
 } from "../ui/papyrus/input/vim/vimKeymap.js";
 import {
-  createApprovalFocusTarget,
+  createDefaultApprovalFocusTarget,
   createInitialFocusState,
   createInitialOperatorConsoleState,
   createPastedTextAttachment,
@@ -535,7 +535,7 @@ export class RawPromptController {
         const approval = approvals.find((candidate) => candidate.status === "pending");
         if (approval === undefined) return false;
         approvalErrors.delete(approval.id);
-        attachmentFocus = createInitialFocusState(createApprovalFocusTarget(approval.id, "approve"));
+        attachmentFocus = createInitialFocusState(createDefaultApprovalFocusTarget(approval.id));
         render();
         return true;
       };

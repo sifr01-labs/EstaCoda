@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   APPROVAL_FOCUS_CONTROLS,
+  DEFAULT_APPROVAL_FOCUS_CONTROL,
   createApprovalFocusTarget,
+  createDefaultApprovalFocusTarget,
   createDefaultStatusRailState,
   createInitialFocusState,
   createInitialOperatorConsoleState,
@@ -128,12 +130,18 @@ describe("Papyrus operator console state model", () => {
 
   it("limits approval focus controls to approve, reject, and inspect", () => {
     expect(APPROVAL_FOCUS_CONTROLS).toEqual(["inspect", "approve", "reject"]);
+    expect(DEFAULT_APPROVAL_FOCUS_CONTROL).toBe("inspect");
     expect(isApprovalFocusControl("approve")).toBe(true);
     expect(isApprovalFocusControl("reject")).toBe(true);
     expect(isApprovalFocusControl("inspect")).toBe(true);
     expect(isApprovalFocusControl("always")).toBe(false);
     expect(isApprovalFocusControl("feedback")).toBe(false);
     expect(createApprovalFocusTarget("approval-1", "inspect")).toEqual({
+      kind: "approval",
+      approvalId: "approval-1",
+      control: "inspect",
+    });
+    expect(createDefaultApprovalFocusTarget("approval-1")).toEqual({
       kind: "approval",
       approvalId: "approval-1",
       control: "inspect",

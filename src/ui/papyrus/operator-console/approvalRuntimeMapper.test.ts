@@ -10,7 +10,7 @@ describe("approval runtime mapper", () => {
       action: "Workspace Write",
       target: "src/app.ts",
       risk: "workspace-write",
-      focusedControl: "approve",
+      focusedControl: "inspect",
     });
   });
 

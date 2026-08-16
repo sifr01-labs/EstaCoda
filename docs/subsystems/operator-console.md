@@ -625,8 +625,8 @@ I need approval before modifying the database.
   │ run migration                                    │
   │ Target · production database                     │
   │                                                  │
-  │   Inspect       Review details before deciding   │
-  │ ❯ Approve once  Permit only this action          │
+  │ ❯ Inspect       Review details before deciding   │
+  │   Approve once  Permit only this action          │
   │   Reject        Deny this action                 │
   │                                                  │
   │ ↑↓ move · Enter select · Esc reject              │
@@ -662,7 +662,8 @@ The card is bounded and inset on wide terminals, but falls back to the available
 width on narrow terminals. Up and down move through the vertical choices; Tab,
 Shift+Tab, left, and right remain supported for compatibility. Fixed copy is
 localized, while action, target, risk, and summary values are rendered with
-mixed-direction isolation.
+mixed-direction isolation. New approval prompts initially focus **Inspect**, so
+pressing Enter before navigating inspects the request and never approves it.
 
 Feedback, amend, session approval, and persistent approval controls are out of
 scope for approval v1 unless the implementation adds a separately reviewed

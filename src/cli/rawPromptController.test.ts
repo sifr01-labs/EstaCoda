@@ -560,6 +560,35 @@ describe("raw prompt controller", () => {
     expect(onApprovalIntent).not.toHaveBeenCalled();
   });
 
+  it("defaults Task approval focus to Inspect so immediate Enter cannot approve", async () => {
+    let approvals: readonly ApprovalCardState[] = [promptApprovalCard()];
+    const onApprovalIntent = vi.fn(async (intent: { readonly type: string }) => {
+      if (intent.type === "reject") approvals = [];
+    });
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        getApprovals: () => approvals,
+        onApprovalIntent
+      }
+    });
+
+    read.input.send("\t");
+    expect(read.output.writes.join("")).toContain("❯ Inspect");
+    read.input.send("\r");
+    await flushPromises();
+
+    expect(read.isResolved()).toBe(false);
+    expect(onApprovalIntent).not.toHaveBeenCalled();
+
+    read.input.send("\x1b");
+    await flushKeypressTimers();
+    expect(onApprovalIntent).toHaveBeenCalledWith({ type: "reject", approvalId: "approval-raw-1" });
+    read.input.send("done\r");
+    await expect(read.pending).resolves.toEqual({ type: "submit", text: "done" });
+  });
+
   it("routes explicit approve-once and rejection controls without submitting the prompt", async () => {
     let approvals: readonly ApprovalCardState[] = [promptApprovalCard()];
     const onApprovalIntent = vi.fn(async () => {
@@ -575,6 +604,7 @@ describe("raw prompt controller", () => {
     });
 
     approved.input.send("\t");
+    approved.input.send("\x1b[B");
     approved.input.send("\r");
     await flushPromises();
     expect(approved.isResolved()).toBe(false);
@@ -593,7 +623,7 @@ describe("raw prompt controller", () => {
       }
     });
     rejected.input.send("\t");
-    rejected.input.send("\x1b[C");
+    rejected.input.send("\x1b[A");
     rejected.input.send("\r");
     await flushPromises();
     expect(rejected.isResolved()).toBe(false);

@@ -2,6 +2,7 @@ import type { ToolExecutionRecord } from "../../../tools/tool-executor.js";
 import type { FileChangePreviewViewModel } from "../../../contracts/view-model.js";
 import { buildToolDisplayPreview } from "../../../tools/tool-target-summary.js";
 import { toolDisplayLabel, type ToolDisplayLocale } from "../../tool-display.js";
+import { DEFAULT_APPROVAL_FOCUS_CONTROL } from "./focusModel.js";
 import type { ApprovalCardState } from "./operatorConsoleState.js";
 
 export function approvalCardStateFromToolExecution(
@@ -17,7 +18,9 @@ export function approvalCardStateFromToolExecution(
     target: approvalTargetFromExecution(execution),
     risk: execution.riskClass,
     ...(diffStats === undefined ? {} : { diffStats }),
-    ...(input.focused === true && status === "pending" ? { focusedControl: "approve" } : {}),
+    ...(input.focused === true && status === "pending"
+      ? { focusedControl: DEFAULT_APPROVAL_FOCUS_CONTROL }
+      : {}),
   };
 }
 
