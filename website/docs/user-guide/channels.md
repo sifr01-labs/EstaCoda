@@ -62,13 +62,16 @@ Telegram is the live-proven first-party remote channel for v0.1.0.
 | Pairing codes | `implemented` |
 | Handoff codes | `implemented` |
 | Progress compaction | `implemented` |
+| Temporary processing reaction | `default-on` |
 | Rapid inbound text batching | `default-on, bounded` |
 | Experimental text streaming | `default-on when Telegram is configured` |
 | Spoken replies with `/voice` | `implemented when TTS is configured` |
 
 **Behavior:**
 
-- One evolving progress message per active turn
+- An admitted request receives a temporary 👨‍💻 reaction on the latest originating user message instead of an initial `Thinking` message
+- EstaCoda removes the reaction best-effort when the turn finishes, fails, or is interrupted; if Telegram rejects the initial reaction, EstaCoda automatically falls back to `Thinking`
+- Later tool, model-fallback, warning, and approval progress continues in one evolving progress message
 - Inline approval buttons map to `/approve` and `/deny`
 - Final replies formatted in Telegram-safe HTML
 - Streaming defaults on for configured Telegram channels and progressively edits Telegram messages during a turn; final `response.text` remains authoritative

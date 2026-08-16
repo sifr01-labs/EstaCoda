@@ -530,6 +530,123 @@ describe("ChannelGateway Telegram secure input", () => {
   });
 });
 
+describe("ChannelGateway Telegram processing indicator", () => {
+  it("replaces only the initial Thinking progress with a successful processing indicator", async () => {
+    const { adapter, gateway } = createStreamingGatewayHarness({
+      actions: [
+        { kind: "event", event: { kind: "agent-start", sessionId: "session-1", input: "hello" } },
+        { kind: "event", event: { kind: "tool-start", tool: "file.read" } }
+      ]
+    });
+    const indicatorStates: boolean[] = [];
+    adapter.setInboundProcessingIndicator = async (_message, active) => {
+      indicatorStates.push(active);
+      return true;
+    };
+
+    const result = await gateway.receive(makeMessage("hello"));
+
+    expect(indicatorStates).toEqual([true, false]);
+    expect(adapter.records.filter((record) => record.kind === "progress").map((record) => record.event?.kind)).toEqual([
+      "tool-start"
+    ]);
+    expect(result.progressCount).toBe(1);
+  });
+
+  it("falls back to existing Thinking progress when the processing indicator is unavailable", async () => {
+    const { adapter, gateway } = createStreamingGatewayHarness({
+      actions: [
+        { kind: "event", event: { kind: "agent-start", sessionId: "session-1", input: "hello" } }
+      ]
+    });
+    const indicatorStates: boolean[] = [];
+    adapter.setInboundProcessingIndicator = async (_message, active) => {
+      indicatorStates.push(active);
+      return false;
+    };
+
+    const result = await gateway.receive(makeMessage("hello"));
+
+    expect(indicatorStates).toEqual([true]);
+    expect(adapter.records.filter((record) => record.kind === "progress").map((record) => record.event?.kind)).toEqual([
+      "agent-start"
+    ]);
+    expect(result.progressCount).toBe(1);
+  });
+
+  it("clears the processing indicator after a runtime failure", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const indicatorStates: boolean[] = [];
+    adapter.setInboundProcessingIndicator = async (_message, active) => {
+      indicatorStates.push(active);
+      return true;
+    };
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession: async () => ({
+        ...createMinimalRuntime(),
+        handle: async ({ onEvent }) => {
+          await onEvent?.({ kind: "agent-start", sessionId: "session-1", input: "hello" });
+          throw new Error("runtime boom");
+        }
+      }),
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: { telegram: { allowedUserIds: ["user-1"] } }
+    });
+
+    const result = await gateway.receive(makeMessage("hello"));
+
+    expect(result.replyText).toContain("runtime boom");
+    expect(indicatorStates).toEqual([true, false]);
+    expect(adapter.records.filter((record) => record.kind === "progress")).toHaveLength(0);
+  });
+
+  it("clears the processing indicator after /stop without reacting to the command", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const indicatorStates: boolean[] = [];
+    adapter.setInboundProcessingIndicator = async (_message, active) => {
+      indicatorStates.push(active);
+      return true;
+    };
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession: async () => ({
+        ...createMinimalRuntime(),
+        handle: async ({ onEvent, signal }) => {
+          await onEvent?.({ kind: "agent-start", sessionId: "session-1", input: "hello" });
+          await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
+          return runtimeResponse({ text: "stopped", securityDecision: "allow" });
+        }
+      }),
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: { telegram: { allowedUserIds: ["user-1"] } }
+    });
+
+    const turn = gateway.receive(makeMessage("hello"));
+    await waitFor(() => indicatorStates.length === 1);
+    await gateway.receive(makeMessage("/stop", { id: "stop-message" }));
+    await turn;
+
+    expect(indicatorStates).toEqual([true, false]);
+  });
+
+  it("does not start a processing indicator for an unauthorized message", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const indicator = vi.fn(async () => true);
+    adapter.setInboundProcessingIndicator = indicator;
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession: async () => createMinimalRuntime(),
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: { telegram: { allowedUserIds: ["another-user"] } }
+    });
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(indicator).not.toHaveBeenCalled();
+  });
+});
+
 describe("ChannelGateway Telegram streaming", () => {
   it("starts streaming only for Telegram when config is enabled and passes config options", async () => {
     const { adapter, gateway } = createStreamingGatewayHarness();

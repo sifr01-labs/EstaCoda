@@ -643,6 +643,24 @@ export class ChannelGateway {
     }
   }
 
+  async #setInboundProcessingIndicator(
+    adapter: ChannelAdapter,
+    message: ChannelMessage,
+    active: boolean
+  ): Promise<boolean> {
+    if (adapter.setInboundProcessingIndicator === undefined) {
+      return false;
+    }
+    try {
+      return await adapter.setInboundProcessingIndicator(message, active);
+    } catch (error) {
+      this.#logWarning?.(
+        `Channel processing indicator update failed (${boundedErrorClass(error)}).`
+      );
+      return false;
+    }
+  }
+
   async #authorizedUsageReplyInspection(
     message: ChannelMessage,
     sessionId: string
@@ -2096,8 +2114,11 @@ export class ChannelGateway {
     let progressCount = 0;
     let terminalEventEmitted = false;
     let streamHandle: ChannelStreamingTextHandle | undefined;
+    let processingIndicatorActive = false;
     const turnStartTime = Date.now();
     try {
+      processingIndicatorActive = await this.#setInboundProcessingIndicator(adapter, message, true);
+
       // Session resolution
       sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, {
         receivedAt: message.receivedAt
@@ -2200,6 +2221,9 @@ export class ChannelGateway {
             isTurnProgressEvent(event)
           ) {
             this.#activeTurnRegistry.markProgress(activeTurnKey, turnId);
+          }
+          if (processingIndicatorActive && event.kind === "agent-start") {
+            return;
           }
           if (await this.#handleStreamingEvent(streamHandle, event, {
             deltasViaCallbacks: streamCallbacksWired,
@@ -2413,7 +2437,12 @@ export class ChannelGateway {
 
       return { sessionId, replyText: errorText, artifactCount: 0, progressCount: 0 };
     } finally {
-      // 1. End the active turn
+      // 1. Clear any channel-native processing indicator.
+      if (processingIndicatorActive) {
+        await this.#setInboundProcessingIndicator(adapter, message, false);
+      }
+
+      // 2. End the active turn
       if (this.#activeTurnRegistry !== undefined && turnId !== undefined) {
         this.#activeTurnRegistry.endTurn(activeTurnKey, turnId);
       } else {
@@ -2422,7 +2451,7 @@ export class ChannelGateway {
         }
       }
 
-      // 2. Release runtime only if it was successfully acquired
+      // 3. Release runtime only if it was successfully acquired
       if (runtime !== undefined) {
         this.#activeRuntimeByTurnKey.delete(activeTurnKey);
         try {
@@ -2434,7 +2463,7 @@ export class ChannelGateway {
         }
       }
 
-      // 3. Drain queued turns only if this turn actually started
+      // 4. Drain queued turns only if this turn actually started
       // Fire-and-owned: the completed turn must resolve its receive promise
       // independently of how long the queue takes to drain.
       if (turnStarted) {

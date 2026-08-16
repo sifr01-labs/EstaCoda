@@ -241,6 +241,8 @@ export type ChannelAdapter = {
   pollOnce?(): Promise<number>;
   /** Best-effort deletion of one inbound platform message. Authorization stays in ChannelGateway. */
   deleteInboundMessage?(message: ChannelMessage): Promise<boolean>;
+  /** Best-effort channel-native indicator for an admitted inbound turn. */
+  setInboundProcessingIndicator?(message: ChannelMessage, active: boolean): Promise<boolean>;
   /** Temporarily let a polling adapter receive the next protected-input message while a turn is waiting. */
   beginSecureInputIntake?(): () => void;
 };

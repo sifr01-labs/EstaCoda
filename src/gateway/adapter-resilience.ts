@@ -101,6 +101,10 @@ export class AdapterResilienceSupervisor {
     return this.rawAdapter.deleteInboundMessage?.bind(this.rawAdapter);
   }
 
+  get setInboundProcessingIndicator(): ChannelAdapter["setInboundProcessingIndicator"] {
+    return this.rawAdapter.setInboundProcessingIndicator?.bind(this.rawAdapter);
+  }
+
   get beginSecureInputIntake(): ChannelAdapter["beginSecureInputIntake"] {
     return this.rawAdapter.beginSecureInputIntake?.bind(this.rawAdapter);
   }

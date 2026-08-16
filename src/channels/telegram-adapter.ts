@@ -20,6 +20,7 @@ import { sanitizeHookError } from "../gateway/hook-registry.js";
 import { buildAdapterCapability } from "./adapter-capability.js";
 import { renderChannelProgressLabel, type ActivityLabelLocale } from "./activity-labels.js";
 import { formatTelegramReply } from "./telegram-format.js";
+import { telegramAttributionMessageIds } from "./telegram-message-attribution.js";
 import {
   createTelegramStreamTextSanitizer,
   escapeTelegramPartialHtml,
@@ -31,6 +32,7 @@ export type TelegramFetch = (url: string, init?: {
   method?: string;
   headers?: Record<string, string>;
   body?: string;
+  signal?: AbortSignal;
 }) => Promise<{
   ok: boolean;
   status: number;
@@ -176,6 +178,9 @@ type TelegramDeliveryAddress = {
   chatId: string;
   messageThreadId?: number;
 };
+
+const TELEGRAM_PROCESSING_REACTION = "👨‍💻";
+const TELEGRAM_PROCESSING_REACTION_TIMEOUT_MS = 1_500;
 
 type ProgressEntry = {
   text: string;
@@ -491,6 +496,45 @@ export class TelegramAdapter implements ChannelAdapter {
     ) return false;
     await this.#deleteMessage(message.sessionKey.chatId, messageId);
     return true;
+  }
+
+  async setInboundProcessingIndicator(message: ChannelMessage, active: boolean): Promise<boolean> {
+    if (
+      message.channel !== "telegram" ||
+      message.sessionKey.platform !== "telegram" ||
+      message.sessionKey.chatId.length === 0
+    ) return false;
+    const telegramMetadata = message.metadata?.telegram;
+    if (
+      telegramMetadata !== null &&
+      typeof telegramMetadata === "object" &&
+      !Array.isArray(telegramMetadata) &&
+      typeof (telegramMetadata as { callbackQueryId?: unknown }).callbackQueryId === "string"
+    ) return false;
+
+    const rawMessageId = telegramAttributionMessageIds(message).at(-1);
+    const messageId = rawMessageId === undefined ? undefined : Number(rawMessageId);
+    if (messageId === undefined || !Number.isSafeInteger(messageId) || messageId <= 0) {
+      return false;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), TELEGRAM_PROCESSING_REACTION_TIMEOUT_MS);
+    try {
+      const updated = await this.#call<boolean>("setMessageReaction", {
+        chat_id: message.sessionKey.chatId,
+        message_id: messageId,
+        reaction: active
+          ? [{ type: "emoji", emoji: TELEGRAM_PROCESSING_REACTION }]
+          : [],
+        is_big: false
+      }, { signal: controller.signal });
+      return updated === true;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   async pollOnce(): Promise<number> {
@@ -1323,13 +1367,18 @@ export class TelegramAdapter implements ChannelAdapter {
     }
   }
 
-  async #call<T>(method: string, body: Record<string, unknown>): Promise<T> {
+  async #call<T>(
+    method: string,
+    body: Record<string, unknown>,
+    options: { signal?: AbortSignal } = {}
+  ): Promise<T> {
     const response = await this.#fetch(`https://api.telegram.org/bot${this.#botToken}/${method}`, {
       method: "POST",
       headers: {
         "content-type": "application/json"
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: options.signal
     });
     const payload = await response.json() as TelegramApiResponse<T>;
 
@@ -2854,6 +2903,7 @@ async function fetchJson(url: string, init?: {
   method?: string;
   headers?: Record<string, string>;
   body?: string;
+  signal?: AbortSignal;
 }) {
   return fetch(url, init as RequestInit);
 }

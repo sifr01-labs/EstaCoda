@@ -370,6 +370,30 @@ describe("AdapterResilienceSupervisor", () => {
     expect(wrapper.delivery).toBe(adapter.delivery);
   });
 
+  it("wrapper preserves the inbound processing indicator with raw-adapter binding", async () => {
+    const calls: boolean[] = [];
+    const adapter = fakeAdapter({
+      setInboundProcessingIndicator: async function (_message, active) {
+        expect(this).toBe(adapter);
+        calls.push(active);
+        return true;
+      }
+    });
+    const wrapper = new AdapterResilienceSupervisor(adapter);
+    const message = {
+      id: "message-1",
+      channel: "telegram" as const,
+      sessionKey: { platform: "telegram" as const, chatId: "123" },
+      text: "hello",
+      sender: { id: "user-1" },
+      receivedAt: new Date().toISOString()
+    };
+
+    await expect(wrapper.setInboundProcessingIndicator?.(message, true)).resolves.toBe(true);
+    await expect(wrapper.setInboundProcessingIndicator?.(message, false)).resolves.toBe(true);
+    expect(calls).toEqual([true, false]);
+  });
+
   it("wrapper preserves getCapabilities if raw adapter has it", () => {
     const cap = () => ({
       kind: "telegram" as const,

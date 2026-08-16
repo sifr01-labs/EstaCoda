@@ -500,6 +500,18 @@ const output = adapter.render(/* any ViewModel */);
 - `output` contains no emoji.
 - `output` contains no HTML tags.
 
+### 9.2 Telegram Processing Reaction
+
+Run the gateway with a real Telegram bot in a direct message, a group, and a forum topic.
+
+**Verify:**
+- An admitted normal request receives one temporary 👨‍💻 reaction on the latest originating user message.
+- No initial `Thinking` progress message is sent when the reaction succeeds.
+- The reaction is removed after a successful response, a runtime failure, `/stop`, and interrupt replacement.
+- Tool, fallback-model, warning, and approval progress remains visible after the initial reaction.
+- A chat that disallows 👨‍💻 falls back to the localized `Thinking` progress message without failing the turn.
+- Commands, callback queries, unauthorized messages, duplicates, and queued work that has not started do not receive the reaction.
+
 ---
 
 ## 10. Reviewed Setup And Guided Repair QA
