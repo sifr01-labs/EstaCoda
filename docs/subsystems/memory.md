@@ -421,7 +421,9 @@ Recall is profile-scoped and workspace-scoped when a workspace root is supplied.
 
 Every recall block is labeled as untrusted historical context and includes source session diagnostics. Recalled content cannot override system, developer, repo, `AGENTS.md`, security, local memory, or current user instructions.
 
-Runtime recall is intentionally narrow. It is only injected for high-confidence continuity language such as "last time", "what did we decide", "what did I say about", "continue from", "we discussed", or relevant "remember ..." phrasing. Ordinary turns do not trigger broad recall.
+Runtime recall is intentionally narrow. It is only injected for high-confidence continuity language such as "last time", "what did we decide", "what did I say about", "continue from", "we discussed", explicit session-history phrases, or direct questions about sites and URLs visited. Equivalent high-confidence Arabic and mixed-language phrases are supported. Feature requests such as "Create a session history page" and reminders such as "Remember to clear history" do not activate recall.
+
+An explicit history request may inspect the active session, but the runtime-owned current message ID is excluded before recall. Current-session results remain bounded and untrusted. For visited-site questions, recall uses successful browser navigation calls and canonical browser state-transition fields; it does not treat URLs merely rendered in page text as visited destinations. URL credentials, tokens, secrets, and sensitive query parameters are redacted before the evidence reaches prompt context.
 
 ## Deterministic Session Search Tool
 

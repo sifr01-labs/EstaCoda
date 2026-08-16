@@ -92,10 +92,16 @@ export class MemoryRecallOrchestrator {
 
   async prepareForTurn(input: {
     text: string;
+    currentSessionId?: string;
+    currentMessageId?: string;
     onEvent?: RuntimeEventSink;
   }): Promise<MemoryRecallOrchestratorResult> {
     const intent = detectSessionRecallIntent(input.text);
-    const session = await this.#sessionRecall(intent, input.onEvent);
+    const session = await this.#sessionRecall(intent, {
+      currentSessionId: input.currentSessionId,
+      currentMessageId: input.currentMessageId,
+      onEvent: input.onEvent
+    });
     const external = await this.#externalRecall({
       query: intent.query,
       triggered: intent.triggered
@@ -123,7 +129,11 @@ export class MemoryRecallOrchestrator {
 
   async #sessionRecall(
     intent: ReturnType<typeof detectSessionRecallIntent>,
-    onEvent?: RuntimeEventSink
+    runtime: {
+      currentSessionId?: string;
+      currentMessageId?: string;
+      onEvent?: RuntimeEventSink;
+    }
   ): Promise<{
     triggered: boolean;
     blocks: PromptMemoryBlock[];
@@ -138,7 +148,7 @@ export class MemoryRecallOrchestrator {
         query: intent.query,
         sourceSessionIds: [],
         warningCount: 0,
-        onEvent
+        onEvent: runtime.onEvent
       });
       const decision: MemoryRecallDecision = {
         included: false,
@@ -156,7 +166,16 @@ export class MemoryRecallOrchestrator {
       };
     }
 
-    const recall = await this.#sessionRecallService.recall(intent.query);
+    const currentSession = intent.includeCurrentSession && runtime.currentSessionId !== undefined
+      ? {
+          sessionId: runtime.currentSessionId,
+          focus: intent.focus,
+          ...(runtime.currentMessageId === undefined ? {} : { excludeMessageIds: [runtime.currentMessageId] })
+        }
+      : undefined;
+    const recall = currentSession === undefined
+      ? await this.#sessionRecallService.recall(intent.query)
+      : await this.#sessionRecallService.recall(intent.query, { currentSession });
     const blocks = sessionRecallResultToPromptBlocks(recall);
     const sourceSessionIds = uniqueSourceSessionIds(blocks);
     const eventWarnings = await this.#recordSessionRecallDecision({
@@ -165,7 +184,7 @@ export class MemoryRecallOrchestrator {
       query: intent.query,
       sourceSessionIds,
       warningCount: recall.diagnostics.warnings.length,
-      onEvent
+      onEvent: runtime.onEvent
     });
     const warnings = [
       ...recall.diagnostics.warnings,

@@ -131,6 +131,28 @@ describe("MemoryRecallOrchestrator", () => {
     }));
   });
 
+  it("passes runtime-owned current-session boundaries only for explicit history recall", async () => {
+    const recall = vi.fn(async (): Promise<SessionRecallResult> => recallResult("session-1"));
+    const { orchestrator } = orchestratorFixture({ sessionRecallService: { recall } });
+
+    await orchestrator.prepareForTurn({
+      text: "can you look at our session history and find what mtn websites we visited",
+      currentSessionId: "session-1",
+      currentMessageId: "current-message"
+    });
+
+    expect(recall).toHaveBeenCalledWith(
+      "can you look at our session history and find what mtn websites we visited",
+      {
+        currentSession: {
+          sessionId: "session-1",
+          excludeMessageIds: ["current-message"],
+          focus: "visited-sites"
+        }
+      }
+    );
+  });
+
   it("records deterministic omitted-recall diagnostics when the recall service is unavailable", async () => {
     const recorder = {
       recordSessionRecallDecision: vi.fn(async () => ["session recall decision event failed"])

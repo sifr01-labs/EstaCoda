@@ -564,6 +564,8 @@ export class AgentLoop {
     });
     const turnMemoryPromptContext = await this.#memoryPromptContextForTurn({
       text: routedText,
+      currentSessionId: this.#currentSessionId(),
+      currentMessageId: visibleTurn.id,
       onEvent: input.onEvent
     });
     await this.#emitLiveContextUsageEstimate({
@@ -1225,6 +1227,8 @@ export class AgentLoop {
 
   async #memoryPromptContextForTurn(input: {
     text: string;
+    currentSessionId?: string;
+    currentMessageId?: string;
     onEvent?: RuntimeEventSink;
   }): Promise<MemoryPromptContext | undefined> {
     if (this.#memoryRecallOrchestrator === undefined) {

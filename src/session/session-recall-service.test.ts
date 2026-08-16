@@ -239,8 +239,258 @@ describe("SessionRecallService", () => {
   it("detects explicit recall intent conservatively", () => {
     expect(detectSessionRecallIntent("What did we decide about deploys?").triggered).toBe(true);
     expect(detectSessionRecallIntent("continue from the last API plan").triggered).toBe(true);
+    expect(detectSessionRecallIntent("can you look at our session history and find what mtn websites we visited")).toMatchObject({
+      triggered: true,
+      focus: "visited-sites",
+      includeCurrentSession: true
+    });
+    expect(detectSessionRecallIntent("What URLs did we open?")).toMatchObject({
+      triggered: true,
+      focus: "visited-sites"
+    });
+    expect(detectSessionRecallIntent("What did we decide earlier in this session?")).toMatchObject({
+      triggered: true,
+      includeCurrentSession: true
+    });
+    expect(detectSessionRecallIntent("Continue from the previous session.")).toMatchObject({
+      triggered: true,
+      includeCurrentSession: false
+    });
+    expect(detectSessionRecallIntent("Review our past conversation.").triggered).toBe(true);
+    expect(detectSessionRecallIntent("راجع سجل الجلسة وأخبرني ما المواقع التي زرناها")).toMatchObject({
+      triggered: true,
+      focus: "visited-sites"
+    });
+    expect(detectSessionRecallIntent("شو websites زرنا في previous session؟")).toMatchObject({
+      triggered: true,
+      focus: "visited-sites"
+    });
     expect(detectSessionRecallIntent("please remember to use pnpm").triggered).toBe(false);
+    expect(detectSessionRecallIntent("Create a session history page.").triggered).toBe(false);
+    expect(detectSessionRecallIntent("Add browser history support.").triggered).toBe(false);
+    expect(detectSessionRecallIntent("Remember to clear history.").triggered).toBe(false);
     expect(detectSessionRecallIntent("build the API plan").triggered).toBe(false);
+  });
+
+  it("recalls only verified current-session browser navigation and excludes the submitted query", async () => {
+    const db = new InMemorySessionDB();
+    await db.createSession({ id: "session-mtn", profileId: "default", title: "MTN" });
+    await db.appendMessage({
+      id: "user-start",
+      sessionId: "session-mtn",
+      role: "user",
+      content: "Open the MTN developer portal."
+    });
+    await db.appendEvent("session-mtn", {
+      kind: "tool-called",
+      tool: "browser.navigate",
+      input: { url: "https://developers.mtn.com/" },
+      toolCallId: "nav-1"
+    });
+    await db.appendMessage({
+      id: "tool-nav",
+      sessionId: "session-mtn",
+      role: "tool",
+      content: [
+        "Browser: local-cdp",
+        "Session: browser-1",
+        "URL: https://developers.mtn.com/login",
+        "",
+        "Action completed with an observable page change.",
+        "Identity: old → new",
+        "Wait: load (met)",
+        "URL: new session → https://developers.mtn.com/login",
+        "",
+        "Current state:",
+        "Identity: new",
+        "URL: https://developers.mtn.com/login",
+        "Title: Sign in",
+        "Actionable refs: none"
+      ].join("\n"),
+      metadata: { tool: "browser.navigate", tool_call_id: "nav-1", ok: true }
+    });
+    await db.appendMessage({
+      id: "tool-snapshot",
+      sessionId: "session-mtn",
+      role: "tool",
+      content: [
+        "[Compact viewport snapshot]",
+        "Identity: auth-check",
+        "Observed: 2030-01-01T00:00:00.000Z",
+        "Controlled tab: @t1 [controlled] Notifications — https://developers.mtn.com/notifications/count",
+        "",
+        "Banner points to https://appx.developers.mtn.com/ but was not opened.",
+        "[Compact viewport snapshot]",
+        "URL: https://appx.developers.mtn.com/"
+      ].join("\n"),
+      metadata: { tool: "browser.snapshot", ok: true }
+    });
+    await db.appendMessage({
+      id: "tool-click",
+      sessionId: "session-mtn",
+      role: "tool",
+      content: [
+        "Action completed with an observable page change.",
+        "Identity: auth-check → apps",
+        "Wait: load (met)",
+        "URL: https://developers.mtn.com/notifications/count → https://developers.mtn.com/apps",
+        "",
+        "Current state:",
+        "Identity: apps",
+        "URL: https://developers.mtn.com/apps",
+        "Title: Apps",
+        "Actionable refs: none"
+      ].join("\n"),
+      metadata: { tool: "browser.click", ok: true }
+    });
+    const currentQuery = "can you look at our session history and find what mtn websites we visited";
+    await db.appendMessage({
+      id: "current-query",
+      sessionId: "session-mtn",
+      role: "user",
+      content: currentQuery
+    });
+
+    const result = await new SessionRecallService({
+      sessionDb: db,
+      profileId: "default",
+      excludeSessionIds: ["session-mtn"],
+      maxContextChars: 2_000,
+      maxSummaryChars: 2_000
+    }).recall(currentQuery, {
+      currentSession: {
+        sessionId: "session-mtn",
+        excludeMessageIds: ["current-query"],
+        focus: "visited-sites"
+      }
+    });
+    const summary = result.blocks[0]?.summary ?? "";
+
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0]?.sessionId).toBe("session-mtn");
+    expect(result.blocks[0]?.hitMessageIds).not.toContain("current-query");
+    expect(summary).toContain("https://developers.mtn.com/");
+    expect(summary).toContain("https://developers.mtn.com/login");
+    expect(summary).toContain("https://developers.mtn.com/notifications/count");
+    expect(summary).toContain("https://developers.mtn.com/apps");
+    expect(summary).not.toContain("appx.developers.mtn.com");
+    expect(summary).not.toContain(currentQuery);
+  });
+
+  it("bounds current-session history and never recalls the current query into itself", async () => {
+    const db = new InMemorySessionDB();
+    await seedSession(db, "session-current", "default", [
+      "Earlier bounded implementation detail.",
+      "Earlier response."
+    ]);
+    await db.appendMessage({
+      id: "current-history-query",
+      sessionId: "session-current",
+      role: "user",
+      content: "Please inspect our session history."
+    });
+
+    const result = await new SessionRecallService({
+      sessionDb: db,
+      profileId: "default",
+      excludeSessionIds: ["session-current"],
+      maxContextChars: 200,
+      maxSummaryChars: 300
+    }).recall("Please inspect our session history.", {
+      currentSession: {
+        sessionId: "session-current",
+        excludeMessageIds: ["current-history-query"],
+        focus: "general"
+      }
+    });
+    const summary = result.blocks[0]?.summary ?? "";
+
+    expect(summary).toContain("Earlier bounded implementation detail.");
+    expect(summary).not.toContain("[hit 3] user: Please inspect our session history.");
+    expect(result.blocks[0]?.hitMessageIds).not.toContain("current-history-query");
+    expect(result.blocks[0]?.summary.length).toBeLessThanOrEqual(300);
+  });
+
+  it("preserves canonical navigation evidence after tool messages leave packed history", async () => {
+    const db = new InMemorySessionDB();
+    await db.createSession({ id: "session-compacted", profileId: "default" });
+    await db.appendEvent("session-compacted", {
+      kind: "tool-called",
+      tool: "browser.navigate",
+      input: { url: "https://developers.mtn.com/" },
+      toolCallId: "nav-compacted"
+    });
+    await db.appendEvent("session-compacted", {
+      kind: "tool-result",
+      tool: "browser.navigate",
+      result: {
+        ok: true,
+        content: [
+          "Browser: local-cdp",
+          "Session: browser-1",
+          "URL: https://developers.mtn.com/login"
+        ].join("\n")
+      },
+      toolCallId: "nav-compacted"
+    });
+    await db.appendMessage({
+      id: "compacted-summary",
+      sessionId: "session-compacted",
+      role: "system",
+      content: "Earlier browser details were summarized."
+    });
+
+    const result = await new SessionRecallService({
+      sessionDb: db,
+      profileId: "default",
+      maxSummaryChars: 1_000
+    }).recall("what websites did we visit", {
+      currentSession: { sessionId: "session-compacted", focus: "visited-sites" }
+    });
+    const summary = result.blocks[0]?.summary ?? "";
+
+    expect(summary).toContain("https://developers.mtn.com/");
+    expect(summary).toContain("https://developers.mtn.com/login");
+    expect(summary).not.toContain("Earlier browser details were summarized.");
+  });
+
+  it("keeps current-session recall profile-scoped and redacts sensitive navigation URLs", async () => {
+    const db = new InMemorySessionDB();
+    await db.createSession({ id: "session-other-profile", profileId: "other" });
+    await db.appendEvent("session-other-profile", {
+      kind: "tool-called",
+      tool: "browser.navigate",
+      input: { url: "https://user:password@example.com/apps?code=oauth-secret&view=all" },
+      toolCallId: "nav-secret"
+    });
+    await db.appendMessage({
+      id: "tool-secret",
+      sessionId: "session-other-profile",
+      role: "tool",
+      content: "URL: https://user:password@example.com/apps?code=oauth-secret&view=all",
+      metadata: { tool: "browser.navigate", tool_call_id: "nav-secret", ok: true }
+    });
+
+    const crossProfile = await new SessionRecallService({
+      sessionDb: db,
+      profileId: "default"
+    }).recall("what URLs did we open", {
+      currentSession: { sessionId: "session-other-profile", focus: "visited-sites" }
+    });
+    expect(crossProfile.blocks).toEqual([]);
+
+    const sameProfile = await new SessionRecallService({
+      sessionDb: db,
+      profileId: "other",
+      maxSummaryChars: 1_000
+    }).recall("what URLs did we open", {
+      currentSession: { sessionId: "session-other-profile", focus: "visited-sites" }
+    });
+    const summary = sameProfile.blocks[0]?.summary ?? "";
+    expect(summary).toContain("/apps?");
+    expect(summary).not.toContain("password");
+    expect(summary).not.toContain("oauth-secret");
+    expect(summary).toContain("%5BREDACTED%5D");
   });
 
   it("converts recall results into untrusted bounded prompt blocks with source session IDs", async () => {

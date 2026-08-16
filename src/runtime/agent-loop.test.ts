@@ -2076,6 +2076,46 @@ describe("AgentLoop provider availability gating", () => {
     }));
   });
 
+  it("passes the visible history query as an excluded current-session message", async () => {
+    const recall = vi.fn(async () => ({
+      query: "look at our session history and find what websites we visited",
+      blocks: [],
+      diagnostics: {
+        rawHitCount: 0,
+        groupedSessionCount: 0,
+        returnedSessionCount: 0,
+        fallbackCount: 0,
+        warnings: []
+      }
+    }));
+    const { loop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      sessionRecallService: { recall }
+    });
+
+    await loop.handle({
+      text: "look at our session history and find what websites we visited",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+    const current = (await sessionDb.listMessages(sessionId)).find((message) =>
+      message.role === "user" && message.content.includes("session history")
+    );
+    expect(current).toBeDefined();
+
+    expect(recall).toHaveBeenCalledWith(
+      "look at our session history and find what websites we visited",
+      {
+        currentSession: {
+          sessionId,
+          excludeMessageIds: [current!.id],
+          focus: "visited-sites"
+        }
+      }
+    );
+  });
+
   it("continues explicit recall turns when triggered recall decision event recording fails", async () => {
     const recall = vi.fn(async () => ({
       query: "What did we decide last time?",
