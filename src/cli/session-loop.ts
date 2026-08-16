@@ -349,7 +349,13 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   });
   let activeTurn: AbortController | undefined;
   let clearActiveTurnChrome: () => void = () => undefined;
+  let cleanupActiveTurn: () => void = () => undefined;
   let activeTurnCancelMessage = "Cancelling current turn. Press Ctrl+C again or type /exit to leave.";
+  let forcedSessionExitRequested = false;
+  let resolveForcedSessionExit!: (reason: SessionFinalizationReason) => void;
+  const forcedSessionExit = new Promise<SessionFinalizationReason>((resolve) => {
+    resolveForcedSessionExit = resolve;
+  });
   const operatorConsoleEnabled = options.operatorConsole?.enabled === true
     && renderer.capabilities.isTTY
     && !renderer.capabilities.isCI
@@ -562,8 +568,22 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     return taskSessionCompletionRefresh;
   };
   const close = options.close ?? (() => prompt.close?.());
+  const forceSessionExit = (reason: Extract<SessionFinalizationReason, "cli-exit" | "sigint">) => {
+    if (forcedSessionExitRequested) return;
+    forcedSessionExitRequested = true;
+    clearActiveTurnChrome();
+    activeTurn?.abort(reason === "sigint" ? "SIGINT" : "CLI exit");
+    cleanupActiveTurn();
+    enqueueRuntimeFinalization(runtime, reason, output);
+    output.write("\nEnding EstaCoda session.\n");
+    resolveForcedSessionExit(reason);
+  };
   const onSigint = () => {
     if (activeTurn !== undefined) {
+      if (activeTurn.signal.aborted) {
+        forceSessionExit("sigint");
+        return;
+      }
       clearActiveTurnChrome();
       activeTurn.abort("SIGINT");
       output.write(`\n${activeTurnCancelMessage}\n`);
@@ -733,7 +753,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           : prompt;
         let shouldExit: Awaited<ReturnType<typeof handleSlashCommand>>;
         try {
-          shouldExit = await handleSlashCommand({
+          const slashCommand = handleSlashCommand({
             text,
             runtime,
             output,
@@ -766,6 +786,12 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             },
             onSessionCompacted: () => applyCompactionRailReset()
           });
+          shouldExit = slashAbortController === undefined
+            ? await slashCommand
+            : await Promise.race([
+              slashCommand,
+              forcedSessionExit.then(() => true as const),
+            ]);
         } catch (error) {
           slashLiveFrame?.clear();
           if (isSetupConsoleExit(error)) {
@@ -978,6 +1004,10 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             if (current === undefined) return;
             const intent = routeSteerKey(current, event);
             if (intent.type !== "submit") return;
+            if (intent.text.trim() === "/exit") {
+              forceSessionExit("cli-exit");
+              return;
+            }
             if (queued !== undefined || steeringRetryUsed || pendingSteeringNote !== undefined) {
               setOperatorConsoleSteerState(currentQueuedSteerState(queued ?? createQueuedSteerState(pendingSteeringNote ?? intent.text)));
               return;
@@ -1103,6 +1133,28 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           turnOutput.lastOutputWasSpinner = false;
         };
         clearActiveTurnChrome = clearSpinner;
+
+        const turnController = activeTurn;
+        let activeTurnCleanedUp = false;
+        const cleanupCurrentActiveTurn = () => {
+          if (activeTurnCleanedUp) return;
+          activeTurnCleanedUp = true;
+          secureInputCollector?.dispose();
+          if (activeTurn === turnController) {
+            activeTurn = undefined;
+            activeTurnStartedAtMs = undefined;
+          }
+          disposeOperatorConsoleSteerInput?.();
+          disposeOperatorConsoleSteerInput = undefined;
+          operatorConsoleSteerState = undefined;
+          operatorConsoleLiveFrame?.setSteer(undefined);
+          clearSpinner();
+          if (cleanupActiveTurn === cleanupCurrentActiveTurn) {
+            cleanupActiveTurn = () => undefined;
+            clearActiveTurnChrome = () => undefined;
+          }
+        };
+        cleanupActiveTurn = cleanupCurrentActiveTurn;
 
         if (!wroteUserPromptRail) {
           output.write("\n");
@@ -1252,17 +1304,14 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             }
           })
 	          .finally(() => {
-	            secureInputCollector?.dispose();
-	            activeTurn = undefined;
-	            activeTurnStartedAtMs = undefined;
-	            disposeOperatorConsoleSteerInput?.();
-	            disposeOperatorConsoleSteerInput = undefined;
-	            operatorConsoleSteerState = undefined;
-	            operatorConsoleLiveFrame?.setSteer(undefined);
-	            clearSpinner();
-	            clearActiveTurnChrome = () => undefined;
+	            cleanupCurrentActiveTurn();
 	          });
-        const response = await responsePromise;
+        const turnOutcome = await Promise.race([
+          responsePromise.then((response) => ({ kind: "response" as const, response })),
+          forcedSessionExit.then((reason) => ({ kind: "session-exit" as const, reason })),
+        ]);
+        if (turnOutcome.kind === "session-exit" || forcedSessionExitRequested) return;
+        const response = turnOutcome.response;
         if (response.turnUsage?.turnId !== undefined) {
           taskTurnScope.currentTurnIds.add(response.turnUsage.turnId);
         }
@@ -1419,8 +1468,11 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	  } finally {
 	    process.removeListener("SIGINT", onSigint);
 	    stopIdleStatusTicker();
-	    await runtime.dispose();
-	    close();
+	    try {
+	      await runtime.dispose();
+	    } finally {
+	      close();
+	    }
 	  }
 }
 

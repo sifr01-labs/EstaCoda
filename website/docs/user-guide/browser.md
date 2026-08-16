@@ -55,6 +55,8 @@ Supervised sessions use isolated CDP Browser Contexts. EstaCoda creates a Browse
 
 Supervised local CDP can auto-launch Chrome/Chromium when `browser.autoLaunch === true`. Discovery checks structured config, environment variables, local binaries, and platform defaults. Launch uses structured argument arrays, does not shell-parse `browser.launchCommand`, never calls `exec`, creates an isolated user data directory, and kills only Chrome processes launched by EstaCoda during cleanup.
 
+Local CDP commands use a 15-second default deadline, so a silent browser connection cannot indefinitely block an active turn. Raw CDP passthrough also inherits cancellation from its owning tool call.
+
 ## Snapshots
 
 Browser snapshots prefer the accessibility tree from `Accessibility.getFullAXTree`. Snapshot elements expose refs such as `@e1` and may include `role`, `name`, `label`, surrounding text, `value`, `disabled`, and `checked`. Ignored and unhelpful AX nodes are skipped.

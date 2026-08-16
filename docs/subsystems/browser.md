@@ -80,6 +80,8 @@ Local CDP has two paths:
 
 The supervised local CDP backend tracks pending dialogs, recent console history, frame navigation data, and isolated browser sessions. It also enables supervised request interception for subresource requests and aborts metadata, private/internal, website-policy-blocked, and secret-bearing URLs before response bodies are read. This is not complete browser automation parity and does not provide socket-level DNS rebinding or TOCTOU protection.
 
+CDP commands are bounded by a 15-second default deadline and accept cancellation from the owning tool call. Browser-state projection for provider prompts uses one 5-second refresh deadline across availability, tab, and snapshot reads; on cancellation or timeout it preserves a stale prior projection when one exists instead of blocking the turn lifecycle.
+
 ## Session Ownership
 
 Browser tools derive browser session keys from the runtime session context. A normal tool call without an explicit `sessionId` uses:

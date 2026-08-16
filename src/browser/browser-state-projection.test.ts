@@ -107,6 +107,52 @@ describe("browser state projection", () => {
     });
   });
 
+  it("returns stale prior state when browser refresh is aborted", async () => {
+    const controller = new AbortController();
+    const previous = await refreshBrowserStateProjection({
+      backend: activeBackend({ snapshot: snapshot({ actionRevision: 2 }) }),
+      sessionId: "browser-session"
+    });
+    const backend: BrowserBackend = {
+      kind: "mock",
+      isAvailable: () => new Promise<boolean>(() => undefined),
+      status: () => ({ backend: "mock", available: true }),
+      navigate: async () => { throw new Error("unused"); }
+    };
+
+    const refresh = refreshBrowserStateProjection({
+      backend,
+      sessionId: "browser-session",
+      previous,
+      signal: controller.signal
+    });
+    controller.abort("cancelled turn");
+
+    await expect(refresh).resolves.toMatchObject({
+      sessionStatus: "active",
+      freshness: "stale",
+      controlledTab: { url: "https://example.com/current" }
+    });
+  });
+
+  it("bounds a silent browser refresh with one deadline", async () => {
+    const backend: BrowserBackend = {
+      kind: "mock",
+      isAvailable: () => new Promise<boolean>(() => undefined),
+      status: () => ({ backend: "mock", available: true }),
+      navigate: async () => { throw new Error("unused"); }
+    };
+
+    await expect(refreshBrowserStateProjection({
+      backend,
+      sessionId: "browser-session",
+      timeoutMs: 5
+    })).resolves.toMatchObject({
+      sessionStatus: "missing",
+      freshness: "stale"
+    });
+  });
+
   it("bounds tabs and redacts secrets before state reaches a prompt", async () => {
     const secret = "secretsecretsecretsecret";
     const tabs = Array.from({ length: BROWSER_STATE_MAX_TABS + 4 }, (_, index) => ({

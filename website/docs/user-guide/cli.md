@@ -262,7 +262,10 @@ text writes a transcript-visible `User steer:` block, aborts the current CLI tur
 with `CLI steer`, and queues one retry with the original submitted text plus an
 explicit steering note. Empty or whitespace-only steer input does nothing.
 `Esc` cancels a steer draft or queued steer. `Ctrl+C` remains the hard interrupt
-path and is not modeled as steer submit/cancel.
+path: the first press cancels the active turn, and a second press exits the
+session if the turn has not settled. Entering an exact `/exit` in the active
+steer surface also exits immediately instead of queueing a steer. These exit
+paths are not modeled as steer submit/cancel.
 
 ---
 

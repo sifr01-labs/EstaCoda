@@ -3797,6 +3797,118 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(stripAnsi(outputChunks.join(""))).not.toContain("User steer:");
   });
 
+  it("force-exits after a second active-turn Ctrl+C when runtime cancellation does not settle", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    const enqueueSessionFinalization = vi.fn();
+    const dispose = vi.fn(async () => undefined);
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      enqueueSessionFinalization,
+      dispose,
+      handle: async ({ signal }: Parameters<Runtime["handle"]>[0]) => {
+        handleStarted?.();
+        signal?.addEventListener("abort", () => undefined, { once: true });
+        return await new Promise<AgentLoopResponse>(() => undefined);
+      },
+    });
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: {
+        enabled: true,
+        runtimeHost: createOperatorConsoleRuntimeHost({
+          terminal: { width: 96, height: 16, isTty: true },
+        }),
+      },
+      prompt: Object.assign(async () => "build feature", { close: () => {} }),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    input.press("\u0003", { name: "c", ctrl: true });
+    input.press("\u0003", { name: "c", ctrl: true });
+    await loop;
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered.match(/Cancelling current turn\./gu)).toHaveLength(1);
+    expect(rendered).toContain("Ending EstaCoda session.");
+    expect(enqueueSessionFinalization).toHaveBeenCalledTimes(1);
+    expect(enqueueSessionFinalization).toHaveBeenCalledWith("sigint");
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(input.listenerCount("data")).toBe(0);
+    expect(input.isRaw).toBe(false);
+  });
+
+  it("handles active-turn /exit before steering and finalizes immediately", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    const enqueueSessionFinalization = vi.fn();
+    let abortReason: unknown;
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      enqueueSessionFinalization,
+      handle: async ({ signal }: Parameters<Runtime["handle"]>[0]) => {
+        handleStarted?.();
+        signal?.addEventListener("abort", () => {
+          abortReason = signal.reason;
+        }, { once: true });
+        return await new Promise<AgentLoopResponse>(() => undefined);
+      },
+    });
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: {
+        enabled: true,
+        runtimeHost: createOperatorConsoleRuntimeHost({
+          terminal: { width: 96, height: 16, isTty: true },
+        }),
+      },
+      prompt: Object.assign(async () => "build feature", { close: () => {} }),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    for (const char of "/exit") input.press(char, { name: char, sequence: char });
+    input.press("\r", { name: "return" });
+    await loop;
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(abortReason).toBe("CLI exit");
+    expect(rendered).toContain("Ending EstaCoda session.");
+    expect(rendered).not.toContain("User steer:");
+    expect(rendered).not.toContain("Queued steer");
+    expect(enqueueSessionFinalization).toHaveBeenCalledTimes(1);
+    expect(enqueueSessionFinalization).toHaveBeenCalledWith("cli-exit");
+    expect(input.listenerCount("data")).toBe(0);
+    expect(input.isRaw).toBe(false);
+  });
+
   it("renders provider progress between runtime events without the retired controller", async () => {
     const outputChunks: string[] = [];
     const output = {

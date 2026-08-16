@@ -4,7 +4,13 @@ import {
   type BrowserDocumentSignal,
   type BrowserSnapshotInput
 } from "./snapshot-state.js";
-import { type CdpClient, type CdpWebSocketEvent, type CdpWebSocketFactory, type CdpWebSocketLike } from "./cdp-client.js";
+import {
+  type CdpClient,
+  type CdpSendOptions,
+  type CdpWebSocketEvent,
+  type CdpWebSocketFactory,
+  type CdpWebSocketLike
+} from "./cdp-client.js";
 import { CdpClient as PersistentCdpClient } from "./cdp-client.js";
 import {
   isSafeUrl,
@@ -32,6 +38,7 @@ export type BrowserSnapshotOptions = {
 export type CDPSupervisorOptions = {
   webSocketUrl: string;
   webSocketFactory?: CdpWebSocketFactory;
+  requestTimeoutMs?: number;
   requestInterception?: {
     allowPrivateUrls?: boolean;
     websiteBlocklist?: WebsitePolicyConfig;
@@ -42,6 +49,7 @@ export type CDPSupervisorOptions = {
 export class CDPSupervisor {
   readonly #webSocketUrl: string;
   readonly #webSocketFactory: CdpWebSocketFactory | undefined;
+  readonly #requestTimeoutMs: number | undefined;
   readonly #interception: CDPSupervisorOptions["requestInterception"];
   readonly #websitePolicy: WebsiteBlocklistPolicy;
   #client: CdpClient | undefined;
@@ -59,6 +67,7 @@ export class CDPSupervisor {
   constructor(options: CDPSupervisorOptions) {
     this.#webSocketUrl = options.webSocketUrl;
     this.#webSocketFactory = options.webSocketFactory;
+    this.#requestTimeoutMs = options.requestTimeoutMs;
     this.#interception = options.requestInterception;
     this.#websitePolicy = loadWebsiteBlocklist(options.requestInterception?.websiteBlocklist ?? {});
   }
@@ -74,7 +83,7 @@ export class CDPSupervisor {
     this.#startPromise = (async () => {
       const socket = await this.#connectSocket();
       socket.addEventListener("message", (event) => this.#handleMessage(event));
-      const client = new PersistentCdpClient(socket);
+      const client = new PersistentCdpClient(socket, { requestTimeoutMs: this.#requestTimeoutMs });
       await client.send("Page.enable");
       await client.send("Runtime.enable");
       if (this.#interception !== undefined) {
@@ -93,8 +102,8 @@ export class CDPSupervisor {
     }
   }
 
-  async send(method: string, params?: Record<string, unknown>): Promise<unknown> {
-    return this.#requireClient().send(method, params);
+  async send(method: string, params?: Record<string, unknown>, options?: CdpSendOptions): Promise<unknown> {
+    return this.#requireClient().send(method, params, options);
   }
 
   async waitFor(method: string, timeoutMs: number): Promise<void> {

@@ -940,7 +940,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       if (input.method === undefined || input.method.trim().length === 0) {
         throw new Error("browser.cdp requires a CDP method.");
       }
-      return session.supervisor.send(input.method, input.params);
+      return session.supervisor.send(input.method, input.params, { signal: input.signal });
     },
     screenshot: async (input = {}) => {
       const session = await getSession(input);

@@ -873,6 +873,7 @@ export class ProviderTurnLoop {
   async #browserStateForPrompt(input: {
     intent: IntentRoute;
     executions: readonly ToolExecutionRecord[];
+    signal?: AbortSignal;
   }): Promise<BrowserStateProjection | undefined> {
     const context = this.#sessionRuntimeContext;
     const previous = context?.browserState();
@@ -896,7 +897,8 @@ export class ProviderTurnLoop {
     const refreshed = await refreshBrowserStateProjection({
       backend: this.#browserBackend,
       sessionId,
-      previous
+      previous,
+      signal: input.signal
     });
     context?.setBrowserState(refreshed);
     return refreshed;
@@ -1009,7 +1011,8 @@ export class ProviderTurnLoop {
     const sessionHistory = await this.#providerSessionHistory();
     const browserState = await this.#browserStateForPrompt({
       intent: input.intent,
-      executions: input.toolExecutions
+      executions: input.toolExecutions,
+      signal: input.signal
     });
     const prompt = assembleProviderPrompt({
       ...input,
@@ -1173,7 +1176,8 @@ export class ProviderTurnLoop {
       intent: input.intent,
       executions: input.toolFeedbackLedger.latest.flatMap((entry) =>
         entry.execution === undefined ? [] : [entry.execution]
-      )
+      ),
+      signal: input.signal
     });
     const prompt = assembleProviderContinuationPrompt({
       ...input,

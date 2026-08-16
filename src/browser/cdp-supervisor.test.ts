@@ -21,6 +21,7 @@ class FakeCdpSocket implements CdpWebSocketLike {
       failAxTree?: boolean;
       failElementClear?: boolean;
       callFunctionValue?: unknown;
+      silentMethods?: ReadonlySet<string>;
     } = {}
   ) {}
 
@@ -31,6 +32,7 @@ class FakeCdpSocket implements CdpWebSocketLike {
       params?: Record<string, unknown>;
     };
     this.sent.push(message);
+    if (this.options.silentMethods?.has(message.method) === true) return;
     if (message.method === "Accessibility.getFullAXTree" && this.options.failAxTree === true) {
       this.#emit("message", {
         data: JSON.stringify({
@@ -154,6 +156,47 @@ describe("CDPSupervisor", () => {
     expect(sockets[0]?.sent.at(-1)).toMatchObject({
       method: "Page.navigate",
       params: { url: "https://example.com" }
+    });
+  });
+
+  it("times out a CDP command when the connected browser never replies", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1", {
+      silentMethods: new Set(["Runtime.evaluate"])
+    });
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket,
+      requestTimeoutMs: 5
+    });
+
+    await supervisor.start();
+    await expect(supervisor.send("Runtime.evaluate", { expression: "1" }))
+      .rejects.toThrow("Timed out waiting for CDP command Runtime.evaluate.");
+
+    const timedOutRequest = socket.sent.at(-1)!;
+    socket.emitMessage({ id: timedOutRequest.id, result: { result: { value: 1 } } });
+    await expect(supervisor.send("Page.navigate", { url: "https://example.com/next" }))
+      .resolves.toMatchObject({ method: "Page.navigate" });
+  });
+
+  it("cancels a pending CDP command through its AbortSignal", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1", {
+      silentMethods: new Set(["Runtime.evaluate"])
+    });
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket,
+      requestTimeoutMs: 1_000
+    });
+    const controller = new AbortController();
+
+    await supervisor.start();
+    const pending = supervisor.send("Runtime.evaluate", { expression: "1" }, { signal: controller.signal });
+    controller.abort("test cancellation");
+
+    await expect(pending).rejects.toMatchObject({
+      name: "AbortError",
+      message: "CDP command Runtime.evaluate was cancelled."
     });
   });
 

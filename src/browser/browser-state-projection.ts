@@ -11,12 +11,15 @@ import { browserSessionStateReason } from "./session-state.js";
 import { redactUrlForMetadata } from "./url-safety.js";
 
 export const BROWSER_STATE_MAX_TABS = 8;
+export const BROWSER_STATE_REFRESH_TIMEOUT_MS = 5_000;
 const BROWSER_STATE_MAX_TEXT_CHARS = 160;
 
 export async function refreshBrowserStateProjection(input: {
   backend: BrowserBackend;
   sessionId: string;
   previous?: BrowserStateProjection;
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }): Promise<BrowserStateProjection> {
   if (input.backend.kind === "unconfigured") {
     return preserveLastAction({
@@ -25,21 +28,35 @@ export async function refreshBrowserStateProjection(input: {
     }, input.previous);
   }
 
+  const controller = linkedTimeoutController(input.signal, input.timeoutMs ?? BROWSER_STATE_REFRESH_TIMEOUT_MS);
   let available = false;
   try {
-    available = await input.backend.isAvailable();
+    available = await abortableBrowserStateCall(
+      Promise.resolve(input.backend.isAvailable()),
+      controller.signal
+    );
   } catch {
+    controller.dispose();
     return staleOrMissing(input);
   }
-  if (!available) return staleOrMissing(input);
+  if (!available) {
+    controller.dispose();
+    return staleOrMissing(input);
+  }
 
   try {
     const tabs = input.backend.tabs === undefined
       ? undefined
-      : await input.backend.tabs({ sessionId: input.sessionId });
+      : await abortableBrowserStateCall(
+        input.backend.tabs({ sessionId: input.sessionId, signal: controller.signal }),
+        controller.signal
+      );
     const snapshot = input.backend.snapshot === undefined
       ? undefined
-      : await input.backend.snapshot({ sessionId: input.sessionId });
+      : await abortableBrowserStateCall(
+        input.backend.snapshot({ sessionId: input.sessionId, signal: controller.signal }),
+        controller.signal
+      );
     if (tabs === undefined && snapshot === undefined) return staleOrMissing(input);
     return currentProjection({
       sessionId: input.sessionId,
@@ -58,6 +75,8 @@ export async function refreshBrowserStateProjection(input: {
       }, input.previous);
     }
     return staleOrMissing(input);
+  } finally {
+    controller.dispose();
   }
 }
 
@@ -269,4 +288,50 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function linkedTimeoutController(
+  signal: AbortSignal | undefined,
+  timeoutMs: number
+): AbortController & { dispose(): void } {
+  const controller = new AbortController() as AbortController & { dispose(): void };
+  const onAbort = () => controller.abort(signal?.reason);
+  if (signal?.aborted === true) controller.abort(signal.reason);
+  else signal?.addEventListener("abort", onAbort, { once: true });
+  const boundedTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? Math.floor(timeoutMs)
+    : BROWSER_STATE_REFRESH_TIMEOUT_MS;
+  const timeout = setTimeout(() => controller.abort("browser-state-refresh-timeout"), boundedTimeoutMs);
+  controller.dispose = () => {
+    clearTimeout(timeout);
+    signal?.removeEventListener("abort", onAbort);
+  };
+  return controller;
+}
+
+function abortableBrowserStateCall<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(browserStateAbortError());
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener("abort", onAbort);
+      reject(browserStateAbortError());
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      }
+    );
+  });
+}
+
+function browserStateAbortError(): Error {
+  const error = new Error("Browser state refresh was cancelled.");
+  error.name = "AbortError";
+  return error;
 }
