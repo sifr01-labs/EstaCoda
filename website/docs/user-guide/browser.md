@@ -49,7 +49,7 @@ When local CDP is configured and connected, the following operations are support
 - `screenshot` — capture page screenshot
 - `dialog handling` — accept/dismiss dialogs
 
-All operations except `status` require a browser session. Browser tools derive browser session keys from the current runtime session, so parent and delegated runtime sessions get isolated browser state by default. Passing an explicit `sessionId` intentionally shares that named browser session.
+All operations except `status` require a browser session. Browser tools derive browser session keys from the current runtime session, so parent and delegated runtime sessions get isolated browser state by default. Passing an explicit `sessionId` intentionally shares that named browser session. An explicit ID equal to the current runtime session ID resolves to the same default `:main` browser session used by later implicit calls.
 
 Supervised sessions use isolated CDP Browser Contexts. EstaCoda creates a Browser Context for each browser session key, opens the page target inside that context, and disposes the context during cleanup so cookies and browser-context state do not leak across parent/delegated sessions.
 

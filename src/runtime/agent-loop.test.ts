@@ -29,6 +29,8 @@ import { MemoryBudgetOverflowError, MemoryStore } from "../memory/memory-store.j
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { RunRecorder } from "./run-recorder.js";
 import { AgentLoop } from "./agent-loop.js";
+import { ExecutionPlanController } from "./execution-plan-controller.js";
+import { ExecutionPlanStore } from "./execution-plan-store.js";
 import type { SkillLearningManager } from "../skills/skill-learning.js";
 import type { CompactResult, SessionCompressionService } from "../prompt/session-compression-service.js";
 import type { NativeToolExecutor } from "./native-tool-executor.js";
@@ -329,6 +331,7 @@ async function createAgentLoop(input: {
   routeAttachments?: ChannelAttachment[];
   providerToolDefinitions?: ToolDefinition[];
   executionPlanReader?: ExecutionPlanReader;
+  executionPlanController?: ExecutionPlanController;
 }) {
   const sessionDb = new InMemorySessionDB();
   const sessionId = `agent-loop-test-${Date.now()}-${Math.random()}`;
@@ -478,7 +481,8 @@ async function createAgentLoop(input: {
     skillLearningManager: input.skillLearningManager,
     skillRouteShadowReranker: input.skillRouteShadowReranker,
     agentEvolutionPolicy: input.agentEvolutionPolicy ?? deriveAgentEvolutionPolicy("suggest"),
-    executionPlanReader: input.executionPlanReader
+    executionPlanReader: input.executionPlanController ?? input.executionPlanReader,
+    executionPlanController: input.executionPlanController
   });
 
   return {
@@ -1627,6 +1631,42 @@ describe("AgentLoop provider availability gating", () => {
       success: false,
       status: "partially_completed"
     });
+  });
+
+  it("reopens a user-input-blocked Mission before a retry reaches the provider loop", async () => {
+    const executionPlanController = new ExecutionPlanController(new ExecutionPlanStore());
+    await executionPlanController.write({
+      objective: "Authenticate the account",
+      items: [{
+        id: "credentials",
+        content: "Collect corrected credentials",
+        status: "blocked",
+        blocker: { kind: "user_input_required", summary: "Provide corrected credentials." }
+      }]
+    }, "turn-auth");
+    let planAtProviderStart: ExecutionPlan | undefined;
+    const { loop, providerTurnLoop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("Requesting protected credentials again."),
+      executionPlanController,
+      onProviderTurnRun: () => {
+        planAtProviderStart = executionPlanController.current();
+      }
+    });
+
+    await loop.handle({
+      text: "yeah lets retry",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(providerTurnLoop.run).toHaveBeenCalledOnce();
+    expect(planAtProviderStart).toMatchObject({
+      status: "active",
+      items: [{ id: "credentials", status: "in_progress" }]
+    });
+    expect(planAtProviderStart?.items[0]).not.toHaveProperty("blocker");
   });
 
   it("does not fail a completed turn when final trajectory persistence fails", async () => {

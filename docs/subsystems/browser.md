@@ -90,7 +90,7 @@ Browser tools derive browser session keys from the runtime session context. A no
 <runtime-session-id>:main
 ```
 
-Delegated or child runtime sessions therefore get isolated browser state by default. Passing an explicit `sessionId` remains supported and intentionally shares the named browser session across parent/child contexts. Direct backend calls that omit session IDs are compatibility paths, not the intended browser tool path.
+Delegated or child runtime sessions therefore get isolated browser state by default. Passing an explicit `sessionId` remains supported and intentionally shares the named browser session across parent/child contexts. An explicit ID equal to the current runtime session ID is canonicalized to that runtime's `:main` browser session so later implicit calls cannot silently fork the browser. Direct backend calls that omit session IDs are compatibility paths, not the intended browser tool path.
 
 Supervised local CDP owns one session manager per endpoint stack. Configured CDP and auto-launched fallback stacks can coexist, and each browser session key is mapped to the stack that created it. Closing a session closes the owning stack session only; configured/manual CDP sessions do not keep an EstaCoda-launched Chrome process alive.
 

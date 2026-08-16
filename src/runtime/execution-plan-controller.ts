@@ -255,6 +255,18 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
       this.clear();
       return;
     }
+    if (isExecutionPlanCancellation(userText)) {
+      await this.abandon(sink);
+      this.clear();
+      return;
+    }
+    if (current.status === "blocked" && shouldResumeUserInputBlockedPlan(current, userText)) {
+      this.#awaitingResumeDecision = false;
+      const plan = resumeUserInputBlockedPlan(current);
+      await this.#recordTransition({ kind: "execution-plan-updated", plan }, sink);
+      this.#store.replace(plan);
+      return;
+    }
     if (this.#awaitingResumeDecision) {
       this.#awaitingResumeDecision = false;
       if (!isExecutionPlanResumeRequest(userText)) {
@@ -304,8 +316,45 @@ function isTerminalItemStatus(status: ExecutionPlanItemStatus): boolean {
 }
 
 function isExecutionPlanResumeRequest(text: string): boolean {
-  return isAcknowledgementContinuation(text) ||
-    /^(resume|resume that|continue|continue that|pick up where we left off)\b/iu.test(text.trim());
+  const normalized = normalizedUserResponse(text);
+  return isAcknowledgementContinuation(normalized) ||
+    /^(?:please\s+)?(?:(?:ok|okay|yes|yeah|yep|sure)\s+)?(?:let(?:'|’)s\s+)?(?:resume(?:\s+that)?|continue(?:\s+that)?|retry|try\s+again|do\s+it|go\s+ahead|pick\s+up\s+where\s+we\s+left\s+off)\b/iu.test(normalized);
+}
+
+function shouldResumeUserInputBlockedPlan(plan: ExecutionPlan, text: string): boolean {
+  if (!plan.items.some((item) => item.status === "blocked" && item.blocker?.kind === "user_input_required")) {
+    return false;
+  }
+  const normalized = normalizedUserResponse(text);
+  if (!/[\p{L}\p{N}]/u.test(normalized) || isExecutionPlanCancellation(normalized)) return false;
+  return isExecutionPlanResumeRequest(normalized) || !isExplicitNewRequest(normalized);
+}
+
+function resumeUserInputBlockedPlan(plan: ExecutionPlan): ExecutionPlan {
+  let activeItemSelected = false;
+  const items = plan.items.map((item): ExecutionPlanItem => {
+    if (item.status !== "blocked" || item.blocker?.kind !== "user_input_required") {
+      return { ...item };
+    }
+    const { blocker: _blocker, evidence: _evidence, evidenceCallIds: _evidenceCallIds, completionKind: _completionKind, ...rest } = item;
+    const status = activeItemSelected ? "pending" : "in_progress";
+    activeItemSelected = true;
+    return { ...rest, status };
+  });
+  return validatePlan({ ...plan, revision: plan.revision + 1, status: "active", items });
+}
+
+function isExecutionPlanCancellation(text: string): boolean {
+  return /^(?:stop|never\s*mind|new\s+topic|cancel|drop\s+it)\b/iu.test(normalizedUserResponse(text));
+}
+
+function normalizedUserResponse(text: string): string {
+  return text.normalize("NFKC")
+    .replace(/[\u0000-\u001f\u007f]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .replace(/[.!…]+$/gu, "")
+    .trim();
 }
 
 function eventKindForPlan(plan: ExecutionPlan): ExecutionPlanLifecycleEvent["kind"] {

@@ -1551,6 +1551,37 @@ describe("web and browser tools baselines", () => {
     expect(clickMethod).not.toHaveBeenCalled();
   });
 
+  it("recovers one transient read-only preflight failure before binding a browser action", async () => {
+    const clickMethod = vi.fn(async () => createSessionRecordingBrowserBackend().snapshot!({ sessionId: "runtime:main" }));
+    const current = browserIdentity(9);
+    const preflightAction = vi.fn(async (_action: "click" | "press" | "dialog", input: BrowserActionInput): Promise<BrowserActionPreflight> => {
+      if (preflightAction.mock.calls.length === 1) {
+        throw new BrowserTargetError({ reason: "browser-target-not-found", message: "settling" });
+      }
+      return {
+        action: "click",
+        sessionId: input.sessionId!,
+        identity: current,
+        tabRef: "@t1",
+        url: "https://developers.mtn.com/login",
+        target: { ref: "@e5", kind: "link", tag: "a", role: "link", label: "Login", href: "https://developers.mtn.com/login", formAssociated: false, submit: false }
+      };
+    });
+    const click = tool("browser.click", createTestWebTools({
+      browserBackend: { ...createSessionRecordingBrowserBackend(), click: clickMethod, preflightAction }
+    }));
+    const input = { sessionId: "runtime:main", identity: current, tabRef: "@t1", ref: "@e5" };
+    const approved = await click.resolveSecurity?.(input, { trustedWorkspace: true, sessionId: "runtime" });
+
+    expect(approved).toMatchObject({
+      riskClass: "read-only-network",
+      targetSummary: "Click link “Login” on developers.mtn.com"
+    });
+    await expect(click.run(input, { securityResolution: approved })).resolves.toMatchObject({ ok: true });
+    expect(preflightAction).toHaveBeenCalledTimes(3);
+    expect(clickMethod).toHaveBeenCalledOnce();
+  });
+
   it("keeps navigation keys read-only and raises Enter on a focused form control", async () => {
     const preflightAction = vi.fn(async (_action: "click" | "press" | "dialog", input: BrowserActionInput): Promise<BrowserActionPreflight> => ({
       action: "press",
@@ -2079,6 +2110,26 @@ describe("web and browser tools baselines", () => {
         })
       ]));
     }
+  });
+
+  it("keeps explicit runtime and implicit browser calls on the same main session", async () => {
+    const calls: Array<{ method: string; input: BrowserActionInput | BrowserNavigateInput }> = [];
+    const tools = createTestWebTools({
+      browserBackend: createSessionRecordingBrowserBackend(calls),
+      currentSessionId: () => "runtime-session",
+      resolveHostname: publicResolver
+    });
+
+    await tool("browser.navigate", tools).run({
+      sessionId: "runtime-session",
+      url: "https://example.com"
+    });
+    await tool("browser.snapshot", tools).run({});
+
+    expect(calls.slice(-2)).toEqual([
+      expect.objectContaining({ method: "navigate", input: expect.objectContaining({ sessionId: "runtime-session:main" }) }),
+      expect.objectContaining({ method: "snapshot", input: expect.objectContaining({ sessionId: "runtime-session:main" }) })
+    ]);
   });
 
   it("requests protected browser input for a runtime-derived verified field without calling plaintext type", async () => {

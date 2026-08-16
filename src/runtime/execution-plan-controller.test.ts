@@ -94,6 +94,76 @@ describe("ExecutionPlanController", () => {
     expect(target.current()?.status).toBe("active");
   });
 
+  it("reopens a user-input-blocked Mission when the user retries", async () => {
+    const events: string[] = [];
+    const target = controller();
+    await target.write({
+      objective: "Authenticate the account",
+      items: [{
+        id: "verify",
+        content: "Verify authentication",
+        status: "blocked",
+        evidenceCallIds: ["stale-failure-evidence"],
+        blocker: { kind: "user_input_required", summary: "Provide corrected credentials." }
+      }]
+    }, "turn-1");
+
+    await target.prepareForTurn("okay lets retry...", async (event) => { events.push(event.kind); });
+
+    expect(target.current()).toMatchObject({
+      revision: 2,
+      status: "active",
+      items: [{ id: "verify", status: "in_progress" }]
+    });
+    expect(target.current()?.items[0]).not.toHaveProperty("blocker");
+    expect(target.current()?.items[0]).not.toHaveProperty("evidenceCallIds");
+    expect(events).toEqual(["execution-plan-updated"]);
+  });
+
+  it("does not reopen non-user blockers or empty follow-ups", async () => {
+    const external = controller();
+    await external.write({
+      objective: "Wait for the external service",
+      items: [{
+        id: "wait",
+        content: "Wait for service recovery",
+        status: "blocked",
+        blocker: { kind: "external_state", summary: "The external service is unavailable." }
+      }]
+    }, "turn-1");
+    await external.prepareForTurn("retry");
+    expect(external.current()?.status).toBe("blocked");
+
+    const empty = controller();
+    await empty.write({
+      objective: "Authenticate the account",
+      items: [{
+        id: "credentials",
+        content: "Collect credentials",
+        status: "blocked",
+        blocker: { kind: "user_input_required", summary: "Provide the credentials." }
+      }]
+    }, "turn-2");
+    await empty.prepareForTurn("...");
+    expect(empty.current()?.status).toBe("blocked");
+  });
+
+  it("abandons a blocked Mission when the user cancels", async () => {
+    const target = controller();
+    await target.write({
+      objective: "Authenticate the account",
+      items: [{
+        id: "credentials",
+        content: "Collect credentials",
+        status: "blocked",
+        blocker: { kind: "user_input_required", summary: "Provide the credentials." }
+      }]
+    }, "turn-1");
+
+    await target.prepareForTurn("never mind");
+    expect(target.current()).toBeUndefined();
+  });
+
   it("hydrates only when the next turn explicitly resumes", async () => {
     const persisted = {
       objective: "Resume this mission",

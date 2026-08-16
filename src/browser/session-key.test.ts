@@ -8,11 +8,17 @@ function contextWithSession(sessionId: string): BrowserSessionKeyContext {
 }
 
 describe("deriveBrowserSessionKey", () => {
-  it("prefers an explicit sessionId over the runtime session", () => {
+  it("preserves an explicit shared sessionId", () => {
     const currentSessionId = vi.fn(() => "runtime-session");
 
     expect(deriveBrowserSessionKey({ currentSessionId }, "shared-browser-session")).toBe("shared-browser-session");
-    expect(currentSessionId).not.toHaveBeenCalled();
+    expect(currentSessionId).toHaveBeenCalledOnce();
+  });
+
+  it("canonicalizes an explicit runtime session ID to its default browser session", () => {
+    expect(deriveBrowserSessionKey(contextWithSession("runtime-session"), "runtime-session")).toBe(
+      "runtime-session:main"
+    );
   });
 
   it("returns an explicit sessionId unchanged", () => {

@@ -1377,6 +1377,7 @@ const SAFE_BROWSER_KEYS = new Set([
   "arrowdown", "arrowleft", "arrowright", "arrowup", "end", "escape", "home",
   "pagedown", "pageup", "tab"
 ]);
+const BROWSER_ACTION_PREFLIGHT_ATTEMPTS = 2;
 
 async function resolveBrowserActionSecurity(
   action: BrowserActionPreflightKind,
@@ -1395,10 +1396,8 @@ async function resolveBrowserActionSecurity(
     return browserActionSecurityResult(action, browserInput, key, undefined, "external-side-effect", false);
   }
 
-  let preflight: BrowserActionPreflight;
-  try {
-    preflight = await browserBackend.preflightAction(action, browserInput);
-  } catch {
+  const preflight = await resolveBrowserActionPreflight(action, browserInput, browserBackend);
+  if (preflight === undefined) {
     return browserActionSecurityResult(action, browserInput, key, undefined, "external-side-effect", false);
   }
   const safeLink = action === "click" && preflight.target?.kind === "link" &&
@@ -1412,6 +1411,23 @@ async function resolveBrowserActionSecurity(
     safeLink ? "read-only-network" : "external-side-effect",
     targetBound
   );
+}
+
+async function resolveBrowserActionPreflight(
+  action: BrowserActionPreflightKind,
+  browserInput: BrowserActionInput,
+  browserBackend: BrowserBackend
+): Promise<BrowserActionPreflight | undefined> {
+  for (let attempt = 0; attempt < BROWSER_ACTION_PREFLIGHT_ATTEMPTS; attempt += 1) {
+    try {
+      return await browserBackend.preflightAction!(action, browserInput);
+    } catch {
+      // A live page may replace an otherwise unchanged target while its DOM settles.
+      // Retry the read-only inspection once; execution still requires a separate,
+      // matching preflight below and therefore remains fail-closed.
+    }
+  }
+  return undefined;
 }
 
 function browserActionSecurityResult(
