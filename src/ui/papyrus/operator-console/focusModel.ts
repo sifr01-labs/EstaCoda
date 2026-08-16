@@ -1,4 +1,4 @@
-export const APPROVAL_FOCUS_CONTROLS = ["approve", "reject", "inspect"] as const;
+export const APPROVAL_FOCUS_CONTROLS = ["inspect", "approve", "reject"] as const;
 
 export type ApprovalFocusControl = typeof APPROVAL_FOCUS_CONTROLS[number];
 

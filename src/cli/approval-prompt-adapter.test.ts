@@ -146,9 +146,9 @@ describe("approval prompt adapter routing", () => {
 
     const rendered = outputChunks.join("");
     expect(rendered).toContain("Approval required");
-    expect(rendered).toContain("Action: Run Command");
-    expect(rendered).toContain("Target: npm install left-pad");
-    expect(rendered).toContain("Risk: destructive-local");
+    expect(rendered).toContain("Run Command");
+    expect(rendered).toContain("Target · npm install left-pad");
+    expect(rendered).toContain("destructive-local");
     expect(rendered).toContain("❯ Approve once");
     expect(rendered).toContain("Reject");
     expect(rendered).toContain("Inspect");
@@ -208,9 +208,9 @@ describe("approval prompt adapter routing", () => {
     await expect(result).resolves.toBe("once");
 
     const rendered = outputChunks.join("");
-    expect(rendered).toContain("Action: Workspace Write");
-    expect(rendered).toContain("Target: src/runtime/provider-turn-loop.ts");
-    expect(rendered).toContain("Risk: workspace-write");
+    expect(rendered).toContain("Workspace Write");
+    expect(rendered).toContain("Target · src/runtime/provider-turn-loop.ts");
+    expect(rendered).toContain("workspace-write");
     expect(rendered).toContain("+2 lines  -1 lines");
     expect(input.chrome?.clearInlineSpinner).not.toHaveBeenCalled();
     expect(input.prompt).not.toHaveBeenCalled();

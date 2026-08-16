@@ -232,8 +232,8 @@ describe("Papyrus operator console raw prompt host", () => {
 
     expect(frame.state.approvals).toEqual([approval]);
     expect(text).toContain("Approval required");
-    expect(text).toContain("Action: Write file");
-    expect(text).toContain("Target: write the reviewed artifact");
+    expect(text).toContain("Write file");
+    expect(text).toContain("Target · write the reviewed artifact");
     expect(text).toContain("❯ Approve once");
   });
 

@@ -395,7 +395,7 @@ describe("Papyrus operator console renderer", () => {
     expect(approvalIndex).toBeLessThan(attachmentsIndex);
     expect(approvalIndex).toBeLessThan(promptIndex);
     expect(approvalIndex).toBeLessThan(statusIndex);
-    expect(output).toContainEqual(expect.stringContaining("[Approve once]"));
+    expect(output).toContainEqual(expect.stringContaining("Approve once  Permit only this action"));
     expect(output.every((line) => stringWidth(line) <= 120)).toBe(true);
   });
 
@@ -417,7 +417,10 @@ describe("Papyrus operator console renderer", () => {
 
     expect(first).toEqual(second);
     expect(first).toContainEqual(expect.stringContaining("Approval required"));
-    expect(first).toContainEqual(expect.stringContaining("Approve once        ❯ Reject        Inspect"));
+    expect(first).toContainEqual(expect.stringContaining("❯ Reject"));
+    expect(first.findIndex((line) => line.includes("Inspect"))).toBeLessThan(
+      first.findIndex((line) => line.includes("Approve once"))
+    );
     expect(first.every((line) => stringWidth(line) <= 72)).toBe(true);
     expect(JSON.stringify(state)).toBe(before);
   });

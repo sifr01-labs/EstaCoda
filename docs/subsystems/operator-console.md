@@ -621,13 +621,16 @@ Approval required:
 ```text
 Assistant:
 I need approval before modifying the database.
-┌─ Approval required ───────────────────┐
-│ Action: run migration                  │
-│ Target: production database            │
-│ Risk: schema change                    │
-│                                        │
-│ [Approve once]   [Reject]   [Inspect]  │
-└────────────────────────────────────────┘
+  ╭─ Approval required ────────────── schema change ─╮
+  │ run migration                                    │
+  │ Target · production database                     │
+  │                                                  │
+  │   Inspect       Review details before deciding   │
+  │ ❯ Approve once  Permit only this action          │
+  │   Reject        Deny this action                 │
+  │                                                  │
+  │ ↑↓ move · Enter select · Esc reject              │
+  ╰──────────────────────────────────────────────────╯
 Assistant:
 Waiting for approval.
 ```
@@ -635,22 +638,31 @@ Waiting for approval.
 Focused approval control:
 
 ```text
-┌─ Approval required ─────────────────────────────────────┐
-│ Action: write file                                      │
-│ Target: src/runtime/provider-turn-loop.ts               │
-│ Risk: runtime behavior change                           │
-│                                                         │
-│ +42 lines  -17 lines                                    │
-│                                                         │
-│ ❯ Approve once        Reject        Inspect             │
-└─────────────────────────────────────────────────────────┘
+  ╭─ Approval required ───────── runtime behavior change ─╮
+  │ write file                                             │
+  │ Target · src/runtime/provider-turn-loop.ts             │
+  │                                                        │
+  │ +42 lines  -17 lines                                   │
+  │                                                        │
+  │ ❯ Inspect       Review details before deciding         │
+  │   Approve once  Permit only this action                │
+  │   Reject        Deny this action                       │
+  │                                                        │
+  │ ↑↓ move · Enter select · Esc reject                    │
+  ╰────────────────────────────────────────────────────────╯
 ```
 
 Approval v1 controls:
 
+- Inspect
 - Approve once
 - Reject
-- Inspect
+
+The card is bounded and inset on wide terminals, but falls back to the available
+width on narrow terminals. Up and down move through the vertical choices; Tab,
+Shift+Tab, left, and right remain supported for compatibility. Fixed copy is
+localized, while action, target, risk, and summary values are rendered with
+mixed-direction isolation.
 
 Feedback, amend, session approval, and persistent approval controls are out of
 scope for approval v1 unless the implementation adds a separately reviewed

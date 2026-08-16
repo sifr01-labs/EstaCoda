@@ -177,7 +177,7 @@ function createRegionDescriptors(
       kind: "approvals",
       priority: APPROVAL_PRIORITY,
       minHeight: 1,
-      desiredHeight: getApprovalSurfaceDesiredHeight(state.approvals),
+      desiredHeight: getApprovalSurfaceDesiredHeight(state.approvals, terminal.width, state.locale),
     });
   }
 

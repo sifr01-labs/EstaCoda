@@ -127,7 +127,7 @@ describe("Papyrus operator console state model", () => {
   });
 
   it("limits approval focus controls to approve, reject, and inspect", () => {
-    expect(APPROVAL_FOCUS_CONTROLS).toEqual(["approve", "reject", "inspect"]);
+    expect(APPROVAL_FOCUS_CONTROLS).toEqual(["inspect", "approve", "reject"]);
     expect(isApprovalFocusControl("approve")).toBe(true);
     expect(isApprovalFocusControl("reject")).toBe(true);
     expect(isApprovalFocusControl("inspect")).toBe(true);

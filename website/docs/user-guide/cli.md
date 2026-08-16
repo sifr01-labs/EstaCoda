@@ -335,7 +335,7 @@ Standard mode uses Unicode box-drawing and a small semantic motion language: Bra
 
 **Provider not configured:** The runtime reports a broken route. Run `estacoda model setup` or `estacoda doctor --live` to diagnose.
 
-**Approval required:** Respond to the prompt with `once`, `session`, `always`, or `deny`. Check `/approvals` for current grants. Use `/revoke <id>` to remove persistent grants.
+**Approval required:** Use the Papyrus card to **Inspect**, **Approve once**, or **Reject** the pending action. Explicit `/approve once|session|always` and `/deny` commands remain available for queued approvals. Check `/approvals` for current grants, and use `/revoke <id>` to remove a persistent grant.
 
 **Unsafe command denied:** The command matched a hardline block. Change the command; the hardline floor cannot be overridden.
 

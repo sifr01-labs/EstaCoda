@@ -6234,9 +6234,9 @@ describe("runSessionLoop — active turn spinner", () => {
       },
     ]);
     expect(result.rendered).toContain("Approval required");
-    expect(result.rendered).toContain("Action: Run Command");
-    expect(result.rendered).toContain("Target: npm install left-pad");
-    expect(result.rendered).toContain("Risk: destructive-local");
+    expect(result.rendered).toContain("Run Command");
+    expect(result.rendered).toContain("Target · npm install left-pad");
+    expect(result.rendered).toContain("destructive-local");
     expect(result.rendered).toContain("❯ Approve once");
     expect(result.rendered).toContain("Reject");
     expect(result.rendered).toContain("Inspect");
