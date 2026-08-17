@@ -1210,13 +1210,17 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           : runtime.createSecureInputRequestHandler({
               collect: secureInputCollector.collect,
               signal: activeTurn.signal,
-              authorize: async ({ destinationLabel, assessment }) => {
+              authorize: async ({ destinationLabel, assessment, transfer }) => {
                 disposeOperatorConsoleSteerInput?.();
                 disposeOperatorConsoleSteerInput = undefined;
                 clearSpinner();
                 try {
                   const arabic = renderer.locale === "ar";
-                  const reason = assessment.reason === "persistent-secret-requires-approval"
+                  const reason = transfer !== undefined
+                    ? arabic
+                      ? `نقل ${isolateAuto(transfer.credentialLabel)} من ${isolateAuto(transfer.sourceLabel)} إلى ${isolateAuto(destinationLabel)}. لا تحتفظ EstaCoda بذاكرة النقل؛ وقد تحفظ الوجهة القيمة أو تشاركها وفقاً لإعداداتها.`
+                      : `Transfer ${transfer.credentialLabel} from ${transfer.sourceLabel} to ${destinationLabel}. EstaCoda does not retain the transfer buffer; the destination may store or share the value under its own settings.`
+                    : assessment.reason === "persistent-secret-requires-approval"
                     ? arabic
                       ? "سيتم حفظ بيانات الاعتماد في مخزن الأسرار للملف الشخصي النشط."
                       : "This will persist the credential in the active profile secret store."
@@ -1225,7 +1229,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
                       : "This protected delivery requires explicit authorization.";
                   const question = arabic
                     ? `${isolateRtl(reason)}\n${isolateRtl(`هل تسمح بتسليم الإدخال المحمي إلى ${isolateAuto(destinationLabel)}؟`)} [y/N] `
-                    : `${reason}\nAuthorize protected input delivery to ${destinationLabel}? [y/N] `;
+                    : `${reason}\nAuthorize protected ${transfer === undefined ? "input delivery" : "transfer"}? [y/N] `;
                   const answer = await prompt(question);
                   return /^(?:y|yes)$/iu.test(answer.trim()) ? "approved" : "denied";
                 } finally {

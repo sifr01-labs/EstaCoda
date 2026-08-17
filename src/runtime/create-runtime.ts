@@ -69,6 +69,7 @@ import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { EphemeralSecretBroker } from "../security/ephemeral-secret-broker.js";
 import { SecureInputTransportRegistry } from "../security/secure-input-transport-registry.js";
 import { createProtectedToolArgumentTransport } from "../security/protected-tool-argument-transport.js";
+import { createProtectedBrowserValueSource } from "../security/protected-browser-value-source.js";
 import { createProfileEnvSecretStore, createRegisteredSecretStoreTransport, RegisteredSecretStoreRegistry } from "../security/registered-secret-store.js";
 import { createProtectedBrowserFieldTransport } from "../browser/protected-browser-field-transport.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
@@ -1294,6 +1295,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         broker: secretBroker,
         transports: secureInputTransports,
         collect: input.collect,
+        browserSource: createProtectedBrowserValueSource(browserBackend),
         authorize: input.authorize,
         onWaitStateChange: input.onWaitStateChange
       });

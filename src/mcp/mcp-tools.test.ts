@@ -165,6 +165,8 @@ describe("MCP protected argument declarations", () => {
       destination: { type: "mcp-argument", serverId: "trusted", toolName: "authenticate" }
     }]);
     expect(JSON.stringify(tool?.inputSchema)).toContain("protectedInput");
+    expect(JSON.stringify(tool?.inputSchema)).toContain("expectedOrigin");
+    expect(JSON.stringify(tool?.inputSchema)).toContain("documentEpoch");
     expect(JSON.stringify(tool?.inputSchema)).toContain('"type":"string"');
     await server?.stop();
   });

@@ -222,7 +222,29 @@ function protectedArgumentEnvelopeSchema(): Record<string, unknown> {
         properties: {
           kind: { type: "string" },
           purpose: { type: "string" },
-          retention: { type: "string", enum: ["use-once"] }
+          retention: { type: "string", enum: ["use-once"] },
+          source: {
+            type: "object",
+            description: "Optional verified browser source. Its value is relayed outside model context.",
+            properties: {
+              type: { type: "string", enum: ["browser-field"] },
+              sessionId: { type: "string" },
+              ref: { type: "string" },
+              identity: {
+                type: "object",
+                properties: {
+                  documentEpoch: { type: "integer" },
+                  actionRevision: { type: "integer" },
+                  observationId: { type: "integer" }
+                },
+                required: ["documentEpoch", "actionRevision", "observationId"]
+              },
+              expectedOrigin: { type: "string", description: "Exact HTTP(S) origin from the current browser snapshot, without a path." },
+              tabRef: { type: "string" },
+              frameId: { type: "string" }
+            },
+            required: ["type", "sessionId", "ref", "identity", "expectedOrigin", "tabRef"]
+          }
         },
         required: ["kind"]
       }

@@ -13,6 +13,7 @@ import { summarizeSecurityTarget, ToolExecutor } from "./tool-executor.js";
 import { attachEphemeralVisionImages, ephemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 import { WorkspaceApprovalController, WorkspaceApprovalStore } from "../security/workspace-approval-controller.js";
 import { TurnMcpReadLedger } from "../runtime/turn-tool-feedback-ledger.js";
+import type { SecureInputTransferRequestHandler } from "../contracts/secure-input.js";
 
 function createMockPolicy(decision: "allow" | "deny" = "allow"): SecurityPolicy {
   return {
@@ -979,6 +980,81 @@ describe("ToolExecutor tool-call metadata persistence", () => {
       ok: true,
       content: "remote echoed [PROTECTED_INPUT]",
       metadata: { echoed: "[PROTECTED_INPUT]" }
+    });
+    expect(await persistedExecutionState(sessionDb, trajectoryRecorder)).not.toContain(sentinel);
+  });
+
+  it("dispatches a protected argument from browser source metadata without invoking ordinary collection", async () => {
+    const sentinel = "browser-relay-sentinel";
+    const run = vi.fn(async (input: Record<string, unknown>): Promise<ToolResult> => ({
+      ok: true,
+      content: `stored ${String((input.auth as Record<string, unknown>).token)}`,
+    }));
+    const tool: RegisteredTool = {
+      ...createEchoTool("trusted.browser-relay"),
+      protectedArguments: [{ path: "auth.token" }],
+      run,
+    };
+    const handler = vi.fn() as unknown as SecureInputTransferRequestHandler;
+    handler.requestGroup = vi.fn();
+    handler.transfer = vi.fn(async (transfer, consume) => {
+      expect(transfer.source).toEqual({
+        type: "browser-field",
+        sessionId: "browser-1",
+        ref: "@e4",
+        identity: { documentEpoch: 3, actionRevision: 7, observationId: 9 },
+        expectedOrigin: "https://portal.example.com",
+        tabRef: "@t1",
+      });
+      const bytes = new TextEncoder().encode(sentinel);
+      try {
+        await consume(bytes, {
+          requestId: "transfer-1",
+          scope: { profileId: "profile", sessionId: "test-session" },
+          request: transfer.request,
+          signal: new AbortController().signal,
+        });
+      } finally {
+        bytes.fill(0);
+      }
+      return { status: "delivered" as const, destinationLabel: "auth.token for trusted.browser-relay", persisted: false };
+    });
+    const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({ tools: [tool] });
+
+    const execution = await executor.executeTool({
+      tool: tool.name,
+      input: {
+        auth: {
+          token: {
+            protectedInput: {
+              kind: "access-token",
+              purpose: "Configure destination auth",
+              source: {
+                type: "browser-field",
+                sessionId: "browser-1",
+                ref: "@e4",
+                identity: { documentEpoch: 3, actionRevision: 7, observationId: 9 },
+                expectedOrigin: "https://portal.example.com",
+                tabRef: "@t1",
+              },
+            },
+          },
+        },
+      },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      onSecureInputRequest: handler,
+    });
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(handler.transfer).toHaveBeenCalledOnce();
+    expect(run).toHaveBeenCalledWith({ auth: { token: sentinel } }, expect.objectContaining({
+      onSecureInputRequest: undefined,
+    }));
+    expect(execution?.result).toEqual({
+      ok: true,
+      content: "Protected value transferred to auth.token for trusted.browser-relay. Verify the destination state with a separate read.",
+      metadata: { protectedTransfer: true },
     });
     expect(await persistedExecutionState(sessionDb, trajectoryRecorder)).not.toContain(sentinel);
   });

@@ -7,7 +7,9 @@ import type {
   SecureInputReceipt,
   SecureInputRequest,
   SecureInputRequestSnapshot,
-  SecureInputScope
+  SecureInputScope,
+  SecureInputTransferRequest,
+  SecureInputTransferRequestHandler
 } from "../contracts/secure-input.js";
 import {
   EphemeralSecretBroker,
@@ -21,12 +23,23 @@ import {
   SecureInputTransportRegistry,
   type SelectedSecureInputTransport
 } from "../security/secure-input-transport-registry.js";
+import type { ProtectedBrowserValueSource } from "../security/protected-browser-value-source.js";
+import type {
+  SecureInputDisclosureBoundary,
+  SecureInputPersistenceBehavior,
+} from "../security/secure-input-policy.js";
 
 export type SecureInputAuthorizationHandler = (input: {
   request: SecureInputRequest;
   transportId: string;
   destinationLabel: string;
   assessment: SecureInputPolicyAssessment;
+  transfer?: {
+    sourceLabel: string;
+    credentialLabel: string;
+    persistence: SecureInputPersistenceBehavior;
+    disclosureBoundary: SecureInputDisclosureBoundary;
+  };
 }) => Promise<"approved" | "denied">;
 
 export type SecureInputWaitEvent = {
@@ -40,6 +53,7 @@ export type SecureInputCoordinatorOptions = {
   broker: EphemeralSecretBroker;
   transports: SecureInputTransportRegistry;
   collect: SecureInputCollector;
+  browserSource?: ProtectedBrowserValueSource;
   authorize?: SecureInputAuthorizationHandler;
   onWaitStateChange?: SecureInputWaitHandler;
 };
@@ -52,6 +66,7 @@ export class SecureInputCoordinator {
   readonly #broker: EphemeralSecretBroker;
   readonly #transports: SecureInputTransportRegistry;
   readonly #collect: SecureInputCollector;
+  readonly #browserSource: ProtectedBrowserValueSource | undefined;
   readonly #authorize: SecureInputAuthorizationHandler | undefined;
   readonly #onWaitStateChange: SecureInputWaitHandler | undefined;
 
@@ -59,24 +74,131 @@ export class SecureInputCoordinator {
     this.#broker = options.broker;
     this.#transports = options.transports;
     this.#collect = options.collect;
+    this.#browserSource = options.browserSource;
     this.#authorize = options.authorize;
     this.#onWaitStateChange = options.onWaitStateChange;
   }
 
-  createRequestHandler(scope: SecureInputScope, signal?: AbortSignal): GroupedSecureInputRequestHandler {
+  createRequestHandler(scope: SecureInputScope, signal?: AbortSignal): SecureInputTransferRequestHandler {
     const boundScope = structuredClone(scope);
     const handler = (async (request, consume) => await this.request({
       scope: boundScope,
       request,
       consume,
       signal
-    })) as GroupedSecureInputRequestHandler;
+    })) as SecureInputTransferRequestHandler;
     handler.requestGroup = async (request) => await this.requestGroup({
       scope: boundScope,
       group: request,
       signal
     });
+    handler.transfer = async (transfer, consume) => await this.transfer({
+      scope: boundScope,
+      transfer,
+      consume,
+      signal,
+    });
     return handler;
+  }
+
+  async transfer(input: {
+    scope: SecureInputScope;
+    transfer: SecureInputTransferRequest;
+    consume: SecureInputConsumer;
+    signal?: AbortSignal;
+  }): Promise<SecureInputReceipt> {
+    const controller = linkedAbortController(input.signal);
+    let selection: SelectedSecureInputTransport | undefined;
+    let source: Awaited<ReturnType<ProtectedBrowserValueSource["prepare"]>> | undefined;
+    let snapshot: SecureInputRequestSnapshot | undefined;
+    try {
+      if (this.#browserSource === undefined) throw new Error("Protected browser transfer is unavailable.");
+      selection = await this.#transports.select({
+        request: input.transfer.request,
+        signal: controller.signal,
+      });
+      const assessment = assessSecureInputPolicy(input.transfer.request, selection.policy);
+      if (assessment.decision === "deny") {
+        return failureReceipt(selection, "The requested retention is not supported by this destination.");
+      }
+      source = await this.#browserSource.prepare({
+        source: input.transfer.source,
+        kind: input.transfer.request.kind,
+        signal: controller.signal,
+      });
+      const decision = this.#authorize === undefined
+        ? "denied"
+        : await this.#authorize({
+            request: structuredClone(input.transfer.request),
+            transportId: selection.transport.id,
+            destinationLabel: selection.verifiedDestination.label,
+            assessment,
+            transfer: {
+              sourceLabel: source.label,
+              credentialLabel: secureInputKindLabel(input.transfer.request.kind),
+              persistence: selection.policy.persistence,
+              disclosureBoundary: selection.policy.disclosureBoundary,
+            },
+          });
+      if (decision !== "approved" || controller.signal.aborted) {
+        return failureReceipt(selection, "Protected transfer was not authorized.");
+      }
+
+      await this.#transports.reverify({
+        selection,
+        request: input.transfer.request,
+        signal: controller.signal,
+      });
+      const value = await this.#browserSource.read({
+        verified: source,
+        kind: input.transfer.request.kind,
+        signal: controller.signal,
+      });
+      try {
+        snapshot = this.#broker.createRequest({
+          scope: input.scope,
+          request: input.transfer.request,
+          signal: controller.signal,
+        });
+        this.#broker.provideSecret({
+          requestId: snapshot.id,
+          scope: input.scope,
+          value,
+        });
+      } finally {
+        value.fill(0);
+      }
+      await this.#transports.reverify({
+        selection,
+        request: input.transfer.request,
+        signal: controller.signal,
+      });
+      await this.#deliver({
+        scope: input.scope,
+        request: input.transfer.request,
+        consume: input.consume,
+        selection,
+        snapshot,
+        signal: controller.signal,
+      });
+      return receipt(selection, "delivered", selection.policy.persistence !== "none");
+    } catch {
+      if (snapshot !== undefined) cancelPending(this.#broker, snapshot.id, input.scope);
+      if (selection !== undefined) await this.#abort([{ request: input.transfer.request, selection }]);
+      return receipt(selection, "failed", false, "Protected transfer failed.");
+    } finally {
+      if (source !== undefined) {
+        await this.#browserSource?.release(source.source).catch(() => undefined);
+      }
+      if (selection !== undefined) {
+        try {
+          await selection.transport.release?.(structuredClone(input.transfer.request));
+        } catch {
+          // Runtime-only bindings are best-effort after a terminal receipt.
+        }
+      }
+      controller.dispose();
+    }
   }
 
   async requestGroup(input: {
@@ -438,6 +560,10 @@ export class SecureInputCoordinator {
       return false;
     }
   }
+}
+
+function secureInputKindLabel(kind: SecureInputRequest["kind"]): string {
+  return kind.replaceAll("-", " ");
 }
 
 function validateGroup(group: SecureInputGroupRequest): void {

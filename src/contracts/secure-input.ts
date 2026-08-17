@@ -76,6 +76,19 @@ export type McpArgumentSecureInputDestination = {
   argumentPath: string;
 };
 
+/** Safe metadata identifying one browser value. The value itself never belongs here. */
+export type BrowserFieldSecureInputSource = {
+  type: "browser-field";
+  sessionId: string;
+  ref: string;
+  identity: BrowserStateIdentity;
+  expectedOrigin: string;
+  tabRef?: string;
+  frameId?: string;
+};
+
+export type SecureInputSource = BrowserFieldSecureInputSource;
+
 /** Product-neutral destinations that a reviewed transport may implement. */
 export type SecureInputDestination =
   | BrowserFieldSecureInputDestination
@@ -179,6 +192,19 @@ export type SecureInputRequestHandler = (
 
 export type GroupedSecureInputRequestHandler = SecureInputRequestHandler & {
   requestGroup: (request: SecureInputGroupRequest) => Promise<SecureInputGroupReceipt>;
+};
+
+/** Metadata-only request to relay a verified source directly to a verified destination. */
+export type SecureInputTransferRequest = {
+  source: SecureInputSource;
+  request: SecureInputRequest;
+};
+
+export type SecureInputTransferRequestHandler = GroupedSecureInputRequestHandler & {
+  transfer: (
+    transfer: SecureInputTransferRequest,
+    consume: SecureInputConsumer
+  ) => Promise<SecureInputReceipt>;
 };
 
 export type SecureInputCollectionResult =

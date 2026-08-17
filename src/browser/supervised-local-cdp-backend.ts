@@ -11,6 +11,8 @@ import type {
   BrowserNavigateResult,
   BrowserProtectedFieldDeliveryInput,
   BrowserProtectedFieldInput,
+  BrowserProtectedSourceInput,
+  BrowserProtectedSourceReadInput,
   BrowserScreenshotResult,
   BrowserSnapshot,
   BrowserStateIdentity,
@@ -49,6 +51,7 @@ import {
 import type { BrowserDocumentSignal, BrowserSnapshotInput } from "./snapshot-state.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import { ProtectedBrowserFormTransactionController } from "./protected-browser-field.js";
+import { ProtectedBrowserSourceController } from "./protected-browser-source.js";
 
 export type SupervisedLocalCdpBackendOptions = {
   cdpUrl?: string;
@@ -117,6 +120,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
   const latestSnapshotScopes = new Map<string, boolean>();
   const latestObservedUrls = new Map<string, string>();
   const protectedFields = new ProtectedBrowserFormTransactionController();
+  const protectedSources = new ProtectedBrowserSourceController();
   let launchedChrome: LaunchedChrome | undefined;
   let launchPromise: Promise<LaunchedChrome> | undefined;
   let configuredStack: BrowserSessionStack | undefined;
@@ -1194,6 +1198,35 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     takeProtectedFieldDeliveryResult: (destination) => protectedFields.takeDeliveryResult(destination),
     releaseProtectedField: async (destination) => {
       await protectedFields.release(destination);
+    },
+    verifyProtectedSource: async (input: BrowserProtectedSourceInput) => {
+      const session = await getSession({ sessionId: input.source.sessionId });
+      if (input.phase === "before-authorization") {
+        const { snapshot } = await captureSafeTargetSnapshot(session, {
+          sessionId: input.source.sessionId,
+          ref: input.source.ref,
+          identity: input.source.identity,
+          tabRef: input.source.tabRef,
+          signal: input.signal,
+        });
+        const target = resolveBrowserTarget(snapshot, {
+          sessionId: input.source.sessionId,
+          ref: input.source.ref,
+          identity: input.source.identity,
+          tabRef: input.source.tabRef,
+        });
+        if (target.ref !== input.source.ref) {
+          return { status: "rejected" as const, reason: "source-replaced" as const };
+        }
+      }
+      return await protectedSources.verify(session, input);
+    },
+    readProtectedSource: async (input: BrowserProtectedSourceReadInput) => {
+      const session = await getSession({ sessionId: input.source.sessionId });
+      return await protectedSources.read(session, input);
+    },
+    releaseProtectedSource: async (source) => {
+      await protectedSources.release(source);
     },
     isSensitiveInputActive: (sessionId) => protectedFields.isSensitive(sessionId),
     dialog: async (input = {}) => {

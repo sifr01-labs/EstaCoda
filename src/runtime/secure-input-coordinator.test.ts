@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
   BrowserFieldSecureInputDestination,
+  BrowserFieldSecureInputSource,
   SecureInputRequest,
   SecureInputScope
 } from "../contracts/secure-input.js";
@@ -9,6 +10,7 @@ import {
   SecureInputTransportRegistry,
   type SecureInputTransport
 } from "../security/secure-input-transport-registry.js";
+import type { ProtectedBrowserValueSource } from "../security/protected-browser-value-source.js";
 import { SecureInputCoordinator } from "./secure-input-coordinator.js";
 
 const scope: SecureInputScope = {
@@ -32,6 +34,21 @@ const request: SecureInputRequest = {
   retention: "use-once"
 };
 const browserDestination = request.destination as BrowserFieldSecureInputDestination;
+const browserSource: BrowserFieldSecureInputSource = {
+  type: "browser-field",
+  sessionId: "browser-1",
+  ref: "@e2",
+  identity: { documentEpoch: 2, actionRevision: 4, observationId: 8 },
+  expectedOrigin: "https://portal.example.com",
+  tabRef: "@t1",
+  frameId: "main",
+};
+const toolRequest: SecureInputRequest = {
+  kind: "client-secret",
+  purpose: "Configure the destination",
+  destination: { type: "tool-argument", toolName: "postman.updateEnvironment", argumentPath: "value" },
+  retention: "use-once",
+};
 
 describe("SecureInputCoordinator", () => {
   it("announces waiting_for_input, re-verifies, delivers once, and returns only a receipt", async () => {
@@ -326,6 +343,125 @@ describe("SecureInputCoordinator", () => {
     expect(broker.stats().cancelled).toBe(1);
     broker.dispose();
   });
+
+  it("relays a verified browser value through the broker after one metadata-only approval", async () => {
+    const broker = brokerWithStableIds();
+    const registry = new SecureInputTransportRegistry();
+    const transport = browserTransport({
+      destinationTypes: ["tool-argument"],
+      verificationStrength: "declared-target",
+    });
+    registry.register(transport);
+    const sourceBytes = new TextEncoder().encode("browser-source-sentinel");
+    const source = browserValueSource({ read: vi.fn(async () => sourceBytes) });
+    const collect = vi.fn();
+    const authorize = vi.fn(async () => "approved" as const);
+    const consumer = vi.fn(async (value: Uint8Array) => {
+      expect(new TextDecoder().decode(value)).toBe("browser-source-sentinel");
+    });
+    const coordinator = new SecureInputCoordinator({
+      broker,
+      transports: registry,
+      collect,
+      browserSource: source,
+      authorize,
+    });
+
+    const result = await coordinator.createRequestHandler(scope).transfer({
+      source: browserSource,
+      request: toolRequest,
+    }, consumer);
+
+    expect(result).toEqual({
+      status: "delivered",
+      destinationLabel: "value for postman.updateEnvironment",
+      persisted: false,
+    });
+    expect(collect).not.toHaveBeenCalled();
+    expect(authorize).toHaveBeenCalledWith(expect.objectContaining({
+      destinationLabel: "value for postman.updateEnvironment",
+      transfer: {
+        sourceLabel: "Browser value at https://portal.example.com",
+        credentialLabel: "client secret",
+        persistence: "none",
+        disclosureBoundary: "destination",
+      },
+    }));
+    expect(consumer).toHaveBeenCalledOnce();
+    expect(source.release).toHaveBeenCalledWith(browserSource);
+    expect(sourceBytes.every((byte) => byte === 0)).toBe(true);
+    expect(JSON.stringify({ result, authorization: authorize.mock.calls })).not.toContain("browser-source-sentinel");
+    broker.dispose();
+  });
+
+  it("does not read or dispatch a browser value when transfer approval is denied", async () => {
+    const broker = brokerWithStableIds();
+    const registry = new SecureInputTransportRegistry();
+    const deliver = vi.fn();
+    registry.register(browserTransport({
+      destinationTypes: ["tool-argument"],
+      verificationStrength: "declared-target",
+      deliver,
+    }));
+    const source = browserValueSource();
+    const coordinator = new SecureInputCoordinator({
+      broker,
+      transports: registry,
+      collect: vi.fn(),
+      browserSource: source,
+      authorize: async () => "denied",
+    });
+
+    const result = await coordinator.createRequestHandler(scope).transfer({
+      source: browserSource,
+      request: toolRequest,
+    }, vi.fn());
+
+    expect(result).toMatchObject({ status: "failed", reason: "Protected transfer was not authorized." });
+    expect(source.read).not.toHaveBeenCalled();
+    expect(deliver).not.toHaveBeenCalled();
+    expect(broker.stats().ready).toBe(0);
+    expect(source.release).toHaveBeenCalledOnce();
+    broker.dispose();
+  });
+
+  it("fails closed and clears bytes when the destination changes after browser read", async () => {
+    const broker = brokerWithStableIds();
+    const registry = new SecureInputTransportRegistry();
+    let verifications = 0;
+    const deliver = vi.fn();
+    registry.register(browserTransport({
+      destinationTypes: ["tool-argument"],
+      verificationStrength: "declared-target",
+      verify: vi.fn(({ request: candidate }) => ({
+        status: "verified" as const,
+        destination: ++verifications < 3
+          ? candidate.destination
+          : { ...candidate.destination, argumentPath: "attacker" },
+      })),
+      deliver,
+    }));
+    const sourceBytes = new TextEncoder().encode("changed-destination-sentinel");
+    const source = browserValueSource({ read: vi.fn(async () => sourceBytes) });
+    const coordinator = new SecureInputCoordinator({
+      broker,
+      transports: registry,
+      collect: vi.fn(),
+      browserSource: source,
+      authorize: async () => "approved",
+    });
+
+    const result = await coordinator.createRequestHandler(scope).transfer({
+      source: browserSource,
+      request: toolRequest,
+    }, vi.fn());
+
+    expect(result.status).toBe("failed");
+    expect(deliver).not.toHaveBeenCalled();
+    expect(sourceBytes.every((byte) => byte === 0)).toBe(true);
+    expect(JSON.stringify(result)).not.toContain("changed-destination-sentinel");
+    broker.dispose();
+  });
 });
 
 function brokerWithStableIds(): EphemeralSecretBroker {
@@ -349,5 +485,17 @@ function browserTransport(overrides: Partial<SecureInputTransport> = {}): Secure
     })),
     deliver: async ({ value, context, consume }) => await consume(value, context),
     ...overrides
+  };
+}
+
+function browserValueSource(overrides: Partial<ProtectedBrowserValueSource> = {}): ProtectedBrowserValueSource {
+  return {
+    prepare: vi.fn(async ({ source }) => ({
+      source: structuredClone(source),
+      label: "Browser value at https://portal.example.com",
+    })),
+    read: vi.fn(async () => new TextEncoder().encode("source-value")),
+    release: vi.fn(async () => undefined),
+    ...overrides,
   };
 }

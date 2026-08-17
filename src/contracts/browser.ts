@@ -331,6 +331,37 @@ export type BrowserProtectedFieldDeliveryResult = {
   snapshot: BrowserSnapshot;
 };
 
+export type BrowserProtectedSourceVerificationPhase = "before-authorization" | "before-delivery";
+
+export type BrowserProtectedSourceVerification =
+  | { status: "verified"; sourceLabel: string }
+  | {
+      status: "rejected";
+      reason:
+        | "session-mismatch"
+        | "tab-mismatch"
+        | "origin-mismatch"
+        | "frame-mismatch"
+        | "source-missing"
+        | "source-replaced"
+        | "source-hidden"
+        | "source-empty"
+        | "request-not-active";
+    };
+
+export type BrowserProtectedSourceInput = {
+  source: import("./secure-input.js").BrowserFieldSecureInputSource;
+  kind: import("./secure-input.js").SecureInputKind;
+  phase: BrowserProtectedSourceVerificationPhase;
+  signal?: AbortSignal;
+};
+
+export type BrowserProtectedSourceReadInput = {
+  source: import("./secure-input.js").BrowserFieldSecureInputSource;
+  kind: import("./secure-input.js").SecureInputKind;
+  signal?: AbortSignal;
+};
+
 export type BrowserNavigateInput = {
   url: string;
   sessionId?: string;
@@ -397,6 +428,12 @@ export type BrowserBackend = {
   /** Returns and clears the metadata-only settlement produced by the last protected delivery. */
   takeProtectedFieldDeliveryResult?(destination: import("./secure-input.js").BrowserFieldSecureInputDestination): BrowserProtectedFieldDeliveryResult | undefined;
   releaseProtectedField?(destination: import("./secure-input.js").BrowserFieldSecureInputDestination): Promise<void> | void;
+  /** Binds and re-verifies an exact browser value without disclosing it to a model-visible surface. */
+  verifyProtectedSource?(input: BrowserProtectedSourceInput): Promise<BrowserProtectedSourceVerification>;
+  /** Reads a previously verified browser value into an ephemeral byte buffer. */
+  readProtectedSource?(input: BrowserProtectedSourceReadInput): Promise<Uint8Array>;
+  /** Releases runtime-only source bindings after every terminal transfer outcome. */
+  releaseProtectedSource?(source: import("./secure-input.js").BrowserFieldSecureInputSource): Promise<void> | void;
   isSensitiveInputActive?(sessionId: string): boolean;
   dialog?(input?: BrowserActionInput): Promise<BrowserSnapshot>;
   closeSession?(sessionId: string): Promise<void> | void;

@@ -12,7 +12,12 @@ import type { ToolApprovalHandler, ToolDefinition, ToolExecutionContext, ToolRes
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
 import type { VisionDispatchPhase, VisionInputProvenanceContext } from "../contracts/vision.js";
-import type { SecureInputKind, SecureInputRequestHandler } from "../contracts/secure-input.js";
+import type {
+  BrowserFieldSecureInputSource,
+  SecureInputKind,
+  SecureInputRequestHandler,
+  SecureInputTransferRequestHandler,
+} from "../contracts/secure-input.js";
 import { assessCommandSafety } from "../security/command-safety.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { ToolRegistry } from "./tool-registry.js";
@@ -639,12 +644,13 @@ async function runToolWithProtectedArguments(
         toolName: declaration.destination.toolName,
         argumentPath: declaration.path
       };
-  const receipt = await context.onSecureInputRequest({
+  const request = {
     kind: descriptor.kind,
     purpose: descriptor.purpose,
     retention: "use-once",
     destination
-  }, async (value) => {
+  } as const;
+  const consume = async (value: Uint8Array) => {
     const decoded = new TextDecoder("utf-8", { fatal: true }).decode(value);
     const dispatchedInput = structuredClone(input);
     setAtPath(dispatchedInput, declaration.path, decoded);
@@ -656,12 +662,28 @@ async function runToolWithProtectedArguments(
     } catch {
       throw new Error("Protected tool argument dispatch failed.");
     }
-  }).catch(() => undefined);
+  };
+  const transfer = (context.onSecureInputRequest as Partial<SecureInputTransferRequestHandler>).transfer;
+  const receipt = await (descriptor.source === undefined
+    ? context.onSecureInputRequest(request, consume)
+    : transfer === undefined
+      ? Promise.resolve(undefined)
+      : transfer({ source: descriptor.source, request }, consume)
+  ).catch(() => undefined);
 
   if (receipt?.status !== "delivered" || dispatchedResult === undefined) {
     return protectedArgumentFailure(receipt === undefined
       ? "Protected tool argument delivery failed."
       : `Protected tool argument ${receipt.status}: ${receipt.reason ?? "delivery did not complete."}`);
+  }
+  if (descriptor.source !== undefined) {
+    return {
+      ok: dispatchedResult.ok,
+      content: dispatchedResult.ok
+        ? `Protected value transferred to ${receipt.destinationLabel}. Verify the destination state with a separate read.`
+        : "The protected destination reported that the transfer did not complete.",
+      metadata: { protectedTransfer: true },
+    };
   }
   return dispatchedResult;
 }
@@ -699,13 +721,58 @@ function parseProtectedArgumentDescriptor(
   value: Record<string, unknown>,
   toolName: string,
   argumentPath: string
-): { kind: SecureInputKind; purpose: string } | undefined {
+): { kind: SecureInputKind; purpose: string; source?: BrowserFieldSecureInputSource } | undefined {
   if (!SECURE_INPUT_KINDS.has(value.kind as SecureInputKind)) return undefined;
   if (value.retention !== undefined && value.retention !== "use-once") return undefined;
   const purpose = typeof value.purpose === "string" && value.purpose.trim().length > 0 && value.purpose.length <= 500
     ? value.purpose.trim()
     : `Provide protected argument ${argumentPath} to ${toolName}`;
-  return { kind: value.kind as SecureInputKind, purpose };
+  const source = value.source === undefined ? undefined : parseProtectedBrowserSource(value.source);
+  if (value.source !== undefined && source === undefined) return undefined;
+  return { kind: value.kind as SecureInputKind, purpose, ...(source === undefined ? {} : { source }) };
+}
+
+function parseProtectedBrowserSource(value: unknown): BrowserFieldSecureInputSource | undefined {
+  if (!isObjectRecord(value) || value.type !== "browser-field" || !isSafeMetadata(value.sessionId) ||
+      typeof value.ref !== "string" || !/^@e\d+$/u.test(value.ref) || !isObjectRecord(value.identity) ||
+      !isBrowserIdentity(value.identity) || !isSafeMetadata(value.tabRef) || typeof value.expectedOrigin !== "string") {
+    return undefined;
+  }
+  let expectedOrigin: string;
+  try {
+    const parsed = new URL(value.expectedOrigin);
+    if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || parsed.origin !== value.expectedOrigin) return undefined;
+    expectedOrigin = parsed.origin;
+  } catch {
+    return undefined;
+  }
+  if (value.frameId !== undefined && !isSafeMetadata(value.frameId)) return undefined;
+  return {
+    type: "browser-field",
+    sessionId: value.sessionId,
+    ref: value.ref,
+    identity: {
+      documentEpoch: value.identity.documentEpoch,
+      actionRevision: value.identity.actionRevision,
+      observationId: value.identity.observationId,
+    },
+    expectedOrigin,
+    tabRef: value.tabRef,
+    ...(typeof value.frameId === "string" ? { frameId: value.frameId } : {}),
+  };
+}
+
+function isBrowserIdentity(value: Record<string, unknown>): value is Record<string, unknown> & {
+  documentEpoch: number;
+  actionRevision: number;
+  observationId: number;
+} {
+  return [value.documentEpoch, value.actionRevision, value.observationId]
+    .every((entry) => typeof entry === "number" && Number.isSafeInteger(entry) && entry >= 0);
+}
+
+function isSafeMetadata(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 256 && !/[\u0000-\u001F\u007F]/u.test(value);
 }
 
 function redactExactSecret(result: ToolResult, secret: string): ToolResult {
