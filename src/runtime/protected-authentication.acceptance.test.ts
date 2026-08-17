@@ -398,6 +398,89 @@ describe("protected authentication journey acceptance", () => {
       await harness.runtime.dispose();
     }
   });
+
+  it("captures the known efficiency gaps in recalled browser authentication", async () => {
+    const harness = await createAcceptanceHarness({
+      name: "recalled fictional portal",
+      authenticated: true,
+      expectedCredentialSubmits: 1,
+      expectedOtpPrompts: 1,
+      expectedOtpSubmits: 1,
+    });
+    const recalledUrl = `${PORTAL_ORIGIN}/current/login`;
+    harness.resetProviderAttempt(recalledUrl);
+    await seedHistoricalBrowserJourneys(harness.runtime, recalledUrl);
+    expect(harness.socket.sent).toHaveLength(0);
+
+    try {
+      const response = await harness.runtime.handle({
+        text: "Open the fictional developer portal we visited in previous sessions and log us in.",
+        channel: "cli",
+        trustedWorkspace: true,
+        onSecureInputRequest: harness.secureInputHandler,
+      });
+
+      const recallRequests = harness.providerRequests.filter(isSessionRecallProviderRequest);
+      const primaryRequests = harness.providerRequests.filter((request) => !isSessionRecallProviderRequest(request));
+      const planOnlyRequests = primaryRequests.filter((request) => {
+        const names = providerToolNames(request);
+        return names.length === 1 && names[0] === "plan";
+      });
+      const firstActionRequest = primaryRequests.find((request) =>
+        providerToolNames(request).some((name) => name.startsWith("browser_"))
+      );
+      const firstActionTools = firstActionRequest === undefined ? [] : providerToolNames(firstActionRequest);
+      const initialPrimaryPrompt = primaryRequests[0] === undefined
+        ? ""
+        : renderProviderRequestText(primaryRequests[0]);
+      const violations = [
+        ...(recallRequests.length === 0 ? [] : [`visited-site recall dispatched ${recallRequests.length} provider request(s)`]),
+        ...(planOnlyRequests.length === 0 ? [] : [`Mission activation consumed ${planOnlyRequests.length} plan-only request(s)`]),
+        ...(harness.primaryProviderRequestsAtCredentialPrompt <= 2
+          ? []
+          : [`protected input required ${harness.primaryProviderRequestsAtCredentialPrompt} primary provider request(s)`]),
+        ...(initialPrimaryPrompt.includes(recalledUrl)
+          ? []
+          : ["the verified recalled destination was absent from the initial primary prompt"]),
+        ...(firstActionTools.some((name) => name === "browser_navigate")
+          ? []
+          : ["the first actionable provider inventory did not expose browser navigation"]),
+        ...(firstActionTools.some((name) => name.startsWith("terminal_") || name.startsWith("mcp_") || name.startsWith("file_"))
+          ? ["the browser-authentication turn exposed unrelated tool systems"]
+          : []),
+      ];
+
+      expect(response.text).toContain("Authentication confirmed from the authenticated account page.");
+      const journeyTools = response.toolExecutions.map((execution) => execution.tool.name);
+      const navigationIndex = journeyTools.indexOf("browser.navigate");
+      const credentialsIndex = journeyTools.indexOf("browser.fill_protected_form");
+      const otpIndex = journeyTools.indexOf("browser.type");
+      expect(navigationIndex).toBeGreaterThanOrEqual(0);
+      expect(credentialsIndex).toBeGreaterThan(navigationIndex);
+      expect(otpIndex).toBeGreaterThan(credentialsIndex);
+      expect(harness.socket.sent.some((message) => message.method === "Page.navigate")).toBe(true);
+      const persisted = {
+        messages: await harness.runtime.sessionDb.listMessages(harness.runtime.sessionId),
+        events: await harness.runtime.sessionDb.listEvents(harness.runtime.sessionId),
+        providerRequests: harness.providerRequests,
+        response,
+      };
+      const serialized = inspect(persisted, { depth: 20, maxArrayLength: null });
+      for (const secret of SECRETS) expect(serialized).not.toContain(secret);
+      // This is a temporary executable characterization of the production
+      // regression. Each corrective commit removes its corresponding entry;
+      // the final journey contract is an empty list.
+      expect(violations).toEqual([
+        "visited-site recall dispatched 3 provider request(s)",
+        "Mission activation consumed 1 plan-only request(s)",
+        "protected input required 3 primary provider request(s)",
+        "the verified recalled destination was absent from the initial primary prompt",
+        "the browser-authentication turn exposed unrelated tool systems",
+      ]);
+    } finally {
+      await harness.runtime.dispose();
+    }
+  });
 });
 
 async function createAcceptanceHarness(scenario: AcceptanceScenario) {
@@ -421,6 +504,7 @@ async function createAcceptanceHarness(scenario: AcceptanceScenario) {
   let otpSubmits = 0;
   let groupedCredentialPrompts = 0;
   let otpPrompts = 0;
+  let primaryProviderRequestsAtCredentialPrompt: number | undefined;
 
   for (const method of ["log", "warn", "error"] as const) {
     vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
@@ -586,6 +670,9 @@ async function createAcceptanceHarness(scenario: AcceptanceScenario) {
     }
   }) as GroupedSecureInputRequestHandler;
   secureInputHandler.requestGroup = async (request) => {
+    primaryProviderRequestsAtCredentialPrompt ??= providerRequests.filter(
+      (providerRequest) => !isSessionRecallProviderRequest(providerRequest),
+    ).length;
     groupedCredentialPrompts += 1;
     try {
       return await groupedBaseHandler.requestGroup(request);
@@ -610,6 +697,9 @@ async function createAcceptanceHarness(scenario: AcceptanceScenario) {
     get otpPrompts() { return otpPrompts; },
     get credentialSubmits() { return credentialSubmits; },
     get otpSubmits() { return otpSubmits; },
+    get primaryProviderRequestsAtCredentialPrompt() {
+      return primaryProviderRequestsAtCredentialPrompt ?? Number.POSITIVE_INFINITY;
+    },
   };
 }
 
@@ -629,6 +719,11 @@ function createProviderScript(input: {
   const complete = (request: ProviderRequest): ProviderResponse => {
     input.timeline.push("provider");
     input.providerRequests.push(structuredClone(request));
+    if (isSessionRecallProviderRequest(request)) {
+      return finalResponse(JSON.stringify({
+        summary: "Source session history did not establish a verified destination URL.",
+      }));
+    }
     const call = (name: string, args: Record<string, unknown>) => toolCallResponse(
       `acceptance-call-${nextCallId++}`,
       name,
@@ -707,6 +802,66 @@ function providerToolNames(request: ProviderRequest): string[] {
     const fn = (tool as { function?: { name?: unknown } }).function;
     return typeof fn?.name === "string" ? [fn.name] : [];
   });
+}
+
+function isSessionRecallProviderRequest(request: ProviderRequest): boolean {
+  return renderProviderRequestText(request).includes(
+    "Summarize historical EstaCoda session search context for manual recall.",
+  );
+}
+
+function renderProviderRequestText(request: ProviderRequest): string {
+  return request.messages.map((message) =>
+    typeof message.content === "string" ? message.content : JSON.stringify(message.content)
+  ).join("\n");
+}
+
+async function seedHistoricalBrowserJourneys(runtime: Runtime, recalledUrl: string): Promise<void> {
+  const active = await runtime.sessionDb.getSession(runtime.sessionId);
+  if (active === undefined) throw new Error("Acceptance runtime session was not created.");
+
+  const destinations = [
+    recalledUrl,
+    `${PORTAL_ORIGIN}/legacy/login`,
+    `${PORTAL_ORIGIN}/docs`,
+  ];
+  for (const [index, destination] of destinations.entries()) {
+    const sessionId = `historical-browser-journey-${index + 1}`;
+    const toolCallId = `historical-navigation-${index + 1}`;
+    await runtime.sessionDb.createSession({
+      id: sessionId,
+      profileId: active.profileId,
+      title: "Fictional developer portal",
+      metadata: active.metadata,
+    });
+    await runtime.sessionDb.appendMessage({
+      id: `${sessionId}-request`,
+      sessionId,
+      role: "user",
+      content: "Open the fictional developer portal we use for browser authentication.",
+    });
+    await runtime.sessionDb.appendEvent(sessionId, {
+      kind: "tool-called",
+      tool: "browser.navigate",
+      input: { url: destination },
+      toolCallId,
+    });
+    await runtime.sessionDb.appendEvent(sessionId, {
+      kind: "tool-result",
+      tool: "browser.navigate",
+      result: {
+        ok: true,
+        content: [
+          "Browser: local-cdp",
+          `URL: ${destination}`,
+          "",
+          "Action completed with an observable page change.",
+          `URL: ${destination}`,
+        ].join("\n"),
+      },
+      toolCallId,
+    });
+  }
 }
 
 function latestIdentity(request: ProviderRequest): {
