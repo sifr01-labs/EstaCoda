@@ -34,6 +34,7 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
   readonly failMethods = new Map<string, string>();
   readonly failNextMethods = new Map<string, { remaining: number; message: string }>();
   readonly missingElementIndexes = new Set<number>();
+  readonly protectedSourceValues = new Map<number, string>();
   #contextCounter = 0;
   #targetCounter = 0;
   closed = false;
@@ -223,6 +224,28 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
         message.params.functionDeclaration.includes("clickable:")
       ) {
         return { result: { value: this.protectedSubmitInspection } };
+      }
+      if (
+        typeof message.params?.functionDeclaration === "string" &&
+        message.params.functionDeclaration.includes("includeValue") &&
+        message.params.functionDeclaration.includes("fingerprint")
+      ) {
+        const args = message.params.arguments as Array<{ value?: unknown }> | undefined;
+        const elementIndex = args?.[0]?.value;
+        const includeValue = args?.[1]?.value === true;
+        const value = typeof elementIndex === "number" ? this.protectedSourceValues.get(elementIndex) : undefined;
+        return {
+          result: {
+            value: {
+              connected: value !== undefined,
+              current: value !== undefined,
+              visible: value !== undefined,
+              empty: value === undefined || value.length === 0,
+              fingerprint: value === undefined ? "missing" : `fingerprint:${value}`,
+              ...(includeValue && value !== undefined ? { value } : {}),
+            },
+          },
+        };
       }
       if (
         typeof message.params?.functionDeclaration === "string" &&
