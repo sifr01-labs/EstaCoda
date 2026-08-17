@@ -10,7 +10,7 @@ import { ExecutionPlanStore } from "./execution-plan-store.js";
 import { ExecutionSupervisionController } from "./execution-supervision-controller.js";
 
 describe("ExecutionSupervisionController", () => {
-  it("owns Mission activation retries and the provisional fallback", async () => {
+  it("creates the provisional Mission before provider work without an activation retry", async () => {
     const planController = new ExecutionPlanController(new ExecutionPlanStore());
     const supervision = createSupervision({
       userText: "Update the collection and then verify the resulting state.",
@@ -19,17 +19,7 @@ describe("ExecutionSupervisionController", () => {
       planController
     }).supervision;
 
-    const firstPrompt = supervision.consumePromptState();
-    expect(firstPrompt).toMatchObject({
-      executionPlanActivationNudge: true,
-      activationRestrictedRequest: true
-    });
-
-    await expect(supervision.superviseActivation({
-      toolNames: ["mcp.postman.updateCollection"],
-      activationRestrictedRequest: firstPrompt.activationRestrictedRequest,
-      canRetry: true
-    })).resolves.toEqual({ retryProvider: true });
+    await supervision.initialize();
     expect(planController.current()).toMatchObject({
       objective: "Update the collection and then verify the resulting state.",
       originTurnId: "turn-activation",
@@ -38,7 +28,21 @@ describe("ExecutionSupervisionController", () => {
         { id: "verify", status: "pending" }
       ]
     });
-    expect(supervision.consumePromptState().retryInitialProviderRequest).toBe(true);
+    expect(planController.current()?.revision).toBe(1);
+    await supervision.initialize();
+    expect(planController.current()?.revision).toBe(1);
+    expect(supervision.consumePromptState()).toEqual({
+      browserNoProgressNudge: false,
+      executionPlanContinuation: false,
+      executionPlanProgressNudge: false
+    });
+    expect(supervision.observeReasoningOnly()).toMatchObject({
+      materialProgress: false,
+      progressKinds: ["incidental-observation"],
+      noProgressIterations: 1
+    });
+    await expect(supervision.superviseActivation(["mcp.postman.updateCollection"])).resolves.toBeUndefined();
+    expect(planController.current()?.revision).toBe(1);
   });
 
   it("orchestrates causal authentication assessment and Mission effects", async () => {

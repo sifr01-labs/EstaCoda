@@ -73,7 +73,6 @@ import {
   TurnMcpReadLedger,
   type TurnToolFeedbackLedger
 } from "./turn-tool-feedback-ledger.js";
-import { isPlanToolName } from "./execution-plan-activation.js";
 import { ExecutionWorkingSetController } from "./execution-working-set.js";
 import type { BrowserSessionLease } from "../browser/session-lifecycle.js";
 import { deriveBrowserSessionKey } from "../browser/session-key.js";
@@ -315,6 +314,9 @@ export class ProviderTurnLoop {
       runRecorder: this.#runRecorder,
       onEvent: input.onEvent
     });
+    if (this.canRunProvider()) {
+      await executionSupervision.initialize();
+    }
 
     for (let iteration = 0; iteration < this.#budgets.maxProviderIterations; iteration += 1) {
       this.#syncBrowserSessionLease(false);
@@ -364,7 +366,7 @@ export class ProviderTurnLoop {
         break;
       }
       const supervisionPrompt = executionSupervision.consumePromptState();
-      const phase: "initial" | "continuation" = iteration === 0 || retryEmptyInitialResponse || retryReasoningOnlyInitialResponse || supervisionPrompt.retryInitialProviderRequest
+      const phase: "initial" | "continuation" = iteration === 0 || retryEmptyInitialResponse || retryReasoningOnlyInitialResponse
         ? "initial"
         : "continuation";
       retryEmptyInitialResponse = false;
@@ -376,8 +378,7 @@ export class ProviderTurnLoop {
             iteration,
             loopStartedAt,
             reasoningOnlyPrefill: pendingReasoningOnlyPrefill,
-            executionPlanProgressNudge: supervisionPrompt.executionPlanProgressNudge,
-            executionPlanActivationNudge: supervisionPrompt.executionPlanActivationNudge
+            executionPlanProgressNudge: supervisionPrompt.executionPlanProgressNudge
           })
         : await this.#continueProviderAfterTools({
           ...input,
@@ -559,42 +560,12 @@ export class ProviderTurnLoop {
       }
 
       if (execution.ok === true && execution.toolCalls.length > 0) {
-        const activation = await executionSupervision.superviseActivation({
-          toolNames: execution.toolCalls.map((call) => call.name ?? ""),
-          activationRestrictedRequest: supervisionPrompt.activationRestrictedRequest,
-          canRetry: iteration + consumedProviderIterations < this.#budgets.maxProviderIterations
-        });
-        if (activation.retryProvider) {
-          await this.#runRecorder.recordProviderIteration({
-            iteration,
-            phase,
-            ok: execution.ok,
-            toolCalls: execution.toolCalls.length,
-            executedTools: 0,
-            exhausted: false
-          });
-          if (consumedProviderIterations > 1) iteration += consumedProviderIterations - 1;
-          continue;
-        }
+        await executionSupervision.superviseActivation(
+          execution.toolCalls.map((call) => call.name ?? "")
+        );
         execution = await this.#persistProviderToolCallTurn(execution);
       } else if (execution.ok === true) {
-        const activation = await executionSupervision.superviseActivation({
-          toolNames: [],
-          activationRestrictedRequest: supervisionPrompt.activationRestrictedRequest,
-          canRetry: iteration + consumedProviderIterations < this.#budgets.maxProviderIterations
-        });
-        if (activation.retryProvider) {
-          await this.#runRecorder.recordProviderIteration({
-            iteration,
-            phase,
-            ok: execution.ok,
-            toolCalls: 0,
-            executedTools: 0,
-            exhausted: false
-          });
-          if (consumedProviderIterations > 1) iteration += consumedProviderIterations - 1;
-          continue;
-        }
+        await executionSupervision.superviseActivation([]);
       }
 
       const beforeExecutions = providerToolExecutions.length;
@@ -1026,7 +997,6 @@ export class ProviderTurnLoop {
     reasoningOnlyPrefill?: boolean;
     executionPlanContinuation?: boolean;
     executionPlanProgressNudge?: boolean;
-    executionPlanActivationNudge?: boolean;
   }): Promise<ProviderExecutionResult | undefined> {
     if (this.#providerExecutor === undefined || this.#model === undefined || this.#model.provider === "unconfigured") {
       return undefined;
@@ -1070,9 +1040,6 @@ export class ProviderTurnLoop {
     if (input.executionPlanProgressNudge === true) {
       prompt.messages.push({ role: "user", content: EXECUTION_SUPERVISION_PROMPTS.executionPlanProgress });
     }
-    if (input.executionPlanActivationNudge === true) {
-      prompt.messages.push({ role: "user", content: EXECUTION_SUPERVISION_PROMPTS.executionPlanActivation });
-    }
     this.#lastPromptTokens = prompt.budget.estimatedTokens;
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
     await this.#recordNativeHistoryDiagnostics(prompt, "primary");
@@ -1084,9 +1051,7 @@ export class ProviderTurnLoop {
       messages: prompt.messages,
       ...this.#providerRequestOptions(),
       tools: this.#model.supportsTools && input.providerTools.length > 0
-        ? input.executionPlanActivationNudge === true
-          ? input.providerTools.filter((tool) => isPlanToolName(tool.function.name))
-          : input.providerTools
+        ? input.providerTools
         : undefined
     });
     const providerPreferences = {

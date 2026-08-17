@@ -2112,37 +2112,34 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     }
   );
 
-  it("requires a Mission before executing the natural MTN and Postman tool batch", async () => {
+  it("starts a Mission without restricting the first MTN and Postman tool batch", async () => {
     const planStore = new ExecutionPlanStore();
     const controller = new ExecutionPlanController(planStore);
     const firstCalls = [
+      providerToolCall("call-plan", JSON.stringify({
+        operation: "merge",
+        items: [
+          { id: "execute", content: "Inspect MTN product details", status: "in_progress" },
+          { id: "update", content: "Update Postman", status: "pending" },
+          { id: "verify", content: "Verify the collection", status: "pending" }
+        ]
+      }), "plan"),
       providerToolCall("call-browser", "{}", "browser.snapshot"),
       providerToolCall("call-postman", "{}", "mcp.postman.getCollection")
     ];
     const harness = await createPostToolNudgeHarness({
       responses: [
-        providerExecution("", [providerToolCall("call-plan", JSON.stringify({
-          operation: "write",
-          objective: "Set up all six MTN products in Postman",
-          items: [
-            { id: "inspect", content: "Inspect MTN product details", status: "in_progress" },
-            { id: "update", content: "Update Postman", status: "pending" },
-            { id: "verify", content: "Verify the collection", status: "pending" }
-          ]
-        }), "plan")]),
         providerExecution("", firstCalls),
         providerExecution("Mission complete.")
       ],
       toolSteps: [
         {
-          executions: [{
-            ...toolExecutionForTool("call-plan", "plan", "plan started"),
-            riskClass: "read-only-local",
-            tool: { ...testTool, name: "plan", riskClass: "read-only-local", toolsets: ["core"] }
-          }]
-        },
-        {
           executions: [
+            {
+              ...toolExecutionForTool("call-plan", "plan", "plan refined"),
+              riskClass: "read-only-local",
+              tool: { ...testTool, name: "plan", riskClass: "read-only-local", toolsets: ["core"] }
+            },
             toolExecutionForTool("call-browser", "browser.snapshot", "six products"),
             toolExecutionForTool("call-postman", "mcp.postman.getCollection", "collection")
           ]
@@ -2153,14 +2150,13 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       maxProviderIterations: 3,
       onExecutePlans: ({ stepInput }) => {
         if (stepInput.providerExecution?.toolCalls.some((call) => call.name === "plan")) {
-          return controller.write({
-            objective: "Set up all six MTN products in Postman",
+          return controller.merge({
             items: [
-              { id: "inspect", content: "Inspect MTN product details", status: "in_progress" },
+              { id: "execute", content: "Inspect MTN product details", status: "in_progress" },
               { id: "update", content: "Update Postman", status: "pending" },
               { id: "verify", content: "Verify the collection", status: "pending" }
             ]
-          }, "visible-turn").then(() => undefined);
+          }).then(() => undefined);
         }
       }
     });
@@ -2175,12 +2171,16 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       .map(([call]) => call.providerExecution?.toolCalls.map((toolCall) => toolCall.name) ?? [])
       .filter((names) => names.length > 0);
     expect(executedBatches).toEqual([
-      ["plan"],
-      ["browser.snapshot", "mcp.postman.getCollection"]
+      ["plan", "browser.snapshot", "mcp.postman.getCollection"]
     ]);
     const firstRequest = harness.completeSpy.mock.calls[0]?.[0] as ProviderRequest;
-    expect((firstRequest.tools as OpenAICompatibleToolSchema[] | undefined)?.map((tool) => tool.function.name)).toEqual(["plan"]);
-    expect(JSON.stringify(firstRequest.messages)).toContain("clearly multi-step foreground work");
+    expect((firstRequest.tools as OpenAICompatibleToolSchema[] | undefined)?.map((tool) => tool.function.name)).toEqual([
+      "plan",
+      "browser.snapshot",
+      "mcp.postman.getCollection"
+    ]);
+    expect(JSON.stringify(firstRequest.messages)).toContain("Active execution plan");
+    expect(JSON.stringify(firstRequest.messages)).not.toContain("Before doing anything else");
   });
 
   it("stops after plan preflight and before browser work when a destination capability is missing", async () => {
@@ -2246,21 +2246,14 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(controller.current()?.status).toBe("blocked");
   });
 
-  it("creates a provisional Mission when the model ignores the activation nudge", async () => {
+  it("creates a provisional Mission before executing the model's first action", async () => {
     const controller = new ExecutionPlanController(new ExecutionPlanStore());
     const mutationCall = providerToolCall("call-update", "{}", "mcp.postman.updateCollection");
     const harness = await createPostToolNudgeHarness({
-      responses: [
-        providerExecution("", [mutationCall]),
-        providerExecution("", [mutationCall]),
-        providerExecution("Updated.")
-      ],
-      toolSteps: [
-        { executions: [toolExecutionForTool("call-update", "mcp.postman.updateCollection", "updated")] },
-        {}
-      ],
+      responses: [providerExecution("", [mutationCall])],
+      toolSteps: [{ executions: [toolExecutionForTool("call-update", "mcp.postman.updateCollection", "updated")] }],
       executionPlanController: controller,
-      maxProviderIterations: 3
+      maxProviderIterations: 1
     });
 
     await runBasicProviderTurn(harness.loop, {
@@ -2273,6 +2266,13 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       .map(([call]) => call.providerExecution?.toolCalls.map((toolCall) => toolCall.name) ?? [])
       .filter((names) => names.length > 0);
     expect(executedBatches).toEqual([["mcp.postman.updateCollection"]]);
+    expect(harness.completeSpy).toHaveBeenCalledOnce();
+    const firstRequest = harness.completeSpy.mock.calls[0]?.[0] as ProviderRequest;
+    expect((firstRequest.tools as OpenAICompatibleToolSchema[] | undefined)?.map((tool) => tool.function.name)).toEqual([
+      "plan",
+      "mcp.postman.updateCollection"
+    ]);
+    expect(JSON.stringify(firstRequest.messages)).toContain("Active execution plan");
     expect(controller.current()).toMatchObject({
       status: "active",
       originTurnId: "visible-turn",

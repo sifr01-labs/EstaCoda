@@ -343,7 +343,7 @@ describe("protected authentication journey acceptance", () => {
         onSecureInputRequest: harness.secureInputHandler,
       });
       expect(first.text).toContain("The Mission needs your input before it can continue");
-      expect(harness.providerRequests[0] === undefined ? [] : providerToolNames(harness.providerRequests[0])).toEqual(["plan"]);
+      expect(harness.providerRequests[0] === undefined ? [] : providerToolNames(harness.providerRequests[0])).toContain("browser_navigate");
       expect(first.toolExecutions.find((execution) => execution.tool.name === "browser.navigate")?.input).toMatchObject({
         url: legacyUrl,
       });
@@ -351,7 +351,8 @@ describe("protected authentication journey acceptance", () => {
         status: "active",
         items: expect.arrayContaining([
           expect.objectContaining({
-            id: "authentication.credentials",
+            id: "execute",
+            content: "Submit the required authentication credentials",
             status: "blocked",
             blocker: expect.objectContaining({ kind: "user_input_required" }),
           }),
@@ -376,8 +377,17 @@ describe("protected authentication journey acceptance", () => {
       expect(latestExecutionPlanSnapshot(await harness.runtime.sessionDb.listEvents(harness.runtime.sessionId))).toMatchObject({
         status: "completed",
         items: expect.arrayContaining([
-          expect.objectContaining({ id: "authentication.credentials", status: "completed" }),
-          expect.objectContaining({ id: "authentication.verify", status: "completed" }),
+          expect.objectContaining({
+            id: "execute",
+            content: "Submit the required authentication credentials",
+            status: "completed"
+          }),
+          expect.objectContaining({
+            id: "verify",
+            content: "Verify the authenticated state",
+            status: "completed"
+          }),
+          expect.objectContaining({ id: "authentication.challenge", status: "completed" }),
         ]),
       });
       expect(harness.groupedCredentialPrompts).toBe(2);
@@ -435,6 +445,10 @@ describe("protected authentication journey acceptance", () => {
         : renderProviderRequestText(primaryRequests[0]);
       const sessionEvents = await harness.runtime.sessionDb.listEvents(harness.runtime.sessionId);
       const intentEvent = sessionEvents.find((event) => event.kind === "intent-routed");
+      const missionStartedIndex = sessionEvents.findIndex((event) => event.kind === "execution-plan-started");
+      const navigationPlannedIndex = sessionEvents.findIndex((event) =>
+        event.kind === "tool-plan" && event.plan.tool === "browser.navigate"
+      );
       const violations = [
         ...(recallRequests.length === 0 ? [] : [`visited-site recall dispatched ${recallRequests.length} provider request(s)`]),
         ...(planOnlyRequests.length === 0 ? [] : [`Mission activation consumed ${planOnlyRequests.length} plan-only request(s)`]),
@@ -464,6 +478,10 @@ describe("protected authentication journey acceptance", () => {
       if (intentEvent?.kind === "intent-routed") {
         expect(intentEvent.route.confidence).toBeGreaterThanOrEqual(0.9);
       }
+      expect(missionStartedIndex).toBeGreaterThanOrEqual(0);
+      expect(navigationPlannedIndex).toBeGreaterThan(missionStartedIndex);
+      expect(planOnlyRequests).toHaveLength(0);
+      expect(primaryRequests[0] === undefined ? [] : providerToolNames(primaryRequests[0])).toContain("browser_navigate");
       expect(response.text).toContain("Authentication confirmed from the authenticated account page.");
       const journeyTools = response.toolExecutions.map((execution) => execution.tool.name);
       const navigationIndex = journeyTools.indexOf("browser.navigate");
@@ -484,10 +502,7 @@ describe("protected authentication journey acceptance", () => {
       // This is a temporary executable characterization of the production
       // regression. Each corrective commit removes its corresponding entry;
       // the final journey contract is an empty list.
-      expect(violations).toEqual([
-        "Mission activation consumed 1 plan-only request(s)",
-        "protected input required 3 primary provider request(s)",
-      ]);
+      expect(violations).toEqual([]);
     } finally {
       await harness.runtime.dispose();
     }

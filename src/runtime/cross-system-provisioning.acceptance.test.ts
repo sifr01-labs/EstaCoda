@@ -155,7 +155,15 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
       expect(response).toBeDefined();
       const toolNames = response!.toolExecutions.map((execution) => execution.tool.name);
       expect(toolNames[0]).toBe("plan");
-      expect(firstRequestToolNames(harness.providerRequests[0])).toEqual(["plan"]);
+      const firstRequestTools = firstRequestToolNames(harness.providerRequests[0]);
+      expect(firstRequestTools).toEqual(expect.arrayContaining([
+        "plan",
+        providerToolName(READ_TOOL),
+        providerToolName(VERIFY_TOOL),
+        providerToolName("browser.navigate"),
+      ]));
+      if (scenario.exposeMutation === false) expect(firstRequestTools).not.toContain(providerToolName(MUTATION_TOOL));
+      else expect(firstRequestTools).toContain(providerToolName(MUTATION_TOOL));
 
       const messages = await harness.runtime.sessionDb.listMessages(harness.runtime.sessionId);
       const events = await harness.runtime.sessionDb.listEvents(harness.runtime.sessionId);
@@ -178,8 +186,11 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
         expect(harness.socket.sent.some((command) => command.method === "Page.navigate")).toBe(false);
         expect(response!.text).toContain("required capability is unavailable");
       } else {
-        const started = events.find((event) => event.kind === "execution-plan-started");
-        expect(started).toMatchObject({ plan: { capabilityPreflight: { status: "ready" } } });
+        const preflightReady = events.find((event) =>
+          (event.kind === "execution-plan-started" || event.kind === "execution-plan-updated") &&
+          event.plan.capabilityPreflight?.status === "ready"
+        );
+        expect(preflightReady).toBeDefined();
         expect(toolNames.indexOf("plan")).toBeLessThan(toolNames.indexOf("browser.navigate"));
         expect(toolNames.indexOf(READ_TOOL)).toBeLessThan(toolNames.indexOf("browser.navigate"));
         expect(harness.mcp.readInputs).toHaveLength(1);
@@ -574,6 +585,10 @@ function firstRequestToolNames(request: ProviderRequest | undefined): string[] {
     const fn = (tool as { function?: { name?: unknown } }).function;
     return typeof fn?.name === "string" ? [fn.name] : [];
   });
+}
+
+function providerToolName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9_-]/gu, "_");
 }
 
 function toolCallResponse(id: string, name: string, args: Record<string, unknown>): ProviderResponse {

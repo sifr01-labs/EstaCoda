@@ -25,17 +25,13 @@ const PROVISIONAL_EXECUTION_PLAN_OBJECTIVE_MAX_CHARS = 500;
 export const EXECUTION_SUPERVISION_PROMPTS = {
   browserNoProgress: "Repeated browser observations show no semantic state change. Do not alternate snapshot, tabs, find, extract, screenshot, console, or CDP calls to inspect the same state. Take a relevant browser action; if protected input or another external condition blocks progress, record that precise blocker.",
   executionPlanContinuation: "Your active execution plan still has unfinished items. Continue executing the original request now. Do not stop to narrate the next step or ask whether to continue.",
-  executionPlanProgress: "Your active execution plan has made no material progress for several iterations. Change approach and continue executing the original request now. Make progress by transitioning the active plan item, performing a relevant target mutation, recording verification evidence, or recording a concrete blocker. Repeated reads, cosmetic browser changes, navigation churn, narration, and failed plan updates do not count as progress. Do not ask whether to continue.",
-  executionPlanActivation: "This is clearly multi-step foreground work. Before doing anything else, call plan with operation=write and create a concise Mission with exactly one in_progress item and the remaining items pending. For work spanning systems, include requirements using exact tool names exposed in this session: destination read, destination mutation, and an independent read-safe verification tool; when protected browser values must cross systems, declare the mutation tool's protectedPaths and protectedSource=browser. Call only plan in this response; do not call substantive tools yet, narrate the plan, or ask whether to proceed."
+  executionPlanProgress: "Your active execution plan has made no material progress for several iterations. Change approach and continue executing the original request now. Make progress by transitioning the active plan item, performing a relevant target mutation, recording verification evidence, or recording a concrete blocker. Repeated reads, cosmetic browser changes, navigation churn, narration, and failed plan updates do not count as progress. Do not ask whether to continue."
 } as const;
 
 export type ExecutionSupervisionPromptState = {
-  retryInitialProviderRequest: boolean;
-  activationRestrictedRequest: boolean;
   browserNoProgressNudge: boolean;
   executionPlanContinuation: boolean;
   executionPlanProgressNudge: boolean;
-  executionPlanActivationNudge: boolean;
 };
 
 export type ExecutionSupervisionAssessment = {
@@ -79,22 +75,22 @@ export class ExecutionSupervisionController {
   readonly #providerTools: readonly OpenAICompatibleToolSchema[];
   readonly #currentSessionId: () => string;
   readonly #locale: "en" | "ar";
+  readonly #noProgressNudgeIteration: number;
   readonly #maxNoProgressIterations: number;
   readonly #executionPlanReader: ExecutionPlanReader | undefined;
   readonly #executionPlanController: ExecutionPlanControllerApi | undefined;
   readonly #executionWorkingSet: ExecutionWorkingSetController | undefined;
   readonly #runRecorder: Pick<RunRecorder, "recordAuthenticationEvidenceAssessment">;
   readonly #onEvent: RuntimeEventSink | undefined;
+  readonly #existingExecutions: readonly ToolExecutionRecord[];
   readonly #browserObservationGuard: BrowserObservationGuard;
-  readonly #executionPlanProgressGuard: ExecutionPlanProgressGuard;
+  #executionPlanProgressGuard: ExecutionPlanProgressGuard;
   readonly #authenticationEvidenceTracker: AuthenticationEvidenceTracker;
   #pendingBrowserNoProgressNudge = false;
   #pendingExecutionPlanContinuation = false;
   #pendingExecutionPlanProgressNudge = false;
-  #pendingExecutionPlanActivationNudge: boolean;
-  #retryExecutionPlanActivation = false;
-  #executionPlanActivationNudged: boolean;
   #automaticExecutionPlanRequired: boolean;
+  #initialized = false;
   #executionPlanIncomplete = false;
 
   constructor(options: ExecutionSupervisionControllerOptions) {
@@ -103,12 +99,14 @@ export class ExecutionSupervisionController {
     this.#providerTools = options.providerTools;
     this.#currentSessionId = options.currentSessionId;
     this.#locale = options.locale;
+    this.#noProgressNudgeIteration = options.noProgressNudgeIteration;
     this.#maxNoProgressIterations = options.maxNoProgressIterations;
     this.#executionPlanController = options.executionPlanController;
     this.#executionPlanReader = options.executionPlanController ?? options.executionPlanReader;
     this.#executionWorkingSet = options.executionWorkingSet;
     this.#runRecorder = options.runRecorder;
     this.#onEvent = options.onEvent;
+    this.#existingExecutions = options.existingExecutions;
     this.#browserObservationGuard = new BrowserObservationGuard(options.maxRepeatedBrowserObservations);
     this.#executionPlanProgressGuard = new ExecutionPlanProgressGuard({
       plan: this.#executionPlanReader?.current(),
@@ -118,73 +116,56 @@ export class ExecutionSupervisionController {
     });
     this.#authenticationEvidenceTracker = new AuthenticationEvidenceTracker(options.existingExecutions);
     const initialActivation = this.#assessActivation([]);
-    this.#pendingExecutionPlanActivationNudge = initialActivation.required;
-    this.#executionPlanActivationNudged = initialActivation.required;
     this.#automaticExecutionPlanRequired = initialActivation.required;
-
-    this.#executionWorkingSet?.beginTurn(this.#executionPlanReader?.current(), this.#currentSessionId());
-    this.#executionWorkingSet?.observe(
-      this.#executionPlanReader?.current(),
-      options.existingExecutions,
-      this.#currentSessionId()
-    );
   }
 
   get executionPlanIncomplete(): boolean {
     return this.#executionPlanIncomplete;
   }
 
+  async initialize(): Promise<void> {
+    if (this.#initialized) return;
+    this.#initialized = true;
+    if (this.#automaticExecutionPlanRequired) {
+      await this.#writeProvisionalExecutionPlan();
+    }
+    this.#executionPlanProgressGuard = new ExecutionPlanProgressGuard({
+      plan: this.#executionPlanReader?.current(),
+      existingExecutions: this.#existingExecutions,
+      noProgressNudgeIteration: this.#noProgressNudgeIteration,
+      maxNoProgressIterations: this.#maxNoProgressIterations
+    });
+    this.#executionWorkingSet?.beginTurn(this.#executionPlanReader?.current(), this.#currentSessionId());
+    this.#executionWorkingSet?.observe(
+      this.#executionPlanReader?.current(),
+      this.#existingExecutions,
+      this.#currentSessionId()
+    );
+  }
+
   consumePromptState(): ExecutionSupervisionPromptState {
     const state = {
-      retryInitialProviderRequest: this.#retryExecutionPlanActivation,
-      activationRestrictedRequest: this.#pendingExecutionPlanActivationNudge,
       browserNoProgressNudge: this.#pendingBrowserNoProgressNudge,
       executionPlanContinuation: this.#pendingExecutionPlanContinuation,
-      executionPlanProgressNudge: this.#pendingExecutionPlanProgressNudge,
-      executionPlanActivationNudge: this.#pendingExecutionPlanActivationNudge
+      executionPlanProgressNudge: this.#pendingExecutionPlanProgressNudge
     };
-    this.#retryExecutionPlanActivation = false;
     this.#pendingBrowserNoProgressNudge = false;
     this.#pendingExecutionPlanContinuation = false;
     this.#pendingExecutionPlanProgressNudge = false;
-    this.#pendingExecutionPlanActivationNudge = false;
     return state;
   }
 
-  async superviseActivation(input: {
-    toolNames: readonly string[];
-    activationRestrictedRequest: boolean;
-    canRetry: boolean;
-  }): Promise<{ retryProvider: boolean }> {
-    const activation = this.#assessActivation(input.toolNames);
+  async superviseActivation(toolNames: readonly string[]): Promise<void> {
+    const activation = this.#assessActivation(toolNames);
     this.#automaticExecutionPlanRequired ||= activation.required;
-    const onlyPlanCalls = input.toolNames.length > 0 && input.toolNames.every(isPlanToolName);
-
-    if (input.activationRestrictedRequest && !onlyPlanCalls) {
-      await this.#writeProvisionalExecutionPlan();
-      this.#retryExecutionPlanActivation = true;
-      return { retryProvider: true };
-    }
+    const containsSubstantiveTool = toolNames.some((name) => !isPlanToolName(name));
     if (
       activation.required &&
       this.#executionPlanReader?.current() === undefined &&
-      !onlyPlanCalls &&
-      !this.#executionPlanActivationNudged &&
-      input.canRetry
-    ) {
-      this.#executionPlanActivationNudged = true;
-      this.#pendingExecutionPlanActivationNudge = true;
-      this.#retryExecutionPlanActivation = true;
-      return { retryProvider: true };
-    }
-    if (
-      activation.required &&
-      this.#executionPlanReader?.current() === undefined &&
-      !onlyPlanCalls
+      containsSubstantiveTool
     ) {
       await this.#writeProvisionalExecutionPlan();
     }
-    return { retryProvider: false };
   }
 
   observeReasoningOnly(): ExecutionPlanProgressAssessment {

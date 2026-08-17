@@ -206,6 +206,9 @@ describe("plan tool", () => {
       toolsets: ["core"],
       maxResultSizeChars: 8192
     });
+    expect(tools[0]!.description).toContain("automatically starts a provisional Mission");
+    expect(tools[0]!.description).toContain("use merge to refine");
+    expect(tools[0]!.description).toContain("use write once to replace it");
     expect(JSON.stringify(tools[0]!.inputSchema)).toContain('"requirements"');
     expect(JSON.stringify(tools[0]!.inputSchema)).not.toContain('"capabilityPreflight"');
   });
