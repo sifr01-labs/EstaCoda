@@ -192,6 +192,53 @@ describe("ExecutionSupervisionController", () => {
     );
   });
 
+  it("stops on the first missing capability with localized deterministic receipts", () => {
+    const store = new ExecutionPlanStore();
+    store.replace({
+      objective: "Provision the destination",
+      originTurnId: "turn-capability",
+      revision: 1,
+      status: "blocked",
+      items: [{
+        id: "update",
+        content: "Update destination",
+        status: "blocked",
+        blocker: { kind: "missing_capability", summary: "stored English fallback" }
+      }],
+      requirements: [{
+        id: "destination-write",
+        itemId: "update",
+        tool: "mcp.target.update",
+        capability: "mutate"
+      }],
+      capabilityPreflight: {
+        status: "blocked",
+        assessments: [{
+          requirementId: "destination-write",
+          itemId: "update",
+          tool: "mcp.target.update",
+          capability: "mutate",
+          status: "missing",
+          reasonCode: "tool_missing"
+        }]
+      }
+    });
+
+    for (const [locale, expected] of [
+      ["en", 'The Mission stopped before substantive work because a required capability is unavailable: Required tool "mcp.target.update" is not exposed to this session.'],
+      ["ar", 'توقفت خطة التنفيذ قبل بدء العمل لأن قدرة مطلوبة غير متاحة: الأداة المطلوبة "mcp.target.update" غير متاحة في هذه الجلسة.']
+    ] as const) {
+      const { supervision } = createSupervision({
+        planController: new ExecutionPlanController(store),
+        locale
+      });
+      const blocker = supervision.assessProgress([]).missingCapabilityBlocker;
+      expect(blocker).toBeDefined();
+      expect(supervision.missingCapabilityReceipt(providerExecution(), blocker!.summary).response?.content).toBe(expected);
+      expect(supervision.executionPlanIncomplete).toBe(true);
+    }
+  });
+
   it("owns finalization eligibility and deadline receipts for unfinished Missions", async () => {
     const { supervision } = createSupervision({ planController: activePlan() });
     const progress = supervision.assessProgress([]);
@@ -218,6 +265,7 @@ function createSupervision(input: {
   maxRepeatedBrowserObservations?: number;
   noProgressNudgeIteration?: number;
   maxNoProgressIterations?: number;
+  locale?: "en" | "ar";
 } = {}) {
   const recordAuthenticationEvidenceAssessment = vi.fn(async () => undefined);
   return {
@@ -228,7 +276,7 @@ function createSupervision(input: {
       providerTools: input.providerTools ?? [],
       existingExecutions: input.existingExecutions ?? [],
       currentSessionId: () => "session-test",
-      locale: "en",
+      locale: input.locale ?? "en",
       maxRepeatedBrowserObservations: input.maxRepeatedBrowserObservations ?? 3,
       noProgressNudgeIteration: input.noProgressNudgeIteration ?? 3,
       maxNoProgressIterations: input.maxNoProgressIterations ?? 6,

@@ -5,10 +5,16 @@ import {
   EXECUTION_PLAN_MAX_ITEM_CHARS,
   EXECUTION_PLAN_MAX_ITEMS,
   EXECUTION_PLAN_MAX_OBJECTIVE_CHARS,
+  EXECUTION_PLAN_MAX_PROTECTED_PATHS,
+  EXECUTION_PLAN_MAX_REQUIREMENTS,
   EXECUTION_PLAN_MAX_SERIALIZED_BYTES,
+  EXECUTION_PLAN_MAX_TOOL_NAME_CHARS,
   type ExecutionPlan,
   type ExecutionPlanBlocker,
   type ExecutionPlanBlockerKind,
+  type ExecutionPlanCapabilityAssessment,
+  type ExecutionPlanCapabilityPreflight,
+  type ExecutionPlanCapabilityRequirement,
   type ExecutionPlanCompletionKind,
   type ExecutionPlanControllerApi,
   type ExecutionPlanEventSink,
@@ -18,11 +24,17 @@ import {
   type ExecutionPlanItemStatus,
   type ExecutionPlanMergeInput,
   type ExecutionPlanStatus,
+  type ExecutionPlanWriteContext,
   type ExecutionPlanWriteInput
 } from "../contracts/execution-plan.js";
+import { isProtectedArgumentPattern } from "../security/protected-argument-path.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import { isAcknowledgementContinuation, isExplicitNewRequest } from "./conversation-continuation-state.js";
 import { ExecutionEvidenceError, ExecutionEvidenceIndex } from "./execution-evidence-index.js";
+import {
+  ExecutionCapabilityPreflight,
+  formatExecutionCapabilityBlocker
+} from "./execution-capability-preflight.js";
 import { ExecutionPlanStore } from "./execution-plan-store.js";
 
 const ITEM_STATUSES = new Set<ExecutionPlanItemStatus>([
@@ -60,16 +72,19 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
   readonly #store: ExecutionPlanStore;
   readonly #record: ((event: ExecutionPlanLifecycleEvent, sink?: ExecutionPlanEventSink) => Promise<void>) | undefined;
   readonly #evidenceIndex: ExecutionEvidenceIndex;
+  readonly #capabilityPreflight: ExecutionCapabilityPreflight | undefined;
   #awaitingResumeDecision = false;
 
   constructor(
     store: ExecutionPlanStore,
     record?: (event: ExecutionPlanLifecycleEvent, sink?: ExecutionPlanEventSink) => Promise<void>,
-    evidenceIndex = new ExecutionEvidenceIndex()
+    evidenceIndex = new ExecutionEvidenceIndex(),
+    capabilityPreflight?: ExecutionCapabilityPreflight
   ) {
     this.#store = store;
     this.#record = record;
     this.#evidenceIndex = evidenceIndex;
+    this.#capabilityPreflight = capabilityPreflight;
   }
 
   current(): ExecutionPlan | undefined {
@@ -79,17 +94,31 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
   async write(
     input: ExecutionPlanWriteInput,
     originTurnId: string,
-    sink?: ExecutionPlanEventSink
+    sink?: ExecutionPlanEventSink,
+    context?: ExecutionPlanWriteContext
   ): Promise<ExecutionPlan> {
     this.#awaitingResumeDecision = false;
     const previous = this.#store.current();
-    const plan = validatePlan({
+    const items = validateWriteItems(input.items).map((item) => this.#validateCompletion(item));
+    const requirements = validateCapabilityRequirements(input.requirements, items);
+    let plan = validatePlan({
       objective: boundedText(input.objective, "objective", EXECUTION_PLAN_MAX_OBJECTIVE_CHARS),
       originTurnId: stableId(originTurnId, "originTurnId", 256),
       revision: (previous?.revision ?? 0) + 1,
       status: "active",
-      items: validateWriteItems(input.items).map((item) => this.#validateCompletion(item))
+      items,
+      ...(requirements === undefined ? {} : { requirements })
     });
+    if (requirements !== undefined) {
+      const capabilityPreflight = this.#capabilityPreflight === undefined
+        ? unavailableCapabilityPreflight(requirements)
+        : await this.#capabilityPreflight.assess(requirements, context);
+      plan = validatePlan({
+        ...plan,
+        items: applyCapabilityBlockers(plan.items, requirements, capabilityPreflight),
+        capabilityPreflight
+      });
+    }
     await this.#recordTransition({
       kind: plan.status === "active" ? "execution-plan-started" : eventKindForPlan(plan),
       plan
@@ -378,15 +407,20 @@ function validateHydratedPlan(input: ExecutionPlan): ExecutionPlan {
   if (!PLAN_STATUSES.has(input.status)) {
     throw new ExecutionPlanValidationError("Persisted execution plan status is invalid.");
   }
+  const items = input.items.map((item) => {
+    if (!isRecord(item)) throw new ExecutionPlanValidationError("Persisted execution plan item is malformed.");
+    return validateItem(item, { persisted: true });
+  });
+  const requirements = validateCapabilityRequirements(input.requirements, items);
+  const capabilityPreflight = validateCapabilityPreflight(input.capabilityPreflight, requirements);
   const validated = validatePlan({
     objective: boundedText(input.objective, "objective", EXECUTION_PLAN_MAX_OBJECTIVE_CHARS),
     originTurnId: stableId(input.originTurnId, "originTurnId", 256),
     revision: input.revision,
     status: "active",
-    items: input.items.map((item) => {
-      if (!isRecord(item)) throw new ExecutionPlanValidationError("Persisted execution plan item is malformed.");
-      return validateItem(item, { persisted: true });
-    })
+    items,
+    ...(requirements === undefined ? {} : { requirements }),
+    ...(capabilityPreflight === undefined ? {} : { capabilityPreflight })
   });
   const derived = validated.status;
   if (input.status !== derived && input.status !== "transferred" && input.status !== "abandoned") {
@@ -437,7 +471,7 @@ function validatePlan(input: ExecutionPlan): ExecutionPlan {
 
   const plan = {
     ...input,
-    status: deriveStatus(input.items)
+    status: deriveStatus(input.items, input.capabilityPreflight)
   };
   if (Buffer.byteLength(JSON.stringify(plan), "utf8") > EXECUTION_PLAN_MAX_SERIALIZED_BYTES) {
     throw new ExecutionPlanValidationError(`Execution plan exceeds ${EXECUTION_PLAN_MAX_SERIALIZED_BYTES} serialized bytes.`);
@@ -584,7 +618,11 @@ function itemStatus(input: unknown, id: string): ExecutionPlanItemStatus {
   return input as ExecutionPlanItemStatus;
 }
 
-function deriveStatus(items: ExecutionPlanItem[]): ExecutionPlanStatus {
+function deriveStatus(
+  items: ExecutionPlanItem[],
+  capabilityPreflight?: ExecutionPlanCapabilityPreflight
+): ExecutionPlanStatus {
+  if (capabilityPreflight?.status === "blocked") return "blocked";
   if (items.every((item) => item.status === "cancelled")) {
     return "abandoned";
   }
@@ -598,6 +636,177 @@ function deriveStatus(items: ExecutionPlanItem[]): ExecutionPlanStatus {
     return "blocked";
   }
   return "active";
+}
+
+function validateCapabilityRequirements(
+  input: unknown,
+  items: readonly ExecutionPlanItem[]
+): ExecutionPlanCapabilityRequirement[] | undefined {
+  if (input === undefined) return undefined;
+  if (!Array.isArray(input) || input.length === 0 || input.length > EXECUTION_PLAN_MAX_REQUIREMENTS) {
+    throw new ExecutionPlanValidationError(
+      `requirements must contain 1-${EXECUTION_PLAN_MAX_REQUIREMENTS} capability declarations.`
+    );
+  }
+  const itemById = new Map(items.map((item) => [item.id, item]));
+  const ids = new Set<string>();
+  const requirements = input.map((entry) => {
+    if (!isRecord(entry)) throw new ExecutionPlanValidationError("Each capability requirement must be an object.");
+    const id = stableId(entry.id, "requirement id", EXECUTION_PLAN_MAX_ID_CHARS);
+    if (ids.has(id)) throw new ExecutionPlanValidationError(`Duplicate requirement id: ${id}`);
+    ids.add(id);
+    const itemId = stableId(entry.itemId, `item id for requirement ${id}`, EXECUTION_PLAN_MAX_ID_CHARS);
+    const item = itemById.get(itemId);
+    if (item === undefined) throw new ExecutionPlanValidationError(`Requirement ${id} references unknown item ${itemId}.`);
+    if (item.status === "completed" || item.status === "cancelled") {
+      throw new ExecutionPlanValidationError(`Requirement ${id} must reference unfinished item ${itemId}.`);
+    }
+    const tool = stableId(entry.tool, `tool for requirement ${id}`, EXECUTION_PLAN_MAX_TOOL_NAME_CHARS);
+    if (entry.capability !== "read" && entry.capability !== "mutate" && entry.capability !== "verify") {
+      throw new ExecutionPlanValidationError(`Requirement ${id} has an invalid capability.`);
+    }
+    const capability: ExecutionPlanCapabilityRequirement["capability"] = entry.capability;
+    const protectedPaths = validateProtectedPaths(entry.protectedPaths, id);
+    if (protectedPaths !== undefined && capability !== "mutate") {
+      throw new ExecutionPlanValidationError(`Only mutation requirement ${id} may declare protected paths.`);
+    }
+    if (entry.protectedSource !== undefined && entry.protectedSource !== "browser") {
+      throw new ExecutionPlanValidationError(`Requirement ${id} has an invalid protected source.`);
+    }
+    if (entry.protectedSource !== undefined && protectedPaths === undefined) {
+      throw new ExecutionPlanValidationError(`Requirement ${id} needs protected paths when a protected source is declared.`);
+    }
+    return {
+      id,
+      itemId,
+      tool,
+      capability,
+      ...(protectedPaths === undefined ? {} : { protectedPaths }),
+      ...(entry.protectedSource === undefined ? {} : { protectedSource: "browser" as const })
+    };
+  });
+  for (const capability of ["read", "mutate", "verify"] as const) {
+    if (!requirements.some((requirement) => requirement.capability === capability)) {
+      throw new ExecutionPlanValidationError(
+        `Cross-system requirements must declare a destination ${capability} capability.`
+      );
+    }
+  }
+  return requirements;
+}
+
+function validateProtectedPaths(input: unknown, requirementId: string): string[] | undefined {
+  if (input === undefined) return undefined;
+  if (!Array.isArray(input) || input.length === 0 || input.length > EXECUTION_PLAN_MAX_PROTECTED_PATHS) {
+    throw new ExecutionPlanValidationError(
+      `Requirement ${requirementId} supports 1-${EXECUTION_PLAN_MAX_PROTECTED_PATHS} protected paths.`
+    );
+  }
+  const values = input.map((value) => {
+    if (typeof value !== "string" || !isProtectedArgumentPattern(value)) {
+      throw new ExecutionPlanValidationError(`Requirement ${requirementId} has an invalid protected path.`);
+    }
+    return value;
+  });
+  if (new Set(values).size !== values.length) {
+    throw new ExecutionPlanValidationError(`Requirement ${requirementId} contains duplicate protected paths.`);
+  }
+  return values;
+}
+
+function validateCapabilityPreflight(
+  input: unknown,
+  requirements: readonly ExecutionPlanCapabilityRequirement[] | undefined
+): ExecutionPlanCapabilityPreflight | undefined {
+  if (input === undefined) {
+    if (requirements !== undefined) {
+      throw new ExecutionPlanValidationError("Persisted capability requirements are missing their runtime preflight.");
+    }
+    return undefined;
+  }
+  if (!isRecord(input) || requirements === undefined || !Array.isArray(input.assessments)) {
+    throw new ExecutionPlanValidationError("Persisted capability preflight is malformed.");
+  }
+  if (input.status !== "ready" && input.status !== "blocked") {
+    throw new ExecutionPlanValidationError("Persisted capability preflight status is invalid.");
+  }
+  if (input.assessments.length !== requirements.length) {
+    throw new ExecutionPlanValidationError("Persisted capability preflight does not match its requirements.");
+  }
+  const assessments = input.assessments.map((entry, index) => {
+    const requirement = requirements[index]!;
+    if (!isRecord(entry) || entry.requirementId !== requirement.id || entry.itemId !== requirement.itemId ||
+      entry.tool !== requirement.tool || entry.capability !== requirement.capability ||
+      (entry.status !== "ready" && entry.status !== "missing" && entry.status !== "unavailable" && entry.status !== "incompatible")) {
+      throw new ExecutionPlanValidationError("Persisted capability assessment is malformed.");
+    }
+    const reasonCode = entry.reasonCode;
+    if (entry.status === "ready") {
+      if (reasonCode !== undefined) throw new ExecutionPlanValidationError("Ready capability assessment has a failure reason.");
+    } else if (reasonCode !== "tool_missing" && reasonCode !== "tool_unavailable" &&
+      reasonCode !== "protected_path_missing" && reasonCode !== "risk_mismatch") {
+      throw new ExecutionPlanValidationError("Failed capability assessment has an invalid reason.");
+    }
+    return {
+      requirementId: requirement.id,
+      itemId: requirement.itemId,
+      tool: requirement.tool,
+      capability: requirement.capability,
+      status: entry.status,
+      ...(reasonCode === undefined ? {} : { reasonCode })
+    } as ExecutionPlanCapabilityAssessment;
+  });
+  const derived = assessments.every((assessment) => assessment.status === "ready") ? "ready" : "blocked";
+  if (input.status !== derived) throw new ExecutionPlanValidationError("Persisted capability preflight status is inconsistent.");
+  return { status: derived, assessments };
+}
+
+function unavailableCapabilityPreflight(
+  requirements: readonly ExecutionPlanCapabilityRequirement[]
+): ExecutionPlanCapabilityPreflight {
+  return {
+    status: "blocked",
+    assessments: requirements.map((requirement) => ({
+      requirementId: requirement.id,
+      itemId: requirement.itemId,
+      tool: requirement.tool,
+      capability: requirement.capability,
+      status: "unavailable",
+      reasonCode: "tool_unavailable"
+    }))
+  };
+}
+
+function applyCapabilityBlockers(
+  items: readonly ExecutionPlanItem[],
+  requirements: readonly ExecutionPlanCapabilityRequirement[],
+  preflight: ExecutionPlanCapabilityPreflight
+): ExecutionPlanItem[] {
+  const requirementById = new Map(requirements.map((requirement) => [requirement.id, requirement]));
+  const firstFailureByItem = new Map<string, ExecutionPlanCapabilityAssessment>();
+  for (const assessment of preflight.assessments) {
+    if (assessment.status !== "ready" && !firstFailureByItem.has(assessment.itemId)) {
+      firstFailureByItem.set(assessment.itemId, assessment);
+    }
+  }
+  return items.map((item) => {
+    const assessment = firstFailureByItem.get(item.id);
+    if (assessment === undefined) return { ...item };
+    return {
+      ...item,
+      status: "blocked",
+      evidenceCallIds: undefined,
+      evidence: undefined,
+      completionKind: undefined,
+      blocker: {
+        kind: "missing_capability",
+        summary: formatExecutionCapabilityBlocker({
+          assessment,
+          requirement: requirementById.get(assessment.requirementId)
+        })
+      }
+    };
+  });
 }
 
 function boundedText(input: unknown, field: string, maxChars: number): string {

@@ -30,6 +30,7 @@ import { ToolPlanRunner } from "./tool-plan-runner.js";
 import { ProviderTurnLoop, type ProviderTurnLoopOptions } from "./provider-turn-loop.js";
 import { ExecutionPlanStore } from "./execution-plan-store.js";
 import { ExecutionPlanController } from "./execution-plan-controller.js";
+import { ExecutionCapabilityPreflight } from "./execution-capability-preflight.js";
 import { ExecutionWorkingSetController } from "./execution-working-set.js";
 import { attachEphemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
@@ -2180,6 +2181,69 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     const firstRequest = harness.completeSpy.mock.calls[0]?.[0] as ProviderRequest;
     expect((firstRequest.tools as OpenAICompatibleToolSchema[] | undefined)?.map((tool) => tool.function.name)).toEqual(["plan"]);
     expect(JSON.stringify(firstRequest.messages)).toContain("clearly multi-step foreground work");
+  });
+
+  it("stops after plan preflight and before browser work when a destination capability is missing", async () => {
+    const registry = new ToolRegistry();
+    for (const name of ["mcp.target.read", "mcp.target.verify"]) {
+      registry.register({
+        ...testTool,
+        name,
+        riskClass: "read-only-network",
+        isAvailable: () => true,
+        run: async () => ({ ok: true, content: "unused" })
+      });
+    }
+    const controller = new ExecutionPlanController(
+      new ExecutionPlanStore(),
+      undefined,
+      undefined,
+      new ExecutionCapabilityPreflight({ registry })
+    );
+    const proposal = {
+      objective: "Provision a destination from a browser source",
+      items: [
+        { id: "inspect-source", content: "Inspect source", status: "in_progress" as const },
+        { id: "update-target", content: "Update destination", status: "pending" as const },
+        { id: "verify-target", content: "Verify destination", status: "pending" as const }
+      ],
+      requirements: [
+        { id: "destination-read", itemId: "inspect-source", tool: "mcp.target.read", capability: "read" as const },
+        { id: "destination-write", itemId: "update-target", tool: "mcp.target.update", capability: "mutate" as const },
+        { id: "destination-verify", itemId: "verify-target", tool: "mcp.target.verify", capability: "verify" as const }
+      ]
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-plan", JSON.stringify({ operation: "write", ...proposal }), "plan")]),
+        providerExecution("", [providerToolCall("call-browser", "{}", "browser.navigate")])
+      ],
+      toolSteps: [{
+        executions: [{
+          ...toolExecutionForTool("call-plan", "plan", "plan blocked"),
+          riskClass: "read-only-local",
+          tool: { ...testTool, name: "plan", riskClass: "read-only-local", toolsets: ["core"] }
+        }]
+      }],
+      executionPlanController: controller,
+      maxProviderIterations: 3,
+      onExecutePlans: async ({ stepInput }) => {
+        if (stepInput.providerExecution?.toolCalls.some((call) => call.name === "plan")) {
+          await controller.write(proposal, "visible-turn");
+        }
+      }
+    });
+
+    const result = await runBasicProviderTurn(harness.loop, {
+      visibleTurnId: "visible-turn",
+      userText: "Inspect the source, provision the destination, and verify it.",
+      providerTools: [planProviderSchema(), toolProviderSchema("browser.navigate")]
+    });
+
+    expect(harness.completeSpy).toHaveBeenCalledOnce();
+    expect(harness.executePlans).toHaveBeenCalledOnce();
+    expect(result.providerExecution?.response?.content).toContain("stopped before substantive work");
+    expect(controller.current()?.status).toBe("blocked");
   });
 
   it("creates a provisional Mission when the model ignores the activation nudge", async () => {

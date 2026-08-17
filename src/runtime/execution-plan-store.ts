@@ -24,6 +24,18 @@ export class ExecutionPlanStore implements ExecutionPlanReader {
 export function cloneExecutionPlan(plan: ExecutionPlan): ExecutionPlan {
   return {
     ...plan,
+    ...(plan.requirements === undefined ? {} : {
+      requirements: plan.requirements.map((requirement) => ({
+        ...requirement,
+        ...(requirement.protectedPaths === undefined ? {} : { protectedPaths: [...requirement.protectedPaths] })
+      }))
+    }),
+    ...(plan.capabilityPreflight === undefined ? {} : {
+      capabilityPreflight: {
+        status: plan.capabilityPreflight.status,
+        assessments: plan.capabilityPreflight.assessments.map((assessment) => ({ ...assessment }))
+      }
+    }),
     items: plan.items.map((item) => ({
       ...item,
       ...(item.evidenceCallIds === undefined ? {} : { evidenceCallIds: [...item.evidenceCallIds] }),

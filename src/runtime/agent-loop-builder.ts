@@ -65,6 +65,7 @@ import { SkillPlaybookRunner } from "./skill-playbook-runner.js";
 import { ExecutionPlanController } from "./execution-plan-controller.js";
 import { ExecutionPlanStore } from "./execution-plan-store.js";
 import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
+import { ExecutionCapabilityPreflight } from "./execution-capability-preflight.js";
 import { ExecutionWorkingSetController } from "./execution-working-set.js";
 import { LlmSkillRouteShadowReranker } from "./skill-route-reranker.js";
 import { createSessionRuntimeContext, type SessionRuntimeContext } from "./session-runtime-context.js";
@@ -307,6 +308,9 @@ export class AgentLoopBuilder {
       profileId: substrate.profileId,
       skillEvolutionStore: substrate.skillEvolutionStore
     });
+    // This same registry is subsequently filtered in-place for the session.
+    // Capability preflight therefore cannot observe a broader/global inventory.
+    const toolRegistry = new ToolRegistry();
     const ownsExecutionPlan = input.parentSessionId === undefined && input.taskExecution === undefined;
     const executionEvidenceIndex = ownsExecutionPlan ? new ExecutionEvidenceIndex() : undefined;
     const persistedSessionEvents = ownsExecutionPlan
@@ -320,7 +324,11 @@ export class AgentLoopBuilder {
             event,
             sink === undefined ? undefined : (runtimeEvent) => sink(runtimeEvent as typeof event)
           ),
-          executionEvidenceIndex
+          executionEvidenceIndex,
+          new ExecutionCapabilityPreflight({
+            registry: toolRegistry,
+            browserSourceAvailable: () => substrate.browserBackend.isAvailable()
+          })
         )
       : undefined;
     const executionWorkingSet = ownsExecutionPlan
@@ -344,7 +352,6 @@ export class AgentLoopBuilder {
       sessionId: input.sessionId,
       profileId: substrate.profileId
     });
-    const toolRegistry = new ToolRegistry();
     const runtimeToolContext = buildRuntimeToolContext({
       workspaceRoot: substrate.workspaceRoot,
       homeDir: substrate.homeDir,

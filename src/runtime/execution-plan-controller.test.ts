@@ -3,6 +3,8 @@ import { EXECUTION_PLAN_MAX_ITEMS } from "../contracts/execution-plan.js";
 import { ExecutionPlanController, ExecutionPlanValidationError } from "./execution-plan-controller.js";
 import { ExecutionPlanStore } from "./execution-plan-store.js";
 import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
+import { ExecutionCapabilityPreflight } from "./execution-capability-preflight.js";
+import { ToolRegistry } from "../tools/tool-registry.js";
 
 function controller() {
   return new ExecutionPlanController(new ExecutionPlanStore(), undefined, evidenceIndex());
@@ -46,6 +48,175 @@ function evidenceIndex() {
 }
 
 describe("ExecutionPlanController", () => {
+  it("preflights requirements, stores only runtime assessments, and keeps a ready Mission active", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "mcp.target.read",
+      description: "read target",
+      inputSchema: {},
+      riskClass: "read-only-network",
+      toolsets: ["mcp"],
+      progressLabel: "reading",
+      maxResultSizeChars: 100,
+      isAvailable: () => true,
+      run: async () => ({ ok: true, content: "unused" })
+    });
+    registry.register({
+      name: "mcp.target.update",
+      description: "update target",
+      inputSchema: {},
+      riskClass: "external-side-effect",
+      toolsets: ["mcp"],
+      progressLabel: "updating",
+      maxResultSizeChars: 100,
+      isAvailable: () => true,
+      run: async () => ({ ok: true, content: "unused" })
+    });
+    const target = new ExecutionPlanController(
+      new ExecutionPlanStore(),
+      undefined,
+      evidenceIndex(),
+      new ExecutionCapabilityPreflight({ registry })
+    );
+
+    const plan = await target.write({
+      objective: "Inspect the destination",
+      items: [
+        { id: "inspect", content: "Inspect target state", status: "in_progress" },
+        { id: "update", content: "Update target state", status: "pending" },
+        { id: "verify", content: "Verify target state", status: "pending" }
+      ],
+      requirements: [
+        { id: "destination-read", itemId: "inspect", tool: "mcp.target.read", capability: "read" },
+        { id: "destination-write", itemId: "update", tool: "mcp.target.update", capability: "mutate" },
+        { id: "destination-verify", itemId: "verify", tool: "mcp.target.read", capability: "verify" }
+      ],
+      ...({ capabilityPreflight: { status: "ready", assessments: [] } } as object)
+    }, "turn-preflight");
+
+    expect(plan).toMatchObject({
+      status: "active",
+      requirements: [
+        { id: "destination-read", tool: "mcp.target.read" },
+        { id: "destination-write", tool: "mcp.target.update" },
+        { id: "destination-verify", tool: "mcp.target.read" }
+      ],
+      capabilityPreflight: {
+        status: "ready",
+        assessments: [
+          { requirementId: "destination-read", status: "ready" },
+          { requirementId: "destination-write", status: "ready" },
+          { requirementId: "destination-verify", status: "ready" }
+        ]
+      }
+    });
+  });
+
+  it("blocks the associated item before substantive work when a mandatory capability is missing", async () => {
+    const registry = new ToolRegistry();
+    for (const [name, capability] of [
+      ["mcp.target.read", "read"],
+      ["mcp.target.verify", "read"]
+    ] as const) {
+      registry.register({
+        name,
+        description: capability,
+        inputSchema: {},
+        riskClass: "read-only-network",
+        toolsets: ["mcp"],
+        progressLabel: capability,
+        maxResultSizeChars: 100,
+        isAvailable: () => true,
+        run: async () => ({ ok: true, content: "unused" })
+      });
+    }
+    const target = new ExecutionPlanController(
+      new ExecutionPlanStore(),
+      undefined,
+      evidenceIndex(),
+      new ExecutionCapabilityPreflight({ registry })
+    );
+    const events: string[] = [];
+
+    const plan = await target.write({
+      objective: "Move configuration between systems",
+      items: [
+        { id: "inspect-source", content: "Inspect source state", status: "in_progress" },
+        { id: "update-target", content: "Update target state", status: "pending" }
+      ],
+      requirements: [
+        { id: "destination-read", itemId: "inspect-source", tool: "mcp.target.read", capability: "read" },
+        { id: "destination-write", itemId: "update-target", tool: "mcp.target.update", capability: "mutate" },
+        { id: "destination-verify", itemId: "update-target", tool: "mcp.target.verify", capability: "verify" }
+      ]
+    }, "turn-blocked", async (event) => { events.push(event.kind); });
+
+    expect(plan.status).toBe("blocked");
+    expect(plan.items).toEqual([
+      expect.objectContaining({ id: "inspect-source", status: "in_progress" }),
+      expect.objectContaining({
+        id: "update-target",
+        status: "blocked",
+        blocker: {
+          kind: "missing_capability",
+          summary: 'Required tool "mcp.target.update" is not exposed to this session.'
+        }
+      })
+    ]);
+    expect(events).toEqual(["execution-plan-blocked"]);
+  });
+
+  it("keeps capability requirements bounded and persists no undeclared secret fields", async () => {
+    const target = new ExecutionPlanController(
+      new ExecutionPlanStore(),
+      undefined,
+      evidenceIndex(),
+      new ExecutionCapabilityPreflight({ registry: new ToolRegistry() })
+    );
+    const plan = await target.write({
+      objective: "Check destination access",
+      items: [{ id: "inspect", content: "Inspect destination", status: "in_progress" }],
+      requirements: [
+        {
+          id: "read",
+          itemId: "inspect",
+          tool: "mcp.target.read",
+          capability: "read",
+          ...({ credential: "must-not-persist" } as object)
+        },
+        { id: "mutate", itemId: "inspect", tool: "mcp.target.update", capability: "mutate" },
+        { id: "verify", itemId: "inspect", tool: "mcp.target.verify", capability: "verify" }
+      ]
+    }, "turn-bounded");
+    expect(JSON.stringify(plan)).not.toContain("must-not-persist");
+
+    await expect(target.write({
+      objective: "Too many requirements",
+      items: [{ id: "inspect", content: "Inspect destination", status: "in_progress" }],
+      requirements: Array.from({ length: 13 }, (_, index) => ({
+        id: `read-${index}`,
+        itemId: "inspect",
+        tool: "mcp.target.read",
+        capability: "read" as const
+      }))
+    }, "turn-overflow")).rejects.toThrow("requirements must contain 1-12");
+  });
+
+  it("rejects incomplete cross-system requirement sets", async () => {
+    const target = controller();
+    await expect(target.write({
+      objective: "Update a destination",
+      items: [
+        { id: "read", content: "Read destination", status: "in_progress" },
+        { id: "update", content: "Update destination", status: "pending" }
+      ],
+      requirements: [
+        { id: "read", itemId: "read", tool: "mcp.target.read", capability: "read" },
+        { id: "update", itemId: "update", tool: "mcp.target.update", capability: "mutate" }
+      ]
+    }, "turn-incomplete")).rejects.toThrow("destination verify capability");
+  });
+
   it("records started, updated, completed, transferred, and abandoned lifecycle snapshots", async () => {
     const events: string[] = [];
     const target = new ExecutionPlanController(

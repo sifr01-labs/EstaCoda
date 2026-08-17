@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ExecutionPlanController } from "../runtime/execution-plan-controller.js";
 import { ExecutionPlanStore } from "../runtime/execution-plan-store.js";
 import { createPlanTools, planToolProvider } from "./plan-tools.js";
 import { ExecutionEvidenceIndex } from "../runtime/execution-evidence-index.js";
+import { ExecutionCapabilityPreflight } from "../runtime/execution-capability-preflight.js";
+import { ToolRegistry } from "./tool-registry.js";
 
 describe("plan tool", () => {
   it("is absent without a foreground controller", () => {
@@ -43,6 +45,85 @@ describe("plan tool", () => {
     expect(JSON.parse(merge.content)).toMatchObject({ revision: 2, status: "completed" });
     expect(read.content).toBe(merge.content);
     expect(emitted).toEqual(["execution-plan-started", "execution-plan-completed"]);
+  });
+
+  it("preflights protected Mission requirements using runtime-owned transfer availability", async () => {
+    const registry = new ToolRegistry();
+    const run = vi.fn(async () => ({ ok: true, content: "must not execute" }));
+    registry.register({
+      name: "mcp.target.update",
+      description: "update target",
+      inputSchema: {},
+      riskClass: "external-side-effect",
+      toolsets: ["mcp"],
+      progressLabel: "updating",
+      maxResultSizeChars: 100,
+      protectedArguments: [{
+        path: "/values/*/value",
+        handling: { persistence: "destination-managed", sharing: "workspace" }
+      }],
+      isAvailable: () => true,
+      run
+    });
+    registry.register({
+      name: "mcp.target.read",
+      description: "read target",
+      inputSchema: {},
+      riskClass: "read-only-network",
+      toolsets: ["mcp"],
+      progressLabel: "reading",
+      maxResultSizeChars: 100,
+      isAvailable: () => true,
+      run: async () => ({ ok: true, content: "unused" })
+    });
+    const controller = new ExecutionPlanController(
+      new ExecutionPlanStore(),
+      undefined,
+      undefined,
+      new ExecutionCapabilityPreflight({ registry, browserSourceAvailable: () => true })
+    );
+    const tool = createPlanTools({ controller })[0]!;
+    const secureHandler = Object.assign(async () => undefined, {
+      transferGroup: async () => undefined
+    });
+
+    const result = await tool.run({
+      operation: "write",
+      objective: "Update destination",
+      items: [
+        { id: "read", content: "Read destination", status: "in_progress" },
+        { id: "update", content: "Update destination", status: "pending" },
+        { id: "verify", content: "Verify destination", status: "pending" }
+      ],
+      requirements: [
+        { id: "destination-read", itemId: "read", tool: "mcp.target.read", capability: "read" },
+        {
+          id: "destination-write",
+          itemId: "update",
+          tool: "mcp.target.update",
+          capability: "mutate",
+          protectedPaths: ["/values/*/value"],
+          protectedSource: "browser"
+        },
+        { id: "destination-verify", itemId: "verify", tool: "mcp.target.read", capability: "verify" }
+      ]
+    }, {
+      visibleTurnId: "turn-protected",
+      onSecureInputRequest: secureHandler as never
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.metadata?.plan).toMatchObject({
+      capabilityPreflight: {
+        status: "ready",
+        assessments: [
+          { requirementId: "destination-read", status: "ready" },
+          { requirementId: "destination-write", status: "ready" },
+          { requirementId: "destination-verify", status: "ready" }
+        ]
+      }
+    });
+    expect(run).not.toHaveBeenCalled();
   });
 
   it("returns structured errors instead of throwing", async () => {
@@ -125,5 +206,7 @@ describe("plan tool", () => {
       toolsets: ["core"],
       maxResultSizeChars: 8192
     });
+    expect(JSON.stringify(tools[0]!.inputSchema)).toContain('"requirements"');
+    expect(JSON.stringify(tools[0]!.inputSchema)).not.toContain('"capabilityPreflight"');
   });
 });

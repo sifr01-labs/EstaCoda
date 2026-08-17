@@ -654,10 +654,24 @@ export class ProviderTurnLoop {
       const hasRecoverableToolFeedback = currentPlans.some((plan) => isRecoverableToolPlanStatus(plan.status));
       const repeatedFailureBudgetExceeded = this.#recordRepeatedToolFailures(loopToolExecutions, repeatedFailures);
       const supervisionAssessment = executionSupervision.assessProgress(loopToolExecutions);
-      const { browserObservation, executionPlanProgress, userInputBlocker } = supervisionAssessment;
+      const { browserObservation, executionPlanProgress, userInputBlocker, missingCapabilityBlocker } = supervisionAssessment;
       this.#syncBrowserSessionLease(false);
       if (userInputBlocker !== undefined) {
         execution = executionSupervision.userInputRequiredReceipt(execution, userInputBlocker.summary);
+        await this.#runRecorder.recordProviderIteration({
+          iteration,
+          phase,
+          ok: execution.ok,
+          toolCalls: execution.toolCalls.length,
+          executedTools: providerToolExecutions.length - beforeExecutions,
+          exhausted: false
+        });
+        effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+        previousProviderExecution = execution;
+        break;
+      }
+      if (missingCapabilityBlocker !== undefined) {
+        execution = executionSupervision.missingCapabilityReceipt(execution, missingCapabilityBlocker.summary);
         await this.#runRecorder.recordProviderIteration({
           iteration,
           phase,

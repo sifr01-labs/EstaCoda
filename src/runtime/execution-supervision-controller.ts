@@ -16,6 +16,7 @@ import {
 import { assessExecutionPlanActivation, isPlanToolName } from "./execution-plan-activation.js";
 import { applyAuthenticationExecutionEffects } from "./authentication-execution-effects.js";
 import { AuthenticationEvidenceTracker } from "./authentication-evidence-tracker.js";
+import { formatExecutionCapabilityBlocker } from "./execution-capability-preflight.js";
 import type { ExecutionWorkingSetController } from "./execution-working-set.js";
 import type { RunRecorder } from "./run-recorder.js";
 
@@ -25,7 +26,7 @@ export const EXECUTION_SUPERVISION_PROMPTS = {
   browserNoProgress: "Repeated browser observations show no semantic state change. Do not alternate snapshot, tabs, find, extract, screenshot, console, or CDP calls to inspect the same state. Take a relevant browser action; if protected input or another external condition blocks progress, record that precise blocker.",
   executionPlanContinuation: "Your active execution plan still has unfinished items. Continue executing the original request now. Do not stop to narrate the next step or ask whether to continue.",
   executionPlanProgress: "Your active execution plan has made no material progress for several iterations. Change approach and continue executing the original request now. Make progress by transitioning the active plan item, performing a relevant target mutation, recording verification evidence, or recording a concrete blocker. Repeated reads, cosmetic browser changes, navigation churn, narration, and failed plan updates do not count as progress. Do not ask whether to continue.",
-  executionPlanActivation: "This is clearly multi-step foreground work. Before doing anything else, call plan with operation=write and create a concise Mission with exactly one in_progress item and the remaining items pending. Call only plan in this response; do not call substantive tools yet, narrate the plan, or ask whether to proceed."
+  executionPlanActivation: "This is clearly multi-step foreground work. Before doing anything else, call plan with operation=write and create a concise Mission with exactly one in_progress item and the remaining items pending. For work spanning systems, include requirements using exact tool names exposed in this session: destination read, destination mutation, and an independent read-safe verification tool; when protected browser values must cross systems, declare the mutation tool's protectedPaths and protectedSource=browser. Call only plan in this response; do not call substantive tools yet, narrate the plan, or ask whether to proceed."
 } as const;
 
 export type ExecutionSupervisionPromptState = {
@@ -41,6 +42,7 @@ export type ExecutionSupervisionAssessment = {
   browserObservation: BrowserObservationAssessment;
   executionPlanProgress: ExecutionPlanProgressAssessment;
   userInputBlocker?: { summary: string };
+  missingCapabilityBlocker?: { summary: string };
 };
 
 export type ExecutionSupervisionFinalization = {
@@ -240,10 +242,15 @@ export class ExecutionSupervisionController {
     if (executionPlanProgress.shouldNudge) this.#pendingExecutionPlanProgressNudge = true;
 
     const userInputBlocker = executionPlanUserInputBlocker(this.#executionPlanReader?.current());
+    const missingCapabilityBlocker = executionPlanMissingCapabilityBlocker(
+      this.#executionPlanReader?.current(),
+      this.#locale
+    );
     return {
       browserObservation,
       executionPlanProgress,
-      ...(userInputBlocker === undefined ? {} : { userInputBlocker })
+      ...(userInputBlocker === undefined ? {} : { userInputBlocker }),
+      ...(missingCapabilityBlocker === undefined ? {} : { missingCapabilityBlocker })
     };
   }
 
@@ -251,6 +258,13 @@ export class ExecutionSupervisionController {
     return receiptExecution(execution, this.#locale === "ar"
       ? `تحتاج خطة التنفيذ إلى إدخالك قبل أن تتابع: ${summary}`
       : `The Mission needs your input before it can continue: ${summary}`);
+  }
+
+  missingCapabilityReceipt(execution: ProviderExecutionResult, summary: string): ProviderExecutionResult {
+    this.#executionPlanIncomplete = true;
+    return receiptExecution(execution, this.#locale === "ar"
+      ? `توقفت خطة التنفيذ قبل بدء العمل لأن قدرة مطلوبة غير متاحة: ${summary}`
+      : `The Mission stopped before substantive work because a required capability is unavailable: ${summary}`);
   }
 
   browserNoProgressStopReceipt(execution: ProviderExecutionResult): ProviderExecutionResult {
@@ -380,6 +394,21 @@ function executionPlanUserInputBlocker(plan: ExecutionPlan | undefined): { summa
   return plan?.items.find((item) =>
     item.status === "blocked" && item.blocker?.kind === "user_input_required"
   )?.blocker;
+}
+
+function executionPlanMissingCapabilityBlocker(
+  plan: ExecutionPlan | undefined,
+  locale: "en" | "ar"
+): { summary: string } | undefined {
+  const assessment = plan?.capabilityPreflight?.assessments.find((entry) => entry.status !== "ready");
+  if (assessment === undefined) return undefined;
+  return {
+    summary: formatExecutionCapabilityBlocker({
+      assessment,
+      requirement: plan?.requirements?.find((entry) => entry.id === assessment.requirementId),
+      locale
+    })
+  };
 }
 
 function receiptExecution(execution: ProviderExecutionResult, content: string): ProviderExecutionResult {

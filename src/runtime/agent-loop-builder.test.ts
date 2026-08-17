@@ -806,6 +806,55 @@ describe("AgentLoopBuilder", () => {
     expect(delegationVisibleTools?.().map((tool) => tool.name)).toContain("mcp.read");
   });
 
+  it("preflights against the final session-filtered registry", async () => {
+    const parentOnly = registeredTool("mcp.parent-only.read", ["research"]);
+    const parentMutation = {
+      ...registeredTool("mcp.parent-only.update", ["research"]),
+      riskClass: "external-side-effect" as const
+    };
+    const parentVerify = registeredTool("mcp.parent-only.verify", ["research"]);
+    const harness = await createBuilderHarness({ mcpTools: [parentOnly, parentMutation, parentVerify] });
+    await harness.sessionDb.createSession({ id: "parent-session", profileId: "default" });
+    await harness.sessionDb.createSession({ id: "narrowed-session", profileId: "default" });
+    const parent = await harness.build("parent-session");
+    const narrowed = await harness.build("narrowed-session", {
+      disabledToolsets: ["research"]
+    });
+
+    const parentPlan = await parent.executionPlanController!.write({
+      objective: "Inspect the target",
+      items: [
+        { id: "inspect", content: "Inspect target", status: "in_progress" },
+        { id: "update", content: "Update target", status: "pending" },
+        { id: "verify", content: "Verify target", status: "pending" }
+      ],
+      requirements: [
+        { id: "target-read", itemId: "inspect", tool: "mcp.parent-only.read", capability: "read" },
+        { id: "target-update", itemId: "update", tool: "mcp.parent-only.update", capability: "mutate" },
+        { id: "target-verify", itemId: "verify", tool: "mcp.parent-only.verify", capability: "verify" }
+      ]
+    }, "turn-parent");
+    const narrowedPlan = await narrowed.executionPlanController!.write({
+      objective: "Inspect the target",
+      items: [
+        { id: "inspect", content: "Inspect target", status: "in_progress" },
+        { id: "update", content: "Update target", status: "pending" },
+        { id: "verify", content: "Verify target", status: "pending" }
+      ],
+      requirements: [
+        { id: "target-read", itemId: "inspect", tool: "mcp.parent-only.read", capability: "read" },
+        { id: "target-update", itemId: "update", tool: "mcp.parent-only.update", capability: "mutate" },
+        { id: "target-verify", itemId: "verify", tool: "mcp.parent-only.verify", capability: "verify" }
+      ]
+    }, "turn-narrowed");
+
+    expect(parentPlan.capabilityPreflight?.assessments[0]).toMatchObject({ status: "ready" });
+    expect(narrowedPlan.capabilityPreflight?.assessments[0]).toMatchObject({
+      status: "missing",
+      reasonCode: "tool_missing"
+    });
+  });
+
   it("exposes cron runtime toolsets after disabled toolsets are removed", async () => {
     const observedToolsets: string[][] = [];
     const writeTool = registeredTool("mcp.write", ["shell-write"]);

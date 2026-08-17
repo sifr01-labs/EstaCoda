@@ -115,7 +115,15 @@ export function repairExecutionPlanWriteInput(
   return {
     plan: {
       objective: input.objective,
-      items
+      items,
+      ...(input.requirements === undefined ? {} : {
+        requirements: input.requirements.map((requirement) => ({
+          ...requirement,
+          ...(requirement.protectedPaths === undefined ? {} : {
+            protectedPaths: [...requirement.protectedPaths]
+          })
+        }))
+      })
     },
     repairs
   };

@@ -5,6 +5,9 @@ export const EXECUTION_PLAN_MAX_BLOCKER_CHARS = 500;
 export const EXECUTION_PLAN_MAX_SERIALIZED_BYTES = 8 * 1024;
 export const EXECUTION_PLAN_MAX_ID_CHARS = 64;
 export const EXECUTION_PLAN_MAX_EVIDENCE_CALL_IDS = 16;
+export const EXECUTION_PLAN_MAX_REQUIREMENTS = 12;
+export const EXECUTION_PLAN_MAX_PROTECTED_PATHS = 8;
+export const EXECUTION_PLAN_MAX_TOOL_NAME_CHARS = 160;
 
 export type ExecutionPlanOperation = "read" | "write" | "merge";
 
@@ -37,6 +40,54 @@ export type ExecutionPlanStatus =
   | "blocked"
   | "transferred"
   | "abandoned";
+
+export type ExecutionPlanCapability = "read" | "mutate" | "verify";
+
+/** Bounded, model-authored declaration of a capability needed by this Mission. */
+export type ExecutionPlanCapabilityRequirement = {
+  id: string;
+  itemId: string;
+  /** Exact tool name exposed to the current session. */
+  tool: string;
+  capability: ExecutionPlanCapability;
+  /** Reviewed protected-argument patterns required by the intended mutation. */
+  protectedPaths?: string[];
+  /** Declares that protected values must originate from the supervised browser. */
+  protectedSource?: "browser";
+};
+
+export type ExecutionPlanCapabilityAssessmentStatus =
+  | "ready"
+  | "missing"
+  | "unavailable"
+  | "incompatible";
+
+export type ExecutionPlanCapabilityAssessmentReason =
+  | "tool_missing"
+  | "tool_unavailable"
+  | "protected_path_missing"
+  | "risk_mismatch";
+
+/** Runtime-owned assessment. Provider input must never populate this field. */
+export type ExecutionPlanCapabilityAssessment = {
+  requirementId: string;
+  itemId: string;
+  tool: string;
+  capability: ExecutionPlanCapability;
+  status: ExecutionPlanCapabilityAssessmentStatus;
+  reasonCode?: ExecutionPlanCapabilityAssessmentReason;
+};
+
+export type ExecutionPlanCapabilityPreflight = {
+  status: "ready" | "blocked";
+  assessments: ExecutionPlanCapabilityAssessment[];
+};
+
+/** Per-call runtime facts used by preflight; never persisted as model-authored state. */
+export type ExecutionPlanWriteContext = {
+  protectedTransferAvailable?: boolean;
+  groupedProtectedTransferAvailable?: boolean;
+};
 
 export type ExecutionPlanBlocker = {
   kind: ExecutionPlanBlockerKind;
@@ -122,6 +173,8 @@ export type ExecutionPlan = {
   revision: number;
   status: ExecutionPlanStatus;
   items: ExecutionPlanItem[];
+  requirements?: ExecutionPlanCapabilityRequirement[];
+  capabilityPreflight?: ExecutionPlanCapabilityPreflight;
 };
 
 export const EXECUTION_PLAN_EVENT_KINDS = [
@@ -154,6 +207,7 @@ export type ExecutionPlanWriteInput = {
     completionKind?: ExecutionPlanCompletionKind;
     blocker?: ExecutionPlanBlocker;
   }>;
+  requirements?: ExecutionPlanCapabilityRequirement[];
 };
 
 export type ExecutionPlanMergeItemInput = {
@@ -180,6 +234,11 @@ export type ExecutionPlanReader = {
 };
 
 export type ExecutionPlanControllerApi = ExecutionPlanReader & {
-  write(input: ExecutionPlanWriteInput, originTurnId: string, sink?: ExecutionPlanEventSink): Promise<ExecutionPlan>;
+  write(
+    input: ExecutionPlanWriteInput,
+    originTurnId: string,
+    sink?: ExecutionPlanEventSink,
+    context?: ExecutionPlanWriteContext
+  ): Promise<ExecutionPlan>;
   merge(input: ExecutionPlanMergeInput, sink?: ExecutionPlanEventSink): Promise<ExecutionPlan>;
 };

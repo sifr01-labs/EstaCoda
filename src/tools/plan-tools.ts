@@ -14,7 +14,7 @@ export function createPlanTools(options: {
   return [{
     name: "plan",
     description:
-      "Create, read, or update the bounded execution plan for the current foreground request. Start a Mission with write before actionable work that has 3 or more dependent steps, multiple targets or systems, or an external mutation that must be verified. Merge as work advances, and read only when the current plan is not already present in context. This tool tracks work but grants no authority and does not create durable Tasks.",
+      "Create, read, or update the bounded execution plan for the current foreground request. Start a Mission with write before actionable work that has 3 or more dependent steps, multiple targets or systems, or an external mutation that must be verified. For cross-system work, declare exact session-visible read, mutate, and independent verify tool requirements; declare protected paths and protectedSource=browser when browser secrets must be transferred. The runtime preflights these declarations without invoking tools or granting authority. Merge as work advances, and read only when the current plan is not already present in context. This tool tracks work but grants no authority and does not create durable Tasks.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -67,6 +67,29 @@ export function createPlanTools(options: {
             },
             required: ["id"]
           }
+        },
+        requirements: {
+          type: "array",
+          minItems: 1,
+          maxItems: 12,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              id: { type: "string", minLength: 1, maxLength: 64 },
+              itemId: { type: "string", minLength: 1, maxLength: 64 },
+              tool: { type: "string", minLength: 1, maxLength: 160 },
+              capability: { type: "string", enum: ["read", "mutate", "verify"] },
+              protectedPaths: {
+                type: "array",
+                minItems: 1,
+                maxItems: 8,
+                items: { type: "string", minLength: 2, maxLength: 240 }
+              },
+              protectedSource: { type: "string", enum: ["browser"] }
+            },
+            required: ["id", "itemId", "tool", "capability"]
+          }
         }
       },
       required: ["operation"]
@@ -92,7 +115,14 @@ export function createPlanTools(options: {
           const plan = await controller.write(
             repair?.plan ?? input,
             context.visibleTurnId,
-            context.onEvent
+            context.onEvent,
+            {
+              protectedTransferAvailable: context.onSecureInputRequest !== undefined,
+              groupedProtectedTransferAvailable:
+                context.onSecureInputRequest !== undefined &&
+                "transferGroup" in context.onSecureInputRequest &&
+                typeof context.onSecureInputRequest.transferGroup === "function"
+            }
           );
           return planResult(plan, repair?.repairs);
         }
