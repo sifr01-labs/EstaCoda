@@ -73,6 +73,7 @@ function toDefinition(tool: RegisteredTool): ToolDefinition {
     inputSchema: tool.inputSchema,
     riskClass: tool.riskClass,
     toolsets: [...tool.toolsets],
+    connector: tool.connector === undefined ? undefined : { ...tool.connector },
     progressLabel: tool.progressLabel,
     maxResultSizeChars: tool.maxResultSizeChars,
     requiredConfig: tool.requiredConfig === undefined ? undefined : [...tool.requiredConfig]

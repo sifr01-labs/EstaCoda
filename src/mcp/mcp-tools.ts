@@ -175,6 +175,7 @@ function createMcpTool(
     inputSchema: protectedProjection.schema,
     riskClass,
     toolsets: ["mcp"],
+    connector: mcpConnector(serverName),
     progressLabel: `calling MCP ${serverName}`,
     maxResultSizeChars: 12_000,
     protectedArguments: protectedProjection.paths.map((path) => ({
@@ -314,6 +315,7 @@ function createResourceTools(
       },
       riskClass: listWrapperRisk(client.transport),
       toolsets: ["mcp"],
+      connector: mcpConnector(serverName),
       progressLabel: `listing MCP resources`,
       maxResultSizeChars: 12_000,
       isAvailable: () => true,
@@ -339,6 +341,7 @@ function createResourceTools(
       },
       riskClass: config.resourceReadRiskClass ?? defaultMcpRisk(config, client.transport, "resource"),
       toolsets: ["mcp"],
+      connector: mcpConnector(serverName),
       progressLabel: `reading MCP resource`,
       maxResultSizeChars: 12_000,
       isAvailable: () => true,
@@ -372,6 +375,7 @@ function createPromptTools(
       },
       riskClass: listWrapperRisk(client.transport),
       toolsets: ["mcp"],
+      connector: mcpConnector(serverName),
       progressLabel: `listing MCP prompts`,
       maxResultSizeChars: 12_000,
       isAvailable: () => true,
@@ -401,6 +405,7 @@ function createPromptTools(
       },
       riskClass: config.promptGetRiskClass ?? defaultMcpRisk(config, client.transport, "prompt"),
       toolsets: ["mcp"],
+      connector: mcpConnector(serverName),
       progressLabel: `getting MCP prompt`,
       maxResultSizeChars: 12_000,
       isAvailable: () => true,
@@ -442,6 +447,13 @@ function defaultMcpRisk(
 
 function listWrapperRisk(transport: "stdio" | "http"): ToolRiskClass {
   return transport === "http" ? "read-only-network" : "read-only-local";
+}
+
+function mcpConnector(serverName: string): NonNullable<RegisteredTool["connector"]> {
+  return {
+    kind: "mcp",
+    id: serverName
+  };
 }
 
 function prefixTool(serverName: string, config: MCPServerConfig, toolName: string): string {

@@ -717,6 +717,7 @@ export class AgentLoop {
     const providerTools = this.#model?.supportsTools === true
       ? this.#providerToolsForTurn({
           intent,
+          userText: routedText,
           selectedSkill,
           attachments,
           executionPlan: this.#executionPlanReader?.current()
@@ -1100,6 +1101,7 @@ export class AgentLoop {
 
   #providerToolsForTurn(input: {
     intent: IntentRoute;
+    userText: string;
     selectedSkill?: LoadedSkill | SkillDefinition;
     attachments?: readonly ChannelAttachment[];
     executionPlan?: ExecutionPlan;
@@ -1110,6 +1112,7 @@ export class AgentLoop {
     return narrowProviderToolsForTurn({
       catalog: this.#providerToolSchemaCatalog,
       intent: input.intent,
+      userText: input.userText,
       selectedSkill: input.selectedSkill,
       attachments: input.attachments,
       resumedExecutionPlan: input.executionPlan

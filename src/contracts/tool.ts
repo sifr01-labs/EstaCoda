@@ -39,6 +39,11 @@ export type ToolDefinition = {
   inputSchema: unknown;
   riskClass: ToolRiskClass;
   toolsets: ToolsetName[];
+  /** Runtime provenance used for deterministic connector-aware tool routing. */
+  connector?: {
+    kind: "mcp";
+    id: string;
+  };
   progressLabel: string;
   maxResultSizeChars: number;
   requiredConfig?: string[];

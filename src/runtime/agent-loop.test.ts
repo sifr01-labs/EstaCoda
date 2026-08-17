@@ -575,6 +575,48 @@ describe("AgentLoop provider availability gating", () => {
     ]);
   });
 
+  it("narrows a low-confidence turn when the user explicitly names a configured connector", async () => {
+    const providerToolDefinitions: ToolDefinition[] = [
+      { ...tool, name: "plan", toolsets: ["core"] },
+      tool,
+      { ...tool, name: "browser.snapshot", toolsets: ["browser"] },
+      {
+        ...tool,
+        name: "collections.get",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "postman" }
+      },
+      {
+        ...tool,
+        name: "issues.get",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "linear" }
+      }
+    ];
+    const { loop, providerTurnLoop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      providerToolDefinitions,
+      routeIntent: { ...intent, confidence: 0.35, suggestedToolsets: [] }
+    });
+
+    await loop.handle({
+      text: "Add the requests to Postman.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    const runInput = vi.mocked(providerTurnLoop.run).mock.calls[0]?.[0] as {
+      providerTools: Array<{ function: { name: string } }>;
+    };
+    expect(runInput.providerTools.map((entry) => entry.function.name)).toEqual([
+      "plan",
+      "files_read",
+      "collections_get"
+    ]);
+  });
+
   it("persists the bounded parent abort source for provider-loop cancellation", async () => {
     const controller = new AbortController();
     const liveEvents: RuntimeEvent[] = [];
