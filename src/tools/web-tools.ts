@@ -2137,7 +2137,9 @@ function renderProtectedFormGuidance(snapshot: BrowserSnapshot): string | undefi
 }
 
 function renderBrowserActionDelta(delta: BrowserActionDelta): string {
-  const heading = delta.outcome === "timeout"
+  const heading = delta.outcome === "dispatched-unverified"
+    ? "Action was dispatched, but settlement verification failed. Do not retry automatically; inspect the current browser state first."
+    : delta.outcome === "timeout"
     ? "Action wait timed out; current browser state was captured."
     : delta.outcome === "no-change"
       ? "Action dispatched; no observable page change was detected."
@@ -2149,6 +2151,10 @@ function renderBrowserActionDelta(delta: BrowserActionDelta): string {
     heading,
     `Identity: ${delta.beforeIdentity === undefined ? "new session" : renderBrowserIdentity(delta.beforeIdentity)} → ${renderBrowserIdentity(delta.afterIdentity)}`,
     `Wait: ${delta.waitCondition} (${delta.conditionMet ? "met" : "not met"})`,
+    ...(delta.outcome !== "dispatched-unverified" ? [] : [
+      `State observation: ${delta.stateObservation === "post-dispatch" ? "post-dispatch" : "last known before dispatch"}`,
+      `Document change observed: ${delta.documentChangeObserved === true ? "yes" : "no"}`
+    ]),
     url,
     ...(delta.addedElements ?? []).map((element) => `Added: ${renderDeltaElement(element)}`),
     ...(delta.removedElements ?? []).map((element) => `Removed: ${renderDeltaElement(element)}`),
@@ -2281,17 +2287,55 @@ function browserWaitInputProperties(): Record<string, unknown> {
   return {
     waitFor: {
       type: "object",
-      properties: {
-        kind: { type: "string", enum: ["url", "text", "element", "dialog", "dom-stable"] },
-        contains: { type: "string" },
-        value: { type: "string" },
-        role: { type: "string" },
-        name: { type: "string" }
-      },
-      required: ["kind"]
+      description: "Post-action condition to wait for. Each kind requires only its matching fields.",
+      oneOf: [
+        {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            kind: { type: "string", enum: ["url"] },
+            contains: { type: "string", minLength: 1, maxLength: 500 }
+          },
+          required: ["kind", "contains"]
+        },
+        {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            kind: { type: "string", enum: ["text"] },
+            value: { type: "string", minLength: 1, maxLength: 500 }
+          },
+          required: ["kind", "value"]
+        },
+        {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            kind: { type: "string", enum: ["element"] },
+            role: { type: "string", minLength: 1, maxLength: 500 },
+            name: { type: "string", minLength: 1, maxLength: 500 }
+          },
+          required: ["kind"],
+          anyOf: [{ required: ["role"] }, { required: ["name"] }]
+        },
+        {
+          type: "object",
+          additionalProperties: false,
+          properties: { kind: { type: "string", enum: ["dialog"] } },
+          required: ["kind"]
+        },
+        {
+          type: "object",
+          additionalProperties: false,
+          properties: { kind: { type: "string", enum: ["dom-stable"] } },
+          required: ["kind"]
+        }
+      ]
     },
     waitTimeoutMs: {
       type: "number",
+      exclusiveMinimum: 0,
+      maximum: 10_000,
       description: "Maximum wait for the requested browser state, capped at 10000 ms."
     }
   };

@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import type {
+  BrowserActionDelta,
   BrowserProtectedFieldDeliveryInput,
   BrowserProtectedFieldDeliveryResult,
   BrowserProtectedFieldInput,
@@ -512,20 +513,7 @@ export class ProtectedBrowserFormTransactionController {
       readiness: snapshot.readiness,
       sensitiveInputActive: true,
       ...(snapshot.actionDelta === undefined ? {} : {
-        actionDelta: {
-          outcome: snapshot.actionDelta.outcome,
-          ...(snapshot.actionDelta.beforeIdentity === undefined ? {} : { beforeIdentity: { ...snapshot.actionDelta.beforeIdentity } }),
-          afterIdentity: { ...snapshot.actionDelta.afterIdentity },
-          waitCondition: snapshot.actionDelta.waitCondition,
-          conditionMet: snapshot.actionDelta.conditionMet,
-          url: {
-            changed: snapshot.actionDelta.url.changed,
-            ...(snapshot.actionDelta.url.before === undefined
-              ? {}
-              : { before: sensitiveUrl(snapshot.actionDelta.url.before) }),
-            after: sensitiveUrl(snapshot.actionDelta.url.after),
-          },
-        },
+        actionDelta: protectedActionDelta(snapshot.actionDelta),
       }),
       ...(snapshot.tab === undefined ? {} : {
         tab: {
@@ -748,6 +736,31 @@ function sensitiveUrl(value: string): string {
   } catch {
     return redactUrlForMetadata(value);
   }
+}
+
+function protectedActionDelta(delta: BrowserActionDelta): BrowserActionDelta {
+  const base = {
+    ...(delta.beforeIdentity === undefined ? {} : { beforeIdentity: { ...delta.beforeIdentity } }),
+    afterIdentity: { ...delta.afterIdentity },
+    waitCondition: delta.waitCondition,
+    conditionMet: delta.conditionMet,
+    url: {
+      changed: delta.url.changed,
+      ...(delta.url.before === undefined ? {} : { before: sensitiveUrl(delta.url.before) }),
+      after: sensitiveUrl(delta.url.after),
+    },
+  };
+  if (delta.outcome === "dispatched-unverified") {
+    return {
+      ...base,
+      outcome: delta.outcome,
+      actionDispatched: true,
+      settlementFailed: true,
+      documentChangeObserved: delta.documentChangeObserved,
+      stateObservation: delta.stateObservation,
+    };
+  }
+  return { ...base, outcome: delta.outcome };
 }
 
 function inspectionRejection(

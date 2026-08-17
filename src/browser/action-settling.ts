@@ -22,6 +22,26 @@ export type BrowserActionSettlement = {
   timedOut: boolean;
 };
 
+export type NormalizedBrowserActionSettlementInput = {
+  waitFor: BrowserWaitCondition;
+  waitTimeoutMs: number;
+};
+
+/**
+ * Validate model-provided wait arguments before a browser action is dispatched.
+ * The backend still normalizes again while settling so direct callers cannot
+ * bypass the runtime boundary.
+ */
+export function normalizeBrowserActionSettlementInput(input: {
+  waitFor?: unknown;
+  waitTimeoutMs?: unknown;
+}): NormalizedBrowserActionSettlementInput {
+  return {
+    waitFor: normalizeWaitCondition(input.waitFor),
+    waitTimeoutMs: normalizeWaitTimeout(input.waitTimeoutMs)
+  };
+}
+
 export async function settleBrowserAction(input: {
   capture: () => Promise<BrowserSnapshot>;
   waitFor?: BrowserWaitCondition;
@@ -33,8 +53,9 @@ export async function settleBrowserAction(input: {
   minimumObservationMs?: number;
   now?: () => number;
 }): Promise<BrowserActionSettlement> {
-  const waitFor = normalizeWaitCondition(input.waitFor);
-  const timeoutMs = normalizeWaitTimeout(input.waitTimeoutMs);
+  const normalized = normalizeBrowserActionSettlementInput(input);
+  const waitFor = normalized.waitFor;
+  const timeoutMs = normalized.waitTimeoutMs;
   const pollIntervalMs = input.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const stableWindowMs = input.stableWindowMs ?? DEFAULT_STABLE_WINDOW_MS;
   const minimumObservationMs = input.minimumObservationMs ?? DEFAULT_MINIMUM_OBSERVATION_MS;
@@ -69,6 +90,35 @@ export async function settleBrowserAction(input: {
       stableSince = now();
     }
   }
+}
+
+export function withDispatchedActionSettlementFailure(input: {
+  before?: BrowserSnapshot;
+  latest: BrowserSnapshot;
+  waitCondition: BrowserWaitCondition["kind"];
+  stateObservation: "post-dispatch" | "last-known";
+  openedTabs?: BrowserTab[];
+}): BrowserSnapshot {
+  const delta = createBrowserActionDelta({
+    before: input.before,
+    after: input.latest,
+    waitCondition: input.waitCondition,
+    conditionMet: false,
+    timedOut: false,
+    openedTabs: input.openedTabs
+  });
+  return {
+    ...input.latest,
+    actionDelta: {
+      ...delta,
+      outcome: "dispatched-unverified",
+      actionDispatched: true,
+      settlementFailed: true,
+      documentChangeObserved: input.before !== undefined &&
+        input.latest.identity.documentEpoch > input.before.identity.documentEpoch,
+      stateObservation: input.stateObservation
+    }
+  };
 }
 
 export function withBrowserActionDelta(input: {
@@ -170,35 +220,66 @@ export function browserWaitConditionMet(snapshot: BrowserSnapshot, condition: Br
   return false;
 }
 
-function normalizeWaitCondition(condition: BrowserWaitCondition | undefined): BrowserWaitCondition {
+function normalizeWaitCondition(condition: unknown): BrowserWaitCondition {
   if (condition === undefined) return { kind: "dom-stable" };
-  if (condition.kind === "url") return { kind: "url", contains: boundedRequired(condition.contains, "URL wait text") };
-  if (condition.kind === "text") return { kind: "text", value: boundedRequired(condition.value, "page wait text") };
-  if (condition.kind === "element") {
-    if (condition.role === undefined && condition.name === undefined) {
+  if (typeof condition !== "object" || condition === null || Array.isArray(condition)) {
+    throw new Error("Browser waitFor must be an object.");
+  }
+  const candidate = condition as Record<string, unknown>;
+  if (candidate.kind === "url") {
+    assertOnlyWaitKeys(candidate, ["kind", "contains"]);
+    return { kind: "url", contains: boundedRequired(candidate.contains, "URL wait text") };
+  }
+  if (candidate.kind === "text") {
+    assertOnlyWaitKeys(candidate, ["kind", "value"]);
+    return { kind: "text", value: boundedRequired(candidate.value, "page wait text") };
+  }
+  if (candidate.kind === "element") {
+    assertOnlyWaitKeys(candidate, ["kind", "role", "name"]);
+    const role = optionalBounded(candidate.role, "element role");
+    const name = optionalBounded(candidate.name, "element name");
+    if (role === undefined && name === undefined) {
       throw new Error("Browser element wait requires role or name.");
     }
     return {
       kind: "element",
-      ...(condition.role === undefined ? {} : { role: boundedRequired(condition.role, "element role") }),
-      ...(condition.name === undefined ? {} : { name: boundedRequired(condition.name, "element name") })
+      ...(role === undefined ? {} : { role }),
+      ...(name === undefined ? {} : { name })
     };
   }
-  if (condition.kind === "dialog" || condition.kind === "dom-stable") return condition;
+  if (candidate.kind === "dialog" || candidate.kind === "dom-stable") {
+    assertOnlyWaitKeys(candidate, ["kind"]);
+    return { kind: candidate.kind };
+  }
   throw new Error("Unsupported browser wait condition.");
 }
 
-function normalizeWaitTimeout(value: number | undefined): number {
+function normalizeWaitTimeout(value: unknown): number {
   if (value === undefined) return DEFAULT_WAIT_TIMEOUT_MS;
-  if (!Number.isFinite(value) || value <= 0) throw new Error("Browser waitTimeoutMs must be a positive number.");
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new Error("Browser waitTimeoutMs must be a positive number.");
+  }
   return Math.min(Math.floor(value), MAX_WAIT_TIMEOUT_MS);
 }
 
-function boundedRequired(value: string, label: string): string {
+function boundedRequired(value: unknown, label: string): string {
+  if (typeof value !== "string") throw new Error(`${label} is required.`);
   const normalized = value.trim();
   if (normalized.length === 0) throw new Error(`${label} must not be empty.`);
   if (normalized.length > 500) throw new Error(`${label} must be 500 characters or fewer.`);
   return normalized;
+}
+
+function optionalBounded(value: unknown, label: string): string | undefined {
+  if (value === undefined) return undefined;
+  return boundedRequired(value, label);
+}
+
+function assertOnlyWaitKeys(candidate: Record<string, unknown>, allowed: readonly string[]): void {
+  const unexpected = Object.keys(candidate).find((key) => !allowed.includes(key));
+  if (unexpected !== undefined) {
+    throw new Error(`Browser wait condition does not allow field '${unexpected}' for kind '${String(candidate.kind)}'.`);
+  }
 }
 
 function deltaElements(elements: NonNullable<BrowserSnapshot["elements"]>): BrowserActionDeltaElement[] {

@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BrowserSnapshot } from "../contracts/browser.js";
-import { createBrowserActionDelta, settleBrowserAction, withBrowserActionDelta } from "./action-settling.js";
+import {
+  createBrowserActionDelta,
+  normalizeBrowserActionSettlementInput,
+  settleBrowserAction,
+  withBrowserActionDelta,
+  withDispatchedActionSettlementFailure
+} from "./action-settling.js";
 
 function snapshot(input: {
   actionRevision: number;
@@ -29,6 +35,21 @@ function snapshot(input: {
 }
 
 describe("browser action settling", () => {
+  it("rejects incomplete discriminated waits before settlement begins", () => {
+    expect(() => normalizeBrowserActionSettlementInput({
+      waitFor: { kind: "url" }
+    })).toThrow("URL wait text is required.");
+    expect(() => normalizeBrowserActionSettlementInput({
+      waitFor: { kind: "text" }
+    })).toThrow("page wait text is required.");
+    expect(() => normalizeBrowserActionSettlementInput({
+      waitFor: { kind: "element" }
+    })).toThrow("Browser element wait requires role or name.");
+    expect(() => normalizeBrowserActionSettlementInput({
+      waitFor: { kind: "url", contains: "/edit", value: "wrong branch" }
+    })).toThrow("does not allow field 'value' for kind 'url'");
+  });
+
   it("captures an asynchronous React-style update after an action", async () => {
     const before = snapshot({ actionRevision: 4 });
     const after = snapshot({
@@ -119,6 +140,36 @@ describe("browser action settling", () => {
     });
 
     expect(delta.outcome).toBe("no-change");
+  });
+
+  it("preserves a dispatched action when post-action settlement cannot be verified", () => {
+    const before = snapshot({ actionRevision: 3, documentEpoch: 2, url: "https://example.com/apps" });
+    const latest = snapshot({
+      actionRevision: 4,
+      documentEpoch: 3,
+      url: "https://example.com/apps/example/edit"
+    });
+    const result = withDispatchedActionSettlementFailure({
+      before,
+      latest,
+      waitCondition: "url",
+      stateObservation: "post-dispatch"
+    });
+
+    expect(result.actionDelta).toMatchObject({
+      outcome: "dispatched-unverified",
+      actionDispatched: true,
+      settlementFailed: true,
+      documentChangeObserved: true,
+      stateObservation: "post-dispatch",
+      beforeIdentity: before.identity,
+      afterIdentity: latest.identity,
+      url: {
+        changed: true,
+        before: "https://example.com/apps",
+        after: "https://example.com/apps/example/edit"
+      }
+    });
   });
 
   it("redacts secret-looking labels, titles, and URLs from deltas", () => {

@@ -1484,7 +1484,7 @@ describe("supervised local CDP backend", () => {
     const page = sockets.pageSocket();
     expect(page).toBeDefined();
     page!.onRuntimeEvaluate = (expression) => {
-      if (!expression.includes(".click()")) return;
+      if (!expression.includes("return 'clicked'")) return;
       setTimeout(() => {
         page!.snapshot = {
           url: "https://example.com/final",
@@ -1517,6 +1517,122 @@ describe("supervised local CDP backend", () => {
       }
     });
     expect(result!.identity.actionRevision).toBeGreaterThan(navigation.snapshot.identity.actionRevision);
+  });
+
+  it("rejects an invalid wait before dispatching click()", async () => {
+    const sockets = createSocketFactory();
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: sockets.webSocketFactory,
+      resolveHostname: () => ["93.184.216.34"]
+    });
+    const navigation = await backend.navigate({
+      url: "https://example.com/start",
+      sessionId: "session-invalid-wait"
+    });
+    const page = sockets.pageSocket()!;
+    const clicksBefore = page.sent.filter((message) =>
+      message.method === "Runtime.evaluate" &&
+      typeof message.params?.expression === "string" &&
+      message.params.expression.includes(".click()")
+    ).length;
+
+    await expect(backend.click?.({
+      sessionId: "session-invalid-wait",
+      ref: "@e1",
+      identity: navigation.snapshot.identity,
+      tabRef: navigation.snapshot.tab!.ref,
+      waitFor: { kind: "url" } as never
+    })).rejects.toThrow("URL wait text is required.");
+
+    expect(page.sent.filter((message) =>
+      message.method === "Runtime.evaluate" &&
+      typeof message.params?.expression === "string" &&
+      message.params.expression.includes(".click()")
+    )).toHaveLength(clicksBefore);
+  });
+
+  it("returns the changed browser state when click settlement observation initially fails", async () => {
+    const sockets = createSocketFactory();
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: sockets.webSocketFactory,
+      resolveHostname: () => ["93.184.216.34"],
+      settling: {
+        pollIntervalMs: 5,
+        stableWindowMs: 10,
+        minimumObservationMs: 20
+      }
+    });
+    await backend.navigate({
+      url: "https://example.com/apps",
+      sessionId: "session-settlement-failure"
+    });
+    const page = sockets.pageSocket()!;
+    page.emitMessage({
+      method: "Page.frameNavigated",
+      params: {
+        frame: {
+          id: "main-frame",
+          loaderId: "apps-page-loader",
+          url: page.snapshot.url
+        }
+      }
+    });
+    const beforeClick = await backend.snapshot?.({ sessionId: "session-settlement-failure" });
+    page.onRuntimeEvaluate = (expression) => {
+      if (!expression.includes("return 'clicked'")) return;
+      page.snapshot = {
+        url: "https://example.com/apps/example/edit",
+        title: "Edit app",
+        text: "Edit app settings",
+        elements: [{ ref: "@e1", role: "button", name: "Save" }]
+      };
+      page.emitMessage({
+        method: "Page.frameNavigated",
+        params: {
+          frame: {
+            id: "main-frame",
+            loaderId: "edit-page-loader",
+            url: page.snapshot.url
+          }
+        }
+      });
+      queueMicrotask(() => {
+        page.failNextMethods.set("Runtime.evaluate", {
+          remaining: 1,
+          message: "Execution context was destroyed during navigation"
+        });
+      });
+    };
+
+    const result = await backend.click?.({
+      sessionId: "session-settlement-failure",
+      ref: "@e1",
+      identity: beforeClick!.identity,
+      tabRef: beforeClick!.tab!.ref,
+      waitFor: { kind: "url", contains: "/edit" },
+      waitTimeoutMs: 200
+    });
+
+    expect(result).toMatchObject({
+      url: "https://example.com/apps/example/edit",
+      actionDelta: {
+        outcome: "dispatched-unverified",
+        actionDispatched: true,
+        settlementFailed: true,
+        documentChangeObserved: true,
+        stateObservation: "post-dispatch",
+        url: {
+          changed: true,
+          before: "https://example.com/final",
+          after: "https://example.com/apps/example/edit"
+        }
+      }
+    });
+    expect(result!.identity.documentEpoch).toBeGreaterThan(beforeClick!.identity.documentEpoch);
   });
 
   it("preflights current click targets structurally without activating them", async () => {

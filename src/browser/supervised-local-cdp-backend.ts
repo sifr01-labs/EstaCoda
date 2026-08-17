@@ -25,7 +25,12 @@ import { checkWebsiteAccess, loadWebsiteBlocklist } from "./website-policy.js";
 import { CDPSupervisor } from "./cdp-supervisor.js";
 import type { BrowserSessionLifecycle } from "./session-lifecycle.js";
 import { BrowserSessionStateError, browserSessionStateReason } from "./session-state.js";
-import { settleBrowserAction, withBrowserActionDelta } from "./action-settling.js";
+import {
+  normalizeBrowserActionSettlementInput,
+  settleBrowserAction,
+  withBrowserActionDelta,
+  withDispatchedActionSettlementFailure
+} from "./action-settling.js";
 import { findBrowserLocator, resolveBrowserTarget } from "./browser-locator.js";
 import { findChromiumExecutable, type ChromiumFinderOptions, type ChromiumFinderResult } from "./chromium-finder.js";
 import { launchChrome, type ChromeLauncherOptions, type LaunchedChrome } from "./chrome-launcher.js";
@@ -264,23 +269,39 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     initialSnapshot?: BrowserSnapshot;
     openedTabs?: BrowserTab[];
     full?: boolean;
+    actionDispatched?: true;
   }): Promise<BrowserSnapshot> => {
     const beforeObservedUrl = latestObservedUrls.get(input.session.key);
-    const settlement = await settleBrowserAction({
-      capture: input.capture ?? (() => captureSessionSnapshot(input.session, [], input.full === true)),
-      waitFor: input.actionInput.waitFor,
-      waitTimeoutMs: input.actionInput.waitTimeoutMs,
-      signal: input.actionInput.signal,
-      initialSnapshot: input.initialSnapshot,
-      pollIntervalMs: options.settling?.pollIntervalMs,
-      stableWindowMs: options.settling?.stableWindowMs,
-      minimumObservationMs: options.settling?.minimumObservationMs
-    });
-    const settledSnapshot = withBrowserActionDelta({
-      before: input.before,
-      settlement,
-      openedTabs: input.openedTabs
-    });
+    const capture = input.capture ?? (() => captureSessionSnapshot(input.session, [], input.full === true));
+    let settledSnapshot: BrowserSnapshot;
+    try {
+      const settlement = await settleBrowserAction({
+        capture,
+        waitFor: input.actionInput.waitFor,
+        waitTimeoutMs: input.actionInput.waitTimeoutMs,
+        signal: input.actionInput.signal,
+        initialSnapshot: input.initialSnapshot,
+        pollIntervalMs: options.settling?.pollIntervalMs,
+        stableWindowMs: options.settling?.stableWindowMs,
+        minimumObservationMs: options.settling?.minimumObservationMs
+      });
+      settledSnapshot = withBrowserActionDelta({
+        before: input.before,
+        settlement,
+        openedTabs: input.openedTabs
+      });
+    } catch (error) {
+      if (input.actionDispatched !== true) throw error;
+      settledSnapshot = await preserveDispatchedSettlementFailure({
+        session: input.session,
+        before: input.before,
+        actionInput: input.actionInput,
+        capture,
+        initialSnapshot: input.initialSnapshot,
+        openedTabs: input.openedTabs,
+        cause: error
+      });
+    }
     const snapshot = protectedFields.protectSnapshot(input.session.key, settledSnapshot);
     latestSnapshots.set(input.session.key, snapshot);
     const afterObservedUrl = latestObservedUrls.get(input.session.key);
@@ -289,6 +310,39 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       await protectedFields.invalidateSession(input.session);
     }
     return snapshot;
+  };
+
+  const preserveDispatchedSettlementFailure = async (input: {
+    session: ManagedBackendSession;
+    before?: BrowserSnapshot;
+    actionInput: Pick<BrowserActionInput, "waitFor" | "waitTimeoutMs" | "signal">;
+    capture: () => Promise<BrowserSnapshot>;
+    initialSnapshot?: BrowserSnapshot;
+    openedTabs?: BrowserTab[];
+    cause: unknown;
+  }): Promise<BrowserSnapshot> => {
+    const normalized = normalizeBrowserActionSettlementInput(input.actionInput);
+    const cached = latestSnapshots.get(input.session.key);
+    let latest = isPostDispatchObservation(input.before, cached) ? cached : input.initialSnapshot;
+
+    if (input.actionInput.signal?.aborted !== true) {
+      try {
+        latest = await input.capture();
+      } catch {
+        // The action has already been sent. Preserve its truthful outcome using
+        // the newest observation available instead of converting it to a retryable failure.
+      }
+    }
+    latest ??= input.before ?? cached;
+    if (latest === undefined) throw input.cause;
+
+    return withDispatchedActionSettlementFailure({
+      before: input.before,
+      latest,
+      waitCondition: normalized.waitFor.kind,
+      stateObservation: isPostDispatchObservation(input.before, latest) ? "post-dispatch" : "last-known",
+      openedTabs: input.openedTabs
+    });
   };
 
   const switchSafeTab = async (input: BrowserSwitchTabInput): Promise<{
@@ -657,6 +711,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     isAvailable: async () => (await resolveAvailabilityStatus()).available,
     status: resolveAvailabilityStatus,
     async navigate(input: BrowserNavigateInput): Promise<BrowserNavigateResult> {
+      normalizeBrowserActionSettlementInput(input);
       if (closed) {
         throw new BrowserSessionStateError("browser_process_missing", "Browser backend is closed.");
       }
@@ -715,16 +770,30 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         const supervisor = session.supervisor;
         const before = latestSnapshots.get(sessionId);
         await supervisor.send("Page.navigate", { url: input.url });
-        await supervisor.waitFor("Page.loadEventFired", 5_000).catch(() => undefined);
-
         sessionStacks.set(sessionId, existingStack ?? sessionStack);
-        const initialSnapshot = await captureSessionSnapshot(session);
-        const snapshot = await settleAction({
-          session,
-          before,
-          actionInput: input,
-          initialSnapshot
-        });
+        const capture = () => captureSessionSnapshot(session!);
+        let snapshot: BrowserSnapshot;
+        try {
+          await supervisor.waitFor("Page.loadEventFired", 5_000).catch(() => undefined);
+          const initialSnapshot = await capture();
+          snapshot = await settleAction({
+            session,
+            before,
+            actionInput: input,
+            initialSnapshot,
+            actionDispatched: true
+          });
+        } catch (error) {
+          snapshot = await preserveDispatchedSettlementFailure({
+            session,
+            before,
+            actionInput: input,
+            capture,
+            cause: error
+          });
+          snapshot = protectedFields.protectSnapshot(session.key, snapshot);
+          latestSnapshots.set(session.key, snapshot);
+        }
         lostSessions.delete(sessionId);
 
         return {
@@ -806,6 +875,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       });
     },
     click: async (input) => {
+      normalizeBrowserActionSettlementInput(input);
       let session = await getSession(input);
       const targetState = await captureSafeTargetSnapshot(session, input);
       const before = targetState.snapshot;
@@ -837,16 +907,28 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         }
         return captureSessionSnapshot(session, openedTabs, targetState.full);
       };
-      const settlement = await settleBrowserAction({
-        capture,
-        waitFor: input.waitFor,
-        waitTimeoutMs: input.waitTimeoutMs,
-        signal: input.signal,
-        pollIntervalMs: options.settling?.pollIntervalMs,
-        stableWindowMs: options.settling?.stableWindowMs,
-        minimumObservationMs: options.settling?.minimumObservationMs
-      });
-      const settledSnapshot = withBrowserActionDelta({ before, settlement, openedTabs });
+      let settledSnapshot: BrowserSnapshot;
+      try {
+        const settlement = await settleBrowserAction({
+          capture,
+          waitFor: input.waitFor,
+          waitTimeoutMs: input.waitTimeoutMs,
+          signal: input.signal,
+          pollIntervalMs: options.settling?.pollIntervalMs,
+          stableWindowMs: options.settling?.stableWindowMs,
+          minimumObservationMs: options.settling?.minimumObservationMs
+        });
+        settledSnapshot = withBrowserActionDelta({ before, settlement, openedTabs });
+      } catch (error) {
+        settledSnapshot = await preserveDispatchedSettlementFailure({
+          session,
+          before,
+          actionInput: input,
+          capture,
+          openedTabs,
+          cause: error
+        });
+      }
       const snapshot = protectedFields.protectSnapshot(session.key, settledSnapshot);
       latestSnapshots.set(session.key, snapshot);
       const afterObservedUrl = latestObservedUrls.get(session.key);
@@ -856,6 +938,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       return snapshot;
     },
     type: async (input) => {
+      normalizeBrowserActionSettlementInput(input);
       const session = await getSession(input);
       const targetState = await captureSafeTargetSnapshot(session, input);
       const before = targetState.snapshot;
@@ -864,9 +947,10 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         expression: refActionExpression(target.ref, "type", input.text ?? ""),
         awaitPromise: true
       });
-      return settleAction({ session, before, actionInput: input, full: targetState.full });
+      return settleAction({ session, before, actionInput: input, full: targetState.full, actionDispatched: true });
     },
     select: async (input) => {
+      normalizeBrowserActionSettlementInput(input);
       const session = await getSession(input);
       const targetState = await captureSafeTargetSnapshot(session, input);
       const before = targetState.snapshot;
@@ -878,7 +962,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         expression: selectActionExpression(target.ref, input.value),
         awaitPromise: true
       });
-      return settleAction({ session, before, actionInput: input, full: targetState.full });
+      return settleAction({ session, before, actionInput: input, full: targetState.full, actionDispatched: true });
     },
     extract: async (input): Promise<BrowserExtractResult> => {
       const session = await getSession(input);
@@ -896,6 +980,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       };
     },
     scroll: async (input) => {
+      normalizeBrowserActionSettlementInput(input);
       const session = await getSession(input);
       const before = latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session);
       const amount = input.amount ?? 700;
@@ -904,17 +989,19 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         expression: `window.scrollBy(0, ${JSON.stringify(delta)}); "ok";`,
         returnByValue: true
       });
-      return settleAction({ session, before, actionInput: input });
+      return settleAction({ session, before, actionInput: input, actionDispatched: true });
     },
     press: async (input) => {
+      normalizeBrowserActionSettlementInput(input);
       const session = await getSession(input);
       const before = latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session);
       const key = input.key ?? "Enter";
       await session.supervisor.send("Input.dispatchKeyEvent", { type: "keyDown", key });
       await session.supervisor.send("Input.dispatchKeyEvent", { type: "keyUp", key });
-      return settleAction({ session, before, actionInput: input });
+      return settleAction({ session, before, actionInput: input, actionDispatched: true });
     },
     back: async (input = {}) => {
+      normalizeBrowserActionSettlementInput(input);
       const session = await getSession(input);
       await protectedFields.invalidateSession(session);
       const before = latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session);
@@ -923,7 +1010,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         returnByValue: true
       });
       await session.supervisor.waitFor("Page.loadEventFired", 2_000).catch(() => undefined);
-      return settleAction({ session, before, actionInput: input });
+      return settleAction({ session, before, actionInput: input, actionDispatched: true });
     },
     getImages: async (input = {}) => {
       const session = await getSession(input);
@@ -956,6 +1043,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       };
     },
     switchTab: async (input) => {
+      normalizeBrowserActionSettlementInput(input);
       await protectedFields.invalidateSession(await getSession(input));
       const before = latestSnapshots.get(requireSessionId(input.sessionId));
       const switched = await switchSafeTab(input);
@@ -963,7 +1051,8 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         session: switched.session,
         before,
         actionInput: input,
-        initialSnapshot: switched.snapshot
+        initialSnapshot: switched.snapshot,
+        actionDispatched: true
       });
       return {
         tab: snapshot.tab!,
@@ -1088,13 +1177,14 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     },
     isSensitiveInputActive: (sessionId) => protectedFields.isSensitive(sessionId),
     dialog: async (input = {}) => {
+      normalizeBrowserActionSettlementInput(input);
       const session = await getSession(input);
       const before = latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session);
       await session.supervisor.respondToDialog({
         accept: input.action !== "dismiss",
         promptText: input.promptText
       });
-      return settleAction({ session, before, actionInput: input });
+      return settleAction({ session, before, actionInput: input, actionDispatched: true });
     },
     closeSession,
     close: closeBackend
@@ -1110,6 +1200,17 @@ function toBrowserTab(tab: BrowserManagedTab): BrowserTab {
     ...(tab.title === undefined ? {} : { title: tab.title }),
     controlled: tab.controlled
   };
+}
+
+function isPostDispatchObservation(
+  before: BrowserSnapshot | undefined,
+  candidate: BrowserSnapshot | undefined
+): candidate is BrowserSnapshot {
+  if (candidate === undefined) return false;
+  if (before === undefined) return true;
+  return candidate.identity.observationId > before.identity.observationId ||
+    candidate.identity.documentEpoch !== before.identity.documentEpoch ||
+    candidate.identity.actionRevision !== before.identity.actionRevision;
 }
 
 function protectedChallengePresent(

@@ -124,8 +124,7 @@ export type BrowserActionDeltaElement = {
   name?: string;
 };
 
-export type BrowserActionDelta = {
-  outcome: "changed" | "no-change" | "timeout";
+type BrowserActionDeltaBase = {
   beforeIdentity?: BrowserStateIdentity;
   afterIdentity: BrowserStateIdentity;
   waitCondition: BrowserWaitCondition["kind"];
@@ -143,6 +142,26 @@ export type BrowserActionDelta = {
     destination: Pick<BrowserTab, "ref" | "url" | "title">;
   };
 };
+
+export type BrowserActionDelta = BrowserActionDeltaBase & (
+  | {
+      outcome: "changed" | "no-change" | "timeout";
+      actionDispatched?: never;
+      settlementFailed?: never;
+      documentChangeObserved?: never;
+      stateObservation?: never;
+    }
+  | {
+      outcome: "dispatched-unverified";
+      /** The browser action was sent, but its requested post-action settlement could not be verified. */
+      actionDispatched: true;
+      settlementFailed: true;
+      /** True only when a post-dispatch observation proves the document epoch advanced. */
+      documentChangeObserved: boolean;
+      /** Distinguishes a recovered post-dispatch observation from the last state seen before dispatch. */
+      stateObservation: "post-dispatch" | "last-known";
+    }
+);
 
 export type BrowserSnapshot = {
   sessionId: string;

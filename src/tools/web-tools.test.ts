@@ -3129,6 +3129,50 @@ describe("web and browser tools baselines", () => {
     expect(result.content).toContain("Actionable refs: none");
   });
 
+  it("renders dispatched settlement failures as non-retryable action outcomes", async () => {
+    const browserBackend: BrowserBackend = {
+      ...createMockBrowserBackend(),
+      click: async (input) => ({
+        sessionId: input.sessionId ?? "session-1",
+        url: "https://example.com/apps/example/edit",
+        identity: { documentEpoch: 2, actionRevision: 3, observationId: 4 },
+        observedAt: "2026-08-13T00:00:00.000Z",
+        actionDelta: {
+          outcome: "dispatched-unverified",
+          beforeIdentity: browserIdentity(2),
+          afterIdentity: { documentEpoch: 2, actionRevision: 3, observationId: 4 },
+          waitCondition: "url",
+          conditionMet: false,
+          actionDispatched: true,
+          settlementFailed: true,
+          documentChangeObserved: true,
+          stateObservation: "post-dispatch",
+          url: {
+            changed: true,
+            before: "https://example.com/apps",
+            after: "https://example.com/apps/example/edit"
+          }
+        }
+      })
+    };
+    const click = tool("browser.click", createTestWebTools({ browserBackend }));
+
+    const result = await click.run({ ref: "@e1" });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("Action was dispatched, but settlement verification failed.");
+    expect(result.content).toContain("Do not retry automatically");
+    expect(result.content).toContain("Document change observed: yes");
+    expect(result.metadata).toMatchObject({
+      snapshot: {
+        actionDelta: {
+          actionDispatched: true,
+          settlementFailed: true
+        }
+      }
+    });
+  });
+
   it("writes browser.screenshot under a temp workspace root", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-web-tools-test-"));
     tempRoots.push(workspaceRoot);
