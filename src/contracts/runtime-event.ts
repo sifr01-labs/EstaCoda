@@ -197,6 +197,13 @@ export type RuntimeEvent =
       reason?: string;
     }
   | {
+      kind: "session-recall-stage";
+      stage: "started" | "completed" | "failed";
+      focus: "general" | "visited-sites";
+      sourceSessionIds: string[];
+      resultCount: number;
+    }
+  | {
       kind: "session-recall-decision";
       triggered: boolean;
       reason: string;

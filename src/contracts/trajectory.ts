@@ -38,6 +38,7 @@ export type TrajectoryEventKind =
   | "security-risk-escalated"
   | "agent-cancelled"
   | "prompt-assembled"
+  | "session-recall-stage"
   | "session-recall-decision"
   | "external-memory-recall"
   | "external-memory-mirror-write"

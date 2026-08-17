@@ -464,6 +464,47 @@ export class RunRecorder {
     return warnings;
   }
 
+  async recordSessionRecallStage(input: {
+    stage: "started" | "completed" | "failed";
+    focus: "general" | "visited-sites";
+    sourceSessionIds: string[];
+    resultCount: number;
+    onEvent?: RuntimeEventSink;
+  }): Promise<string[]> {
+    const event = {
+      kind: "session-recall-stage" as const,
+      stage: input.stage,
+      focus: input.focus,
+      sourceSessionIds: [...input.sourceSessionIds],
+      resultCount: input.resultCount
+    };
+    const warnings: string[] = [];
+    try {
+      await this.#sessionDb.appendEvent(this.#currentSessionId(), event);
+    } catch (error) {
+      warnings.push(`session recall stage session event failed: ${errorMessage(error)}`);
+    }
+
+    try {
+      this.#trajectoryRecorder.record("session-recall-stage", {
+        stage: event.stage,
+        focus: event.focus,
+        sourceSessionIds: event.sourceSessionIds,
+        resultCount: event.resultCount
+      });
+    } catch (error) {
+      warnings.push(`session recall stage trajectory event failed: ${errorMessage(error)}`);
+    }
+
+    try {
+      await emit(input.onEvent, event);
+    } catch (error) {
+      warnings.push(`session recall stage runtime event failed: ${errorMessage(error)}`);
+    }
+
+    return warnings;
+  }
+
   async recordExternalMemoryRecall(input: {
     providerIds: string[];
     enabled: boolean;

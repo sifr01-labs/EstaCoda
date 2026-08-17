@@ -60,10 +60,10 @@ export type SessionRecallIntentDecision = {
 };
 
 export type SessionRecallQueryOptions = {
+  focus?: "general" | "visited-sites";
   currentSession?: {
     sessionId: string;
     excludeMessageIds?: string[];
-    focus: "general" | "visited-sites";
   };
 };
 
@@ -106,6 +106,7 @@ export class SessionRecallService {
   async recall(query: string, options: SessionRecallQueryOptions = {}): Promise<SessionRecallResult> {
     const normalizedQuery = query.trim();
     const redactedQuery = redactSensitiveText(normalizedQuery);
+    const focus = options.focus ?? "general";
     if (normalizedQuery.length === 0) {
       return {
         query: normalizedQuery,
@@ -138,11 +139,18 @@ export class SessionRecallService {
     );
     const currentSessionHistory = options.currentSession === undefined
       ? undefined
-      : await this.#currentSessionHistory(options.currentSession, excludedMessageIds);
+      : await this.#currentSessionHistory(options.currentSession, excludedMessageIds, focus);
     const allGroups = [
       ...(currentSessionHistory === undefined ? [] : [currentSessionHistory.group]),
       ...groupHitsBySession(hits)
     ];
+    if (focus === "visited-sites") {
+      return await this.#recallVisitedSites({
+        query: redactedQuery,
+        rawHitCount: rawHits.length,
+        groups: allGroups
+      });
+    }
     const groups = allGroups.slice(0, this.#maxSessions);
     const warnings: string[] = [];
     const blocks: SessionRecallBlock[] = [];
@@ -260,9 +268,69 @@ export class SessionRecallService {
     return new Set(typeof this.#excludeSessionIds === "function" ? this.#excludeSessionIds() : this.#excludeSessionIds);
   }
 
+  async #recallVisitedSites(input: {
+    query: string;
+    rawHitCount: number;
+    groups: SessionHitGroup[];
+  }): Promise<SessionRecallResult> {
+    const blocks: SessionRecallBlock[] = [];
+    const blockByUrl = new Map<string, SessionRecallBlock>();
+
+    for (const group of input.groups) {
+      if (blocks.length >= this.#maxSessions) break;
+      const [messages, events] = await Promise.all([
+        this.#sessionDb.listMessages(group.session.id),
+        this.#sessionDb.listEvents(group.session.id)
+      ]);
+      const evidence = collectBrowserNavigationEvidence(messages, events)
+        .filter((entry) => {
+          const existing = blockByUrl.get(entry.url);
+          if (existing === undefined) return true;
+          if (!existing.sourceSessionIds.includes(group.session.id)) {
+            existing.sourceSessionIds.push(group.session.id);
+          }
+          if (!existing.hitMessageIds.includes(entry.messageId)) {
+            existing.hitMessageIds.push(entry.messageId);
+          }
+          return false;
+        });
+      if (evidence.length === 0) continue;
+
+      const block: SessionRecallBlock = {
+        sessionId: group.session.id,
+        sourceSessionIds: [group.session.id],
+        title: group.session.title,
+        summary: truncateWithEllipsis([
+          `Source session ${group.session.id}: verified browser navigation history.`,
+          renderBrowserNavigationEvidence(evidence, this.#maxContextChars)
+        ].join("\n"), this.#maxSummaryChars),
+        hitMessageIds: [...new Set(evidence.map((entry) => entry.messageId))],
+        usedFallback: false,
+        untrustedNotice: SESSION_RECALL_UNTRUSTED_NOTICE
+      };
+      blocks.push(block);
+      for (const entry of evidence) {
+        blockByUrl.set(entry.url, block);
+      }
+    }
+
+    return {
+      query: input.query,
+      blocks,
+      diagnostics: {
+        rawHitCount: input.rawHitCount,
+        groupedSessionCount: input.groups.length,
+        returnedSessionCount: blocks.length,
+        fallbackCount: 0,
+        warnings: []
+      }
+    };
+  }
+
   async #currentSessionHistory(
     options: NonNullable<SessionRecallQueryOptions["currentSession"]>,
-    excludedMessageIds: ReadonlySet<string>
+    excludedMessageIds: ReadonlySet<string>,
+    focus: NonNullable<SessionRecallQueryOptions["focus"]>
   ): Promise<{ group: SessionHitGroup; navigationContext?: string } | undefined> {
     const session = await this.#sessionDb.getSessionForProfile(options.sessionId, this.#profileId);
     if (
@@ -275,7 +343,7 @@ export class SessionRecallService {
 
     const messages = (await this.#sessionDb.listMessages(session.id))
       .filter((message) => !excludedMessageIds.has(message.id));
-    if (options.focus === "visited-sites") {
+    if (focus === "visited-sites") {
       const events = await this.#sessionDb.listEvents(session.id);
       const evidence = collectBrowserNavigationEvidence(messages, events);
       if (evidence.length === 0) return undefined;

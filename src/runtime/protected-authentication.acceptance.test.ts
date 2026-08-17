@@ -471,10 +471,8 @@ describe("protected authentication journey acceptance", () => {
       // regression. Each corrective commit removes its corresponding entry;
       // the final journey contract is an empty list.
       expect(violations).toEqual([
-        "visited-site recall dispatched 3 provider request(s)",
         "Mission activation consumed 1 plan-only request(s)",
         "protected input required 3 primary provider request(s)",
-        "the verified recalled destination was absent from the initial primary prompt",
         "the browser-authentication turn exposed unrelated tool systems",
       ]);
     } finally {

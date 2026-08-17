@@ -2048,11 +2048,13 @@ describe("AgentLoop provider availability gating", () => {
       runSkillPlaybook: vi.fn(async () => []),
       sessionRecallService: { recall }
     });
+    const liveEvents: RuntimeEvent[] = [];
 
     await loop.handle({
       text: "What did we decide last time?",
       channel: "cli",
-      trustedWorkspace: true
+      trustedWorkspace: true,
+      onEvent: (event) => { liveEvents.push(event); }
     });
 
     expect(recall).toHaveBeenCalledWith("What did we decide last time?");
@@ -2069,6 +2071,25 @@ describe("AgentLoop provider availability gating", () => {
       entryIds: ["source-session"]
     }));
     const events = await sessionDb.listEvents(sessionId);
+    expect(events.filter((event) => event.kind === "session-recall-stage")).toEqual([
+      expect.objectContaining({
+        kind: "session-recall-stage",
+        stage: "started",
+        focus: "general",
+        sourceSessionIds: [],
+        resultCount: 0
+      }),
+      expect.objectContaining({
+        kind: "session-recall-stage",
+        stage: "completed",
+        focus: "general",
+        sourceSessionIds: ["source-session"],
+        resultCount: 1
+      })
+    ]);
+    expect(liveEvents.filter((event) => event.kind === "session-recall-stage")).toEqual(
+      events.filter((event) => event.kind === "session-recall-stage")
+    );
     expect(events).toContainEqual(expect.objectContaining({
       kind: "session-recall-decision",
       triggered: true,
@@ -2107,10 +2128,10 @@ describe("AgentLoop provider availability gating", () => {
     expect(recall).toHaveBeenCalledWith(
       "look at our session history and find what websites we visited",
       {
+        focus: "visited-sites",
         currentSession: {
           sessionId,
-          excludeMessageIds: [current!.id],
-          focus: "visited-sites"
+          excludeMessageIds: [current!.id]
         }
       }
     );

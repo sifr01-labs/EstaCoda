@@ -236,6 +236,74 @@ describe("SessionRecallService", () => {
     expect(result.blocks[0]?.summary).toContain("Authorization: Bearer [REDACTED]");
   });
 
+  it("recalls ranked, deduplicated historical browser destinations without a provider", async () => {
+    const db = new InMemorySessionDB();
+    await seedSession(db, "session-primary", "default", ["Open the fictional developer portal from previous sessions."]);
+    await seedSession(db, "session-secondary", "default", ["Open the fictional developer portal from previous sessions."]);
+    await seedSession(db, "session-unverified", "default", ["Open the fictional developer portal from previous sessions."]);
+    await appendNavigationEvidence(db, {
+      sessionId: "session-primary",
+      toolCallId: "primary-navigation",
+      requestedUrl: "https://portal.example.test/login?view=all&code=raw-secret",
+      canonicalUrl: "https://portal.example.test/login?view=all&code=raw-secret"
+    });
+    await appendNavigationEvidence(db, {
+      sessionId: "session-secondary",
+      toolCallId: "duplicate-navigation",
+      requestedUrl: "https://portal.example.test/login?view=all&code=another-secret",
+      canonicalUrl: "https://portal.example.test/login?view=all&code=another-secret"
+    });
+    await appendNavigationEvidence(db, {
+      sessionId: "session-secondary",
+      toolCallId: "docs-navigation",
+      requestedUrl: "https://portal.example.test/docs",
+      canonicalUrl: "https://portal.example.test/docs"
+    });
+    await db.appendEvent("session-unverified", {
+      kind: "tool-called",
+      tool: "browser.navigate",
+      input: { url: "https://unverified.example.test/" },
+      toolCallId: "failed-navigation"
+    });
+    await db.appendEvent("session-unverified", {
+      kind: "tool-result",
+      tool: "browser.navigate",
+      result: { ok: false, content: "Navigation failed." },
+      toolCallId: "failed-navigation"
+    });
+    const providerExecutor = { complete: vi.fn() };
+
+    const result = await new SessionRecallService({
+      sessionDb: db,
+      profileId: "default",
+      route: auxiliaryRoute(),
+      mainRoute: mainRoute(),
+      providerExecutor,
+      maxSummaryChars: 2_000
+    }).recall("Open the fictional developer portal we visited in previous sessions.", {
+      focus: "visited-sites"
+    });
+    const summaries = result.blocks.map((block) => block.summary).join("\n");
+
+    expect(providerExecutor.complete).not.toHaveBeenCalled();
+    expect(result.blocks.map((block) => block.sessionId)).toEqual(["session-primary", "session-secondary"]);
+    expect(result.blocks.map((block) => block.sourceSessionIds)).toEqual([
+      ["session-primary", "session-secondary"],
+      ["session-secondary"]
+    ]);
+    expect(summaries.match(/https:\/\/portal\.example\.test\/login\?/gu)).toHaveLength(1);
+    expect(summaries).toContain("https://portal.example.test/docs");
+    expect(summaries).not.toContain("raw-secret");
+    expect(summaries).not.toContain("another-secret");
+    expect(summaries).not.toContain("unverified.example.test");
+    expect(result.diagnostics).toMatchObject({
+      groupedSessionCount: 3,
+      returnedSessionCount: 2,
+      fallbackCount: 0,
+      warnings: []
+    });
+  });
+
   it("detects explicit recall intent conservatively", () => {
     expect(detectSessionRecallIntent("What did we decide about deploys?").triggered).toBe(true);
     expect(detectSessionRecallIntent("continue from the last API plan").triggered).toBe(true);
@@ -367,10 +435,10 @@ describe("SessionRecallService", () => {
       maxContextChars: 2_000,
       maxSummaryChars: 2_000
     }).recall(currentQuery, {
+      focus: "visited-sites",
       currentSession: {
         sessionId: "session-mtn",
-        excludeMessageIds: ["current-query"],
-        focus: "visited-sites"
+        excludeMessageIds: ["current-query"]
       }
     });
     const summary = result.blocks[0]?.summary ?? "";
@@ -406,10 +474,10 @@ describe("SessionRecallService", () => {
       maxContextChars: 200,
       maxSummaryChars: 300
     }).recall("Please inspect our session history.", {
+      focus: "general",
       currentSession: {
         sessionId: "session-current",
-        excludeMessageIds: ["current-history-query"],
-        focus: "general"
+        excludeMessageIds: ["current-history-query"]
       }
     });
     const summary = result.blocks[0]?.summary ?? "";
@@ -454,7 +522,8 @@ describe("SessionRecallService", () => {
       profileId: "default",
       maxSummaryChars: 1_000
     }).recall("what websites did we visit", {
-      currentSession: { sessionId: "session-compacted", focus: "visited-sites" }
+      focus: "visited-sites",
+      currentSession: { sessionId: "session-compacted" }
     });
     const summary = result.blocks[0]?.summary ?? "";
 
@@ -484,7 +553,8 @@ describe("SessionRecallService", () => {
       sessionDb: db,
       profileId: "default"
     }).recall("what URLs did we open", {
-      currentSession: { sessionId: "session-other-profile", focus: "visited-sites" }
+      focus: "visited-sites",
+      currentSession: { sessionId: "session-other-profile" }
     });
     expect(crossProfile.blocks).toEqual([]);
 
@@ -493,7 +563,8 @@ describe("SessionRecallService", () => {
       profileId: "other",
       maxSummaryChars: 1_000
     }).recall("what URLs did we open", {
-      currentSession: { sessionId: "session-other-profile", focus: "visited-sites" }
+      focus: "visited-sites",
+      currentSession: { sessionId: "session-other-profile" }
     });
     const summary = sameProfile.blocks[0]?.summary ?? "";
     expect(summary).toContain("/apps?");
@@ -574,6 +645,38 @@ async function seedSession(
       content
     });
   }
+}
+
+async function appendNavigationEvidence(
+  db: InMemorySessionDB,
+  input: {
+    sessionId: string;
+    toolCallId: string;
+    requestedUrl: string;
+    canonicalUrl: string;
+  }
+): Promise<void> {
+  await db.appendEvent(input.sessionId, {
+    kind: "tool-called",
+    tool: "browser.navigate",
+    input: { url: input.requestedUrl },
+    toolCallId: input.toolCallId
+  });
+  await db.appendEvent(input.sessionId, {
+    kind: "tool-result",
+    tool: "browser.navigate",
+    result: {
+      ok: true,
+      content: [
+        "Browser: local-cdp",
+        `URL: ${input.canonicalUrl}`,
+        "",
+        "Action completed with an observable page change.",
+        `URL: ${input.canonicalUrl}`
+      ].join("\n")
+    },
+    toolCallId: input.toolCallId
+  });
 }
 
 function auxiliaryOptions(summary = "provider summary", ok = true) {

@@ -10,6 +10,13 @@ import { MemoryPromptContextBuilder } from "./memory-prompt-context-builder.js";
 import { MemoryRecallOrchestrator } from "./memory-recall-orchestrator.js";
 import { MemoryStore } from "./memory-store.js";
 
+type RecallStageInput = {
+  stage: "started" | "completed" | "failed";
+  focus: "general" | "visited-sites";
+  sourceSessionIds: string[];
+  resultCount: number;
+};
+
 type ExternalRecallAuditInput = {
   providerIds: string[];
   enabled: boolean;
@@ -133,7 +140,14 @@ describe("MemoryRecallOrchestrator", () => {
 
   it("passes runtime-owned current-session boundaries only for explicit history recall", async () => {
     const recall = vi.fn(async (): Promise<SessionRecallResult> => recallResult("session-1"));
-    const { orchestrator } = orchestratorFixture({ sessionRecallService: { recall } });
+    const recordSessionRecallStage = vi.fn(async (_input: RecallStageInput) => []);
+    const { orchestrator } = orchestratorFixture({
+      sessionRecallService: { recall },
+      recorder: {
+        recordSessionRecallStage,
+        recordSessionRecallDecision: vi.fn(async () => [])
+      }
+    });
 
     await orchestrator.prepareForTurn({
       text: "can you look at our session history and find what mtn websites we visited",
@@ -144,13 +158,49 @@ describe("MemoryRecallOrchestrator", () => {
     expect(recall).toHaveBeenCalledWith(
       "can you look at our session history and find what mtn websites we visited",
       {
+        focus: "visited-sites",
         currentSession: {
           sessionId: "session-1",
-          excludeMessageIds: ["current-message"],
-          focus: "visited-sites"
+          excludeMessageIds: ["current-message"]
         }
       }
     );
+    expect(recordSessionRecallStage.mock.calls.map(([event]) => event)).toEqual([
+      expect.objectContaining({
+        stage: "started",
+        focus: "visited-sites",
+        sourceSessionIds: [],
+        resultCount: 0
+      }),
+      expect.objectContaining({
+        stage: "completed",
+        focus: "visited-sites",
+        sourceSessionIds: ["session-1"],
+        resultCount: 1
+      })
+    ]);
+  });
+
+  it("records a failed recall stage when retrieval throws", async () => {
+    const failure = new Error("recall unavailable");
+    const recall = vi.fn(async (): Promise<SessionRecallResult> => { throw failure; });
+    const recordSessionRecallStage = vi.fn(async (_input: RecallStageInput) => []);
+    const { orchestrator } = orchestratorFixture({
+      sessionRecallService: { recall },
+      recorder: {
+        recordSessionRecallStage,
+        recordSessionRecallDecision: vi.fn(async () => [])
+      }
+    });
+
+    await expect(orchestrator.prepareForTurn({
+      text: "What URLs did we open?"
+    })).rejects.toBe(failure);
+
+    expect(recordSessionRecallStage.mock.calls.map(([event]) => event.stage)).toEqual([
+      "started",
+      "failed"
+    ]);
   });
 
   it("records deterministic omitted-recall diagnostics when the recall service is unavailable", async () => {
@@ -502,6 +552,12 @@ function orchestratorFixture(input: {
   };
   externalMemoryProviders?: ExternalMemoryProvider[];
   recorder?: {
+    recordSessionRecallStage?(input: {
+      stage: "started" | "completed" | "failed";
+      focus: "general" | "visited-sites";
+      sourceSessionIds: string[];
+      resultCount: number;
+    }): Promise<string[]>;
     recordSessionRecallDecision(input: {
       triggered: boolean;
       reason: string;
