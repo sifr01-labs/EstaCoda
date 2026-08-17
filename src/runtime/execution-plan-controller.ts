@@ -23,6 +23,7 @@ import {
   type ExecutionPlanItem,
   type ExecutionPlanItemStatus,
   type ExecutionPlanMergeInput,
+  type ExecutionPlanProvenance,
   type ExecutionPlanStatus,
   type ExecutionPlanWriteContext,
   type ExecutionPlanWriteInput
@@ -101,12 +102,31 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
     const previous = this.#store.current();
     const items = validateWriteItems(input.items).map((item) => this.#validateCompletion(item));
     const requirements = validateCapabilityRequirements(input.requirements, items);
+    const requestedOriginTurnId = stableId(originTurnId, "originTurnId", 256);
+    const provenance = validateWriteProvenance(context);
+    const replacesProvisional = previous !== undefined && canReplaceProvisionalPlan({
+      previous,
+      requestedOriginTurnId,
+      provenance
+    });
+    if (previous !== undefined && !replacesProvisional) {
+      throw new ExecutionPlanValidationError(
+        "An execution plan already exists. Use operation=merge to refine or progress the active Mission."
+      );
+    }
     let plan = validatePlan({
       objective: boundedText(input.objective, "objective", EXECUTION_PLAN_MAX_OBJECTIVE_CHARS),
-      originTurnId: stableId(originTurnId, "originTurnId", 256),
+      originTurnId: replacesProvisional ? previous.originTurnId : requestedOriginTurnId,
       revision: (previous?.revision ?? 0) + 1,
       status: "active",
       items,
+      provenance: replacesProvisional
+        ? {
+            source: "provider",
+            provisional: false,
+            ...(previous.provenance?.sessionId === undefined ? {} : { sessionId: previous.provenance.sessionId })
+          }
+        : provenance,
       ...(requirements === undefined ? {} : { requirements })
     });
     if (requirements !== undefined) {
@@ -120,7 +140,9 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
       });
     }
     await this.#recordTransition({
-      kind: plan.status === "active" ? "execution-plan-started" : eventKindForPlan(plan),
+      kind: replacesProvisional
+        ? eventKindForPlan(plan)
+        : plan.status === "active" ? "execution-plan-started" : eventKindForPlan(plan),
       plan
     }, sink);
     return this.#store.replace(plan);
@@ -418,12 +440,14 @@ function validateHydratedPlan(input: ExecutionPlan): ExecutionPlan {
   });
   const requirements = validateCapabilityRequirements(input.requirements, items);
   const capabilityPreflight = validateCapabilityPreflight(input.capabilityPreflight, requirements);
+  const provenance = validatePersistedProvenance(input.provenance);
   const validated = validatePlan({
     objective: boundedText(input.objective, "objective", EXECUTION_PLAN_MAX_OBJECTIVE_CHARS),
     originTurnId: stableId(input.originTurnId, "originTurnId", 256),
     revision: input.revision,
     status: "active",
     items,
+    ...(provenance === undefined ? {} : { provenance }),
     ...(requirements === undefined ? {} : { requirements }),
     ...(capabilityPreflight === undefined ? {} : { capabilityPreflight })
   });
@@ -436,6 +460,63 @@ function validateHydratedPlan(input: ExecutionPlan): ExecutionPlan {
     throw new ExecutionPlanValidationError(`Execution plan exceeds ${EXECUTION_PLAN_MAX_SERIALIZED_BYTES} serialized bytes.`);
   }
   return plan;
+}
+
+export function isRuntimeProvisionalExecutionPlan(plan: ExecutionPlan): boolean {
+  return plan.provenance?.source === "runtime" && plan.provenance.provisional === true;
+}
+
+function canReplaceProvisionalPlan(input: {
+  previous: ExecutionPlan;
+  requestedOriginTurnId: string;
+  provenance: ExecutionPlanProvenance;
+}): boolean {
+  return isRuntimeProvisionalExecutionPlan(input.previous) &&
+    input.previous.revision === 1 &&
+    input.provenance.source === "provider" &&
+    input.previous.originTurnId === input.requestedOriginTurnId &&
+    input.previous.provenance?.sessionId !== undefined &&
+    input.previous.provenance.sessionId === input.provenance.sessionId;
+}
+
+function validateWriteProvenance(context: ExecutionPlanWriteContext | undefined): ExecutionPlanProvenance {
+  const source = context?.source ?? "runtime";
+  if (source !== "runtime" && source !== "provider") {
+    throw new ExecutionPlanValidationError("Execution plan provenance source is invalid.");
+  }
+  const provisional = context?.provisional === true;
+  if (provisional && source !== "runtime") {
+    throw new ExecutionPlanValidationError("Only the runtime may create a provisional execution plan.");
+  }
+  const sessionId = context?.sessionId === undefined
+    ? undefined
+    : stableId(context.sessionId, "provenance sessionId", 256);
+  if (provisional && sessionId === undefined) {
+    throw new ExecutionPlanValidationError("A provisional execution plan requires its originating Session.");
+  }
+  return {
+    source,
+    provisional,
+    ...(sessionId === undefined ? {} : { sessionId })
+  };
+}
+
+function validatePersistedProvenance(input: unknown): ExecutionPlanProvenance | undefined {
+  if (input === undefined) return undefined;
+  if (!isRecord(input) || (input.source !== "runtime" && input.source !== "provider") || typeof input.provisional !== "boolean") {
+    throw new ExecutionPlanValidationError("Persisted execution plan provenance is malformed.");
+  }
+  const sessionId = input.sessionId === undefined
+    ? undefined
+    : stableId(input.sessionId, "provenance sessionId", 256);
+  if (input.provisional === true && (input.source !== "runtime" || sessionId === undefined)) {
+    throw new ExecutionPlanValidationError("Persisted provisional execution plan provenance is invalid.");
+  }
+  return {
+    source: input.source,
+    provisional: input.provisional,
+    ...(sessionId === undefined ? {} : { sessionId })
+  };
 }
 
 function validateWriteItems(input: unknown): ExecutionPlanItem[] {

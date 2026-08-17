@@ -2227,9 +2227,12 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       }],
       executionPlanController: controller,
       maxProviderIterations: 3,
-      onExecutePlans: async ({ stepInput }) => {
+      onExecutePlans: async ({ sessionId, stepInput }) => {
         if (stepInput.providerExecution?.toolCalls.some((call) => call.name === "plan")) {
-          await controller.write(proposal, "visible-turn");
+          await controller.write(proposal, "visible-turn", undefined, {
+            source: "provider",
+            sessionId
+          });
         }
       }
     });
@@ -2332,7 +2335,14 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
   it("keeps a repaired five-step MTN Mission instead of substituting the provisional fallback", async () => {
     const controller = new ExecutionPlanController(new ExecutionPlanStore());
-    const planTool = createPlanTools({ controller })[0]!;
+    let activeSessionId: string | undefined;
+    const planTool = createPlanTools({
+      controller,
+      currentSessionId: () => {
+        if (activeSessionId === undefined) throw new Error("test session is not active");
+        return activeSessionId;
+      }
+    })[0]!;
     const proposal = {
       operation: "write" as const,
       objective: "Configure approved MTN products in Postman and verify the result",
@@ -2358,8 +2368,9 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       }],
       executionPlanController: controller,
       maxProviderIterations: 2,
-      onExecutePlans: async ({ stepInput }) => {
+      onExecutePlans: async ({ sessionId, stepInput }) => {
         if (!stepInput.providerExecution?.toolCalls.some((call) => call.name === "plan")) return;
+        activeSessionId = sessionId;
         const result = await planTool.run(proposal, { visibleTurnId: "visible-turn" });
         expect(result.ok).toBe(true);
       }

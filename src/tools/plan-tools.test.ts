@@ -179,6 +179,48 @@ describe("plan tool", () => {
     expect(JSON.stringify(controller.current())).not.toContain("evidenceCallIds");
   });
 
+  it("replaces a runtime provisional Mission through the provider plan tool", async () => {
+    const controller = new ExecutionPlanController(new ExecutionPlanStore());
+    await controller.write({
+      objective: "Configure and verify",
+      items: [
+        { id: "execute", content: "Complete the requested multi-step work", status: "in_progress" },
+        { id: "verify", content: "Verify the resulting state", status: "pending" }
+      ]
+    }, "turn-refine", undefined, {
+      source: "runtime",
+      provisional: true,
+      sessionId: "session-refine"
+    });
+    const tool = createPlanTools({
+      controller,
+      currentSessionId: () => "session-refine"
+    })[0]!;
+
+    const result = await tool.run({
+      operation: "write",
+      objective: "Configure and verify the destination",
+      items: [
+        { id: "inspect", content: "Inspect the destination", status: "in_progress", completionKind: "reasoning" },
+        { id: "update", content: "Update the destination", status: "pending", completionKind: "reasoning" },
+        { id: "verify-update", content: "Verify the destination", status: "pending", completionKind: "reasoning" }
+      ]
+    }, { visibleTurnId: "turn-refine" });
+
+    expect(result.ok).toBe(true);
+    expect(controller.current()).toMatchObject({
+      originTurnId: "turn-refine",
+      revision: 2,
+      provenance: { source: "provider", provisional: false, sessionId: "session-refine" },
+      items: [
+        { id: "inspect", status: "in_progress" },
+        { id: "update", status: "pending" },
+        { id: "verify-update", status: "pending" }
+      ]
+    });
+    expect(controller.current()?.items.map((item) => item.id)).not.toContain("execute");
+  });
+
   it("keeps structurally invalid Mission writes rejected", async () => {
     const controller = new ExecutionPlanController(new ExecutionPlanStore());
     const tool = createPlanTools({ controller })[0]!;

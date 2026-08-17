@@ -23,6 +23,7 @@ describe("ExecutionSupervisionController", () => {
     expect(planController.current()).toMatchObject({
       objective: "Update the collection and then verify the resulting state.",
       originTurnId: "turn-activation",
+      provenance: { source: "runtime", provisional: true, sessionId: "session-test" },
       items: [
         { id: "execute", status: "in_progress" },
         { id: "verify", status: "pending" }

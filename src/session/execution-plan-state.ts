@@ -26,6 +26,7 @@ export function latestExecutionPlanSnapshot(events: readonly SessionEvent[]): Ex
 function cloneExecutionPlanSnapshot(plan: ExecutionPlan): ExecutionPlan {
   return {
     ...plan,
+    ...(plan.provenance === undefined ? {} : { provenance: { ...plan.provenance } }),
     items: plan.items.map((item) => ({
       ...item,
       ...(item.evidenceCallIds === undefined ? {} : { evidenceCallIds: [...item.evidenceCallIds] }),

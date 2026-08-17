@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { EXECUTION_PLAN_MAX_ITEMS } from "../contracts/execution-plan.js";
-import { ExecutionPlanController, ExecutionPlanValidationError } from "./execution-plan-controller.js";
+import {
+  ExecutionPlanController,
+  ExecutionPlanValidationError,
+  isRuntimeProvisionalExecutionPlan
+} from "./execution-plan-controller.js";
 import { ExecutionPlanStore } from "./execution-plan-store.js";
 import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 import { ExecutionCapabilityPreflight } from "./execution-capability-preflight.js";
@@ -48,6 +52,175 @@ function evidenceIndex() {
 }
 
 describe("ExecutionPlanController", () => {
+  it("atomically replaces only a same-turn same-Session runtime provisional Mission", async () => {
+    const events: string[] = [];
+    const target = new ExecutionPlanController(
+      new ExecutionPlanStore(),
+      async (event) => { events.push(event.kind); },
+      evidenceIndex()
+    );
+    const provisional = await target.write({
+      objective: "Configure the destination and verify it",
+      items: [
+        { id: "execute", content: "Complete the requested multi-step work", status: "in_progress" },
+        { id: "verify", content: "Verify the resulting state", status: "pending" }
+      ]
+    }, "turn-1", undefined, {
+      source: "runtime",
+      provisional: true,
+      sessionId: "session-1"
+    });
+
+    expect(isRuntimeProvisionalExecutionPlan(provisional)).toBe(true);
+    const refined = await target.write({
+      objective: "Configure the destination and verify every change",
+      items: [
+        { id: "inspect", content: "Inspect the destination", status: "in_progress" },
+        { id: "update", content: "Update the destination", status: "pending" },
+        { id: "verify-update", content: "Verify the update", status: "pending" }
+      ]
+    }, "turn-1", undefined, {
+      source: "provider",
+      sessionId: "session-1"
+    });
+
+    expect(refined).toMatchObject({
+      originTurnId: "turn-1",
+      revision: 2,
+      provenance: { source: "provider", provisional: false, sessionId: "session-1" },
+      items: [
+        { id: "inspect", status: "in_progress" },
+        { id: "update", status: "pending" },
+        { id: "verify-update", status: "pending" }
+      ]
+    });
+    expect(isRuntimeProvisionalExecutionPlan(refined)).toBe(false);
+    expect(events).toEqual(["execution-plan-started", "execution-plan-updated"]);
+  });
+
+  it("rejects provisional replacement from another turn or Session without mutating it", async () => {
+    for (const replacement of [
+      { originTurnId: "turn-2", sessionId: "session-1" },
+      { originTurnId: "turn-1", sessionId: "session-2" }
+    ]) {
+      const target = controller();
+      await target.write({
+        objective: "Original request",
+        items: [{ id: "execute", content: "Execute", status: "in_progress" }]
+      }, "turn-1", undefined, {
+        source: "runtime",
+        provisional: true,
+        sessionId: "session-1"
+      });
+      const before = target.current();
+
+      await expect(target.write({
+        objective: "Replacement",
+        items: [{ id: "replace", content: "Replace", status: "in_progress" }]
+      }, replacement.originTurnId, undefined, {
+        source: "provider",
+        sessionId: replacement.sessionId
+      })).rejects.toThrow("Use operation=merge");
+      expect(target.current()).toEqual(before);
+    }
+  });
+
+  it("does not replace a provisional Mission after it has recorded progress", async () => {
+    const target = controller();
+    await target.write({
+      objective: "Original request",
+      items: [
+        { id: "execute", content: "Execute", status: "in_progress" },
+        { id: "verify", content: "Verify", status: "pending" }
+      ]
+    }, "turn-1", undefined, {
+      source: "runtime",
+      provisional: true,
+      sessionId: "session-1"
+    });
+    await target.merge({
+      items: [{ id: "execute", content: "Execute the discovered workflow" }]
+    });
+    const progressed = target.current();
+
+    await expect(target.write({
+      objective: "Replacement",
+      items: [{ id: "replacement", content: "Replace", status: "in_progress" }]
+    }, "turn-1", undefined, {
+      source: "provider",
+      sessionId: "session-1"
+    })).rejects.toThrow("Use operation=merge");
+    expect(target.current()).toEqual(progressed);
+  });
+
+  it("rejects a replacement with multiple active items without mutating the provisional Mission", async () => {
+    const target = controller();
+    await target.write({
+      objective: "Original request",
+      items: [{ id: "execute", content: "Execute", status: "in_progress" }]
+    }, "turn-1", undefined, {
+      source: "runtime",
+      provisional: true,
+      sessionId: "session-1"
+    });
+    const provisional = target.current();
+
+    await expect(target.write({
+      objective: "Invalid replacement",
+      items: [
+        { id: "one", content: "One", status: "in_progress" },
+        { id: "two", content: "Two", status: "in_progress" }
+      ]
+    }, "turn-1", undefined, {
+      source: "provider",
+      sessionId: "session-1"
+    })).rejects.toThrow("Only one plan item may be in_progress");
+    expect(target.current()).toEqual(provisional);
+  });
+
+  it("never replaces an established Mission and preserves ordinary merge behavior", async () => {
+    const target = controller();
+    await target.write({
+      objective: "Established Mission",
+      items: [{ id: "work", content: "Do the work", status: "in_progress" }]
+    }, "turn-1");
+
+    await expect(target.write({
+      objective: "Overwrite",
+      items: [{ id: "other", content: "Other work", status: "in_progress" }]
+    }, "turn-1", undefined, { source: "provider", sessionId: "session-1" })).rejects.toThrow(
+      "Use operation=merge"
+    );
+    await expect(target.merge({
+      objective: "Refined established Mission",
+      items: [{ id: "work", content: "Do the refined work" }]
+    })).resolves.toMatchObject({
+      objective: "Refined established Mission",
+      revision: 2,
+      items: [{ id: "work", content: "Do the refined work", status: "in_progress" }]
+    });
+  });
+
+  it("requires runtime provenance and a Session for provisional plans", async () => {
+    const target = controller();
+    await expect(target.write({
+      objective: "Invalid provider provisional",
+      items: [{ id: "work", content: "Work", status: "in_progress" }]
+    }, "turn-1", undefined, {
+      source: "provider",
+      provisional: true,
+      sessionId: "session-1"
+    })).rejects.toThrow("Only the runtime");
+    await expect(target.write({
+      objective: "Missing Session",
+      items: [{ id: "work", content: "Work", status: "in_progress" }]
+    }, "turn-1", undefined, {
+      source: "runtime",
+      provisional: true
+    })).rejects.toThrow("originating Session");
+    expect(target.current()).toBeUndefined();
+  });
+
   it("preflights requirements, stores only runtime assessments, and keeps a ready Mission active", async () => {
     const registry = new ToolRegistry();
     registry.register({

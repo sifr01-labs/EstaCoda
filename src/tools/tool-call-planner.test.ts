@@ -147,4 +147,88 @@ describe("stableToolCallId", () => {
       allowedTools: ["file.read", "invented_tool"]
     }]);
   });
+
+  it("canonicalizes session-visible provider aliases in Mission requirements", () => {
+    const registry = new ToolRegistry();
+    const definitions = [
+      { ...testTool, name: "plan" },
+      { ...testTool, name: "mcp.target.read" },
+      { ...testTool, name: "mcp.target.update" }
+    ];
+    for (const definition of definitions) {
+      registry.register({
+        ...definition,
+        isAvailable: () => true,
+        run: async () => ({ ok: true, content: "ok" })
+      });
+    }
+    const catalog = buildProviderToolSchemaCatalog({ tools: definitions });
+    const planner = new ToolCallPlanner({ registry, aliases: catalog.aliases });
+
+    const planned = planner.planFromProviderDelta({
+      id: "plan-requirements",
+      name: "plan",
+      argumentsText: JSON.stringify({
+        operation: "write",
+        objective: "Update target",
+        items: [{ id: "update", content: "Update", status: "in_progress" }],
+        requirements: [
+          { id: "read", itemId: "update", tool: "mcp_target_read", capability: "read" },
+          { id: "mutate", itemId: "update", tool: "mcp_target_update", capability: "mutate" },
+          { id: "verify", itemId: "update", tool: "mcp.target.read", capability: "verify" }
+        ]
+      })
+    });
+
+    expect(planned).toMatchObject({
+      status: "planned",
+      input: {
+        requirements: [
+          { id: "read", tool: "mcp.target.read" },
+          { id: "mutate", tool: "mcp.target.update" },
+          { id: "verify", tool: "mcp.target.read" }
+        ]
+      }
+    });
+  });
+
+  it("rejects unavailable and ambiguous Mission requirement tool names before execution", () => {
+    const registry = new ToolRegistry();
+    const definitions = [
+      { ...testTool, name: "plan" },
+      { ...testTool, name: "file.read" },
+      { ...testTool, name: "file_read" }
+    ];
+    for (const definition of definitions) {
+      registry.register({
+        ...definition,
+        isAvailable: () => true,
+        run: async () => ({ ok: true, content: "ok" })
+      });
+    }
+    const catalog = buildProviderToolSchemaCatalog({ tools: definitions });
+    const planner = new ToolCallPlanner({ registry, aliases: catalog.aliases });
+    const call = (tool: string) => planner.planFromProviderDelta({
+      name: "plan",
+      argumentsText: JSON.stringify({
+        operation: "write",
+        requirements: [{ id: "read", itemId: "read", tool, capability: "read" }]
+      })
+    });
+
+    expect(call("invented_tool")).toMatchObject({
+      status: "invalid",
+      error: expect.stringContaining("unavailable tool")
+    });
+    expect(call("file_read")).toMatchObject({
+      status: "invalid",
+      error: expect.stringContaining("ambiguous tool name")
+    });
+    expect(call("mcp.unavailable.mutate")).toMatchObject({
+      status: "planned",
+      input: {
+        requirements: [{ tool: "mcp.unavailable.mutate" }]
+      }
+    });
+  });
 });

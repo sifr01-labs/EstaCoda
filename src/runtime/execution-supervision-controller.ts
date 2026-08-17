@@ -355,7 +355,11 @@ export class ExecutionSupervisionController {
           status: "pending"
         }
       ]
-    }, this.#visibleTurnId, this.#onEvent);
+    }, this.#visibleTurnId, this.#onEvent, {
+      source: "runtime",
+      provisional: true,
+      sessionId: this.#currentSessionId()
+    });
   }
 }
 

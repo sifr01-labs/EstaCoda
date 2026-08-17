@@ -19,13 +19,22 @@ const events: SessionEvent[] = [{
     originTurnId: "turn-1",
     revision: 2,
     status: "active",
+    provenance: { source: "provider", provisional: false, sessionId: "session-1" },
     items: [{ id: "inspect", content: "Inspect APIs", status: "pending" }]
   }
 }];
 
 describe("execution plan session state", () => {
   it("hydrates only the latest unresolved bounded snapshot", () => {
-    expect(hydratableExecutionPlanSnapshot(events)?.revision).toBe(2);
+    const snapshot = hydratableExecutionPlanSnapshot(events);
+    expect(snapshot).toMatchObject({
+      revision: 2,
+      provenance: { source: "provider", provisional: false, sessionId: "session-1" }
+    });
+    snapshot!.provenance!.sessionId = "mutated-session";
+    expect((events[1] as { plan: ExecutionPlan }).plan.provenance?.sessionId).toBe(
+      "session-1"
+    );
     expect(executionPlanCarryForwardEvent(events)).toMatchObject({
       kind: "execution-plan-updated",
       plan: { revision: 2, originTurnId: "turn-1" }

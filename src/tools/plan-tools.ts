@@ -8,13 +8,14 @@ import {
 
 export function createPlanTools(options: {
   controller?: ExecutionPlanControllerApi;
+  currentSessionId?: () => string;
 }): readonly RegisteredTool<ExecutionPlanToolInput>[] {
   if (options.controller === undefined) return [];
   const controller = options.controller;
   return [{
     name: "plan",
     description:
-      "Read or refine the bounded execution plan for the current foreground request. The runtime automatically starts a provisional Mission for clearly multi-step work. When an active plan is present in context, use merge to refine its generic items and record material progress. For cross-system work whose provisional plan does not yet declare capabilities, use write once to replace it with a specific plan containing exact session-visible read, mutate, and independent verify tool requirements; declare protected paths and protectedSource=browser when browser secrets must be transferred. The runtime preflights these declarations without invoking tools or granting authority. Use write for other work only when no plan exists, and read only when the current plan is not already present in context. This tool tracks work but grants no authority and does not create durable Tasks.",
+      "Read or refine the bounded execution plan for the current foreground request. The runtime automatically starts a provisional Mission for clearly multi-step work; use write once to replace it with a specific plan from the same turn. Otherwise use merge to refine or record material progress. Cross-system plans must contain exact session-visible read, mutate, and independent verify tool requirements; declare protected paths and protectedSource=browser when browser secrets must be transferred. The runtime preflights these declarations without invoking tools or granting authority. Use write for other work only when no plan exists, and read only when the current plan is not already present in context. This tool tracks work but grants no authority and does not create durable Tasks.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -121,7 +122,9 @@ export function createPlanTools(options: {
               groupedProtectedTransferAvailable:
                 context.onSecureInputRequest !== undefined &&
                 "transferGroup" in context.onSecureInputRequest &&
-                typeof context.onSecureInputRequest.transferGroup === "function"
+                typeof context.onSecureInputRequest.transferGroup === "function",
+              source: "provider",
+              ...(options.currentSessionId === undefined ? {} : { sessionId: options.currentSessionId() })
             }
           );
           return planResult(plan, repair?.repairs);
@@ -143,7 +146,10 @@ export const planToolProvider: SessionToolProvider = {
   name: "plan",
   kind: "session",
   createTools(ctx) {
-    return createPlanTools({ controller: ctx.executionPlanController });
+    return createPlanTools({
+      controller: ctx.executionPlanController,
+      currentSessionId: ctx.currentSessionId
+    });
   }
 };
 

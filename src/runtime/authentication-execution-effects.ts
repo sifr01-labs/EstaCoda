@@ -10,6 +10,7 @@ import {
   type ExecutionPlanWriteInput,
 } from "../contracts/execution-plan.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import { isRuntimeProvisionalExecutionPlan } from "./execution-plan-controller.js";
 
 const AUTHENTICATION_TOOL_NAMES = new Set([
   "browser.fill_protected_form",
@@ -323,9 +324,7 @@ function resolveAuthenticationItemIds(plan: ExecutionPlan): {
 }
 
 function isProvisionalPlan(plan: ExecutionPlan): boolean {
-  return plan.items.length === 2 &&
-    plan.items.some((item) => item.id === "execute") &&
-    plan.items.some((item) => item.id === "verify");
+  return isRuntimeProvisionalExecutionPlan(plan);
 }
 
 function findItem(items: readonly ExecutionPlanItem[], preferredId: string, pattern: RegExp): ExecutionPlanItem | undefined {

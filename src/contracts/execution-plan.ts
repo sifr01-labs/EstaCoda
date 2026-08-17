@@ -83,10 +83,23 @@ export type ExecutionPlanCapabilityPreflight = {
   assessments: ExecutionPlanCapabilityAssessment[];
 };
 
-/** Per-call runtime facts used by preflight; never persisted as model-authored state. */
+/** Per-call runtime facts used while accepting a plan write; never model-authored. */
 export type ExecutionPlanWriteContext = {
   protectedTransferAvailable?: boolean;
   groupedProtectedTransferAvailable?: boolean;
+  /** Runtime-owned identity for the component authoring this plan snapshot. */
+  source?: "runtime" | "provider";
+  /** Only the runtime may mark its initial execution skeleton as provisional. */
+  provisional?: boolean;
+  /** Current logical Session identity; required for provisional runtime plans. */
+  sessionId?: string;
+};
+
+/** Runtime-owned provenance. It is not accepted by the model-visible plan schema. */
+export type ExecutionPlanProvenance = {
+  source: "runtime" | "provider";
+  provisional: boolean;
+  sessionId?: string;
 };
 
 export type ExecutionPlanBlocker = {
@@ -173,6 +186,7 @@ export type ExecutionPlan = {
   revision: number;
   status: ExecutionPlanStatus;
   items: ExecutionPlanItem[];
+  provenance?: ExecutionPlanProvenance;
   requirements?: ExecutionPlanCapabilityRequirement[];
   capabilityPreflight?: ExecutionPlanCapabilityPreflight;
 };
