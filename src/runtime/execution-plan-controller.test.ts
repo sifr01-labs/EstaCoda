@@ -291,6 +291,66 @@ describe("ExecutionPlanController", () => {
     expect(events).toEqual(["execution-plan-updated"]);
   });
 
+  it("reopens a user-input blocker inside an otherwise active Mission", async () => {
+    const events: string[] = [];
+    const target = controller();
+    await target.write({
+      objective: "Sign in and verify the account",
+      items: [
+        {
+          id: "credentials",
+          content: "Submit credentials",
+          status: "blocked",
+          blocker: { kind: "user_input_required", summary: "Provide the credentials." }
+        },
+        { id: "verify", content: "Verify authentication", status: "pending" }
+      ]
+    }, "turn-1");
+    expect(target.current()?.status).toBe("active");
+
+    await target.prepareForTurn("but that was the wrong portal, use the correct one", async (event) => {
+      events.push(event.kind);
+    });
+
+    expect(target.current()).toMatchObject({
+      revision: 2,
+      status: "active",
+      items: [
+        { id: "credentials", status: "in_progress" },
+        { id: "verify", status: "pending" }
+      ]
+    });
+    expect(target.current()?.items[0]).not.toHaveProperty("blocker");
+    expect(events).toEqual(["execution-plan-updated"]);
+  });
+
+  it("clears a blocker when merge moves an item back to executable work", async () => {
+    const target = controller();
+    await target.write({
+      objective: "Recover authentication",
+      items: [
+        {
+          id: "credentials",
+          content: "Submit credentials",
+          status: "blocked",
+          blocker: { kind: "user_input_required", summary: "Provide corrected credentials." }
+        },
+        { id: "verify", content: "Verify authentication", status: "pending" }
+      ]
+    }, "turn-1");
+
+    await expect(target.merge({
+      items: [{ id: "credentials", status: "in_progress" }]
+    })).resolves.toMatchObject({
+      status: "active",
+      items: [
+        { id: "credentials", status: "in_progress" },
+        { id: "verify", status: "pending" }
+      ]
+    });
+    expect(target.current()?.items[0]).not.toHaveProperty("blocker");
+  });
+
   it("does not reopen non-user blockers or empty follow-ups", async () => {
     const external = controller();
     await external.write({

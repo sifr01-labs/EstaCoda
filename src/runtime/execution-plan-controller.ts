@@ -169,6 +169,9 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
       }
 
       const existing = items[index]!;
+      const statusLeavesBlockedState = rawPatch.status !== undefined &&
+        rawPatch.status !== "blocked" &&
+        rawPatch.status !== "cancelled";
       items[index] = validateItem({
         ...existing,
         ...(rawPatch.content === undefined ? {} : { content: rawPatch.content }),
@@ -176,7 +179,9 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
         ...(rawPatch.evidenceCallIds === undefined ? {} : { evidenceCallIds: rawPatch.evidenceCallIds }),
         ...(rawPatch.completionKind === undefined ? {} : { completionKind: rawPatch.completionKind }),
         ...(rawPatch.blocker === undefined
-          ? {}
+          ? statusLeavesBlockedState
+            ? { blocker: undefined }
+            : {}
           : rawPatch.blocker === null
             ? { blocker: undefined }
             : { blocker: rawPatch.blocker })
@@ -289,7 +294,7 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
       this.clear();
       return;
     }
-    if (current.status === "blocked" && shouldResumeUserInputBlockedPlan(current, userText)) {
+    if (shouldResumeUserInputBlockedPlan(current, userText)) {
       this.#awaitingResumeDecision = false;
       const plan = resumeUserInputBlockedPlan(current);
       await this.#recordTransition({ kind: "execution-plan-updated", plan }, sink);
@@ -360,7 +365,7 @@ function shouldResumeUserInputBlockedPlan(plan: ExecutionPlan, text: string): bo
 }
 
 function resumeUserInputBlockedPlan(plan: ExecutionPlan): ExecutionPlan {
-  let activeItemSelected = false;
+  let activeItemSelected = plan.items.some((item) => item.status === "in_progress");
   const items = plan.items.map((item): ExecutionPlanItem => {
     if (item.status !== "blocked" || item.blocker?.kind !== "user_input_required") {
       return { ...item };

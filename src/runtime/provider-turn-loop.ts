@@ -292,6 +292,7 @@ export class ProviderTurnLoop {
     let toolFeedbackLedger = createTurnToolFeedbackLedger();
     let providerCallsThisTurn = 0;
     let providerTokensThisTurn = 0;
+    let planUpdateRepairUsed = false;
     const workingSessionId = this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
     const mcpReadLedger = new TurnMcpReadLedger({
       profileId: this.#profileId,
@@ -652,11 +653,20 @@ export class ProviderTurnLoop {
         loopToolExecutions
       );
       const hasRecoverableToolFeedback = currentPlans.some((plan) => isRecoverableToolPlanStatus(plan.status));
+      const hasRecoverablePlanUpdateFailure = currentPlans.some((plan) =>
+        plan.tool === "plan" && plan.status === "executed" && plan.result?.ok === false
+      );
+      const shouldRepairFailedPlanUpdate =
+        hasRecoverablePlanUpdateFailure &&
+        !planUpdateRepairUsed &&
+        iteration + consumedProviderIterations < this.#budgets.maxProviderIterations &&
+        providerToolExecutions.length < this.#budgets.maxProviderToolCalls;
+      if (shouldRepairFailedPlanUpdate) planUpdateRepairUsed = true;
       const repeatedFailureBudgetExceeded = this.#recordRepeatedToolFailures(loopToolExecutions, repeatedFailures);
       const supervisionAssessment = executionSupervision.assessProgress(loopToolExecutions);
       const { browserObservation, executionPlanProgress, userInputBlocker, missingCapabilityBlocker } = supervisionAssessment;
       this.#syncBrowserSessionLease(false);
-      if (userInputBlocker !== undefined) {
+      if (userInputBlocker !== undefined && !shouldRepairFailedPlanUpdate) {
         execution = executionSupervision.userInputRequiredReceipt(execution, userInputBlocker.summary);
         await this.#runRecorder.recordProviderIteration({
           iteration,

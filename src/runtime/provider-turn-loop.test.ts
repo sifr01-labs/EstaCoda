@@ -2621,6 +2621,113 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     );
   });
 
+  it("allows one provider continuation to repair a failed plan update before surfacing an existing blocker", async () => {
+    const planStore = new ExecutionPlanStore();
+    planStore.replace({
+      objective: "Sign in to the correct fictional portal",
+      originTurnId: "turn-plan-repair",
+      revision: 1,
+      status: "active",
+      items: [
+        {
+          id: "credentials",
+          content: "Submit credentials",
+          status: "blocked",
+          blocker: { kind: "user_input_required", summary: "Provide the credentials." }
+        },
+        { id: "verify", content: "Verify authentication", status: "pending" }
+      ]
+    });
+    const failedPlanUpdate = toolExecutionForTool("call-plan-repair", "plan", "invalid Mission update");
+    failedPlanUpdate.result = {
+      ok: false,
+      content: "Only blocked or cancelled items may include a blocker."
+    };
+    let executionBatch = 0;
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-plan-repair", "{}", "plan")]),
+        providerExecution("", [providerToolCall("call-correct-navigation", "{}", "browser.navigate")]),
+        providerExecution("Recovered on the correct fictional portal.")
+      ],
+      toolSteps: [
+        { executions: [failedPlanUpdate] },
+        { executions: [toolExecutionForTool("call-correct-navigation", "browser.navigate", "correct portal opened")] }
+      ],
+      executionPlanReader: planStore,
+      maxProviderIterations: 3,
+      onExecutePlans: () => {
+        executionBatch += 1;
+        if (executionBatch !== 2) return;
+        planStore.replace({
+          objective: "Sign in to the correct fictional portal",
+          originTurnId: "turn-plan-repair",
+          revision: 2,
+          status: "completed",
+          items: [
+            { id: "credentials", content: "Submit credentials", status: "completed" },
+            { id: "verify", content: "Verify authentication", status: "completed" }
+          ]
+        });
+      }
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
+    expect(harness.executePlans).toHaveBeenCalledTimes(3);
+    expect(result.toolExecutions.map((execution) => execution.toolCallId)).toEqual([
+      "call-plan-repair",
+      "call-correct-navigation"
+    ]);
+    expect(result.providerExecution?.response?.content).toContain("Recovered on the correct fictional portal.");
+    expect(result.providerExecution?.response?.content).not.toContain("Mission needs your input");
+  });
+
+  it("bounds failed plan-update repair to one continuation", async () => {
+    const planStore = new ExecutionPlanStore();
+    planStore.replace({
+      objective: "Recover a fictional sign-in",
+      originTurnId: "turn-bounded-plan-repair",
+      revision: 1,
+      status: "active",
+      items: [
+        {
+          id: "credentials",
+          content: "Submit credentials",
+          status: "blocked",
+          blocker: { kind: "user_input_required", summary: "Provide the credentials." }
+        },
+        { id: "verify", content: "Verify authentication", status: "pending" }
+      ]
+    });
+    const failed = (id: string) => {
+      const execution = toolExecutionForTool(id, "plan", "invalid Mission update");
+      execution.result = { ok: false, content: "Invalid Mission update." };
+      return execution;
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-plan-first", "{}", "plan")]),
+        providerExecution("", [providerToolCall("call-plan-second", "{}", "plan")]),
+        providerExecution("must not run")
+      ],
+      toolSteps: [
+        { executions: [failed("call-plan-first")] },
+        { executions: [failed("call-plan-second")] }
+      ],
+      executionPlanReader: planStore,
+      maxProviderIterations: 4
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    expect(result.providerExecution?.response?.content).toBe(
+      "The Mission needs your input before it can continue: Provide the credentials."
+    );
+  });
+
   it("does not charge protected operator input time to the provider wall-clock budget", async () => {
     let now = 0;
     const handler: SecureInputRequestHandler = async () => {

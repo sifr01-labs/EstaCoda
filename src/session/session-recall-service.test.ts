@@ -256,6 +256,15 @@ describe("SessionRecallService", () => {
       triggered: true,
       includeCurrentSession: false
     });
+    expect(detectSessionRecallIntent("Use the developer website we've been visiting in previous sessions.")).toMatchObject({
+      triggered: true,
+      focus: "visited-sites",
+      includeCurrentSession: false
+    });
+    expect(detectSessionRecallIntent("Pick up the configuration from earlier sessions.")).toMatchObject({
+      triggered: true,
+      includeCurrentSession: false
+    });
     expect(detectSessionRecallIntent("Review our past conversation.").triggered).toBe(true);
     expect(detectSessionRecallIntent("راجع سجل الجلسة وأخبرني ما المواقع التي زرناها")).toMatchObject({
       triggered: true,

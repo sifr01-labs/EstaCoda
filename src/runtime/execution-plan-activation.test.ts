@@ -33,6 +33,10 @@ describe("execution plan activation", () => {
       proposedToolNames: ["browser.navigate"]
     })).toEqual({ required: true, reasons: ["authentication"] });
     expect(assessExecutionPlanActivation({
+      userText: "Pull up a browser and get us logged into our developer account.",
+      proposedToolNames: ["browser.navigate"]
+    })).toEqual({ required: true, reasons: ["authentication"] });
+    expect(assessExecutionPlanActivation({
       userText: "سجّل دخولنا إلى حساب المطور.",
       proposedToolNames: ["browser.navigate"]
     })).toEqual({ required: true, reasons: ["authentication"] });

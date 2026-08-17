@@ -63,6 +63,7 @@ type AcceptanceScenario = {
   otpOutcome?: OtpOutcome;
   otpSameDocument?: boolean;
   cancelCollection?: boolean;
+  cancelFirstCollectionOnly?: boolean;
   changeSubmitDuringCollection?: boolean;
   closeBrowserDuringCollection?: boolean;
   preexistingSignOut?: boolean;
@@ -320,6 +321,83 @@ describe("protected authentication journey acceptance", () => {
       if (!disposed) await harness.runtime.dispose();
     }
   });
+
+  it("recovers a partially blocked Mission when the user corrects the fictional portal", async () => {
+    const harness = await createAcceptanceHarness({
+      name: "corrected fictional portal recovery",
+      cancelFirstCollectionOnly: true,
+      authenticated: true,
+      expectedCredentialSubmits: 1,
+      expectedOtpPrompts: 1,
+      expectedOtpSubmits: 1,
+    });
+    const legacyUrl = `${PORTAL_ORIGIN}/legacy/login`;
+    const correctUrl = `${PORTAL_ORIGIN}/current/login`;
+    harness.resetProviderAttempt(legacyUrl);
+
+    try {
+      const first = await harness.runtime.handle({
+        text: "Pull up a browser and get us logged into our fictional developer account.",
+        channel: "cli",
+        trustedWorkspace: true,
+        onSecureInputRequest: harness.secureInputHandler,
+      });
+      expect(first.text).toContain("The Mission needs your input before it can continue");
+      expect(harness.providerRequests[0] === undefined ? [] : providerToolNames(harness.providerRequests[0])).toEqual(["plan"]);
+      expect(first.toolExecutions.find((execution) => execution.tool.name === "browser.navigate")?.input).toMatchObject({
+        url: legacyUrl,
+      });
+      expect(latestExecutionPlanSnapshot(await harness.runtime.sessionDb.listEvents(harness.runtime.sessionId))).toMatchObject({
+        status: "active",
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            id: "authentication.credentials",
+            status: "blocked",
+            blocker: expect.objectContaining({ kind: "user_input_required" }),
+          }),
+        ]),
+      });
+
+      showCredentialLoginPage(harness.socket);
+      harness.socket.snapshot.url = correctUrl;
+      harness.resetProviderAttempt(correctUrl);
+      const second = await harness.runtime.handle({
+        text: "but that was the wrong portal; use the correct fictional portal instead",
+        channel: "cli",
+        trustedWorkspace: true,
+        onSecureInputRequest: harness.secureInputHandler,
+      });
+
+      expect(second.text).toContain("Authentication confirmed from the authenticated account page.");
+      expect(second.text).not.toContain("Mission needs your input");
+      expect(second.toolExecutions.find((execution) => execution.tool.name === "browser.navigate")?.input).toMatchObject({
+        url: correctUrl,
+      });
+      expect(latestExecutionPlanSnapshot(await harness.runtime.sessionDb.listEvents(harness.runtime.sessionId))).toMatchObject({
+        status: "completed",
+        items: expect.arrayContaining([
+          expect.objectContaining({ id: "authentication.credentials", status: "completed" }),
+          expect.objectContaining({ id: "authentication.verify", status: "completed" }),
+        ]),
+      });
+      expect(harness.groupedCredentialPrompts).toBe(2);
+      expect(harness.credentialSubmits).toBe(1);
+      expect(harness.otpSubmits).toBe(1);
+      expect(harness.providerRequests.length).toBeLessThanOrEqual(10);
+
+      const persisted = {
+        messages: await harness.runtime.sessionDb.listMessages(harness.runtime.sessionId),
+        events: await harness.runtime.sessionDb.listEvents(harness.runtime.sessionId),
+        providerRequests: harness.providerRequests,
+        first,
+        second,
+      };
+      const serialized = inspect(persisted, { depth: 20, maxArrayLength: null });
+      for (const secret of SECRETS) expect(serialized).not.toContain(secret);
+    } finally {
+      await harness.runtime.dispose();
+    }
+  });
 });
 
 async function createAcceptanceHarness(scenario: AcceptanceScenario) {
@@ -442,7 +520,7 @@ async function createAcceptanceHarness(scenario: AcceptanceScenario) {
     executable: true,
     health: () => ({ available: true }),
     listModels: () => [model],
-    complete: async (request) => providerScript(request),
+    complete: async (request) => providerScript.complete(request),
   };
   providerRegistry.register(provider);
 
@@ -477,6 +555,11 @@ async function createAcceptanceHarness(scenario: AcceptanceScenario) {
     ) => {
       collectedKinds.push(request.request.kind);
       if (scenario.cancelCollection && context.group?.index === 1) return { status: "cancelled" as const };
+      if (
+        scenario.cancelFirstCollectionOnly &&
+        groupedCredentialPrompts === 1 &&
+        context.group?.index === 1
+      ) return { status: "cancelled" as const };
       if (context.group?.index === 1 && scenario.changeSubmitDuringCollection) {
         socket.protectedSubmitInspection.current = false;
       }
@@ -522,6 +605,7 @@ async function createAcceptanceHarness(scenario: AcceptanceScenario) {
     logs,
     collectedKinds,
     secureInputHandler,
+    resetProviderAttempt: providerScript.resetAttempt,
     get groupedCredentialPrompts() { return groupedCredentialPrompts; },
     get otpPrompts() { return otpPrompts; },
     get credentialSubmits() { return credentialSubmits; },
@@ -534,13 +618,15 @@ function createProviderScript(input: {
   timeline: string[];
   providerRequests: ProviderRequest[];
 }) {
+  let planRequested = false;
   let navigateRequested = false;
   let credentialsRequested = false;
   let otpRequested = false;
   let authenticatedSnapshotRequested = false;
   let nextCallId = 1;
+  let navigationUrl = `${PORTAL_ORIGIN}/login`;
 
-  return (request: ProviderRequest): ProviderResponse => {
+  const complete = (request: ProviderRequest): ProviderResponse => {
     input.timeline.push("provider");
     input.providerRequests.push(structuredClone(request));
     const call = (name: string, args: Record<string, unknown>) => toolCallResponse(
@@ -549,9 +635,20 @@ function createProviderScript(input: {
       args,
     );
 
+    if (!planRequested && providerToolNames(request).length === 1 && providerToolNames(request)[0] === "plan") {
+      planRequested = true;
+      return call("plan", {
+        operation: "write",
+        objective: "Authenticate the fictional developer account and verify the resulting state.",
+        items: [
+          { id: "authentication.credentials", content: "Submit credentials", status: "in_progress" },
+          { id: "authentication.verify", content: "Verify authentication", status: "pending" },
+        ],
+      });
+    }
     if (!navigateRequested) {
       navigateRequested = true;
-      return call("browser.navigate", { url: `${PORTAL_ORIGIN}/login` });
+      return call("browser.navigate", { url: navigationUrl });
     }
     if (!credentialsRequested) {
       credentialsRequested = true;
@@ -590,6 +687,26 @@ function createProviderScript(input: {
         : "Authentication could not be confirmed from the settled browser state.",
     );
   };
+
+  return {
+    complete,
+    resetAttempt(url = `${PORTAL_ORIGIN}/login`) {
+      navigateRequested = false;
+      credentialsRequested = false;
+      otpRequested = false;
+      authenticatedSnapshotRequested = false;
+      navigationUrl = url;
+    },
+  };
+}
+
+function providerToolNames(request: ProviderRequest): string[] {
+  if (!Array.isArray(request.tools)) return [];
+  return request.tools.flatMap((tool) => {
+    if (typeof tool !== "object" || tool === null) return [];
+    const fn = (tool as { function?: { name?: unknown } }).function;
+    return typeof fn?.name === "string" ? [fn.name] : [];
+  });
 }
 
 function latestIdentity(request: ProviderRequest): {
