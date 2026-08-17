@@ -110,6 +110,60 @@ describe("ExecutionSupervisionController", () => {
     expect(receipt.response?.content).toContain("2 consecutive iterations");
   });
 
+  it("continues an unchanged Mission after a canonical browser state transition", () => {
+    const planController = activePlan();
+    const baseline = pageSnapshot(identity(4, 6, 10), "Apps", []);
+    baseline.url = "https://portal.example.com/apps";
+    baseline.tab = { ...baseline.tab!, url: baseline.url };
+    const { supervision } = createSupervision({
+      planController,
+      existingExecutions: [snapshotExecution("apps-page", baseline)],
+      noProgressNudgeIteration: 2,
+      maxNoProgressIterations: 3
+    });
+    supervision.assessProgress([]);
+    supervision.assessProgress([]);
+    const planBefore = JSON.stringify(planController.current());
+    const changed: BrowserSnapshot = {
+      ...baseline,
+      url: "https://portal.example.com/apps/example/edit",
+      identity: identity(5, 7, 11),
+      tab: { ...baseline.tab!, url: "https://portal.example.com/apps/example/edit" },
+      actionDelta: {
+        outcome: "dispatched-unverified",
+        beforeIdentity: baseline.identity,
+        afterIdentity: identity(5, 7, 11),
+        waitCondition: "url",
+        conditionMet: false,
+        actionDispatched: true,
+        settlementFailed: true,
+        documentChangeObserved: true,
+        stateObservation: "post-dispatch",
+        url: {
+          changed: true,
+          before: baseline.url,
+          after: "https://portal.example.com/apps/example/edit"
+        }
+      }
+    };
+    const transition = supervision.assessProgress([{
+      ...snapshotExecution("open-edit", changed),
+      tool: toolDefinition("browser.click")
+    }]);
+
+    expect(transition.executionPlanProgress).toMatchObject({
+      materialProgress: true,
+      progressKinds: ["browser-state-change"],
+      noProgressIterations: 0,
+      shouldStop: false
+    });
+    expect(JSON.stringify(planController.current())).toBe(planBefore);
+    expect(supervision.assessProgress([]).executionPlanProgress).toMatchObject({
+      noProgressIterations: 1,
+      shouldStop: false
+    });
+  });
+
   it("owns user-input blocker receipts without exposing provider continuation", async () => {
     const store = new ExecutionPlanStore();
     store.replace({

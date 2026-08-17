@@ -33,6 +33,62 @@ function execution(overrides: Partial<ToolExecutionRecord> = {}): ToolExecutionR
   };
 }
 
+function browserExecution(input: {
+  toolCallId: string;
+  tool?: string;
+  sessionId?: string;
+  tabRef?: string;
+  documentEpoch: number;
+  actionRevision: number;
+  observationId?: number;
+  url: string;
+  outcome?: "changed" | "no-change" | "timeout" | "dispatched-unverified";
+  documentChangeObserved?: boolean;
+  urlChanged?: boolean;
+  beforeDocumentEpoch?: number;
+  beforeActionRevision?: number;
+}): ToolExecutionRecord {
+  const actionDelta = input.outcome === undefined ? undefined : {
+    outcome: input.outcome,
+    documentChangeObserved: input.documentChangeObserved,
+    url: { changed: input.urlChanged ?? false },
+    ...(input.beforeDocumentEpoch === undefined || input.beforeActionRevision === undefined ? {} : {
+      beforeIdentity: {
+        documentEpoch: input.beforeDocumentEpoch,
+        actionRevision: input.beforeActionRevision,
+        observationId: Math.max(1, (input.observationId ?? 1) - 1)
+      },
+      afterIdentity: {
+        documentEpoch: input.documentEpoch,
+        actionRevision: input.actionRevision,
+        observationId: input.observationId ?? 1
+      }
+    })
+  };
+  return execution({
+    tool: { ...execution().tool, name: input.tool ?? "browser.snapshot" },
+    targetKey: "browser-session:portal",
+    toolCallId: input.toolCallId,
+    result: {
+      ok: true,
+      content: "safe browser state",
+      metadata: {
+        snapshot: {
+          sessionId: input.sessionId ?? "browser-session",
+          url: input.url,
+          identity: {
+            documentEpoch: input.documentEpoch,
+            actionRevision: input.actionRevision,
+            observationId: input.observationId ?? 1
+          },
+          tab: { ref: input.tabRef ?? "@t1", url: input.url, controlled: true },
+          ...(actionDelta === undefined ? {} : { actionDelta })
+        }
+      }
+    }
+  });
+}
+
 describe("ExecutionPlanProgressGuard", () => {
   it("nudges at three and stops at six no-progress iterations", () => {
     const plan = activePlan();
@@ -309,6 +365,148 @@ describe("ExecutionPlanProgressGuard", () => {
     expect(guard.observe({ plan, executions: [browserAction("changed", "select-changed", "browser.select")] })).toMatchObject({
       materialProgress: true,
       progressKinds: ["target-mutation"]
+    });
+  });
+
+  it("credits a canonical browser transition after dispatched settlement fails", () => {
+    const plan = activePlan({
+      objective: "Configure the developer app",
+      items: [{ id: "configure", content: "Configure the browser app", status: "in_progress" }]
+    });
+    const guard = new ExecutionPlanProgressGuard({
+      plan,
+      existingExecutions: [browserExecution({
+        toolCallId: "apps-page",
+        documentEpoch: 5,
+        actionRevision: 7,
+        observationId: 20,
+        url: "https://developers.example.com/apps"
+      })],
+      noProgressNudgeIteration: 3,
+      maxNoProgressIterations: 4
+    });
+    guard.observe({ plan, executions: [] });
+    guard.observe({ plan, executions: [] });
+    guard.observe({ plan, executions: [] });
+    const planBefore = JSON.stringify(plan);
+
+    const transition = guard.observe({
+      plan,
+      executions: [browserExecution({
+        tool: "browser.click",
+        toolCallId: "open-edit",
+        documentEpoch: 6,
+        actionRevision: 8,
+        observationId: 21,
+        url: "https://developers.example.com/apps/tiktok-connect/edit?tab=credentials",
+        outcome: "dispatched-unverified",
+        documentChangeObserved: true,
+        urlChanged: true
+      })]
+    });
+
+    expect(transition).toMatchObject({
+      active: true,
+      materialProgress: true,
+      progressKinds: ["browser-state-change"],
+      noProgressIterations: 0,
+      shouldStop: false
+    });
+    expect(JSON.stringify(plan)).toBe(planBefore);
+    expect(guard.observe({ plan, executions: [] })).toMatchObject({
+      noProgressIterations: 1,
+      shouldStop: false
+    });
+  });
+
+  it("uses a dispatched action's bound before/after identities when no prior snapshot is indexed", () => {
+    const plan = activePlan({
+      items: [{ id: "configure", content: "Configure the browser app", status: "in_progress" }]
+    });
+    const guard = new ExecutionPlanProgressGuard({
+      plan,
+      noProgressNudgeIteration: 2,
+      maxNoProgressIterations: 4
+    });
+    guard.observe({ plan, executions: [] });
+
+    expect(guard.observe({ plan, executions: [browserExecution({
+      tool: "browser.click",
+      toolCallId: "first-browser-result",
+      beforeDocumentEpoch: 2,
+      beforeActionRevision: 3,
+      documentEpoch: 3,
+      actionRevision: 4,
+      observationId: 9,
+      url: "https://portal.example.com/apps/example/edit",
+      outcome: "dispatched-unverified"
+    })] })).toMatchObject({
+      materialProgress: true,
+      progressKinds: ["browser-state-change"],
+      noProgressIterations: 0
+    });
+  });
+
+  it("ignores cosmetic observations and previously seen browser-state churn", () => {
+    const plan = activePlan({
+      items: [{ id: "inspect", content: "Inspect the browser app", status: "in_progress" }]
+    });
+    const initial = browserExecution({
+      toolCallId: "initial",
+      documentEpoch: 2,
+      actionRevision: 4,
+      observationId: 10,
+      url: "https://portal.example.com/apps?notification=1"
+    });
+    const guard = new ExecutionPlanProgressGuard({
+      plan,
+      existingExecutions: [initial],
+      noProgressNudgeIteration: 3,
+      maxNoProgressIterations: 6
+    });
+
+    expect(guard.observe({ plan, executions: [browserExecution({
+      toolCallId: "cosmetic",
+      documentEpoch: 2,
+      actionRevision: 4,
+      observationId: 11,
+      url: "https://portal.example.com/apps?notification=2#new"
+    })] })).toMatchObject({
+      materialProgress: false,
+      progressKinds: ["incidental-observation"]
+    });
+    expect(guard.observe({ plan, executions: [browserExecution({
+      toolCallId: "new-controls",
+      documentEpoch: 2,
+      actionRevision: 5,
+      observationId: 12,
+      url: "https://portal.example.com/apps?notification=2"
+    })] })).toMatchObject({
+      materialProgress: true,
+      progressKinds: ["browser-state-change"],
+      noProgressIterations: 0
+    });
+    expect(guard.observe({ plan, executions: [browserExecution({
+      toolCallId: "repeat-controls",
+      documentEpoch: 2,
+      actionRevision: 5,
+      observationId: 13,
+      url: "https://portal.example.com/apps?notification=3"
+    })] })).toMatchObject({
+      materialProgress: false,
+      progressKinds: ["incidental-observation"]
+    });
+    expect(guard.observe({ plan, executions: [browserExecution({
+      toolCallId: "new-tab",
+      tabRef: "@t2",
+      documentEpoch: 2,
+      actionRevision: 5,
+      observationId: 14,
+      url: "https://portal.example.com/apps?notification=4"
+    })] })).toMatchObject({
+      materialProgress: true,
+      progressKinds: ["browser-state-change"],
+      noProgressIterations: 0
     });
   });
 

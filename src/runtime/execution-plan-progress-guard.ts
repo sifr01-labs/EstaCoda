@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { ExecutionPlan, ExecutionPlanItem } from "../contracts/execution-plan.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import { redactUrlForMetadata } from "../browser/url-safety.js";
 import { executionEvidenceStatus } from "./execution-evidence-index.js";
 
 const MUTATION_RISK_CLASSES = new Set<ToolRiskClass>([
@@ -40,6 +41,7 @@ const MAX_DISCOVERY_OBSERVATIONS_PER_ITEM = 2;
 export type ExecutionProgressKind =
   | "plan-transition"
   | "new-required-evidence"
+  | "browser-state-change"
   | "target-mutation"
   | "verification"
   | "concrete-blocker"
@@ -70,15 +72,30 @@ type ExecutionPlanFocus = {
   significantTerms: Set<string>;
 };
 
+type BrowserProgressIdentity = {
+  sessionId: string;
+  tabRef?: string;
+  documentEpoch: number;
+  actionRevision: number;
+  url: string;
+  outcome?: "changed" | "no-change" | "timeout" | "dispatched-unverified";
+  documentChangeObserved?: boolean;
+  deltaChanged?: boolean;
+  deltaIdentityChanged?: boolean;
+};
+
 /**
  * Tracks goal-directed progress for one provider turn. Content-derived keys are
- * hashed, remain in memory, and are never emitted or persisted.
+ * hashed; bounded canonical browser state is redacted to origin/path. Both stay
+ * in memory and are never emitted or persisted.
  */
 export class ExecutionPlanProgressGuard {
   readonly #nudgeIteration: number;
   readonly #stopIteration: number;
   readonly #seenObservations = new Set<string>();
   readonly #seenMutations = new Set<string>();
+  readonly #seenBrowserStates = new Set<string>();
+  readonly #latestBrowserStateByFocusSession = new Map<string, BrowserProgressIdentity>();
   readonly #verifiedFocuses = new Set<string>();
   readonly #discoveryCounts = new Map<string, number>();
   readonly #nudgedFocuses = new Set<string>();
@@ -164,6 +181,24 @@ export class ExecutionPlanProgressGuard {
   ): void {
     for (const execution of executions) {
       if (executionEvidenceStatus(execution) !== "success" || focus === undefined) continue;
+
+      const browserState = browserProgressIdentity(execution);
+      if (browserState !== undefined) {
+        const stateScope = `${focus.key}\u0000${browserState.sessionId}`;
+        const previousState = this.#latestBrowserStateByFocusSession.get(stateScope);
+        const stateKey = fingerprint({ focus: focus.key, ...browserState });
+        const stateSeen = this.#seenBrowserStates.has(stateKey);
+        this.#seenBrowserStates.add(stateKey);
+        this.#latestBrowserStateByFocusSession.set(stateScope, browserState);
+        if (
+          !stateSeen &&
+          browserStateChanged(previousState, browserState) &&
+          isExecutionRelevant(execution, focus)
+        ) {
+          progressKinds?.add("browser-state-change");
+          if (progressKinds !== undefined) continue;
+        }
+      }
 
       if (isExplicitBrowserNoChange(execution)) {
         progressKinds?.add("incidental-observation");
@@ -301,6 +336,107 @@ function browserActionOutcome(execution: ToolExecutionRecord): string | undefine
   if (delta === null || typeof delta !== "object" || Array.isArray(delta)) return undefined;
   const outcome = (delta as Record<string, unknown>).outcome;
   return typeof outcome === "string" ? outcome : undefined;
+}
+
+function browserProgressIdentity(execution: ToolExecutionRecord): BrowserProgressIdentity | undefined {
+  if (!execution.tool.name.startsWith("browser.")) return undefined;
+  const snapshot = recordValue(execution.result?.metadata?.snapshot);
+  const identity = recordValue(snapshot?.identity);
+  const sessionId = boundedStateString(snapshot?.sessionId, 160);
+  const documentEpoch = positiveInteger(identity?.documentEpoch);
+  const actionRevision = positiveInteger(identity?.actionRevision);
+  const url = safeBrowserStateUrl(snapshot?.url);
+  if (sessionId === undefined || documentEpoch === undefined || actionRevision === undefined || url === undefined) {
+    return undefined;
+  }
+  const tab = recordValue(snapshot?.tab);
+  const tabRef = boundedStateString(tab?.ref, 160);
+  const delta = recordValue(snapshot?.actionDelta);
+  const outcome = browserProgressOutcome(delta?.outcome);
+  const documentChangeObserved = typeof delta?.documentChangeObserved === "boolean"
+    ? delta.documentChangeObserved
+    : undefined;
+  const deltaUrl = recordValue(delta?.url);
+  const deltaChanged = typeof deltaUrl?.changed === "boolean" ? deltaUrl.changed : undefined;
+  const beforeIdentity = browserStateIdentity(recordValue(delta?.beforeIdentity));
+  const afterIdentity = browserStateIdentity(recordValue(delta?.afterIdentity));
+  const deltaIdentityChanged = beforeIdentity === undefined || afterIdentity === undefined
+    ? undefined
+    : beforeIdentity.documentEpoch !== afterIdentity.documentEpoch ||
+      beforeIdentity.actionRevision !== afterIdentity.actionRevision;
+  return {
+    sessionId,
+    ...(tabRef === undefined ? {} : { tabRef }),
+    documentEpoch,
+    actionRevision,
+    url,
+    ...(outcome === undefined ? {} : { outcome }),
+    ...(documentChangeObserved === undefined ? {} : { documentChangeObserved }),
+    ...(deltaChanged === undefined ? {} : { deltaChanged }),
+    ...(deltaIdentityChanged === undefined ? {} : { deltaIdentityChanged })
+  };
+}
+
+function browserStateChanged(
+  previous: BrowserProgressIdentity | undefined,
+  next: BrowserProgressIdentity
+): boolean {
+  if (previous !== undefined) {
+    return previous.tabRef !== next.tabRef ||
+      previous.documentEpoch !== next.documentEpoch ||
+      previous.actionRevision !== next.actionRevision ||
+      previous.url !== next.url;
+  }
+  return next.documentChangeObserved === true ||
+    next.deltaChanged === true ||
+    next.deltaIdentityChanged === true ||
+    next.outcome === "changed";
+}
+
+function browserStateIdentity(value: Record<string, unknown> | undefined): {
+  documentEpoch: number;
+  actionRevision: number;
+} | undefined {
+  const documentEpoch = positiveInteger(value?.documentEpoch);
+  const actionRevision = positiveInteger(value?.actionRevision);
+  return documentEpoch === undefined || actionRevision === undefined
+    ? undefined
+    : { documentEpoch, actionRevision };
+}
+
+function safeBrowserStateUrl(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.trim().length === 0) return undefined;
+  const redacted = redactUrlForMetadata(value);
+  if (redacted.startsWith("[")) return redacted;
+  try {
+    const parsed = new URL(redacted);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function browserProgressOutcome(value: unknown): BrowserProgressIdentity["outcome"] {
+  return value === "changed" || value === "no-change" || value === "timeout" || value === "dispatched-unverified"
+    ? value
+    : undefined;
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function positiveInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+function boundedStateString(value: unknown, maxChars: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized.length > 0 && normalized.length <= maxChars ? normalized : undefined;
 }
 
 function isVerificationItem(item: ExecutionPlanItem): boolean {
