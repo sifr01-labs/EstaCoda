@@ -23,6 +23,11 @@ import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { ToolRegistry } from "./tool-registry.js";
 import type { DelegateCallBudget } from "../delegation/delegate-call-budget.js";
 import { buildToolSecurityTargetSummary } from "./tool-target-summary.js";
+import {
+  findProtectedArgumentEnvelopes,
+  matchesProtectedArgumentPattern,
+  setAtProtectedArgumentPointer,
+} from "../security/protected-argument-path.js";
 
 const MAX_STORED_TOOL_RESULT_CHARS = 12_000;
 const MAX_CONTEXT_SUMMARY_CHARS = 500;
@@ -618,32 +623,100 @@ async function runToolWithProtectedArguments(
   context: ToolExecutionContext
 ): Promise<ToolResult> {
   const declarations = tool.protectedArguments ?? [];
-  const protectedArguments = declarations.flatMap((declaration) => {
-    const envelope = getAtPath(input, declaration.path);
-    return isProtectedInputEnvelope(envelope) ? [{ declaration, envelope }] : [];
-  });
-  if (protectedArguments.length === 0) return await tool.run(input, context);
-  if (protectedArguments.length > 1) {
-    return protectedArgumentFailure("Only one protected argument may be supplied per tool call.");
+  // Some trusted core tools own their protected-input collection internally.
+  // Declaration matching applies only to the generic argument-injection path.
+  if (declarations.length === 0) return await tool.run(input, context);
+  const envelopes = findProtectedArgumentEnvelopes(input);
+  const protectedArguments: Array<{
+    declaration: (typeof declarations)[number];
+    pointer: string;
+    envelope: Record<string, unknown>;
+  }> = [];
+  for (const candidate of envelopes) {
+    const matches = declarations.filter((declaration) =>
+      matchesProtectedArgumentPattern(declaration.path, candidate.pointer, input)
+    );
+    if (matches.length !== 1) {
+      return protectedArgumentFailure(matches.length === 0
+        ? `Protected tool argument ${candidate.pointer} is not declared.`
+        : `Protected tool argument ${candidate.pointer} matches more than one declaration.`);
+    }
+    protectedArguments.push({ declaration: matches[0]!, pointer: candidate.pointer, envelope: candidate.envelope });
   }
+  if (protectedArguments.length === 0) return await tool.run(input, context);
   if (context.onSecureInputRequest === undefined) {
     return protectedArgumentFailure("Protected tool arguments are unavailable on this runtime.");
   }
 
-  const [{ declaration, envelope }] = protectedArguments;
-  const descriptor = parseProtectedArgumentDescriptor(envelope.protectedInput, tool.name, declaration.path);
-  if (descriptor === undefined) {
+  const prepared = protectedArguments.map(({ declaration, pointer, envelope }) => ({
+    declaration,
+    pointer,
+    descriptor: parseProtectedArgumentDescriptor(envelope, tool.name, pointer),
+  }));
+  if (prepared.some((entry) => entry.descriptor === undefined)) {
     return protectedArgumentFailure("Protected tool argument metadata is invalid.");
   }
+
+  if (prepared.length > 1) {
+    if (prepared.some((entry) => entry.descriptor!.source === undefined)) {
+      return protectedArgumentFailure("Grouped protected tool arguments require verified sources for atomic delivery.");
+    }
+    const transferGroup = (context.onSecureInputRequest as Partial<SecureInputTransferRequestHandler>).transferGroup;
+    if (transferGroup === undefined) {
+      return protectedArgumentFailure("Grouped protected tool argument delivery is unavailable on this runtime.");
+    }
+    let dispatchedResult: ToolResult | undefined;
+    const receipt = await transferGroup({
+      purpose: `Transfer ${prepared.length} protected values to ${tool.name}`,
+      items: prepared.map((entry, index) => ({
+        id: `argument-${index + 1}`,
+        source: entry.descriptor!.source!,
+        request: {
+          kind: entry.descriptor!.kind,
+          purpose: entry.descriptor!.purpose,
+          retention: "use-once",
+          destination: protectedArgumentDestination(tool.name, entry.declaration, entry.pointer),
+        },
+        handling: entry.declaration.handling,
+      })),
+    }, async (values) => {
+      if (values.length !== prepared.length) throw new Error("Protected tool argument group was incomplete.");
+      const dispatchedInput = structuredClone(input);
+      const decoded: string[] = [];
+      try {
+        for (const [index, entry] of prepared.entries()) {
+          const value = values.find((candidate) => candidate.id === `argument-${index + 1}`);
+          if (value === undefined) throw new Error("Protected tool argument group was incomplete.");
+          const secret = new TextDecoder("utf-8", { fatal: true }).decode(value.value);
+          decoded.push(secret);
+          setAtProtectedArgumentPointer(dispatchedInput, entry.pointer, secret);
+        }
+        dispatchedResult = redactExactSecrets(await tool.run(dispatchedInput, {
+          ...context,
+          onSecureInputRequest: undefined,
+        }), decoded);
+      } catch {
+        throw new Error("Protected tool argument dispatch failed.");
+      }
+    }).catch(() => undefined);
+    if (receipt?.status !== "delivered" || dispatchedResult === undefined) {
+      return protectedArgumentFailure(receipt === undefined
+        ? "Protected tool argument group delivery failed."
+        : `Protected tool argument group ${receipt.status}: ${receipt.reason ?? "delivery did not complete."}`);
+    }
+    return {
+      ok: dispatchedResult.ok,
+      content: dispatchedResult.ok
+        ? `${prepared.length} protected values transferred atomically. Verify the destination state with a separate read.`
+        : "The protected destination reported that the grouped transfer did not complete.",
+      metadata: { protectedTransfer: true, protectedValueCount: prepared.length },
+    };
+  }
+
+  const [{ declaration, pointer, descriptor: parsedDescriptor }] = prepared;
+  const descriptor = parsedDescriptor!;
   let dispatchedResult: ToolResult | undefined;
-  const destination = declaration.destination === undefined
-    ? { type: "tool-argument" as const, toolName: tool.name, argumentPath: declaration.path }
-    : {
-        type: "mcp-argument" as const,
-        serverId: declaration.destination.serverId,
-        toolName: declaration.destination.toolName,
-        argumentPath: declaration.path
-      };
+  const destination = protectedArgumentDestination(tool.name, declaration, pointer);
   const request = {
     kind: descriptor.kind,
     purpose: descriptor.purpose,
@@ -653,7 +726,7 @@ async function runToolWithProtectedArguments(
   const consume = async (value: Uint8Array) => {
     const decoded = new TextDecoder("utf-8", { fatal: true }).decode(value);
     const dispatchedInput = structuredClone(input);
-    setAtPath(dispatchedInput, declaration.path, decoded);
+    setAtProtectedArgumentPointer(dispatchedInput, pointer, decoded);
     try {
       dispatchedResult = redactExactSecret(await tool.run(dispatchedInput, {
         ...context,
@@ -668,7 +741,7 @@ async function runToolWithProtectedArguments(
     ? context.onSecureInputRequest(request, consume)
     : transfer === undefined
       ? Promise.resolve(undefined)
-      : transfer({ source: descriptor.source, request }, consume)
+      : transfer({ source: descriptor.source, request, handling: declaration.handling }, consume)
   ).catch(() => undefined);
 
   if (receipt?.status !== "delivered" || dispatchedResult === undefined) {
@@ -688,33 +761,19 @@ async function runToolWithProtectedArguments(
   return dispatchedResult;
 }
 
-function getAtPath(input: Record<string, unknown>, path: string): unknown {
-  if (!isSafeProtectedArgumentPath(path)) return undefined;
-  let current: unknown = input;
-  for (const segment of path.split(".")) {
-    if (!isObjectRecord(current) || !Object.hasOwn(current, segment)) return undefined;
-    current = current[segment];
-  }
-  return current;
-}
-
-function setAtPath(input: Record<string, unknown>, path: string, value: string): void {
-  if (!isSafeProtectedArgumentPath(path)) throw new Error("Protected argument path is invalid.");
-  const segments = path.split(".");
-  let current = input;
-  for (const segment of segments.slice(0, -1)) {
-    const next = current[segment];
-    if (!isObjectRecord(next)) throw new Error("Protected argument path changed before dispatch.");
-    current = next;
-  }
-  current[segments.at(-1) as string] = value;
-}
-
-function isSafeProtectedArgumentPath(path: string): boolean {
-  return path.split(".").every((segment) =>
-    /^[A-Za-z_][A-Za-z0-9_]*$/u.test(segment) &&
-    segment !== "__proto__" && segment !== "prototype" && segment !== "constructor"
-  );
+function protectedArgumentDestination(
+  toolName: string,
+  declaration: import("../contracts/tool.js").ProtectedToolArgumentDeclaration,
+  pointer: string
+) {
+  return declaration.destination === undefined
+    ? { type: "tool-argument" as const, toolName, argumentPath: pointer }
+    : {
+        type: "mcp-argument" as const,
+        serverId: declaration.destination.serverId,
+        toolName: declaration.destination.toolName,
+        argumentPath: pointer,
+      };
 }
 
 function parseProtectedArgumentDescriptor(
@@ -778,6 +837,10 @@ function isSafeMetadata(value: unknown): value is string {
 function redactExactSecret(result: ToolResult, secret: string): ToolResult {
   if (secret.length === 0) return result;
   return replaceExactSecret(result, secret) as ToolResult;
+}
+
+function redactExactSecrets(result: ToolResult, secrets: readonly string[]): ToolResult {
+  return secrets.reduce((current, secret) => redactExactSecret(current, secret), result);
 }
 
 function replaceExactSecret(value: unknown, secret: string): unknown {

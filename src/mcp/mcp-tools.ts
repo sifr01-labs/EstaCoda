@@ -1,5 +1,6 @@
 import type { MCPServerConfig } from "../config/runtime-config.js";
 import type { RegisteredTool, ToolResult, ToolRiskClass } from "../contracts/tool.js";
+import { parseProtectedArgumentPattern } from "../security/protected-argument-path.js";
 import { redactObject } from "../utils/redaction.js";
 import { MCPClient, type MCPFetchLike, type MCPPromptDescriptor, type MCPResourceDescriptor, type MCPToolDescriptor } from "./mcp-client.js";
 
@@ -163,20 +164,22 @@ function createMcpTool(
 ): RegisteredTool {
   const toolName = prefixTool(serverName, config, tool.name);
   const riskClass = resolveMcpToolRiskClass(config, client.transport, tool.name);
-  const protectedPaths = config.protectedToolArguments?.[tool.name] ?? [];
+  const protectedConfig = config.protectedToolArguments?.[tool.name];
+  const protectedProjection = addProtectedArgumentEnvelopes(tool.inputSchema ?? {
+    type: "object",
+    additionalProperties: true
+  }, protectedConfig?.paths ?? []);
   return {
     name: toolName,
     description: mcpToolDescription(serverName, tool, riskClass),
-    inputSchema: addProtectedArgumentEnvelopes(tool.inputSchema ?? {
-      type: "object",
-      additionalProperties: true
-    }, protectedPaths),
+    inputSchema: protectedProjection.schema,
     riskClass,
     toolsets: ["mcp"],
     progressLabel: `calling MCP ${serverName}`,
     maxResultSizeChars: 12_000,
-    protectedArguments: protectedPaths.map((path) => ({
+    protectedArguments: protectedProjection.paths.map((path) => ({
       path,
+      handling: protectedConfig?.handling ?? { persistence: "unknown", sharing: "unknown" },
       destination: { type: "mcp-argument" as const, serverId: serverName, toolName: tool.name }
     })),
     isAvailable: () => true,
@@ -187,30 +190,48 @@ function createMcpTool(
   };
 }
 
-function addProtectedArgumentEnvelopes(schema: unknown, paths: readonly string[]): unknown {
-  if (paths.length === 0 || typeof schema !== "object" || schema === null || Array.isArray(schema)) return schema;
+function addProtectedArgumentEnvelopes(
+  schema: unknown,
+  paths: readonly string[]
+): { schema: unknown; paths: readonly string[] } {
+  if (paths.length === 0 || typeof schema !== "object" || schema === null || Array.isArray(schema)) {
+    return { schema, paths: [] };
+  }
   const clone = structuredClone(schema) as Record<string, unknown>;
+  const projected: string[] = [];
   for (const path of paths) {
-    const segments = path.split(".");
+    const segments = parseProtectedArgumentPattern(path);
+    if (segments === undefined) continue;
     let node: Record<string, unknown> = clone;
+    let applied = false;
     for (let index = 0; index < segments.length; index += 1) {
+      const key = segments[index];
+      if (key === "*") {
+        const item = typeof node.items === "object" && node.items !== null && !Array.isArray(node.items)
+          ? node.items as Record<string, unknown>
+          : undefined;
+        if (item === undefined || index === segments.length - 1) break;
+        node = item;
+        continue;
+      }
       const properties = typeof node.properties === "object" && node.properties !== null && !Array.isArray(node.properties)
         ? node.properties as Record<string, unknown>
         : undefined;
       if (properties === undefined) break;
-      const key = segments[index];
       const property = properties[key];
       if (typeof property !== "object" || property === null || Array.isArray(property)) break;
       if (index === segments.length - 1) {
         properties[key] = {
           oneOf: [property, protectedArgumentEnvelopeSchema()]
         };
+        applied = true;
       } else {
         node = property as Record<string, unknown>;
       }
     }
+    if (applied) projected.push(path);
   }
-  return clone;
+  return { schema: clone, paths: projected };
 }
 
 function protectedArgumentEnvelopeSchema(): Record<string, unknown> {

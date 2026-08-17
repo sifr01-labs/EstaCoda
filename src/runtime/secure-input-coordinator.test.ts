@@ -46,7 +46,7 @@ const browserSource: BrowserFieldSecureInputSource = {
 const toolRequest: SecureInputRequest = {
   kind: "client-secret",
   purpose: "Configure the destination",
-  destination: { type: "tool-argument", toolName: "postman.updateEnvironment", argumentPath: "value" },
+  destination: { type: "tool-argument", toolName: "trusted.updateRecords", argumentPath: "/values/0/value" },
   retention: "use-once",
 };
 
@@ -374,16 +374,17 @@ describe("SecureInputCoordinator", () => {
 
     expect(result).toEqual({
       status: "delivered",
-      destinationLabel: "value for postman.updateEnvironment",
+      destinationLabel: "/values/0/value for trusted.updateRecords",
       persisted: false,
     });
     expect(collect).not.toHaveBeenCalled();
     expect(authorize).toHaveBeenCalledWith(expect.objectContaining({
-      destinationLabel: "value for postman.updateEnvironment",
+      destinationLabel: "/values/0/value for trusted.updateRecords",
       transfer: {
         sourceLabel: "Browser value at https://portal.example.com",
         credentialLabel: "client secret",
         persistence: "none",
+        sharing: "unknown",
         disclosureBoundary: "destination",
       },
     }));
@@ -422,6 +423,188 @@ describe("SecureInputCoordinator", () => {
     expect(deliver).not.toHaveBeenCalled();
     expect(broker.stats().ready).toBe(0);
     expect(source.release).toHaveBeenCalledOnce();
+    broker.dispose();
+  });
+
+  it("authorizes once and exposes every grouped browser value only during one atomic consumer", async () => {
+    const broker = brokerWithStableIds();
+    const registry = new SecureInputTransportRegistry();
+    const events: string[] = [];
+    registry.register(browserTransport({
+      destinationTypes: ["tool-argument"],
+      verificationStrength: "declared-target",
+      verify: vi.fn(({ request: candidate, phase }) => {
+        events.push(`verify:${phase}:${candidate.destination.type === "tool-argument" ? candidate.destination.argumentPath : "unknown"}`);
+        return { status: "verified" as const, destination: candidate.destination };
+      }),
+      deliver: async ({ value, context, consume }) => {
+        events.push(`deliver:${context.request.kind}`);
+        await consume(value, context);
+      },
+    }));
+    const sourceBytes = [
+      new TextEncoder().encode("group-source-key"),
+      new TextEncoder().encode("group-source-secret"),
+    ];
+    let readIndex = 0;
+    const source = browserValueSource({
+      prepare: vi.fn(async ({ source: candidate }) => ({
+        source: structuredClone(candidate),
+        label: `Browser value ${candidate.ref} at ${candidate.expectedOrigin}`,
+      })),
+      read: vi.fn(async ({ verified }) => {
+        events.push(`read:${verified.source.ref}`);
+        return sourceBytes[readIndex++]!;
+      }),
+    });
+    const authorize = vi.fn(async () => "approved" as const);
+    const consume = vi.fn(async (values: readonly { id: string; value: Uint8Array }[]) => {
+      events.push("dispatch");
+      expect(values.map((entry) => new TextDecoder().decode(entry.value))).toEqual([
+        "group-source-key",
+        "group-source-secret",
+      ]);
+    });
+    const coordinator = new SecureInputCoordinator({
+      broker,
+      transports: registry,
+      collect: vi.fn(),
+      browserSource: source,
+      authorize,
+    });
+    const secondSource = { ...browserSource, ref: "@e3" };
+    const secondRequest: SecureInputRequest = {
+      ...toolRequest,
+      kind: "api-key",
+      destination: { type: "tool-argument", toolName: "trusted.updateRecords", argumentPath: "/values/1/value" },
+    };
+
+    const result = await coordinator.createRequestHandler(scope).transferGroup({
+      purpose: "Configure two protected destination values",
+      items: [
+        {
+          id: "client-key",
+          source: browserSource,
+          request: toolRequest,
+          handling: { persistence: "destination-managed", sharing: "workspace" },
+        },
+        {
+          id: "client-secret",
+          source: secondSource,
+          request: secondRequest,
+          handling: { persistence: "destination-managed", sharing: "workspace" },
+        },
+      ],
+    }, consume);
+
+    expect(result.status).toBe("delivered");
+    expect(result.items).toHaveLength(2);
+    expect(result.items.every((item) => item.receipt.persisted)).toBe(true);
+    expect(authorize).toHaveBeenCalledOnce();
+    expect(authorize).toHaveBeenCalledWith(expect.objectContaining({
+      transferGroup: expect.objectContaining({
+        purpose: "Configure two protected destination values",
+        items: expect.arrayContaining([
+          expect.objectContaining({ persistence: "destination-managed", sharing: "workspace" }),
+        ]),
+      }),
+    }));
+    expect(events.filter((event) => event.startsWith("read:"))).toHaveLength(2);
+    expect(events.indexOf("dispatch")).toBeGreaterThan(events.lastIndexOf("read:@e3"));
+    expect(consume).toHaveBeenCalledOnce();
+    expect(sourceBytes.every((value) => value.every((byte) => byte === 0))).toBe(true);
+    expect(source.release).toHaveBeenCalledTimes(2);
+    expect(broker.stats().consumed).toBe(2);
+    broker.dispose();
+  });
+
+  it("does not dispatch a grouped transfer when one destination drifts after source reads", async () => {
+    const broker = brokerWithStableIds();
+    const registry = new SecureInputTransportRegistry();
+    let verifications = 0;
+    const deliver = vi.fn();
+    registry.register(browserTransport({
+      destinationTypes: ["tool-argument"],
+      verificationStrength: "declared-target",
+      verify: vi.fn(({ request: candidate }) => ({
+        status: "verified" as const,
+        destination: ++verifications === 6
+          ? { ...candidate.destination, argumentPath: "/attacker" }
+          : candidate.destination,
+      })),
+      deliver,
+    }));
+    const bytes = [new TextEncoder().encode("first-group-value"), new TextEncoder().encode("second-group-value")];
+    let readIndex = 0;
+    const source = browserValueSource({ read: vi.fn(async () => bytes[readIndex++]!) });
+    const coordinator = new SecureInputCoordinator({
+      broker,
+      transports: registry,
+      collect: vi.fn(),
+      browserSource: source,
+      authorize: async () => "approved",
+    });
+    const consume = vi.fn();
+    const result = await coordinator.createRequestHandler(scope).transferGroup({
+      purpose: "Atomic protected update",
+      items: [
+        { id: "first", source: browserSource, request: toolRequest },
+        {
+          id: "second",
+          source: { ...browserSource, ref: "@e3" },
+          request: {
+            ...toolRequest,
+            destination: { type: "tool-argument", toolName: "trusted.updateRecords", argumentPath: "/values/1/value" },
+          },
+        },
+      ],
+    }, consume);
+
+    expect(result.status).toBe("failed");
+    expect(consume).not.toHaveBeenCalled();
+    expect(deliver).not.toHaveBeenCalled();
+    expect(bytes.every((value) => value.every((byte) => byte === 0))).toBe(true);
+    broker.dispose();
+  });
+
+  it("reads no grouped source and performs no delivery when the single approval is denied", async () => {
+    const broker = brokerWithStableIds();
+    const registry = new SecureInputTransportRegistry();
+    const deliver = vi.fn();
+    registry.register(browserTransport({
+      destinationTypes: ["tool-argument"],
+      verificationStrength: "declared-target",
+      deliver,
+    }));
+    const source = browserValueSource();
+    const authorize = vi.fn(async () => "denied" as const);
+    const coordinator = new SecureInputCoordinator({
+      broker,
+      transports: registry,
+      collect: vi.fn(),
+      browserSource: source,
+      authorize,
+    });
+    const result = await coordinator.createRequestHandler(scope).transferGroup({
+      purpose: "Denied atomic update",
+      items: [
+        { id: "first", source: browserSource, request: toolRequest },
+        {
+          id: "second",
+          source: { ...browserSource, ref: "@e3" },
+          request: {
+            ...toolRequest,
+            destination: { type: "tool-argument", toolName: "trusted.updateRecords", argumentPath: "/values/1/value" },
+          },
+        },
+      ],
+    }, vi.fn());
+
+    expect(result.status).toBe("failed");
+    expect(authorize).toHaveBeenCalledOnce();
+    expect(source.read).not.toHaveBeenCalled();
+    expect(deliver).not.toHaveBeenCalled();
+    expect(source.release).toHaveBeenCalledTimes(2);
     broker.dispose();
   });
 

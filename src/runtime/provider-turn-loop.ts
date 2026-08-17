@@ -28,7 +28,7 @@ import type {
 import type { LoadedSkill, SelectedSkillPromptContent, SkillDefinition, SkillCatalogEntry } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
-import type { GroupedSecureInputRequestHandler, SecureInputRequestHandler } from "../contracts/secure-input.js";
+import type { GroupedSecureInputRequestHandler, SecureInputRequestHandler, SecureInputTransferRequestHandler } from "../contracts/secure-input.js";
 import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import { PromptCache } from "../prompt/prompt-cache.js";
 import { estimateTextTokensRough } from "../prompt/token-estimator.js";
@@ -2220,6 +2220,19 @@ function timeSecureInputHandler(
     const grouped = timed as GroupedSecureInputRequestHandler;
     grouped.requestGroup = async (request) => {
       return await timedCall(async () => await requestGroup(request));
+    };
+  }
+  const transferHandler = handler as Partial<SecureInputTransferRequestHandler>;
+  const transfer = transferHandler.transfer;
+  if (transfer !== undefined) {
+    (timed as SecureInputTransferRequestHandler).transfer = async (request, consume) => {
+      return await timedCall(async () => await transfer(request, consume));
+    };
+  }
+  const transferGroup = transferHandler.transferGroup;
+  if (transferGroup !== undefined) {
+    (timed as SecureInputTransferRequestHandler).transferGroup = async (request, consume) => {
+      return await timedCall(async () => await transferGroup(request, consume));
     };
   }
   return timed;

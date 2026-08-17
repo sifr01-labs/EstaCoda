@@ -3307,6 +3307,10 @@ describe("loadRuntimeConfig profile loading", () => {
           command: "trusted-mcp",
           protectedToolArguments: {
             authenticate: ["credential", "nested.token", "credential"],
+            updateRecords: {
+              paths: ["/values/*/value", "/values/*/value", "/__proto__/value", "/values/0/value"],
+              handling: { persistence: "destination-managed", sharing: "workspace" }
+            },
             invalid: ["__proto__.token", "token[0]"]
           }
         }
@@ -3315,7 +3319,14 @@ describe("loadRuntimeConfig profile loading", () => {
 
     const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
     expect(loaded.mcp.servers.trusted?.protectedToolArguments).toEqual({
-      authenticate: ["credential", "nested.token"]
+      authenticate: {
+        paths: ["/credential", "/nested/token"],
+        handling: { persistence: "unknown", sharing: "unknown" }
+      },
+      updateRecords: {
+        paths: ["/values/*/value"],
+        handling: { persistence: "destination-managed", sharing: "workspace" }
+      }
     });
     await rm(workspace, { recursive: true, force: true });
   });

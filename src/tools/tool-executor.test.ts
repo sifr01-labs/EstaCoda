@@ -13,7 +13,7 @@ import { summarizeSecurityTarget, ToolExecutor } from "./tool-executor.js";
 import { attachEphemeralVisionImages, ephemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 import { WorkspaceApprovalController, WorkspaceApprovalStore } from "../security/workspace-approval-controller.js";
 import { TurnMcpReadLedger } from "../runtime/turn-tool-feedback-ledger.js";
-import type { SecureInputTransferRequestHandler } from "../contracts/secure-input.js";
+import type { SecureInputTransferGroupConsumer, SecureInputTransferGroupRequest, SecureInputTransferRequestHandler } from "../contracts/secure-input.js";
 
 function createMockPolicy(decision: "allow" | "deny" = "allow"): SecurityPolicy {
   return {
@@ -942,7 +942,7 @@ describe("ToolExecutor tool-call metadata persistence", () => {
     const observed: unknown[] = [];
     const tool: RegisteredTool = {
       ...createEchoTool("trusted.api.call"),
-      protectedArguments: [{ path: "auth.token" }],
+      protectedArguments: [{ path: "/auth/token", handling: { persistence: "none", sharing: "private" } }],
       run: async (input) => {
         observed.push(input);
         return { ok: true, content: `remote echoed ${String(input.auth?.token)}`, metadata: { echoed: input.auth?.token } };
@@ -959,7 +959,7 @@ describe("ToolExecutor tool-call metadata persistence", () => {
       trustedWorkspace: true,
       sessionId: "test-session",
       onSecureInputRequest: async (request, consume) => {
-        expect(request.destination).toEqual({ type: "tool-argument", toolName: tool.name, argumentPath: "auth.token" });
+        expect(request.destination).toEqual({ type: "tool-argument", toolName: tool.name, argumentPath: "/auth/token" });
         const value = new TextEncoder().encode(sentinel);
         try {
           await consume(value, {
@@ -992,7 +992,7 @@ describe("ToolExecutor tool-call metadata persistence", () => {
     }));
     const tool: RegisteredTool = {
       ...createEchoTool("trusted.browser-relay"),
-      protectedArguments: [{ path: "auth.token" }],
+      protectedArguments: [{ path: "/auth/token", handling: { persistence: "none", sharing: "private" } }],
       run,
     };
     const handler = vi.fn() as unknown as SecureInputTransferRequestHandler;
@@ -1059,25 +1059,116 @@ describe("ToolExecutor tool-call metadata persistence", () => {
     expect(await persistedExecutionState(sessionDb, trajectoryRecorder)).not.toContain(sentinel);
   });
 
-  it("fails closed instead of dispatching multiple protected arguments in one call", async () => {
-    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "unexpected" }));
+  it("injects array-matched protected values and dispatches one atomic tool call", async () => {
+    const secrets = ["grouped-key-sentinel", "grouped-secret-sentinel"];
+    const run = vi.fn(async (input: Record<string, unknown>): Promise<ToolResult> => ({
+      ok: true,
+      content: `stored ${JSON.stringify(input)}`,
+    }));
     const tool: RegisteredTool = {
       ...createEchoTool("trusted.multi"),
-      protectedArguments: [{ path: "first" }, { path: "second" }],
+      protectedArguments: [
+        { path: "/values/*/value", handling: { persistence: "destination-managed", sharing: "workspace" } }
+      ],
       run
     };
-    const { executor } = await setupExecutor({ tools: [tool] });
+    const handler = vi.fn() as unknown as SecureInputTransferRequestHandler;
+    handler.requestGroup = vi.fn();
+    handler.transfer = vi.fn();
+    handler.transferGroup = vi.fn(async (group: SecureInputTransferGroupRequest, consume: SecureInputTransferGroupConsumer) => {
+      expect(group.items.map((item) => item.request.destination)).toEqual([
+        { type: "tool-argument", toolName: tool.name, argumentPath: "/values/0/value" },
+        { type: "tool-argument", toolName: tool.name, argumentPath: "/values/1/value" },
+      ]);
+      expect(group.items.every((item) => item.handling?.sharing === "workspace")).toBe(true);
+      const bytes = secrets.map((secret) => new TextEncoder().encode(secret));
+      try {
+        await consume(bytes.map((value, index) => ({
+          id: `argument-${index + 1}`,
+          value,
+          context: {
+            requestId: `group-${index + 1}`,
+            scope: { profileId: "profile", sessionId: "test-session" },
+            request: group.items[index]!.request,
+            signal: new AbortController().signal,
+          },
+        })));
+      } finally {
+        bytes.forEach((value) => value.fill(0));
+      }
+      return {
+        status: "delivered" as const,
+        items: group.items.map((item) => ({
+          id: item.id,
+          receipt: { status: "delivered" as const, destinationLabel: "trusted.multi", persisted: true },
+        })),
+      };
+    });
+    const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({ tools: [tool] });
+    const browserSource = (ref: string) => ({
+      type: "browser-field" as const,
+      sessionId: "browser-1",
+      ref,
+      identity: { documentEpoch: 2, actionRevision: 3, observationId: 4 },
+      expectedOrigin: "https://portal.example.com",
+      tabRef: "@t1",
+    });
     const execution = await executor.executeTool({
       tool: tool.name,
       input: {
-        first: { protectedInput: { kind: "api-key" } },
-        second: { protectedInput: { kind: "client-secret" } }
+        values: [
+          { key: "client_key", value: { protectedInput: { kind: "api-key", source: browserSource("@e1") } } },
+          { key: "client_secret", value: { protectedInput: { kind: "client-secret", source: browserSource("@e2") } } },
+        ],
       },
       trustedWorkspace: true,
       sessionId: "test-session",
-      onSecureInputRequest: vi.fn()
+      onSecureInputRequest: handler,
     });
-    expect(execution?.result?.content).toContain("Only one protected argument");
+    expect(handler.transferGroup).toHaveBeenCalledOnce();
+    expect(run).toHaveBeenCalledOnce();
+    expect(run).toHaveBeenCalledWith({
+      values: [
+        { key: "client_key", value: secrets[0] },
+        { key: "client_secret", value: secrets[1] },
+      ],
+    }, expect.objectContaining({ onSecureInputRequest: undefined }));
+    expect(execution?.result).toEqual({
+      ok: true,
+      content: "2 protected values transferred atomically. Verify the destination state with a separate read.",
+      metadata: { protectedTransfer: true, protectedValueCount: 2 },
+    });
+    expect(await persistedExecutionState(sessionDb, trajectoryRecorder)).not.toContain(secrets[0]);
+    expect(await persistedExecutionState(sessionDb, trajectoryRecorder)).not.toContain(secrets[1]);
+  });
+
+  it("rejects undeclared and ambiguously declared protected envelopes before dispatch", async () => {
+    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "unexpected" }));
+    const source = {
+      type: "browser-field" as const,
+      sessionId: "browser-1",
+      ref: "@e1",
+      identity: { documentEpoch: 1, actionRevision: 1, observationId: 1 },
+      expectedOrigin: "https://portal.example.com",
+    };
+    for (const protectedArguments of [
+      [{ path: "/other", handling: { persistence: "unknown" as const, sharing: "unknown" as const } }],
+      [
+        { path: "/values/*/value", handling: { persistence: "unknown" as const, sharing: "unknown" as const } },
+        { path: "/values/*/value", handling: { persistence: "none" as const, sharing: "private" as const } },
+      ],
+    ]) {
+      const tool: RegisteredTool = { ...createEchoTool("trusted.invalid-group"), protectedArguments, run };
+      const { executor } = await setupExecutor({ tools: [tool] });
+      const execution = await executor.executeTool({
+        tool: tool.name,
+        input: { values: [{ value: { protectedInput: { kind: "api-key", source } } }] },
+        trustedWorkspace: true,
+        sessionId: "test-session",
+        onSecureInputRequest: vi.fn(),
+      });
+      expect(execution?.result?.ok).toBe(false);
+    }
     expect(run).not.toHaveBeenCalled();
   });
 

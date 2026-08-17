@@ -585,6 +585,31 @@ Trust levels: `conservative`, `read-only-network`, `read-only-local`.
 
 Use `env` only for non-secret literal values. `envRefs` maps a child-process variable name to a variable loaded from the selected profile `.env`; only the names are persisted in `config.json`. Missing or invalid references leave that MCP server unavailable.
 
+Reviewed MCP tools may accept protected browser values without exposing those values to the model. Declare the eligible argument locations with JSON Pointer patterns. `*` matches one array item; it does not match arbitrary object keys.
+
+```json
+{
+  "mcpServers": {
+    "records": {
+      "command": "records-mcp",
+      "protectedToolArguments": {
+        "updateRecords": {
+          "paths": ["/values/*/value"],
+          "handling": {
+            "persistence": "destination-managed",
+            "sharing": "workspace"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+When one tool call contains two to eight protected browser sources, EstaCoda binds and verifies every source and destination, presents one grouped protected-transfer approval, and invokes the MCP tool once only after every value is ready. Any failure before invocation prevents the remote mutation. This is dispatch atomicity; the remote service remains responsible for its own transaction and rollback behavior.
+
+`persistence` is `none`, `destination-managed`, or `unknown`. `sharing` is `private`, `workspace`, `account`, `external`, or `unknown`. These declarations describe destination behavior for approval copy; they do not grant additional access.
+
 ### skills
 
 Skill loading and Agent Evolution policy.

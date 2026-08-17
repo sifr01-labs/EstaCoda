@@ -9,6 +9,8 @@ import type {
   SecureInputRequestSnapshot,
   SecureInputScope,
   SecureInputTransferRequest,
+  SecureInputTransferGroupConsumer,
+  SecureInputTransferGroupRequest,
   SecureInputTransferRequestHandler
 } from "../contracts/secure-input.js";
 import {
@@ -37,8 +39,19 @@ export type SecureInputAuthorizationHandler = (input: {
   transfer?: {
     sourceLabel: string;
     credentialLabel: string;
-    persistence: SecureInputPersistenceBehavior;
+    persistence: SecureInputPersistenceBehavior | "unknown";
+    sharing: "private" | "workspace" | "account" | "external" | "unknown";
     disclosureBoundary: SecureInputDisclosureBoundary;
+  };
+  transferGroup?: {
+    purpose: string;
+    items: readonly {
+      sourceLabel: string;
+      credentialLabel: string;
+      destinationLabel: string;
+      persistence: "none" | "destination-managed" | "unknown";
+      sharing: "private" | "workspace" | "account" | "external" | "unknown";
+    }[];
   };
 }) => Promise<"approved" | "denied">;
 
@@ -98,7 +111,123 @@ export class SecureInputCoordinator {
       consume,
       signal,
     });
+    handler.transferGroup = async (transfer, consume) => await this.transferGroup({
+      scope: boundScope,
+      transfer,
+      consume,
+      signal,
+    });
     return handler;
+  }
+
+  async transferGroup(input: {
+    scope: SecureInputScope;
+    transfer: SecureInputTransferGroupRequest;
+    consume: SecureInputTransferGroupConsumer;
+    signal?: AbortSignal;
+  }): Promise<SecureInputGroupReceipt> {
+    validateTransferGroup(input.transfer);
+    const controller = linkedAbortController(input.signal);
+    const entries: Array<{
+      id: string;
+      request: SecureInputRequest;
+      selection: SelectedSecureInputTransport;
+      source?: Awaited<ReturnType<ProtectedBrowserValueSource["prepare"]>>;
+      snapshot?: SecureInputRequestSnapshot;
+      handling: NonNullable<SecureInputTransferGroupRequest["items"][number]["handling"]>;
+      receipt?: SecureInputReceipt;
+    }> = [];
+    try {
+      if (this.#browserSource === undefined) throw new Error("Protected browser transfer is unavailable.");
+      for (const item of input.transfer.items) {
+        const selection = await this.#transports.select({ request: item.request, signal: controller.signal });
+        const assessment = assessSecureInputPolicy(item.request, selection.policy);
+        if (assessment.decision === "deny") throw new Error("The requested retention is not supported by this destination.");
+        const entry: (typeof entries)[number] = {
+          id: item.id,
+          request: item.request,
+          selection,
+          handling: item.handling ?? { persistence: "unknown", sharing: "unknown" },
+        };
+        entries.push(entry);
+        entry.source = await this.#browserSource.prepare({
+          source: item.source,
+          kind: item.request.kind,
+          signal: controller.signal,
+        });
+      }
+
+      const first = entries[0]!;
+      const decision = this.#authorize === undefined
+        ? "denied"
+        : await this.#authorize({
+            request: structuredClone(first.request),
+            transportId: first.selection.transport.id,
+            destinationLabel: `${entries.length} protected destinations`,
+            assessment: assessSecureInputPolicy(first.request, first.selection.policy),
+            transferGroup: {
+              purpose: input.transfer.purpose,
+              items: entries.map((entry) => ({
+                sourceLabel: entry.source!.label,
+                credentialLabel: secureInputKindLabel(entry.request.kind),
+                destinationLabel: entry.selection.verifiedDestination.label,
+                persistence: entry.handling.persistence,
+                sharing: entry.handling.sharing,
+              })),
+            },
+          });
+      if (decision !== "approved" || controller.signal.aborted) {
+        throw new Error("Protected transfer was not authorized.");
+      }
+
+      for (const entry of entries) {
+        await this.#transports.reverify({ selection: entry.selection, request: entry.request, signal: controller.signal });
+      }
+      for (const entry of entries) {
+        const value = await this.#browserSource.read({
+          verified: entry.source!,
+          kind: entry.request.kind,
+          signal: controller.signal,
+        });
+        try {
+          entry.snapshot = this.#broker.createRequest({ scope: input.scope, request: entry.request, signal: controller.signal });
+          this.#broker.provideSecret({ requestId: entry.snapshot.id, scope: input.scope, value });
+        } finally {
+          value.fill(0);
+        }
+      }
+      for (const entry of entries) {
+        await this.#transports.reverify({ selection: entry.selection, request: entry.request, signal: controller.signal });
+      }
+      await this.#deliverTransferGroup({
+        scope: input.scope,
+        entries: entries.map((entry) => ({ ...entry, snapshot: entry.snapshot! })),
+        consume: input.consume,
+        signal: controller.signal,
+      });
+      for (const entry of entries) {
+        entry.receipt = receipt(entry.selection, "delivered", entry.handling.persistence === "destination-managed");
+      }
+      return groupReceipt(entries, "delivered");
+    } catch {
+      for (const entry of entries) {
+        if (entry.snapshot !== undefined) cancelPending(this.#broker, entry.snapshot.id, input.scope);
+      }
+      const cleared = await this.#abort(entries.map((entry) => ({ request: entry.request, selection: entry.selection })));
+      return groupReceipt(entries, "failed", cleared ? "Protected group transfer failed before dispatch." : protectedInputClearBlocker());
+    } finally {
+      for (const entry of entries) {
+        if (entry.source !== undefined) {
+          await this.#browserSource?.release(entry.source.source).catch(() => undefined);
+        }
+        try {
+          await entry.selection.transport.release?.(structuredClone(entry.request));
+        } catch {
+          // Runtime-only bindings are best-effort after a terminal receipt.
+        }
+      }
+      controller.dispose();
+    }
   }
 
   async transfer(input: {
@@ -136,7 +265,8 @@ export class SecureInputCoordinator {
             transfer: {
               sourceLabel: source.label,
               credentialLabel: secureInputKindLabel(input.transfer.request.kind),
-              persistence: selection.policy.persistence,
+              persistence: input.transfer.handling?.persistence ?? selection.policy.persistence,
+              sharing: input.transfer.handling?.sharing ?? "unknown",
               disclosureBoundary: selection.policy.disclosureBoundary,
             },
           });
@@ -181,7 +311,11 @@ export class SecureInputCoordinator {
         snapshot,
         signal: controller.signal,
       });
-      return receipt(selection, "delivered", selection.policy.persistence !== "none");
+      return receipt(
+        selection,
+        "delivered",
+        input.transfer.handling?.persistence === "destination-managed" || selection.policy.persistence !== "none"
+      );
     } catch {
       if (snapshot !== undefined) cancelPending(this.#broker, snapshot.id, input.scope);
       if (selection !== undefined) await this.#abort([{ request: input.transfer.request, selection }]);
@@ -541,6 +675,54 @@ export class SecureInputCoordinator {
     });
   }
 
+  async #deliverTransferGroup(input: {
+    scope: SecureInputScope;
+    entries: readonly {
+      id: string;
+      request: SecureInputRequest;
+      selection: SelectedSecureInputTransport;
+      snapshot: SecureInputRequestSnapshot;
+    }[];
+    consume: SecureInputTransferGroupConsumer;
+    signal: AbortSignal;
+  }): Promise<void> {
+    const values: Array<Parameters<SecureInputTransferGroupConsumer>[0][number]> = [];
+    const visit = async (index: number): Promise<void> => {
+      const entry = input.entries[index];
+      if (entry === undefined) {
+        await input.consume(values);
+        return;
+      }
+      let consumerCalled = false;
+      await this.#broker.consume({
+        requestId: entry.snapshot.id,
+        scope: input.scope,
+        destination: entry.selection.verifiedDestination.destination,
+        signal: input.signal,
+      }, async (value, context) => {
+        await entry.selection.transport.deliver({
+          value,
+          context,
+          consume: async (candidate, candidateContext) => {
+            if (consumerCalled) throw new Error("Secure-input consumer replay was blocked.");
+            if (candidate !== value || candidateContext !== context) {
+              throw new Error("Secure-input transport substitution was blocked.");
+            }
+            consumerCalled = true;
+            values.push({ id: entry.id, value: candidate, context: candidateContext });
+            try {
+              await visit(index + 1);
+            } finally {
+              values.pop();
+            }
+          },
+        });
+        if (!consumerCalled) throw new Error("Secure-input transport did not invoke its consumer.");
+      });
+    };
+    await visit(0);
+  }
+
   async #abort(entries: readonly {
     request: SecureInputRequest;
     selection: SelectedSecureInputTransport;
@@ -580,6 +762,40 @@ function validateGroup(group: SecureInputGroupRequest): void {
     }
     ids.add(item.id);
     if (typeof item.consume !== "function") throw new Error("A protected-input group item requires a consumer.");
+  }
+}
+
+function validateTransferGroup(group: SecureInputTransferGroupRequest): void {
+  if (typeof group.purpose !== "string" || group.purpose.trim().length === 0 || group.purpose.length > 500) {
+    throw new Error("A protected-transfer group requires a bounded purpose.");
+  }
+  if (!Array.isArray(group.items) || group.items.length < 2 || group.items.length > 8) {
+    throw new Error("A protected-transfer group must contain between two and eight items.");
+  }
+  const ids = new Set<string>();
+  const destinations = new Set<string>();
+  let target: string | undefined;
+  for (const item of group.items) {
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/u.test(item.id) || ids.has(item.id)) {
+      throw new Error("Protected-transfer group item identifiers must be unique and bounded.");
+    }
+    ids.add(item.id);
+    const destination = item.request.destination;
+    if (destination.type !== "tool-argument" && destination.type !== "mcp-argument") {
+      throw new Error("Atomic protected-transfer groups support reviewed tool arguments only.");
+    }
+    const destinationTarget = destination.type === "tool-argument"
+      ? `tool:${destination.toolName}`
+      : `mcp:${destination.serverId}:${destination.toolName}`;
+    if (target !== undefined && target !== destinationTarget) {
+      throw new Error("An atomic protected-transfer group must target one tool invocation.");
+    }
+    target = destinationTarget;
+    const destinationKey = `${destinationTarget}:${destination.argumentPath}`;
+    if (destinations.has(destinationKey)) {
+      throw new Error("Protected-transfer destinations must be unique.");
+    }
+    destinations.add(destinationKey);
   }
 }
 

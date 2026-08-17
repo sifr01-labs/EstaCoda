@@ -198,13 +198,43 @@ export type GroupedSecureInputRequestHandler = SecureInputRequestHandler & {
 export type SecureInputTransferRequest = {
   source: SecureInputSource;
   request: SecureInputRequest;
+  handling?: SecureInputDestinationHandling;
 };
+
+export type SecureInputDestinationHandling = {
+  persistence: "none" | "destination-managed" | "unknown";
+  sharing: "private" | "workspace" | "account" | "external" | "unknown";
+};
+
+export type SecureInputTransferGroupRequest = {
+  purpose: string;
+  items: readonly {
+    id: string;
+    source: SecureInputSource;
+    request: SecureInputRequest;
+    handling?: SecureInputDestinationHandling;
+  }[];
+};
+
+export type SecureInputTransferGroupValue = {
+  id: string;
+  value: Uint8Array;
+  context: SecureInputConsumptionContext;
+};
+
+export type SecureInputTransferGroupConsumer = (
+  values: readonly SecureInputTransferGroupValue[]
+) => void | Promise<void>;
 
 export type SecureInputTransferRequestHandler = GroupedSecureInputRequestHandler & {
   transfer: (
     transfer: SecureInputTransferRequest,
     consume: SecureInputConsumer
   ) => Promise<SecureInputReceipt>;
+  transferGroup: (
+    transfer: SecureInputTransferGroupRequest,
+    consume: SecureInputTransferGroupConsumer
+  ) => Promise<SecureInputGroupReceipt>;
 };
 
 export type SecureInputCollectionResult =

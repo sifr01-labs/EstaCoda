@@ -68,6 +68,7 @@ import { SessionCompressionService, type CompactResult } from "../prompt/session
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { EphemeralSecretBroker } from "../security/ephemeral-secret-broker.js";
 import { SecureInputTransportRegistry } from "../security/secure-input-transport-registry.js";
+import { matchesProtectedArgumentPointer } from "../security/protected-argument-path.js";
 import { createProtectedToolArgumentTransport } from "../security/protected-tool-argument-transport.js";
 import { createProtectedBrowserValueSource } from "../security/protected-browser-value-source.js";
 import { createProfileEnvSecretStore, createRegisteredSecretStoreTransport, RegisteredSecretStoreRegistry } from "../security/registered-secret-store.js";
@@ -1097,13 +1098,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const destination = request.destination;
     if (destination.type === "tool-argument") {
       return toolRegistry.get(destination.toolName)?.protectedArguments?.some((entry) =>
-        entry.path === destination.argumentPath && entry.destination === undefined
+        matchesProtectedArgumentPointer(entry.path, destination.argumentPath) && entry.destination === undefined
       ) === true;
     }
     if (destination.type !== "mcp-argument") return false;
     return toolRegistry.getRegisteredByToolset("mcp").some((tool) =>
       tool.protectedArguments?.some((entry) =>
-        entry.path === destination.argumentPath &&
+        matchesProtectedArgumentPointer(entry.path, destination.argumentPath) &&
         entry.destination?.type === "mcp-argument" &&
         entry.destination.serverId === destination.serverId &&
         entry.destination.toolName === destination.toolName

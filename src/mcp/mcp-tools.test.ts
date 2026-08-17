@@ -135,8 +135,17 @@ describe("MCP protected argument declarations", () => {
                 name: "authenticate",
                 inputSchema: {
                   type: "object",
-                  properties: { credential: { type: "string" } },
-                  required: ["credential"]
+                  properties: {
+                    values: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: { value: { type: "string" } },
+                        required: ["value"]
+                      }
+                    }
+                  },
+                  required: ["values"]
                 }
               }]
             }
@@ -154,14 +163,20 @@ describe("MCP protected argument declarations", () => {
         trusted: {
           transport: "http",
           url: "https://mcp.example.test",
-          protectedToolArguments: { authenticate: ["credential"] }
+          protectedToolArguments: {
+            authenticate: {
+              paths: ["/values/*/value", "/missing/value"],
+              handling: { persistence: "destination-managed", sharing: "workspace" }
+            }
+          }
         }
       },
       fetch
     });
     const tool = server?.tools[0];
     expect(tool?.protectedArguments).toEqual([{
-      path: "credential",
+      path: "/values/*/value",
+      handling: { persistence: "destination-managed", sharing: "workspace" },
       destination: { type: "mcp-argument", serverId: "trusted", toolName: "authenticate" }
     }]);
     expect(JSON.stringify(tool?.inputSchema)).toContain("protectedInput");

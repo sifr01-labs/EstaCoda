@@ -105,8 +105,12 @@ export type ToolSecurityResolverContext = Omit<ToolExecutionContext, "securityRe
 export type ToolHandler<TInput = unknown> = (input: TInput, context?: ToolExecutionContext) => Promise<ToolResult>;
 
 export type ProtectedToolArgumentDeclaration = {
-  /** Dot-separated object path from reviewed code or profile configuration. */
+  /** Reviewed JSON Pointer pattern. `*` may bind one array item. */
   path: string;
+  handling: {
+    persistence: "none" | "destination-managed" | "unknown";
+    sharing: "private" | "workspace" | "account" | "external" | "unknown";
+  };
   destination?: {
     type: "mcp-argument";
     serverId: string;

@@ -64,8 +64,16 @@ import {
   normalizeWhatsAppGroupAllowlist,
   normalizeWhatsAppUserId,
 } from "../channels/whatsapp-identity.js";
+import { isProtectedArgumentPattern } from "../security/protected-argument-path.js";
 
 export type MCPServerTrust = "conservative" | "read-only-network" | "read-only-local";
+export type MCPProtectedToolArgumentsConfig = {
+  paths: string[];
+  handling: {
+    persistence: "none" | "destination-managed" | "unknown";
+    sharing: "private" | "workspace" | "account" | "external" | "unknown";
+  };
+};
 export type UiLanguage = "en" | "ar";
 export type UiFlavor = "standard" | "arabic-light" | "kemet-full";
 export type ActivityLabelsLocale = "en" | "ar";
@@ -352,7 +360,7 @@ export type MCPServerConfig = {
   trust?: MCPServerTrust;
   toolRiskClass?: ToolRiskClass;
   toolRiskClasses?: Record<string, ToolRiskClass>;
-  protectedToolArguments?: Record<string, string[]>;
+  protectedToolArguments?: Record<string, MCPProtectedToolArgumentsConfig>;
   resourceReadRiskClass?: ToolRiskClass;
   promptGetRiskClass?: ToolRiskClass;
 };
@@ -798,7 +806,7 @@ export type MCPSetupInput = {
   trust?: MCPServerTrust;
   toolRiskClass?: ToolRiskClass;
   toolRiskClasses?: Record<string, ToolRiskClass>;
-  protectedToolArguments?: Record<string, string[]>;
+  protectedToolArguments?: Record<string, MCPProtectedToolArgumentsConfig>;
   resourceReadRiskClass?: ToolRiskClass;
   promptGetRiskClass?: ToolRiskClass;
 };
@@ -2376,14 +2384,30 @@ function normalizeToolRiskClasses(value: unknown): Record<string, ToolRiskClass>
   return entries.length === 0 ? undefined : Object.fromEntries(entries);
 }
 
-function normalizeProtectedToolArguments(value: unknown): Record<string, string[]> | undefined {
+function normalizeProtectedToolArguments(value: unknown): Record<string, MCPProtectedToolArgumentsConfig> | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
-  const entries = Object.entries(value).flatMap(([toolName, paths]) => {
-    if (toolName.trim().length === 0 || !Array.isArray(paths)) return [];
-    const normalized = paths.filter((path): path is string =>
-      typeof path === "string" && isProtectedArgumentPath(path)
-    );
-    return normalized.length === 0 ? [] : [[toolName, [...new Set(normalized)] as string[]] as [string, string[]]];
+  const entries = Object.entries(value).flatMap(([toolName, declaration]) => {
+    if (toolName.trim().length === 0) return [];
+    const legacyPaths = Array.isArray(declaration)
+      ? declaration.filter((path): path is string => typeof path === "string" && isLegacyProtectedArgumentPath(path))
+        .map((path) => `/${path.split(".").join("/")}`)
+      : undefined;
+    const record = typeof declaration === "object" && declaration !== null && !Array.isArray(declaration)
+      ? declaration as Record<string, unknown>
+      : undefined;
+    const paths = legacyPaths ?? (Array.isArray(record?.paths)
+      ? record.paths.filter((path): path is string => typeof path === "string" && isProtectedArgumentPattern(path))
+      : []);
+    if (paths.length === 0) return [];
+    const handling = typeof record?.handling === "object" && record.handling !== null && !Array.isArray(record.handling)
+      ? record.handling as Record<string, unknown>
+      : {};
+    const persistence = isProtectedArgumentPersistence(handling.persistence) ? handling.persistence : "unknown";
+    const sharing = isProtectedArgumentSharing(handling.sharing) ? handling.sharing : "unknown";
+    return [[toolName, {
+      paths: [...new Set(paths)],
+      handling: { persistence, sharing }
+    }] as [string, MCPProtectedToolArgumentsConfig]];
   });
   return entries.length === 0 ? undefined : Object.fromEntries(entries);
 }
@@ -3794,9 +3818,12 @@ function validateMcpSetupInput(input: MCPSetupInput): void {
     requireNonEmpty(toolName, "MCP tool risk override name");
     validateRiskClass(riskClass, `toolRiskClasses.${toolName}`);
   }
-  for (const [toolName, paths] of Object.entries(input.protectedToolArguments ?? {})) {
+  for (const [toolName, declaration] of Object.entries(input.protectedToolArguments ?? {})) {
     requireNonEmpty(toolName, "MCP protected argument tool name");
-    if (!Array.isArray(paths) || paths.length === 0 || paths.some((path) => !isProtectedArgumentPath(path))) {
+    if (!Array.isArray(declaration.paths) || declaration.paths.length === 0 ||
+        declaration.paths.some((path) => !isProtectedArgumentPattern(path)) ||
+        !isProtectedArgumentPersistence(declaration.handling?.persistence) ||
+        !isProtectedArgumentSharing(declaration.handling?.sharing)) {
       throw new Error(`Invalid protected argument declaration for MCP tool ${toolName}`);
     }
   }
@@ -3817,12 +3844,20 @@ function validateMcpSetupInput(input: MCPSetupInput): void {
   }
 }
 
-function isProtectedArgumentPath(value: string): boolean {
+function isLegacyProtectedArgumentPath(value: string): boolean {
   const segments = value.split(".");
   return segments.length > 0 && segments.every((segment) =>
     /^[A-Za-z_][A-Za-z0-9_]*$/u.test(segment) &&
     segment !== "__proto__" && segment !== "prototype" && segment !== "constructor"
   );
+}
+
+function isProtectedArgumentPersistence(value: unknown): value is MCPProtectedToolArgumentsConfig["handling"]["persistence"] {
+  return value === "none" || value === "destination-managed" || value === "unknown";
+}
+
+function isProtectedArgumentSharing(value: unknown): value is MCPProtectedToolArgumentsConfig["handling"]["sharing"] {
+  return value === "private" || value === "workspace" || value === "account" || value === "external" || value === "unknown";
 }
 
 function validateSecuritySetupInput(input: SecuritySetupInput): void {

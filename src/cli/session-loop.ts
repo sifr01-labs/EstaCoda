@@ -1210,16 +1210,27 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           : runtime.createSecureInputRequestHandler({
               collect: secureInputCollector.collect,
               signal: activeTurn.signal,
-              authorize: async ({ destinationLabel, assessment, transfer }) => {
+              authorize: async ({ destinationLabel, assessment, transfer, transferGroup }) => {
                 disposeOperatorConsoleSteerInput?.();
                 disposeOperatorConsoleSteerInput = undefined;
                 clearSpinner();
                 try {
                   const arabic = renderer.locale === "ar";
-                  const reason = transfer !== undefined
+                  const reason = transferGroup !== undefined
+                    ? (() => {
+                        const sources = [...new Set(transferGroup.items.map((item) => item.sourceLabel))].join(", ");
+                        const destinations = [...new Set(transferGroup.items.map((item) => item.destinationLabel))].join(", ");
+                        const handling = [...new Set(transferGroup.items.map((item) =>
+                          `${item.persistence} persistence / ${item.sharing} sharing`
+                        ))].join(", ");
+                        return arabic
+                          ? `نقل ${isolateAuto(String(transferGroup.items.length))} قيم محمية من ${isolateAuto(sources)} إلى ${isolateAuto(destinations)}. معالجة الوجهة: ${isolateAuto(handling)}. لا تحتفظ EstaCoda بذاكرة النقل.`
+                          : `Transfer ${transferGroup.items.length} protected values from ${sources} to ${destinations}. Destination handling: ${handling}. EstaCoda does not retain the transfer buffers.`;
+                      })()
+                    : transfer !== undefined
                     ? arabic
-                      ? `نقل ${isolateAuto(transfer.credentialLabel)} من ${isolateAuto(transfer.sourceLabel)} إلى ${isolateAuto(destinationLabel)}. لا تحتفظ EstaCoda بذاكرة النقل؛ وقد تحفظ الوجهة القيمة أو تشاركها وفقاً لإعداداتها.`
-                      : `Transfer ${transfer.credentialLabel} from ${transfer.sourceLabel} to ${destinationLabel}. EstaCoda does not retain the transfer buffer; the destination may store or share the value under its own settings.`
+                      ? `نقل ${isolateAuto(transfer.credentialLabel)} من ${isolateAuto(transfer.sourceLabel)} إلى ${isolateAuto(destinationLabel)}. معالجة الوجهة: ${isolateAuto(`${transfer.persistence} / ${transfer.sharing}`)}. لا تحتفظ EstaCoda بذاكرة النقل.`
+                      : `Transfer ${transfer.credentialLabel} from ${transfer.sourceLabel} to ${destinationLabel}. Destination handling: ${transfer.persistence} persistence / ${transfer.sharing} sharing. EstaCoda does not retain the transfer buffer.`
                     : assessment.reason === "persistent-secret-requires-approval"
                     ? arabic
                       ? "سيتم حفظ بيانات الاعتماد في مخزن الأسرار للملف الشخصي النشط."
@@ -1229,7 +1240,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
                       : "This protected delivery requires explicit authorization.";
                   const question = arabic
                     ? `${isolateRtl(reason)}\n${isolateRtl(`هل تسمح بتسليم الإدخال المحمي إلى ${isolateAuto(destinationLabel)}؟`)} [y/N] `
-                    : `${reason}\nAuthorize protected ${transfer === undefined ? "input delivery" : "transfer"}? [y/N] `;
+                    : `${reason}\nAuthorize protected ${transfer === undefined && transferGroup === undefined ? "input delivery" : "transfer"}? [y/N] `;
                   const answer = await prompt(question);
                   return /^(?:y|yes)$/iu.test(answer.trim()) ? "approved" : "denied";
                 } finally {
