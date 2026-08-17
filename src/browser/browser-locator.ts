@@ -97,6 +97,23 @@ export function resolveBrowserTarget(snapshot: BrowserSnapshot, input: BrowserAc
     return result.candidates[0]!;
   }
 
+  assertBrowserTargetContext(snapshot, input);
+  const element = (snapshot.elements ?? []).find((candidate) => candidate.ref === input.ref);
+  if (element === undefined) {
+    throw targetError("browser-target-not-found", `Browser element ref not found: ${input.ref}`, snapshot, tabRef);
+  }
+  if (element.hidden === true) {
+    throw targetError("browser-target-hidden", `Browser element ref is hidden: ${input.ref}`, snapshot, tabRef);
+  }
+  if (element.disabled === true) {
+    throw targetError("browser-target-disabled", `Browser element ref is disabled: ${input.ref}`, snapshot, tabRef);
+  }
+  return locatorCandidate(element, snapshot.identity, tabRef);
+}
+
+/** Validates a runtime-bound action without resolving a semantic locator again. */
+export function assertBrowserTargetContext(snapshot: BrowserSnapshot, input: BrowserActionInput): void {
+  const tabRef = requireSnapshotTab(snapshot);
   if (input.sessionId?.trim().length === 0 || input.sessionId === undefined || !isBrowserStateIdentity(input.identity) || input.tabRef?.trim().length === 0 || input.tabRef === undefined) {
     throw targetError(
       "invalid-browser-target",
@@ -129,17 +146,6 @@ export function resolveBrowserTarget(snapshot: BrowserSnapshot, input: BrowserAc
       tabRef
     );
   }
-  const element = (snapshot.elements ?? []).find((candidate) => candidate.ref === input.ref);
-  if (element === undefined) {
-    throw targetError("browser-target-not-found", `Browser element ref not found: ${input.ref}`, snapshot, tabRef);
-  }
-  if (element.hidden === true) {
-    throw targetError("browser-target-hidden", `Browser element ref is hidden: ${input.ref}`, snapshot, tabRef);
-  }
-  if (element.disabled === true) {
-    throw targetError("browser-target-disabled", `Browser element ref is disabled: ${input.ref}`, snapshot, tabRef);
-  }
-  return locatorCandidate(element, snapshot.identity, tabRef);
 }
 
 export function browserTargetFailureMetadata(error: unknown): Record<string, unknown> | undefined {

@@ -2,8 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
-import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
-import type { SessionToolProvider } from "../contracts/tool.js";
+import type { RegisteredTool, SessionToolProvider, ToolResult, ToolSecurityResolution } from "../contracts/tool.js";
 import type {
   BrowserActionInput,
   BrowserActionPreflight,
@@ -1326,23 +1325,20 @@ function createBrowserActionTool(input: {
       if (method === undefined) {
         return unsupportedBrowserTool(input.browserBackend, input.name);
       }
+      let browserInput: BrowserActionInput = input.deriveBrowserInput(toolInput);
       if (securityAction !== undefined && context?.securityResolution !== undefined) {
-        const verified = await resolveBrowserActionSecurity(
-          securityAction,
-          toolInput,
-          input.browserBackend,
-          input.deriveBrowserInput
-        );
-        if (!verified.executable || verified.resolution.targetKey !== context.securityResolution.targetKey ||
-            verified.resolution.riskClass !== context.securityResolution.riskClass) {
-          return {
-            ok: false,
-            content: "Browser action target changed or could not be re-verified after security review. Take a fresh snapshot and retry.",
-            metadata: { reason: "browser-action-security-preflight-mismatch" }
-          };
+        const reviewed = reviewedBrowserAction(context.securityResolution);
+        if (reviewed === undefined || reviewed.action !== securityAction ||
+            reviewed.key !== browserActionSecurityKey(securityAction, toolInput)) {
+          return browserActionSecurityFailure(input.browserBackend);
+        }
+        if (reviewed.status === "rejected") {
+          return browserActionSecurityFailure(input.browserBackend, reviewed.error);
+        }
+        if (reviewed.status === "bound") {
+          browserInput = bindReviewedBrowserActionInput(browserInput, reviewed.preflight);
         }
       }
-      const browserInput = input.deriveBrowserInput(toolInput);
       const snapshot = await method(browserInput).catch((error: unknown) => ({ error }));
       if ("error" in snapshot) {
         return {
@@ -1365,19 +1361,29 @@ function browserSecurityAction(value: string): BrowserActionPreflightKind | unde
 }
 
 type BrowserActionSecurityResult = {
-  resolution: {
-    riskClass: "read-only-network" | "external-side-effect";
-    targetKey: string;
-    targetSummary: string;
-  };
-  executable: boolean;
+  resolution: BrowserActionSecurityResolution;
+};
+
+const REVIEWED_BROWSER_ACTION = Symbol("reviewed-browser-action");
+
+type ReviewedBrowserAction = {
+  action: BrowserActionPreflightKind;
+  key?: string;
+} & (
+  | { status: "safe-unbound" }
+  | { status: "bound"; preflight: BrowserActionPreflight }
+  | { status: "rejected"; error?: unknown }
+);
+
+type BrowserActionSecurityResolution = ToolSecurityResolution & {
+  /** Runtime-only binding. Symbols are not persisted, logged, or shown for approval. */
+  [REVIEWED_BROWSER_ACTION]: ReviewedBrowserAction;
 };
 
 const SAFE_BROWSER_KEYS = new Set([
   "arrowdown", "arrowleft", "arrowright", "arrowup", "end", "escape", "home",
   "pagedown", "pageup", "tab"
 ]);
-const BROWSER_ACTION_PREFLIGHT_ATTEMPTS = 2;
 
 async function resolveBrowserActionSecurity(
   action: BrowserActionPreflightKind,
@@ -1386,19 +1392,42 @@ async function resolveBrowserActionSecurity(
   deriveBrowserInput: DeriveBrowserInput
 ): Promise<BrowserActionSecurityResult> {
   const browserInput = deriveBrowserInput(toolInput);
-  const key = action === "press" ? normalizedBrowserKey(toolInput.key) : action === "dialog" ? toolInput.action : undefined;
+  const key = browserActionSecurityKey(action, toolInput);
   if ((action === "press" && key !== undefined && SAFE_BROWSER_KEYS.has(key)) ||
       (action === "dialog" && key === "dismiss")) {
-    return browserActionSecurityResult(action, browserInput, key, undefined, "read-only-network", true);
+    return browserActionSecurityResult(
+      action,
+      browserInput,
+      key,
+      undefined,
+      "read-only-network",
+      { status: "safe-unbound", action, ...(key === undefined ? {} : { key }) }
+    );
   }
 
   if (browserBackend.preflightAction === undefined) {
-    return browserActionSecurityResult(action, browserInput, key, undefined, "external-side-effect", false);
+    return browserActionSecurityResult(
+      action,
+      browserInput,
+      key,
+      undefined,
+      "read-only-network",
+      { status: "rejected", action, ...(key === undefined ? {} : { key }) }
+    );
   }
 
-  const preflight = await resolveBrowserActionPreflight(action, browserInput, browserBackend);
-  if (preflight === undefined) {
-    return browserActionSecurityResult(action, browserInput, key, undefined, "external-side-effect", false);
+  let preflight: BrowserActionPreflight;
+  try {
+    preflight = await browserBackend.preflightAction(action, browserInput);
+  } catch (error) {
+    return browserActionSecurityResult(
+      action,
+      browserInput,
+      key,
+      undefined,
+      "read-only-network",
+      { status: "rejected", action, ...(key === undefined ? {} : { key }), error }
+    );
   }
   const safeLink = action === "click" && preflight.target?.kind === "link" &&
     preflight.target.tag === "a" && preflight.target.submit === false && isHttpUrl(preflight.target.href);
@@ -1408,26 +1437,11 @@ async function resolveBrowserActionSecurity(
     browserInput,
     key,
     preflight,
-    safeLink ? "read-only-network" : "external-side-effect",
+    safeLink || !targetBound ? "read-only-network" : "external-side-effect",
     targetBound
+      ? { status: "bound", action, ...(key === undefined ? {} : { key }), preflight }
+      : { status: "rejected", action, ...(key === undefined ? {} : { key }) }
   );
-}
-
-async function resolveBrowserActionPreflight(
-  action: BrowserActionPreflightKind,
-  browserInput: BrowserActionInput,
-  browserBackend: BrowserBackend
-): Promise<BrowserActionPreflight | undefined> {
-  for (let attempt = 0; attempt < BROWSER_ACTION_PREFLIGHT_ATTEMPTS; attempt += 1) {
-    try {
-      return await browserBackend.preflightAction!(action, browserInput);
-    } catch {
-      // A live page may replace an otherwise unchanged target while its DOM settles.
-      // Retry the read-only inspection once; execution still requires a separate,
-      // matching preflight below and therefore remains fail-closed.
-    }
-  }
-  return undefined;
 }
 
 function browserActionSecurityResult(
@@ -1436,7 +1450,7 @@ function browserActionSecurityResult(
   key: string | undefined,
   preflight: BrowserActionPreflight | undefined,
   riskClass: "read-only-network" | "external-side-effect",
-  executable: boolean
+  reviewed: ReviewedBrowserAction
 ): BrowserActionSecurityResult {
   const targetKeyMaterial = preflight === undefined
     ? {
@@ -1467,9 +1481,50 @@ function browserActionSecurityResult(
     resolution: {
       riskClass,
       targetKey: `browser-action:${createHash("sha256").update(JSON.stringify(targetKeyMaterial)).digest("hex")}`,
-      targetSummary: buildBrowserActionSecuritySummary({ action, key, preflight })
-    },
-    executable
+      targetSummary: buildBrowserActionSecuritySummary({ action, key, preflight }),
+      [REVIEWED_BROWSER_ACTION]: reviewed
+    }
+  };
+}
+
+function reviewedBrowserAction(resolution: ToolSecurityResolution): ReviewedBrowserAction | undefined {
+  return (resolution as Partial<BrowserActionSecurityResolution>)[REVIEWED_BROWSER_ACTION];
+}
+
+function browserActionSecurityKey(
+  action: BrowserActionPreflightKind,
+  input: BrowserActionInput
+): string | undefined {
+  return action === "press" ? normalizedBrowserKey(input.key) : action === "dialog" ? input.action : undefined;
+}
+
+function bindReviewedBrowserActionInput(
+  input: BrowserActionInput,
+  preflight: BrowserActionPreflight
+): BrowserActionInput {
+  return {
+    ...input,
+    sessionId: preflight.sessionId,
+    ref: preflight.target!.ref,
+    identity: { ...preflight.identity },
+    tabRef: preflight.tabRef,
+    locator: undefined
+  };
+}
+
+function browserActionSecurityFailure(
+  backend: BrowserBackend,
+  error?: unknown
+): ToolResult {
+  return {
+    ok: false,
+    content: error instanceof Error
+      ? error.message
+      : "Browser action target could not be bound to the state reviewed by security policy.",
+    metadata: {
+      ...browserFailureMetadata(backend, error, "browser-action-security-binding-failed"),
+      reason: browserTargetFailureMetadata(error)?.reason ?? "browser-action-security-binding-failed"
+    }
   };
 }
 

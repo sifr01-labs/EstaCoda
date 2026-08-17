@@ -368,7 +368,7 @@ export type BrowserBackend = {
   navigate(input: BrowserNavigateInput): Promise<BrowserNavigateResult>;
   snapshot?(input?: BrowserActionInput): Promise<BrowserSnapshot>;
   find?(input: BrowserActionInput): Promise<BrowserFindResult>;
-  /** Read-only structural inspection used before policy assessment and again before dispatch. */
+  /** Resolves one exact structural target before policy assessment; execution consumes that binding. */
   preflightAction?(action: BrowserActionPreflightKind, input: BrowserActionInput): Promise<BrowserActionPreflight>;
   click?(input: BrowserActionInput): Promise<BrowserSnapshot>;
   type?(input: BrowserActionInput): Promise<BrowserSnapshot>;

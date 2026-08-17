@@ -1692,6 +1692,106 @@ describe("supervised local CDP backend", () => {
     )).toHaveLength(beforeClicks);
   });
 
+  it("dispatches a reviewed key only while its exact focused target remains bound", async () => {
+    const sockets = createSocketFactory();
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: sockets.webSocketFactory,
+      resolveHostname: () => ["93.184.216.34"]
+    });
+    await backend.navigate({ url: "https://example.com/form", sessionId: "session-bound-press" });
+    const page = sockets.pageSocket()!;
+    page.snapshot = {
+      url: "https://example.com/form",
+      title: "Form",
+      text: "Email",
+      elements: [{ ref: "@e1", role: "textbox", name: "Email" }]
+    };
+    page.browserActionPreflight = {
+      ref: "@e1",
+      kind: "form-control",
+      tag: "input",
+      role: "textbox",
+      label: "Email",
+      formAssociated: true,
+      submit: false
+    };
+    const current = await backend.snapshot?.({ sessionId: "session-bound-press" });
+
+    await expect(backend.press?.({
+      sessionId: "session-bound-press",
+      ref: "@e1",
+      identity: current!.identity,
+      tabRef: current!.tab!.ref,
+      key: "Enter"
+    })).resolves.toMatchObject({ sessionId: "session-bound-press" });
+    expect(page.sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: "Input.dispatchKeyEvent", params: { type: "keyDown", key: "Enter" } }),
+      expect.objectContaining({ method: "Input.dispatchKeyEvent", params: { type: "keyUp", key: "Enter" } })
+    ]));
+
+    const dispatchedBeforeMismatch = page.sent.filter((message) => message.method === "Input.dispatchKeyEvent").length;
+    page.browserActionPreflight = {
+      ...page.browserActionPreflight,
+      ref: "@e2",
+      label: "Other field"
+    };
+    await expect(backend.press?.({
+      sessionId: "session-bound-press",
+      ref: "@e1",
+      identity: (await backend.snapshot?.({ sessionId: "session-bound-press" }))!.identity,
+      tabRef: current!.tab!.ref,
+      key: "Enter"
+    })).rejects.toMatchObject({ reason: "browser-target-not-found" });
+    expect(page.sent.filter((message) => message.method === "Input.dispatchKeyEvent")).toHaveLength(dispatchedBeforeMismatch);
+  });
+
+  it("accepts only the exact browser dialog bound during security review", async () => {
+    const sockets = createSocketFactory();
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: sockets.webSocketFactory,
+      resolveHostname: () => ["93.184.216.34"]
+    });
+    await backend.navigate({ url: "https://example.com/dialog", sessionId: "session-bound-dialog" });
+    const page = sockets.pageSocket()!;
+    page.snapshot = {
+      url: "https://example.com/dialog",
+      title: "Dialog",
+      text: "Confirm",
+      elements: []
+    };
+    page.emitMessage({
+      method: "Page.javascriptDialogOpening",
+      params: { type: "confirm", message: "Continue?" }
+    });
+    const current = await backend.snapshot?.({ sessionId: "session-bound-dialog" });
+
+    await expect(backend.dialog?.({
+      sessionId: "session-bound-dialog",
+      ref: "dialog-1",
+      identity: current!.identity,
+      tabRef: current!.tab!.ref,
+      action: "accept"
+    })).resolves.toMatchObject({ sessionId: "session-bound-dialog" });
+    expect(page.sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: "Page.handleJavaScriptDialog", params: { accept: true, promptText: "" } })
+    ]));
+
+    const dispatchedBeforeMismatch = page.sent.filter((message) => message.method === "Page.handleJavaScriptDialog").length;
+    page.emitMessage({ method: "Page.javascriptDialogClosed", params: {} });
+    await expect(backend.dialog?.({
+      sessionId: "session-bound-dialog",
+      ref: "dialog-1",
+      identity: (await backend.snapshot?.({ sessionId: "session-bound-dialog" }))!.identity,
+      tabRef: current!.tab!.ref,
+      action: "accept"
+    })).rejects.toMatchObject({ reason: "browser-target-not-found" });
+    expect(page.sent.filter((message) => message.method === "Page.handleJavaScriptDialog")).toHaveLength(dispatchedBeforeMismatch);
+  });
+
   it("click() follows one newly opened safe tab and focuses its snapshot", async () => {
     const mainSnapshot = {
       sessionId: "session-1",

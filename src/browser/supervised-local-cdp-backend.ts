@@ -31,7 +31,12 @@ import {
   withBrowserActionDelta,
   withDispatchedActionSettlementFailure
 } from "./action-settling.js";
-import { findBrowserLocator, resolveBrowserTarget } from "./browser-locator.js";
+import {
+  assertBrowserTargetContext,
+  BrowserTargetError,
+  findBrowserLocator,
+  resolveBrowserTarget
+} from "./browser-locator.js";
 import { findChromiumExecutable, type ChromiumFinderOptions, type ChromiumFinderResult } from "./chromium-finder.js";
 import { launchChrome, type ChromeLauncherOptions, type LaunchedChrome } from "./chrome-launcher.js";
 import { CdpTargetManager, type CdpTargetManagerOptions } from "./cdp-target-manager.js";
@@ -994,7 +999,22 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     press: async (input) => {
       normalizeBrowserActionSettlementInput(input);
       const session = await getSession(input);
-      const before = latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session);
+      const before = input.ref === undefined
+        ? latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session)
+        : (await captureSafeTargetSnapshot(session, input)).snapshot;
+      if (input.ref !== undefined) {
+        const target = resolveBrowserTarget(before, input);
+        const focused = await inspectBrowserActionTarget(session, undefined);
+        if (focused?.ref !== target.ref) {
+          throw new BrowserTargetError({
+            reason: "browser-target-not-found",
+            message: `The security-reviewed browser target is no longer focused: ${target.ref}.`,
+            currentSessionId: before.sessionId,
+            currentIdentity: before.identity,
+            currentTabRef: before.tab?.ref
+          });
+        }
+      }
       const key = input.key ?? "Enter";
       await session.supervisor.send("Input.dispatchKeyEvent", { type: "keyDown", key });
       await session.supervisor.send("Input.dispatchKeyEvent", { type: "keyUp", key });
@@ -1179,7 +1199,22 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     dialog: async (input = {}) => {
       normalizeBrowserActionSettlementInput(input);
       const session = await getSession(input);
-      const before = latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session);
+      const before = input.ref === undefined
+        ? latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session)
+        : await captureSessionSnapshot(session);
+      if (input.ref !== undefined) {
+        assertBrowserTargetContext(before, input);
+        const dialog = before.pendingDialogs?.find((candidate) => candidate.id === input.ref);
+        if (dialog === undefined) {
+          throw new BrowserTargetError({
+            reason: "browser-target-not-found",
+            message: `The security-reviewed browser dialog is no longer current: ${input.ref}.`,
+            currentSessionId: before.sessionId,
+            currentIdentity: before.identity,
+            currentTabRef: before.tab?.ref
+          });
+        }
+      }
       await session.supervisor.respondToDialog({
         accept: input.action !== "dismiss",
         promptText: input.promptText
