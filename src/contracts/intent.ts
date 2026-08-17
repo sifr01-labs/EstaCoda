@@ -6,6 +6,7 @@ export type NativeIntent =
   | "voice-transcription"
   | "speech-generation"
   | "attachment-analysis"
+  | "browser-control"
   | "general";
 
 export type IntentRouteEvidence = {

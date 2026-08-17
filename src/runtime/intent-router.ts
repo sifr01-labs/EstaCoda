@@ -51,6 +51,7 @@ const NATIVE_INTENT_TOOLSETS: Record<NativeIntent, ToolsetName[]> = {
   "voice-transcription": ["media", "files"],
   "speech-generation": ["media", "files"],
   "attachment-analysis": ["media", "files"],
+  "browser-control": ["browser"],
   "general": []
 };
 
@@ -316,6 +317,11 @@ function detectNativeIntent(normalized: string, attachments: ChannelAttachment[]
     };
   }
 
+  const browserControl = detectBrowserControl(normalized);
+  if (browserControl !== undefined) {
+    return browserControl;
+  }
+
   if (readyAttachments.length > 0) {
     return {
       nativeIntent: "attachment-analysis",
@@ -565,6 +571,80 @@ function matchesVoiceTranscription(normalized: string): boolean {
 
 function matchesSpeechGeneration(normalized: string): boolean {
   return /\b(text to speech|tts|read aloud|speak this|say this|spoken reply|generate speech)\b/iu.test(normalized);
+}
+
+function detectBrowserControl(normalized: string): {
+  nativeIntent: "browser-control";
+  labels: IntentLabel[];
+  evidence: IntentRouteEvidence[];
+} | undefined {
+  if (matchesBrowserEngineeringQuestion(normalized)) {
+    return undefined;
+  }
+
+  const authentication = matchesBrowserAuthentication(normalized);
+  const supervised = matchesSupervisedBrowserRequest(normalized);
+  const directControl = matchesDirectBrowserControl(normalized);
+  if (!authentication && !supervised && !directControl) {
+    return undefined;
+  }
+
+  const detail = authentication
+    ? "Prompt explicitly asks to authenticate through a website or browser."
+    : supervised
+      ? "Prompt explicitly asks for a visible or supervised browser session."
+      : "Prompt explicitly asks to navigate or interact with a browser.";
+
+  return {
+    nativeIntent: "browser-control",
+    labels: [
+      "browser-control",
+      ...(authentication ? ["authentication"] : []),
+      ...(supervised ? ["supervised-browser"] : [])
+    ],
+    evidence: [{
+      kind: "native-intent",
+      detail,
+      weight: 0.95
+    }]
+  };
+}
+
+function matchesBrowserEngineeringQuestion(normalized: string): boolean {
+  const browserSubject = /\b(browser|chrome|chromium|cdp|playwright|puppeteer)\b|متصفح|كروم/iu;
+  const engineeringSubject = /\b(code|codebase|architecture|implementation|backend|controller|class|interface|module|tests?|integration)\b|كود|شفرة|معمارية|هندسة|تنفيذ|خلفية|متحكم|واجهة|وحدة|اختبار|تكامل/iu;
+  const engineeringIntent = /\b(explain|review|audit|analy[sz]e|design|implement|fix|change|update|modify|refactor|test|debug|investigate|how|why|what)\b|اشرح|راجع|دقق|حلل|صمم|نفذ|أصلح|غير|حدّث|عدل|اختبر|صحح|حقق|كيف|لماذا|ما /iu;
+
+  return browserSubject.test(normalized) &&
+    engineeringSubject.test(normalized) &&
+    engineeringIntent.test(normalized);
+}
+
+function matchesBrowserAuthentication(normalized: string): boolean {
+  const authenticationAction = /\b(?:log|sign)\s+(?:me\s+|us\s+)?in(?:to)?\b|\blogin\s+to\b|\bget\s+(?:me|us)\s+(?:logged|signed)\s+in\b|\bauthenticate\b|سج[ّ]?ل(?:ني|نا)?\s+(?:ال)?دخول(?:ي|نا)?|تسجيل\s+(?:ال)?دخول|ادخل(?:ني|نا)?\s+(?:إلى|الى)/iu;
+  const webTarget = /\b(browser|chrome|chromium|website|site|portal|web\s?page|account|dashboard)\b|https?:\/\/|متصفح|كروم|موقع|بوابة|صفحة|حساب|لوحة\s+التحكم/iu;
+  return authenticationAction.test(normalized) && webTarget.test(normalized);
+}
+
+function matchesSupervisedBrowserRequest(normalized: string): boolean {
+  return /\b(?:open|launch|start|spin\s+up|show|use)\b.{0,80}\b(?:visible|headed|supervised)\b.{0,30}\b(?:browser|chrome|chromium)\b/iu.test(normalized) ||
+    /\b(?:visible|headed|supervised)\b.{0,30}\b(?:browser|chrome|chromium)\b/iu.test(normalized) ||
+    /\b(?:show|let)\b.{0,80}\b(?:watch|see|interact)\b.{0,80}\b(?:browser|chrome|chromium)\b/iu.test(normalized) ||
+    /(?:افتح|شغ[ّ]?ل|ابدأ|أظهر|استخدم).{0,80}(?:مرئي|ظاهر|تحت\s+الإشراف).{0,30}(?:متصفح|كروم)/iu.test(normalized) ||
+    /(?:دعني|خليني).{0,80}(?:أشاهد|أرى|أتفاعل).{0,80}(?:متصفح|كروم)/iu.test(normalized);
+}
+
+function matchesDirectBrowserControl(normalized: string): boolean {
+  const browser = "(?:browser|chrome|chromium)";
+  const action = "(?:open|launch|start|spin\\s+up|navigate|go\\s+to|visit|browse|control|interact|click|press|type|enter|fill|select|scroll|switch|inspect|screenshot|capture)";
+  const explicitBrowserControl = new RegExp(
+    `(?:\\b${action}\\b.{0,100}\\b${browser}\\b|\\b${browser}\\b.{0,100}\\b${action}\\b)`,
+    "iu"
+  );
+  const directWebNavigation = /\b(?:open|navigate|go\s+to|visit|browse)\b.{0,100}(?:https?:\/\/|\b(?:website|web\s?page|site|portal|login\s+page)\b|\b[a-z0-9-]+\.(?:com|org|net|io|ai|dev|app|co)\b)/iu;
+  const arabicBrowserControl = /(?:افتح|شغ[ّ]?ل|ابدأ|انتقل|اذهب|تصفح|تحكم|تفاعل|انقر|اضغط|اكتب|أدخل|املأ|اختر|مرر|بد[ّ]?ل|افحص|التقط).{0,100}(?:متصفح|كروم|موقع|بوابة|صفحة|https?:\/\/)/iu;
+
+  return explicitBrowserControl.test(normalized) || directWebNavigation.test(normalized) || arabicBrowserControl.test(normalized);
 }
 
 function matchesCodeReview(normalized: string): boolean {
@@ -826,6 +906,7 @@ function taskClassFromNativeIntent(nativeIntent: NativeIntent): IntentTaskClass 
     case "attachment-analysis":
     case "voice-transcription":
       return "attachment-analysis";
+    case "browser-control":
     case "general":
       return "general";
   }

@@ -64,6 +64,21 @@ describe("narrowProviderToolsForTurn", () => {
     ]);
   });
 
+  it("exposes only core and browser tools for high-confidence browser control", () => {
+    const catalog = buildProviderToolSchemaCatalog({ tools });
+    const browserIntent: IntentRoute = {
+      ...intent(0.95, ["browser"]),
+      nativeIntent: "browser-control",
+      labels: ["browser-control", "authentication"]
+    };
+
+    expect(names(narrowProviderToolsForTurn({ catalog, intent: browserIntent }))).toEqual([
+      "plan",
+      "task_status",
+      "browser_snapshot"
+    ]);
+  });
+
   it("includes core, plan, routed, required, and available optional toolsets", () => {
     const catalog = buildProviderToolSchemaCatalog({ tools });
     const skill: SkillDefinition = {

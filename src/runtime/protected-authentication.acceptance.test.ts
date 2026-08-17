@@ -433,6 +433,8 @@ describe("protected authentication journey acceptance", () => {
       const initialPrimaryPrompt = primaryRequests[0] === undefined
         ? ""
         : renderProviderRequestText(primaryRequests[0]);
+      const sessionEvents = await harness.runtime.sessionDb.listEvents(harness.runtime.sessionId);
+      const intentEvent = sessionEvents.find((event) => event.kind === "intent-routed");
       const violations = [
         ...(recallRequests.length === 0 ? [] : [`visited-site recall dispatched ${recallRequests.length} provider request(s)`]),
         ...(planOnlyRequests.length === 0 ? [] : [`Mission activation consumed ${planOnlyRequests.length} plan-only request(s)`]),
@@ -450,6 +452,18 @@ describe("protected authentication journey acceptance", () => {
           : []),
       ];
 
+      expect(intentEvent).toEqual({
+        kind: "intent-routed",
+        route: expect.objectContaining({
+          nativeIntent: "browser-control",
+          labels: expect.arrayContaining(["browser-control", "authentication"]),
+          confidence: expect.any(Number),
+          suggestedToolsets: ["browser"],
+        }),
+      });
+      if (intentEvent?.kind === "intent-routed") {
+        expect(intentEvent.route.confidence).toBeGreaterThanOrEqual(0.9);
+      }
       expect(response.text).toContain("Authentication confirmed from the authenticated account page.");
       const journeyTools = response.toolExecutions.map((execution) => execution.tool.name);
       const navigationIndex = journeyTools.indexOf("browser.navigate");
@@ -461,7 +475,7 @@ describe("protected authentication journey acceptance", () => {
       expect(harness.socket.sent.some((message) => message.method === "Page.navigate")).toBe(true);
       const persisted = {
         messages: await harness.runtime.sessionDb.listMessages(harness.runtime.sessionId),
-        events: await harness.runtime.sessionDb.listEvents(harness.runtime.sessionId),
+        events: sessionEvents,
         providerRequests: harness.providerRequests,
         response,
       };
@@ -473,7 +487,6 @@ describe("protected authentication journey acceptance", () => {
       expect(violations).toEqual([
         "Mission activation consumed 1 plan-only request(s)",
         "protected input required 3 primary provider request(s)",
-        "the browser-authentication turn exposed unrelated tool systems",
       ]);
     } finally {
       await harness.runtime.dispose();
