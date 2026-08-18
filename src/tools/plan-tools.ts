@@ -15,7 +15,7 @@ export function createPlanTools(options: {
   return [{
     name: "plan",
     description:
-      "Read or refine the bounded execution plan for the current foreground request. The runtime automatically starts a provisional Mission for clearly multi-step work; use write once to replace it with a specific plan from the same turn. Otherwise use merge to refine or record material progress. Cross-system plans must contain exact session-visible read, mutate, and independent verify tool requirements; declare protected paths and protectedSource=browser when browser secrets must be transferred. The runtime preflights these declarations without invoking tools or granting authority. Use write for other work only when no plan exists, and read only when the current plan is not already present in context. This tool tracks work but grants no authority and does not create durable Tasks.",
+      "Read or refine the bounded execution plan for the current foreground request. The runtime automatically starts a provisional Mission for clearly multi-step work; use write once to replace it with a specific plan from the same turn. Otherwise use merge to refine or record material progress. Cross-system plans must contain exact session-visible read, mutate, and independent verify tool requirements. Set requiresProtectedInput=true and protectedSource=browser when the mutation needs protected browser values; the runtime derives risk, reviewed argument mappings, grouped delivery, and verification facts from registered tools. Preflight invokes no tools and grants no authority. Use write for other work only when no plan exists, and read only when the current plan is not already present in context. This tool tracks work but grants no authority and does not create durable Tasks.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -81,12 +81,7 @@ export function createPlanTools(options: {
               itemId: { type: "string", minLength: 1, maxLength: 64 },
               tool: { type: "string", minLength: 1, maxLength: 160 },
               capability: { type: "string", enum: ["read", "mutate", "verify"] },
-              protectedPaths: {
-                type: "array",
-                minItems: 1,
-                maxItems: 8,
-                items: { type: "string", minLength: 2, maxLength: 240 }
-              },
+              requiresProtectedInput: { type: "boolean" },
               protectedSource: { type: "string", enum: ["browser"] }
             },
             required: ["id", "itemId", "tool", "capability"]

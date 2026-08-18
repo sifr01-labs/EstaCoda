@@ -8,6 +8,30 @@ const plan: ExecutionPlan = {
   revision: 1,
   status: "active",
   provenance: { source: "runtime", provisional: true, sessionId: "session-1" },
+  requirements: [{
+    id: "update",
+    itemId: "inspect",
+    tool: "mcp.target.update",
+    capability: "mutate",
+    requiresProtectedInput: true,
+    protectedSource: "browser"
+  }],
+  capabilityPreflight: {
+    status: "ready",
+    assessments: [{
+      requirementId: "update",
+      itemId: "inspect",
+      tool: "mcp.target.update",
+      capability: "mutate",
+      status: "ready",
+      resolution: {
+        canonicalTool: "mcp.target.update",
+        riskClass: "external-side-effect",
+        classification: "mutate",
+        protectedInput: { paths: ["/values/*/value"], grouped: true, source: "browser" }
+      }
+    }]
+  },
   items: [{ id: "inspect", content: "Inspect the collection", status: "in_progress" }]
 };
 
@@ -17,6 +41,7 @@ describe("ExecutionPlanStore", () => {
     const written = store.replace(plan);
     written.items[0]!.content = "mutated outside";
     written.provenance!.provisional = false;
+    written.capabilityPreflight!.assessments[0]!.resolution!.protectedInput!.paths[0] = "/mutated";
     const firstRead = store.current()!;
     firstRead.items[0]!.status = "completed";
     firstRead.provenance!.sessionId = "another-session";

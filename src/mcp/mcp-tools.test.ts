@@ -179,6 +179,9 @@ describe("MCP protected argument declarations", () => {
       handling: { persistence: "destination-managed", sharing: "workspace" },
       destination: { type: "mcp-argument", serverId: "trusted", toolName: "authenticate" }
     }]);
+    expect(tool?.capabilityMetadata).toEqual({
+      protectedInput: { groupedDelivery: true, sources: ["browser"] }
+    });
     expect(JSON.stringify(tool?.inputSchema)).toContain("protectedInput");
     expect(JSON.stringify(tool?.inputSchema)).toContain("expectedOrigin");
     expect(JSON.stringify(tool?.inputSchema)).toContain("documentEpoch");

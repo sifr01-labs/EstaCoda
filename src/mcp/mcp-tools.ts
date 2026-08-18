@@ -183,6 +183,14 @@ function createMcpTool(
       handling: protectedConfig?.handling ?? { persistence: "unknown", sharing: "unknown" },
       destination: { type: "mcp-argument" as const, serverId: serverName, toolName: tool.name }
     })),
+    ...(protectedProjection.paths.length === 0 ? {} : {
+      capabilityMetadata: {
+        protectedInput: {
+          groupedDelivery: true,
+          sources: ["browser" as const]
+        }
+      }
+    }),
     isAvailable: () => true,
     run: async (input: Record<string, unknown>) => {
       const result = await client.callTool(tool.name, input);

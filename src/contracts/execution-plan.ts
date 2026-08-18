@@ -50,8 +50,8 @@ export type ExecutionPlanCapabilityRequirement = {
   /** Exact tool name exposed to the current session. */
   tool: string;
   capability: ExecutionPlanCapability;
-  /** Reviewed protected-argument patterns required by the intended mutation. */
-  protectedPaths?: string[];
+  /** Semantic request only. The runtime resolves reviewed argument mappings. */
+  requiresProtectedInput?: boolean;
   /** Declares that protected values must originate from the supervised browser. */
   protectedSource?: "browser";
 };
@@ -65,8 +65,30 @@ export type ExecutionPlanCapabilityAssessmentStatus =
 export type ExecutionPlanCapabilityAssessmentReason =
   | "tool_missing"
   | "tool_unavailable"
+  | "risk_class_missing"
+  | "capability_metadata_invalid"
   | "protected_path_missing"
+  | "protected_transfer_unavailable"
+  | "grouped_transfer_unsupported"
+  | "protected_source_unsupported"
+  | "protected_source_unavailable"
+  | "verification_missing"
   | "risk_mismatch";
+
+/** Runtime-resolved facts. Provider input cannot populate this structure. */
+export type ExecutionPlanCapabilityResolution = {
+  canonicalTool: string;
+  riskClass: import("./tool.js").ToolRiskClass;
+  classification: "read" | "mutate";
+  protectedInput?: {
+    paths: string[];
+    grouped: boolean;
+    source?: "browser";
+  };
+  verification?: {
+    mutationTools: string[];
+  };
+};
 
 /** Runtime-owned assessment. Provider input must never populate this field. */
 export type ExecutionPlanCapabilityAssessment = {
@@ -76,6 +98,7 @@ export type ExecutionPlanCapabilityAssessment = {
   capability: ExecutionPlanCapability;
   status: ExecutionPlanCapabilityAssessmentStatus;
   reasonCode?: ExecutionPlanCapabilityAssessmentReason;
+  resolution?: ExecutionPlanCapabilityResolution;
 };
 
 export type ExecutionPlanCapabilityPreflight = {

@@ -513,7 +513,7 @@ function initialPlan(): Record<string, unknown> {
         itemId: "update-target",
         tool: MUTATION_TOOL,
         capability: "mutate",
-        protectedPaths: ["/values/*/value"],
+        requiresProtectedInput: true,
         protectedSource: "browser",
       },
       { id: "destination-verification", itemId: "verify-target", tool: VERIFY_TOOL, capability: "verify" },

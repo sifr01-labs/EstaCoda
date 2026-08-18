@@ -27,6 +27,31 @@ function cloneExecutionPlanSnapshot(plan: ExecutionPlan): ExecutionPlan {
   return {
     ...plan,
     ...(plan.provenance === undefined ? {} : { provenance: { ...plan.provenance } }),
+    ...(plan.requirements === undefined ? {} : {
+      requirements: plan.requirements.map((requirement) => ({ ...requirement }))
+    }),
+    ...(plan.capabilityPreflight === undefined ? {} : {
+      capabilityPreflight: {
+        status: plan.capabilityPreflight.status,
+        assessments: plan.capabilityPreflight.assessments.map((assessment) => ({
+          ...assessment,
+          ...(assessment.resolution === undefined ? {} : {
+            resolution: {
+              ...assessment.resolution,
+              ...(assessment.resolution.protectedInput === undefined ? {} : {
+                protectedInput: {
+                  ...assessment.resolution.protectedInput,
+                  paths: [...assessment.resolution.protectedInput.paths]
+                }
+              }),
+              ...(assessment.resolution.verification === undefined ? {} : {
+                verification: { mutationTools: [...assessment.resolution.verification.mutationTools] }
+              })
+            }
+          })
+        }))
+      }
+    }),
     items: plan.items.map((item) => ({
       ...item,
       ...(item.evidenceCallIds === undefined ? {} : { evidenceCallIds: [...item.evidenceCallIds] }),

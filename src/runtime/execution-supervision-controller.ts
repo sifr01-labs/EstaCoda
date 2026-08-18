@@ -390,7 +390,6 @@ function executionPlanMissingCapabilityBlocker(
   return {
     summary: formatExecutionCapabilityBlocker({
       assessment,
-      requirement: plan?.requirements?.find((entry) => entry.id === assessment.requirementId),
       locale
     })
   };

@@ -28,6 +28,7 @@ import {
   type ExecutionPlanWriteContext,
   type ExecutionPlanWriteInput
 } from "../contracts/execution-plan.js";
+import type { ToolRiskClass } from "../contracts/tool.js";
 import { isProtectedArgumentPattern } from "../security/protected-argument-path.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import { isAcknowledgementContinuation, isExplicitNewRequest } from "./conversation-continuation-state.js";
@@ -135,7 +136,7 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
         : await this.#capabilityPreflight.assess(requirements, context);
       plan = validatePlan({
         ...plan,
-        items: applyCapabilityBlockers(plan.items, requirements, capabilityPreflight),
+        items: applyCapabilityBlockers(plan.items, capabilityPreflight),
         capabilityPreflight
       });
     }
@@ -752,22 +753,25 @@ function validateCapabilityRequirements(
       throw new ExecutionPlanValidationError(`Requirement ${id} has an invalid capability.`);
     }
     const capability: ExecutionPlanCapabilityRequirement["capability"] = entry.capability;
-    const protectedPaths = validateProtectedPaths(entry.protectedPaths, id);
-    if (protectedPaths !== undefined && capability !== "mutate") {
-      throw new ExecutionPlanValidationError(`Only mutation requirement ${id} may declare protected paths.`);
+    if (entry.requiresProtectedInput !== undefined && typeof entry.requiresProtectedInput !== "boolean") {
+      throw new ExecutionPlanValidationError(`Requirement ${id} has an invalid protected input declaration.`);
+    }
+    const requiresProtectedInput = entry.requiresProtectedInput === true;
+    if (requiresProtectedInput && capability !== "mutate") {
+      throw new ExecutionPlanValidationError(`Only mutation requirement ${id} may require protected input.`);
     }
     if (entry.protectedSource !== undefined && entry.protectedSource !== "browser") {
       throw new ExecutionPlanValidationError(`Requirement ${id} has an invalid protected source.`);
     }
-    if (entry.protectedSource !== undefined && protectedPaths === undefined) {
-      throw new ExecutionPlanValidationError(`Requirement ${id} needs protected paths when a protected source is declared.`);
+    if (entry.protectedSource !== undefined && !requiresProtectedInput) {
+      throw new ExecutionPlanValidationError(`Requirement ${id} must require protected input when a protected source is declared.`);
     }
     return {
       id,
       itemId,
       tool,
       capability,
-      ...(protectedPaths === undefined ? {} : { protectedPaths }),
+      ...(requiresProtectedInput ? { requiresProtectedInput: true } : {}),
       ...(entry.protectedSource === undefined ? {} : { protectedSource: "browser" as const })
     };
   });
@@ -779,25 +783,6 @@ function validateCapabilityRequirements(
     }
   }
   return requirements;
-}
-
-function validateProtectedPaths(input: unknown, requirementId: string): string[] | undefined {
-  if (input === undefined) return undefined;
-  if (!Array.isArray(input) || input.length === 0 || input.length > EXECUTION_PLAN_MAX_PROTECTED_PATHS) {
-    throw new ExecutionPlanValidationError(
-      `Requirement ${requirementId} supports 1-${EXECUTION_PLAN_MAX_PROTECTED_PATHS} protected paths.`
-    );
-  }
-  const values = input.map((value) => {
-    if (typeof value !== "string" || !isProtectedArgumentPattern(value)) {
-      throw new ExecutionPlanValidationError(`Requirement ${requirementId} has an invalid protected path.`);
-    }
-    return value;
-  });
-  if (new Set(values).size !== values.length) {
-    throw new ExecutionPlanValidationError(`Requirement ${requirementId} contains duplicate protected paths.`);
-  }
-  return values;
 }
 
 function validateCapabilityPreflight(
@@ -827,11 +812,17 @@ function validateCapabilityPreflight(
       throw new ExecutionPlanValidationError("Persisted capability assessment is malformed.");
     }
     const reasonCode = entry.reasonCode;
+    let resolution: ExecutionPlanCapabilityAssessment["resolution"];
     if (entry.status === "ready") {
       if (reasonCode !== undefined) throw new ExecutionPlanValidationError("Ready capability assessment has a failure reason.");
-    } else if (reasonCode !== "tool_missing" && reasonCode !== "tool_unavailable" &&
-      reasonCode !== "protected_path_missing" && reasonCode !== "risk_mismatch") {
-      throw new ExecutionPlanValidationError("Failed capability assessment has an invalid reason.");
+      resolution = validateCapabilityResolution(entry.resolution, requirement);
+    } else {
+      if (!isCapabilityFailureReason(reasonCode)) {
+        throw new ExecutionPlanValidationError("Failed capability assessment has an invalid reason.");
+      }
+      if (entry.resolution !== undefined) {
+        throw new ExecutionPlanValidationError("Failed capability assessment must not contain a resolution.");
+      }
     }
     return {
       requirementId: requirement.id,
@@ -839,12 +830,118 @@ function validateCapabilityPreflight(
       tool: requirement.tool,
       capability: requirement.capability,
       status: entry.status,
-      ...(reasonCode === undefined ? {} : { reasonCode })
+      ...(reasonCode === undefined ? {} : { reasonCode }),
+      ...(resolution === undefined ? {} : { resolution })
     } as ExecutionPlanCapabilityAssessment;
   });
+  validatePersistedVerificationCoverage(assessments, requirements);
   const derived = assessments.every((assessment) => assessment.status === "ready") ? "ready" : "blocked";
   if (input.status !== derived) throw new ExecutionPlanValidationError("Persisted capability preflight status is inconsistent.");
   return { status: derived, assessments };
+}
+
+function validateCapabilityResolution(
+  input: unknown,
+  requirement: ExecutionPlanCapabilityRequirement
+): NonNullable<ExecutionPlanCapabilityAssessment["resolution"]> {
+  if (!isRecord(input) || input.canonicalTool !== requirement.tool || !isToolRiskClass(input.riskClass) ||
+    (input.classification !== "read" && input.classification !== "mutate")) {
+    throw new ExecutionPlanValidationError("Persisted capability resolution is malformed.");
+  }
+  if ((requirement.capability === "mutate") !== (input.classification === "mutate") ||
+    !resolutionRiskMatches(input.classification, input.riskClass)) {
+    throw new ExecutionPlanValidationError("Persisted capability resolution has inconsistent risk metadata.");
+  }
+
+  let protectedInput: NonNullable<ExecutionPlanCapabilityAssessment["resolution"]>["protectedInput"];
+  if (requirement.requiresProtectedInput === true) {
+    const persistedPaths = isRecord(input.protectedInput) && Array.isArray(input.protectedInput.paths)
+      ? input.protectedInput.paths
+      : undefined;
+    const expectedGrouped = persistedPaths !== undefined && (
+      persistedPaths.length > 1 ||
+      persistedPaths.some((path) => typeof path === "string" && path.split("/").includes("*"))
+    );
+    if (!isRecord(input.protectedInput) || !Array.isArray(input.protectedInput.paths) ||
+      input.protectedInput.paths.length === 0 || input.protectedInput.paths.length > EXECUTION_PLAN_MAX_PROTECTED_PATHS ||
+      input.protectedInput.paths.some((path) => typeof path !== "string" || !isProtectedArgumentPattern(path)) ||
+      new Set(input.protectedInput.paths).size !== input.protectedInput.paths.length ||
+      typeof input.protectedInput.grouped !== "boolean" ||
+      input.protectedInput.grouped !== expectedGrouped ||
+      input.protectedInput.source !== requirement.protectedSource) {
+      throw new ExecutionPlanValidationError("Persisted protected capability resolution is malformed.");
+    }
+    protectedInput = {
+      paths: [...input.protectedInput.paths] as string[],
+      grouped: input.protectedInput.grouped,
+      ...(requirement.protectedSource === undefined ? {} : { source: requirement.protectedSource })
+    };
+  } else if (input.protectedInput !== undefined) {
+    throw new ExecutionPlanValidationError("Unexpected persisted protected capability resolution.");
+  }
+
+  let verification: NonNullable<ExecutionPlanCapabilityAssessment["resolution"]>["verification"];
+  if (requirement.capability === "verify") {
+    if (!isRecord(input.verification) || !Array.isArray(input.verification.mutationTools) ||
+      input.verification.mutationTools.length === 0 ||
+      input.verification.mutationTools.some((tool) => typeof tool !== "string" || tool.trim().length === 0 ||
+        tool.length > EXECUTION_PLAN_MAX_TOOL_NAME_CHARS) ||
+      new Set(input.verification.mutationTools).size !== input.verification.mutationTools.length) {
+      throw new ExecutionPlanValidationError("Persisted verification capability resolution is malformed.");
+    }
+    verification = { mutationTools: [...input.verification.mutationTools] as string[] };
+  } else if (input.verification !== undefined) {
+    throw new ExecutionPlanValidationError("Unexpected persisted verification capability resolution.");
+  }
+
+  return {
+    canonicalTool: requirement.tool,
+    riskClass: input.riskClass,
+    classification: input.classification,
+    ...(protectedInput === undefined ? {} : { protectedInput }),
+    ...(verification === undefined ? {} : { verification })
+  };
+}
+
+function validatePersistedVerificationCoverage(
+  assessments: readonly ExecutionPlanCapabilityAssessment[],
+  requirements: readonly ExecutionPlanCapabilityRequirement[]
+): void {
+  const mutationTools = new Set(
+    requirements.filter((requirement) => requirement.capability === "mutate").map((requirement) => requirement.tool)
+  );
+  const covered = new Set<string>();
+  for (const assessment of assessments) {
+    if (assessment.status !== "ready" || assessment.capability !== "verify") continue;
+    for (const tool of assessment.resolution?.verification?.mutationTools ?? []) {
+      if (!mutationTools.has(tool) || tool === assessment.tool) {
+        throw new ExecutionPlanValidationError("Persisted verification capability references an invalid mutation tool.");
+      }
+      covered.add(tool);
+    }
+  }
+  if (assessments.every((assessment) => assessment.status === "ready") &&
+    [...mutationTools].some((tool) => !covered.has(tool))) {
+    throw new ExecutionPlanValidationError("Persisted capability preflight lacks independent verification coverage.");
+  }
+}
+
+function isCapabilityFailureReason(input: unknown): input is NonNullable<ExecutionPlanCapabilityAssessment["reasonCode"]> {
+  return input === "tool_missing" || input === "tool_unavailable" || input === "risk_class_missing" ||
+    input === "capability_metadata_invalid" || input === "protected_path_missing" ||
+    input === "protected_transfer_unavailable" || input === "grouped_transfer_unsupported" ||
+    input === "protected_source_unsupported" || input === "protected_source_unavailable" ||
+    input === "verification_missing" || input === "risk_mismatch";
+}
+
+function resolutionRiskMatches(
+  classification: "read" | "mutate",
+  riskClass: ToolRiskClass
+): boolean {
+  return classification === "read"
+    ? riskClass === "read-only-local" || riskClass === "read-only-network"
+    : riskClass === "workspace-write" || riskClass === "external-side-effect" ||
+      riskClass === "destructive-local" || riskClass === "shared-state-mutation" || riskClass === "spend-money";
 }
 
 function unavailableCapabilityPreflight(
@@ -865,10 +962,8 @@ function unavailableCapabilityPreflight(
 
 function applyCapabilityBlockers(
   items: readonly ExecutionPlanItem[],
-  requirements: readonly ExecutionPlanCapabilityRequirement[],
   preflight: ExecutionPlanCapabilityPreflight
 ): ExecutionPlanItem[] {
-  const requirementById = new Map(requirements.map((requirement) => [requirement.id, requirement]));
   const firstFailureByItem = new Map<string, ExecutionPlanCapabilityAssessment>();
   for (const assessment of preflight.assessments) {
     if (assessment.status !== "ready" && !firstFailureByItem.has(assessment.itemId)) {
@@ -886,10 +981,7 @@ function applyCapabilityBlockers(
       completionKind: undefined,
       blocker: {
         kind: "missing_capability",
-        summary: formatExecutionCapabilityBlocker({
-          assessment,
-          requirement: requirementById.get(assessment.requirementId)
-        })
+        summary: formatExecutionCapabilityBlocker({ assessment })
       }
     };
   });

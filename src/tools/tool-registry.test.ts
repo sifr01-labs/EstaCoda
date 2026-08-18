@@ -13,6 +13,13 @@ describe("ToolRegistry connector provenance", () => {
       riskClass: "read-only-network",
       toolsets: ["mcp"],
       connector,
+      protectedArguments: [{
+        path: "/secret",
+        handling: { persistence: "none", sharing: "private" }
+      }],
+      capabilityMetadata: {
+        protectedInput: { groupedDelivery: false, sources: ["browser"] }
+      },
       progressLabel: "reading collection",
       maxResultSizeChars: 1_000,
       isAvailable: () => true,
@@ -23,5 +30,7 @@ describe("ToolRegistry connector provenance", () => {
     const snapshot = await registry.snapshot();
     expect(snapshot.available[0]?.connector).toEqual(connector);
     expect(snapshot.available[0]?.connector).not.toBe(connector);
+    expect(snapshot.available[0]).not.toHaveProperty("protectedArguments");
+    expect(snapshot.available[0]).not.toHaveProperty("capabilityMetadata");
   });
 });

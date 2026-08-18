@@ -697,7 +697,7 @@ function renderExecutionPlan(plan: ExecutionPlan): string {
         const assessment = plan.capabilityPreflight?.assessments.find((entry) => entry.requirementId === requirement.id);
         return [
           `- ${requirement.id}: item=${requirement.itemId} tool=${requirement.tool} capability=${requirement.capability}`,
-          ...(requirement.protectedPaths === undefined ? [] : [`  protected_paths: ${requirement.protectedPaths.join(", ")}`]),
+          ...(requirement.requiresProtectedInput === true ? ["  protected_input: required"] : []),
           ...(requirement.protectedSource === undefined ? [] : [`  protected_source: ${requirement.protectedSource}`]),
           ...(assessment === undefined ? [] : [
             `  runtime_preflight: ${assessment.status}${assessment.reasonCode === undefined ? "" : ` · ${assessment.reasonCode}`}`

@@ -339,6 +339,66 @@ describe("ExecutionPlanController", () => {
     expect(events).toEqual(["execution-plan-blocked"]);
   });
 
+  it("rejects tampered runtime capability resolutions during hydration", () => {
+    const persisted = {
+      objective: "Update and verify the destination",
+      originTurnId: "turn-capability",
+      revision: 1,
+      status: "active" as const,
+      items: [
+        { id: "read", content: "Read", status: "in_progress" as const },
+        { id: "update", content: "Update", status: "pending" as const },
+        { id: "verify", content: "Verify", status: "pending" as const }
+      ],
+      requirements: [
+        { id: "read", itemId: "read", tool: "target.read", capability: "read" as const },
+        {
+          id: "update", itemId: "update", tool: "target.update", capability: "mutate" as const,
+          requiresProtectedInput: true, protectedSource: "browser" as const
+        },
+        { id: "verify", itemId: "verify", tool: "target.verify", capability: "verify" as const }
+      ],
+      capabilityPreflight: {
+        status: "ready" as const,
+        assessments: [
+          {
+            requirementId: "read", itemId: "read", tool: "target.read", capability: "read" as const,
+            status: "ready" as const,
+            resolution: { canonicalTool: "target.read", riskClass: "read-only-network" as const, classification: "read" as const }
+          },
+          {
+            requirementId: "update", itemId: "update", tool: "target.update", capability: "mutate" as const,
+            status: "ready" as const,
+            resolution: {
+              canonicalTool: "target.update",
+              riskClass: "external-side-effect" as const,
+              classification: "mutate" as const,
+              protectedInput: { paths: ["/values/*/value"], grouped: true, source: "browser" as const }
+            }
+          },
+          {
+            requirementId: "verify", itemId: "verify", tool: "target.verify", capability: "verify" as const,
+            status: "ready" as const,
+            resolution: {
+              canonicalTool: "target.verify",
+              riskClass: "read-only-network" as const,
+              classification: "read" as const,
+              verification: { mutationTools: ["target.update"] }
+            }
+          }
+        ]
+      }
+    };
+
+    expect(controller().hydrate(structuredClone(persisted))).toMatchObject({ status: "active" });
+    const badGrouping = structuredClone(persisted);
+    badGrouping.capabilityPreflight.assessments[1]!.resolution.protectedInput!.grouped = false;
+    expect(() => controller().hydrate(badGrouping)).toThrow("protected capability resolution");
+    const badVerification = structuredClone(persisted);
+    badVerification.capabilityPreflight.assessments[2]!.resolution.verification!.mutationTools = ["other.update"];
+    expect(() => controller().hydrate(badVerification)).toThrow("invalid mutation tool");
+  });
+
   it("keeps capability requirements bounded and persists no undeclared secret fields", async () => {
     const target = new ExecutionPlanController(
       new ExecutionPlanStore(),

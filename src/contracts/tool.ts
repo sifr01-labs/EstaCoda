@@ -123,9 +123,25 @@ export type ProtectedToolArgumentDeclaration = {
   };
 };
 
+/** Runtime-only capability facts that cannot be supplied by provider tool input. */
+export type RegisteredToolCapabilityMetadata = {
+  protectedInput?: {
+    /** The registered handler can deliver multiple protected values atomically. */
+    groupedDelivery: boolean;
+    /** Trusted protected-value sources accepted by this tool integration. */
+    sources: readonly "browser"[];
+  };
+  verification?: {
+    /** Canonical mutation tool names whose resulting state this tool can verify. */
+    verifies: readonly string[];
+  };
+};
+
 export type RegisteredTool<TInput = any> = ToolDefinition & {
   /** Runtime-only declaration; ToolRegistry intentionally omits it from ToolDefinition. */
   protectedArguments?: readonly ProtectedToolArgumentDeclaration[];
+  /** Runtime-only execution capability metadata; never projected into provider schemas. */
+  capabilityMetadata?: RegisteredToolCapabilityMetadata;
   isAvailable(): Promise<boolean> | boolean;
   resolveSecurity?(input: TInput, context: ToolSecurityResolverContext): Promise<ToolSecurityResolution | undefined> | ToolSecurityResolution | undefined;
   run: ToolHandler<TInput>;

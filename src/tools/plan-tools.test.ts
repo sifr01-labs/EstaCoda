@@ -62,6 +62,9 @@ describe("plan tool", () => {
         path: "/values/*/value",
         handling: { persistence: "destination-managed", sharing: "workspace" }
       }],
+      capabilityMetadata: {
+        protectedInput: { groupedDelivery: true, sources: ["browser"] }
+      },
       isAvailable: () => true,
       run
     });
@@ -102,9 +105,10 @@ describe("plan tool", () => {
           itemId: "update",
           tool: "mcp.target.update",
           capability: "mutate",
-          protectedPaths: ["/values/*/value"],
-          protectedSource: "browser"
-        },
+          requiresProtectedInput: true,
+          protectedSource: "browser",
+          ...({ protectedPaths: ["/model/invented"], riskClass: "read-only-network" } as object)
+        } as never,
         { id: "destination-verify", itemId: "verify", tool: "mcp.target.read", capability: "verify" }
       ]
     }, {
@@ -123,6 +127,27 @@ describe("plan tool", () => {
         ]
       }
     });
+    expect(result.metadata?.plan).toMatchObject({
+      requirements: [
+        {},
+        { id: "destination-write", requiresProtectedInput: true, protectedSource: "browser" },
+        {}
+      ],
+      capabilityPreflight: {
+        assessments: [
+          {},
+          {
+            requirementId: "destination-write",
+            resolution: {
+              riskClass: "external-side-effect",
+              protectedInput: { paths: ["/values/*/value"] }
+            }
+          },
+          {}
+        ]
+      }
+    });
+    expect(JSON.stringify(result.metadata?.plan)).not.toContain("/model/invented");
     expect(run).not.toHaveBeenCalled();
   });
 
@@ -252,6 +277,8 @@ describe("plan tool", () => {
     expect(tools[0]!.description).toContain("use merge to refine");
     expect(tools[0]!.description).toContain("use write once to replace it");
     expect(JSON.stringify(tools[0]!.inputSchema)).toContain('"requirements"');
+    expect(JSON.stringify(tools[0]!.inputSchema)).toContain('"requiresProtectedInput"');
+    expect(JSON.stringify(tools[0]!.inputSchema)).not.toContain('"protectedPaths"');
     expect(JSON.stringify(tools[0]!.inputSchema)).not.toContain('"capabilityPreflight"');
   });
 });
