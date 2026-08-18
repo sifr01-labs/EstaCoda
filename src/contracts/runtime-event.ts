@@ -27,6 +27,19 @@ export type ContextEstimateStage =
 export type RuntimeEvent =
   | ExecutionPlanLifecycleEvent
   | {
+      kind: "authentication-lifecycle";
+      stage:
+        | "credentials-requested"
+        | "credentials-submitted"
+        | "challenge-required"
+        | "challenge-submitted"
+        | "verification-pending"
+        | "authenticated"
+        | "blocked";
+      toolCallId: string;
+      blockerKind?: "user_input_required" | "approval_required" | "missing_capability" | "external_state" | "budget";
+    }
+  | {
       kind: "agent-start";
       sessionId: string;
       input: string;

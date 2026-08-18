@@ -68,6 +68,135 @@ describe("authentication evidence tracker", () => {
     ]);
   });
 
+  it("keeps authentication pending when the credential receipt lands on a challenge with authenticated-looking controls", () => {
+    const tracker = new AuthenticationEvidenceTracker();
+    const before = loginSnapshot(identity(1, 1, 1));
+    tracker.observe([snapshotExecution("before", before)]);
+    const challenge = pageSnapshot(identity(2, 2, 2), "Approve sign-in", [
+      { ref: "@e1", role: "button", name: "Use a passkey" },
+      { ref: "@e2", role: "link", name: "Sign out" },
+    ]);
+
+    const observation = tracker.observe([
+      protectedExecution("browser.fill_protected_form", "submit", {
+        before: before.identity,
+        after: challenge.identity,
+        snapshot: challenge,
+      }),
+    ]);
+
+    expect(observation.effects).toEqual([
+      { effect: "credentials-submitted", stage: "credentials", toolCallId: "submit" },
+      { effect: "challenge-required", stage: "challenge", toolCallId: "submit" },
+    ]);
+    expect(observation.assessments).toEqual([
+      expect.objectContaining({ outcome: "candidate", reason: "challenge-required", stage: "challenge" }),
+    ]);
+
+    const laterChallenge = pageSnapshot(identity(2, 2, 3), "Approve sign-in", [
+      { ref: "@e1", role: "button", name: "Use a passkey" },
+      { ref: "@e2", role: "link", name: "My profile" },
+    ]);
+    const laterObservation = tracker.observe([snapshotExecution("observe-challenge", laterChallenge)]);
+    expect(laterObservation.effects).toEqual([]);
+    expect(laterObservation.assessments).toEqual([
+      expect.objectContaining({ outcome: "candidate", reason: "challenge-required", stage: "challenge" }),
+    ]);
+  });
+
+  it("verifies a generic approval challenge after a causal browser action", () => {
+    const tracker = pendingApprovalChallengeTracker();
+    const authenticated = withChangedAction(
+      authenticatedSnapshot(identity(3, 3, 3)),
+      identity(2, 2, 2)
+    );
+
+    const observation = tracker.observe([
+      browserActionExecution("approve", "browser.click", authenticated),
+    ]);
+
+    expect(observation.effects).toEqual([
+      { effect: "challenge-submitted", stage: "challenge", toolCallId: "approve" },
+      { effect: "authentication-verified", stage: "verification", toolCallId: "approve" },
+    ]);
+    expect(observation.assessments).toEqual([
+      expect.objectContaining({
+        outcome: "verified",
+        reason: "authenticated-evidence-observed",
+        challengeDeparted: true,
+        stateTransitionObserved: true,
+      }),
+    ]);
+  });
+
+  it("keeps resend actions on the same challenge pending without duplicating success", () => {
+    const tracker = pendingApprovalChallengeTracker();
+    const repeatedChallenge = withChangedAction(pageSnapshot(identity(2, 3, 3), "Approval request sent", [
+      { ref: "@e1", role: "button", name: "Resend approval request" },
+    ]), identity(2, 2, 2));
+
+    const observation = tracker.observe([
+      browserActionExecution("resend", "browser.click", repeatedChallenge),
+    ]);
+
+    expect(observation.effects).toEqual([
+      { effect: "challenge-required", stage: "challenge", toolCallId: "resend" },
+    ]);
+    expect(observation.effects.some((effect) => effect.effect === "authentication-verified")).toBe(false);
+  });
+
+  it("allows a rejected protected challenge to be retried and then verified", () => {
+    const tracker = new AuthenticationEvidenceTracker();
+    const challenge = pageSnapshot(identity(1, 1, 1), "Verification code", [
+      { ref: "@e1", role: "textbox", name: "Verification code" },
+      { ref: "@e2", role: "button", name: "Verify" },
+    ]);
+    tracker.observe([snapshotExecution("before-challenge", challenge)]);
+    const rejected = tracker.observe([
+      protectedExecution("browser.type", "rejected-code", {
+        before: challenge.identity,
+        after: identity(1, 2, 2),
+        snapshot: { ...challenge, identity: identity(1, 2, 2), text: "Incorrect verification code" },
+        challengeState: "still-present",
+      }),
+    ]);
+    expect(rejected.effects.map((effect) => effect.effect)).toEqual([
+      "challenge-submitted",
+      "challenge-required",
+    ]);
+
+    const retry = tracker.observe([
+      protectedExecution("browser.type", "accepted-code", {
+        before: identity(1, 2, 2),
+        after: identity(2, 3, 3),
+        snapshot: authenticatedSnapshot(identity(2, 3, 3)),
+      }),
+    ]);
+    expect(retry.effects.map((effect) => effect.effect)).toEqual([
+      "challenge-submitted",
+      "authentication-candidate",
+      "authentication-verified",
+    ]);
+  });
+
+  it("accepts a supervised user's causal completion of an active challenge", () => {
+    const tracker = pendingApprovalChallengeTracker();
+    const observation = tracker.observe([
+      snapshotExecution("observe-user-completion", authenticatedSnapshot(identity(3, 3, 3))),
+    ]);
+
+    expect(observation.effects).toEqual([
+      { effect: "authentication-verified", stage: "verification", toolCallId: "observe-user-completion" },
+    ]);
+    expect(observation.assessments).toEqual([
+      expect.objectContaining({
+        outcome: "verified",
+        challengeDeparted: true,
+        stateTransitionObserved: true,
+      }),
+    ]);
+  });
+
   it("verifies an MFA departure into an authenticated destination when signals were visible behind the challenge", () => {
     const tracker = new AuthenticationEvidenceTracker();
     const before = {
@@ -351,6 +480,40 @@ function verifiedChallengeTracker(): AuthenticationEvidenceTracker {
     }),
   ]);
   return tracker;
+}
+
+function pendingApprovalChallengeTracker(): AuthenticationEvidenceTracker {
+  const tracker = new AuthenticationEvidenceTracker();
+  const before = loginSnapshot(identity(1, 1, 1));
+  tracker.observe([snapshotExecution("before", before)]);
+  tracker.observe([
+    protectedExecution("browser.fill_protected_form", "submit", {
+      before: before.identity,
+      after: identity(2, 2, 2),
+      snapshot: pageSnapshot(identity(2, 2, 2), "Approve sign-in", [
+        { ref: "@e1", role: "button", name: "Approve request" },
+      ]),
+    }),
+  ]);
+  return tracker;
+}
+
+function withChangedAction(snapshot: BrowserSnapshot, beforeIdentity: BrowserStateIdentity): BrowserSnapshot {
+  return {
+    ...snapshot,
+    actionDelta: {
+      outcome: "changed",
+      beforeIdentity,
+      afterIdentity: snapshot.identity,
+      waitCondition: "dom-stable",
+      conditionMet: true,
+      url: {
+        changed: snapshot.identity.documentEpoch > beforeIdentity.documentEpoch,
+        before: "https://portal.example.com/state",
+        after: snapshot.url,
+      },
+    },
+  };
 }
 
 function snapshotExecution(toolCallId: string, snapshot: BrowserSnapshot): ToolExecutionRecord {

@@ -14,7 +14,10 @@ import {
   type ExecutionPlanProgressAssessment
 } from "./execution-plan-progress-guard.js";
 import { assessExecutionPlanActivation, isPlanToolName } from "./execution-plan-activation.js";
-import { applyAuthenticationExecutionEffects } from "./authentication-execution-effects.js";
+import {
+  applyAuthenticationExecutionEffects,
+  type AuthenticationExecutionEffectReceipt,
+} from "./authentication-execution-effects.js";
 import { AuthenticationEvidenceTracker } from "./authentication-evidence-tracker.js";
 import { formatExecutionCapabilityBlocker } from "./execution-capability-preflight.js";
 import type { ExecutionWorkingSetController } from "./execution-working-set.js";
@@ -185,6 +188,7 @@ export class ExecutionSupervisionController {
     for (const assessment of authenticationObservation.assessments) {
       await this.#runRecorder.recordAuthenticationEvidenceAssessment(assessment);
     }
+    await emitAuthenticationLifecycleEvents(this.#onEvent, authenticationObservation.effects);
     if (
       authenticationObservation.effects.length > 0 &&
       this.#executionPlanController !== undefined &&
@@ -360,6 +364,38 @@ export class ExecutionSupervisionController {
       provisional: true,
       sessionId: this.#currentSessionId()
     });
+  }
+}
+
+async function emitAuthenticationLifecycleEvents(
+  sink: RuntimeEventSink | undefined,
+  effects: readonly AuthenticationExecutionEffectReceipt[]
+): Promise<void> {
+  if (sink === undefined) return;
+  for (const effect of effects) {
+    const stage = effect.effect === "credentials-required"
+      ? "credentials-requested" as const
+      : effect.effect === "credentials-submitted"
+        ? "credentials-submitted" as const
+        : effect.effect === "challenge-required"
+          ? "challenge-required" as const
+          : effect.effect === "challenge-submitted"
+            ? "challenge-submitted" as const
+            : effect.effect === "authentication-candidate"
+              ? "verification-pending" as const
+              : effect.effect === "authentication-verified"
+                ? "authenticated" as const
+                : "blocked" as const;
+    try {
+      await sink({
+        kind: "authentication-lifecycle",
+        stage,
+        toolCallId: effect.toolCallId,
+        ...(effect.blocker === undefined ? {} : { blockerKind: effect.blocker.kind }),
+      });
+    } catch {
+      // Runtime UI/event consumers are observational and cannot block authentication.
+    }
   }
 }
 

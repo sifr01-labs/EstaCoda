@@ -7,6 +7,7 @@ import { ExecutionPlanStore } from "./execution-plan-store.js";
 import {
   applyAuthenticationExecutionEffects,
   deriveAuthenticationExecutionEffects,
+  prioritizeAuthenticationExecutionEffects,
   type AuthenticationExecutionEffectReceipt,
 } from "./authentication-execution-effects.js";
 
@@ -54,14 +55,46 @@ describe("authentication execution effects", () => {
         },
       },
       {
-        effect: "authentication-blocked",
+        effect: "challenge-submitted",
+        stage: "challenge",
+        toolCallId: "challenge-call",
+      },
+      {
+        effect: "challenge-required",
         stage: "challenge",
         toolCallId: "challenge-call",
         blocker: {
-          kind: "external_state",
-          summary: "The authentication challenge remained after submission.",
+          kind: "user_input_required",
+          summary: "The authentication challenge remained after submission; provide a new or corrected response.",
         },
       },
+    ]);
+  });
+
+  it("gives an active challenge precedence over authenticated-looking evidence from the same receipt", () => {
+    expect(prioritizeAuthenticationExecutionEffects([
+      { effect: "credentials-submitted", stage: "credentials", toolCallId: "submit" },
+      { effect: "challenge-required", stage: "challenge", toolCallId: "submit" },
+      { effect: "authentication-verified", stage: "verification", toolCallId: "submit" },
+    ])).toEqual([
+      { effect: "credentials-submitted", stage: "credentials", toolCallId: "submit" },
+      { effect: "challenge-required", stage: "challenge", toolCallId: "submit" },
+    ]);
+  });
+
+  it("recognizes generic interactive authentication challenges without OTP-specific fields", () => {
+    const execution = protectedExecution("browser.fill_protected_form", "credentials-call", {
+      secureInputGroupReceipt: { status: "delivered" },
+      protectedDelivery: settledDelivery(),
+      snapshot: {
+        title: "Approve sign-in",
+        elements: [{ ref: "@e1", role: "button", name: "Use a passkey" }],
+      },
+    });
+
+    expect(deriveAuthenticationExecutionEffects([execution])).toEqual([
+      { effect: "credentials-submitted", stage: "credentials", toolCallId: "credentials-call" },
+      { effect: "challenge-required", stage: "challenge", toolCallId: "credentials-call" },
     ]);
   });
 
@@ -186,8 +219,22 @@ describe("authentication execution effects", () => {
 
     expect(controller.current()?.items).toMatchObject([
       { id: "login", status: "completed" },
-      { id: "otp", status: "completed", evidenceCallIds: ["challenge-call"] },
+      { id: "otp", status: "pending", evidenceCallIds: ["challenge-call"] },
       { id: "verify-login", status: "in_progress" },
+      { id: "postman", status: "pending" },
+    ]);
+
+    await applyAuthenticationExecutionEffects({
+      controller,
+      effects: [{ effect: "challenge-required", stage: "challenge", toolCallId: "resend-call" }],
+      objective: "ignored",
+      originTurnId: "turn-1",
+    });
+    expect(controller.current()?.items.filter((item) => item.id === "otp")).toHaveLength(1);
+    expect(controller.current()?.items).toMatchObject([
+      { id: "login", status: "completed" },
+      { id: "otp", status: "in_progress", evidenceCallIds: ["challenge-call"] },
+      { id: "verify-login", status: "pending" },
       { id: "postman", status: "pending" },
     ]);
 

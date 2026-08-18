@@ -26,7 +26,7 @@ const VERIFY_CONTENT = "Verify the authenticated state";
 const POST_LOGIN_CONTENT = "Continue the requested post-login work";
 const AUTHENTICATION_TERMS = /\b(?:authenticat(?:e|ed|ion)|credentials?|log[ -]?in|sign[ -]?in|password)\b|(?:المصادقة|بيانات الاعتماد|تسجيل الدخول|كلمة المرور)/iu;
 const CREDENTIAL_TERMS = /\b(?:account identifier|credentials?|e-?mail|password|user(?:name)?)\b|(?:اسم المستخدم|البريد الإلكتروني|بيانات الاعتماد|كلمة المرور)/iu;
-const CHALLENGE_TERMS = /\b(?:challenge|one[ -]?time|otp|2fa|mfa|verification code|security code|authenticator)\b|(?:رمز التحقق|رمز الأمان|رمز المصادقة|تحدي المصادقة)/iu;
+const CHALLENGE_TERMS = /\b(?:challenge|one[ -]?time|otp|2fa|mfa|verification code|security code|authenticator|passkey|security key|hardware key|biometric|captcha|approve (?:the )?(?:request|sign[ -]?in)|approval (?:prompt|request)|push (?:notification|approval)|device verification|confirm (?:this )?(?:sign[ -]?in|login)|choose (?:a )?verification method)\b|(?:رمز التحقق|رمز الأمان|رمز المصادقة|تحدي المصادقة|مفتاح المرور|مفتاح الأمان|الموافقة على تسجيل الدخول|إشعار الموافقة|التحقق من الجهاز)/iu;
 const VERIFY_TERMS = /\b(?:verify|confirm|check).{0,40}\b(?:authenticat(?:e|ed|ion)|log[ -]?in|sign[ -]?in|session)\b|\bauthenticated state\b|(?:تحقق|تأكد).{0,40}(?:المصادقة|تسجيل الدخول|الجلسة)/iu;
 const GENERAL_VERIFY_TERMS = /\b(?:verify|confirm|check|validation)\b|(?:تحقق|تأكد|تأكيد)/iu;
 const POST_LOGIN_SEQUENCE = /\b(?:and then|then|after(?:wards)?|once)\b|(?:ثم|بعد ذلك|بعد تسجيل الدخول)/iu;
@@ -57,7 +57,7 @@ export async function applyAuthenticationExecutionEffects(input: {
   originTurnId: string;
   sink?: ExecutionPlanEventSink;
 }): Promise<void> {
-  for (const effect of input.effects) {
+  for (const effect of prioritizeAuthenticationExecutionEffects(input.effects)) {
     const current = input.controller.current();
     if (current === undefined) {
       await input.controller.write(
@@ -73,6 +73,20 @@ export async function applyAuthenticationExecutionEffects(input: {
       await input.controller.merge({ items: patches }, input.sink);
     }
   }
+}
+
+/** A challenge observed in the same trusted receipt always outranks a success claim. */
+export function prioritizeAuthenticationExecutionEffects(
+  effects: readonly AuthenticationExecutionEffectReceipt[]
+): AuthenticationExecutionEffectReceipt[] {
+  const challengedCalls = new Set(
+    effects
+      .filter((effect) => effect.effect === "challenge-required")
+      .map((effect) => effect.toolCallId)
+  );
+  return effects.filter((effect) =>
+    effect.effect !== "authentication-verified" || !challengedCalls.has(effect.toolCallId)
+  );
 }
 
 function deriveAuthenticationExecutionEffectsForTool(
@@ -143,7 +157,7 @@ function credentialEffects(
     stage: "credentials",
     toolCallId,
   }];
-  effects.push(snapshotRequiresChallenge(metadata.snapshot)
+  effects.push(snapshotRequiresAuthenticationChallenge(metadata.snapshot)
     ? { effect: "challenge-required", stage: "challenge", toolCallId }
     : { effect: "authentication-candidate", stage: "credentials", toolCallId });
   return effects;
@@ -182,7 +196,18 @@ function challengeEffects(
     return [blockedEffect(toolCallId, "challenge", "The verified authentication challenge control could not be submitted.")];
   }
   if (delivery.challengeState === "still-present") {
-    return [blockedEffect(toolCallId, "challenge", "The authentication challenge remained after submission.")];
+    return [
+      { effect: "challenge-submitted", stage: "challenge", toolCallId },
+      {
+        effect: "challenge-required",
+        stage: "challenge",
+        toolCallId,
+        blocker: {
+          kind: "user_input_required",
+          summary: "The authentication challenge remained after submission; provide a new or corrected response.",
+        },
+      },
+    ];
   }
   if (delivery.sensitiveInputActive || delivery.challengeState === "unknown") {
     return [blockedEffect(toolCallId, "challenge", "The protected authentication challenge could not be safely settled.")];
@@ -196,7 +221,15 @@ function challengeEffects(
     )];
   }
   if (!succeeded || (delivery.submission !== "clicked" && delivery.submission !== "automatic")) return [];
-  return [{ effect: "authentication-candidate", stage: "challenge", toolCallId }];
+  const effects: AuthenticationExecutionEffectReceipt[] = [
+    { effect: "challenge-submitted", stage: "challenge", toolCallId },
+  ];
+  if (snapshotRequiresAuthenticationChallenge(metadata.snapshot)) {
+    effects.push({ effect: "challenge-required", stage: "challenge", toolCallId });
+  } else {
+    effects.push({ effect: "authentication-candidate", stage: "challenge", toolCallId });
+  }
+  return effects;
 }
 
 function initialAuthenticationPlan(
@@ -250,12 +283,13 @@ function authenticationEffectPatches(
     }
   }
   const activate = (id: string, content: string, blocker?: ExecutionPlanBlocker) => {
+    const existing = plan.items.find((item) => item.id === id);
     demoteOtherActiveItems(plan, id, patches);
     patches.push({
       id,
-      ...(!plan.items.some((item) => item.id === id) || (provisional && id === "execute") ? { content } : {}),
+      ...(existing === undefined || (provisional && id === "execute") ? { content } : {}),
       status: blocker === undefined ? "in_progress" : "blocked",
-      evidenceCallIds: [],
+      evidenceCallIds: existing?.evidenceCallIds ?? [],
       blocker: blocker ?? null,
     });
   };
@@ -266,7 +300,7 @@ function authenticationEffectPatches(
       id,
       ...(existing === undefined || (provisional && id === "execute") ? { content } : {}),
       status: "completed",
-      evidenceCallIds: [effect.toolCallId],
+      evidenceCallIds: [...new Set([...(existing?.evidenceCallIds ?? []), effect.toolCallId])],
       blocker: null,
     });
   };
@@ -283,12 +317,21 @@ function authenticationEffectPatches(
       activate(ids.challenge, CHALLENGE_CONTENT, effect.blocker);
       ensurePending(ids.verify, VERIFY_CONTENT, plan, patches);
       break;
+    case "challenge-submitted":
+      awaitChallengeVerification(ids.challenge, CHALLENGE_CONTENT, plan, patches, effect.toolCallId);
+      activate(ids.verify, VERIFY_CONTENT);
+      break;
     case "authentication-candidate":
       if (effect.stage === "credentials") complete(ids.credentials, CREDENTIAL_CONTENT);
-      if (effect.stage === "challenge") complete(ids.challenge, CHALLENGE_CONTENT);
+      if (effect.stage === "challenge") {
+        awaitChallengeVerification(ids.challenge, CHALLENGE_CONTENT, plan, patches, effect.toolCallId);
+      }
       activate(ids.verify, VERIFY_CONTENT);
       break;
     case "authentication-verified":
+      if (plan.items.some((item) => item.id === ids.challenge)) {
+        complete(ids.challenge, CHALLENGE_CONTENT);
+      }
       complete(ids.verify, VERIFY_CONTENT);
       activateNextPostLoginItem(plan, patches, new Set([ids.credentials, ids.challenge, ids.verify]));
       break;
@@ -363,6 +406,23 @@ function ensurePending(
   }
 }
 
+function awaitChallengeVerification(
+  id: string,
+  content: string,
+  plan: ExecutionPlan,
+  patches: ExecutionPlanMergeItemInput[],
+  toolCallId: string
+): void {
+  const existing = plan.items.find((item) => item.id === id);
+  patches.push({
+    id,
+    ...(existing === undefined ? { content } : {}),
+    status: "pending",
+    evidenceCallIds: [toolCallId],
+    blocker: null,
+  });
+}
+
 function activateNextPostLoginItem(
   plan: ExecutionPlan,
   patches: ExecutionPlanMergeItemInput[],
@@ -433,7 +493,7 @@ function blockedEffect(
   };
 }
 
-function snapshotRequiresChallenge(value: unknown): boolean {
+export function snapshotRequiresAuthenticationChallenge(value: unknown): boolean {
   const snapshot = record(value);
   if (snapshot === undefined) return false;
   const elements = Array.isArray(snapshot.elements) ? snapshot.elements : [];
@@ -442,7 +502,12 @@ function snapshotRequiresChallenge(value: unknown): boolean {
     typeof snapshot.text === "string" ? snapshot.text.slice(0, 4_000) : "",
     ...elements.slice(0, 64).flatMap((element) => {
       const candidate = record(element);
-      if (candidate === undefined) return [];
+      if (
+        candidate === undefined ||
+        candidate.hidden === true ||
+        candidate.disabled === true ||
+        candidate.interactable === false
+      ) return [];
       return [candidate.role, candidate.name, candidate.label, candidate.text]
         .filter((entry): entry is string => typeof entry === "string");
     }),

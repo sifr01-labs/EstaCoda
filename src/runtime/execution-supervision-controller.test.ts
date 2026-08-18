@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BrowserSnapshot, BrowserStateIdentity } from "../contracts/browser.js";
 import type { ProviderResponse } from "../contracts/provider.js";
+import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ToolDefinition } from "../contracts/tool.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
@@ -77,6 +78,42 @@ describe("ExecutionSupervisionController", () => {
         expect.objectContaining({ id: "authentication.verify", status: "completed" }),
         expect.objectContaining({ id: "authentication.continue", status: "in_progress" })
       ])
+    });
+  });
+
+  it("emits authentication lifecycle events without allowing observers to interrupt execution", async () => {
+    const before = loginSnapshot(identity(1, 1, 1));
+    const submission = protectedExecution("submit-auth", before.identity, identity(2, 2, 2));
+    const onEvent = vi.fn<RuntimeEventSink>()
+      .mockRejectedValueOnce(new Error("observer unavailable"))
+      .mockResolvedValue(undefined);
+    const { supervision } = createSupervision({
+      userText: "Sign me in.",
+      providerTools: [providerTool("plan"), providerTool("browser.fill_protected_form")],
+      existingExecutions: [snapshotExecution("before-auth", before)],
+      planController: new ExecutionPlanController(new ExecutionPlanStore()),
+      onEvent,
+    });
+
+    await expect(supervision.applyRuntimeMissionEffects({
+      executions: [submission],
+      providerToolNames: ["browser.fill_protected_form"],
+    })).resolves.toBeUndefined();
+
+    expect(onEvent).toHaveBeenCalledWith({
+      kind: "authentication-lifecycle",
+      stage: "credentials-submitted",
+      toolCallId: "submit-auth",
+    });
+    expect(onEvent).toHaveBeenCalledWith({
+      kind: "authentication-lifecycle",
+      stage: "verification-pending",
+      toolCallId: "submit-auth",
+    });
+    expect(onEvent).toHaveBeenCalledWith({
+      kind: "authentication-lifecycle",
+      stage: "authenticated",
+      toolCallId: "submit-auth",
     });
   });
 
@@ -271,6 +308,7 @@ function createSupervision(input: {
   noProgressNudgeIteration?: number;
   maxNoProgressIterations?: number;
   locale?: "en" | "ar";
+  onEvent?: RuntimeEventSink;
 } = {}) {
   const recordAuthenticationEvidenceAssessment = vi.fn(async () => undefined);
   return {
@@ -286,7 +324,8 @@ function createSupervision(input: {
       noProgressNudgeIteration: input.noProgressNudgeIteration ?? 3,
       maxNoProgressIterations: input.maxNoProgressIterations ?? 6,
       executionPlanController: input.planController,
-      runRecorder: { recordAuthenticationEvidenceAssessment }
+      runRecorder: { recordAuthenticationEvidenceAssessment },
+      onEvent: input.onEvent,
     })
   };
 }

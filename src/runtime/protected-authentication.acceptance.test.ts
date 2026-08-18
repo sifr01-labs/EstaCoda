@@ -51,7 +51,7 @@ const route: ResolvedModelRoute = {
   authMethod: "none",
 };
 
-type CredentialOutcome = "otp" | "incorrect" | "error" | "remains";
+type CredentialOutcome = "authenticated" | "otp" | "incorrect" | "error" | "remains";
 type SubmissionMode = "manual" | "automatic";
 type OtpOutcome = "authenticated" | "rejected";
 
@@ -74,6 +74,14 @@ type AcceptanceScenario = {
 };
 
 const scenarios: AcceptanceScenario[] = [
+  {
+    name: "password-only authentication reaches the authenticated page",
+    credentialOutcome: "authenticated",
+    authenticated: true,
+    expectedCredentialSubmits: 1,
+    expectedOtpPrompts: 0,
+    expectedOtpSubmits: 0,
+  },
   {
     name: "credentials manual submit then OTP manual submit reaches the authenticated page",
     authenticated: true,
@@ -253,23 +261,31 @@ describe("protected authentication journey acceptance", () => {
       if (scenario.authenticated) {
         expect(response!.text).toContain("Authentication confirmed from the authenticated account page.");
         expect(response!.text).not.toContain("The Mission is incomplete.");
-        expect(mission).toMatchObject({
-          status: "completed",
-          items: [
+        expect(mission).toMatchObject({ status: "completed" });
+        expect(mission!.items).toEqual(expect.arrayContaining([
             { id: "authentication.credentials", status: "completed" },
             {
               id: "authentication.verify",
               status: "completed",
-              evidenceCallIds: ["acceptance-call-3"],
+              evidenceCallIds: [scenario.expectedOtpPrompts === 0 ? "acceptance-call-2" : "acceptance-call-3"],
             },
-            { id: "authentication.challenge", status: "completed" },
-          ],
-        });
+        ].map((item) => expect.objectContaining(item))));
+        if (scenario.expectedOtpPrompts > 0) {
+          expect(mission!.items).toContainEqual(expect.objectContaining({
+            id: "authentication.challenge",
+            status: "completed",
+          }));
+        } else {
+          expect(mission!.items.some((item) => item.id === "authentication.challenge")).toBe(false);
+        }
+        const expectedVerificationCallId = scenario.expectedOtpPrompts === 0
+          ? "acceptance-call-2"
+          : "acceptance-call-3";
         expect(authenticationAssessments).toContainEqual(expect.objectContaining({
           outcome: "verified",
           reason: "authenticated-evidence-observed",
-          submissionToolCallId: "acceptance-call-3",
-          evidenceToolCallId: "acceptance-call-3",
+          submissionToolCallId: expectedVerificationCallId,
+          evidenceToolCallId: expectedVerificationCallId,
           challengeDeparted: true,
           stateTransitionObserved: true,
           postSubmitEvidence: true,
@@ -287,7 +303,7 @@ describe("protected authentication journey acceptance", () => {
         expect(response!.text).not.toContain("Authentication confirmed from the authenticated account page.");
         expect(authenticationAssessments.some((event) => event.outcome === "verified")).toBe(false);
         expect(mission!.items.some((item) => item.status === "blocked" && item.blocker !== undefined)).toBe(true);
-        if (scenario.cancelCollection) {
+        if (scenario.cancelCollection || scenario.otpOutcome === "rejected") {
           expect(response!.text).toContain("The Mission needs your input before it can continue");
         } else {
           expect(response!.text).toContain("The Mission is incomplete.");
@@ -577,6 +593,10 @@ async function createAcceptanceHarness(scenario: AcceptanceScenario) {
 
   const completeCredentialSubmission = () => {
     switch (scenario.credentialOutcome ?? "otp") {
+      case "authenticated":
+        showAuthenticatedHome(socket, { documentChanged: true });
+        socket.snapshot.url = `${PORTAL_ORIGIN}/home`;
+        break;
       case "otp":
         activateOtpChallenge();
         break;

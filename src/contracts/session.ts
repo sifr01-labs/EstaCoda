@@ -246,6 +246,7 @@ export type AuthenticationEvidenceAssessmentEvent = {
     | "authenticated-evidence-observed"
     | "authentication-error"
     | "causal-chain-interrupted"
+    | "challenge-required"
     | "challenge-departed-without-authenticated-evidence"
     | "challenge-still-present"
     | "preexisting-authenticated-evidence"

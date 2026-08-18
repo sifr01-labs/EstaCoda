@@ -16,6 +16,7 @@ export type AuthenticationExecutionEffect =
   | "credentials-required"
   | "credentials-submitted"
   | "challenge-required"
+  | "challenge-submitted"
   | "authentication-candidate"
   | "authentication-verified"
   | "authentication-blocked";
