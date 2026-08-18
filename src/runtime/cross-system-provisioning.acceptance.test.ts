@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSupervisedLocalCdpBrowserBackend } from "../browser/supervised-local-cdp-backend.js";
+import type { ExecutionFinalOutcomeStatus } from "../contracts/execution-plan.js";
 import type {
   ModelProfile,
   ProviderAdapter,
@@ -75,51 +76,86 @@ type JourneyScenario = {
   exposeMutation?: boolean;
   failVerification?: boolean;
   expectCompleted: boolean;
+  expectedFinalOutcome: ExecutionFinalOutcomeStatus;
   expectedMutationCalls: number;
   expectedVerificationCalls: number;
+  expectedTimeline: string[];
+  expectedProviderRequests: number;
+  expectedToolExecutions: number;
+  expectedPlanExecutions: number;
 };
 
 const scenarios: JourneyScenario[] = [
   {
     name: "provisions two protected values and verifies the independently read state",
     expectCompleted: true,
+    expectedFinalOutcome: "completed",
     expectedMutationCalls: 1,
     expectedVerificationCalls: 1,
+    expectedTimeline: ["destination-read", "destination-mutation", "destination-verification"],
+    expectedProviderRequests: 10,
+    expectedToolExecutions: 9,
+    expectedPlanExecutions: 5,
   },
   {
     name: "denied grouped approval performs no destination mutation",
     approval: "denied",
     expectCompleted: false,
+    expectedFinalOutcome: "partially_completed",
     expectedMutationCalls: 0,
     expectedVerificationCalls: 0,
+    expectedTimeline: ["destination-read"],
+    expectedProviderRequests: 12,
+    expectedToolExecutions: 8,
+    expectedPlanExecutions: 5,
   },
   {
     name: "a browser source changed after approval performs no destination mutation",
     changeSourceAfterApproval: true,
     expectCompleted: false,
+    expectedFinalOutcome: "partially_completed",
     expectedMutationCalls: 0,
     expectedVerificationCalls: 0,
+    expectedTimeline: ["destination-read"],
+    expectedProviderRequests: 12,
+    expectedToolExecutions: 8,
+    expectedPlanExecutions: 5,
   },
   {
     name: "an undeclared destination path performs no destination mutation",
     undeclaredDestination: true,
     expectCompleted: false,
+    expectedFinalOutcome: "partially_completed",
     expectedMutationCalls: 0,
     expectedVerificationCalls: 0,
+    expectedTimeline: ["destination-read"],
+    expectedProviderRequests: 12,
+    expectedToolExecutions: 8,
+    expectedPlanExecutions: 5,
   },
   {
     name: "a missing mutation capability blocks before the browser opens",
     exposeMutation: false,
     expectCompleted: false,
+    expectedFinalOutcome: "blocked",
     expectedMutationCalls: 0,
     expectedVerificationCalls: 0,
+    expectedTimeline: [],
+    expectedProviderRequests: 1,
+    expectedToolExecutions: 1,
+    expectedPlanExecutions: 1,
   },
   {
     name: "a successful mutation with failed verification leaves the Mission incomplete",
     failVerification: true,
     expectCompleted: false,
+    expectedFinalOutcome: "partially_completed",
     expectedMutationCalls: 1,
     expectedVerificationCalls: 1,
+    expectedTimeline: ["destination-read", "destination-mutation", "destination-verification"],
+    expectedProviderRequests: 10,
+    expectedToolExecutions: 9,
+    expectedPlanExecutions: 5,
   },
 ];
 
@@ -205,6 +241,23 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
         mutationCalls: scenario.expectedMutationCalls,
         verificationCalls: scenario.expectedVerificationCalls,
       });
+      expect(harness.mcp.timeline).toEqual(scenario.expectedTimeline);
+      expect(response!.finalOutcome?.status).toBe(scenario.expectedFinalOutcome);
+
+      // Temporary characterization of the current Mission protocol tax. Later
+      // migration commits intentionally update these counts while preserving
+      // the mutation, verification, approval, and secret-isolation assertions.
+      expect({
+        providerRequests: harness.providerRequests.length,
+        toolExecutions: response!.toolExecutions.length,
+        planExecutions: toolNames.filter((name) => name === "plan").length,
+        substantiveExecutions: toolNames.filter((name) => name !== "plan").length,
+      }).toEqual({
+        providerRequests: scenario.expectedProviderRequests,
+        toolExecutions: scenario.expectedToolExecutions,
+        planExecutions: scenario.expectedPlanExecutions,
+        substantiveExecutions: scenario.expectedToolExecutions - scenario.expectedPlanExecutions,
+      });
 
       if (scenario.expectedMutationCalls === 1) {
         expect(harness.mcp.mutationInputs[0]).toMatchObject({
@@ -216,6 +269,12 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
           ],
         });
         expect(harness.mcp.state().settings).toEqual(harness.mcp.initialSettings);
+      } else {
+        expect(harness.mcp.state()).toEqual({
+          targetId: TARGET_ID,
+          settings: harness.mcp.initialSettings,
+          values: [],
+        });
       }
 
       if (scenario.expectCompleted) {
@@ -232,8 +291,6 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
           MUTATION_TOOL,
           VERIFY_TOOL,
         ]);
-        expect(harness.providerRequests.length).toBeLessThanOrEqual(10);
-        expect(response!.toolExecutions).toHaveLength(9);
         expect(mission).toMatchObject({
           status: "completed",
           capabilityPreflight: { status: "ready" },
@@ -245,10 +302,29 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
           ],
         });
         expect(mission?.items[3]?.evidence?.[0]).toMatchObject({ tool: VERIFY_TOOL, outcome: "success" });
+        expect(response!.finalOutcome?.confirmedActions).toEqual([
+          expect.objectContaining({
+            tool: MUTATION_TOOL,
+            status: "confirmed",
+            verification: "verified",
+          }),
+        ]);
         expect(response!.text).not.toContain("Mission is incomplete");
       } else {
         expect(mission?.status).not.toBe("completed");
         expect(response!.text).not.toContain("Provisioning completed and independently verified.");
+        if (scenario.expectedMutationCalls === 0) {
+          expect(response!.finalOutcome?.confirmedActions).toEqual([]);
+        }
+        if (scenario.failVerification === true) {
+          expect(response!.finalOutcome?.confirmedActions).toEqual([
+            expect.objectContaining({
+              tool: MUTATION_TOOL,
+              status: "confirmed",
+              verification: "not_verified",
+            }),
+          ]);
+        }
       }
 
       if (scenario.approval === "denied") expect(harness.authorizationRequests).toHaveLength(1);
