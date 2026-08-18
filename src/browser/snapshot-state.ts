@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { BrowserSnapshot, BrowserStateIdentity } from "../contracts/browser.js";
+import { isBrowserSnapshotElementInteractable } from "./browser-interactability.js";
 
 export type BrowserDocumentSignal = {
   frameId?: string;
@@ -81,7 +82,7 @@ export function observeBrowserSnapshot(
 export function browserActionMapFingerprint(snapshot: BrowserSnapshotInput): string {
   const stableState = {
     elements: snapshot.elements
-      ?.filter((element) => isActionableBrowserRole(element.role))
+      ?.filter((element) => isActionableBrowserRole(element.role) && isBrowserSnapshotElementInteractable(element))
       .map(({ value: _value, checked: _checked, ...element }) => element),
     pendingDialogs: snapshot.pendingDialogs?.map(({ id: _id, ...dialog }) => dialog)
   };

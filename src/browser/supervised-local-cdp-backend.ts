@@ -52,6 +52,11 @@ import type { BrowserDocumentSignal, BrowserSnapshotInput } from "./snapshot-sta
 import { redactSensitiveText } from "../utils/redaction.js";
 import { ProtectedBrowserFormTransactionController } from "./protected-browser-field.js";
 import { ProtectedBrowserSourceController } from "./protected-browser-source.js";
+import {
+  BROWSER_INTERACTABILITY_EVALUATOR_SOURCE,
+  assertBrowserRuntimeEvaluationSucceeded,
+  browserInteractabilityGuardSource
+} from "./browser-interactability.js";
 
 export type SupervisedLocalCdpBackendOptions = {
   cdpUrl?: string;
@@ -891,10 +896,11 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       const beforeObservedUrl = latestObservedUrls.get(session.key);
       const target = resolveBrowserTarget(before, input);
       const beforeTabs = supportsTabManagement(session.key) ? await listManagedTabs(session.key) : undefined;
-      await session.supervisor.send("Runtime.evaluate", {
+      const actionEvaluation = await session.supervisor.send("Runtime.evaluate", {
         expression: refActionExpression(target.ref, "click"),
         awaitPromise: true
       });
+      assertBrowserRuntimeEvaluationSucceeded(actionEvaluation);
       const priorRefs = new Set(beforeTabs?.map((tab) => tab.ref) ?? []);
       let openedTabs: BrowserTab[] = [];
       const capture = async (): Promise<BrowserSnapshot> => {
@@ -952,10 +958,11 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       const targetState = await captureSafeTargetSnapshot(session, input);
       const before = targetState.snapshot;
       const target = resolveBrowserTarget(before, input);
-      await session.supervisor.send("Runtime.evaluate", {
+      const actionEvaluation = await session.supervisor.send("Runtime.evaluate", {
         expression: refActionExpression(target.ref, "type", input.text ?? ""),
         awaitPromise: true
       });
+      assertBrowserRuntimeEvaluationSucceeded(actionEvaluation);
       return settleAction({ session, before, actionInput: input, full: targetState.full, actionDispatched: true });
     },
     select: async (input) => {
@@ -967,10 +974,11 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       if (input.value === undefined || input.value.length === 0) {
         throw new Error("browser.select requires a non-empty value.");
       }
-      await session.supervisor.send("Runtime.evaluate", {
+      const actionEvaluation = await session.supervisor.send("Runtime.evaluate", {
         expression: selectActionExpression(target.ref, input.value),
         awaitPromise: true
       });
+      assertBrowserRuntimeEvaluationSucceeded(actionEvaluation);
       return settleAction({ session, before, actionInput: input, full: targetState.full, actionDispatched: true });
     },
     extract: async (input): Promise<BrowserExtractResult> => {
@@ -1317,10 +1325,11 @@ function withSessionTab(
 
 function refActionExpression(ref: string | undefined, action: "click" | "type", text = ""): string {
   const index = refToIndex(ref);
+  const guard = browserInteractabilityGuardSource(`window.__estacodaElements?.[${index}]`, ref ?? "");
   if (action === "click") {
-    return `(() => { const el = window.__estacodaElements?.[${index}]; if (!el || !el.isConnected) throw new Error('Browser element ref not found: ${ref ?? ""}'); if (el.matches(':disabled,[aria-disabled="true"]')) throw new Error('Browser element is disabled: ${ref ?? ""}'); const style = getComputedStyle(el); if (style.display === 'none' || style.visibility === 'hidden' || el.getClientRects().length === 0) throw new Error('Browser element is hidden: ${ref ?? ""}'); el.click(); return 'clicked'; })()`;
+    return `(() => { ${guard} el.click(); return 'clicked'; })()`;
   }
-  return `(() => { const el = window.__estacodaElements?.[${index}]; if (!el || !el.isConnected) throw new Error('Browser element ref not found: ${ref ?? ""}'); if (el.matches(':disabled,[aria-disabled="true"]')) throw new Error('Browser element is disabled: ${ref ?? ""}'); const style = getComputedStyle(el); if (style.display === 'none' || style.visibility === 'hidden' || el.getClientRects().length === 0) throw new Error('Browser element is hidden: ${ref ?? ""}'); if (!(el instanceof HTMLInputElement) && !(el instanceof HTMLTextAreaElement) && !el.isContentEditable) throw new Error('Browser target does not accept text: ${ref ?? ""}'); el.focus(); if (el.isContentEditable) el.textContent = ${JSON.stringify(text)}; else el.value = ${JSON.stringify(text)}; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return 'typed'; })()`;
+  return `(() => { ${guard} if (!(el instanceof HTMLInputElement) && !(el instanceof HTMLTextAreaElement) && !el.isContentEditable) throw new Error('Browser target does not accept text: ${ref ?? ""}'); el.focus(); if (el.isContentEditable) el.textContent = ${JSON.stringify(text)}; else el.value = ${JSON.stringify(text)}; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return 'typed'; })()`;
 }
 
 async function inspectBrowserActionTarget(
@@ -1342,6 +1351,8 @@ function browserActionPreflightExpression(index: number | undefined): string {
   return `(() => {
     const el = ${target};
     if (!(el instanceof Element) || !el.isConnected) return undefined;
+    const assessInteractability = ${BROWSER_INTERACTABILITY_EVALUATOR_SOURCE};
+    const interactability = assessInteractability(el);
     const clean = (value, max = 96) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, max);
     const tag = el.tagName.toLowerCase();
     const role = clean(el.getAttribute('role') || '');
@@ -1359,11 +1370,14 @@ function browserActionPreflightExpression(index: number | undefined): string {
     else if (el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement) kind = 'form-control';
     else if (inlineScripted || controlRole) kind = 'scripted-control';
     const label = clean(el.getAttribute('aria-label') || el.innerText || el.textContent || el.getAttribute('value') || el.getAttribute('title') || '');
-    return { ref: boundIndex >= 0 ? '@e' + (boundIndex + 1) : undefined, kind, tag, role: role || undefined, label: label || undefined, href, formAssociated, submit };
+    return { ref: boundIndex >= 0 ? '@e' + (boundIndex + 1) : undefined, kind, tag, role: role || undefined, label: label || undefined, href, formAssociated, submit, interactable: interactability.interactable, interactabilityReason: interactability.reason };
   })()`;
 }
 
 function parseBrowserActionTargetSemantics(value: unknown): BrowserActionTargetSemantics | undefined {
+  if (isRecord(value) && value.interactable === false) {
+    throw new Error(`Browser action target is not interactable${typeof value.interactabilityReason === "string" ? ` (${value.interactabilityReason})` : ""}.`);
+  }
   if (!isRecord(value) || !isBrowserActionTargetKind(value.kind) ||
       typeof value.formAssociated !== "boolean" || typeof value.submit !== "boolean") {
     return undefined;
@@ -1418,12 +1432,9 @@ function isBrowserActionTargetKind(value: unknown): value is BrowserActionTarget
 
 function selectActionExpression(ref: string | undefined, value: string): string {
   const index = refToIndex(ref);
+  const guard = browserInteractabilityGuardSource(`window.__estacodaElements?.[${index}]`, ref ?? "");
   return `(() => {
-    const el = window.__estacodaElements?.[${index}];
-    if (!el || !el.isConnected) throw new Error('Browser element ref not found: ${ref ?? ""}');
-    if (el.matches(':disabled,[aria-disabled="true"]')) throw new Error('Browser element is disabled: ${ref ?? ""}');
-    const style = getComputedStyle(el);
-    if (style.display === 'none' || style.visibility === 'hidden' || el.getClientRects().length === 0) throw new Error('Browser element is hidden: ${ref ?? ""}');
+    ${guard}
     if (!(el instanceof HTMLSelectElement)) throw new Error('Browser target is not a select element: ${ref ?? ""}');
     const requested = ${JSON.stringify(value)};
     const option = Array.from(el.options).find((entry) => entry.value === requested || entry.text.trim() === requested);

@@ -70,6 +70,7 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
   onProtectedDelivery?: () => void;
   onProtectedSubmit?: () => void;
   onRuntimeEvaluate?: (expression: string) => void;
+  rejectBrowserActions = false;
   browserActionPreflight: Record<string, unknown> = {
     kind: "button",
     tag: "button",
@@ -184,6 +185,10 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
       };
     }
     if (method === "Runtime.evaluate") {
+      if (this.rejectBrowserActions && typeof message.params?.expression === "string" &&
+          /\.(?:click|focus)\(\)/u.test(message.params.expression)) {
+        return { exceptionDetails: { text: "Element became non-interactable" } };
+      }
       if (message.params?.expression === "document") {
         return { result: { objectId: "protected-document-object" } };
       }

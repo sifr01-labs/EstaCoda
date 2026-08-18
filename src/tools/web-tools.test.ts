@@ -2786,6 +2786,31 @@ describe("web and browser tools baselines", () => {
     });
   });
 
+  it("keeps page text while omitting non-interactable controls from model-visible snapshots", async () => {
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: {
+        ...createMockBrowserBackend(),
+        snapshot: async () => ({
+          sessionId: "session-modal",
+          url: "https://example.com",
+          identity: browserIdentity(1),
+          observedAt: "2026-08-18T00:00:00.000Z",
+          text: "Background diagnostics remain visible.",
+          elements: [
+            { ref: "@e1", role: "button", name: "Background action", interactable: false, interactabilityReason: "modal-blocked" },
+            { ref: "@e2", role: "button", name: "Confirm" }
+          ]
+        })
+      }
+    }));
+
+    const result = await snapshot.run({});
+
+    expect(result.content).toContain("Background diagnostics remain visible.");
+    expect(result.content).toContain("@e2 button Confirm");
+    expect(result.content).not.toContain("Background action");
+  });
+
   it("renders only the explicit protected-transaction notice while page observation is suppressed", async () => {
     const snapshot = tool("browser.snapshot", createTestWebTools({
       browserBackend: {

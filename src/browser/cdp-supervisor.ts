@@ -5,6 +5,10 @@ import {
   type BrowserSnapshotInput
 } from "./snapshot-state.js";
 import {
+  BROWSER_INTERACTABILITY_EVALUATOR_SOURCE,
+  isBrowserSnapshotElementInteractable
+} from "./browser-interactability.js";
+import {
   type CdpClient,
   type CdpSendOptions,
   type CdpWebSocketEvent,
@@ -465,6 +469,7 @@ export function snapshotExpression(): string {
   return `(() => {
     const candidates = Array.from(document.querySelectorAll('a,button,input,textarea,select,[role],[tabindex]')).slice(0, 120);
     window.__estacodaElements = candidates;
+    const assessInteractability = ${BROWSER_INTERACTABILITY_EVALUATOR_SOURCE};
     const clean = (value, max = 240) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, max);
     const labelText = (el) => clean(Array.from(el.labels || []).map((label) => label.innerText || label.textContent || '').join(' ') || el.getAttribute('aria-label') || el.closest('label')?.innerText || '');
     const elementText = (el) => clean(el.innerText || el.textContent || '');
@@ -489,25 +494,27 @@ export function snapshotExpression(): string {
       return tag;
     };
     const withinText = (el) => clean(el.closest('article,li,form,section,[role="listitem"],[role="group"],[role="row"],tr')?.innerText || el.parentElement?.innerText || '');
-    const hidden = (el) => {
-      const style = getComputedStyle(el);
-      return !el.isConnected || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || el.getClientRects().length === 0;
-    };
-    return JSON.stringify({
-      url: location.href,
-      title: document.title,
-      readiness: document.readyState,
-      text: (document.body && document.body.innerText ? document.body.innerText : '').slice(0, 12000),
-      elements: candidates.map((el, index) => ({
+    const elements = candidates.map((el, index) => {
+      const interactability = assessInteractability(el);
+      return {
         ref: '@e' + (index + 1),
         role: role(el),
         name: name(el),
         text: elementText(el),
         label: labelText(el),
         withinText: withinText(el),
-        hidden: hidden(el),
-        disabled: el.matches(':disabled,[aria-disabled="true"]')
-      }))
+        interactable: interactability.interactable,
+        interactabilityReason: interactability.reason,
+        hidden: interactability.hidden,
+        disabled: interactability.disabled
+      };
+    });
+    return JSON.stringify({
+      url: location.href,
+      title: document.title,
+      readiness: document.readyState,
+      text: (document.body && document.body.innerText ? document.body.innerText : '').slice(0, 12000),
+      elements: elements.filter((element) => element.interactable)
     });
   })()`;
 }
@@ -518,7 +525,8 @@ type AxSnapshotElementCandidate = BrowserSnapshotElement & {
   actionable: boolean;
 };
 
-type BoundElementMetadata = Pick<BrowserSnapshotElement, "text" | "label" | "withinText" | "hidden"> & {
+type BoundElementMetadata = Pick<BrowserSnapshotElement,
+  "text" | "label" | "withinText" | "hidden" | "disabled" | "interactable" | "interactabilityReason"> & {
   sensitive?: boolean;
 };
 
@@ -622,7 +630,14 @@ async function bindAxElements(
     }
     const { backendDOMNodeId: _backendDOMNodeId, actionable: _actionable, ...element } = candidate;
     const { value: elementValue, ...elementWithoutValue } = element;
-    const { sensitive, ...publicMetadata } = binding?.metadata ?? {};
+    const { sensitive, interactable: observedInteractable, ...publicMetadata } = binding?.metadata ?? {};
+    const interactable = observedInteractable ?? isBrowserSnapshotElementInteractable({
+      ...elementWithoutValue,
+      ...publicMetadata
+    });
+    if (candidate.actionable && !interactable) {
+      continue;
+    }
     elements.push({
       ...elementWithoutValue,
       ...(sensitive === true || elementValue === undefined ? {} : { value: elementValue }),
@@ -651,14 +666,18 @@ async function bindAxElement(
       functionDeclaration: `function(index) {
         window.__estacodaElements = window.__estacodaElements || [];
         window.__estacodaElements[index] = this;
+        const assessInteractability = ${BROWSER_INTERACTABILITY_EVALUATOR_SOURCE};
         const clean = (value, max = 240) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, max);
         const label = clean(Array.from(this.labels || []).map((entry) => entry.innerText || entry.textContent || '').join(' ') || this.getAttribute?.('aria-label') || this.closest?.('label')?.innerText || '');
-        const style = getComputedStyle(this);
+        const interactability = assessInteractability(this);
         return {
           text: clean(this.innerText || this.textContent || ''),
           label,
           withinText: clean(this.closest?.('article,li,form,section,[role="listitem"],[role="group"],[role="row"],tr')?.innerText || this.parentElement?.innerText || ''),
-          hidden: !this.isConnected || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || this.getClientRects().length === 0,
+          interactable: interactability.interactable,
+          interactabilityReason: interactability.reason,
+          hidden: interactability.hidden,
+          disabled: interactability.disabled,
           sensitive: this instanceof HTMLInputElement && this.type.toLowerCase() === 'password'
         };
       }`,
@@ -676,13 +695,23 @@ function parseBoundElementMetadata(value: unknown): BoundElementMetadata | undef
   const text = boundedMetadataText(value.text);
   const label = boundedMetadataText(value.label);
   const withinText = boundedMetadataText(value.withinText);
+  const interactabilityReason = parseInteractabilityReason(value.interactabilityReason);
   return {
     ...(text === undefined ? {} : { text }),
     ...(label === undefined ? {} : { label }),
     ...(withinText === undefined ? {} : { withinText }),
     ...(typeof value.hidden === "boolean" ? { hidden: value.hidden } : {}),
+    ...(typeof value.disabled === "boolean" ? { disabled: value.disabled } : {}),
+    ...(typeof value.interactable === "boolean" ? { interactable: value.interactable } : {}),
+    ...(interactabilityReason === undefined ? {} : { interactabilityReason }),
     ...(typeof value.sensitive === "boolean" ? { sensitive: value.sensitive } : {})
   };
+}
+
+function parseInteractabilityReason(value: unknown): BrowserSnapshotElement["interactabilityReason"] | undefined {
+  return value === "detached" || value === "hidden" || value === "inert" || value === "disabled" || value === "modal-blocked"
+    ? value
+    : undefined;
 }
 
 function boundedMetadataText(value: unknown): string | undefined {
@@ -762,7 +791,16 @@ export function parseCdpSnapshot(value: unknown, sessionId: string): BrowserSnap
       readiness: parseReadiness(parsed.readiness),
       title: parsed.title,
       text: parsed.text,
-      elements: Array.isArray(parsed.elements) ? parsed.elements : []
+      elements: Array.isArray(parsed.elements)
+        ? parsed.elements.filter(isBrowserSnapshotElementInteractable).map((element) => {
+            const {
+              interactable: _interactable,
+              interactabilityReason: _interactabilityReason,
+              ...publicElement
+            } = element;
+            return publicElement;
+          })
+        : []
     };
   } catch {
     return emptySnapshot(sessionId, value);

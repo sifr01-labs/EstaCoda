@@ -124,6 +124,24 @@ describe("semantic browser locators", () => {
     });
   });
 
+  it("uses the shared interactability result for find and action resolution", () => {
+    const current = snapshot([
+      { ref: "@e1", role: "button", name: "Continue", interactable: false, interactabilityReason: "modal-blocked" },
+      { ref: "@e2", role: "button", name: "Cancel" }
+    ]);
+
+    expect(findBrowserLocator(current, { role: "button", name: "Continue" })).toMatchObject({
+      status: "not-found",
+      candidates: []
+    });
+    expect(() => resolveBrowserTarget(current, {
+      sessionId: current.sessionId,
+      ref: "@e1",
+      identity: current.identity,
+      tabRef: current.tab!.ref
+    })).toThrowError(expect.objectContaining({ reason: "browser-target-not-interactable" }));
+  });
+
   it("redacts secret-looking candidate text", () => {
     const result = findBrowserLocator(snapshot([
       { ref: "@e1", role: "button", name: "token=do-not-render", withinText: "Bearer abcdefghijklmnopqrstuvwxyz" }

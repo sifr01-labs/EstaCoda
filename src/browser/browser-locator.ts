@@ -7,6 +7,7 @@ import type {
   BrowserStateIdentity
 } from "../contracts/browser.js";
 import { redactSensitiveText } from "../utils/redaction.js";
+import { isBrowserSnapshotElementInteractable } from "./browser-interactability.js";
 
 const MAX_LOCATOR_TEXT = 500;
 const MAX_CANDIDATES = 8;
@@ -19,7 +20,8 @@ export type BrowserTargetFailureReason =
   | "browser-target-not-found"
   | "browser-target-ambiguous"
   | "browser-target-hidden"
-  | "browser-target-disabled";
+  | "browser-target-disabled"
+  | "browser-target-not-interactable";
 
 export class BrowserTargetError extends Error {
   readonly reason: BrowserTargetFailureReason;
@@ -50,7 +52,7 @@ export function findBrowserLocator(snapshot: BrowserSnapshot, locator: BrowserLo
   const normalized = normalizeBrowserLocator(locator);
   const tabRef = requireSnapshotTab(snapshot);
   assertLocatorIdentity(normalized, snapshot, tabRef);
-  const available = (snapshot.elements ?? []).filter((element) => element.hidden !== true && element.disabled !== true);
+  const available = (snapshot.elements ?? []).filter(isBrowserSnapshotElementInteractable);
   const candidates = available
     .filter((element) => locatorMatches(element, normalized))
     .slice(0, MAX_CANDIDATES)
@@ -82,6 +84,14 @@ export function resolveBrowserTarget(snapshot: BrowserSnapshot, input: BrowserAc
       if (unavailable?.disabled === true) {
         throw targetError("browser-target-disabled", "Browser locator matched only a disabled target.", snapshot, tabRef);
       }
+      if (unavailable?.interactable === false) {
+        throw targetError(
+          "browser-target-not-interactable",
+          `Browser locator matched only a non-interactable target${unavailable.interactabilityReason === undefined ? "." : ` (${unavailable.interactabilityReason}).`}`,
+          snapshot,
+          tabRef
+        );
+      }
       throw targetError("browser-target-not-found", "Browser locator did not match a current element.", snapshot, tabRef);
     }
     if (result.status === "ambiguous") {
@@ -107,6 +117,14 @@ export function resolveBrowserTarget(snapshot: BrowserSnapshot, input: BrowserAc
   }
   if (element.disabled === true) {
     throw targetError("browser-target-disabled", `Browser element ref is disabled: ${input.ref}`, snapshot, tabRef);
+  }
+  if (element.interactable === false) {
+    throw targetError(
+      "browser-target-not-interactable",
+      `Browser element ref is not interactable${element.interactabilityReason === undefined ? `: ${input.ref}` : ` (${element.interactabilityReason}): ${input.ref}`}`,
+      snapshot,
+      tabRef
+    );
   }
   return locatorCandidate(element, snapshot.identity, tabRef);
 }

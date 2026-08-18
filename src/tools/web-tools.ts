@@ -25,6 +25,7 @@ import { createBrowserDebugSession, type BrowserDebugSession } from "../browser/
 import { createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
 import { browserSessionStateReason } from "../browser/session-state.js";
 import { browserTargetFailureMetadata, isBrowserStateIdentity } from "../browser/browser-locator.js";
+import { isBrowserSnapshotElementInteractable } from "../browser/browser-interactability.js";
 import { isActionableBrowserRole } from "../browser/snapshot-state.js";
 import { deriveBrowserSessionKey } from "../browser/session-key.js";
 import { maybeSummarizeSnapshot, truncateSnapshotText } from "../browser/snapshot-summarizer.js";
@@ -2124,7 +2125,7 @@ function renderBrowserSnapshot(snapshot: BrowserSnapshot, options: BrowserSnapsh
       "State: settling.",
     ].join("\n");
   }
-  const elements = snapshot.elements ?? [];
+  const elements = (snapshot.elements ?? []).filter(isBrowserSnapshotElementInteractable);
   const pendingDialogs = snapshot.pendingDialogs ?? [];
   const frameTree = snapshot.frameTree ?? [];
   const consoleHistory = snapshot.consoleHistory ?? [];
@@ -2176,7 +2177,7 @@ function renderSafeBrowserTab(tab: BrowserTab): string {
 function renderProtectedFormGuidance(snapshot: BrowserSnapshot): string | undefined {
   if (snapshot.sensitiveInputActive === true || snapshot.tab === undefined) return undefined;
   const candidates = (snapshot.elements ?? []).filter((element) =>
-    element.hidden !== true && element.disabled !== true && element.ref.startsWith("@e")
+    isBrowserSnapshotElementInteractable(element) && element.ref.startsWith("@e")
   );
   const account = candidates.filter((element) =>
     /email|e-mail|user\s*name|account(?:\s*id)?|login\s*id/iu.test([element.name, element.label].filter(Boolean).join(" "))
@@ -2243,7 +2244,7 @@ function renderBrowserActionCurrentState(snapshot: BrowserSnapshot): string {
     ].join("\n");
   }
   const refs = (snapshot.elements ?? [])
-    .filter((element) => element.hidden !== true && element.disabled !== true && isActionableBrowserRole(element.role))
+    .filter((element) => isBrowserSnapshotElementInteractable(element) && isActionableBrowserRole(element.role))
     .slice(0, 20);
   return [
     `Identity: ${renderBrowserIdentity(snapshot.identity)}`,

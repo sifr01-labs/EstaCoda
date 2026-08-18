@@ -90,6 +90,29 @@ describe("BrowserObservationGuard", () => {
     expect(guard.observe([observation])).toMatchObject({ count: 3, shouldStop: true });
   });
 
+  it("does not reset no-progress detection for an explicitly unchanged browser action", () => {
+    const guard = new BrowserObservationGuard(3);
+    const observation = execution({ metadata: { snapshot: { url: "https://example.com", text: "same" } } });
+    const noChange = execution({
+      tool: "browser.click",
+      metadata: {
+        snapshot: {
+          url: "https://example.com",
+          text: "same",
+          actionDelta: { outcome: "no-change" }
+        }
+      }
+    });
+
+    expect(guard.observe([observation])).toMatchObject({ count: 1 });
+    expect(guard.observe([observation])).toMatchObject({ count: 2, shouldNudge: true });
+    expect(guard.observe([noChange])).toMatchObject({
+      tool: "browser.click",
+      count: 3,
+      shouldStop: true
+    });
+  });
+
   it("does not let alternating empty or blocked observation tools evade the limit", () => {
     const guard = new BrowserObservationGuard(3);
 

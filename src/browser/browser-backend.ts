@@ -20,6 +20,10 @@ import { createBrowserbaseBrowserBackend, type BrowserbaseBrowserBackendOptions 
 import { classifyBrowserUrl, type HybridClassificationResult } from "./hybrid-classifier.js";
 import { decideBrowserRoute, type BrowserRouteDecision } from "./hybrid-router.js";
 import type { ResolveHostnameFn } from "./url-safety.js";
+import {
+  assertBrowserRuntimeEvaluationSucceeded,
+  browserInteractabilityGuardSource
+} from "./browser-interactability.js";
 
 export type { CdpFetchLike, CdpWebSocketEvent, CdpWebSocketFactory, CdpWebSocketLike } from "./cdp-client.js";
 
@@ -166,10 +170,11 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
       action: async (client, sessionId) => {
         const current = await observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
         const target = resolveBrowserTarget(current, input);
-        await client.send("Runtime.evaluate", {
+        const actionEvaluation = await client.send("Runtime.evaluate", {
           expression: refActionExpression(target.ref, "click"),
           awaitPromise: true
         });
+        assertBrowserRuntimeEvaluationSucceeded(actionEvaluation);
         return observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
       }
     }),
@@ -181,10 +186,11 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
       action: async (client, sessionId) => {
         const current = await observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
         const target = resolveBrowserTarget(current, input);
-        await client.send("Runtime.evaluate", {
+        const actionEvaluation = await client.send("Runtime.evaluate", {
           expression: refActionExpression(target.ref, "type", input.text ?? ""),
           awaitPromise: true
         });
+        assertBrowserRuntimeEvaluationSucceeded(actionEvaluation);
         return observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
       }
     }),
@@ -367,10 +373,11 @@ async function ensureConsoleCapture(client: CdpClient): Promise<void> {
 
 function refActionExpression(ref: string | undefined, action: "click" | "type", text = ""): string {
   const index = refToIndex(ref);
+  const guard = browserInteractabilityGuardSource(`window.__estacodaElements?.[${index}]`, ref ?? "");
   if (action === "click") {
-    return `(() => { const el = window.__estacodaElements?.[${index}]; if (!el) throw new Error('Browser element ref not found: ${ref ?? ""}'); el.click(); return 'clicked'; })()`;
+    return `(() => { ${guard} el.click(); return 'clicked'; })()`;
   }
-  return `(() => { const el = window.__estacodaElements?.[${index}]; if (!el) throw new Error('Browser element ref not found: ${ref ?? ""}'); el.focus(); el.value = ${JSON.stringify(text)}; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return 'typed'; })()`;
+  return `(() => { ${guard} el.focus(); el.value = ${JSON.stringify(text)}; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return 'typed'; })()`;
 }
 
 function refToIndex(ref: string | undefined): number {

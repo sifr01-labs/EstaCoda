@@ -81,6 +81,19 @@ describe("browser snapshot state identity", () => {
     });
   });
 
+  it("does not include non-interactable controls in actionable identity", () => {
+    const state = createBrowserSnapshotIdentityState();
+    const initial = observeBrowserState(snapshot(), state, { frameId: "main", loaderId: "loader-1" });
+    const blockedControlAdded = observeBrowserState(snapshot({
+      elements: [
+        { ref: "@e1", role: "button", name: "Continue" },
+        { ref: "@e2", role: "button", name: "Covered", interactable: false, interactabilityReason: "modal-blocked" }
+      ]
+    }), state, { frameId: "main", loaderId: "loader-1" });
+
+    expect(blockedControlAdded.identity.actionRevision).toBe(initial.identity.actionRevision);
+  });
+
   it("advances documentEpoch for same-URL document replacement", () => {
     const state = createBrowserSnapshotIdentityState();
     const initial = observeBrowserState(snapshot(), state, { frameId: "main", loaderId: "loader-1" });

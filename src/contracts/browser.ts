@@ -183,6 +183,9 @@ export type BrowserSnapshot = {
     text?: string;
     label?: string;
     withinText?: string;
+    /** Runtime-owned result from the shared browser interactability evaluator. */
+    interactable?: boolean;
+    interactabilityReason?: "detached" | "hidden" | "inert" | "disabled" | "modal-blocked";
     hidden?: boolean;
     value?: string;
     disabled?: boolean;

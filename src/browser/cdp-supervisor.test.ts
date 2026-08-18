@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CDPSupervisor } from "./cdp-supervisor.js";
+import { CDPSupervisor, parseCdpSnapshot } from "./cdp-supervisor.js";
 import type { CdpWebSocketEvent, CdpWebSocketLike } from "./cdp-client.js";
 
 class FakeCdpSocket implements CdpWebSocketLike {
@@ -114,6 +114,21 @@ async function flushAsyncEvents(): Promise<void> {
 }
 
 describe("CDPSupervisor", () => {
+  it("preserves page text while removing non-interactable DOM controls", () => {
+    expect(parseCdpSnapshot(JSON.stringify({
+      url: "https://example.com",
+      title: "Modal",
+      text: "Background diagnostics remain readable",
+      elements: [
+        { ref: "@e1", role: "button", name: "Background", interactable: false, interactabilityReason: "modal-blocked" },
+        { ref: "@e2", role: "button", name: "Confirm", interactable: true }
+      ]
+    }), "session-1")).toMatchObject({
+      text: "Background diagnostics remain readable",
+      elements: [{ ref: "@e2", role: "button", name: "Confirm" }]
+    });
+  });
+
   it("start() connects once and enables Page and Runtime", async () => {
     const sockets: FakeCdpSocket[] = [];
     const supervisor = new CDPSupervisor({
@@ -264,9 +279,8 @@ describe("CDPSupervisor", () => {
       title: "Example",
       text: "Readable text",
       elements: [
-        { ref: "@e1", role: "button", name: "Continue", disabled: true },
-        { ref: "@e2", role: "textbox", name: "Email", value: "ada@example.com" },
-        { ref: "@e3", role: "checkbox", name: "Subscribe", checked: "mixed" }
+        { ref: "@e1", role: "textbox", name: "Email", value: "ada@example.com" },
+        { ref: "@e2", role: "checkbox", name: "Subscribe", checked: "mixed" }
       ],
       pendingDialogs: [],
       frameTree: [],
@@ -279,6 +293,37 @@ describe("CDPSupervisor", () => {
       { backendNodeId: 103 }
     ]);
     expect(socket.sent.filter((message) => message.method === "Runtime.callFunctionOn")).toHaveLength(3);
+  });
+
+  it("excludes AX controls rejected by the shared interactability evaluator", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1", {
+      snapshot: { url: "https://example.com", title: "Example", text: "Background text remains", elements: [] },
+      axTree: {
+        nodes: [{
+          nodeId: "covered-button",
+          backendDOMNodeId: 101,
+          role: { value: "button" },
+          name: { value: "Covered action" }
+        }]
+      },
+      callFunctionValue: {
+        text: "Covered action",
+        interactable: false,
+        interactabilityReason: "modal-blocked",
+        hidden: false,
+        disabled: false
+      }
+    });
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+
+    await supervisor.start();
+    await expect(supervisor.getSnapshot("session-1")).resolves.toMatchObject({
+      text: "Background text remains",
+      elements: []
+    });
   });
 
   it("getSnapshot() falls back when compact AX refs cannot be bound to DOM nodes", async () => {

@@ -1692,6 +1692,56 @@ describe("supervised local CDP backend", () => {
     )).toHaveLength(beforeClicks);
   });
 
+  it("rejects a target that becomes non-interactable during security preflight", async () => {
+    const sockets = createSocketFactory();
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: sockets.webSocketFactory,
+      resolveHostname: () => ["93.184.216.34"]
+    });
+    await backend.navigate({ url: "https://example.com/start", sessionId: "session-blocked-preflight" });
+    const page = sockets.pageSocket()!;
+    page.browserActionPreflight = {
+      kind: "button",
+      tag: "button",
+      role: "button",
+      label: "Continue",
+      formAssociated: false,
+      submit: false,
+      interactable: false,
+      interactabilityReason: "modal-blocked"
+    };
+    const current = await backend.snapshot?.({ sessionId: "session-blocked-preflight" });
+
+    await expect(backend.preflightAction?.("click", {
+      sessionId: "session-blocked-preflight",
+      ref: "@e1",
+      identity: current!.identity,
+      tabRef: current!.tab!.ref
+    })).rejects.toThrow(/not interactable \(modal-blocked\)/u);
+  });
+
+  it("rechecks interactability immediately before dispatch when the DOM changes", async () => {
+    const sockets = createSocketFactory();
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: sockets.webSocketFactory,
+      resolveHostname: () => ["93.184.216.34"]
+    });
+    const navigation = await backend.navigate({ url: "https://example.com/start", sessionId: "session-action-race" });
+    const page = sockets.pageSocket()!;
+    page.rejectBrowserActions = true;
+
+    await expect(backend.click?.({
+      sessionId: "session-action-race",
+      ref: "@e1",
+      identity: navigation.snapshot.identity,
+      tabRef: navigation.snapshot.tab!.ref
+    })).rejects.toThrow(/final interactability validation/u);
+  });
+
   it("dispatches a reviewed key only while its exact focused target remains bound", async () => {
     const sockets = createSocketFactory();
     const backend = createSupervisedLocalCdpBrowserBackend({

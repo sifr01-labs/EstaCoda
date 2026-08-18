@@ -47,23 +47,26 @@ export class BrowserObservationGuard {
   }
 
   observe(executions: ToolExecutionRecord[]): BrowserObservationAssessment {
-    if (executions.some((execution) =>
+    const successfulActions = executions.filter((execution) =>
       execution.result?.ok === true && BROWSER_ACTION_TOOLS.has(execution.tool.name)
-    )) {
+    );
+    const unchangedActions = successfulActions.filter(isExplicitNoChangeBrowserAction);
+    if (successfulActions.length > unchangedActions.length) {
       this.#reset();
       return undefined;
     }
 
     const observations = executions.filter((execution) => BROWSER_OBSERVATION_TOOLS.has(execution.tool.name));
+    const noProgressWork = [...observations, ...unchangedActions];
     const containsOtherWork = executions.some((execution) =>
-      !BROWSER_OBSERVATION_TOOLS.has(execution.tool.name) && !BROWSER_ACTION_TOOLS.has(execution.tool.name)
+      !noProgressWork.includes(execution) && !BROWSER_ACTION_TOOLS.has(execution.tool.name)
     );
-    if (observations.length === 0 || containsOtherWork) {
+    if (noProgressWork.length === 0 || containsOtherWork) {
       this.#reset();
       return undefined;
     }
 
-    const stateFingerprint = semanticBrowserStateFingerprint(observations);
+    const stateFingerprint = semanticBrowserStateFingerprint(noProgressWork);
     if (
       stateFingerprint !== undefined &&
       this.#lastStateFingerprint !== undefined &&
@@ -75,7 +78,7 @@ export class BrowserObservationGuard {
     }
     if (stateFingerprint !== undefined) this.#lastStateFingerprint = stateFingerprint;
 
-    const tools = [...new Set(observations.map((execution) => execution.tool.name))].sort();
+    const tools = [...new Set(noProgressWork.map((execution) => execution.tool.name))].sort();
     return {
       tool: tools.join(", "),
       count: this.#noProgressCount,
@@ -88,6 +91,15 @@ export class BrowserObservationGuard {
     this.#lastStateFingerprint = undefined;
     this.#noProgressCount = 0;
   }
+}
+
+function isExplicitNoChangeBrowserAction(execution: ToolExecutionRecord): boolean {
+  const snapshot = execution.result?.metadata?.snapshot;
+  if (snapshot === null || typeof snapshot !== "object" || Array.isArray(snapshot)) return false;
+  const delta = (snapshot as Record<string, unknown>).actionDelta;
+  if (delta === null || typeof delta !== "object" || Array.isArray(delta)) return false;
+  const outcome = (delta as Record<string, unknown>).outcome;
+  return outcome === "no-change" || outcome === "timeout";
 }
 
 function semanticBrowserStateFingerprint(executions: ToolExecutionRecord[]): string | undefined {
