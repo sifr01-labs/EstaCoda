@@ -51,7 +51,7 @@ import {
   type ProviderRuntimeEvent
 } from "../providers/provider-executor.js";
 import type { ProviderUsageTaskAttribution } from "../providers/provider-usage-ledger.js";
-import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
+import type { OpenAICompatibleToolSchema, ProviderToolSchemaCatalog } from "../tools/tool-schema.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { stableToolCallId } from "../tools/tool-call-planner.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
@@ -85,6 +85,7 @@ import {
   ExecutionSupervisionController,
   EXECUTION_SUPERVISION_PROMPTS
 } from "./execution-supervision-controller.js";
+import { extendProviderToolsForExecutionPlan } from "./provider-tool-narrowing.js";
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
 const PROVIDER_CALL_EFFICIENCY_WARNING_THRESHOLD = 12;
@@ -241,6 +242,7 @@ export class ProviderTurnLoop {
     attachments: ChannelAttachment[] | undefined;
     memoryPromptContext: MemoryPromptContext | undefined;
     providerTools: OpenAICompatibleToolSchema[];
+    providerToolSchemaCatalog?: ProviderToolSchemaCatalog;
     preflightCompression?: PromptSemanticCompressionReport;
     conversationContinuationState?: ConversationContinuationState;
     fallbackText: string;
@@ -292,6 +294,7 @@ export class ProviderTurnLoop {
     let providerCallsThisTurn = 0;
     let providerTokensThisTurn = 0;
     let planUpdateRepairUsed = false;
+    let activeProviderTools = [...input.providerTools];
     const workingSessionId = this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
     const mcpReadLedger = new TurnMcpReadLedger({
       profileId: this.#profileId,
@@ -320,6 +323,11 @@ export class ProviderTurnLoop {
 
     for (let iteration = 0; iteration < this.#budgets.maxProviderIterations; iteration += 1) {
       this.#syncBrowserSessionLease(false);
+      activeProviderTools = extendProviderToolsForExecutionPlan({
+        currentTools: activeProviderTools,
+        catalog: input.providerToolSchemaCatalog,
+        plan: this.#executionPlanReader?.current()
+      });
       if (isAborted(input.signal)) {
         await this.#runRecorder.recordProviderBudgetExhausted({
           budget: "abort-signal",
@@ -375,6 +383,7 @@ export class ProviderTurnLoop {
       let execution = phase === "initial"
         ? await this.#completeWithProvider({
             ...input,
+            providerTools: activeProviderTools,
             iteration,
             loopStartedAt,
             reasoningOnlyPrefill: pendingReasoningOnlyPrefill,
@@ -382,6 +391,7 @@ export class ProviderTurnLoop {
           })
         : await this.#continueProviderAfterTools({
           ...input,
+          providerTools: activeProviderTools,
           toolExecutions: [
             ...input.toolExecutions,
             ...providerToolExecutions

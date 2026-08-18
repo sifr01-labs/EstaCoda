@@ -714,7 +714,7 @@ export class AgentLoop {
     });
     const setupApprovals = buildSetupApprovalRequests(selectedSkillSetup, selectedSkill?.name);
     const deterministicImageGenerationRan = deterministicNativeTools.executions.some((execution) => execution.tool.name === "image.generate");
-    const providerTools = this.#model?.supportsTools === true
+    const narrowedProviderTools = this.#model?.supportsTools === true
       ? this.#providerToolsForTurn({
           intent,
           userText: routedText,
@@ -723,6 +723,12 @@ export class AgentLoop {
           executionPlan: this.#executionPlanReader?.current()
         })
       : [];
+    const providerTools = deterministicImageGenerationRan
+      ? suppressImageGenerationTools(narrowedProviderTools)
+      : narrowedProviderTools;
+    const providerToolSchemaCatalog = deterministicImageGenerationRan
+      ? suppressImageGenerationToolCatalog(this.#providerToolSchemaCatalog)
+      : this.#providerToolSchemaCatalog;
     const preflightCompression = await this.#compactBeforeProviderTurn(input.signal, input.onEvent);
     const previousConversationContinuationState = await this.#latestConversationContinuationState();
     await this.#emitLiveContextUsageEstimate({
@@ -737,7 +743,7 @@ export class AgentLoop {
       selectedSkillResources,
       selectedSkillSetup,
       toolExecutions,
-      providerTools: deterministicImageGenerationRan ? suppressImageGenerationTools(providerTools) : providerTools,
+      providerTools,
       preflightCompression,
       stage: "preflight"
     });
@@ -757,7 +763,8 @@ export class AgentLoop {
       projectContext: this.#projectContext,
       attachments,
       memoryPromptContext: turnMemoryPromptContext,
-      providerTools: deterministicImageGenerationRan ? suppressImageGenerationTools(providerTools) : providerTools,
+      providerTools,
+      providerToolSchemaCatalog,
       preflightCompression,
       fallbackText: fallbackResponse.text,
       onEvent: input.onEvent,
@@ -1811,4 +1818,19 @@ function truncate(value: string, maxChars: number): string {
 
 function suppressImageGenerationTools(tools: OpenAICompatibleToolSchema[]): OpenAICompatibleToolSchema[] {
   return tools.filter((tool) => tool.function.name !== "image_generate" && tool.function.name !== "image.generate");
+}
+
+function suppressImageGenerationToolCatalog(
+  catalog: ProviderToolSchemaCatalog | undefined
+): ProviderToolSchemaCatalog | undefined {
+  if (catalog === undefined) return undefined;
+  const entries = catalog.entries.filter((entry) =>
+    entry.schema.function.name !== "image_generate" && entry.schema.function.name !== "image.generate"
+  );
+  const providerNames = new Set(entries.map((entry) => entry.schema.function.name));
+  return {
+    entries,
+    tools: entries.map((entry) => entry.schema),
+    aliases: new Map([...catalog.aliases].filter(([alias]) => providerNames.has(alias)))
+  };
 }

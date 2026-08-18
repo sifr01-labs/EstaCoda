@@ -13,7 +13,7 @@ export const PROVIDER_TOOL_NARROWING_MIN_CONFIDENCE = 0.7;
 
 /**
  * Narrows an already availability-filtered foreground catalog. It never adds a
- * tool, and callers keep the returned inventory fixed for the complete turn.
+ * tool that is absent from the catalog.
  */
 export function narrowProviderToolsForTurn(input: {
   catalog: ProviderToolSchemaCatalog;
@@ -49,6 +49,28 @@ export function narrowProviderToolsForTurn(input: {
         : entry.tool.toolsets.some((toolset) => includedToolsets.has(toolset)))
     )
     .map((entry) => entry.schema);
+}
+
+/**
+ * Extends a provider-visible inventory with exact, runtime-preflighted Mission
+ * requirements. The resolved catalog is the authority ceiling: model-authored
+ * plan text cannot introduce a tool that the session did not already expose.
+ */
+export function extendProviderToolsForExecutionPlan(input: {
+  currentTools: readonly OpenAICompatibleToolSchema[];
+  catalog?: ProviderToolSchemaCatalog;
+  plan?: ExecutionPlan;
+}): OpenAICompatibleToolSchema[] {
+  if (input.catalog === undefined || input.plan === undefined) return [...input.currentTools];
+
+  const readyToolNames = readyExecutionPlanToolNames(input.plan);
+  if (readyToolNames.size === 0) return [...input.currentTools];
+
+  const includedProviderNames = new Set(input.currentTools.map((tool) => tool.function.name));
+  const additions = input.catalog.entries
+    .filter((entry) => readyToolNames.has(entry.tool.name) && !includedProviderNames.has(entry.schema.function.name))
+    .map((entry) => entry.schema);
+  return additions.length === 0 ? [...input.currentTools] : [...input.currentTools, ...additions];
 }
 
 function selectNamedConnectors(input: {
@@ -186,6 +208,8 @@ function addExecutionPlanTools(
 ): void {
   if (plan === undefined) return;
 
+  for (const toolName of readyExecutionPlanToolNames(plan)) includedTools.add(toolName);
+
   for (const item of plan.items) {
     for (const evidence of item.evidence ?? []) includedTools.add(evidence.tool);
   }
@@ -197,6 +221,27 @@ function addExecutionPlanTools(
   for (const entry of catalog.entries) {
     if (referencesCanonicalTool(searchablePlanText, entry.tool.name)) includedTools.add(entry.tool.name);
   }
+}
+
+function readyExecutionPlanToolNames(plan: ExecutionPlan): Set<string> {
+  const ready = new Set<string>();
+  if (plan.requirements === undefined || plan.capabilityPreflight === undefined) return ready;
+
+  for (const requirement of plan.requirements) {
+    const assessment = plan.capabilityPreflight.assessments.find((candidate) =>
+      candidate.requirementId === requirement.id &&
+      candidate.itemId === requirement.itemId &&
+      candidate.tool === requirement.tool &&
+      candidate.capability === requirement.capability
+    );
+    if (
+      assessment?.status === "ready" &&
+      assessment.resolution?.canonicalTool === requirement.tool
+    ) {
+      ready.add(requirement.tool);
+    }
+  }
+  return ready;
 }
 
 function referencesCanonicalTool(text: string, toolName: string): boolean {

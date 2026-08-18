@@ -330,6 +330,7 @@ async function createAgentLoop(input: {
   routeIntent?: IntentRoute;
   routeAttachments?: ChannelAttachment[];
   providerToolDefinitions?: ToolDefinition[];
+  nativeToolExecutions?: ToolExecutionRecord[];
   executionPlanReader?: ExecutionPlanReader;
   executionPlanController?: ExecutionPlanController;
 }) {
@@ -449,7 +450,7 @@ async function createAgentLoop(input: {
 
   const nativeToolExecutor = {
     executeDeterministicNativeTools: vi.fn(async () => ({
-      executions: [],
+      executions: input.nativeToolExecutions ?? [],
       plans: []
     }))
   } as unknown as NativeToolExecutor;
@@ -615,6 +616,62 @@ describe("AgentLoop provider availability gating", () => {
       "files_read",
       "collections_get"
     ]);
+  });
+
+  it("keeps a deterministically executed image tool out of the Mission expansion catalog", async () => {
+    const providerToolDefinitions: ToolDefinition[] = [
+      { ...tool, name: "plan", toolsets: ["core"] },
+      { ...tool, name: "image.generate", toolsets: ["media"] },
+      { ...tool, name: "browser.snapshot", toolsets: ["browser"] }
+    ];
+    const executionPlanReader: ExecutionPlanReader = {
+      current: () => ({
+        objective: "Generate and inspect an image",
+        originTurnId: "turn-1",
+        revision: 1,
+        status: "active",
+        items: [{ id: "generate", content: "Generate the image", status: "in_progress" }],
+        requirements: [{ id: "image", itemId: "generate", tool: "image.generate", capability: "read" }],
+        capabilityPreflight: {
+          status: "ready",
+          assessments: [{
+            requirementId: "image",
+            itemId: "generate",
+            tool: "image.generate",
+            capability: "read",
+            status: "ready",
+            resolution: {
+              canonicalTool: "image.generate",
+              riskClass: "read-only-local",
+              classification: "read"
+            }
+          }]
+        }
+      })
+    };
+    const { loop, providerTurnLoop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      providerToolDefinitions,
+      executionPlanReader,
+      routeIntent: { ...intent, nativeIntent: "image-generation", suggestedToolsets: ["media"] },
+      nativeToolExecutions: [{
+        tool: { ...tool, name: "image.generate", toolsets: ["media"] },
+        decision: "allow",
+        riskClass: "read-only-local",
+        result: { ok: true, content: "generated image" }
+      }]
+    });
+
+    await loop.handle({ text: "Generate an image.", channel: "cli", trustedWorkspace: true });
+
+    const runInput = vi.mocked(providerTurnLoop.run).mock.calls[0]?.[0] as {
+      providerTools: Array<{ function: { name: string } }>;
+      providerToolSchemaCatalog?: { entries: Array<{ tool: { name: string } }> };
+    };
+    expect(runInput.providerTools.map((entry) => entry.function.name)).not.toContain("image_generate");
+    expect(runInput.providerToolSchemaCatalog?.entries.map((entry) => entry.tool.name)).not.toContain("image.generate");
   });
 
   it("persists the bounded parent abort source for provider-loop cancellation", async () => {

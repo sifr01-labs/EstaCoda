@@ -5,7 +5,10 @@ import type { IntentRoute } from "../contracts/intent.js";
 import type { SkillDefinition } from "../contracts/skill.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import { buildProviderToolSchemaCatalog } from "../tools/tool-schema.js";
-import { narrowProviderToolsForTurn } from "./provider-tool-narrowing.js";
+import {
+  extendProviderToolsForExecutionPlan,
+  narrowProviderToolsForTurn
+} from "./provider-tool-narrowing.js";
 
 function tool(
   name: string,
@@ -52,6 +55,48 @@ function intent(confidence: number, suggestedToolsets: ToolsetName[] = []): Inte
 
 function names(result: ReturnType<typeof narrowProviderToolsForTurn>): string[] {
   return result.map((schema) => schema.function.name);
+}
+
+function planWithRequirements(input: {
+  requirements: NonNullable<ExecutionPlan["requirements"]>;
+  assessments: NonNullable<ExecutionPlan["capabilityPreflight"]>["assessments"];
+}): ExecutionPlan {
+  return {
+    objective: "Move records between systems",
+    originTurnId: "turn-1",
+    revision: 2,
+    status: "active",
+    items: [
+      { id: "inspect", content: "Inspect the source", status: "in_progress" },
+      { id: "update", content: "Update the destination", status: "pending" },
+      { id: "verify", content: "Verify the destination", status: "pending" }
+    ],
+    requirements: input.requirements,
+    capabilityPreflight: {
+      status: input.assessments.every((assessment) => assessment.status === "ready") ? "ready" : "blocked",
+      assessments: input.assessments
+    }
+  };
+}
+
+function readyAssessment(input: {
+  id: string;
+  itemId: string;
+  tool: string;
+  capability: "read" | "mutate" | "verify";
+}): NonNullable<ExecutionPlan["capabilityPreflight"]>["assessments"][number] {
+  return {
+    requirementId: input.id,
+    itemId: input.itemId,
+    tool: input.tool,
+    capability: input.capability,
+    status: "ready",
+    resolution: {
+      canonicalTool: input.tool,
+      riskClass: input.capability === "mutate" ? "external-side-effect" : "read-only-network",
+      classification: input.capability === "mutate" ? "mutate" : "read"
+    }
+  };
 }
 
 describe("narrowProviderToolsForTurn", () => {
@@ -324,5 +369,106 @@ describe("narrowProviderToolsForTurn", () => {
       catalog,
       intent: intent(0.9, ["mcp"])
     }))).not.toContain("mcp_postman_updateCollection");
+  });
+
+  it("adds exact ready Mission requirements without relying on plan prose", () => {
+    const catalog = buildProviderToolSchemaCatalog({ tools });
+    const requirements = [
+      { id: "source-read", itemId: "inspect", tool: "browser.snapshot", capability: "read" as const },
+      { id: "target-write", itemId: "update", tool: "mcp.postman.updateCollection", capability: "mutate" as const },
+      { id: "target-verify", itemId: "verify", tool: "mcp.postman.getCollection", capability: "verify" as const }
+    ];
+    const plan = planWithRequirements({
+      requirements,
+      assessments: requirements.map((requirement) => readyAssessment(requirement))
+    });
+    const currentTools = [catalog.entries.find((entry) => entry.tool.name === "plan")!.schema];
+
+    expect(names(extendProviderToolsForExecutionPlan({ currentTools, catalog, plan }))).toEqual([
+      "plan",
+      "browser_snapshot",
+      "mcp_postman_getCollection",
+      "mcp_postman_updateCollection"
+    ]);
+    expect(names(narrowProviderToolsForTurn({
+      catalog,
+      intent: intent(0.9),
+      resumedExecutionPlan: plan
+    }))).toEqual([
+      "plan",
+      "task_status",
+      "browser_snapshot",
+      "mcp_postman_getCollection",
+      "mcp_postman_updateCollection"
+    ]);
+  });
+
+  it("adds only ready, catalog-resolved requirements and never removes current tools", () => {
+    const catalog = buildProviderToolSchemaCatalog({ tools });
+    const plan = planWithRequirements({
+      requirements: [
+        { id: "ready", itemId: "inspect", tool: "browser.snapshot", capability: "read" },
+        { id: "unavailable", itemId: "update", tool: "mcp.postman.updateCollection", capability: "mutate" },
+        { id: "missing", itemId: "verify", tool: "mcp.unknown.verify", capability: "verify" }
+      ],
+      assessments: [
+        readyAssessment({ id: "ready", itemId: "inspect", tool: "browser.snapshot", capability: "read" }),
+        {
+          requirementId: "unavailable",
+          itemId: "update",
+          tool: "mcp.postman.updateCollection",
+          capability: "mutate",
+          status: "unavailable",
+          reasonCode: "tool_unavailable"
+        },
+        {
+          requirementId: "missing",
+          itemId: "verify",
+          tool: "mcp.unknown.verify",
+          capability: "verify",
+          status: "missing",
+          reasonCode: "tool_missing"
+        }
+      ]
+    });
+    const currentTools = [
+      catalog.entries.find((entry) => entry.tool.name === "plan")!.schema,
+      catalog.entries.find((entry) => entry.tool.name === "file.read")!.schema
+    ];
+
+    expect(names(extendProviderToolsForExecutionPlan({ currentTools, catalog, plan }))).toEqual([
+      "plan",
+      "file_read",
+      "browser_snapshot"
+    ]);
+  });
+
+  it("deduplicates repeated requirements and fails closed on mismatched assessments", () => {
+    const catalog = buildProviderToolSchemaCatalog({ tools });
+    const plan = planWithRequirements({
+      requirements: [
+        { id: "read-one", itemId: "inspect", tool: "browser.snapshot", capability: "read" },
+        { id: "read-two", itemId: "verify", tool: "browser.snapshot", capability: "read" },
+        { id: "catalog-miss", itemId: "verify", tool: "mcp.unknown.verify", capability: "read" }
+      ],
+      assessments: [
+        readyAssessment({ id: "read-one", itemId: "inspect", tool: "browser.snapshot", capability: "read" }),
+        {
+          ...readyAssessment({ id: "read-two", itemId: "verify", tool: "browser.snapshot", capability: "read" }),
+          resolution: {
+            canonicalTool: "file.read",
+            riskClass: "read-only-local",
+            classification: "read"
+          }
+        },
+        readyAssessment({ id: "catalog-miss", itemId: "verify", tool: "mcp.unknown.verify", capability: "read" })
+      ]
+    });
+
+    expect(names(extendProviderToolsForExecutionPlan({
+      currentTools: [catalog.entries.find((entry) => entry.tool.name === "plan")!.schema],
+      catalog,
+      plan
+    }))).toEqual(["plan", "browser_snapshot"]);
   });
 });

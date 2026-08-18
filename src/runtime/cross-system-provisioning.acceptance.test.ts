@@ -140,7 +140,7 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
 
     try {
       response = await harness.runtime.handle({
-        text: "Configure the destination from the two protected values in the developer portal, then read back and verify the resulting state.",
+        text: "Configure the fictional control plane from the approved source records, then read back and verify the resulting state.",
         channel: "cli",
         trustedWorkspace: true,
         onSecureInputRequest: harness.secureInputHandler,
@@ -160,8 +160,8 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
         "plan",
         providerToolName(READ_TOOL),
         providerToolName(VERIFY_TOOL),
-        providerToolName("browser.navigate"),
       ]));
+      expect(firstRequestTools).not.toContain(providerToolName("browser.navigate"));
       if (scenario.exposeMutation === false) expect(firstRequestTools).not.toContain(providerToolName(MUTATION_TOOL));
       else expect(firstRequestTools).toContain(providerToolName(MUTATION_TOOL));
 
@@ -169,7 +169,7 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
       const events = await harness.runtime.sessionDb.listEvents(harness.runtime.sessionId);
       const mission = latestExecutionPlanSnapshot(events);
       expect(mission).toBeDefined();
-      expect(mission?.requirements).toHaveLength(3);
+      expect(mission?.requirements).toHaveLength(4);
 
       if (scenario.exposeMutation === false) {
         expect(mission).toMatchObject({
@@ -191,6 +191,7 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
           event.plan.capabilityPreflight?.status === "ready"
         );
         expect(preflightReady).toBeDefined();
+        expect(firstRequestToolNames(harness.providerRequests[1])).toContain(providerToolName("browser.navigate"));
         expect(toolNames.indexOf("plan")).toBeLessThan(toolNames.indexOf("browser.navigate"));
         expect(toolNames.indexOf(READ_TOOL)).toBeLessThan(toolNames.indexOf("browser.navigate"));
         expect(harness.mcp.readInputs).toHaveLength(1);
@@ -513,6 +514,7 @@ function initialPlan(): Record<string, unknown> {
       { id: "verify-target", content: "Read back and verify the changed destination state", status: "pending" },
     ],
     requirements: [
+      { id: "source-read", itemId: "bind-sources", tool: "browser.navigate", capability: "read" },
       { id: "destination-read", itemId: "inspect-target", tool: READ_TOOL, capability: "read" },
       {
         id: "destination-mutation",

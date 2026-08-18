@@ -10,7 +10,7 @@ import type { ModelProfile, ResolvedModelRoute, ProviderRequest, ProviderRespons
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { ReplacementSessionMessage, SessionDB, SessionEvent } from "../contracts/session.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
-import type { ToolDefinition } from "../contracts/tool.js";
+import type { RegisteredTool, ToolDefinition } from "../contracts/tool.js";
 import type { SecureInputRequestHandler } from "../contracts/secure-input.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
@@ -21,7 +21,11 @@ import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { stableToolCallId, ToolCallPlanner } from "../tools/tool-call-planner.js";
-import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
+import {
+  buildProviderToolSchemaCatalog,
+  type OpenAICompatibleToolSchema,
+  type ProviderToolSchemaCatalog
+} from "../tools/tool-schema.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
 import { createPlanTools } from "../tools/plan-tools.js";
@@ -360,6 +364,7 @@ async function runBasicProviderTurn(
     visibleTurnId?: string;
     userText?: string;
     providerTools?: OpenAICompatibleToolSchema[];
+    providerToolSchemaCatalog?: ProviderToolSchemaCatalog;
     signal?: AbortSignal;
     onSecureInputRequest?: SecureInputRequestHandler;
   } = {}
@@ -380,6 +385,7 @@ async function runBasicProviderTurn(
     attachments: callbacks.attachments,
     memoryPromptContext: undefined,
     providerTools: callbacks.providerTools ?? [],
+    providerToolSchemaCatalog: callbacks.providerToolSchemaCatalog,
     fallbackText: "",
     toolPlans: callbacks.toolPlans ?? [],
     trustedWorkspace: false,
@@ -2181,6 +2187,129 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     ]);
     expect(JSON.stringify(firstRequest.messages)).toContain("Active execution plan");
     expect(JSON.stringify(firstRequest.messages)).not.toContain("Before doing anything else");
+  });
+
+  it("adds ready Mission requirements to the next provider iteration without a new user turn", async () => {
+    const registry = new ToolRegistry();
+    const requirementTools: RegisteredTool[] = [
+      {
+        ...testTool,
+        name: "browser.snapshot",
+        riskClass: "read-only-network",
+        toolsets: ["browser"],
+        isAvailable: () => true,
+        run: async () => ({ ok: true, content: "source records" })
+      },
+      {
+        ...testTool,
+        name: "mcp.target.read",
+        riskClass: "read-only-network",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "target" },
+        isAvailable: () => true,
+        run: async () => ({ ok: true, content: "target state" })
+      },
+      {
+        ...testTool,
+        name: "mcp.target.update",
+        riskClass: "external-side-effect",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "target" },
+        isAvailable: () => true,
+        run: async () => ({ ok: true, content: "updated" })
+      },
+      {
+        ...testTool,
+        name: "mcp.target.verify",
+        riskClass: "read-only-network",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "target" },
+        capabilityMetadata: { verification: { verifies: ["mcp.target.update"] } },
+        isAvailable: () => true,
+        run: async () => ({ ok: true, content: "verified" })
+      }
+    ];
+    for (const tool of requirementTools) registry.register(tool);
+    const planTool = {
+      ...testTool,
+      name: "plan",
+      riskClass: "read-only-local" as const,
+      toolsets: ["core" as const]
+    };
+    const catalog = buildProviderToolSchemaCatalog({ tools: [planTool, ...requirementTools] });
+    const controller = new ExecutionPlanController(
+      new ExecutionPlanStore(),
+      undefined,
+      undefined,
+      new ExecutionCapabilityPreflight({ registry })
+    );
+    const proposal = {
+      objective: "Move source records into the destination and verify the result",
+      items: [
+        { id: "inspect", content: "Inspect source records", status: "in_progress" as const },
+        { id: "read", content: "Read destination state", status: "pending" as const },
+        { id: "update", content: "Update destination state", status: "pending" as const },
+        { id: "verify", content: "Verify destination state", status: "pending" as const }
+      ],
+      requirements: [
+        { id: "source", itemId: "inspect", tool: "browser.snapshot", capability: "read" as const },
+        { id: "target-read", itemId: "read", tool: "mcp.target.read", capability: "read" as const },
+        { id: "target-update", itemId: "update", tool: "mcp.target.update", capability: "mutate" as const },
+        { id: "target-verify", itemId: "verify", tool: "mcp.target.verify", capability: "verify" as const }
+      ]
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-plan", JSON.stringify({ operation: "write", ...proposal }), "plan")]),
+        providerExecution("", [providerToolCall("call-browser", "{}", "browser.snapshot")]),
+        providerExecution("Continuing with the source records.")
+      ],
+      toolSteps: [
+        {
+          executions: [{
+            ...toolExecutionForTool("call-plan", "plan", "plan accepted"),
+            tool: planTool
+          }]
+        },
+        { executions: [toolExecutionForTool("call-browser", "browser.snapshot", "source records")] },
+        {}
+      ],
+      executionPlanController: controller,
+      maxProviderIterations: 3,
+      onExecutePlans: async ({ sessionId, stepInput }) => {
+        if (stepInput.providerExecution?.toolCalls.some((call) => call.name === "plan")) {
+          await controller.write(proposal, "visible-turn", undefined, {
+            source: "provider",
+            sessionId
+          });
+        }
+      }
+    });
+    const initialTools = catalog.entries
+      .filter((entry) => entry.tool.name !== "browser.snapshot")
+      .map((entry) => entry.schema);
+
+    await runBasicProviderTurn(harness.loop, {
+      visibleTurnId: "visible-turn",
+      userText: "Move the approved records into Target and verify the result.",
+      providerTools: initialTools,
+      providerToolSchemaCatalog: catalog
+    });
+
+    const firstRequest = harness.completeSpy.mock.calls[0]?.[0] as ProviderRequest;
+    const secondRequest = harness.completeSpy.mock.calls[1]?.[0] as ProviderRequest;
+    expect((firstRequest.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name)).not.toContain("browser_snapshot");
+    expect((secondRequest.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name)).toEqual([
+      "plan",
+      "mcp_target_read",
+      "mcp_target_update",
+      "mcp_target_verify",
+      "browser_snapshot"
+    ]);
+    expect(controller.current()?.capabilityPreflight?.status).toBe("ready");
+    expect(harness.executePlans.mock.calls.flatMap(([call]) =>
+      call.providerExecution?.toolCalls.map((toolCall) => toolCall.name) ?? []
+    )).toContain("browser.snapshot");
   });
 
   it("stops after plan preflight and before browser work when a destination capability is missing", async () => {
