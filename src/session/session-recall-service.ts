@@ -505,13 +505,13 @@ const HIGH_CONFIDENCE_RECALL_TRIGGERS: Array<{
     includeCurrentSession: true
   },
   {
-    pattern: /\b(?:visit(?:ed|ing)?|open(?:ed|ing)?|brows(?:e|ed|ing)|us(?:e|ed|ing))\b.{0,100}\b(?:previous|earlier|prior|past|recent) sessions?\b/u,
+    pattern: /\b(?:visit(?:ed|ing)?|open(?:ed|ing)?|brows(?:e|ed|ing)|us(?:e|ed|ing))\b.{0,100}\b(?:previous|earlier|prior|past|recent|last) sessions?\b/u,
     reason: "explicit prior-session visited-site phrase",
     focus: "visited-sites"
   },
   { pattern: /\b(?:our |the |my )?session history\b/u, reason: "explicit session-history phrase", includeCurrentSession: true },
   { pattern: /\b(?:what|which|where|when|recall|review|inspect|look at)\b.{0,80}\b(?:this|current) session\b/u, reason: "explicit current-session history phrase", includeCurrentSession: true },
-  { pattern: /\b(?:previous|earlier|prior|past|recent) sessions?\b/u, reason: "explicit prior-session phrase" },
+  { pattern: /\b(?:previous|earlier|prior|past|recent|last) sessions?\b/u, reason: "explicit prior-session phrase" },
   { pattern: /\bpast conversation\b/u, reason: "explicit past-conversation phrase" },
   { pattern: /(?:سجل (?:الجلسة|جلساتنا)|الجلسة السابقة|جلسة سابقة|المحادثة السابقة|محادثتنا السابقة)/u, reason: "explicit Arabic session-history phrase", includeCurrentSession: true },
   { pattern: /\b(?:do you )?remember (?!to\b)(?:when|what|how|where|last|we|i|the|that|our|my)\b/u, reason: "explicit remember recall phrase" },

@@ -329,6 +329,16 @@ describe("SessionRecallService", () => {
       focus: "visited-sites",
       includeCurrentSession: false
     });
+    expect(detectSessionRecallIntent("Open the website we visited in the last session.")).toMatchObject({
+      triggered: true,
+      focus: "visited-sites",
+      includeCurrentSession: false
+    });
+    expect(detectSessionRecallIntent("Continue what we were doing in our LAST SESSION!")).toMatchObject({
+      triggered: true,
+      focus: "general",
+      includeCurrentSession: false
+    });
     expect(detectSessionRecallIntent("Pick up the configuration from earlier sessions.")).toMatchObject({
       triggered: true,
       includeCurrentSession: false
@@ -347,6 +357,7 @@ describe("SessionRecallService", () => {
     expect(detectSessionRecallIntent("Add browser history support.").triggered).toBe(false);
     expect(detectSessionRecallIntent("Remember to clear history.").triggered).toBe(false);
     expect(detectSessionRecallIntent("build the API plan").triggered).toBe(false);
+    expect(detectSessionRecallIntent("Build a last-session summary component.").triggered).toBe(false);
   });
 
   it("recalls only verified current-session browser navigation and excludes the submitted query", async () => {

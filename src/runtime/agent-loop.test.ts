@@ -2035,6 +2035,41 @@ describe("AgentLoop provider availability gating", () => {
     }));
   });
 
+  it("injects visited-site recall for an explicit last-session request", async () => {
+    const recall = vi.fn(async () => ({
+      query: "Pull up the developer website we visited in the last session.",
+      blocks: [],
+      diagnostics: {
+        rawHitCount: 0,
+        groupedSessionCount: 0,
+        returnedSessionCount: 0,
+        fallbackCount: 0,
+        warnings: []
+      }
+    }));
+    const { loop, providerTurnLoop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      sessionRecallService: { recall }
+    });
+
+    await loop.handle({
+      text: "Pull up the developer website we visited in the last session.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(recall).toHaveBeenCalledWith(
+      "Pull up the developer website we visited in the last session.",
+      { focus: "visited-sites" }
+    );
+    expect(providerTurnLoop.run).toHaveBeenCalledTimes(1);
+    const runInput = vi.mocked(providerTurnLoop.run).mock.calls[0]?.[0] as {
+      memoryPromptContext?: { diagnostics?: { recallTriggered: boolean } };
+    };
+    expect(runInput.memoryPromptContext?.diagnostics?.recallTriggered).toBe(true);
+  });
+
   it("continues ordinary turns when omitted recall decision event recording fails", async () => {
     const recall = vi.fn();
     const { loop, providerTurnLoop, sessionDb, sessionId } = await createAgentLoop({
