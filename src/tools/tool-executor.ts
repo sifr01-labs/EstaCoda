@@ -8,7 +8,7 @@ import {
   type SecurityPolicy
 } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
-import type { ToolApprovalHandler, ToolDefinition, ToolExecutionContext, ToolResult, ToolRiskClass, ToolSecurityResolution, ToolsetName } from "../contracts/tool.js";
+import type { ToolApprovalHandler, ToolDefinition, ToolExecutionContext, ToolExecutionEffect, ToolResult, ToolRiskClass, ToolSecurityResolution, ToolsetName } from "../contracts/tool.js";
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
 import type { VisionDispatchPhase, VisionInputProvenanceContext } from "../contracts/vision.js";
@@ -23,6 +23,7 @@ import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { ToolRegistry } from "./tool-registry.js";
 import type { DelegateCallBudget } from "../delegation/delegate-call-budget.js";
 import { buildToolSecurityTargetSummary } from "./tool-target-summary.js";
+import { resolveToolExecutionEffect } from "./tool-capability.js";
 import {
   findProtectedArgumentEnvelopes,
   matchesProtectedArgumentPattern,
@@ -100,6 +101,8 @@ export type ToolReadLedger = {
 
 export type ToolExecutionRecord = {
   tool: ToolDefinition;
+  /** Runtime-derived from trusted registration metadata; never provider input. */
+  executionEffect?: ToolExecutionEffect;
   input?: Record<string, unknown>;
   decision: SecurityDecision;
   riskClass: ToolRiskClass;
@@ -171,6 +174,7 @@ export class ToolExecutor {
 
     const environmentType = request.environmentType ?? DEFAULT_ENVIRONMENT_TYPE;
     const baseRiskClass = classifyEffectiveRisk(tool, request.input, environmentType);
+    const baseExecutionEffect = resolveToolExecutionEffect(tool, baseRiskClass);
     const persistedCall = redactToolCallForPersistence(tool.name, request.input, request.providerNativeToolCall);
     const validationError = validateToolInput(tool, request.input);
     if (validationError !== undefined) {
@@ -190,6 +194,7 @@ export class ToolExecutor {
 
       return {
         tool: toDefinition(tool),
+        ...(baseExecutionEffect === undefined ? {} : { executionEffect: baseExecutionEffect }),
         input: request.input,
         decision: "deny",
         riskClass: baseRiskClass,
@@ -218,6 +223,7 @@ export class ToolExecutor {
       return await this.#blockedSecurityResolution(request, tool, baseRiskClass);
     }
     const riskClass = moreRestrictiveRiskClass(baseRiskClass, securityResolution?.riskClass);
+    const executionEffect = resolveToolExecutionEffect(tool, riskClass);
     if (tool.name === "delegate_task" && request.delegateCallBudget !== undefined) {
       const budget = request.delegateCallBudget.tryConsume();
       if (budget.allowed === false) {
@@ -302,6 +308,7 @@ export class ToolExecutor {
 
       return {
         tool: toDefinition(tool),
+        ...(executionEffect === undefined ? {} : { executionEffect }),
         input: request.input,
         decision,
         riskClass,
@@ -409,6 +416,7 @@ export class ToolExecutor {
 
     const execution: ToolExecutionRecord = {
       tool: definition,
+      ...(executionEffect === undefined ? {} : { executionEffect }),
       input: request.input,
       decision,
       riskClass,
@@ -562,6 +570,7 @@ export class ToolExecutor {
 
     return {
       tool: toDefinition(tool),
+      ...executionEffectProperty(tool, riskClass),
       input: request.input,
       decision: "deny",
       riskClass,
@@ -606,6 +615,7 @@ export class ToolExecutor {
     });
     return {
       tool: toDefinition(tool),
+      ...executionEffectProperty(tool, riskClass),
       input: request.input,
       decision: "deny",
       riskClass,
@@ -995,10 +1005,19 @@ function toDefinition(tool: ToolDefinition): ToolDefinition {
     inputSchema: tool.inputSchema,
     riskClass: tool.riskClass,
     toolsets: [...tool.toolsets],
+    connector: tool.connector === undefined ? undefined : { ...tool.connector },
     progressLabel: tool.progressLabel,
     maxResultSizeChars: tool.maxResultSizeChars,
     requiredConfig: tool.requiredConfig === undefined ? undefined : [...tool.requiredConfig]
   };
+}
+
+function executionEffectProperty(
+  tool: import("../contracts/tool.js").RegisteredTool,
+  riskClass: ToolRiskClass
+): { executionEffect?: ToolExecutionEffect } {
+  const executionEffect = resolveToolExecutionEffect(tool, riskClass);
+  return executionEffect === undefined ? {} : { executionEffect };
 }
 
 export const summarizeSecurityTarget = buildToolSecurityTargetSummary;

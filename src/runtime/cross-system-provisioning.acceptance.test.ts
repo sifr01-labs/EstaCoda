@@ -203,6 +203,7 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
 
       const messages = await harness.runtime.sessionDb.listMessages(harness.runtime.sessionId);
       const events = await harness.runtime.sessionDb.listEvents(harness.runtime.sessionId);
+      const evidenceEvents = events.filter((event) => event.kind === "execution-evidence-recorded");
       const mission = latestExecutionPlanSnapshot(events);
       expect(mission).toBeDefined();
       expect(mission?.requirements).toHaveLength(4);
@@ -231,6 +232,15 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
         expect(toolNames.indexOf("plan")).toBeLessThan(toolNames.indexOf("browser.navigate"));
         expect(toolNames.indexOf(READ_TOOL)).toBeLessThan(toolNames.indexOf("browser.navigate"));
         expect(harness.mcp.readInputs).toHaveLength(1);
+        expect(evidenceEvents).toContainEqual(expect.objectContaining({
+          toolCallId: "journey-call-2",
+          tool: READ_TOOL,
+          status: "success",
+          executionEffect: {
+            kind: "read",
+            connector: { kind: "mcp", id: SERVER_ID },
+          },
+        }));
       }
 
       const callSummary = {
@@ -269,6 +279,39 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
           ],
         });
         expect(harness.mcp.state().settings).toEqual(harness.mcp.initialSettings);
+        expect(evidenceEvents).toContainEqual(expect.objectContaining({
+          toolCallId: "journey-call-6",
+          tool: MUTATION_TOOL,
+          status: "success",
+          executionEffect: {
+            kind: "mutation",
+            connector: { kind: "mcp", id: SERVER_ID },
+          },
+        }));
+        if (scenario.failVerification === true) {
+          const failedVerification = evidenceEvents.find((event) =>
+            event.kind === "execution-evidence-recorded" && event.toolCallId === "journey-call-8"
+          );
+          expect(failedVerification).not.toHaveProperty("verifiedMutation");
+        }
+        expect(evidenceEvents).toContainEqual(expect.objectContaining({
+          toolCallId: "journey-call-8",
+          tool: VERIFY_TOOL,
+          status: scenario.failVerification === true ? "failed" : "success",
+          executionEffect: {
+            kind: "verification",
+            verifies: [MUTATION_TOOL],
+            connector: { kind: "mcp", id: SERVER_ID },
+          },
+          ...(scenario.failVerification === true
+            ? {}
+            : {
+                verifiedMutation: {
+                  toolCallId: "journey-call-6",
+                  tool: MUTATION_TOOL,
+                },
+              }),
+        }));
       } else {
         expect(harness.mcp.state()).toEqual({
           targetId: TARGET_ID,

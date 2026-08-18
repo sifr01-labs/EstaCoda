@@ -93,15 +93,27 @@ export function diagnoseSessionExecution(input: {
       continue;
     }
     if (event.kind === "execution-evidence-recorded") {
-      if (event.riskClass !== undefined && READ_ONLY_RISK_CLASSES.has(event.riskClass)) {
+      if (event.executionEffect?.kind === "read" || event.executionEffect?.kind === "verification" || (
+        event.executionEffect === undefined &&
+        event.riskClass !== undefined &&
+        READ_ONLY_RISK_CLASSES.has(event.riskClass)
+      )) {
         const tool = safeToolName(event.tool);
         observationCalls.set(tool, (observationCalls.get(tool) ?? 0) + 1);
         if (event.status === "blocked") blockedObservations += 1;
-        if (event.status === "success") verificationEvidence += 1;
+        if (
+          event.status === "success" &&
+          (event.executionEffect === undefined || (
+            event.executionEffect.kind === "verification" && event.verifiedMutation !== undefined
+          ))
+        ) verificationEvidence += 1;
       } else if (
         event.status === "success" &&
-        event.riskClass !== undefined &&
-        MUTATION_RISK_CLASSES.has(event.riskClass)
+        (event.executionEffect?.kind === "mutation" || (
+          event.executionEffect === undefined &&
+          event.riskClass !== undefined &&
+          MUTATION_RISK_CLASSES.has(event.riskClass)
+        ))
       ) {
         mutationEvidence += 1;
       }

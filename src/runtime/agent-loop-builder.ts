@@ -312,12 +312,14 @@ export class AgentLoopBuilder {
     // Capability preflight therefore cannot observe a broader/global inventory.
     const toolRegistry = new ToolRegistry();
     const ownsExecutionPlan = input.parentSessionId === undefined && input.taskExecution === undefined;
-    const executionEvidenceIndex = ownsExecutionPlan ? new ExecutionEvidenceIndex() : undefined;
+    // Every runtime records authoritative execution receipts. Only root
+    // foreground sessions additionally expose the legacy Mission controller.
+    const executionEvidenceIndex = new ExecutionEvidenceIndex();
     const persistedSessionEvents = ownsExecutionPlan
       ? await input.sessionDb.listEvents(input.sessionId)
       : [];
-    executionEvidenceIndex?.hydrate(persistedSessionEvents);
-    const executionPlanController = ownsExecutionPlan && executionEvidenceIndex !== undefined
+    executionEvidenceIndex.hydrate(persistedSessionEvents);
+    const executionPlanController = ownsExecutionPlan
       ? new ExecutionPlanController(
           new ExecutionPlanStore(),
           (event, sink) => runRecorder.recordExecutionPlanTransition(

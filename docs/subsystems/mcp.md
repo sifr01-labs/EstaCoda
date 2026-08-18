@@ -76,6 +76,8 @@ The CLI accepts the same map with `--tool-risk-classes TOOL=RISK,...`. When a pe
 
 `protectedToolArguments` contains reviewed JSON Pointer patterns only; it never contains credential values. `groupedDelivery` and `browserRelay` describe capabilities the generic secure dispatcher enforces. `toolVerificationRelationships` maps a read-only verification tool to the mutation tools whose resulting state it can independently verify. Tool names and protected paths are checked against the discovered MCP catalog and input schemas before any tools from that server are registered. Unknown tools, invalid or overlapping paths, non-string destinations, duplicate relationships, and risk conflicts leave the server unavailable with a bounded diagnostic.
 
+At execution time, the runtime copies only the validated connector and verification relationship into its bounded effect receipt. A successful verifier is associated with the most recent compatible successful mutation from the same visible turn, using target identity when both calls provide one. MCP results and model-authored plan text cannot create or override that relationship.
+
 The reviewed configuration tool accepts these structured fields directly. The CLI accepts `--protected-tool-arguments-json` and `--tool-verification-relationships-json`. `mcp status` reports only yes/no capability summaries; it never prints protected paths or credential values.
 
 ## Read Reuse

@@ -937,6 +937,66 @@ describe("ToolExecutor input redaction", () => {
 });
 
 describe("ToolExecutor tool-call metadata persistence", () => {
+  it("preserves trusted execution effects without projecting capability metadata into tool definitions", async () => {
+    const mutation: RegisteredTool = {
+      ...createEchoTool("mcp.postman.updateCollection"),
+      riskClass: "external-side-effect",
+      toolsets: ["mcp"],
+      connector: { kind: "mcp", id: "postman" },
+      resolveSecurity: () => ({
+        riskClass: "external-side-effect",
+        targetKey: "collection:alpha",
+        targetSummary: "Collection Alpha"
+      })
+    };
+    const verifier: RegisteredTool = {
+      ...createEchoTool("mcp.postman.getCollection"),
+      riskClass: "read-only-network",
+      toolsets: ["mcp"],
+      connector: { kind: "mcp", id: "postman" },
+      capabilityMetadata: { verification: { verifies: [mutation.name] } },
+      resolveSecurity: () => ({
+        riskClass: "read-only-network",
+        targetKey: "collection:alpha",
+        targetSummary: "Collection Alpha"
+      })
+    };
+    const { executor } = await setupExecutor({ tools: [mutation, verifier] });
+
+    const mutationExecution = await executor.executeTool({
+      tool: mutation.name,
+      input: {},
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      toolCallId: "call-update"
+    });
+    const verificationExecution = await executor.executeTool({
+      tool: verifier.name,
+      input: {},
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      toolCallId: "call-verify"
+    });
+
+    expect(mutationExecution).toMatchObject({
+      tool: { name: mutation.name, connector: { kind: "mcp", id: "postman" } },
+      targetKey: "collection:alpha",
+      targetSummary: "Collection Alpha",
+      executionEffect: {
+        kind: "mutation",
+        connector: { kind: "mcp", id: "postman" }
+      }
+    });
+    expect(verificationExecution).toMatchObject({
+      executionEffect: {
+        kind: "verification",
+        verifies: [mutation.name],
+        connector: { kind: "mcp", id: "postman" }
+      }
+    });
+    expect(executor.getToolDefinition(verifier.name)).not.toHaveProperty("capabilityMetadata");
+  });
+
   it("injects one declared protected argument immediately before dispatch and scrubs tool echoes", async () => {
     const sentinel = "declared-tool-sentinel-secret";
     const observed: unknown[] = [];

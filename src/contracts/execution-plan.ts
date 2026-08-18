@@ -187,6 +187,12 @@ export type ExecutionEvidenceRecord =
       status: "success";
       riskClass: import("./tool.js").ToolRiskClass;
       targetSummary?: string;
+      visibleTurnId?: string;
+      executionEffect?: import("./tool.js").ToolExecutionEffect;
+      verifiedMutation?: {
+        toolCallId: string;
+        tool: string;
+      };
     }
   | {
       kind: "execution-evidence-recorded";
@@ -195,6 +201,8 @@ export type ExecutionEvidenceRecord =
       status: "failed" | "blocked" | "unavailable" | "ineligible";
       riskClass?: import("./tool.js").ToolRiskClass;
       targetSummary?: string;
+      visibleTurnId?: string;
+      executionEffect?: import("./tool.js").ToolExecutionEffect;
     };
 
 export type ExecutionPlanCompletionKind = "reasoning";

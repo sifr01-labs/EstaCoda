@@ -34,6 +34,7 @@ import { emit } from "../utils/runtime-helpers.js";
 import { truncate } from "../utils/formatting.js";
 import { buildFailureRecord, type FailureContext } from "../trajectory/failure-classifier.js";
 import { redactSensitiveText } from "../utils/redaction.js";
+import { normalizeExecutionEvidenceRecord } from "../session/execution-evidence-state.js";
 import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { cloneExecutionPlan } from "./execution-plan-store.js";
 
@@ -92,7 +93,8 @@ export class RunRecorder {
   }
 
   async recordExecutionEvidence(record: ExecutionEvidenceRecord): Promise<void> {
-    const persisted = { ...record };
+    const persisted = normalizeExecutionEvidenceRecord(record);
+    if (persisted === undefined) return;
     await this.#sessionDb.appendEvent(this.#currentSessionId(), persisted);
     this.#trajectoryRecorder.record(persisted.kind, persisted);
   }

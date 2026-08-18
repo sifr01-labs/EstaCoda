@@ -3,6 +3,7 @@ import type {
   ExecutionEvidenceRecord,
   ExecutionPlanEvidence
 } from "../contracts/execution-plan.js";
+import type { ToolExecutionEffect } from "../contracts/tool.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { SessionEvent } from "../contracts/session.js";
 import { redactSensitiveText } from "../utils/redaction.js";
@@ -14,8 +15,20 @@ const MAX_INDEXED_EXECUTIONS = 1_024;
 const MAX_EVIDENCE_CANDIDATES = 8;
 
 type IndexedExecutionEvidence =
-  | { status: "success"; evidence: ExecutionPlanEvidence; visibleTurnId?: string }
-  | { status: "failed" | "blocked" | "unavailable" | "ineligible"; tool: string; visibleTurnId?: string };
+  | {
+      status: "success";
+      evidence: ExecutionPlanEvidence;
+      record: ExecutionEvidenceRecord;
+      visibleTurnId?: string;
+      targetKey?: string;
+      executionEffect?: ToolExecutionEffect;
+    }
+  | {
+      status: "failed" | "blocked" | "unavailable" | "ineligible";
+      tool: string;
+      record: ExecutionEvidenceRecord;
+      visibleTurnId?: string;
+    };
 
 export type ExecutionEvidenceStatus = IndexedExecutionEvidence["status"];
 
@@ -38,6 +51,11 @@ export class ExecutionEvidenceIndex {
     if (toolCallId === undefined || tool === undefined) return undefined;
     const status = executionEvidenceStatus(execution);
     const targetSummary = safeTargetSummary(execution.targetSummary);
+    const safeTurnId = safeVisibleTurnId(visibleTurnId);
+    const executionEffect = status === "ineligible" ? undefined : cloneExecutionEffect(execution.executionEffect);
+    const verifiedMutation = status === "success" && executionEffect?.kind === "verification"
+      ? this.#latestCompatibleMutation({ execution, visibleTurnId: safeTurnId, effect: executionEffect })
+      : undefined;
     const record: ExecutionEvidenceRecord = status === "success"
       ? {
           kind: "execution-evidence-recorded",
@@ -45,7 +63,10 @@ export class ExecutionEvidenceIndex {
           tool,
           status,
           riskClass: execution.riskClass,
-          ...(targetSummary === undefined ? {} : { targetSummary })
+          ...(targetSummary === undefined ? {} : { targetSummary }),
+          ...(safeTurnId === undefined ? {} : { visibleTurnId: safeTurnId }),
+          ...(executionEffect === undefined ? {} : { executionEffect }),
+          ...(verifiedMutation === undefined ? {} : { verifiedMutation })
         }
       : {
           kind: "execution-evidence-recorded",
@@ -53,20 +74,26 @@ export class ExecutionEvidenceIndex {
           tool,
           status,
           riskClass: execution.riskClass,
-          ...(targetSummary === undefined ? {} : { targetSummary })
+          ...(targetSummary === undefined ? {} : { targetSummary }),
+          ...(safeTurnId === undefined ? {} : { visibleTurnId: safeTurnId }),
+          ...(executionEffect === undefined ? {} : { executionEffect })
         };
-    this.#indexRecord(record, visibleTurnId);
-    return record;
+    const normalized = normalizeExecutionEvidenceRecord(record);
+    if (normalized === undefined) return undefined;
+    this.#indexRecord(normalized, execution.targetKey);
+    return normalized;
   }
 
   recordUnavailable(toolCallId: string, tool: string, visibleTurnId?: string): ExecutionEvidenceRecord {
+    const safeTurnId = safeVisibleTurnId(visibleTurnId);
     const record: ExecutionEvidenceRecord = {
       kind: "execution-evidence-recorded",
       toolCallId,
       tool,
-      status: "unavailable"
+      status: "unavailable",
+      ...(safeTurnId === undefined ? {} : { visibleTurnId: safeTurnId })
     };
-    this.#indexRecord(record, visibleTurnId);
+    this.#indexRecord(record);
     return record;
   }
 
@@ -118,6 +145,16 @@ export class ExecutionEvidenceIndex {
     }));
   }
 
+  recordsForTurn(visibleTurnId: string): ExecutionEvidenceRecord[] {
+    const safeTurnId = safeVisibleTurnId(visibleTurnId);
+    if (safeTurnId === undefined) return [];
+    return [...this.#byCallId.values()].flatMap((entry) => {
+      if (entry.visibleTurnId !== safeTurnId) return [];
+      const safe = normalizeExecutionEvidenceRecord(entry.record);
+      return safe === undefined ? [] : [safe];
+    });
+  }
+
   #set(toolCallId: string, evidence: IndexedExecutionEvidence): void {
     this.#byCallId.delete(toolCallId);
     this.#byCallId.set(toolCallId, evidence);
@@ -128,12 +165,14 @@ export class ExecutionEvidenceIndex {
     }
   }
 
-  #indexRecord(record: ExecutionEvidenceRecord, visibleTurnId?: string): void {
-    const safeTurnId = safeVisibleTurnId(visibleTurnId);
+  #indexRecord(record: ExecutionEvidenceRecord, targetKey?: string): void {
+    const safeTurnId = safeVisibleTurnId(record.visibleTurnId);
+    const safeKey = safeTargetKey(targetKey);
     if (record.status !== "success") {
       this.#set(record.toolCallId, {
         status: record.status,
         tool: record.tool,
+        record,
         ...(safeTurnId === undefined ? {} : { visibleTurnId: safeTurnId })
       });
       return;
@@ -148,8 +187,40 @@ export class ExecutionEvidenceIndex {
         riskClass: record.riskClass,
         ...(targetSummary === undefined ? {} : { targetSummary })
       },
+      record,
+      ...(safeKey === undefined ? {} : { targetKey: safeKey }),
+      ...(record.executionEffect === undefined ? {} : { executionEffect: cloneExecutionEffect(record.executionEffect) }),
       ...(safeTurnId === undefined ? {} : { visibleTurnId: safeTurnId })
     });
+  }
+
+  #latestCompatibleMutation(input: {
+    execution: ToolExecutionRecord;
+    visibleTurnId?: string;
+    effect: Extract<ToolExecutionEffect, { kind: "verification" }>;
+  }): { toolCallId: string; tool: string } | undefined {
+    if (input.visibleTurnId === undefined) return undefined;
+    const verifierTargetKey = safeTargetKey(input.execution.targetKey);
+    const candidates = [...this.#byCallId.values()].reverse();
+    for (const candidate of candidates) {
+      if (
+        candidate.status !== "success" ||
+        candidate.visibleTurnId !== input.visibleTurnId ||
+        candidate.executionEffect?.kind !== "mutation" ||
+        !input.effect.verifies.includes(candidate.evidence.tool) ||
+        !connectorsCompatible(input.effect.connector, candidate.executionEffect.connector)
+      ) continue;
+      if (
+        verifierTargetKey !== undefined &&
+        candidate.targetKey !== undefined &&
+        verifierTargetKey !== candidate.targetKey
+      ) continue;
+      return {
+        toolCallId: candidate.evidence.toolCallId,
+        tool: candidate.evidence.tool
+      };
+    }
+    return undefined;
   }
 }
 
@@ -165,6 +236,28 @@ function safeTargetSummary(value: string | undefined): string | undefined {
   const safe = redactSensitiveText(value).replace(/\s+/gu, " ").trim();
   if (safe.length === 0) return undefined;
   return [...safe].slice(0, MAX_EVIDENCE_TARGET_CHARS).join("");
+}
+
+function safeTargetKey(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const safe = redactSensitiveText(value).replace(/\s+/gu, " ").trim();
+  return safe.length > 0 && safe.length <= 512 && safe === value.trim() ? safe : undefined;
+}
+
+function cloneExecutionEffect(effect: ToolExecutionEffect | undefined): ToolExecutionEffect | undefined {
+  if (effect === undefined) return undefined;
+  const connector = effect.connector === undefined ? {} : { connector: { ...effect.connector } };
+  return effect.kind === "verification"
+    ? { kind: "verification", verifies: [...effect.verifies], ...connector }
+    : { kind: effect.kind, ...connector };
+}
+
+function connectorsCompatible(
+  verifier: ToolExecutionEffect["connector"],
+  mutation: ToolExecutionEffect["connector"]
+): boolean {
+  if (verifier === undefined || mutation === undefined) return true;
+  return verifier.kind === mutation.kind && verifier.id === mutation.id;
 }
 
 function safeVisibleTurnId(value: string | undefined): string | undefined {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RegisteredTool } from "../contracts/tool.js";
-import { resolveRegisteredToolCapability } from "./tool-capability.js";
+import { resolveRegisteredToolCapability, resolveToolExecutionEffect } from "./tool-capability.js";
 
 function registered(overrides: Partial<RegisteredTool> = {}): RegisteredTool {
   return {
@@ -100,5 +100,45 @@ describe("resolveRegisteredToolCapability", () => {
     });
     const result = resolveRegisteredToolCapability(registered({ name: "mcp.target.setPassword" }));
     expect(result.ok && result.capability.protectedInput).toBeUndefined();
+  });
+
+  it("derives bounded execution effects from trusted metadata and effective risk", () => {
+    expect(resolveToolExecutionEffect(registered(), "external-side-effect")).toEqual({
+      kind: "mutation",
+      connector: { kind: "mcp", id: "target" }
+    });
+    expect(resolveToolExecutionEffect(registered({
+      name: "mcp.target.read",
+      riskClass: "read-only-network"
+    }), "read-only-network")).toEqual({
+      kind: "read",
+      connector: { kind: "mcp", id: "target" }
+    });
+    expect(resolveToolExecutionEffect(registered({
+      name: "mcp.target.verify",
+      riskClass: "read-only-network",
+      capabilityMetadata: { verification: { verifies: ["mcp.target.update"] } }
+    }), "read-only-network")).toEqual({
+      kind: "verification",
+      verifies: ["mcp.target.update"],
+      connector: { kind: "mcp", id: "target" }
+    });
+  });
+
+  it("lets dynamic risk escalation override a registered read classification", () => {
+    expect(resolveToolExecutionEffect(registered({
+      name: "mcp.target.verify",
+      riskClass: "read-only-network",
+      capabilityMetadata: { verification: { verifies: ["mcp.target.update"] } }
+    }), "external-side-effect")).toEqual({
+      kind: "mutation",
+      connector: { kind: "mcp", id: "target" }
+    });
+    expect(resolveToolExecutionEffect(registered(), "credential-access")).toBeUndefined();
+    expect(resolveToolExecutionEffect(registered({
+      capabilityMetadata: {
+        verification: { verifies: [] }
+      }
+    }), "external-side-effect")).toBeUndefined();
   });
 });

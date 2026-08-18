@@ -43,6 +43,7 @@ import { writeManagedPythonCapabilityManifest } from "../python-env/manifest.js"
 import { fingerprintManagedPythonCapabilitySpec } from "../python-env/spec-hash.js";
 import * as capabilityManager from "../python-env/capability-manager.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
+import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 import { AgentLoopBuilder, defaultSkillVisibilityStrategy, type AgentLoopRuntimeSubstrate } from "./agent-loop-builder.js";
 
 const model: ModelProfile = {
@@ -94,7 +95,15 @@ describe("AgentLoopBuilder", () => {
   });
 
   it("does not register foreground execution planning in child or Task worker runtimes", async () => {
-    const harness = await createBuilderHarness();
+    const evidenceIndexes: unknown[] = [];
+    const harness = await createBuilderHarness({
+      factories: {
+        agentLoop(options) {
+          evidenceIndexes.push(options.executionEvidenceIndex);
+          return { handle: vi.fn() } as never;
+        }
+      }
+    });
     const delegatedChild = await harness.build("child-session", { parentSessionId: "parent-session" });
     const taskWorker = await harness.build("task-worker", {
       parentSessionId: "parent-session",
@@ -115,6 +124,7 @@ describe("AgentLoopBuilder", () => {
     expect(taskWorker.toolRegistry.get("plan")).toBeUndefined();
     expect(delegatedChild.providerTools.map((tool) => tool.function.name)).not.toContain("plan");
     expect(taskWorker.providerTools.map((tool) => tool.function.name)).not.toContain("plan");
+    expect(evidenceIndexes).toEqual([expect.any(ExecutionEvidenceIndex), expect.any(ExecutionEvidenceIndex)]);
   });
 
   it("enables routed provider narrowing only for the root foreground loop", async () => {

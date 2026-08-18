@@ -355,15 +355,27 @@ describe("SessionCompressionService", () => {
       tool: "postman.update",
       status: "success",
       riskClass: "external-side-effect",
-      targetSummary: "Collection A"
+      targetSummary: "Collection A",
+      visibleTurnId: "turn-current",
+      executionEffect: {
+        kind: "mutation",
+        connector: { kind: "mcp", id: "postman" }
+      }
     });
     await db.appendEvent(sessionId, {
       kind: "execution-evidence-recorded",
       toolCallId: "call-2",
-      tool: "postman.update",
+      tool: "postman.verify",
       status: "success",
-      riskClass: "external-side-effect",
-      targetSummary: "token=secret-compaction-value"
+      riskClass: "read-only-network",
+      targetSummary: "token=secret-compaction-value",
+      visibleTurnId: "turn-current",
+      executionEffect: {
+        kind: "verification",
+        verifies: ["postman.update"],
+        connector: { kind: "mcp", id: "postman" }
+      },
+      verifiedMutation: { toolCallId: "call-1", tool: "postman.update" }
     });
     const service = new SessionCompressionService({
       sessionDb: db,
@@ -381,7 +393,18 @@ describe("SessionCompressionService", () => {
     expect(childEvents).toContainEqual(expect.objectContaining({
       kind: "execution-evidence-recorded",
       toolCallId: "call-1",
-      targetSummary: "Collection A"
+      targetSummary: "Collection A",
+      executionEffect: { kind: "mutation", connector: { kind: "mcp", id: "postman" } }
+    }));
+    expect(childEvents).toContainEqual(expect.objectContaining({
+      kind: "execution-evidence-recorded",
+      toolCallId: "call-2",
+      executionEffect: {
+        kind: "verification",
+        verifies: ["postman.update"],
+        connector: { kind: "mcp", id: "postman" }
+      },
+      verifiedMutation: { toolCallId: "call-1", tool: "postman.update" }
     }));
     expect(JSON.stringify(childEvents)).not.toContain("secret raw collection body");
     expect(JSON.stringify(childEvents)).not.toContain("secret-compaction-value");

@@ -234,6 +234,43 @@ describe("diagnoseSessionExecution", () => {
     expect(diagnosis.observations.repeatedCalls).toBe(MAX_REPEATED_OBSERVATION_GROUPS + 3);
     expect(diagnosis.observations.repeatedGroups).toHaveLength(MAX_REPEATED_OBSERVATION_GROUPS);
   });
+
+  it("counts only linked verification receipts as verification evidence", () => {
+    const events: SessionEvent[] = [{
+      ...evidence("mcp.postman.read", "success", "read-only-network"),
+      executionEffect: { kind: "read", connector: { kind: "mcp", id: "postman" } },
+    }, {
+      ...evidence("mcp.postman.update", "success", "external-side-effect"),
+      executionEffect: { kind: "mutation", connector: { kind: "mcp", id: "postman" } },
+    }, {
+      ...evidence("mcp.postman.verify-unlinked", "success", "read-only-network"),
+      executionEffect: {
+        kind: "verification",
+        verifies: ["mcp.postman.update"],
+        connector: { kind: "mcp", id: "postman" },
+      },
+    }, {
+      ...evidence("mcp.postman.verify-linked", "success", "read-only-network"),
+      executionEffect: {
+        kind: "verification",
+        verifies: ["mcp.postman.update"],
+        connector: { kind: "mcp", id: "postman" },
+      },
+      verifiedMutation: {
+        toolCallId: "call-mcp.postman.update-success",
+        tool: "mcp.postman.update",
+      },
+    } as Extract<SessionEvent, { kind: "execution-evidence-recorded" }>];
+
+    const diagnosis = diagnoseSessionExecution({
+      sessionId: "session-effects",
+      events,
+      providerUsage: [],
+    });
+
+    expect(diagnosis.evidence).toEqual({ mutations: 1, verifications: 1 });
+    expect(diagnosis.observations.repeatedCalls).toBe(0);
+  });
 });
 
 function evidence(

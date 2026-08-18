@@ -137,6 +137,22 @@ export type RegisteredToolCapabilityMetadata = {
   };
 };
 
+/** Trusted runtime-only effect metadata derived from a registered tool. */
+export type ToolExecutionEffect =
+  | {
+      kind: "read";
+      connector?: { kind: "mcp"; id: string };
+    }
+  | {
+      kind: "mutation";
+      connector?: { kind: "mcp"; id: string };
+    }
+  | {
+      kind: "verification";
+      verifies: string[];
+      connector?: { kind: "mcp"; id: string };
+    };
+
 export type RegisteredTool<TInput = any> = ToolDefinition & {
   /** Runtime-only declaration; ToolRegistry intentionally omits it from ToolDefinition. */
   protectedArguments?: readonly ProtectedToolArgumentDeclaration[];

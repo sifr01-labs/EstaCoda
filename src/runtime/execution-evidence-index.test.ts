@@ -48,6 +48,109 @@ describe("ExecutionEvidenceIndex", () => {
     expect(JSON.stringify(evidence)).not.toContain("raw collection body");
   });
 
+  it("records trusted read, mutation, and verification effects and links the latest compatible target", () => {
+    const index = new ExecutionEvidenceIndex();
+    const mutation = (toolCallId: string, targetKey: string, connectorId = "postman") => execution({
+      toolCallId,
+      tool: {
+        ...execution().tool,
+        name: "mcp.postman.updateCollection",
+        connector: { kind: "mcp", id: connectorId }
+      },
+      targetKey,
+      targetSummary: `collection ${targetKey}`,
+      executionEffect: {
+        kind: "mutation",
+        connector: { kind: "mcp", id: connectorId }
+      }
+    });
+    const firstMutation = index.record(mutation("call-update-a", "collection:a"), "turn-current");
+    index.record(mutation("call-update-b", "collection:b"), "turn-current");
+    index.record(mutation("call-other-connector", "collection:a", "other"), "turn-current");
+    index.record(mutation("call-earlier-turn", "collection:a"), "turn-earlier");
+
+    const verification = index.record(execution({
+      toolCallId: "call-verify-a",
+      tool: {
+        ...execution().tool,
+        name: "mcp.postman.getCollection",
+        riskClass: "read-only-network",
+        connector: { kind: "mcp", id: "postman" }
+      },
+      riskClass: "read-only-network",
+      targetKey: "collection:a",
+      targetSummary: "collection a",
+      executionEffect: {
+        kind: "verification",
+        verifies: ["mcp.postman.updateCollection"],
+        connector: { kind: "mcp", id: "postman" }
+      }
+    }), "turn-current");
+
+    expect(firstMutation).toMatchObject({
+      status: "success",
+      visibleTurnId: "turn-current",
+      executionEffect: {
+        kind: "mutation",
+        connector: { kind: "mcp", id: "postman" }
+      }
+    });
+    expect(verification).toMatchObject({
+      status: "success",
+      executionEffect: {
+        kind: "verification",
+        verifies: ["mcp.postman.updateCollection"]
+      },
+      verifiedMutation: {
+        toolCallId: "call-update-a",
+        tool: "mcp.postman.updateCollection"
+      }
+    });
+    expect(verification).not.toHaveProperty("targetKey");
+    expect(index.recordsForTurn("turn-current")).toHaveLength(4);
+    expect(index.recordsForTurn("turn-earlier")).toEqual([
+      expect.objectContaining({ toolCallId: "call-earlier-turn" })
+    ]);
+  });
+
+  it("does not fabricate verification links across turns, targets, failures, or undeclared relationships", () => {
+    const index = new ExecutionEvidenceIndex();
+    index.record(execution({
+      toolCallId: "call-update",
+      tool: { ...execution().tool, name: "mcp.postman.updateCollection" },
+      targetKey: "collection:a",
+      executionEffect: { kind: "mutation" }
+    }), "turn-one");
+
+    const verifier = (overrides: Partial<ToolExecutionRecord> = {}) => execution({
+      toolCallId: "call-verify",
+      tool: {
+        ...execution().tool,
+        name: "mcp.postman.getCollection",
+        riskClass: "read-only-network"
+      },
+      riskClass: "read-only-network",
+      targetKey: "collection:a",
+      executionEffect: {
+        kind: "verification",
+        verifies: ["mcp.postman.updateCollection"]
+      },
+      ...overrides
+    });
+
+    expect(index.record(verifier(), "turn-two")).not.toHaveProperty("verifiedMutation");
+    expect(index.record(verifier({ toolCallId: "target-mismatch", targetKey: "collection:b" }), "turn-one"))
+      .not.toHaveProperty("verifiedMutation");
+    expect(index.record(verifier({
+      toolCallId: "failed-verifier",
+      result: { ok: false, content: "verification failed" }
+    }), "turn-one")).not.toHaveProperty("verifiedMutation");
+    expect(index.record(verifier({
+      toolCallId: "unrelated-verifier",
+      executionEffect: { kind: "verification", verifies: ["mcp.other.update"] }
+    }), "turn-one")).not.toHaveProperty("verifiedMutation");
+  });
+
   it("rejects failed, blocked, unknown, plan, and delegation calls", () => {
     const index = new ExecutionEvidenceIndex();
     index.record(execution({ toolCallId: "failed", result: { ok: false, content: "failed" } }));
@@ -112,7 +215,9 @@ describe("ExecutionEvidenceIndex", () => {
       toolCallId: "persisted-call",
       status: "success",
       riskClass: "external-side-effect",
-      targetSummary: "safe target"
+      targetSummary: "safe target",
+      visibleTurnId: "turn-current",
+      executionEffect: { kind: "mutation", connector: { kind: "mcp", id: "postman" } }
     } satisfies SessionEvent]);
 
     expect(index.resolve(["persisted-call"])).toEqual([expect.objectContaining({
@@ -121,7 +226,44 @@ describe("ExecutionEvidenceIndex", () => {
       riskClass: "external-side-effect",
       targetSummary: "safe target"
     })]);
-    expect(index.candidatesForTurn({ visibleTurnId: "turn-current" })).toEqual([]);
+    expect(index.candidatesForTurn({ visibleTurnId: "turn-current" })).toEqual([
+      expect.objectContaining({ toolCallId: "persisted-call" })
+    ]);
+    expect(index.recordsForTurn("turn-current")).toEqual([
+      expect.objectContaining({
+        toolCallId: "persisted-call",
+        executionEffect: { kind: "mutation", connector: { kind: "mcp", id: "postman" } }
+      })
+    ]);
+  });
+
+  it("drops forged persisted verification links and secret-looking effect metadata", () => {
+    const index = new ExecutionEvidenceIndex();
+    index.hydrate([{
+      kind: "execution-evidence-recorded",
+      tool: "mcp.postman.verify",
+      toolCallId: "call-verify",
+      status: "success",
+      riskClass: "read-only-network",
+      visibleTurnId: "turn-current",
+      executionEffect: {
+        kind: "verification",
+        verifies: ["mcp.postman.update", "token=raw-secret"],
+        connector: { kind: "mcp", id: "token=raw-secret" }
+      },
+      verifiedMutation: { toolCallId: "call-forged", tool: "mcp.other.update" }
+    } as SessionEvent]);
+
+    expect(index.recordsForTurn("turn-current")).toEqual([
+      expect.objectContaining({
+        executionEffect: {
+          kind: "verification",
+          verifies: ["mcp.postman.update"]
+        }
+      })
+    ]);
+    expect(index.recordsForTurn("turn-current")[0]).not.toHaveProperty("verifiedMutation");
+    expect(JSON.stringify(index.recordsForTurn("turn-current"))).not.toContain("raw-secret");
   });
 
   it("ignores malformed persisted success receipts", () => {

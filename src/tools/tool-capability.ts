@@ -1,5 +1,6 @@
 import type {
   RegisteredTool,
+  ToolExecutionEffect,
   ToolRiskClass
 } from "../contracts/tool.js";
 import { isProtectedArgumentPattern } from "../security/protected-argument-path.js";
@@ -22,6 +23,10 @@ const MUTATION_RISK_CLASSES = new Set<ToolRiskClass>([
   "destructive-local",
   "shared-state-mutation",
   "spend-money"
+]);
+const EXECUTION_MUTATION_RISK_CLASSES = new Set<ToolRiskClass>([
+  ...MUTATION_RISK_CLASSES,
+  "sandbox-escape"
 ]);
 
 export type ResolvedRegisteredToolCapability = {
@@ -101,6 +106,41 @@ export function resolveRegisteredToolCapability(
       }),
       ...(verifies === undefined ? {} : { verification: { verifies: [...verifies] } })
     }
+  };
+}
+
+/**
+ * Projects trusted registration metadata into the bounded effect facts carried
+ * by an execution record. Dynamic risk escalation is authoritative over the
+ * registered base classification.
+ */
+export function resolveToolExecutionEffect(
+  tool: RegisteredTool,
+  effectiveRiskClass: ToolRiskClass
+): ToolExecutionEffect | undefined {
+  const resolution = resolveRegisteredToolCapability(tool);
+  if (resolution.ok === false) return undefined;
+
+  const connector = resolution.capability.connector;
+  if (EXECUTION_MUTATION_RISK_CLASSES.has(effectiveRiskClass)) {
+    return {
+      kind: "mutation",
+      ...(connector === undefined ? {} : { connector: { ...connector } })
+    };
+  }
+  if (!READ_RISK_CLASSES.has(effectiveRiskClass)) return undefined;
+
+  const verifies = resolution.capability.verification?.verifies;
+  if (verifies !== undefined) {
+    return {
+      kind: "verification",
+      verifies: [...verifies],
+      ...(connector === undefined ? {} : { connector: { ...connector } })
+    };
+  }
+  return {
+    kind: "read",
+    ...(connector === undefined ? {} : { connector: { ...connector } })
   };
 }
 
