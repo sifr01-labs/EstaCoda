@@ -114,6 +114,27 @@ describe("maybeSummarizeSnapshot", () => {
     expect(result.content).toBe("short @e1 snapshot");
   });
 
+  it("can use pre-compaction size to honor explicit provider summarization", async () => {
+    const executor = createExecutor("Explicit summary with @e1 preserved.");
+    const result = await maybeSummarizeSnapshot({
+      renderedSnapshot: "compact @e1 snapshot",
+      thresholdChars: 1_000
+    }, {
+      providerExecutor: executor,
+      auxiliaryRoute,
+      mainRoute: route,
+      maxResultSizeChars: 8_000,
+      threshold: 100,
+      mode: true
+    });
+
+    expect(executor.complete).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      content: "Explicit summary with @e1 preserved.",
+      summarized: true
+    });
+  });
+
   it("auto mode calls the provider only when an auxiliary route and executor are available", async () => {
     const executor = createExecutor("auto summary");
     const available = await maybeSummarizeSnapshot({

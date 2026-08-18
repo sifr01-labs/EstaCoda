@@ -2886,6 +2886,32 @@ describe("web and browser tools baselines", () => {
     expect(result.content).toContain("[Full page snapshot]");
     expect(result.content).toContain("@e1 textbox Email value=\"ada@example.com\" disabled=false");
     expect(result.content).toContain("@e2 checkbox Subscribe checked=mixed");
+    expect(result.metadata).toMatchObject({
+      compaction: { mode: "full", compacted: false, truncated: false }
+    });
+  });
+
+  it("keeps explicit full diagnostic snapshots on the existing un-compacted path", async () => {
+    const executor = createSummaryExecutor("provider summary should not be used");
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: createLargeSnapshotBackend("Diagnostic line. ".repeat(800)),
+      browserConfig: {
+        summarizeSnapshots: false,
+        snapshotSummarizeThreshold: 20
+      },
+      snapshotAuxiliaryRoute,
+      mainRoute: summaryRoute,
+      providerExecutor: executor
+    }));
+
+    const result = await snapshot.run({ full: true });
+
+    expect(executor.complete).not.toHaveBeenCalled();
+    expect(result.content).toContain("[Full page snapshot]");
+    expect(result.content).toMatch(/\n\.\.\. \[truncated\]$/u);
+    expect(result.metadata).toMatchObject({
+      compaction: { mode: "full", compacted: false, truncated: true }
+    });
   });
 
   it("browser.snapshot defaults to compact rendering when full is omitted or false", async () => {
@@ -2901,7 +2927,7 @@ describe("web and browser tools baselines", () => {
     expect(omitted.content).not.toContain("[Full page snapshot]");
   });
 
-  it("truncates rendered browser snapshots with a clear suffix", async () => {
+  it("deterministically compacts oversized browser snapshots with a clear suffix", async () => {
     const snapshot = tool("browser.snapshot", createTestWebTools({
       browserBackend: {
         ...createMockBrowserBackend(),
@@ -2920,10 +2946,13 @@ describe("web and browser tools baselines", () => {
 
     expect(result.ok).toBe(true);
     expect(result.content.length).toBeLessThanOrEqual(8_000);
-    expect(result.content).toMatch(/\n\.\.\. \[truncated\]$/u);
+    expect(result.content).toMatch(/\n\.\.\. \[deterministically compacted\]$/u);
+    expect(result.metadata).toMatchObject({
+      compaction: { mode: "deterministic", compacted: true, truncated: true }
+    });
   });
 
-  it("browser.snapshot summarizeSnapshots=false skips LLM summarization and truncates", async () => {
+  it("browser.snapshot summarizeSnapshots=false skips LLM summarization after deterministic compaction", async () => {
     const executor = createSummaryExecutor("summary");
     const snapshot = tool("browser.snapshot", createTestWebTools({
       browserBackend: createLargeSnapshotBackend("x".repeat(9_000)),
@@ -2941,7 +2970,32 @@ describe("web and browser tools baselines", () => {
     expect(result.ok).toBe(true);
     expect(executor.complete).not.toHaveBeenCalled();
     expect(result.content.length).toBeLessThanOrEqual(8_000);
-    expect(result.content).toMatch(/\n\.\.\. \[truncated\]$/u);
+    expect(result.content).toMatch(/\n\.\.\. \[deterministically compacted\]$/u);
+    expect(result.metadata?.summarized).toBeUndefined();
+  });
+
+  it("browser.snapshot auto mode avoids a provider call when deterministic compaction fits", async () => {
+    const executor = createSummaryExecutor("provider summary should not be used");
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: createLargeSnapshotBackend(),
+      browserConfig: {
+        summarizeSnapshots: "auto",
+        snapshotSummarizeThreshold: 8_000
+      },
+      snapshotAuxiliaryRoute,
+      mainRoute: summaryRoute,
+      providerExecutor: executor
+    }));
+
+    const result = await snapshot.run({});
+
+    expect(result.ok).toBe(true);
+    expect(executor.complete).not.toHaveBeenCalled();
+    expect(result.content).toContain("@e1 button Save");
+    expect(result.content).toContain("@e2 textbox Email");
+    expect(result.metadata).toMatchObject({
+      compaction: { mode: "deterministic", compacted: true }
+    });
     expect(result.metadata?.summarized).toBeUndefined();
   });
 
@@ -3013,7 +3067,7 @@ describe("web and browser tools baselines", () => {
     const summarized = await withRoute.run({});
 
     expect(skipped.ok).toBe(true);
-    expect(skipped.content).toMatch(/\n\.\.\. \[truncated\]$/u);
+    expect(skipped.content).toMatch(/\n\.\.\. \[deterministically compacted\]$/u);
     expect(summarized.ok).toBe(true);
     expect(summarized.metadata).toMatchObject({ summarized: true });
     expect(executor.complete).toHaveBeenCalledTimes(1);
@@ -3075,7 +3129,7 @@ describe("web and browser tools baselines", () => {
     expect(result.content).toContain("dialog-1 alert: Careful");
     expect(result.content).toContain("Frames:");
     expect(result.content).toContain("frame-1 https://frame.test/app origin=https://frame.test");
-    expect(result.content).toContain("Console:");
+    expect(result.content).toContain("Console errors:");
     expect(result.content).toContain("[warn] 1970-01-01T00:00:00.000Z Heads up");
     expect(result.content).toContain("Interactive elements:");
   });

@@ -65,7 +65,7 @@ EstaCoda uses the same interactability check for snapshot refs, semantic find/ex
 
 The DOM snapshot path remains as fallback when AX is unavailable, empty, malformed, or cannot bind actionable refs. Refs are actionable where exposed.
 
-`browser.snapshot` defaults to a compact snapshot. Compact snapshots are a bounded actionable AX subset, not true viewport-visible filtering yet. Passing `full: true` requests the full snapshot path. Rendered tool output labels compact vs full snapshots, truncates large results, and may summarize oversized snapshots when configured.
+`browser.snapshot` defaults to a compact snapshot. Compact snapshots are a bounded actionable AX subset, not true viewport-visible filtering yet. EstaCoda deterministically compacts normal snapshots before returning them to the model, prioritizing identity, dialogs and alerts, actionable refs, forms and validation errors, authentication context, frames, and browser errors while deduplicating repeated navigation and boilerplate. A visible suffix marks omitted output. Passing `full: true` retains the larger diagnostic path.
 
 Snapshots include a canonical identity, observation time, and page readiness. The identity separates document replacement (`documentEpoch`), actionable-ref changes (`actionRevision`), and individual captures (`observationId`). Actions such as `browser.navigate`, `browser.click`, `browser.type`, `browser.press`, and `browser.back` wait briefly for DOM stability by default and return a concise delta plus the resulting identity, a safe current-state summary, and current actionable refs when safe. You can pass `waitFor` to wait for a URL fragment, page text, an element role/name, a dialog, or DOM stability, plus `waitTimeoutMs` up to 10 seconds. If the condition is not met, EstaCoda returns the latest state and labels the result as timed out rather than claiming success. Use `browser.snapshot` when you explicitly need a detailed current page snapshot.
 
@@ -78,7 +78,7 @@ Snapshot summarization is controlled by:
 - `browser.summarizeSnapshots`: `false`, `true`, or `"auto"`
 - `browser.snapshotSummarizeThreshold`: character threshold before summarization is considered
 
-In `"auto"` mode, summarization runs only when an auxiliary model route is available and the rendered snapshot exceeds the threshold. Secret-bearing URLs and sensitive values are redacted before provider calls.
+In `"auto"` mode, deterministic compaction runs first and an auxiliary model is used only when the compacted result still exceeds the threshold. `true` explicitly permits summarization based on the original rendered size, while `false` never invokes a summarization provider. Secret-bearing URLs and sensitive values are redacted before provider calls.
 
 ---
 

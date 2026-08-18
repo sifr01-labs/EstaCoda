@@ -434,8 +434,8 @@ Brave Search مزود خارجي ببيانات اعتماد ويستخدم نم
 | `browser.hybridRouting` | boolean | يوجّه عناوين HTTP(S) العامة إلى السحابة والعناوين الخاصة/الداخلية المسموحة إلى المحلي عند الإعداد. لا يتجاوز أمان URL. |
 | `browser.cloudFallback` | boolean | يسمح لإخفاقات Browserbase المؤهلة بالرجوع إلى المحلي. إخفاقات موافقة الإنفاق لا ترجع. |
 | `browser.cloudSpendApproved` | boolean أو `"pending"` | موافقة صريحة لإنشاء جلسات متصفح سحابية قابلة للفوترة. بيانات الاعتماد وحدها لا توافق على الإنفاق. |
-| `browser.summarizeSnapshots` | boolean أو `"auto"` | يتحكم في إمكانية تلخيص اللقطات المعروضة الضخمة. |
-| `browser.snapshotSummarizeThreshold` | number | عتبة أحرف عرض اللقطة قبل التفكير في التلخيص. |
+| `browser.summarizeSnapshots` | boolean أو `"auto"` | يتحكم في تلخيص المزود الاختياري بعد ضغط اللقطة حتميًا. تستخدم القيمة `true` الحجم الأصلي المعروض صراحةً، ويستخدم `"auto"` الحجم المضغوط، ولا تستدعي القيمة `false` مزود التلخيص. |
+| `browser.snapshotSummarizeThreshold` | number | عتبة الأحرف التي يستخدمها وضع تلخيص اللقطة المحدد. |
 
 Browserbase مُنفّذ عبر خلفية المتصفح، ويتطلب `BROWSERBASE_API_KEY` و`BROWSERBASE_PROJECT_ID` و`browser.cloudSpendApproved: true` صريحة قبل إنشاء جلسات قابلة للفوترة. يضبط `estacoda browser approve-cloud` الموافقة، ويعطلها `estacoda browser revoke-cloud`. الإعداد وحده لا ينشئ جلسات Browserbase. تبقى browser-use وFirecrawl browser وCamofox مزودات مؤجلة.
 

@@ -434,8 +434,8 @@ Browser backend selection.
 | `browser.hybridRouting` | boolean | Routes public HTTP(S) URLs to cloud and allowed private/internal URLs to local when configured. Does not bypass URL safety. |
 | `browser.cloudFallback` | boolean | Allows eligible Browserbase failures to fall back to local. Spend approval failures do not fall back. |
 | `browser.cloudSpendApproved` | boolean or `"pending"` | Explicit approval for billable cloud browser session creation. Credentials alone do not approve spend. |
-| `browser.summarizeSnapshots` | boolean or `"auto"` | Controls whether oversized rendered snapshots may be summarized. |
-| `browser.snapshotSummarizeThreshold` | number | Rendered snapshot character threshold before summarization is considered. |
+| `browser.summarizeSnapshots` | boolean or `"auto"` | Controls optional provider summarization after deterministic snapshot compaction. `true` explicitly uses the original rendered size; `"auto"` uses the compacted size; `false` never calls a summarizer. |
+| `browser.snapshotSummarizeThreshold` | number | Character threshold used by the selected snapshot summarization mode. |
 
 Browserbase is implemented through the browser backend and requires `BROWSERBASE_API_KEY`, `BROWSERBASE_PROJECT_ID`, and explicit `browser.cloudSpendApproved: true` before billable sessions can be created. `estacoda browser approve-cloud` sets approval, and `estacoda browser revoke-cloud` disables it. Config alone does not create Browserbase sessions. browser-use, Firecrawl browser, and Camofox remain deferred providers.
 

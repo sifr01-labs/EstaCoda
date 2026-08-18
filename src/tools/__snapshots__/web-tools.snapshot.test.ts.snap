@@ -62,15 +62,26 @@ exports[`web and browser golden snapshots > browser.snapshot output matches gold
   "content": "[Compact viewport snapshot]
 Identity: documentEpoch=1 actionRevision=1 observationId=1
 Observed: <timestamp>
+URL: mock://browser
+Title: Test Page
 Readiness: complete
 Controlled tab: @t1 [controlled] Test Page — mock://browser
 
-Hello world.
-
 Interactive elements:
-@e1 button Mock Button",
+@e1 button Mock Button
+
+Page context:
+Hello world.",
   "metadata": {
     "backend": "mock",
+    "compaction": {
+      "compacted": false,
+      "inputChars": 312,
+      "mode": "deterministic",
+      "omittedItems": 0,
+      "outputChars": 312,
+      "truncated": false,
+    },
     "snapshot": {
       "elements": [
         {

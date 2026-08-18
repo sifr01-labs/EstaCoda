@@ -17,6 +17,8 @@ export interface SnapshotSummarizerOptions {
 
 export interface SnapshotSummarizeInput {
   renderedSnapshot: string;
+  /** Character count used only to decide whether provider summarization is warranted. */
+  thresholdChars?: number;
   userTask?: string;
   signal?: AbortSignal;
   executionSessionId?: string;
@@ -38,10 +40,12 @@ export async function maybeSummarizeSnapshot(
   options: SnapshotSummarizerOptions
 ): Promise<SnapshotSummarizeResult> {
   const renderedSnapshot = input.renderedSnapshot;
-  if (renderedSnapshot.length <= options.threshold) {
+  const thresholdChars = input.thresholdChars ?? renderedSnapshot.length;
+  if (thresholdChars <= options.threshold) {
     options.debug?.log?.("browser.snapshot.summarize.skipped", {
       reason: "below-threshold",
-      chars: renderedSnapshot.length,
+      chars: thresholdChars,
+      renderedChars: renderedSnapshot.length,
       threshold: options.threshold
     });
     return {
@@ -54,7 +58,8 @@ export async function maybeSummarizeSnapshot(
   if (options.mode === false) {
     options.debug?.log?.("browser.snapshot.summarize.skipped", {
       reason: "disabled",
-      chars: renderedSnapshot.length,
+      chars: thresholdChars,
+      renderedChars: renderedSnapshot.length,
       threshold: options.threshold
     });
     return {
@@ -71,7 +76,8 @@ export async function maybeSummarizeSnapshot(
     options.debug?.log?.("browser.snapshot.summarize.skipped", {
       reason,
       mode: options.mode,
-      chars: renderedSnapshot.length,
+      chars: thresholdChars,
+      renderedChars: renderedSnapshot.length,
       threshold: options.threshold
     });
     return {
@@ -84,7 +90,8 @@ export async function maybeSummarizeSnapshot(
   const redact = options.redact ?? redactSnapshotSecrets;
   const redactedSnapshot = redact(renderedSnapshot);
   options.debug?.log?.("browser.snapshot.summarize.attempted", {
-    chars: renderedSnapshot.length,
+    chars: thresholdChars,
+    renderedChars: renderedSnapshot.length,
     redactedChars: redactedSnapshot.length,
     threshold: options.threshold,
     provider: route.route.provider,

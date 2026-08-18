@@ -28,6 +28,7 @@ import { browserTargetFailureMetadata, isBrowserStateIdentity } from "../browser
 import { isBrowserSnapshotElementInteractable } from "../browser/browser-interactability.js";
 import { isActionableBrowserRole } from "../browser/snapshot-state.js";
 import { deriveBrowserSessionKey } from "../browser/session-key.js";
+import { compactBrowserSnapshot } from "../browser/snapshot-compactor.js";
 import { maybeSummarizeSnapshot, truncateSnapshotText } from "../browser/snapshot-summarizer.js";
 import { isAlwaysBlockedUrl, isSafeUrl, redactUrlForMetadata, scanUrlForSecrets, type ResolveHostnameFn } from "../browser/url-safety.js";
 import { checkWebsiteAccess, loadWebsiteBlocklist } from "../browser/website-policy.js";
@@ -1267,16 +1268,34 @@ function createBrowserSnapshotTool(
           metadata: browserFailureMetadata(browserBackend, snapshot.error)
         }, debug);
       }
-      const renderedSnapshot = renderBrowserSnapshot(snapshot, { full: browserInput.full === true });
+      const full = browserInput.full === true;
+      const summarizeMode = options.browserConfig?.summarizeSnapshots ?? "auto";
+      const summarizeThreshold = options.browserConfig?.snapshotSummarizeThreshold ?? 8_000;
+      const verboseRenderedSnapshot = renderBrowserSnapshot(snapshot, { full });
+      const compaction = full
+        ? {
+            content: verboseRenderedSnapshot,
+            mode: "full" as const,
+            compacted: false,
+            truncated: false,
+            inputChars: verboseRenderedSnapshot.length,
+            outputChars: verboseRenderedSnapshot.length,
+            omittedItems: 0
+          }
+        : compactBrowserSnapshot(snapshot, {
+            maxChars: 8_000,
+            inputChars: verboseRenderedSnapshot.length
+          });
       const summarizeResult = await maybeSummarizeSnapshot({
-        renderedSnapshot,
+        renderedSnapshot: compaction.content,
+        thresholdChars: summarizeMode === true ? compaction.inputChars : compaction.outputChars,
         userTask: browserInput.text,
         signal: context?.signal,
         executionSessionId: options.currentSessionId?.(),
         visibleTurnId: context?.visibleTurnId
       }, {
-        mode: options.browserConfig?.summarizeSnapshots ?? "auto",
-        threshold: options.browserConfig?.snapshotSummarizeThreshold ?? 8_000,
+        mode: summarizeMode,
+        threshold: summarizeThreshold,
         maxResultSizeChars: 8_000,
         providerExecutor: options.providerExecutor,
         auxiliaryRoute: options.snapshotAuxiliaryRoute,
@@ -1289,6 +1308,14 @@ function createBrowserSnapshotTool(
         metadata: {
           backend: browserBackend.kind,
           snapshot,
+          compaction: {
+            mode: compaction.mode,
+            compacted: compaction.compacted,
+            truncated: compaction.truncated || summarizeResult.content.endsWith("\n... [truncated]"),
+            inputChars: compaction.inputChars,
+            outputChars: summarizeResult.content.length,
+            omittedItems: compaction.omittedItems
+          },
           ...(summarizeResult.summarized ? { summarized: true } : {}),
           ...debugMetadata(debug)
         }
