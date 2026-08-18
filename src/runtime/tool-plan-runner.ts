@@ -254,7 +254,7 @@ export class ToolPlanRunner {
       });
       if (this.#executionEvidenceIndex !== undefined) {
         await this.#runRecorder.recordExecutionEvidence(
-          this.#executionEvidenceIndex.recordUnavailable(plan.id, plan.tool)
+          this.#executionEvidenceIndex.recordUnavailable(plan.id, plan.tool, input.visibleTurnId)
         );
       }
       return undefined;
@@ -288,7 +288,7 @@ export class ToolPlanRunner {
       ...toolResultStats(execution)
     });
 
-    const evidenceRecord = this.#executionEvidenceIndex?.record(execution);
+    const evidenceRecord = this.#executionEvidenceIndex?.record(execution, input.visibleTurnId);
     if (evidenceRecord !== undefined) {
       await this.#runRecorder.recordExecutionEvidence(evidenceRecord);
     }

@@ -139,6 +139,14 @@ export type ExecutionPlanEvidence = {
   targetSummary?: string;
 };
 
+/** Safe, bounded current-turn choice offered after a missing-evidence update. */
+export type ExecutionEvidenceCandidate = {
+  toolCallId: string;
+  tool: string;
+  riskClass: import("./tool.js").ToolRiskClass;
+  targetSummary?: string;
+};
+
 export type ConfirmedActionReceipt = {
   toolCallId?: string;
   tool: string;
@@ -279,4 +287,5 @@ export type ExecutionPlanControllerApi = ExecutionPlanReader & {
     context?: ExecutionPlanWriteContext
   ): Promise<ExecutionPlan>;
   merge(input: ExecutionPlanMergeInput, sink?: ExecutionPlanEventSink): Promise<ExecutionPlan>;
+  evidenceCandidates(itemId: string, visibleTurnId: string): ExecutionEvidenceCandidate[];
 };

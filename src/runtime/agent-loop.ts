@@ -676,7 +676,7 @@ export class AgentLoop {
     ];
     if (this.#executionEvidenceIndex !== undefined) {
       for (const execution of toolExecutions) {
-        const evidenceRecord = this.#executionEvidenceIndex.record(execution);
+        const evidenceRecord = this.#executionEvidenceIndex.record(execution, visibleTurn.id);
         if (evidenceRecord !== undefined) {
           await this.#runRecorder.recordExecutionEvidence(evidenceRecord);
         }

@@ -793,6 +793,25 @@ describe("ExecutionPlanController", () => {
     expect(target.current()?.items[0]?.status).toBe("in_progress");
   });
 
+  it("identifies missing completion evidence without string matching", async () => {
+    const target = controller();
+    await target.write({
+      objective: "Locate the destination collection",
+      items: [{ id: "locate-collection", content: "Locate the collection", status: "in_progress" }]
+    }, "turn-1");
+
+    const failure = await target.merge({
+      items: [{ id: "locate-collection", status: "completed" }]
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ExecutionPlanValidationError);
+    expect(failure).toMatchObject({
+      code: "completion-evidence-required",
+      itemId: "locate-collection"
+    });
+    expect(target.current()?.items[0]).toMatchObject({ status: "in_progress" });
+  });
+
   it("accepts reasoning completion only for non-consequential work", async () => {
     const target = controller();
     await target.write({

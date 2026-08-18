@@ -35,6 +35,7 @@ import { ProviderTurnLoop, type ProviderTurnLoopOptions } from "./provider-turn-
 import { ExecutionPlanStore } from "./execution-plan-store.js";
 import { ExecutionPlanController } from "./execution-plan-controller.js";
 import { ExecutionCapabilityPreflight } from "./execution-capability-preflight.js";
+import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 import { ExecutionWorkingSetController } from "./execution-working-set.js";
 import { attachEphemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
@@ -2310,6 +2311,89 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(harness.executePlans.mock.calls.flatMap(([call]) =>
       call.providerExecution?.toolCalls.map((toolCall) => toolCall.name) ?? []
     )).toContain("browser.snapshot");
+  });
+
+  it("repairs a missing-evidence Mission update in one bounded provider iteration", async () => {
+    const evidence = new ExecutionEvidenceIndex();
+    const controller = new ExecutionPlanController(new ExecutionPlanStore(), undefined, evidence);
+    await controller.write({
+      objective: "Locate and verify the destination collection",
+      items: [{ id: "locate-collection", content: "Locate the destination collection", status: "in_progress" }]
+    }, "visible-turn");
+    const planTool = createPlanTools({ controller })[0]!;
+    const readExecution = toolExecutionForTool("call-read", "mcp.target.read", "raw destination payload");
+    readExecution.riskClass = "read-only-network";
+    readExecution.tool.riskClass = "read-only-network";
+    readExecution.targetSummary = "destination collection";
+    const rejectedPlanExecution = {
+      ...toolExecutionForTool("call-plan-missing", "plan", "pending"),
+      tool: { ...testTool, name: "plan", riskClass: "read-only-local" as const, toolsets: ["core" as const] }
+    };
+    const acceptedPlanExecution = {
+      ...toolExecutionForTool("call-plan-retry", "plan", "pending"),
+      tool: { ...testTool, name: "plan", riskClass: "read-only-local" as const, toolsets: ["core" as const] }
+    };
+    const missingEvidenceMerge = {
+      operation: "merge" as const,
+      items: [{ id: "locate-collection", status: "completed" as const }]
+    };
+    const repairedMerge = {
+      operation: "merge" as const,
+      items: [{
+        id: "locate-collection",
+        status: "completed" as const,
+        evidenceCallIds: ["call-read"]
+      }]
+    };
+    let stateAfterRejectedUpdate: string | undefined;
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-read", "{}", "mcp.target.read")]),
+        providerExecution("", [providerToolCall("call-plan-missing", JSON.stringify(missingEvidenceMerge), "plan")]),
+        providerExecution("", [providerToolCall("call-plan-retry", JSON.stringify(repairedMerge), "plan")]),
+        providerExecution("Mission complete.")
+      ],
+      toolSteps: [
+        { executions: [readExecution] },
+        { executions: [rejectedPlanExecution] },
+        { executions: [acceptedPlanExecution] }
+      ],
+      executionPlanReader: controller,
+      executionPlanController: controller,
+      maxProviderIterations: 4,
+      onExecutePlans: async ({ stepInput }) => {
+        const call = stepInput.providerExecution?.toolCalls[0];
+        if (call?.id === "call-read") {
+          evidence.record(readExecution, "visible-turn");
+        } else if (call?.id === "call-plan-missing") {
+          rejectedPlanExecution.result = await planTool.run(missingEvidenceMerge, { visibleTurnId: "visible-turn" });
+          stateAfterRejectedUpdate = controller.current()?.items[0]?.status;
+        } else if (call?.id === "call-plan-retry") {
+          acceptedPlanExecution.result = await planTool.run(repairedMerge, { visibleTurnId: "visible-turn" });
+        }
+      }
+    });
+
+    await runBasicProviderTurn(harness.loop, {
+      visibleTurnId: "visible-turn",
+      userText: "Locate the destination collection and verify it.",
+      providerTools: [planProviderSchema(), toolProviderSchema("mcp.target.read")]
+    });
+
+    const repairRequest = harness.completeSpy.mock.calls[2]?.[0] as ProviderRequest;
+    const repairContext = JSON.stringify(repairRequest.messages);
+    expect(repairContext).toContain("completion-evidence-required");
+    expect(repairContext).toContain("call-read");
+    expect(repairContext).toContain("Retry the plan merge using only successful evidence");
+    expect(stateAfterRejectedUpdate).toBe("in_progress");
+    expect(controller.current()).toMatchObject({
+      status: "completed",
+      items: [{
+        id: "locate-collection",
+        status: "completed",
+        evidenceCallIds: ["call-read"]
+      }]
+    });
   });
 
   it("stops after plan preflight and before browser work when a destination capability is missing", async () => {

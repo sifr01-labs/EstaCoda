@@ -17,6 +17,7 @@ import {
   type ExecutionPlanCapabilityRequirement,
   type ExecutionPlanCompletionKind,
   type ExecutionPlanControllerApi,
+  type ExecutionEvidenceCandidate,
   type ExecutionPlanEventSink,
   type ExecutionPlanEvidence,
   type ExecutionPlanLifecycleEvent,
@@ -64,9 +65,17 @@ const COMPLETION_KINDS = new Set<ExecutionPlanCompletionKind>(["reasoning"]);
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/u;
 
 export class ExecutionPlanValidationError extends Error {
-  constructor(message: string) {
+  readonly code: "completion-evidence-required" | undefined;
+  readonly itemId: string | undefined;
+
+  constructor(message: string, details?: {
+    code: "completion-evidence-required";
+    itemId: string;
+  }) {
     super(message);
     this.name = "ExecutionPlanValidationError";
+    this.code = details?.code;
+    this.itemId = details?.itemId;
   }
 }
 
@@ -91,6 +100,15 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
 
   current(): ExecutionPlan | undefined {
     return this.#store.current();
+  }
+
+  evidenceCandidates(itemId: string, visibleTurnId: string): ExecutionEvidenceCandidate[] {
+    const current = this.#store.current();
+    if (current === undefined || !current.items.some((item) => item.id === itemId)) return [];
+    const preferredTools = current.requirements
+      ?.filter((requirement) => requirement.itemId === itemId)
+      .map((requirement) => requirement.tool);
+    return this.#evidenceIndex.candidatesForTurn({ visibleTurnId, preferredTools });
   }
 
   async write(
@@ -255,7 +273,8 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
     }
     if (item.evidenceCallIds === undefined || item.evidenceCallIds.length === 0) {
       throw new ExecutionPlanValidationError(
-        `Completed item ${item.id} requires successful evidenceCallIds or completionKind=reasoning.`
+        `Completed item ${item.id} requires successful evidenceCallIds or completionKind=reasoning.`,
+        { code: "completion-evidence-required", itemId: item.id }
       );
     }
     try {

@@ -62,6 +62,48 @@ describe("ExecutionEvidenceIndex", () => {
     expect(() => index.resolve(["delegate"])).toThrow("ineligible");
   });
 
+  it("offers only bounded, safe, successful evidence from the current visible turn", () => {
+    const index = new ExecutionEvidenceIndex();
+    index.record(execution({
+      toolCallId: "preferred",
+      tool: { ...execution().tool, name: "postman.read" },
+      targetSummary: "collection token=raw-secret"
+    }), "turn-current");
+    for (let position = 0; position < 9; position += 1) {
+      index.record(execution({ toolCallId: `recent-${position}`, targetSummary: `target ${position}` }), "turn-current");
+    }
+    index.record(execution({ toolCallId: "earlier-turn" }), "turn-earlier");
+    index.record(execution({ toolCallId: "failed-current", result: { ok: false, content: "raw failure" } }), "turn-current");
+    index.record(execution({ toolCallId: "blocked-current", decision: "ask", result: undefined }), "turn-current");
+    index.record(execution({
+      toolCallId: "plan-current",
+      tool: { ...execution().tool, name: "plan" }
+    }), "turn-current");
+    index.recordUnavailable("unavailable-current", "missing.tool", "turn-current");
+    expect(index.record(execution({ toolCallId: "x".repeat(257) }), "turn-current")).toBeUndefined();
+    expect(index.record(execution({ toolCallId: "token=raw-secret" }), "turn-current")).toBeUndefined();
+    expect(index.record(execution({
+      tool: { ...execution().tool, name: "x".repeat(257) }
+    }), "turn-current")).toBeUndefined();
+
+    const candidates = index.candidatesForTurn({
+      visibleTurnId: "turn-current",
+      preferredTools: ["postman.read"]
+    });
+
+    expect(candidates).toHaveLength(8);
+    expect(candidates[0]).toMatchObject({ toolCallId: "preferred", tool: "postman.read" });
+    expect(JSON.stringify(candidates)).not.toContain("raw-secret");
+    expect(JSON.stringify(candidates)).not.toContain("raw collection body");
+    expect(candidates.map((candidate) => candidate.toolCallId)).not.toEqual(expect.arrayContaining([
+      "earlier-turn",
+      "failed-current",
+      "blocked-current",
+      "plan-current",
+      "unavailable-current"
+    ]));
+  });
+
   it("hydrates only from persisted harness receipt fields", () => {
     const index = new ExecutionEvidenceIndex();
     index.hydrate([{
@@ -79,6 +121,7 @@ describe("ExecutionEvidenceIndex", () => {
       riskClass: "external-side-effect",
       targetSummary: "safe target"
     })]);
+    expect(index.candidatesForTurn({ visibleTurnId: "turn-current" })).toEqual([]);
   });
 
   it("ignores malformed persisted success receipts", () => {

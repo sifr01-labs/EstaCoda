@@ -169,6 +169,91 @@ describe("plan tool", () => {
     );
   });
 
+  it("returns bounded current-turn evidence choices and requires the model to select one", async () => {
+    const evidence = new ExecutionEvidenceIndex();
+    evidence.record({
+      tool: {
+        name: "mcp.target.read",
+        description: "Read target",
+        inputSchema: {},
+        riskClass: "read-only-network",
+        toolsets: ["mcp"],
+        progressLabel: "reading",
+        maxResultSizeChars: 1_000
+      },
+      input: { apiKey: "raw-secret" },
+      decision: "allow",
+      riskClass: "read-only-network",
+      targetSummary: "collection token=raw-secret",
+      toolCallId: "call-current-read",
+      result: { ok: true, content: "raw collection body" }
+    }, "turn-current");
+    evidence.record({
+      tool: {
+        name: "mcp.target.read",
+        description: "Read target",
+        inputSchema: {},
+        riskClass: "read-only-network",
+        toolsets: ["mcp"],
+        progressLabel: "reading",
+        maxResultSizeChars: 1_000
+      },
+      decision: "allow",
+      riskClass: "read-only-network",
+      toolCallId: "call-earlier-read",
+      result: { ok: true, content: "older result" }
+    }, "turn-earlier");
+    const controller = new ExecutionPlanController(new ExecutionPlanStore(), undefined, evidence);
+    const tool = createPlanTools({ controller })[0]!;
+    await tool.run({
+      operation: "write",
+      objective: "Locate the destination collection",
+      items: [{ id: "locate-collection", content: "Locate the collection", status: "in_progress" }]
+    }, { visibleTurnId: "turn-current" });
+
+    const rejected = await tool.run({
+      operation: "merge",
+      items: [{ id: "locate-collection", status: "completed" }]
+    }, { visibleTurnId: "turn-current" });
+
+    expect(rejected).toMatchObject({
+      ok: false,
+      metadata: {
+        error: "completion-evidence-required",
+        itemId: "locate-collection",
+        evidenceCandidates: [{
+          toolCallId: "call-current-read",
+          tool: "mcp.target.read",
+          riskClass: "read-only-network"
+        }]
+      }
+    });
+    expect(rejected.content).toContain("Retry the plan merge using only successful evidence");
+    expect(JSON.stringify(rejected)).not.toContain("call-earlier-read");
+    expect(JSON.stringify(rejected)).not.toContain("raw-secret");
+    expect(JSON.stringify(rejected)).not.toContain("raw collection body");
+    expect(controller.current()?.items[0]).toMatchObject({ status: "in_progress" });
+    expect(controller.current()?.items[0]).not.toHaveProperty("evidenceCallIds");
+
+    const accepted = await tool.run({
+      operation: "merge",
+      items: [{
+        id: "locate-collection",
+        status: "completed",
+        evidenceCallIds: ["call-current-read"]
+      }]
+    }, { visibleTurnId: "turn-current" });
+    expect(accepted.ok).toBe(true);
+    expect(controller.current()).toMatchObject({
+      status: "completed",
+      items: [{
+        id: "locate-collection",
+        status: "completed",
+        evidenceCallIds: ["call-current-read"]
+      }]
+    });
+  });
+
   it("repairs invalid completion metadata and preserves the model-authored Mission", async () => {
     const controller = new ExecutionPlanController(new ExecutionPlanStore());
     const tool = createPlanTools({ controller })[0]!;

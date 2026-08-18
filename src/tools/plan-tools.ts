@@ -129,9 +129,17 @@ export function createPlanTools(options: {
         }
         return error("invalid-operation", "plan operation must be read, write, or merge.");
       } catch (caught) {
-        return caught instanceof ExecutionPlanValidationError
-          ? error("invalid-plan", caught.message)
-          : error("plan-update-failed", "Execution plan state could not be updated.");
+        if (caught instanceof ExecutionPlanValidationError) {
+          if (caught.code === "completion-evidence-required" && caught.itemId !== undefined) {
+            return missingEvidenceError({
+              controller,
+              itemId: caught.itemId,
+              visibleTurnId: context?.visibleTurnId
+            });
+          }
+          return error("invalid-plan", caught.message);
+        }
+        return error("plan-update-failed", "Execution plan state could not be updated.");
       }
     }
   }];
@@ -166,4 +174,32 @@ function planResult(
 
 function error(code: string, content: string): ToolResult {
   return { ok: false, content, metadata: { error: code } };
+}
+
+function missingEvidenceError(input: {
+  controller: ExecutionPlanControllerApi;
+  itemId: string;
+  visibleTurnId?: string;
+}): ToolResult {
+  const evidenceCandidates = input.visibleTurnId === undefined
+    ? []
+    : input.controller.evidenceCandidates(input.itemId, input.visibleTurnId);
+  const instruction =
+    "Retry the plan merge using only successful evidence that actually proves this item. " +
+    "If none of these calls proves completion, perform or verify the required action first.";
+  const feedback = {
+    error: "completion-evidence-required",
+    itemId: input.itemId,
+    instruction,
+    evidenceCandidates
+  };
+  return {
+    ok: false,
+    content: JSON.stringify(feedback),
+    metadata: {
+      error: feedback.error,
+      itemId: feedback.itemId,
+      evidenceCandidates: feedback.evidenceCandidates
+    }
+  };
 }

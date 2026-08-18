@@ -127,6 +127,7 @@ describe("runtime tool activity events", () => {
       providerExecution: providerExecution(),
       toolPlans: [],
       trustedWorkspace: true,
+      visibleTurnId: "turn-current",
       remainingToolCalls: 1,
       riskBaseline: "read-only-local",
       onEvent: (event) => {
@@ -161,6 +162,10 @@ describe("runtime tool activity events", () => {
       toolCallId: "tc1",
       tool: "file.read"
     })]);
+    expect(evidenceIndex.candidatesForTurn({ visibleTurnId: "turn-current" })).toEqual([
+      expect.objectContaining({ toolCallId: "tc1", tool: "file.read" })
+    ]);
+    expect(evidenceIndex.candidatesForTurn({ visibleTurnId: "turn-earlier" })).toEqual([]);
   });
 
   it("keeps security summaries separate from compact display previews", async () => {
