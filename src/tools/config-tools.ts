@@ -25,6 +25,7 @@ import {
   type WebSetupInput
 } from "../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
+import { summarizeMcpCapabilityConfig } from "../mcp/mcp-tools.js";
 import {
   diagnoseProviderConfig,
   formatProviderTruthStatus,
@@ -424,7 +425,9 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             : [
                 "MCP servers",
                 ...servers.map(([name, server]) =>
-                  [
+                  (() => {
+                    const capabilities = summarizeMcpCapabilityConfig(server);
+                    return [
                     `${name}`,
                     `  enabled: ${server.enabled === false ? "no" : "yes"}`,
                     `  transport: ${server.transport ?? "stdio"}`,
@@ -432,13 +435,24 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
                     server.command === undefined ? undefined : `  command: ${server.command}`,
                     server.url === undefined ? undefined : `  url: ${server.url}`,
                     server.args === undefined ? undefined : `  args: ${server.args.join(" ") || "(none)"}`,
-                    server.cwd === undefined ? undefined : `  cwd: ${server.cwd}`
-                  ].filter((line) => line !== undefined).join("\n")
+                    server.cwd === undefined ? undefined : `  cwd: ${server.cwd}`,
+                    `  protected delivery configured: ${capabilities.protectedDeliveryConfigured ? "yes" : "no"}`,
+                    `  grouped delivery supported: ${capabilities.groupedDeliverySupported ? "yes" : "no"}`,
+                    `  browser relay supported: ${capabilities.browserRelaySupported ? "yes" : "no"}`,
+                    `  verification configured: ${capabilities.verificationConfigured ? "yes" : "no"}`
+                    ].filter((line) => line !== undefined).join("\n");
+                  })()
                 ),
                 `Config sources: ${loaded.sources.join(", ") || "none"}`
               ].join("\n"),
           metadata: {
-            servers: loaded.mcp.servers,
+            servers: servers.map(([name, server]) => ({
+              name,
+              enabled: server.enabled !== false,
+              transport: server.transport ?? "stdio",
+              trust: server.trust ?? "conservative",
+              capabilities: summarizeMcpCapabilityConfig(server)
+            })),
             sources: loaded.sources
           }
         };
@@ -469,6 +483,44 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           toolRiskClass: {
             type: "string",
             enum: ["read-only-local", "read-only-network", "workspace-write", "external-side-effect", "credential-access", "destructive-local", "shared-state-mutation", "spend-money", "sandbox-escape"]
+          },
+          toolRiskClasses: {
+            type: "object",
+            additionalProperties: {
+              type: "string",
+              enum: ["read-only-local", "read-only-network", "workspace-write", "external-side-effect", "credential-access", "destructive-local", "shared-state-mutation", "spend-money", "sandbox-escape"]
+            }
+          },
+          protectedToolArguments: {
+            type: "object",
+            additionalProperties: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                paths: { type: "array", minItems: 1, maxItems: 8, items: { type: "string" } },
+                handling: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    persistence: { type: "string", enum: ["none", "destination-managed", "unknown"] },
+                    sharing: { type: "string", enum: ["private", "workspace", "account", "external", "unknown"] }
+                  },
+                  required: ["persistence", "sharing"]
+                },
+                groupedDelivery: { type: "boolean" },
+                browserRelay: { type: "boolean" }
+              },
+              required: ["paths", "handling"]
+            }
+          },
+          toolVerificationRelationships: {
+            type: "object",
+            additionalProperties: {
+              type: "array",
+              minItems: 1,
+              maxItems: 16,
+              items: { type: "string" }
+            }
           },
           resourceReadRiskClass: {
             type: "string",
@@ -505,7 +557,13 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           ].filter((line) => line !== undefined).join("\n"),
           metadata: {
             path: result.path,
-            servers: result.config.mcpServers
+            servers: Object.entries(result.config.mcpServers ?? {}).map(([name, server]) => ({
+              name,
+              enabled: server.enabled !== false,
+              transport: server.transport ?? "stdio",
+              trust: server.trust ?? "conservative",
+              capabilities: summarizeMcpCapabilityConfig(server)
+            }))
           }
         };
       }

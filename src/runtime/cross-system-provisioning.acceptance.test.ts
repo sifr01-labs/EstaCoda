@@ -284,7 +284,7 @@ async function createJourneyHarness(scenario: JourneyScenario) {
   const socket = new FakeCdpAuthPortalSocket();
   showProtectedProvisioningValues(socket, [FIRST_PROTECTED_VALUE, SECOND_PROTECTED_VALUE]);
   const mcp = new FakeApiManagementMcp({
-    exposeMutation: scenario.exposeMutation,
+    exposeMutation: true,
     failVerification: scenario.failVerification,
     echoProtectedValues: true,
   });
@@ -347,6 +347,7 @@ async function createJourneyHarness(scenario: JourneyScenario) {
       [SERVER_ID]: {
         transport: "http",
         url: FAKE_API_MANAGEMENT_MCP_URL,
+        excludeTools: scenario.exposeMutation === false ? ["updateState"] : undefined,
         toolRiskClasses: {
           readState: "read-only-network",
           updateState: "external-side-effect",
@@ -356,7 +357,12 @@ async function createJourneyHarness(scenario: JourneyScenario) {
           updateState: {
             paths: ["/values/*/value"],
             handling: { persistence: "destination-managed", sharing: "workspace" },
+            groupedDelivery: true,
+            browserRelay: true,
           },
+        },
+        toolVerificationRelationships: {
+          verifyState: ["updateState"],
         },
       },
     },

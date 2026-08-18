@@ -43,19 +43,29 @@ description: "MCP client transport, discovery, and trust metadata."
 - Unknown operations remain conservative even when known read operations have explicit overrides.
 - Trusted workspaces can execute `read-only-local` MCP tools after explicit workspace trust.
 
-Example Postman classification:
+Example generic capability configuration:
 
 ```json
 {
   "mcpServers": {
-    "postman": {
+    "records": {
       "toolRiskClasses": {
-        "getAuthenticatedUser": "read-only-network",
-        "getWorkspaces": "read-only-network",
-        "getCollections": "read-only-network",
-        "getCollection": "read-only-network",
-        "updateCollection": "external-side-effect",
-        "updateCollectionRequest": "external-side-effect"
+        "readRecords": "read-only-network",
+        "updateRecords": "external-side-effect"
+      },
+      "protectedToolArguments": {
+        "updateRecords": {
+          "paths": ["/values/*/value"],
+          "handling": {
+            "persistence": "destination-managed",
+            "sharing": "workspace"
+          },
+          "groupedDelivery": true,
+          "browserRelay": true
+        }
+      },
+      "toolVerificationRelationships": {
+        "readRecords": ["updateRecords"]
       }
     }
   }
@@ -63,6 +73,10 @@ Example Postman classification:
 ```
 
 The CLI accepts the same map with `--tool-risk-classes TOOL=RISK,...`. When a per-tool map is present, unlisted operations use conservative server trust instead of inheriting the older broad `toolRiskClass` override. Without a map, `toolRiskClass` remains the legacy server-wide override.
+
+`protectedToolArguments` contains reviewed JSON Pointer patterns only; it never contains credential values. `groupedDelivery` and `browserRelay` describe capabilities the generic secure dispatcher enforces. `toolVerificationRelationships` maps a read-only verification tool to the mutation tools whose resulting state it can independently verify. Tool names and protected paths are checked against the discovered MCP catalog and input schemas before any tools from that server are registered. Unknown tools, invalid or overlapping paths, non-string destinations, duplicate relationships, and risk conflicts leave the server unavailable with a bounded diagnostic.
+
+The reviewed configuration tool accepts these structured fields directly. The CLI accepts `--protected-tool-arguments-json` and `--tool-verification-relationships-json`. `mcp status` reports only yes/no capability summaries; it never prints protected paths or credential values.
 
 ## Read Reuse
 

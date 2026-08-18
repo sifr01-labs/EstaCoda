@@ -585,6 +585,37 @@ STT المستضاف المستقر: OpenAI، Groq، xAI. STT المحلي يد�
 
 استخدم `env` فقط للقيم الحرفية غير السرية. يربط `envRefs` اسم متغير العملية الفرعية بمتغير محمّل من ملف `.env` للملف الشخصي المختار؛ لا يُحفظ في `config.json` سوى الأسماء. إذا كان المرجع مفقودًا أو غير صالح، يبقى خادم MCP غير متاح.
 
+يمكن للأدوات التي تمت مراجعتها استقبال قيم محمية من المتصفح من دون كشفها للنموذج. تُحفظ في الإعدادات مسارات JSON Pointer والقدرات فقط، ولا تُحفظ قيم بيانات الاعتماد:
+
+```json
+{
+  "mcpServers": {
+    "records": {
+      "toolRiskClasses": {
+        "updateRecords": "external-side-effect",
+        "readRecords": "read-only-network"
+      },
+      "protectedToolArguments": {
+        "updateRecords": {
+          "paths": ["/values/*/value"],
+          "handling": {
+            "persistence": "destination-managed",
+            "sharing": "workspace"
+          },
+          "groupedDelivery": true,
+          "browserRelay": true
+        }
+      },
+      "toolVerificationRelationships": {
+        "readRecords": ["updateRecords"]
+      }
+    }
+  }
+}
+```
+
+يتحقق EstaCoda عند اكتشاف خادم MCP أو إعادة تحميله من أسماء الأدوات والمسارات بمقارنتها مع مخططات الإدخال الفعلية. تؤدي الأداة غير المعروفة، أو المسارات المفقودة أو المتعارضة، أو تعارض تصنيف المخاطر إلى إبقاء الخادم غير متاح. تعرض التشخيصات حالة القدرات بصيغة نعم/لا فقط، ولا تعرض المسارات المحمية أو القيم السرية. يقبل مسار الإعداد القابل للمراجعة هذه الحقول المنظمة، وتقبل CLI الخيارين `--protected-tool-arguments-json` و`--tool-verification-relationships-json`.
+
 ### skills
 
 تحميل المهارات وسياسة Agent Evolution.

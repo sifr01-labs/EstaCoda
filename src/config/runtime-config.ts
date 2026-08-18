@@ -64,7 +64,7 @@ import {
   normalizeWhatsAppGroupAllowlist,
   normalizeWhatsAppUserId,
 } from "../channels/whatsapp-identity.js";
-import { isProtectedArgumentPattern } from "../security/protected-argument-path.js";
+import { isProtectedArgumentPattern, parseProtectedArgumentPattern } from "../security/protected-argument-path.js";
 
 export type MCPServerTrust = "conservative" | "read-only-network" | "read-only-local";
 export type MCPProtectedToolArgumentsConfig = {
@@ -73,6 +73,10 @@ export type MCPProtectedToolArgumentsConfig = {
     persistence: "none" | "destination-managed" | "unknown";
     sharing: "private" | "workspace" | "account" | "external" | "unknown";
   };
+  /** Whether this registered integration permits atomic multi-value delivery. */
+  groupedDelivery?: boolean;
+  /** Whether protected values may be relayed from a verified browser field. */
+  browserRelay?: boolean;
 };
 export type UiLanguage = "en" | "ar";
 export type UiFlavor = "standard" | "arabic-light" | "kemet-full";
@@ -361,6 +365,8 @@ export type MCPServerConfig = {
   toolRiskClass?: ToolRiskClass;
   toolRiskClasses?: Record<string, ToolRiskClass>;
   protectedToolArguments?: Record<string, MCPProtectedToolArgumentsConfig>;
+  /** Verification tool name -> mutation tool names, all unprefixed MCP names. */
+  toolVerificationRelationships?: Record<string, string[]>;
   resourceReadRiskClass?: ToolRiskClass;
   promptGetRiskClass?: ToolRiskClass;
 };
@@ -807,6 +813,7 @@ export type MCPSetupInput = {
   toolRiskClass?: ToolRiskClass;
   toolRiskClasses?: Record<string, ToolRiskClass>;
   protectedToolArguments?: Record<string, MCPProtectedToolArgumentsConfig>;
+  toolVerificationRelationships?: Record<string, string[]>;
   resourceReadRiskClass?: ToolRiskClass;
   promptGetRiskClass?: ToolRiskClass;
 };
@@ -2368,6 +2375,7 @@ function normalizeMcpServers(
       toolRiskClass: isToolRiskClass(record.toolRiskClass) ? record.toolRiskClass : undefined,
       toolRiskClasses: normalizeToolRiskClasses(record.toolRiskClasses),
       protectedToolArguments: normalizeProtectedToolArguments(record.protectedToolArguments),
+      toolVerificationRelationships: normalizeToolVerificationRelationships(record.toolVerificationRelationships),
       resourceReadRiskClass: isToolRiskClass(record.resourceReadRiskClass) ? record.resourceReadRiskClass : undefined,
       promptGetRiskClass: isToolRiskClass(record.promptGetRiskClass) ? record.promptGetRiskClass : undefined
     };
@@ -2387,7 +2395,9 @@ function normalizeToolRiskClasses(value: unknown): Record<string, ToolRiskClass>
 function normalizeProtectedToolArguments(value: unknown): Record<string, MCPProtectedToolArgumentsConfig> | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const entries = Object.entries(value).flatMap(([toolName, declaration]) => {
-    if (toolName.trim().length === 0) return [];
+    if (toolName.trim().length === 0) {
+      throw new Error("Invalid MCP protected argument configuration for unnamed tool");
+    }
     const legacyPaths = Array.isArray(declaration)
       ? declaration.filter((path): path is string => typeof path === "string" && isLegacyProtectedArgumentPath(path))
         .map((path) => `/${path.split(".").join("/")}`)
@@ -2395,9 +2405,16 @@ function normalizeProtectedToolArguments(value: unknown): Record<string, MCPProt
     const record = typeof declaration === "object" && declaration !== null && !Array.isArray(declaration)
       ? declaration as Record<string, unknown>
       : undefined;
-    const paths = legacyPaths ?? (Array.isArray(record?.paths)
-      ? record.paths.filter((path): path is string => typeof path === "string" && isProtectedArgumentPattern(path))
-      : []);
+    if (record !== undefined && (!Array.isArray(record.paths) ||
+      record.paths.some((path) => typeof path !== "string") ||
+      (record.groupedDelivery !== undefined && typeof record.groupedDelivery !== "boolean") ||
+      (record.browserRelay !== undefined && typeof record.browserRelay !== "boolean"))) {
+      throw new Error(`Invalid MCP protected argument configuration for tool ${toolName.slice(0, 160)}`);
+    }
+    const paths = legacyPaths ?? (record?.paths as string[] | undefined) ?? [];
+    if (record !== undefined && paths.length === 0) {
+      throw new Error(`Invalid MCP protected argument configuration for tool ${toolName.slice(0, 160)}`);
+    }
     if (paths.length === 0) return [];
     const handling = typeof record?.handling === "object" && record.handling !== null && !Array.isArray(record.handling)
       ? record.handling as Record<string, unknown>
@@ -2405,9 +2422,23 @@ function normalizeProtectedToolArguments(value: unknown): Record<string, MCPProt
     const persistence = isProtectedArgumentPersistence(handling.persistence) ? handling.persistence : "unknown";
     const sharing = isProtectedArgumentSharing(handling.sharing) ? handling.sharing : "unknown";
     return [[toolName, {
-      paths: [...new Set(paths)],
-      handling: { persistence, sharing }
+      paths: legacyPaths === undefined ? paths : [...new Set(paths)],
+      handling: { persistence, sharing },
+      ...(typeof record?.groupedDelivery === "boolean" ? { groupedDelivery: record.groupedDelivery } : {}),
+      ...(typeof record?.browserRelay === "boolean" ? { browserRelay: record.browserRelay } : {})
     }] as [string, MCPProtectedToolArgumentsConfig]];
+  });
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
+}
+
+function normalizeToolVerificationRelationships(value: unknown): Record<string, string[]> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value).flatMap(([toolName, targets]) => {
+    if (toolName.trim().length === 0 || !Array.isArray(targets) || targets.length === 0 ||
+      targets.some((target) => typeof target !== "string")) {
+      throw new Error(`Invalid MCP verification configuration for tool ${toolName.slice(0, 160)}`);
+    }
+    return [[toolName, targets as string[]] as [string, string[]]];
   });
   return entries.length === 0 ? undefined : Object.fromEntries(entries);
 }
@@ -3096,42 +3127,45 @@ export async function setupMcpConfig(options: {
   path: string;
   config: EstaCodaConfig;
 }> {
-  validateMcpSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const serverName = options.input.name.trim();
   const servers = normalizeMcpServers(existing.config.mcpServers ?? existing.config.mcp_servers, options.homeDir);
-  servers[serverName] = {
-    enabled: options.input.enabled ?? true,
-    transport: options.input.transport ?? "stdio",
-    command: options.input.command,
-    args: options.input.args,
-    cwd: options.input.cwd === undefined ? undefined : expandConfiguredPath(options.input.cwd, options.homeDir),
-    env: options.input.env,
-    envRefs: options.input.envRefs,
-    url: options.input.url,
-    headers: options.input.headers,
+  const previous = servers[serverName] ?? {};
+  const nextServer: MCPServerConfig = {
+    enabled: options.input.enabled ?? previous.enabled ?? true,
+    transport: options.input.transport ?? previous.transport ?? "stdio",
+    command: options.input.command ?? previous.command,
+    args: options.input.args ?? previous.args,
+    cwd: options.input.cwd === undefined ? previous.cwd : expandConfiguredPath(options.input.cwd, options.homeDir),
+    env: options.input.env ?? previous.env,
+    envRefs: options.input.envRefs ?? previous.envRefs,
+    url: options.input.url ?? previous.url,
+    headers: options.input.headers ?? previous.headers,
     tools: {
-      include: options.input.includeTools ?? options.input.tools?.include,
-      exclude: options.input.excludeTools ?? options.input.tools?.exclude,
-      resources: options.input.exposeResources ?? options.input.tools?.resources,
-      prompts: options.input.exposePrompts ?? options.input.tools?.prompts,
-      prefix: options.input.toolPrefix ?? options.input.tools?.prefix
+      include: options.input.includeTools ?? options.input.tools?.include ?? previous.tools?.include,
+      exclude: options.input.excludeTools ?? options.input.tools?.exclude ?? previous.tools?.exclude,
+      resources: options.input.exposeResources ?? options.input.tools?.resources ?? previous.tools?.resources,
+      prompts: options.input.exposePrompts ?? options.input.tools?.prompts ?? previous.tools?.prompts,
+      prefix: options.input.toolPrefix ?? options.input.tools?.prefix ?? previous.tools?.prefix
     },
-    includeTools: options.input.includeTools,
-    excludeTools: options.input.excludeTools,
-    exposeResources: options.input.exposeResources,
-    exposePrompts: options.input.exposePrompts,
-    toolPrefix: options.input.toolPrefix,
-    timeoutMs: options.input.timeoutMs,
-    connectTimeoutMs: options.input.connectTimeoutMs,
-    trust: options.input.trust,
-    toolRiskClass: options.input.toolRiskClass,
-    toolRiskClasses: options.input.toolRiskClasses,
-    protectedToolArguments: options.input.protectedToolArguments,
-    resourceReadRiskClass: options.input.resourceReadRiskClass,
-    promptGetRiskClass: options.input.promptGetRiskClass
+    includeTools: options.input.includeTools ?? previous.includeTools,
+    excludeTools: options.input.excludeTools ?? previous.excludeTools,
+    exposeResources: options.input.exposeResources ?? previous.exposeResources,
+    exposePrompts: options.input.exposePrompts ?? previous.exposePrompts,
+    toolPrefix: options.input.toolPrefix ?? previous.toolPrefix,
+    timeoutMs: options.input.timeoutMs ?? previous.timeoutMs,
+    connectTimeoutMs: options.input.connectTimeoutMs ?? previous.connectTimeoutMs,
+    trust: options.input.trust ?? previous.trust,
+    toolRiskClass: options.input.toolRiskClass ?? previous.toolRiskClass,
+    toolRiskClasses: options.input.toolRiskClasses ?? previous.toolRiskClasses,
+    protectedToolArguments: options.input.protectedToolArguments ?? previous.protectedToolArguments,
+    toolVerificationRelationships: options.input.toolVerificationRelationships ?? previous.toolVerificationRelationships,
+    resourceReadRiskClass: options.input.resourceReadRiskClass ?? previous.resourceReadRiskClass,
+    promptGetRiskClass: options.input.promptGetRiskClass ?? previous.promptGetRiskClass
   };
+  validateMcpSetupInput({ name: serverName, ...nextServer });
+  servers[serverName] = nextServer;
   const config = patchConfig(existing.config, {
     mcpServers: servers
   });
@@ -3820,11 +3854,26 @@ function validateMcpSetupInput(input: MCPSetupInput): void {
   }
   for (const [toolName, declaration] of Object.entries(input.protectedToolArguments ?? {})) {
     requireNonEmpty(toolName, "MCP protected argument tool name");
-    if (!Array.isArray(declaration.paths) || declaration.paths.length === 0 ||
+    if (!Array.isArray(declaration.paths) || declaration.paths.length === 0 || declaration.paths.length > 8 ||
         declaration.paths.some((path) => !isProtectedArgumentPattern(path)) ||
+        new Set(declaration.paths).size !== declaration.paths.length ||
+        hasOverlappingProtectedArgumentPatterns(declaration.paths) ||
         !isProtectedArgumentPersistence(declaration.handling?.persistence) ||
-        !isProtectedArgumentSharing(declaration.handling?.sharing)) {
+        !isProtectedArgumentSharing(declaration.handling?.sharing) ||
+        (declaration.groupedDelivery !== undefined && typeof declaration.groupedDelivery !== "boolean") ||
+        (declaration.browserRelay !== undefined && typeof declaration.browserRelay !== "boolean") ||
+        !isMutationRiskClass(resolveMcpSetupToolRisk(input, toolName))) {
       throw new Error(`Invalid protected argument declaration for MCP tool ${toolName}`);
+    }
+  }
+  for (const [verificationTool, mutationTools] of Object.entries(input.toolVerificationRelationships ?? {})) {
+    requireNonEmpty(verificationTool, "MCP verification tool name");
+    if (!Array.isArray(mutationTools) || mutationTools.length === 0 || mutationTools.length > 16 ||
+        mutationTools.some((toolName) => typeof toolName !== "string" || toolName.trim().length === 0) ||
+        new Set(mutationTools).size !== mutationTools.length || mutationTools.includes(verificationTool) ||
+        !isReadRiskClass(resolveMcpSetupToolRisk(input, verificationTool)) ||
+        mutationTools.some((toolName) => !isMutationRiskClass(resolveMcpSetupToolRisk(input, toolName)))) {
+      throw new Error(`Invalid verification relationship for MCP tool ${verificationTool}`);
     }
   }
   validateRiskClass(input.resourceReadRiskClass, "resourceReadRiskClass");
@@ -3842,6 +3891,33 @@ function validateMcpSetupInput(input: MCPSetupInput): void {
   if (input.connectTimeoutMs !== undefined && (!Number.isInteger(input.connectTimeoutMs) || input.connectTimeoutMs <= 0)) {
     throw new Error("Expected connectTimeoutMs to be a positive integer");
   }
+}
+
+function resolveMcpSetupToolRisk(input: MCPSetupInput, toolName: string): ToolRiskClass {
+  const defaultRisk = input.trust === "read-only-local"
+    ? "read-only-local"
+    : input.trust === "read-only-network" ? "read-only-network" : "external-side-effect";
+  if (input.toolRiskClasses !== undefined) {
+    return input.toolRiskClasses[toolName] ?? defaultRisk;
+  }
+  return input.toolRiskClass ?? defaultRisk;
+}
+
+function isReadRiskClass(value: ToolRiskClass): boolean {
+  return value === "read-only-local" || value === "read-only-network";
+}
+
+function isMutationRiskClass(value: ToolRiskClass): boolean {
+  return value === "workspace-write" || value === "external-side-effect" || value === "destructive-local" ||
+    value === "shared-state-mutation" || value === "spend-money";
+}
+
+function hasOverlappingProtectedArgumentPatterns(paths: readonly string[]): boolean {
+  const parsed = paths.map((path) => parseProtectedArgumentPattern(path)!);
+  return parsed.some((candidate, index) => parsed.some((other, otherIndex) =>
+    index !== otherIndex && candidate.length < other.length &&
+    candidate.every((segment, segmentIndex) => segment === other[segmentIndex])
+  ));
 }
 
 function isLegacyProtectedArgumentPath(value: string): boolean {

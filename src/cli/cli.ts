@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { stdin, stdout } from "node:process";
+import { summarizeMcpCapabilityConfig } from "../mcp/mcp-tools.js";
 import {
   createTelegramPairingCode,
   isBrowserDisplayUpdate,
@@ -3096,7 +3097,9 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
         "  estacoda mcp setup --name docs --command uvx --args mcp-server-fetch",
         "  estacoda mcp setup --name remote --transport http --url http://127.0.0.1:3000/mcp --server-trust read-only-network",
         "  --env-ref CHILD_KEY=PROFILE_ENV_KEY forwards an explicitly named profile secret without storing its value in config",
-        "  --tool-risk-classes TOOL=RISK,... classifies individual discovered operations; unknown tools stay conservative"
+        "  --tool-risk-classes TOOL=RISK,... classifies individual discovered operations; unknown tools stay conservative",
+        "  --protected-tool-arguments-json JSON configures reviewed JSON Pointer mappings without credential values",
+        "  --tool-verification-relationships-json JSON maps read-only verification tools to mutation tools"
       ].join("\n")
     };
   }
@@ -3118,6 +3121,7 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
             "EstaCoda MCP",
             ...lines.map(([name, server]) => {
               const snapshot = snapshots.find((entry) => entry.name === name);
+              const capabilities = snapshot?.capabilities ?? summarizeMcpCapabilityConfig(server);
               const status = snapshot === undefined
                 ? (server.enabled === false ? "disabled" : "configured")
                 : snapshot.available
@@ -3133,7 +3137,11 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
                 server.args === undefined ? undefined : `  args: ${server.args.join(" ") || "(none)"}`,
                 server.cwd === undefined ? undefined : `  cwd: ${server.cwd}`,
                 snapshot === undefined ? undefined : `  discovered tools: ${snapshot.toolCount}, resources: ${snapshot.resourceCount}, prompts: ${snapshot.promptCount}`,
-                snapshot === undefined || snapshot.tools.length === 0 ? undefined : `  registered: ${snapshot.tools.join(", ")}`
+                snapshot === undefined || snapshot.tools.length === 0 ? undefined : `  registered: ${snapshot.tools.join(", ")}`,
+                `  protected delivery configured: ${capabilities.protectedDeliveryConfigured ? "yes" : "no"}`,
+                `  grouped delivery supported: ${capabilities.groupedDeliverySupported ? "yes" : "no"}`,
+                `  browser relay supported: ${capabilities.browserRelaySupported ? "yes" : "no"}`,
+                `  verification configured: ${capabilities.verificationConfigured ? "yes" : "no"}`
               ].filter((line) => line !== undefined).join("\n");
             }),
             `Config sources: ${config.sources.join(", ") || "none"}`
@@ -3168,7 +3176,7 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
     return {
       handled: true,
       exitCode: 1,
-      output: "Usage: estacoda mcp setup --name <server> --command <cmd> [--args a,b,c] [--env-ref CHILD_KEY=PROFILE_ENV_KEY]"
+      output: "Usage: estacoda mcp setup --name <server> --command <cmd> [--args a,b,c] [--env-ref CHILD_KEY=PROFILE_ENV_KEY] [--protected-tool-arguments-json JSON]"
     };
   }
   const result = await setupMcpConfig({
@@ -3854,10 +3862,7 @@ function parseTelegramPairArgs(args: string[]): {
 }
 
 function parseMcpArgs(args: string[]): Partial<MCPSetupInput> {
-  const parsed: Partial<MCPSetupInput> = {
-    enabled: true,
-    transport: "stdio"
-  };
+  const parsed: Partial<MCPSetupInput> = {};
 
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -3898,6 +3903,12 @@ function parseMcpArgs(args: string[]): Partial<MCPSetupInput> {
       index += 1;
     } else if (arg === "--tool-risk-classes") {
       parsed.toolRiskClasses = parseKeyValueList(next ?? "") as Record<string, import("../contracts/tool.js").ToolRiskClass>;
+      index += 1;
+    } else if (arg === "--protected-tool-arguments-json") {
+      parsed.protectedToolArguments = parseJsonRecord(next ?? "", "protected tool arguments") as MCPSetupInput["protectedToolArguments"];
+      index += 1;
+    } else if (arg === "--tool-verification-relationships-json") {
+      parsed.toolVerificationRelationships = parseJsonRecord(next ?? "", "tool verification relationships") as MCPSetupInput["toolVerificationRelationships"];
       index += 1;
     } else if (arg === "--resource-read-risk-class") {
       parsed.resourceReadRiskClass = next as MCPSetupInput["resourceReadRiskClass"];
@@ -3981,6 +3992,19 @@ function parseKeyValueList(value: string): Record<string, string> {
     parsed[key] = entryValue;
   }
   return parsed;
+}
+
+function parseJsonRecord(value: string, label: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error(`Expected ${label} to be a JSON object`);
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Expected ${label} to be a JSON object`);
+  }
+  return parsed as Record<string, unknown>;
 }
 
 function localeForConfig(config: { ui: { language: string } }): Locale {

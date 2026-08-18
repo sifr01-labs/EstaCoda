@@ -598,8 +598,17 @@ Reviewed MCP tools may accept protected browser values without exposing those va
           "handling": {
             "persistence": "destination-managed",
             "sharing": "workspace"
-          }
+          },
+          "groupedDelivery": true,
+          "browserRelay": true
         }
+      },
+      "toolRiskClasses": {
+        "updateRecords": "external-side-effect",
+        "readRecords": "read-only-network"
+      },
+      "toolVerificationRelationships": {
+        "readRecords": ["updateRecords"]
       }
     }
   }
@@ -609,6 +618,12 @@ Reviewed MCP tools may accept protected browser values without exposing those va
 When one tool call contains two to eight protected browser sources, EstaCoda binds and verifies every source and destination, presents one grouped protected-transfer approval, and invokes the MCP tool once only after every value is ready. Any failure before invocation prevents the remote mutation. This is dispatch atomicity; the remote service remains responsible for its own transaction and rollback behavior.
 
 `persistence` is `none`, `destination-managed`, or `unknown`. `sharing` is `private`, `workspace`, `account`, `external`, or `unknown`. These declarations describe destination behavior for approval copy; they do not grant additional access.
+
+`groupedDelivery` and `browserRelay` default to `true` for an existing protected declaration and are enforced by the secure dispatcher. Set either to `false` when the integration does not support that capability. `toolVerificationRelationships` maps a read-only verification tool to one or more mutation tools using their unprefixed MCP names.
+
+On MCP discovery or reload, EstaCoda validates configured tool names and JSON Pointer patterns against the actual MCP input schemas. Unknown tools, missing or incompatible paths, duplicates, overlapping paths, and risk conflicts leave that server unavailable. Diagnostics report only whether protected delivery, grouped delivery, browser relay, and verification are configured; they do not print protected paths or values.
+
+The reviewed `config.mcp.setup` tool accepts these structured fields. The CLI accepts the equivalent JSON objects through `--protected-tool-arguments-json` and `--tool-verification-relationships-json`.
 
 ### skills
 

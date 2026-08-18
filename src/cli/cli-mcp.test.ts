@@ -112,4 +112,68 @@ describe("cli mcp setup", () => {
       await rm(tmpDir, { recursive: true, force: true });
     }
   });
+
+  it("stores generic protected delivery and verification metadata without credential values", async () => {
+    const tmpDir = await makeTempDir();
+    try {
+      const protectedConfig = {
+        updateRecords: {
+          paths: ["/values/*/value"],
+          handling: { persistence: "destination-managed", sharing: "workspace" },
+          groupedDelivery: true,
+          browserRelay: true
+        }
+      };
+      const initial = await runCliCommand({
+        argv: [
+          "mcp", "setup", "--name", "records", "--command", "records-mcp",
+          "--env-ref", "API_TOKEN=RECORDS_API_TOKEN"
+        ],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+      expect(initial.exitCode).toBe(0);
+      const result = await runCliCommand({
+        argv: [
+          "mcp", "setup", "--name", "records",
+          "--tool-risk-classes", "updateRecords=external-side-effect,readRecords=read-only-network",
+          "--protected-tool-arguments-json", JSON.stringify(protectedConfig),
+          "--tool-verification-relationships-json", JSON.stringify({ readRecords: ["updateRecords"] })
+        ],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.exitCode).toBe(0);
+      const rawConfig = await readFile(profileConfigPath(tmpDir), "utf8");
+      const config = JSON.parse(rawConfig) as {
+        mcpServers?: Record<string, {
+          command?: string;
+          envRefs?: Record<string, string>;
+          protectedToolArguments?: unknown;
+          toolVerificationRelationships?: unknown;
+        }>;
+      };
+      expect(config.mcpServers?.records?.command).toBe("records-mcp");
+      expect(config.mcpServers?.records?.envRefs).toEqual({ API_TOKEN: "RECORDS_API_TOKEN" });
+      expect(config.mcpServers?.records?.protectedToolArguments).toEqual(protectedConfig);
+      expect(config.mcpServers?.records?.toolVerificationRelationships).toEqual({
+        readRecords: ["updateRecords"]
+      });
+      expect(rawConfig).not.toContain("credential-value");
+
+      const status = await runCliCommand({
+        argv: ["mcp", "status"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+      expect(status.output).toContain("protected delivery configured: yes");
+      expect(status.output).toContain("grouped delivery supported: yes");
+      expect(status.output).toContain("browser relay supported: yes");
+      expect(status.output).toContain("verification configured: yes");
+      expect(status.output).not.toContain("/values/*/value");
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
 });

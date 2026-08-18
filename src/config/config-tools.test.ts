@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ModelProfile, ProviderExecutionSummary } from "../contracts/provider.js";
@@ -713,6 +713,50 @@ describe("config.compression.status", () => {
     const tools = createConfigTools({ workspaceRoot: "/tmp/workspace", homeDir: "/tmp/home" });
     expect(tools.map((tool) => tool.name)).toContain("config.compression.status");
     expect(tools.map((tool) => tool.name)).not.toContain("config.compression.setup");
+  });
+});
+
+describe("MCP capability configuration tools", () => {
+  it("exposes reviewed capability fields while keeping status metadata free of secrets and protected paths", async () => {
+    const secret = "mcp-config-secret-sentinel";
+    const homeDir = await configHome({
+      mcpServers: {
+        records: {
+          command: "records-mcp",
+          env: { API_TOKEN: secret },
+          headers: { Authorization: secret },
+          toolRiskClasses: {
+            updateRecords: "external-side-effect",
+            readRecords: "read-only-network"
+          },
+          protectedToolArguments: {
+            updateRecords: {
+              paths: ["/values/*/value"],
+              handling: { persistence: "destination-managed", sharing: "workspace" },
+              groupedDelivery: true,
+              browserRelay: true
+            }
+          },
+          toolVerificationRelationships: { readRecords: ["updateRecords"] }
+        }
+      }
+    });
+    try {
+      const status = await configTool("config.mcp.status", homeDir).run({});
+      const serialized = JSON.stringify(status);
+      expect(status.content).toContain("protected delivery configured: yes");
+      expect(status.content).toContain("verification configured: yes");
+      expect(serialized).not.toContain(secret);
+      expect(serialized).not.toContain("/values/*/value");
+
+      const setup = configTool("config.mcp.setup", homeDir);
+      const schema = JSON.stringify(setup.inputSchema);
+      expect(schema).toContain("protectedToolArguments");
+      expect(schema).toContain("toolVerificationRelationships");
+      expect(schema).toContain("toolRiskClasses");
+    } finally {
+      await rm(homeDir, { recursive: true, force: true });
+    }
   });
 });
 

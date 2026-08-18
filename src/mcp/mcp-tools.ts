@@ -11,8 +11,16 @@ export type MCPServerSnapshot = {
   resourceCount: number;
   promptCount: number;
   tools: string[];
+  capabilities: MCPServerCapabilitySummary;
   available: boolean;
   error?: string;
+};
+
+export type MCPServerCapabilitySummary = {
+  protectedDeliveryConfigured: boolean;
+  groupedDeliverySupported: boolean;
+  browserRelaySupported: boolean;
+  verificationConfigured: boolean;
 };
 
 export type LoadedMCPServer = {
@@ -66,6 +74,8 @@ export async function loadMcpServers(input: {
     try {
       await client.start();
       const allTools = await client.listTools();
+      const capabilityConfigError = validateMcpCapabilityConfiguration(config, allTools);
+      if (capabilityConfigError !== undefined) throw new Error(capabilityConfigError);
       const filteredTools = filterTools(allTools, config);
       const resources = resourcesEnabled(config) && client.capabilities.resources !== undefined
         ? await client.listResources().catch(() => [])
@@ -90,6 +100,7 @@ export async function loadMcpServers(input: {
           resourceCount: resources.length,
           promptCount: prompts.length,
           tools: tools.map((tool) => tool.name),
+          capabilities: summarizeMcpCapabilityConfig(config),
           available: true
         },
         stop: () => client.stop()
@@ -149,6 +160,7 @@ function unavailableServer(name: string, config: MCPServerConfig, error: string)
       resourceCount: 0,
       promptCount: 0,
       tools: [],
+      capabilities: summarizeMcpCapabilityConfig(config),
       available: false,
       error
     },
@@ -165,6 +177,9 @@ function createMcpTool(
   const toolName = prefixTool(serverName, config, tool.name);
   const riskClass = resolveMcpToolRiskClass(config, client.transport, tool.name);
   const protectedConfig = config.protectedToolArguments?.[tool.name];
+  const verificationTargets = config.toolVerificationRelationships?.[tool.name]?.map((target) =>
+    prefixTool(serverName, config, target)
+  );
   const protectedProjection = addProtectedArgumentEnvelopes(tool.inputSchema ?? {
     type: "object",
     additionalProperties: true
@@ -183,12 +198,17 @@ function createMcpTool(
       handling: protectedConfig?.handling ?? { persistence: "unknown", sharing: "unknown" },
       destination: { type: "mcp-argument" as const, serverId: serverName, toolName: tool.name }
     })),
-    ...(protectedProjection.paths.length === 0 ? {} : {
+    ...(protectedProjection.paths.length === 0 && verificationTargets === undefined ? {} : {
       capabilityMetadata: {
-        protectedInput: {
-          groupedDelivery: true,
-          sources: ["browser" as const]
-        }
+        ...(protectedProjection.paths.length === 0 ? {} : {
+          protectedInput: {
+            groupedDelivery: protectedConfig?.groupedDelivery ?? true,
+            sources: protectedConfig?.browserRelay === false ? [] : ["browser" as const]
+          }
+        }),
+        ...(verificationTargets === undefined ? {} : {
+          verification: { verifies: verificationTargets }
+        })
       }
     }),
     isAvailable: () => true,
@@ -197,6 +217,120 @@ function createMcpTool(
       return normalizeMcpResult(result);
     }
   };
+}
+
+export function summarizeMcpCapabilityConfig(
+  config: Pick<MCPServerConfig, "protectedToolArguments" | "toolVerificationRelationships">
+): MCPServerCapabilitySummary {
+  const protectedDeclarations = Object.values(config.protectedToolArguments ?? {});
+  return {
+    protectedDeliveryConfigured: protectedDeclarations.length > 0,
+    groupedDeliverySupported: protectedDeclarations.length > 0 &&
+      protectedDeclarations.every((declaration) => declaration.groupedDelivery !== false),
+    browserRelaySupported: protectedDeclarations.length > 0 &&
+      protectedDeclarations.every((declaration) => declaration.browserRelay !== false),
+    verificationConfigured: Object.keys(config.toolVerificationRelationships ?? {}).length > 0
+  };
+}
+
+export function validateMcpCapabilityConfiguration(
+  config: MCPServerConfig,
+  tools: readonly MCPToolDescriptor[]
+): string | undefined {
+  const byName = new Map(tools.map((tool) => [tool.name, tool]));
+  const transport = config.transport ?? "stdio";
+  for (const toolName of Object.keys(config.toolRiskClasses ?? {})) {
+    if (!byName.has(toolName)) return unknownCapabilityTool(toolName);
+  }
+  for (const [toolName, declaration] of Object.entries(config.protectedToolArguments ?? {})) {
+    const tool = byName.get(toolName);
+    if (tool === undefined) return unknownCapabilityTool(toolName);
+    if (!isMutationMcpRisk(resolveMcpToolRiskClass(config, transport, toolName))) {
+      return `MCP protected argument configuration conflicts with the risk class for tool ${boundedToolName(toolName)}.`;
+    }
+    if (declaration.paths.length === 0 || declaration.paths.length > 8 ||
+      declaration.paths.some((path) => parseProtectedArgumentPattern(path) === undefined) ||
+      new Set(declaration.paths).size !== declaration.paths.length ||
+      protectedPatternsOverlap(declaration.paths)) {
+      return `MCP protected argument configuration is invalid for tool ${boundedToolName(toolName)}.`;
+    }
+    if (declaration.paths.some((path) => !schemaAcceptsProtectedString(tool.inputSchema, path))) {
+      return `MCP protected argument mapping does not match the input schema for tool ${boundedToolName(toolName)}.`;
+    }
+  }
+  for (const [verificationTool, mutationTools] of Object.entries(config.toolVerificationRelationships ?? {})) {
+    if (!byName.has(verificationTool)) return unknownCapabilityTool(verificationTool);
+    if (!isReadMcpRisk(resolveMcpToolRiskClass(config, transport, verificationTool))) {
+      return `MCP verification configuration conflicts with the risk class for tool ${boundedToolName(verificationTool)}.`;
+    }
+    if (mutationTools.length === 0 || new Set(mutationTools).size !== mutationTools.length ||
+      mutationTools.includes(verificationTool)) {
+      return `MCP verification configuration is invalid for tool ${boundedToolName(verificationTool)}.`;
+    }
+    for (const mutationTool of mutationTools) {
+      if (!byName.has(mutationTool)) return unknownCapabilityTool(mutationTool);
+      if (!isMutationMcpRisk(resolveMcpToolRiskClass(config, transport, mutationTool))) {
+        return `MCP verification target conflicts with the risk class for tool ${boundedToolName(mutationTool)}.`;
+      }
+    }
+  }
+  return undefined;
+}
+
+function schemaAcceptsProtectedString(schema: unknown, path: string): boolean {
+  const segments = parseProtectedArgumentPattern(path);
+  if (segments === undefined || !isRecord(schema)) return false;
+  let node: Record<string, unknown> = schema;
+  for (const [index, segment] of segments.entries()) {
+    if (segment === "*") {
+      if (index === segments.length - 1 || node.type !== "array" || !isRecord(node.items)) return false;
+      node = node.items;
+      continue;
+    }
+    if (!isRecord(node.properties) || !Object.hasOwn(node.properties, segment)) return false;
+    const property = node.properties[segment];
+    if (!isRecord(property)) return false;
+    node = property;
+  }
+  return schemaNodeAcceptsString(node);
+}
+
+function schemaNodeAcceptsString(node: Record<string, unknown>): boolean {
+  if (node.readOnly === true || node.const !== undefined || node.$ref !== undefined || Array.isArray(node.enum)) return false;
+  if (node.type === undefined) {
+    const alternatives = Array.isArray(node.oneOf) ? node.oneOf : Array.isArray(node.anyOf) ? node.anyOf : undefined;
+    return alternatives === undefined || alternatives.some((candidate) => isRecord(candidate) && schemaNodeAcceptsString(candidate));
+  }
+  return node.type === "string" || (Array.isArray(node.type) && node.type.includes("string"));
+}
+
+function protectedPatternsOverlap(paths: readonly string[]): boolean {
+  const parsed = paths.map((path) => parseProtectedArgumentPattern(path)!);
+  return parsed.some((candidate, index) => parsed.some((other, otherIndex) =>
+    index !== otherIndex && candidate.length < other.length &&
+    candidate.every((segment, segmentIndex) => segment === other[segmentIndex])
+  ));
+}
+
+function isReadMcpRisk(riskClass: ToolRiskClass): boolean {
+  return riskClass === "read-only-local" || riskClass === "read-only-network";
+}
+
+function isMutationMcpRisk(riskClass: ToolRiskClass): boolean {
+  return riskClass === "workspace-write" || riskClass === "external-side-effect" ||
+    riskClass === "destructive-local" || riskClass === "shared-state-mutation" || riskClass === "spend-money";
+}
+
+function unknownCapabilityTool(toolName: string): string {
+  return `MCP capability configuration references an unknown tool ${boundedToolName(toolName)}.`;
+}
+
+function boundedToolName(toolName: string): string {
+  return JSON.stringify(toolName.slice(0, 160));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function addProtectedArgumentEnvelopes(

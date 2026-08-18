@@ -943,6 +943,7 @@ describe("ToolExecutor tool-call metadata persistence", () => {
     const tool: RegisteredTool = {
       ...createEchoTool("trusted.api.call"),
       protectedArguments: [{ path: "/auth/token", handling: { persistence: "none", sharing: "private" } }],
+      capabilityMetadata: { protectedInput: { groupedDelivery: true, sources: ["browser"] } },
       run: async (input) => {
         observed.push(input);
         return { ok: true, content: `remote echoed ${String(input.auth?.token)}`, metadata: { echoed: input.auth?.token } };
@@ -993,6 +994,7 @@ describe("ToolExecutor tool-call metadata persistence", () => {
     const tool: RegisteredTool = {
       ...createEchoTool("trusted.browser-relay"),
       protectedArguments: [{ path: "/auth/token", handling: { persistence: "none", sharing: "private" } }],
+      capabilityMetadata: { protectedInput: { groupedDelivery: true, sources: ["browser"] } },
       run,
     };
     const handler = vi.fn() as unknown as SecureInputTransferRequestHandler;
@@ -1070,6 +1072,7 @@ describe("ToolExecutor tool-call metadata persistence", () => {
       protectedArguments: [
         { path: "/values/*/value", handling: { persistence: "destination-managed", sharing: "workspace" } }
       ],
+      capabilityMetadata: { protectedInput: { groupedDelivery: true, sources: ["browser"] } },
       run
     };
     const handler = vi.fn() as unknown as SecureInputTransferRequestHandler;
@@ -1142,6 +1145,58 @@ describe("ToolExecutor tool-call metadata persistence", () => {
     expect(await persistedExecutionState(sessionDb, trajectoryRecorder)).not.toContain(secrets[1]);
   });
 
+  it("enforces registered grouped-delivery and browser-relay capabilities before collection", async () => {
+    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "unexpected" }));
+    const browserSource = (ref: string) => ({
+      type: "browser-field" as const,
+      sessionId: "browser-1",
+      ref,
+      identity: { documentEpoch: 1, actionRevision: 1, observationId: 1 },
+      expectedOrigin: "https://portal.example.com",
+      tabRef: "@t1"
+    });
+    const groupedTool: RegisteredTool = {
+      ...createEchoTool("trusted.no-group"),
+      protectedArguments: [{
+        path: "/values/*/value",
+        handling: { persistence: "destination-managed", sharing: "workspace" }
+      }],
+      capabilityMetadata: { protectedInput: { groupedDelivery: false, sources: ["browser"] } },
+      run
+    };
+    const browserTool: RegisteredTool = {
+      ...createEchoTool("trusted.no-browser"),
+      protectedArguments: [{ path: "/token", handling: { persistence: "none", sharing: "private" } }],
+      capabilityMetadata: { protectedInput: { groupedDelivery: true, sources: [] } },
+      run
+    };
+    const { executor } = await setupExecutor({ tools: [groupedTool, browserTool] });
+
+    const grouped = await executor.executeTool({
+      tool: groupedTool.name,
+      input: {
+        values: [
+          { value: { protectedInput: { kind: "api-key", source: browserSource("@e1") } } },
+          { value: { protectedInput: { kind: "client-secret", source: browserSource("@e2") } } }
+        ]
+      },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      onSecureInputRequest: vi.fn()
+    });
+    const browser = await executor.executeTool({
+      tool: browserTool.name,
+      input: { token: { protectedInput: { kind: "api-key", source: browserSource("@e3") } } },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      onSecureInputRequest: vi.fn()
+    });
+
+    expect(grouped?.result).toMatchObject({ ok: false, content: expect.stringContaining("Grouped") });
+    expect(browser?.result).toMatchObject({ ok: false, content: expect.stringContaining("browser-source") });
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("rejects undeclared and ambiguously declared protected envelopes before dispatch", async () => {
     const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "unexpected" }));
     const source = {
@@ -1158,7 +1213,12 @@ describe("ToolExecutor tool-call metadata persistence", () => {
         { path: "/values/*/value", handling: { persistence: "none" as const, sharing: "private" as const } },
       ],
     ]) {
-      const tool: RegisteredTool = { ...createEchoTool("trusted.invalid-group"), protectedArguments, run };
+      const tool: RegisteredTool = {
+        ...createEchoTool("trusted.invalid-group"),
+        protectedArguments,
+        capabilityMetadata: { protectedInput: { groupedDelivery: true, sources: ["browser"] } },
+        run
+      };
       const { executor } = await setupExecutor({ tools: [tool] });
       const execution = await executor.executeTool({
         tool: tool.name,

@@ -656,8 +656,19 @@ async function runToolWithProtectedArguments(
   if (prepared.some((entry) => entry.descriptor === undefined)) {
     return protectedArgumentFailure("Protected tool argument metadata is invalid.");
   }
+  const protectedCapability = tool.capabilityMetadata?.protectedInput;
+  if (protectedCapability === undefined) {
+    return protectedArgumentFailure("Protected tool argument capability metadata is unavailable.");
+  }
+  if (prepared.some((entry) => entry.descriptor!.source !== undefined) &&
+    !protectedCapability.sources.includes("browser")) {
+    return protectedArgumentFailure("Protected browser-source relay is not supported by this tool.");
+  }
 
   if (prepared.length > 1) {
+    if (!protectedCapability.groupedDelivery) {
+      return protectedArgumentFailure("Grouped protected tool argument delivery is not supported by this tool.");
+    }
     if (prepared.some((entry) => entry.descriptor!.source === undefined)) {
       return protectedArgumentFailure("Grouped protected tool arguments require verified sources for atomic delivery.");
     }

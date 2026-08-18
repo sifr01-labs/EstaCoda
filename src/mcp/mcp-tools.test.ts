@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { MCPProtectedToolArgumentsConfig } from "../config/runtime-config.js";
 import {
   loadMcpServers,
   normalizeMcpResult,
@@ -124,68 +125,215 @@ describe("loadMcpServers environment references", () => {
 });
 
 describe("MCP protected argument declarations", () => {
-  it("accepts protected envelopes only for reviewed configured argument paths", async () => {
-    const fetch = async (_url: string, init?: { body?: string }) => {
-      const payload = JSON.parse(init?.body ?? "{}") as { id?: number; method?: string };
-      const result = payload.method === "initialize"
-        ? { capabilities: { tools: {} } }
-        : payload.method === "tools/list"
-          ? {
-              tools: [{
-                name: "authenticate",
-                inputSchema: {
-                  type: "object",
-                  properties: {
-                    values: {
-                      type: "array",
-                      items: {
-                        type: "object",
-                        properties: { value: { type: "string" } },
-                        required: ["value"]
-                      }
+  const capabilityFetch = async (_url: string, init?: { body?: string }) => {
+    const payload = JSON.parse(init?.body ?? "{}") as { id?: number; method?: string };
+    const result = payload.method === "initialize"
+      ? { capabilities: { tools: {} } }
+      : payload.method === "tools/list"
+        ? {
+            tools: [{
+              name: "authenticate",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  values: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: { value: { type: "string" } },
+                      required: ["value"]
                     }
                   },
-                  required: ["values"]
-                }
-              }]
-            }
-          : {};
-      return {
-        ok: true,
-        status: 200,
-        statusText: "OK",
-        json: async () => ({ jsonrpc: "2.0", id: payload.id, result }),
-        text: async () => ""
-      };
+                  metadata: {
+                    type: "object",
+                    properties: { secret: { type: "string" } }
+                  }
+                },
+                required: ["values"]
+              }
+            }, {
+              name: "verifyAuthentication",
+              inputSchema: { type: "object", properties: {} }
+            }]
+          }
+        : {};
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({ jsonrpc: "2.0", id: payload.id, result }),
+      text: async () => ""
     };
+  };
+
+  it("leaves ordinary MCP tools unchanged when no capability mappings are configured", async () => {
+    const [server] = await loadMcpServers({
+      servers: {
+        ordinary: {
+          transport: "http",
+          url: "https://mcp.example.test"
+        }
+      },
+      fetch: capabilityFetch
+    });
+
+    expect(server?.snapshot).toMatchObject({
+      available: true,
+      capabilities: {
+        protectedDeliveryConfigured: false,
+        groupedDeliverySupported: false,
+        browserRelaySupported: false,
+        verificationConfigured: false
+      }
+    });
+    expect(server?.tools).toHaveLength(2);
+    for (const tool of server?.tools ?? []) {
+      expect(tool.protectedArguments).toEqual([]);
+      expect(tool.capabilityMetadata).toBeUndefined();
+      expect(JSON.stringify(tool.inputSchema)).not.toContain("protectedInput");
+    }
+    await server?.stop();
+  });
+
+  it("registers validated protected delivery and verification metadata from real MCP configuration", async () => {
     const [server] = await loadMcpServers({
       servers: {
         trusted: {
           transport: "http",
           url: "https://mcp.example.test",
+          toolRiskClasses: {
+            authenticate: "external-side-effect",
+            verifyAuthentication: "read-only-network"
+          },
           protectedToolArguments: {
             authenticate: {
-              paths: ["/values/*/value", "/missing/value"],
-              handling: { persistence: "destination-managed", sharing: "workspace" }
+              paths: ["/values/*/value", "/metadata/secret"],
+              handling: { persistence: "destination-managed", sharing: "workspace" },
+              groupedDelivery: true,
+              browserRelay: true
             }
+          },
+          toolVerificationRelationships: {
+            verifyAuthentication: ["authenticate"]
           }
         }
       },
-      fetch
+      fetch: capabilityFetch
     });
-    const tool = server?.tools[0];
+    const tool = server?.tools.find((candidate) => candidate.name.endsWith("authenticate"));
+    const verifier = server?.tools.find((candidate) => candidate.name.endsWith("verifyAuthentication"));
     expect(tool?.protectedArguments).toEqual([{
       path: "/values/*/value",
+      handling: { persistence: "destination-managed", sharing: "workspace" },
+      destination: { type: "mcp-argument", serverId: "trusted", toolName: "authenticate" }
+    }, {
+      path: "/metadata/secret",
       handling: { persistence: "destination-managed", sharing: "workspace" },
       destination: { type: "mcp-argument", serverId: "trusted", toolName: "authenticate" }
     }]);
     expect(tool?.capabilityMetadata).toEqual({
       protectedInput: { groupedDelivery: true, sources: ["browser"] }
     });
+    expect(verifier?.capabilityMetadata).toEqual({
+      verification: { verifies: ["mcp.trusted.authenticate"] }
+    });
+    expect(server?.snapshot.capabilities).toEqual({
+      protectedDeliveryConfigured: true,
+      groupedDeliverySupported: true,
+      browserRelaySupported: true,
+      verificationConfigured: true
+    });
     expect(JSON.stringify(tool?.inputSchema)).toContain("protectedInput");
     expect(JSON.stringify(tool?.inputSchema)).toContain("expectedOrigin");
     expect(JSON.stringify(tool?.inputSchema)).toContain("documentEpoch");
     expect(JSON.stringify(tool?.inputSchema)).toContain('"type":"string"');
     await server?.stop();
+  });
+
+  it("rejects unknown tools and mappings that do not resolve to compatible schema arguments", async () => {
+    const invalidDeclarations: Array<Record<string, MCPProtectedToolArgumentsConfig>> = [{
+      missingTool: {
+        paths: ["/value"],
+        handling: { persistence: "none" as const, sharing: "private" as const }
+      }
+    }, {
+      authenticate: {
+        paths: ["/missing/value"],
+        handling: { persistence: "none" as const, sharing: "private" as const }
+      }
+    }, {
+      authenticate: {
+        paths: ["/values"],
+        handling: { persistence: "none" as const, sharing: "private" as const }
+      }
+    }, {
+      authenticate: {
+        paths: ["/__proto__/value"],
+        handling: { persistence: "none" as const, sharing: "private" as const }
+      }
+    }, {
+      authenticate: {
+        paths: ["/metadata/secret", "/metadata/secret"],
+        handling: { persistence: "none" as const, sharing: "private" as const }
+      }
+    }, {
+      authenticate: {
+        paths: ["/metadata", "/metadata/secret"],
+        handling: { persistence: "none" as const, sharing: "private" as const }
+      }
+    }];
+    for (const protectedToolArguments of invalidDeclarations) {
+      const [server] = await loadMcpServers({
+        servers: {
+          trusted: {
+            transport: "http",
+            url: "https://mcp.example.test",
+            protectedToolArguments
+          }
+        },
+        fetch: capabilityFetch
+      });
+      expect(server?.snapshot).toMatchObject({ available: false });
+      expect(server?.snapshot.error).toMatch(/unknown tool|invalid|does not match the input schema/u);
+      expect(server?.snapshot.error).not.toContain("/");
+      expect(server?.tools).toEqual([]);
+    }
+  });
+
+  it("rejects missing, duplicate, or risk-conflicting verification relationships", async () => {
+    const configs = [{
+      toolRiskClasses: {
+        authenticate: "external-side-effect" as const,
+        verifyAuthentication: "read-only-network" as const
+      },
+      toolVerificationRelationships: { verifyAuthentication: ["missingMutation"] }
+    }, {
+      toolRiskClasses: {
+        authenticate: "external-side-effect" as const,
+        verifyAuthentication: "read-only-network" as const
+      },
+      toolVerificationRelationships: { verifyAuthentication: ["authenticate", "authenticate"] }
+    }, {
+      toolRiskClasses: {
+        authenticate: "external-side-effect" as const,
+        verifyAuthentication: "external-side-effect" as const
+      },
+      toolVerificationRelationships: { verifyAuthentication: ["authenticate"] }
+    }];
+    for (const config of configs) {
+      const [server] = await loadMcpServers({
+        servers: {
+          trusted: {
+            transport: "http",
+            url: "https://mcp.example.test",
+            ...config
+          }
+        },
+        fetch: capabilityFetch
+      });
+      expect(server?.snapshot.available).toBe(false);
+      expect(server?.snapshot.error).toMatch(/verification|unknown tool/u);
+      expect(server?.tools).toEqual([]);
+    }
   });
 });

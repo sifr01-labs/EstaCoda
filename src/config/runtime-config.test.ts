@@ -19,7 +19,8 @@ import {
   setupWebConfig,
   setupVoiceConfig,
   setupBudgetConfig,
-  setupTelegramConfig
+  setupTelegramConfig,
+  setupMcpConfig
 } from "./runtime-config.js";
 import { DEFAULT_DELEGATION_CONFIG } from "./delegation-defaults.js";
 import { DEFAULT_MEMORY_CONFIG } from "./memory-config.js";
@@ -162,6 +163,80 @@ async function withHomeEnv<T>(
     }
   }
 }
+
+describe("setupMcpConfig capability validation", () => {
+  it("rejects duplicate or overlapping protected paths and conflicting verification risks before writing", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "estacoda-mcp-config-"));
+    const base = {
+      workspaceRoot: homeDir,
+      homeDir
+    };
+    try {
+      await expect(setupMcpConfig({
+        ...base,
+        input: {
+          name: "records",
+          command: "records-mcp",
+          protectedToolArguments: {
+            update: {
+              paths: ["/auth", "/auth/token"],
+              handling: { persistence: "none", sharing: "private" }
+            }
+          }
+        }
+      })).rejects.toThrow(/Invalid protected argument declaration/u);
+      await expect(setupMcpConfig({
+        ...base,
+        input: {
+          name: "records",
+          command: "records-mcp",
+          toolRiskClasses: { verify: "external-side-effect", update: "external-side-effect" },
+          toolVerificationRelationships: { verify: ["update"] }
+        }
+      })).rejects.toThrow(/Invalid verification relationship/u);
+      await expect(readFile(profileConfigPath(homeDir), "utf8")).rejects.toThrow();
+    } finally {
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed on explicitly empty structured capability mappings", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-mcp-config-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    try {
+      await writeFile(profileConfigPath(workspace), JSON.stringify({
+        model: { provider: "openai", id: "gpt-4o" },
+        mcpServers: {
+          records: {
+            command: "records-mcp",
+            protectedToolArguments: {
+              update: {
+                paths: [],
+                handling: { persistence: "none", sharing: "private" }
+              }
+            }
+          }
+        }
+      }));
+      await expect(loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace }))
+        .rejects.toThrow(/Invalid MCP protected argument configuration/u);
+
+      await writeFile(profileConfigPath(workspace), JSON.stringify({
+        model: { provider: "openai", id: "gpt-4o" },
+        mcpServers: {
+          records: {
+            command: "records-mcp",
+            toolVerificationRelationships: { verify: [] }
+          }
+        }
+      }));
+      await expect(loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace }))
+        .rejects.toThrow(/Invalid MCP verification configuration/u);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("normalizeAuxiliaryModels", () => {
   it("fills missing tasks with auto/enabled defaults", () => {
@@ -3297,7 +3372,7 @@ describe("loadRuntimeConfig profile loading", () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
-  it("loads only syntactically bounded reviewed MCP protected argument declarations", async () => {
+  it("normalizes legacy MCP protected arguments while preserving structured declarations for discovery validation", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
     await writeFile(profileConfigPath(workspace), JSON.stringify({
@@ -3309,9 +3384,14 @@ describe("loadRuntimeConfig profile loading", () => {
             authenticate: ["credential", "nested.token", "credential"],
             updateRecords: {
               paths: ["/values/*/value", "/values/*/value", "/__proto__/value", "/values/0/value"],
-              handling: { persistence: "destination-managed", sharing: "workspace" }
+              handling: { persistence: "destination-managed", sharing: "workspace" },
+              groupedDelivery: false,
+              browserRelay: true
             },
             invalid: ["__proto__.token", "token[0]"]
+          },
+          toolVerificationRelationships: {
+            verifyRecords: ["updateRecords"]
           }
         }
       }
@@ -3324,9 +3404,14 @@ describe("loadRuntimeConfig profile loading", () => {
         handling: { persistence: "unknown", sharing: "unknown" }
       },
       updateRecords: {
-        paths: ["/values/*/value"],
-        handling: { persistence: "destination-managed", sharing: "workspace" }
+        paths: ["/values/*/value", "/values/*/value", "/__proto__/value", "/values/0/value"],
+        handling: { persistence: "destination-managed", sharing: "workspace" },
+        groupedDelivery: false,
+        browserRelay: true
       }
+    });
+    expect(loaded.mcp.servers.trusted?.toolVerificationRelationships).toEqual({
+      verifyRecords: ["updateRecords"]
     });
     await rm(workspace, { recursive: true, force: true });
   });
