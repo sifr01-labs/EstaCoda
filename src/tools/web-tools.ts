@@ -24,7 +24,7 @@ import { resolveGlobalStateHome } from "../config/profile-home.js";
 import { createBrowserDebugSession, type BrowserDebugSession } from "../browser/browser-debug.js";
 import { createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
 import { browserSessionStateReason } from "../browser/session-state.js";
-import { browserTargetFailureMetadata, isBrowserStateIdentity } from "../browser/browser-locator.js";
+import { BrowserTargetError, browserTargetFailureMetadata, isBrowserStateIdentity } from "../browser/browser-locator.js";
 import { isBrowserSnapshotElementInteractable } from "../browser/browser-interactability.js";
 import { isActionableBrowserRole } from "../browser/snapshot-state.js";
 import { deriveBrowserSessionKey } from "../browser/session-key.js";
@@ -1371,7 +1371,7 @@ function createBrowserActionTool(input: {
       if ("error" in snapshot) {
         return {
           ok: false,
-          content: snapshot.error instanceof Error ? snapshot.error.message : `${input.name} failed.`,
+          content: renderBrowserActionFailure(snapshot.error, `${input.name} failed.`),
           metadata: browserFailureMetadata(input.browserBackend, snapshot.error)
         };
       }
@@ -1546,9 +1546,10 @@ function browserActionSecurityFailure(
 ): ToolResult {
   return {
     ok: false,
-    content: error instanceof Error
-      ? error.message
-      : "Browser action target could not be bound to the state reviewed by security policy.",
+    content: renderBrowserActionFailure(
+      error,
+      "Browser action target could not be bound to the state reviewed by security policy."
+    ),
     metadata: {
       ...browserFailureMetadata(backend, error, "browser-action-security-binding-failed"),
       reason: browserTargetFailureMetadata(error)?.reason ?? "browser-action-security-binding-failed"
@@ -2270,16 +2271,24 @@ function renderBrowserActionCurrentState(snapshot: BrowserSnapshot): string {
       "Page content and actionable refs are intentionally suppressed.",
     ].join("\n");
   }
-  const refs = (snapshot.elements ?? [])
-    .filter((element) => isBrowserSnapshotElementInteractable(element) && isActionableBrowserRole(element.role))
-    .slice(0, 20);
+  const actionable = (snapshot.elements ?? [])
+    .filter((element) => isBrowserSnapshotElementInteractable(element) && isActionableBrowserRole(element.role));
+  const targetRegion = snapshot.actionDelta?.target?.regionText ?? snapshot.actionDelta?.target?.withinText;
+  const related = targetRegion === undefined
+    ? []
+    : actionable.filter((element) => browserRegionMatchesTarget(element, targetRegion));
+  const refs = [...related, ...actionable.filter((element) => !related.includes(element))].slice(0, 20);
   return [
     `Identity: ${renderBrowserIdentity(snapshot.identity)}`,
     `URL: ${redactUrlForMetadata(snapshot.url)}`,
     snapshot.title === undefined ? undefined : `Title: ${redactSensitiveText(snapshot.title).slice(0, 240)}`,
     snapshot.readiness === undefined ? undefined : `Readiness: ${snapshot.readiness}`,
     snapshot.tab === undefined ? undefined : `Controlled tab: ${renderSafeBrowserTab(snapshot.tab)}`,
-    refs.length === 0 ? "Actionable refs: none" : "Current actionable refs:",
+    refs.length === 0
+      ? "Actionable refs: none"
+      : related.length === 0
+        ? "Current actionable refs:"
+        : `Current actionable refs (related region first: ${JSON.stringify(redactSensitiveText(targetRegion!).slice(0, 240))}):`,
     ...refs.map((element) => [
       element.ref,
       `identity=${JSON.stringify(snapshot.identity)}`,
@@ -2287,8 +2296,19 @@ function renderBrowserActionCurrentState(snapshot: BrowserSnapshot): string {
       element.role,
       element.name === undefined ? undefined : JSON.stringify(redactSensitiveText(element.name).slice(0, 160)),
       element.label === undefined ? undefined : `label=${JSON.stringify(redactSensitiveText(element.label).slice(0, 160))}`,
+      element.regionText === undefined ? undefined : `region=${JSON.stringify(redactSensitiveText(element.regionText).slice(0, 240))}`,
     ].filter((part): part is string => part !== undefined).join(" ")),
   ].filter((line): line is string => line !== undefined).join("\n");
+}
+
+function browserRegionMatchesTarget(
+  element: NonNullable<BrowserSnapshot["elements"]>[number],
+  targetRegion: string
+): boolean {
+  const elementRegion = element.regionText ?? element.withinText;
+  if (elementRegion === undefined) return false;
+  const safeElementRegion = redactSensitiveText(elementRegion);
+  return safeElementRegion === targetRegion || safeElementRegion.startsWith(targetRegion);
 }
 
 function renderDeltaElement(element: BrowserActionDeltaElement): string {
@@ -2304,7 +2324,7 @@ function renderBrowserFindResult(result: BrowserFindResult): string {
     return [
       heading,
       "Nearby current-document candidates (not exact matches; inspect structure before acting):",
-      ...result.nearbyCandidates!.map(renderBrowserLocatorCandidate)
+      ...renderBrowserCandidateRegions(result.nearbyCandidates!)
     ].join("\n");
   }
   const heading = result.status === "ambiguous"
@@ -2319,8 +2339,43 @@ function renderBrowserLocatorCandidate(candidate: BrowserLocatorCandidate): stri
     candidate.role,
     candidate.name === undefined ? undefined : JSON.stringify(candidate.name),
     candidate.label === undefined ? undefined : `label=${JSON.stringify(candidate.label)}`,
-    candidate.withinText === undefined ? undefined : `within=${JSON.stringify(candidate.withinText)}`
+    candidate.withinText === undefined ? undefined : `within=${JSON.stringify(candidate.withinText)}`,
+    candidate.regionText === undefined ? undefined : `region=${JSON.stringify(candidate.regionText)}`
   ].filter((part): part is string => part !== undefined).join(" ");
+}
+
+function renderBrowserActionFailure(error: unknown, fallback: string): string {
+  if (!(error instanceof BrowserTargetError)) return error instanceof Error ? error.message : fallback;
+  return [
+    error.message,
+    error.nearbyCandidates.length === 0
+      ? "No action was dispatched."
+      : "No action was dispatched. Grounded current-document alternatives:",
+    ...renderBrowserCandidateRegions(error.nearbyCandidates)
+  ].join("\n");
+}
+
+function renderBrowserCandidateRegions(candidates: readonly BrowserLocatorCandidate[]): string[] {
+  const regions = new Map<string, BrowserLocatorCandidate[]>();
+  const ungrouped: BrowserLocatorCandidate[] = [];
+  for (const candidate of candidates) {
+    const region = candidate.regionText ?? candidate.withinText;
+    if (region === undefined || region.trim().length === 0) {
+      ungrouped.push(candidate);
+      continue;
+    }
+    const existing = regions.get(region) ?? [];
+    existing.push(candidate);
+    regions.set(region, existing);
+  }
+  return [
+    ...[...regions.entries()].flatMap(([region, actions]) => [
+      `Region: ${JSON.stringify(region)}`,
+      "Actions:",
+      ...actions.map(renderBrowserLocatorCandidate)
+    ]),
+    ...ungrouped.map(renderBrowserLocatorCandidate)
+  ];
 }
 
 function browserLocatorSchema(): Record<string, unknown> {

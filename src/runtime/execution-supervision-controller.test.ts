@@ -14,9 +14,9 @@ describe("ExecutionSupervisionController", () => {
     await supervision.initialize();
     await supervision.initialize();
     expect(supervision.consumePromptState()).toEqual({
-      browserNoProgressNudge: false,
-      browserActionRecovery: false,
-      browserTabsAllowed: false,
+      browserEvidenceNudge: false,
+      browserRetargetNudge: false,
+      suppressedBrowserTools: [],
       toolLoopProgressNudge: false
     });
     expect(supervision.observeReasoningOnly()).toMatchObject({
@@ -74,45 +74,50 @@ describe("ExecutionSupervisionController", () => {
     });
   });
 
-  it("owns browser semantic no-progress nudging and its deterministic stop receipt", async () => {
+  it("owns evidence-aware browser nudging, focused suppression, and its deterministic stop receipt", async () => {
     const { supervision } = createSupervision({ maxRepeatedBrowserObservations: 3 });
     const snapshot = pageSnapshot(identity(1, 1, 1), "Account", []);
 
     supervision.assessProgress([snapshotExecution("snapshot-1", snapshot)]);
     supervision.assessProgress([snapshotExecution("snapshot-2", snapshot)]);
-    expect(supervision.consumePromptState().browserNoProgressNudge).toBe(true);
-    const recovery = supervision.assessProgress([snapshotExecution("snapshot-3", snapshot)]);
-
-    expect(recovery.browserObservation).toMatchObject({ count: 3, shouldRecover: true, shouldStop: false });
-    expect(recovery.terminationCause).toBeUndefined();
     expect(supervision.consumePromptState()).toMatchObject({
-      browserActionRecovery: true,
-      browserTabsAllowed: true
+      browserEvidenceNudge: true,
+      browserRetargetNudge: false,
+      suppressedBrowserTools: ["browser.snapshot"]
     });
-    const assessment = supervision.assessProgress([]);
-    expect(assessment.browserObservation).toMatchObject({ count: 4, shouldStop: true });
+    const assessment = supervision.assessProgress([snapshotExecution("snapshot-3", snapshot)]);
+    expect(assessment.browserObservation).toMatchObject({ count: 2, shouldStop: true });
     expect(assessment.terminationCause).toBe("browser_no_progress");
     expect(supervision.browserNoProgressStopReceipt(providerExecution()).response?.content).toContain(
-      "repeated observations showed no state change"
+      "repeated without a new grounded strategy"
     );
   });
 
-  it("does not re-expose browser.tabs when current complete inventory is already known", () => {
-    const { supervision } = createSupervision({
-      maxRepeatedBrowserObservations: 3,
-      hasCurrentBrowserTabInventory: true
-    });
-    const snapshot = pageSnapshot(identity(1, 1, 1), "Account", []);
+  it("owns one bounded retarget prompt when target resolution dispatches no action", () => {
+    const { supervision } = createSupervision({ maxRepeatedBrowserObservations: 3 });
+    const failedTarget: ToolExecutionRecord = {
+      tool: toolDefinition("browser.click"),
+      input: { locator: { text: "TikTok Connect" } },
+      decision: "allow",
+      riskClass: "read-only-network",
+      result: {
+        ok: false,
+        content: "Browser locator did not match a current element.",
+        metadata: {
+          reason: "browser-target-not-found",
+          currentIdentity: identity(1, 1, 1)
+        }
+      }
+    };
 
-    supervision.assessProgress([snapshotExecution("snapshot-1", snapshot)]);
-    supervision.assessProgress([snapshotExecution("snapshot-2", snapshot)]);
-    supervision.consumePromptState();
-    supervision.assessProgress([snapshotExecution("snapshot-3", snapshot)]);
+    expect(supervision.assessProgress([failedTarget]).terminationCause).toBeUndefined();
 
     expect(supervision.consumePromptState()).toMatchObject({
-      browserActionRecovery: true,
-      browserTabsAllowed: false
+      browserEvidenceNudge: true,
+      browserRetargetNudge: true,
+      suppressedBrowserTools: []
     });
+    expect(supervision.assessProgress([failedTarget]).terminationCause).toBe("browser_no_progress");
   });
 
   it("owns tool-loop progress nudging and stopping without Mission state", async () => {
@@ -222,7 +227,6 @@ function createSupervision(input: {
   maxNoProgressIterations?: number;
   locale?: "en" | "ar";
   onEvent?: RuntimeEventSink;
-  hasCurrentBrowserTabInventory?: boolean;
 } = {}) {
   const recordAuthenticationEvidenceAssessment = vi.fn(async () => undefined);
   return {
@@ -237,7 +241,6 @@ function createSupervision(input: {
       maxNoProgressIterations: input.maxNoProgressIterations ?? 6,
       runRecorder: { recordAuthenticationEvidenceAssessment },
       onEvent: input.onEvent,
-      hasCurrentBrowserTabInventory: () => input.hasCurrentBrowserTabInventory === true,
     })
   };
 }

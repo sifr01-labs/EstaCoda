@@ -142,6 +142,35 @@ describe("browser action settling", () => {
     expect(delta.outcome).toBe("no-change");
   });
 
+  it("preserves the grounded target region for no-change recovery", () => {
+    const current = snapshot({ actionRevision: 3 });
+    const delta = createBrowserActionDelta({
+      before: current,
+      after: current,
+      waitCondition: "dom-stable",
+      conditionMet: true,
+      timedOut: false,
+      target: {
+        ref: "@e7",
+        identity: current.identity,
+        tabRef: "@t1",
+        role: "button",
+        name: "Edit",
+        regionText: "TikTok Connect Callback URL Edit Delete"
+      }
+    });
+
+    expect(delta).toMatchObject({
+      outcome: "no-change",
+      target: {
+        ref: "@e7",
+        role: "button",
+        name: "Edit",
+        regionText: "TikTok Connect Callback URL Edit Delete"
+      }
+    });
+  });
+
   it("preserves a dispatched action when post-action settlement cannot be verified", () => {
     const before = snapshot({ actionRevision: 3, documentEpoch: 2, url: "https://example.com/apps" });
     const latest = snapshot({

@@ -25,162 +25,342 @@ const BROWSER_ACTION_TOOLS = new Set([
   "browser.dialog",
 ]);
 
+const WHOLE_STATE_OBSERVATIONS = new Set([
+  "browser.snapshot",
+  "browser.tabs",
+  "browser.get_images",
+  "browser.console",
+  "browser.screenshot",
+]);
+
+const TARGET_FAILURE_REASONS = new Set([
+  "browser-target-not-found",
+  "browser-target-ambiguous",
+  "browser-target-hidden",
+  "browser-target-disabled",
+  "browser-target-not-interactable",
+  "stale-browser-ref",
+  "browser-ref-wrong-session",
+  "browser-ref-wrong-tab",
+]);
+
 export type BrowserObservationAssessment = {
   tool: string;
   count: number;
+  evidenceAdvanced: boolean;
+  actionDispatched: boolean;
   shouldNudge: boolean;
-  shouldRecover: boolean;
+  shouldRetarget: boolean;
   shouldStop: boolean;
-  tabInventoryObserved: boolean;
+  suppressedTools: string[];
 } | undefined;
 
-export function isBrowserActionTool(tool: string): boolean {
-  return BROWSER_ACTION_TOOLS.has(tool);
-}
-
 /**
- * Tracks browser observation work that does not change semantic page/tab state.
- * Alternating read tools and blocked observations cannot reset the guard.
- * Fingerprints are held only in memory and never exposed in events or results.
+ * Supervises browser work from trusted execution results without treating an
+ * unchanged page as proof that the agent learned nothing. Fingerprints remain
+ * bounded, in memory, and are never exposed or persisted.
  */
 export class BrowserObservationGuard {
-  readonly #limit: number;
-  #lastStateFingerprint: string | undefined;
+  readonly #repeatLimit: number;
+  readonly #seenEvidence = new Set<string>();
+  readonly #suppressedTools = new Set<string>();
+  readonly #ineffectiveActionSignatures = new Set<string>();
+  readonly #targetFailureSignatures = new Set<string>();
   #noProgressCount = 0;
+  #retargetUsed = false;
 
   constructor(limit: number) {
-    this.#limit = Math.max(2, Math.floor(limit));
+    this.#repeatLimit = Math.max(2, Math.floor(limit));
   }
 
-  observe(
-    executions: ToolExecutionRecord[],
-    options: { actionRecovery?: boolean } = {}
-  ): BrowserObservationAssessment {
-    const successfulActions = executions.filter((execution) =>
-      execution.result?.ok === true && BROWSER_ACTION_TOOLS.has(execution.tool.name)
+  observe(executions: readonly ToolExecutionRecord[]): BrowserObservationAssessment {
+    const browserExecutions = executions.filter((execution) =>
+      BROWSER_OBSERVATION_TOOLS.has(execution.tool.name) || BROWSER_ACTION_TOOLS.has(execution.tool.name)
     );
-    const unchangedActions = successfulActions.filter(isExplicitNoChangeBrowserAction);
-    if (successfulActions.length > unchangedActions.length) {
-      this.#reset();
+    if (browserExecutions.length === 0) return undefined;
+
+    const changedAction = browserExecutions.find(isStateChangingBrowserAction);
+    if (changedAction !== undefined) {
+      this.#resetAfterProgress();
       return undefined;
     }
 
-    if (options.actionRecovery === true) {
-      const tabInventoryObserved = executions.length > 0 && executions.every((execution) =>
-        execution.tool.name === "browser.tabs" && execution.result?.ok === true
-      );
-      if (tabInventoryObserved) {
-        return {
-          tool: "browser.tabs",
-          count: this.#noProgressCount,
-          shouldNudge: false,
-          shouldRecover: true,
-          shouldStop: false,
-          tabInventoryObserved: true
-        };
-      }
-      this.#noProgressCount += 1;
-      return {
-        tool: browserRecoveryAttemptLabel(executions),
-        count: this.#noProgressCount,
+    const targetFailures = browserExecutions.filter(isTargetResolutionFailure);
+    if (targetFailures.length > 0) return this.#observeTargetFailures(targetFailures);
+
+    const ineffectiveActions = browserExecutions.filter(isIneffectiveDispatchedAction);
+    if (ineffectiveActions.length > 0) return this.#observeIneffectiveActions(ineffectiveActions);
+
+    const successfulAction = browserExecutions.find((execution) =>
+      BROWSER_ACTION_TOOLS.has(execution.tool.name) && execution.result?.ok === true
+    );
+    if (successfulAction !== undefined) {
+      this.#resetAfterProgress();
+      return undefined;
+    }
+
+    const evidenceFingerprints = browserExecutions.map(browserEvidenceFingerprint).filter(
+      (value): value is string => value !== undefined
+    );
+    const evidenceAdvanced = evidenceFingerprints.some((fingerprint) => !this.#seenEvidence.has(fingerprint));
+    for (const fingerprint of evidenceFingerprints) this.#rememberEvidence(fingerprint);
+
+    if (evidenceAdvanced) {
+      this.#noProgressCount = 0;
+      this.#suppressedTools.clear();
+      return assessment({
+        executions: browserExecutions,
+        count: 0,
+        evidenceAdvanced: true,
+        actionDispatched: false,
         shouldNudge: false,
-        shouldRecover: false,
-        shouldStop: true,
-        tabInventoryObserved: false
-      };
+        shouldRetarget: false,
+        shouldStop: false,
+        suppressedTools: []
+      });
     }
 
-    const observations = executions.filter((execution) => BROWSER_OBSERVATION_TOOLS.has(execution.tool.name));
-    const noProgressWork = [...observations, ...unchangedActions];
-    const containsOtherWork = executions.some((execution) =>
-      !noProgressWork.includes(execution) && !BROWSER_ACTION_TOOLS.has(execution.tool.name)
-    );
-    if (noProgressWork.length === 0 || containsOtherWork) {
-      this.#reset();
-      return undefined;
+    this.#noProgressCount += 1;
+    for (const execution of browserExecutions) {
+      if (WHOLE_STATE_OBSERVATIONS.has(execution.tool.name)) this.#suppressedTools.add(execution.tool.name);
     }
-
-    const stateFingerprint = semanticBrowserStateFingerprint(noProgressWork);
-    if (
-      stateFingerprint !== undefined &&
-      this.#lastStateFingerprint !== undefined &&
-      stateFingerprint !== this.#lastStateFingerprint
-    ) {
-      this.#noProgressCount = 1;
-    } else {
-      this.#noProgressCount += 1;
-    }
-    if (stateFingerprint !== undefined) this.#lastStateFingerprint = stateFingerprint;
-
-    const tools = [...new Set(noProgressWork.map((execution) => execution.tool.name))].sort();
-    return {
-      tool: tools.join(", "),
+    return assessment({
+      executions: browserExecutions,
       count: this.#noProgressCount,
-      shouldNudge: this.#noProgressCount === this.#limit - 1,
-      shouldRecover: this.#noProgressCount >= this.#limit,
-      shouldStop: false,
-      tabInventoryObserved: false
-    };
+      evidenceAdvanced: false,
+      actionDispatched: false,
+      shouldNudge: this.#noProgressCount === 1,
+      shouldRetarget: false,
+      shouldStop: this.#noProgressCount >= this.#repeatLimit - 1,
+      suppressedTools: [...this.#suppressedTools].sort()
+    });
   }
 
-  #reset(): void {
-    this.#lastStateFingerprint = undefined;
-    this.#noProgressCount = 0;
+  #observeTargetFailures(executions: readonly ToolExecutionRecord[]): NonNullable<BrowserObservationAssessment> {
+    const signatures = executions.map(browserCallSignature);
+    const repeatedTarget = signatures.some((signature) => this.#targetFailureSignatures.has(signature));
+    for (const signature of signatures) this.#targetFailureSignatures.add(signature);
+    this.#noProgressCount += 1;
+    const shouldStop = repeatedTarget || this.#retargetUsed;
+    this.#retargetUsed = true;
+    return assessment({
+      executions,
+      count: this.#noProgressCount,
+      evidenceAdvanced: false,
+      actionDispatched: false,
+      shouldNudge: !shouldStop,
+      shouldRetarget: !shouldStop,
+      shouldStop,
+      suppressedTools: [...this.#suppressedTools].sort()
+    });
   }
-}
 
-function browserRecoveryAttemptLabel(executions: ToolExecutionRecord[]): string {
-  const tools = [...new Set(executions.map((execution) => execution.tool.name))].sort();
-  return tools.length === 0 ? "provider-response" : tools.join(", ");
-}
+  #observeIneffectiveActions(executions: readonly ToolExecutionRecord[]): NonNullable<BrowserObservationAssessment> {
+    const signatures = executions.map(browserCallSignature);
+    const repeatedAction = signatures.some((signature) => this.#ineffectiveActionSignatures.has(signature));
+    for (const signature of signatures) this.#ineffectiveActionSignatures.add(signature);
+    this.#noProgressCount += 1;
+    const shouldStop = repeatedAction || this.#retargetUsed || this.#ineffectiveActionSignatures.size > 1;
+    return assessment({
+      executions,
+      count: this.#noProgressCount,
+      evidenceAdvanced: false,
+      actionDispatched: true,
+      shouldNudge: !shouldStop,
+      shouldRetarget: false,
+      shouldStop,
+      suppressedTools: [...this.#suppressedTools].sort()
+    });
+  }
 
-function isExplicitNoChangeBrowserAction(execution: ToolExecutionRecord): boolean {
-  const snapshot = execution.result?.metadata?.snapshot;
-  if (snapshot === null || typeof snapshot !== "object" || Array.isArray(snapshot)) return false;
-  const delta = (snapshot as Record<string, unknown>).actionDelta;
-  if (delta === null || typeof delta !== "object" || Array.isArray(delta)) return false;
-  const outcome = (delta as Record<string, unknown>).outcome;
-  return outcome === "no-change" || outcome === "timeout";
-}
-
-function semanticBrowserStateFingerprint(executions: ToolExecutionRecord[]): string | undefined {
-  const states = executions.flatMap((execution) => {
-    const metadata = execution.result?.metadata;
-    if (metadata?.snapshot !== undefined) return [stableBrowserSnapshot(metadata.snapshot)];
-    if (execution.tool.name === "browser.tabs" && metadata !== undefined) {
-      return [{
-        sessionId: metadata.sessionId,
-        tabs: metadata.tabs,
-        blockedCount: metadata.blockedCount,
-      }];
+  #rememberEvidence(fingerprint: string): void {
+    if (this.#seenEvidence.size >= 64) {
+      const oldest = this.#seenEvidence.values().next().value as string | undefined;
+      if (oldest !== undefined) this.#seenEvidence.delete(oldest);
     }
-    return [];
-  });
-  if (states.length === 0) return undefined;
-  const hash = createHash("sha256");
-  for (const state of states.map(stableSerialize).sort()) {
-    hash.update(state);
-    hash.update("\0");
+    this.#seenEvidence.add(fingerprint);
   }
-  return hash.digest("hex");
+
+  #resetAfterProgress(): void {
+    this.#seenEvidence.clear();
+    this.#suppressedTools.clear();
+    this.#ineffectiveActionSignatures.clear();
+    this.#targetFailureSignatures.clear();
+    this.#noProgressCount = 0;
+    this.#retargetUsed = false;
+  }
+}
+
+function assessment(input: {
+  executions: readonly ToolExecutionRecord[];
+  count: number;
+  evidenceAdvanced: boolean;
+  actionDispatched: boolean;
+  shouldNudge: boolean;
+  shouldRetarget: boolean;
+  shouldStop: boolean;
+  suppressedTools: string[];
+}): NonNullable<BrowserObservationAssessment> {
+  return {
+    tool: [...new Set(input.executions.map((execution) => execution.tool.name))].sort().join(", "),
+    count: input.count,
+    evidenceAdvanced: input.evidenceAdvanced,
+    actionDispatched: input.actionDispatched,
+    shouldNudge: input.shouldNudge,
+    shouldRetarget: input.shouldRetarget,
+    shouldStop: input.shouldStop,
+    suppressedTools: input.suppressedTools
+  };
+}
+
+function isStateChangingBrowserAction(execution: ToolExecutionRecord): boolean {
+  if (!BROWSER_ACTION_TOOLS.has(execution.tool.name) || execution.result?.ok !== true) return false;
+  const outcome = browserActionOutcome(execution);
+  if (outcome === "changed") return true;
+  if (outcome === "dispatched-unverified") {
+    const delta = browserActionDelta(execution);
+    return delta?.documentChangeObserved === true || asRecord(delta?.url)?.changed === true;
+  }
+  return outcome === undefined;
+}
+
+function isIneffectiveDispatchedAction(execution: ToolExecutionRecord): boolean {
+  if (!BROWSER_ACTION_TOOLS.has(execution.tool.name) || execution.result?.ok !== true) return false;
+  const outcome = browserActionOutcome(execution);
+  if (outcome === "no-change" || outcome === "timeout") return true;
+  if (outcome !== "dispatched-unverified") return false;
+  const delta = browserActionDelta(execution);
+  return delta?.documentChangeObserved !== true && asRecord(delta?.url)?.changed !== true;
+}
+
+function isTargetResolutionFailure(execution: ToolExecutionRecord): boolean {
+  if (!BROWSER_ACTION_TOOLS.has(execution.tool.name) || execution.result?.ok !== false) return false;
+  return TARGET_FAILURE_REASONS.has(String(execution.result.metadata?.reason ?? ""));
+}
+
+function browserActionOutcome(execution: ToolExecutionRecord): string | undefined {
+  const outcome = browserActionDelta(execution)?.outcome;
+  return typeof outcome === "string" ? outcome : undefined;
+}
+
+function browserActionDelta(execution: ToolExecutionRecord): Record<string, unknown> | undefined {
+  const snapshot = asRecord(execution.result?.metadata?.snapshot);
+  return asRecord(snapshot?.actionDelta);
+}
+
+function browserEvidenceFingerprint(execution: ToolExecutionRecord): string | undefined {
+  if (BROWSER_ACTION_TOOLS.has(execution.tool.name)) {
+    if (execution.result?.ok === false) {
+      return fingerprint({ kind: "browser-action-failure", reason: execution.result.metadata?.reason ?? "unknown" });
+    }
+    return undefined;
+  }
+  const metadata = execution.result?.metadata;
+  const snapshot = metadata?.snapshot;
+  if (snapshot !== undefined) {
+    return fingerprint({ kind: "snapshot", evidence: stableBrowserSnapshot(snapshot) });
+  }
+  if (execution.tool.name === "browser.find" && metadata !== undefined) {
+    return fingerprint({
+      kind: "find",
+      status: metadata.status,
+      candidates: stableBrowserCandidates(metadata.candidates),
+      nearbyCandidates: stableBrowserCandidates(metadata.nearbyCandidates),
+      state: stableBrowserIdentity(metadata.identity),
+      tabRef: metadata.tabRef
+    });
+  }
+  if (execution.tool.name === "browser.tabs" && metadata !== undefined) {
+    return fingerprint({
+      kind: "tabs",
+      sessionId: metadata.sessionId,
+      tabs: metadata.tabs,
+      blockedCount: metadata.blockedCount
+    });
+  }
+  return fingerprint({
+    kind: execution.result?.ok === false ? "browser-observation-failure" : execution.tool.name,
+    ok: execution.result?.ok,
+    reason: metadata?.reason,
+    content: execution.result?.content
+  });
 }
 
 function stableBrowserSnapshot(value: unknown): unknown {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
-  const {
-    observedAt: _observedAt,
-    identity: _identity,
-    actionDelta: _actionDelta,
-    ...stable
-  } = value as Record<string, unknown>;
+  const snapshot = asRecord(value);
+  if (snapshot === undefined) return value;
+  const elements = Array.isArray(snapshot.elements)
+    ? snapshot.elements.map(stableBrowserElement).sort((left, right) => stableSerialize(left).localeCompare(stableSerialize(right)))
+    : undefined;
+  return {
+    sessionId: snapshot.sessionId,
+    url: snapshot.url,
+    title: snapshot.title,
+    readiness: snapshot.readiness,
+    tab: snapshot.tab,
+    identity: stableBrowserIdentity(snapshot.identity),
+    text: snapshot.text,
+    elements,
+    pendingDialogs: snapshot.pendingDialogs,
+    frameTree: snapshot.frameTree
+  };
+}
+
+function stableBrowserElement(value: unknown): unknown {
+  const element = asRecord(value);
+  if (element === undefined) return value;
+  const { ref: _ref, ...stable } = element;
   return stable;
+}
+
+function stableBrowserCandidates(value: unknown): unknown[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((candidate) => {
+    const record = asRecord(candidate);
+    if (record === undefined) return candidate;
+    const { ref: _ref, identity: _identity, ...stable } = record;
+    return stable;
+  }).sort((left, right) => stableSerialize(left).localeCompare(stableSerialize(right)));
+}
+
+function stableBrowserIdentity(value: unknown): unknown {
+  const identity = asRecord(value);
+  if (identity === undefined) return undefined;
+  return { documentEpoch: identity.documentEpoch, actionRevision: identity.actionRevision };
+}
+
+function browserCallSignature(execution: ToolExecutionRecord): string {
+  const snapshot = asRecord(execution.result?.metadata?.snapshot);
+  return fingerprint({
+    tool: execution.tool.name,
+    input: stableBrowserCallInput(execution.input),
+    state: stableBrowserIdentity(execution.result?.metadata?.currentIdentity ?? snapshot?.identity),
+    target: execution.targetKey ?? execution.targetSummary
+  });
+}
+
+function stableBrowserCallInput(value: unknown): unknown {
+  const input = asRecord(value);
+  if (input === undefined) return value;
+  const { sessionId: _sessionId, signal: _signal, identity, ...stable } = input;
+  return { ...stable, identity: stableBrowserIdentity(identity) };
+}
+
+function fingerprint(value: unknown): string {
+  return createHash("sha256").update(stableSerialize(value)).digest("hex");
 }
 
 function stableSerialize(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "undefined";
   if (Array.isArray(value)) return `[${value.map(stableSerialize).join(",")}]`;
-  return `{${Object.entries(value)
+  return `{${Object.entries(value as Record<string, unknown>)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, entry]) => `${JSON.stringify(key)}:${stableSerialize(entry)}`)
     .join(",")}}`;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
 }

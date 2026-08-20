@@ -85,7 +85,6 @@ import {
   ExecutionSupervisionController,
   EXECUTION_SUPERVISION_PROMPTS
 } from "./execution-supervision-controller.js";
-import { isBrowserActionTool } from "./browser-observation-guard.js";
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
 const PROVIDER_CALL_EFFICIENCY_WARNING_THRESHOLD = 12;
@@ -315,13 +314,7 @@ export class ProviderTurnLoop {
       maxNoProgressIterations: this.#budgets.maxNoProgressIterations,
       executionWorkingSet: this.#executionWorkingSet,
       runRecorder: this.#runRecorder,
-      onEvent: input.onEvent,
-      hasCurrentBrowserTabInventory: () => {
-        const state = this.#sessionRuntimeContext?.browserState();
-        return state?.sessionStatus === "active" &&
-          state.freshness === "current" &&
-          state.tabInventoryComplete === true;
-      }
+      onEvent: input.onEvent
     });
     if (this.canRunProvider()) {
       await executionSupervision.initialize();
@@ -383,9 +376,10 @@ export class ProviderTurnLoop {
         : "continuation";
       retryEmptyInitialResponse = false;
       retryReasoningOnlyInitialResponse = false;
-      const providerToolsForIteration = supervisionPrompt.browserActionRecovery
-        ? browserActionRecoveryProviderTools(activeProviderTools, supervisionPrompt.browserTabsAllowed)
-        : activeProviderTools;
+      const providerToolsForIteration = filterSuppressedBrowserProviderTools(
+        activeProviderTools,
+        supervisionPrompt.suppressedBrowserTools
+      );
 
       let execution = phase === "initial"
         ? await this.#completeWithProvider({
@@ -410,9 +404,8 @@ export class ProviderTurnLoop {
           iteration,
           loopStartedAt,
           emptyResponseNudge: pendingEmptyResponseNudge,
-          browserNoProgressNudge: supervisionPrompt.browserNoProgressNudge,
-          browserActionRecovery: supervisionPrompt.browserActionRecovery,
-          browserTabsAllowed: supervisionPrompt.browserTabsAllowed,
+          browserEvidenceNudge: supervisionPrompt.browserEvidenceNudge,
+          browserRetargetNudge: supervisionPrompt.browserRetargetNudge,
           toolLoopProgressNudge: supervisionPrompt.toolLoopProgressNudge,
           reasoningOnlyPrefill: pendingReasoningOnlyPrefill,
           efficiencySignals: providerEfficiencySignals({
@@ -438,7 +431,7 @@ export class ProviderTurnLoop {
         terminationCause = execution.runtimeMetadata.continuation.exhaustionCause ?? "budget_exhausted";
       }
 
-      if (isTruncatedToolCallRefusalExecution(execution) && !supervisionPrompt.browserActionRecovery) {
+      if (isTruncatedToolCallRefusalExecution(execution)) {
         terminationCause = "provider_failed";
         await this.#runRecorder.recordProviderIteration({
           iteration,
@@ -456,7 +449,7 @@ export class ProviderTurnLoop {
         break;
       }
 
-      if (isReasoningOnlyExecution(execution) && !supervisionPrompt.browserActionRecovery) {
+      if (isReasoningOnlyExecution(execution)) {
         if (isReasoningOnlyLengthExhaustion(execution)) {
           terminationCause = "provider_failed";
           execution = reasoningOnlySafeGuidanceExecution(execution, REASONING_ONLY_LENGTH_EXHAUSTION_MESSAGE);
@@ -679,7 +672,7 @@ export class ProviderTurnLoop {
         );
       }
       if (browserObservation?.shouldStop === true) {
-        const reason = `Browser observation tools (${browserObservation.tool}) repeated without semantic progress.`;
+        const reason = `Browser work (${browserObservation.tool}) repeated evidence or ineffective targets without a new grounded strategy.`;
         await this.#runRecorder.recordProviderBudgetExhausted({
           budget: "repeated-browser-observations",
           limit: this.#budgets.maxRepeatedBrowserObservations,
@@ -826,7 +819,7 @@ export class ProviderTurnLoop {
         }
         if (exhausted && execution.ok === true && !toolLoopProgress.shouldStop) {
           const exhaustionReason = browserObservation?.shouldStop === true
-            ? "repeated browser observations made no progress"
+            ? "browser evidence or ineffective targets repeated without a new grounded strategy"
             : "max iterations, tool calls, or repeated tool failures reached with pending work";
           await this.#runRecorder.recordClassifiedFailure(
             { kind: "loop-exhausted", reason: exhaustionReason, iterations: iteration + 1 },
@@ -1121,9 +1114,8 @@ export class ProviderTurnLoop {
     iteration: number;
     loopStartedAt: number;
     emptyResponseNudge?: boolean;
-    browserNoProgressNudge?: boolean;
-    browserActionRecovery?: boolean;
-    browserTabsAllowed?: boolean;
+    browserEvidenceNudge?: boolean;
+    browserRetargetNudge?: boolean;
     toolLoopProgressNudge?: boolean;
     reasoningOnlyPrefill?: boolean;
     efficiencySignals?: string[];
@@ -1187,19 +1179,16 @@ export class ProviderTurnLoop {
         content: "You just executed tool calls but returned an empty response. Please process the tool results above and continue with the task."
       });
     }
-    if (input.browserNoProgressNudge === true) {
+    if (input.browserEvidenceNudge === true) {
       prompt.messages.push({
         role: "user",
-        content: EXECUTION_SUPERVISION_PROMPTS.browserNoProgress
+        content: EXECUTION_SUPERVISION_PROMPTS.browserEvidence
       });
     }
-    if (input.browserActionRecovery === true) {
+    if (input.browserRetargetNudge === true) {
       prompt.messages.push({
         role: "user",
-        content: [
-          EXECUTION_SUPERVISION_PROMPTS.browserActionRecovery,
-          ...(input.browserTabsAllowed === true ? [EXECUTION_SUPERVISION_PROMPTS.browserTabsRecovery] : [])
-        ].join("\n")
+        content: EXECUTION_SUPERVISION_PROMPTS.browserRetarget
       });
     }
     if (input.toolLoopProgressNudge === true) {
@@ -2255,14 +2244,15 @@ function normalizeBrowserObservationLimit(limit: number): number {
     : 3;
 }
 
-function browserActionRecoveryProviderTools(
+function filterSuppressedBrowserProviderTools(
   tools: readonly OpenAICompatibleToolSchema[],
-  allowTabs: boolean
+  suppressedTools: readonly string[]
 ): OpenAICompatibleToolSchema[] {
+  if (suppressedTools.length === 0) return [...tools];
+  const suppressed = new Set(suppressedTools);
   return tools.filter((tool) => {
     const canonicalName = canonicalBrowserProviderToolName(tool.function.name);
-    if (canonicalName === undefined) return false;
-    return isBrowserActionTool(canonicalName) || (allowTabs && canonicalName === "browser.tabs");
+    return canonicalName === undefined || !suppressed.has(canonicalName);
   });
 }
 

@@ -471,6 +471,7 @@ export function snapshotExpression(): string {
     window.__estacodaElements = candidates;
     const assessInteractability = ${BROWSER_INTERACTABILITY_EVALUATOR_SOURCE};
     const clean = (value, max = 240) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, max);
+    const actionSelector = 'a[href],button,input,select,textarea,[role="button"],[role="link"],[role="tab"],[role="menuitem"]';
     const labelText = (el) => clean(Array.from(el.labels || []).map((label) => label.innerText || label.textContent || '').join(' ') || el.getAttribute('aria-label') || el.closest('label')?.innerText || '');
     const elementText = (el) => clean(el.innerText || el.textContent || '');
     const sensitive = (el) => el instanceof HTMLInputElement && el.type.toLowerCase() === 'password';
@@ -493,16 +494,30 @@ export function snapshotExpression(): string {
       }
       return tag;
     };
-    const withinText = (el) => clean(el.closest('article,li,form,section,[role="listitem"],[role="group"],[role="row"],tr')?.innerText || el.parentElement?.innerText || '');
+    const regionText = (el) => {
+      let node = el.parentElement;
+      for (let depth = 0; node && depth < 7 && node !== document.body && node !== document.documentElement; depth += 1, node = node.parentElement) {
+        const rawText = String(node.innerText || node.textContent || '').replace(/\\s+/g, ' ').trim();
+        if (rawText.length === 0 || rawText.length > 1200) continue;
+        const controls = Array.from(node.querySelectorAll(actionSelector)).slice(0, 17);
+        if (controls.length === 0 || controls.length > 16) continue;
+        const controlText = controls.map((control) => String(control.innerText || control.textContent || control.getAttribute?.('aria-label') || '')).join(' ').replace(/\\s+/g, ' ').trim();
+        if (rawText.length <= controlText.length + 2) continue;
+        return clean(rawText, 480);
+      }
+      return '';
+    };
     const elements = candidates.map((el, index) => {
       const interactability = assessInteractability(el);
+      const region = regionText(el);
       return {
         ref: '@e' + (index + 1),
         role: role(el),
         name: name(el),
         text: elementText(el),
         label: labelText(el),
-        withinText: withinText(el),
+        withinText: region || clean(el.closest('article,li,form,section,[role="listitem"],[role="group"],[role="row"],tr')?.innerText || el.parentElement?.innerText || ''),
+        regionText: region,
         interactable: interactability.interactable,
         interactabilityReason: interactability.reason,
         hidden: interactability.hidden,
@@ -526,7 +541,7 @@ type AxSnapshotElementCandidate = BrowserSnapshotElement & {
 };
 
 type BoundElementMetadata = Pick<BrowserSnapshotElement,
-  "text" | "label" | "withinText" | "hidden" | "disabled" | "interactable" | "interactabilityReason"> & {
+  "text" | "label" | "withinText" | "regionText" | "hidden" | "disabled" | "interactable" | "interactabilityReason"> & {
   sensitive?: boolean;
 };
 
@@ -670,10 +685,25 @@ async function bindAxElement(
         const clean = (value, max = 240) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, max);
         const label = clean(Array.from(this.labels || []).map((entry) => entry.innerText || entry.textContent || '').join(' ') || this.getAttribute?.('aria-label') || this.closest?.('label')?.innerText || '');
         const interactability = assessInteractability(this);
+        const actionSelector = 'a[href],button,input,select,textarea,[role="button"],[role="link"],[role="tab"],[role="menuitem"]';
+        const region = (() => {
+          let node = this.parentElement;
+          for (let depth = 0; node && depth < 7 && node !== document.body && node !== document.documentElement; depth += 1, node = node.parentElement) {
+            const rawText = String(node.innerText || node.textContent || '').replace(/\\s+/g, ' ').trim();
+            if (rawText.length === 0 || rawText.length > 1200) continue;
+            const controls = Array.from(node.querySelectorAll(actionSelector)).slice(0, 17);
+            if (controls.length === 0 || controls.length > 16) continue;
+            const controlText = controls.map((control) => String(control.innerText || control.textContent || control.getAttribute?.('aria-label') || '')).join(' ').replace(/\\s+/g, ' ').trim();
+            if (rawText.length <= controlText.length + 2) continue;
+            return clean(rawText, 480);
+          }
+          return '';
+        })();
         return {
           text: clean(this.innerText || this.textContent || ''),
           label,
-          withinText: clean(this.closest?.('article,li,form,section,[role="listitem"],[role="group"],[role="row"],tr')?.innerText || this.parentElement?.innerText || ''),
+          withinText: region || clean(this.closest?.('article,li,form,section,[role="listitem"],[role="group"],[role="row"],tr')?.innerText || this.parentElement?.innerText || ''),
+          regionText: region,
           interactable: interactability.interactable,
           interactabilityReason: interactability.reason,
           hidden: interactability.hidden,
@@ -695,11 +725,13 @@ function parseBoundElementMetadata(value: unknown): BoundElementMetadata | undef
   const text = boundedMetadataText(value.text);
   const label = boundedMetadataText(value.label);
   const withinText = boundedMetadataText(value.withinText);
+  const regionText = boundedMetadataText(value.regionText, 480);
   const interactabilityReason = parseInteractabilityReason(value.interactabilityReason);
   return {
     ...(text === undefined ? {} : { text }),
     ...(label === undefined ? {} : { label }),
     ...(withinText === undefined ? {} : { withinText }),
+    ...(regionText === undefined ? {} : { regionText }),
     ...(typeof value.hidden === "boolean" ? { hidden: value.hidden } : {}),
     ...(typeof value.disabled === "boolean" ? { disabled: value.disabled } : {}),
     ...(typeof value.interactable === "boolean" ? { interactable: value.interactable } : {}),
@@ -714,10 +746,10 @@ function parseInteractabilityReason(value: unknown): BrowserSnapshotElement["int
     : undefined;
 }
 
-function boundedMetadataText(value: unknown): string | undefined {
+function boundedMetadataText(value: unknown, maxChars = 240): string | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.replace(/\s+/gu, " ").trim();
-  return normalized.length === 0 ? undefined : normalized.slice(0, 240);
+  return normalized.length === 0 ? undefined : normalized.slice(0, maxChars);
 }
 
 function axPropertyString(value: unknown): string | undefined {

@@ -121,11 +121,24 @@ describe("CDPSupervisor", () => {
       text: "Background diagnostics remain readable",
       elements: [
         { ref: "@e1", role: "button", name: "Background", interactable: false, interactabilityReason: "modal-blocked" },
-        { ref: "@e2", role: "button", name: "Confirm", interactable: true }
+        {
+          ref: "@e2",
+          role: "button",
+          name: "Confirm",
+          withinText: "Account Settings Confirm Cancel",
+          regionText: "Account Settings Confirm Cancel",
+          interactable: true
+        }
       ]
     }), "session-1")).toMatchObject({
       text: "Background diagnostics remain readable",
-      elements: [{ ref: "@e2", role: "button", name: "Confirm" }]
+      elements: [{
+        ref: "@e2",
+        role: "button",
+        name: "Confirm",
+        withinText: "Account Settings Confirm Cancel",
+        regionText: "Account Settings Confirm Cancel"
+      }]
     });
   });
 
@@ -323,6 +336,43 @@ describe("CDPSupervisor", () => {
     await expect(supervisor.getSnapshot("session-1")).resolves.toMatchObject({
       text: "Background text remains",
       elements: []
+    });
+  });
+
+  it("binds actionable AX controls to their compact visible page region", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1", {
+      axTree: {
+        nodes: [{
+          nodeId: "edit-button",
+          backendDOMNodeId: 101,
+          role: { value: "button" },
+          name: { value: "Edit" }
+        }]
+      },
+      callFunctionValue: {
+        text: "Edit",
+        withinText: "TikTok Connect Callback URL Edit Delete",
+        regionText: "TikTok Connect Callback URL Edit Delete",
+        interactable: true,
+        hidden: false,
+        disabled: false
+      }
+    });
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+
+    await supervisor.start();
+
+    await expect(supervisor.getSnapshot("session-1")).resolves.toMatchObject({
+      elements: [{
+        ref: "@e1",
+        role: "button",
+        name: "Edit",
+        withinText: "TikTok Connect Callback URL Edit Delete",
+        regionText: "TikTok Connect Callback URL Edit Delete"
+      }]
     });
   });
 

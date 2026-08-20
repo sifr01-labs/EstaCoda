@@ -83,6 +83,46 @@ describe("semantic browser locators", () => {
     })).toThrowError(expect.objectContaining({ reason: "browser-target-not-found" }));
   });
 
+  it("prioritizes actions in a matching semantic region over incidental notification text", () => {
+    const appRegion = "TikTok Connect Callback URL Edit Delete";
+    const current = snapshot([
+      {
+        ref: "@e1",
+        role: "link",
+        name: "TikTok Connect notification",
+        regionText: "Notifications Recent events TikTok Connect was updated by another administrator"
+      },
+      { ref: "@e2", role: "link", name: "Callback URL", regionText: appRegion },
+      { ref: "@e3", role: "button", name: "Edit", regionText: appRegion },
+      { ref: "@e4", role: "button", name: "Delete", regionText: appRegion }
+    ]);
+
+    const result = findBrowserLocator(current, { name: "TikTok Connect", exact: true });
+
+    expect(result).toMatchObject({
+      status: "not-found",
+      candidates: [],
+      nearbyCandidates: [
+        { ref: "@e2", name: "Callback URL", regionText: appRegion },
+        { ref: "@e3", name: "Edit", regionText: appRegion },
+        { ref: "@e4", name: "Delete", regionText: appRegion },
+        { ref: "@e1", name: "TikTok Connect notification" }
+      ]
+    });
+
+    expect(() => resolveBrowserTarget(current, {
+      locator: { name: "TikTok Connect", exact: true }
+    })).toThrowError(expect.objectContaining<Partial<BrowserTargetError>>({
+      reason: "browser-target-not-found",
+      nearbyCandidates: [
+        expect.objectContaining({ ref: "@e2" }),
+        expect.objectContaining({ ref: "@e3" }),
+        expect.objectContaining({ ref: "@e4" }),
+        expect.objectContaining({ ref: "@e1" })
+      ]
+    }));
+  });
+
   it("does not invent nearby candidates without structural text overlap", () => {
     const result = findBrowserLocator(snapshot([
       { ref: "@e1", role: "button", name: "MTN developer portal" }

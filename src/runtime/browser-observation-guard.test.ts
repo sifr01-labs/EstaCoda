@@ -4,6 +4,7 @@ import { BrowserObservationGuard } from "./browser-observation-guard.js";
 
 function execution(input: {
   tool?: string;
+  toolInput?: Record<string, unknown>;
   ok?: boolean;
   content?: string;
   metadata?: Record<string, unknown>;
@@ -19,195 +20,204 @@ function execution(input: {
       progressLabel: "test",
       maxResultSizeChars: 8_000
     },
+    input: input.toolInput,
     decision: "allow",
     riskClass: "read-only-network",
     result: {
       ok: input.ok ?? true,
-      content: input.content ?? "rendered snapshot",
+      content: input.content ?? "browser result",
       metadata: input.metadata
     }
   };
 }
 
+function snapshot(observationId = 1, elements: unknown[] = [{ ref: "@e1", role: "button", name: "Open" }]) {
+  return {
+    sessionId: "session-1",
+    url: "https://example.com/apps",
+    title: "Apps",
+    identity: { documentEpoch: 3, actionRevision: 7, observationId },
+    observedAt: `2026-08-20T00:00:0${observationId}.000Z`,
+    tab: { ref: "@t1", url: "https://example.com/apps", controlled: true },
+    elements
+  };
+}
+
+function targetFailure(locator: string): ToolExecutionRecord {
+  return execution({
+    tool: "browser.click",
+    toolInput: { locator: { text: locator } },
+    ok: false,
+    content: "Browser locator did not match a current element.",
+    metadata: {
+      reason: "browser-target-not-found",
+      currentIdentity: { documentEpoch: 3, actionRevision: 7, observationId: 4 }
+    }
+  });
+}
+
+function action(toolInput: Record<string, unknown>, outcome: string): ToolExecutionRecord {
+  return execution({
+    tool: "browser.click",
+    toolInput,
+    metadata: {
+      snapshot: {
+        ...snapshot(6),
+        actionDelta: { outcome, url: { changed: outcome === "changed" } }
+      }
+    }
+  });
+}
+
 describe("BrowserObservationGuard", () => {
-  it("nudges once and then requires bounded action recovery before stopping", () => {
+  it("treats a focused find and a structural snapshot as distinct new evidence on an unchanged page", () => {
     const guard = new BrowserObservationGuard(3);
-    const observation = execution({
+    const find = execution({
+      tool: "browser.find",
+      toolInput: { locator: { text: "TikTok Connect" } },
       metadata: {
-        snapshot: {
-          sessionId: "session-1",
-          url: "https://example.com",
-          text: "account content"
-        }
+        status: "not-found",
+        identity: { documentEpoch: 3, actionRevision: 7, observationId: 2 },
+        tabRef: "@t1",
+        candidates: [],
+        nearbyCandidates: [{ ref: "@e4", role: "link", name: "apps", withinText: "TikTok Connect notification" }]
       }
     });
+    const structural = execution({ metadata: { snapshot: snapshot(3, [
+      { ref: "@e62", role: "link", name: "Callback", regionText: "TikTok Connect Callback Edit Delete" },
+      { ref: "@e65", role: "link", name: "Edit", regionText: "TikTok Connect Callback Edit Delete" }
+    ]) } });
 
-    expect(guard.observe([observation])).toMatchObject({ count: 1, shouldNudge: false, shouldStop: false });
-    expect(guard.observe([observation])).toMatchObject({ count: 2, shouldNudge: true, shouldStop: false });
-    expect(guard.observe([observation])).toEqual({
+    expect(guard.observe([find])).toMatchObject({ evidenceAdvanced: true, count: 0, shouldStop: false });
+    expect(guard.observe([structural])).toMatchObject({ evidenceAdvanced: true, count: 0, shouldStop: false });
+  });
+
+  it("nudges an identical observation, suppresses only that whole-state tool, and then stops a repeat", () => {
+    const guard = new BrowserObservationGuard(3);
+    const first = execution({ metadata: { snapshot: snapshot(1) } });
+    const later = execution({ metadata: { snapshot: snapshot(2) } });
+
+    expect(guard.observe([first])).toMatchObject({ evidenceAdvanced: true, count: 0 });
+    expect(guard.observe([later])).toEqual({
       tool: "browser.snapshot",
-      count: 3,
-      shouldNudge: false,
-      shouldRecover: true,
+      count: 1,
+      evidenceAdvanced: false,
+      actionDispatched: false,
+      shouldNudge: true,
+      shouldRetarget: false,
       shouldStop: false,
-      tabInventoryObserved: false
+      suppressedTools: ["browser.snapshot"]
     });
-    expect(guard.observe([], { actionRecovery: true })).toEqual({
-      tool: "provider-response",
-      count: 4,
-      shouldNudge: false,
-      shouldRecover: false,
-      shouldStop: true,
-      tabInventoryObserved: false
-    });
+    expect(guard.observe([later])).toMatchObject({ count: 2, shouldNudge: false, shouldStop: true });
   });
 
-  it("treats changed browser state as progress", () => {
+  it("does not treat ref renumbering, element order, timestamps, or observation IDs as new evidence", () => {
     const guard = new BrowserObservationGuard(3);
-    const first = execution({ metadata: { snapshot: { url: "https://example.com", text: "first" } } });
-    const changed = execution({ metadata: { snapshot: { url: "https://example.com", text: "second" } } });
+    const first = execution({ metadata: { snapshot: snapshot(1, [
+      { ref: "@e1", role: "button", name: "Open" },
+      { ref: "@e2", role: "link", name: "Edit" }
+    ]) } });
+    const churned = execution({ metadata: { snapshot: snapshot(9, [
+      { ref: "@e9", role: "link", name: "Edit" },
+      { ref: "@e8", role: "button", name: "Open" }
+    ]) } });
 
     guard.observe([first]);
-    expect(guard.observe([first])?.shouldNudge).toBe(true);
-    expect(guard.observe([changed])).toMatchObject({ count: 1, shouldNudge: false, shouldStop: false });
+    expect(guard.observe([churned])).toMatchObject({ evidenceAdvanced: false, shouldNudge: true });
   });
 
-  it("ignores volatile snapshot observation timestamps", () => {
+  it("does not count different locator wording with the same candidate set as new evidence", () => {
     const guard = new BrowserObservationGuard(3);
-    const first = execution({ metadata: { snapshot: {
-      url: "https://example.com",
-      revision: 4,
-      observedAt: "2026-08-13T00:00:00.000Z"
-    } } });
-    const later = execution({ metadata: { snapshot: {
-      url: "https://example.com",
-      revision: 4,
-      observedAt: "2026-08-13T00:00:01.000Z"
-    } } });
+    const result = {
+      status: "not-found",
+      identity: { documentEpoch: 3, actionRevision: 7, observationId: 2 },
+      tabRef: "@t1",
+      candidates: [],
+      nearbyCandidates: [{ ref: "@e4", role: "link", name: "Edit", regionText: "TikTok Connect" }]
+    };
 
-    guard.observe([first]);
-    expect(guard.observe([later])).toMatchObject({ count: 2, shouldNudge: true });
+    guard.observe([execution({ tool: "browser.find", toolInput: { locator: { text: "TikTok Connect" } }, metadata: result })]);
+    expect(guard.observe([execution({
+      tool: "browser.find",
+      toolInput: { locator: { text: "tiktok   connect" } },
+      metadata: { ...result, identity: { ...result.identity, observationId: 3 } }
+    })])).toMatchObject({ evidenceAdvanced: false, shouldNudge: true, suppressedTools: [] });
   });
 
-  it("resets after a browser action but counts failed observations", () => {
+  it("bounds alternating empty or failed observation tools once their evidence has already been seen", () => {
     const guard = new BrowserObservationGuard(3);
-    const observation = execution();
+    const find = execution({ tool: "browser.find", content: "No element matched." });
+    const screenshot = execution({ tool: "browser.screenshot", ok: false, content: "Blocked.", metadata: { reason: "protected-input" } });
+    const extract = execution({ tool: "browser.extract", content: "No text." });
 
-    guard.observe([observation]);
-    expect(guard.observe([execution({ tool: "browser.switch_tab" })])).toBeUndefined();
-    expect(guard.observe([observation])).toMatchObject({ count: 1 });
-    expect(guard.observe([execution({ ok: false })])).toMatchObject({ count: 2, shouldNudge: true });
-    expect(guard.observe([observation])).toMatchObject({ count: 3, shouldRecover: true, shouldStop: false });
+    expect(guard.observe([find])?.evidenceAdvanced).toBe(true);
+    expect(guard.observe([screenshot])?.evidenceAdvanced).toBe(true);
+    expect(guard.observe([extract])?.evidenceAdvanced).toBe(true);
+    expect(guard.observe([find])).toMatchObject({ count: 1, shouldNudge: true });
+    expect(guard.observe([screenshot])).toMatchObject({ count: 2, shouldStop: true });
   });
 
-  it("does not reset no-progress detection for an explicitly unchanged browser action", () => {
+  it("permits one bounded retarget when no action was dispatched", () => {
     const guard = new BrowserObservationGuard(3);
-    const observation = execution({ metadata: { snapshot: { url: "https://example.com", text: "same" } } });
-    const noChange = execution({
-      tool: "browser.click",
-      metadata: {
-        snapshot: {
-          url: "https://example.com",
-          text: "same",
-          actionDelta: { outcome: "no-change" }
-        }
-      }
-    });
 
-    expect(guard.observe([observation])).toMatchObject({ count: 1 });
-    expect(guard.observe([observation])).toMatchObject({ count: 2, shouldNudge: true });
-    expect(guard.observe([noChange])).toMatchObject({
-      tool: "browser.click",
-      count: 3,
-      shouldRecover: true,
+    expect(guard.observe([targetFailure("TikTok Connect")])).toMatchObject({
+      actionDispatched: false,
+      shouldRetarget: true,
       shouldStop: false
     });
-    expect(guard.observe([noChange], { actionRecovery: true })).toMatchObject({
-      tool: "browser.click",
-      count: 4,
-      shouldRecover: false,
+    expect(guard.observe([action({ ref: "@e65" }, "changed")])).toBeUndefined();
+    expect(guard.observe([targetFailure("Another app")])).toMatchObject({ shouldRetarget: true, shouldStop: false });
+  });
+
+  it("stops the same failed target or a second failed retarget", () => {
+    const repeated = new BrowserObservationGuard(3);
+    repeated.observe([targetFailure("TikTok Connect")]);
+    expect(repeated.observe([targetFailure("TikTok Connect")])).toMatchObject({ shouldStop: true });
+
+    const different = new BrowserObservationGuard(3);
+    different.observe([targetFailure("TikTok Connect")]);
+    expect(different.observe([targetFailure("TikTok Connect app card")])).toMatchObject({
+      shouldRetarget: false,
       shouldStop: true
     });
   });
 
-  it("does not let alternating empty or blocked observation tools evade the limit", () => {
+  it("allows a targeting repair after one dispatched no-change action", () => {
     const guard = new BrowserObservationGuard(3);
-
-    expect(guard.observe([execution({
-      tool: "browser.find",
-      content: "No visible element matched."
-    })])).toMatchObject({ count: 1 });
-    expect(guard.observe([execution({
-      tool: "browser.screenshot",
-      ok: false,
-      content: "Browser screenshots are blocked while protected input is active."
-    })])).toMatchObject({ count: 2, shouldNudge: true });
-    expect(guard.observe([execution({
-      tool: "browser.extract",
-      content: "No bounded text was available."
-    })])).toMatchObject({ count: 3, shouldRecover: true, shouldStop: false });
-    expect(guard.observe([execution({
-      tool: "browser.find",
-      content: "No visible element matched."
-    })], { actionRecovery: true })).toMatchObject({ count: 4, shouldStop: true });
-  });
-
-  it("does not treat concurrent observation ordering as a state change", () => {
-    const guard = new BrowserObservationGuard(3);
-    const snapshot = execution({ metadata: { snapshot: { url: "https://example.com" } } });
-    const tabs = execution({
-      tool: "browser.tabs",
-      metadata: {
-        sessionId: "session-1",
-        tabs: [{ ref: "@t1", url: "https://example.com", controlled: true }],
-        blockedCount: 0
-      }
+    expect(guard.observe([action({ ref: "@e62" }, "no-change")])).toMatchObject({
+      actionDispatched: true,
+      shouldNudge: true,
+      shouldStop: false
     });
-
-    guard.observe([snapshot, tabs]);
-    expect(guard.observe([tabs, snapshot])).toMatchObject({ count: 2, shouldNudge: true });
+    expect(guard.observe([targetFailure("TikTok Connect")])).toMatchObject({
+      actionDispatched: false,
+      shouldRetarget: true,
+      shouldStop: false
+    });
+    expect(guard.observe([action({ ref: "@e65" }, "changed")])).toBeUndefined();
   });
 
-  it("does not expose page content or fingerprints in assessments", () => {
+  it("stops repeated or multiple ineffective dispatched actions", () => {
+    const repeated = new BrowserObservationGuard(3);
+    repeated.observe([action({ ref: "@e62" }, "no-change")]);
+    expect(repeated.observe([action({ ref: "@e62" }, "no-change")])).toMatchObject({ shouldStop: true });
+
+    const different = new BrowserObservationGuard(3);
+    different.observe([action({ ref: "@e62" }, "no-change")]);
+    expect(different.observe([action({ ref: "@e65" }, "no-change")])).toMatchObject({ shouldStop: true });
+  });
+
+  it("does not expose page content, inputs, or fingerprints in assessments", () => {
     const guard = new BrowserObservationGuard(3);
-    const observation = execution({
+    const sensitive = execution({
+      toolInput: { locator: { text: "secret-query" } },
       content: "secret-visible-content",
-      metadata: { snapshot: { text: "secret-metadata-content" } }
+      metadata: { snapshot: { ...snapshot(1), text: "secret-metadata-content" } }
     });
 
-    const assessment = guard.observe([observation]);
+    guard.observe([sensitive]);
+    const assessment = guard.observe([sensitive]);
     expect(JSON.stringify(assessment)).not.toContain("secret");
-    expect(assessment).toEqual({
-      tool: "browser.snapshot",
-      count: 1,
-      shouldNudge: false,
-      shouldRecover: false,
-      shouldStop: false,
-      tabInventoryObserved: false
-    });
-  });
-
-  it("allows one tab-inventory observation inside recovery before requiring an action", () => {
-    const guard = new BrowserObservationGuard(3);
-    const observation = execution();
-    guard.observe([observation]);
-    guard.observe([observation]);
-    expect(guard.observe([observation])?.shouldRecover).toBe(true);
-
-    expect(guard.observe([execution({
-      tool: "browser.tabs",
-      metadata: {
-        sessionId: "session-1",
-        tabs: [{ ref: "@t1", url: "https://example.com", controlled: true }],
-        blockedCount: 0
-      }
-    })], { actionRecovery: true })).toMatchObject({
-      count: 3,
-      shouldRecover: true,
-      shouldStop: false,
-      tabInventoryObserved: true
-    });
-    expect(guard.observe([execution({ tool: "browser.switch_tab" })], { actionRecovery: true })).toBeUndefined();
-    expect(guard.observe([observation])).toMatchObject({ count: 1 });
+    expect(assessment).toMatchObject({ tool: "browser.snapshot", shouldNudge: true });
   });
 });

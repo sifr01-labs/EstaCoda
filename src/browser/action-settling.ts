@@ -1,6 +1,7 @@
 import type {
   BrowserActionDelta,
   BrowserActionDeltaElement,
+  BrowserLocatorCandidate,
   BrowserSnapshot,
   BrowserTab,
   BrowserWaitCondition
@@ -98,6 +99,7 @@ export function withDispatchedActionSettlementFailure(input: {
   waitCondition: BrowserWaitCondition["kind"];
   stateObservation: "post-dispatch" | "last-known";
   openedTabs?: BrowserTab[];
+  target?: BrowserLocatorCandidate;
 }): BrowserSnapshot {
   const delta = createBrowserActionDelta({
     before: input.before,
@@ -105,7 +107,8 @@ export function withDispatchedActionSettlementFailure(input: {
     waitCondition: input.waitCondition,
     conditionMet: false,
     timedOut: false,
-    openedTabs: input.openedTabs
+    openedTabs: input.openedTabs,
+    target: input.target
   });
   return {
     ...input.latest,
@@ -126,6 +129,7 @@ export function withBrowserActionDelta(input: {
   settlement: BrowserActionSettlement;
   after?: BrowserSnapshot;
   openedTabs?: BrowserTab[];
+  target?: BrowserLocatorCandidate;
 }): BrowserSnapshot {
   const after = input.after ?? input.settlement.snapshot;
   return {
@@ -136,7 +140,8 @@ export function withBrowserActionDelta(input: {
       waitCondition: input.settlement.waitCondition,
       conditionMet: input.settlement.conditionMet,
       timedOut: input.settlement.timedOut,
-      openedTabs: input.openedTabs
+      openedTabs: input.openedTabs,
+      target: input.target
     })
   };
 }
@@ -148,6 +153,7 @@ export function createBrowserActionDelta(input: {
   conditionMet: boolean;
   timedOut: boolean;
   openedTabs?: BrowserTab[];
+  target?: BrowserLocatorCandidate;
 }): BrowserActionDelta {
   const beforeElements = deltaElements(input.before?.elements ?? []);
   const afterElements = deltaElements(input.after.elements ?? []);
@@ -193,7 +199,17 @@ export function createBrowserActionDelta(input: {
         ...(tab.title === undefined ? {} : { title: safeDeltaText(tab.title) })
       }))
     }),
-    ...(tabTransition === undefined ? {} : { tabTransition })
+    ...(tabTransition === undefined ? {} : { tabTransition }),
+    ...(input.target === undefined ? {} : {
+      target: {
+        ref: input.target.ref,
+        ...(input.target.role === undefined ? {} : { role: safeDeltaText(input.target.role) }),
+        ...(input.target.name === undefined ? {} : { name: safeDeltaText(input.target.name) }),
+        ...(input.target.label === undefined ? {} : { label: safeDeltaText(input.target.label) }),
+        ...(input.target.withinText === undefined ? {} : { withinText: safeDeltaText(input.target.withinText) }),
+        ...(input.target.regionText === undefined ? {} : { regionText: safeDeltaText(input.target.regionText) })
+      }
+    })
   };
 }
 

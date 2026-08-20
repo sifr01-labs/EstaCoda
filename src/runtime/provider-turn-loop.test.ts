@@ -2943,7 +2943,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       nowSpy.mockRestore();
     }
   });
-  it("nudges once, exposes one action-only recovery step, and stops a refusal truthfully", async () => {
+  it("suppresses only a repeated whole-state observation while preserving grounded exploration", async () => {
     const sensitivePageText = "private account marker";
     const snapshotExecution = (id: string): ToolExecutionRecord => ({
       ...toolExecutionForTool(id, "browser.snapshot", "Rendered browser snapshot."),
@@ -2964,15 +2964,13 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       responses: [
         providerExecution("", [providerToolCall("call-snapshot-1", "{}", "browser.snapshot")]),
         providerExecution("", [providerToolCall("call-snapshot-2", "{}", "browser.snapshot")]),
-        providerExecution("", [providerToolCall("call-snapshot-3", "{}", "browser.snapshot")]),
-        providerExecution("I cannot identify a safe grounded browser action.")
+        providerExecution("I will use a different grounded inspection before acting.")
       ],
       toolSteps: [
         { executions: [snapshotExecution("call-snapshot-1")] },
-        { executions: [snapshotExecution("call-snapshot-2")] },
-        { executions: [snapshotExecution("call-snapshot-3")] }
+        { executions: [snapshotExecution("call-snapshot-2")] }
       ],
-      maxProviderIterations: 5
+      maxProviderIterations: 4
     });
     const events: RuntimeEvent[] = [];
 
@@ -3001,89 +2999,133 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       providerTools
     });
 
-    expect(harness.completeSpy).toHaveBeenCalledTimes(4);
-    expect(result.iterations).toBe(4);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
+    expect(result.iterations).toBe(3);
     expect(result.providerExecution?.response?.content).toBe(
-      "I stopped this browser turn because repeated observations showed no state change. I can continue after switching tabs, taking a different browser action, or receiving clarification about the next step."
+      "I will use a different grounded inspection before acting."
     );
-    expect(result.terminationCause).toBe("browser_no_progress");
+    expect(result.terminationCause).toBe("normal");
 
     const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
-    const nudge = "Repeated browser observations show no semantic state change. Do not alternate snapshot, tabs, find, extract, screenshot, console, or CDP calls to inspect the same state. Take a relevant browser action; if protected input or another external condition blocks progress, record that precise blocker.";
+    const nudge = "The last browser call repeated evidence already available for this document. Do not repeat the same locator, target, or observation result. Use a different grounded action or a distinct inspection that can reveal new structure; if neither exists, return the truthful incomplete result.";
     expect(requests.filter((request) => JSON.stringify(request.messages).includes(nudge))).toHaveLength(1);
-    const recoveryRequest = requests[3]!;
-    expect(JSON.stringify(recoveryRequest.messages)).toContain("bounded browser action-recovery step");
-    expect((recoveryRequest.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name)).toEqual([
-      "browser_click",
-      "browser_scroll",
-      "browser_tabs",
-      "browser_switch_tab",
-      "browser_dialog",
-      "browser_back",
-      "browser_navigate",
-      "browser_press",
-      "browser_type",
-      "browser_fill_protected_form",
-      "browser_select"
-    ]);
-
-    const budgetEvent = events.find((event) =>
-      event.kind === "provider-budget-exhausted" && event.budget === "repeated-browser-observations"
-    );
-    expect(budgetEvent).toEqual(expect.objectContaining({
+    const recoveryRequest = requests[2]!;
+    const recoveryTools = (recoveryRequest.tools as OpenAICompatibleToolSchema[])
+      .map((tool) => tool.function.name);
+    expect(recoveryTools).not.toContain("browser_snapshot");
+    expect(recoveryTools).toContain("browser_find");
+    expect(recoveryTools).toContain("browser_extract");
+    expect(recoveryTools).toContain("browser_click");
+    expect(recoveryTools).toContain("browser_tabs");
+    expect(recoveryTools).toContain("mcp_postman_updateCollection");
+    expect(events).not.toContainEqual(expect.objectContaining({
       kind: "provider-budget-exhausted",
-      budget: "repeated-browser-observations",
-      limit: 3,
-      observed: 4
+      budget: "repeated-browser-observations"
     }));
-    expect(JSON.stringify(budgetEvent)).not.toContain(sensitivePageText);
+    expect(JSON.stringify(requests)).not.toContain(sensitivePageText);
   });
 
-  it("recovers snapshot-find-find stalls through one grounded action and restores the full inventory", async () => {
+  it("allows find, structural snapshot, no-change repair, bounded retarget, and a different grounded action", async () => {
     const onApprovalRequest = vi.fn(async () => "approved" as const);
-    const sameSnapshot = (id: string, tool = "browser.snapshot"): ToolExecutionRecord => ({
-      ...toolExecutionForTool(id, tool, "Same browser state."),
+    const findResult: ToolExecutionRecord = {
+      ...toolExecutionForTool("call-find", "browser.find", "No exact clickable match."),
       result: {
         ok: true,
-        content: "Same browser state.",
-        metadata: tool === "browser.snapshot" ? {
-          snapshot: { sessionId: "browser-session", url: "https://example.com/apps", text: "Apps" }
-        } : undefined
+        content: "No exact clickable match.",
+        metadata: {
+          status: "not-found",
+          tabRef: "@t1",
+          identity: { documentEpoch: 1, actionRevision: 1, observationId: 1 },
+          candidates: [],
+          nearbyCandidates: [{
+            ref: "@e7",
+            role: "button",
+            name: "Edit",
+            regionText: "TikTok Connect Callback URL Edit Delete"
+          }]
+        }
       }
-    });
-    const changedClick: ToolExecutionRecord = {
-      ...toolExecutionForTool("call-click", "browser.click", "App opened."),
+    };
+    const structuralSnapshot: ToolExecutionRecord = {
+      ...toolExecutionForTool("call-snapshot", "browser.snapshot", "Rendered app controls."),
       result: {
         ok: true,
-        content: "App opened.",
+        content: "Rendered app controls.",
+        metadata: {
+          snapshot: {
+            sessionId: "browser-session",
+            url: "https://example.com/apps",
+            title: "Apps",
+            text: "TikTok Connect",
+            identity: { documentEpoch: 1, actionRevision: 2, observationId: 2 },
+            elements: [
+              { ref: "@e6", role: "link", name: "Callback URL", regionText: "TikTok Connect Callback URL Edit Delete" },
+              { ref: "@e7", role: "button", name: "Edit", regionText: "TikTok Connect Callback URL Edit Delete" },
+              { ref: "@e8", role: "button", name: "Delete", regionText: "TikTok Connect Callback URL Edit Delete" }
+            ]
+          }
+        }
+      }
+    };
+    const noChangeClick: ToolExecutionRecord = {
+      ...toolExecutionForTool("call-callback", "browser.click", "The action was dispatched but the page did not change."),
+      input: { ref: "@e6", tabRef: "@t1" },
+      targetKey: "browser:browser-session:@t1:@e6",
+      result: {
+        ok: true,
+        content: "The action was dispatched but the page did not change.",
+        metadata: {
+          snapshot: {
+            sessionId: "browser-session",
+            url: "https://example.com/apps",
+            actionDelta: { outcome: "no-change", actionDispatched: true }
+          }
+        }
+      }
+    };
+    const failedRetarget: ToolExecutionRecord = {
+      ...toolExecutionForTool("call-missing", "browser.click", "Browser target was not found."),
+      input: { locator: { text: "TikTok Connect" }, tabRef: "@t1" },
+      targetKey: "browser:browser-session:@t1:text:TikTok Connect",
+      result: {
+        ok: false,
+        content: "Browser target was not found. No action was dispatched.",
+        metadata: { reason: "browser-target-not-found", actionDispatched: false }
+      }
+    };
+    const changedClick: ToolExecutionRecord = {
+      ...toolExecutionForTool("call-edit", "browser.click", "App editor opened."),
+      input: { ref: "@e7", tabRef: "@t1" },
+      targetKey: "browser:browser-session:@t1:@e7",
+      result: {
+        ok: true,
+        content: "App editor opened.",
         metadata: {
           snapshot: {
             sessionId: "browser-session",
             url: "https://example.com/apps/tiktok",
-            actionDelta: { outcome: "changed" }
+            actionDelta: { outcome: "changed", actionDispatched: true }
           }
         }
       }
     };
     const harness = await createPostToolNudgeHarness({
       responses: [
+        providerExecution("", [providerToolCall("call-find", JSON.stringify({ text: "TikTok Connect" }), "browser.find")]),
         providerExecution("", [providerToolCall("call-snapshot", "{}", "browser.snapshot")]),
-        providerExecution("", [providerToolCall("call-find-1", "{}", "browser.find")]),
-        providerExecution("", [providerToolCall("call-find-2", "{}", "browser.find")]),
-        providerExecution("", [providerToolCall("call-click", JSON.stringify({
-          ref: "@e7",
-          identity: { documentEpoch: 1, actionRevision: 3, observationId: 3 },
-          tabRef: "@t1"
-        }), "browser.click")]),
-        providerExecution("Recovered after opening the grounded app.")
+        providerExecution("", [providerToolCall("call-callback", JSON.stringify({ ref: "@e6", tabRef: "@t1" }), "browser.click")]),
+        providerExecution("", [providerToolCall("call-missing", JSON.stringify({ locator: { text: "TikTok Connect" }, tabRef: "@t1" }), "browser.click")]),
+        providerExecution("", [providerToolCall("call-edit", JSON.stringify({ ref: "@e7", tabRef: "@t1" }), "browser.click")]),
+        providerExecution("Recovered after opening the grounded app editor.")
       ],
       toolSteps: [
-        { executions: [sameSnapshot("call-snapshot")] },
-        { executions: [sameSnapshot("call-find-1", "browser.find")] },
-        { executions: [sameSnapshot("call-find-2", "browser.find")] },
+        { executions: [findResult] },
+        { executions: [structuralSnapshot] },
+        { executions: [noChangeClick] },
+        { executions: [failedRetarget] },
         { executions: [changedClick] }
       ],
-      maxProviderIterations: 6
+      maxProviderIterations: 7
     });
     const providerTools = [
       "browser.snapshot",
@@ -3098,69 +3140,47 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
     const result = await runBasicProviderTurn(harness.loop, { providerTools, onApprovalRequest });
     const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
-    const recoveryTools = (requests[3]!.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name);
-    const restoredTools = (requests[4]!.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name);
+    const afterNoChangeTools = (requests[3]!.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name);
+    const afterTargetFailureTools = (requests[4]!.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name);
 
     expect(result.terminationCause).toBe("normal");
-    expect(result.providerExecution?.response?.content).toBe("Recovered after opening the grounded app.");
-    expect(recoveryTools).toEqual([
-      "browser.click",
-      "browser.scroll",
-      "browser.tabs",
-      "browser.switch_tab"
-    ]);
-    expect(restoredTools).toEqual(providerTools.map((tool) => tool.function.name));
-    expect(harness.executePlans.mock.calls[3]?.[0].onApprovalRequest).toBe(onApprovalRequest);
-    expect(harness.executePlans.mock.calls[3]?.[0].providerExecution?.toolCalls[0]?.argumentsText).toBe(
-      JSON.stringify({
-        ref: "@e7",
-        identity: { documentEpoch: 1, actionRevision: 3, observationId: 3 },
-        tabRef: "@t1"
-      })
+    expect(result.providerExecution?.response?.content).toBe("Recovered after opening the grounded app editor.");
+    expect(afterNoChangeTools).toEqual(providerTools.map((tool) => tool.function.name));
+    expect(afterTargetFailureTools).toEqual(providerTools.map((tool) => tool.function.name));
+    expect(JSON.stringify(requests[3]!.messages)).toContain("repeated evidence already available");
+    expect(JSON.stringify(requests[4]!.messages)).toContain("one bounded retargeting opportunity");
+    expect(harness.executePlans.mock.calls[4]?.[0].onApprovalRequest).toBe(onApprovalRequest);
+    expect(harness.executePlans.mock.calls[4]?.[0].providerExecution?.toolCalls[0]?.argumentsText).toBe(
+      JSON.stringify({ ref: "@e7", tabRef: "@t1" })
     );
   });
 
-  it("permits browser.tabs once when recovery lacks inventory, then requires a grounded action", async () => {
-    const observation = (id: string, tool: string): ToolExecutionRecord =>
-      toolExecutionForTool(id, tool, "No browser state change.");
-    const tabs: ToolExecutionRecord = {
-      ...toolExecutionForTool("call-tabs", "browser.tabs", "Two safe tabs."),
+  it("stops a repeated unresolved target after one bounded retargeting opportunity", async () => {
+    const missingTarget = (id: string): ToolExecutionRecord => ({
+      ...toolExecutionForTool(id, "browser.click", "Browser target was not found."),
+      input: { locator: { text: "Missing control" }, tabRef: "@t1" },
+      targetKey: "browser:browser-session:@t1:text:Missing control",
       result: {
-        ok: true,
-        content: "Two safe tabs.",
-        metadata: {
-          sessionId: "browser-session",
-          tabs: [
-            { ref: "@t1", url: "https://example.com/apps", controlled: true },
-            { ref: "@t2", url: "https://example.com/notifications", controlled: false }
-          ],
-          blockedCount: 0
-        }
+        ok: false,
+        content: "Browser target was not found. No action was dispatched.",
+        metadata: { reason: "browser-target-not-found", actionDispatched: false }
       }
-    };
-    const switched = toolExecutionForTool("call-switch", "browser.switch_tab", "Switched tabs.");
+    });
     const harness = await createPostToolNudgeHarness({
       responses: [
-        providerExecution("", [providerToolCall("call-snapshot", "{}", "browser.snapshot")]),
-        providerExecution("", [providerToolCall("call-find", "{}", "browser.find")]),
-        providerExecution("", [providerToolCall("call-extract", "{}", "browser.extract")]),
-        providerExecution("", [providerToolCall("call-tabs", "{}", "browser.tabs")]),
-        providerExecution("", [providerToolCall("call-switch", "{}", "browser.switch_tab")]),
-        providerExecution("Recovered on the notifications tab.")
+        providerExecution("", [providerToolCall("call-missing-1", JSON.stringify({ locator: { text: "Missing control" }, tabRef: "@t1" }), "browser.click")]),
+        providerExecution("", [providerToolCall("call-missing-2", JSON.stringify({ locator: { text: "Missing control" }, tabRef: "@t1" }), "browser.click")]),
+        providerExecution("This response must not be reached.")
       ],
       toolSteps: [
-        { executions: [observation("call-snapshot", "browser.snapshot")] },
-        { executions: [observation("call-find", "browser.find")] },
-        { executions: [observation("call-extract", "browser.extract")] },
-        { executions: [tabs] },
-        { executions: [switched] }
+        { executions: [missingTarget("call-missing-1")] },
+        { executions: [missingTarget("call-missing-2")] }
       ],
-      maxProviderIterations: 7
+      maxProviderIterations: 4
     });
     const providerTools = [
       "browser.snapshot",
       "browser.find",
-      "browser.extract",
       "browser.click",
       "browser.tabs",
       "browser.switch_tab"
@@ -3168,14 +3188,13 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
     const result = await runBasicProviderTurn(harness.loop, { providerTools });
     const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
-    const firstRecoveryTools = (requests[3]!.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name);
-    const secondRecoveryTools = (requests[4]!.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name);
 
-    expect(firstRecoveryTools).toContain("browser.tabs");
-    expect(secondRecoveryTools).not.toContain("browser.tabs");
-    expect(secondRecoveryTools).toContain("browser.switch_tab");
-    expect(result.terminationCause).toBe("normal");
-    expect(harness.completeSpy).toHaveBeenCalledTimes(6);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(requests[1]!.messages)).toContain("one bounded retargeting opportunity");
+    expect((requests[1]!.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name))
+      .toEqual(providerTools.map((tool) => tool.function.name));
+    expect(result.terminationCause).toBe("browser_no_progress");
+    expect(result.providerExecution?.response?.content).toContain("ineffective target was repeated");
   });
 
   it("stops before a substitute continuation when a delegated Task owns the answer", async () => {

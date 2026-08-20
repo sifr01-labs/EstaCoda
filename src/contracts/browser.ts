@@ -69,6 +69,8 @@ export type BrowserLocatorCandidate = {
   text?: string;
   label?: string;
   withinText?: string;
+  /** Smallest meaningful runtime-observed container shared with related actions. */
+  regionText?: string;
 };
 
 export type BrowserFindResult = {
@@ -143,6 +145,7 @@ type BrowserActionDeltaBase = {
     source: Pick<BrowserTab, "ref" | "url" | "title">;
     destination: Pick<BrowserTab, "ref" | "url" | "title">;
   };
+  target?: Pick<BrowserLocatorCandidate, "ref" | "role" | "name" | "label" | "withinText" | "regionText">;
 };
 
 export type BrowserActionDelta = BrowserActionDeltaBase & (
@@ -185,6 +188,8 @@ export type BrowserSnapshot = {
     text?: string;
     label?: string;
     withinText?: string;
+    /** Smallest meaningful runtime-observed container shared with related actions. */
+    regionText?: string;
     /** Runtime-owned result from the shared browser interactability evaluator. */
     interactable?: boolean;
     interactabilityReason?: "detached" | "hidden" | "inert" | "disabled" | "modal-blocked";

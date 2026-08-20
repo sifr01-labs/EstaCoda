@@ -1557,8 +1557,10 @@ describe("web and browser tools baselines", () => {
 
     await expect(click.run(input, { securityResolution: approved })).resolves.toMatchObject({
       ok: false,
+      content: expect.stringContaining("No action was dispatched."),
       metadata: {
         reason: "stale-browser-ref",
+        actionDispatched: false,
         currentIdentity
       }
     });
@@ -3172,7 +3174,8 @@ describe("web and browser tools baselines", () => {
     ]));
   });
 
-  it("renders grounded nearby browser.find candidates as non-exact current-document refs", async () => {
+  it("renders matching page regions with their grounded actions before incidental text", async () => {
+    const regionText = "TikTok Connect Callback URL Edit Delete";
     const backend: BrowserBackend = {
       ...createMockBrowserBackend(),
       find: async () => ({
@@ -3181,13 +3184,39 @@ describe("web and browser tools baselines", () => {
         tabRef: "@t2",
         status: "not-found",
         candidates: [],
-        nearbyCandidates: [{
-          ref: "@e7",
-          identity: browserIdentity(4),
-          tabRef: "@t2",
-          role: "button",
-          name: "TikTok notifications"
-        }]
+        nearbyCandidates: [
+          {
+            ref: "@e7",
+            identity: browserIdentity(4),
+            tabRef: "@t2",
+            role: "link",
+            name: "Callback URL",
+            regionText
+          },
+          {
+            ref: "@e8",
+            identity: browserIdentity(4),
+            tabRef: "@t2",
+            role: "button",
+            name: "Edit",
+            regionText
+          },
+          {
+            ref: "@e9",
+            identity: browserIdentity(4),
+            tabRef: "@t2",
+            role: "button",
+            name: "Delete",
+            regionText
+          },
+          {
+            ref: "@e10",
+            identity: browserIdentity(4),
+            tabRef: "@t2",
+            role: "link",
+            name: "TikTok Connect notification"
+          }
+        ]
       })
     };
 
@@ -3199,9 +3228,17 @@ describe("web and browser tools baselines", () => {
     expect(result.ok).toBe(true);
     expect(result.content).toContain("No visible, enabled browser element matched exactly");
     expect(result.content).toContain("Nearby current-document candidates (not exact matches");
+    expect(result.content).toContain(`Region: ${JSON.stringify(regionText)}`);
+    expect(result.content).toContain("Actions:");
     expect(result.content).toContain(`@e7 identity=${JSON.stringify(browserIdentity(4))} tab=@t2`);
+    expect(result.content.indexOf("Callback URL")).toBeLessThan(result.content.indexOf("TikTok Connect notification"));
     expect(result.metadata).toMatchObject({
-      nearbyCandidates: [{ ref: "@e7", identity: browserIdentity(4), tabRef: "@t2" }]
+      nearbyCandidates: [
+        { ref: "@e7", identity: browserIdentity(4), tabRef: "@t2" },
+        { ref: "@e8", identity: browserIdentity(4), tabRef: "@t2" },
+        { ref: "@e9", identity: browserIdentity(4), tabRef: "@t2" },
+        { ref: "@e10", identity: browserIdentity(4), tabRef: "@t2" }
+      ]
     });
   });
 
@@ -3235,6 +3272,44 @@ describe("web and browser tools baselines", () => {
         currentTabRef: "@t2",
         candidates: [{ ref: "@e1" }, { ref: "@e2" }]
       }
+    });
+  });
+
+  it("marks target-resolution failures as undispatched and returns grounded nearby actions", async () => {
+    const regionText = "TikTok Connect Callback URL Edit Delete";
+    const nearbyCandidates = [
+      { ref: "@e7", identity: browserIdentity(9), tabRef: "@t2", role: "link", name: "Callback URL", regionText },
+      { ref: "@e8", identity: browserIdentity(9), tabRef: "@t2", role: "button", name: "Edit", regionText },
+      { ref: "@e9", identity: browserIdentity(9), tabRef: "@t2", role: "button", name: "Delete", regionText }
+    ];
+    const backend: BrowserBackend = {
+      ...createMockBrowserBackend(),
+      click: async () => {
+        throw new BrowserTargetError({
+          reason: "browser-target-not-found",
+          message: "Browser locator did not match a current element.",
+          currentIdentity: browserIdentity(9),
+          currentTabRef: "@t2",
+          nearbyCandidates
+        });
+      }
+    };
+
+    const result = await tool("browser.click", createTestWebTools({ browserBackend: backend })).run({
+      locator: { name: "TikTok Connect", exact: true }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.content).toContain("No action was dispatched");
+    expect(result.content).toContain(`Region: ${JSON.stringify(regionText)}`);
+    expect(result.content).toContain("Actions:");
+    expect(result.content).toContain("Callback URL");
+    expect(result.content).toContain("Edit");
+    expect(result.content).toContain("Delete");
+    expect(result.metadata).toMatchObject({
+      reason: "browser-target-not-found",
+      actionDispatched: false,
+      nearbyCandidates: [{ ref: "@e7" }, { ref: "@e8" }, { ref: "@e9" }]
     });
   });
 
@@ -3317,6 +3392,57 @@ describe("web and browser tools baselines", () => {
     expect(result.content).toContain("Current state:");
     expect(result.content).toContain("Identity: documentEpoch=1 actionRevision=2 observationId=2");
     expect(result.content).toContain("Actionable refs: none");
+  });
+
+  it("returns actions from the attempted target region first after a no-change action", async () => {
+    const regionText = "TikTok Connect Callback URL Edit Delete";
+    const unrelated = Array.from({ length: 22 }, (_, index) => ({
+      ref: `@e${index + 1}`,
+      role: "button",
+      name: `Unrelated action ${index + 1}`
+    }));
+    const browserBackend: BrowserBackend = {
+      ...createMockBrowserBackend(),
+      click: async (input) => ({
+        sessionId: input.sessionId ?? "session-1",
+        url: "https://example.com/apps",
+        identity: browserIdentity(5),
+        observedAt: "2026-08-13T00:00:00.000Z",
+        readiness: "complete",
+        tab: { ref: "@t1", url: "https://example.com/apps", controlled: true },
+        elements: [
+          ...unrelated,
+          { ref: "@e23", role: "link", name: "Callback URL", regionText },
+          { ref: "@e24", role: "button", name: "Edit", regionText },
+          { ref: "@e25", role: "button", name: "Delete", regionText }
+        ],
+        actionDelta: {
+          outcome: "no-change",
+          beforeIdentity: browserIdentity(5),
+          afterIdentity: browserIdentity(5),
+          waitCondition: "dom-stable",
+          conditionMet: true,
+          url: { changed: false, after: "https://example.com/apps" },
+          target: {
+            ref: "@e23",
+            role: "link",
+            name: "Callback URL",
+            regionText
+          }
+        }
+      })
+    };
+
+    const result = await tool("browser.click", createTestWebTools({ browserBackend })).run({
+      locator: { name: "Callback URL", withinText: "TikTok Connect" }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("Action dispatched; no observable page change was detected.");
+    expect(result.content).toContain(`Current actionable refs (related region first: ${JSON.stringify(regionText)}):`);
+    expect(result.content.indexOf("@e23")).toBeLessThan(result.content.indexOf("@e1 "));
+    expect(result.content).toContain("@e24");
+    expect(result.content).toContain("@e25");
   });
 
   it("renders dispatched settlement failures as non-retryable action outcomes", async () => {

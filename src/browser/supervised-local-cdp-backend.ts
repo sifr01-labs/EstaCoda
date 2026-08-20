@@ -7,6 +7,7 @@ import type {
   BrowserConsoleEntry,
   BrowserBackendStatus,
   BrowserExtractResult,
+  BrowserLocatorCandidate,
   BrowserNavigateInput,
   BrowserNavigateResult,
   BrowserProtectedFieldDeliveryInput,
@@ -282,6 +283,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     capture?: () => Promise<BrowserSnapshot>;
     initialSnapshot?: BrowserSnapshot;
     openedTabs?: BrowserTab[];
+    target?: BrowserLocatorCandidate;
     full?: boolean;
     actionDispatched?: true;
   }): Promise<BrowserSnapshot> => {
@@ -302,7 +304,8 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       settledSnapshot = withBrowserActionDelta({
         before: input.before,
         settlement,
-        openedTabs: input.openedTabs
+        openedTabs: input.openedTabs,
+        target: input.target
       });
     } catch (error) {
       if (input.actionDispatched !== true) throw error;
@@ -313,6 +316,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         capture,
         initialSnapshot: input.initialSnapshot,
         openedTabs: input.openedTabs,
+        target: input.target,
         cause: error
       });
     }
@@ -333,6 +337,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     capture: () => Promise<BrowserSnapshot>;
     initialSnapshot?: BrowserSnapshot;
     openedTabs?: BrowserTab[];
+    target?: BrowserLocatorCandidate;
     cause: unknown;
   }): Promise<BrowserSnapshot> => {
     const normalized = normalizeBrowserActionSettlementInput(input.actionInput);
@@ -355,7 +360,8 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       latest,
       waitCondition: normalized.waitFor.kind,
       stateObservation: isPostDispatchObservation(input.before, latest) ? "post-dispatch" : "last-known",
-      openedTabs: input.openedTabs
+      openedTabs: input.openedTabs,
+      target: input.target
     });
   };
 
@@ -933,7 +939,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
           stableWindowMs: options.settling?.stableWindowMs,
           minimumObservationMs: options.settling?.minimumObservationMs
         });
-        settledSnapshot = withBrowserActionDelta({ before, settlement, openedTabs });
+        settledSnapshot = withBrowserActionDelta({ before, settlement, openedTabs, target });
       } catch (error) {
         settledSnapshot = await preserveDispatchedSettlementFailure({
           session,
@@ -941,6 +947,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
           actionInput: input,
           capture,
           openedTabs,
+          target,
           cause: error
         });
       }
@@ -963,7 +970,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         awaitPromise: true
       });
       assertBrowserRuntimeEvaluationSucceeded(actionEvaluation);
-      return settleAction({ session, before, actionInput: input, full: targetState.full, actionDispatched: true });
+      return settleAction({ session, before, actionInput: input, target, full: targetState.full, actionDispatched: true });
     },
     select: async (input) => {
       normalizeBrowserActionSettlementInput(input);
@@ -979,7 +986,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         awaitPromise: true
       });
       assertBrowserRuntimeEvaluationSucceeded(actionEvaluation);
-      return settleAction({ session, before, actionInput: input, full: targetState.full, actionDispatched: true });
+      return settleAction({ session, before, actionInput: input, target, full: targetState.full, actionDispatched: true });
     },
     extract: async (input): Promise<BrowserExtractResult> => {
       const session = await getSession(input);
@@ -1014,8 +1021,8 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       const before = input.ref === undefined
         ? latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session)
         : (await captureSafeTargetSnapshot(session, input)).snapshot;
-      if (input.ref !== undefined) {
-        const target = resolveBrowserTarget(before, input);
+      const target = input.ref === undefined ? undefined : resolveBrowserTarget(before, input);
+      if (target !== undefined) {
         const focused = await inspectBrowserActionTarget(session, undefined);
         if (focused?.ref !== target.ref) {
           throw new BrowserTargetError({
@@ -1030,7 +1037,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       const key = input.key ?? "Enter";
       await session.supervisor.send("Input.dispatchKeyEvent", { type: "keyDown", key });
       await session.supervisor.send("Input.dispatchKeyEvent", { type: "keyUp", key });
-      return settleAction({ session, before, actionInput: input, actionDispatched: true });
+      return settleAction({ session, before, actionInput: input, target, actionDispatched: true });
     },
     back: async (input = {}) => {
       normalizeBrowserActionSettlementInput(input);

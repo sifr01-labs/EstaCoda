@@ -27,6 +27,7 @@ export type BrowserTargetFailureReason =
 export class BrowserTargetError extends Error {
   readonly reason: BrowserTargetFailureReason;
   readonly candidates: BrowserLocatorCandidate[];
+  readonly nearbyCandidates: BrowserLocatorCandidate[];
   readonly currentSessionId?: string;
   readonly currentIdentity?: BrowserStateIdentity;
   readonly currentTabRef?: string;
@@ -35,6 +36,7 @@ export class BrowserTargetError extends Error {
     reason: BrowserTargetFailureReason;
     message: string;
     candidates?: BrowserLocatorCandidate[];
+    nearbyCandidates?: BrowserLocatorCandidate[];
     currentSessionId?: string;
     currentIdentity?: BrowserStateIdentity;
     currentTabRef?: string;
@@ -43,6 +45,7 @@ export class BrowserTargetError extends Error {
     this.name = "BrowserTargetError";
     this.reason = input.reason;
     this.candidates = input.candidates?.slice(0, MAX_CANDIDATES) ?? [];
+    this.nearbyCandidates = input.nearbyCandidates?.slice(0, MAX_NEARBY_CANDIDATES) ?? [];
     this.currentSessionId = input.currentSessionId;
     this.currentIdentity = input.currentIdentity;
     this.currentTabRef = input.currentTabRef;
@@ -79,11 +82,16 @@ function nearbyBrowserLocatorCandidates(
 ): BrowserLocatorCandidate[] {
   const requestedTokens = locatorTextTokens(locator);
   if (requestedTokens.length === 0) return [];
+  const regionActionCounts = elements.reduce((counts, element) => {
+    const region = comparable(element.regionText ?? element.withinText ?? "");
+    if (region.length > 0) counts.set(region, (counts.get(region) ?? 0) + 1);
+    return counts;
+  }, new Map<string, number>());
   return elements
     .map((element, index) => ({
       element,
       index,
-      score: nearbyCandidateScore(element, locator, requestedTokens)
+      score: nearbyCandidateScore(element, locator, requestedTokens, regionActionCounts)
     }))
     .filter((entry) => entry.score > 0)
     .sort((left, right) => right.score - left.score || left.index - right.index)
@@ -94,20 +102,34 @@ function nearbyBrowserLocatorCandidates(
 function nearbyCandidateScore(
   element: NonNullable<BrowserSnapshot["elements"]>[number],
   locator: BrowserLocator,
-  requestedTokens: readonly string[]
+  requestedTokens: readonly string[],
+  regionActionCounts: ReadonlyMap<string, number>
 ): number {
-  const candidateText = comparable([
+  const directText = comparable([
     element.name,
     element.text,
-    element.label,
-    element.withinText
+    element.label
   ].filter((value): value is string => value !== undefined).join(" "));
-  const candidateTokens = new Set(tokenizeLocatorText(candidateText));
-  const overlap = requestedTokens.filter((token) => candidateTokens.has(token)).length;
+  const regionText = comparable(element.regionText ?? element.withinText ?? "");
+  const directTokens = new Set(tokenizeLocatorText(directText));
+  const regionTokens = new Set(tokenizeLocatorText(regionText));
+  const directOverlap = requestedTokens.filter((token) => directTokens.has(token)).length;
+  const regionOverlap = requestedTokens.filter((token) => regionTokens.has(token)).length;
   const phrase = requestedTokens.join(" ");
-  const partialPhrase = phrase.length >= 4 && candidateText.includes(phrase) ? 2 : 0;
+  const directPhrase = phrase.length >= 4 && directText.includes(phrase) ? 12 : 0;
+  const regionPhrase = phrase.length >= 4 && regionText.includes(phrase) ? 8 : 0;
+  const regionCompactness = regionOverlap === 0
+    ? 0
+    : regionTokens.size <= 16
+      ? 6
+      : regionTokens.size <= 32
+        ? 3
+        : 0;
+  const sharedRegionActions = regionOverlap === 0 ? 0 : regionActionCounts.get(regionText) ?? 0;
+  const sharedRegionBonus = Math.max(0, Math.min(sharedRegionActions, 4) - 1) * 16;
   const role = locator.role !== undefined && comparable(element.role ?? "") === comparable(locator.role) ? 1 : 0;
-  return overlap * 4 + partialPhrase + (overlap > 0 ? role : 0);
+  return directOverlap * 8 + regionOverlap * 4 + directPhrase + regionPhrase + regionCompactness + sharedRegionBonus +
+    (directOverlap > 0 || regionOverlap > 0 ? role : 0);
 }
 
 function locatorTextTokens(locator: BrowserLocator): string[] {
@@ -151,7 +173,13 @@ export function resolveBrowserTarget(snapshot: BrowserSnapshot, input: BrowserAc
           tabRef
         );
       }
-      throw targetError("browser-target-not-found", "Browser locator did not match a current element.", snapshot, tabRef);
+      throw targetError(
+        "browser-target-not-found",
+        "Browser locator did not match a current element.",
+        snapshot,
+        tabRef,
+        result.nearbyCandidates
+      );
     }
     if (result.status === "ambiguous") {
       throw new BrowserTargetError({
@@ -229,10 +257,12 @@ export function browserTargetFailureMetadata(error: unknown): Record<string, unk
   if (!(error instanceof BrowserTargetError)) return undefined;
   return {
     reason: error.reason,
+    actionDispatched: false,
     ...(error.currentSessionId === undefined ? {} : { currentSessionId: error.currentSessionId }),
     ...(error.currentIdentity === undefined ? {} : { currentIdentity: error.currentIdentity }),
     ...(error.currentTabRef === undefined ? {} : { currentTabRef: error.currentTabRef }),
-    ...(error.candidates.length === 0 ? {} : { candidates: error.candidates })
+    ...(error.candidates.length === 0 ? {} : { candidates: error.candidates }),
+    ...(error.nearbyCandidates.length === 0 ? {} : { nearbyCandidates: error.nearbyCandidates })
   };
 }
 
@@ -299,7 +329,8 @@ function locatorCandidate(
     ...(element.name === undefined ? {} : { name: safeCandidateText(element.name) }),
     ...(element.text === undefined ? {} : { text: safeCandidateText(element.text) }),
     ...(element.label === undefined ? {} : { label: safeCandidateText(element.label) }),
-    ...(element.withinText === undefined ? {} : { withinText: safeCandidateText(element.withinText) })
+    ...(element.withinText === undefined ? {} : { withinText: safeCandidateText(element.withinText) }),
+    ...(element.regionText === undefined ? {} : { regionText: safeCandidateText(element.regionText) })
   };
 }
 
@@ -341,14 +372,16 @@ function targetError(
   reason: BrowserTargetFailureReason,
   message: string,
   snapshot: BrowserSnapshot,
-  tabRef: string
+  tabRef: string,
+  nearbyCandidates?: BrowserLocatorCandidate[]
 ): BrowserTargetError {
   return new BrowserTargetError({
     reason,
     message,
     currentIdentity: snapshot.identity,
     currentSessionId: snapshot.sessionId,
-    currentTabRef: tabRef
+    currentTabRef: tabRef,
+    nearbyCandidates
   });
 }
 
