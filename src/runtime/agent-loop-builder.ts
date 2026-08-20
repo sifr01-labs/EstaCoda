@@ -311,7 +311,8 @@ export class AgentLoopBuilder {
     // This same registry is subsequently filtered in-place for the session.
     // Capability preflight therefore cannot observe a broader/global inventory.
     const toolRegistry = new ToolRegistry();
-    const ownsExecutionPlan = input.parentSessionId === undefined && input.taskExecution === undefined;
+    const ownsForegroundSupervision = input.parentSessionId === undefined && input.taskExecution === undefined;
+    const ownsExecutionPlan = ownsForegroundSupervision;
     // Every runtime records authoritative execution receipts. Only root
     // foreground sessions additionally expose the legacy Mission controller.
     const executionEvidenceIndex = new ExecutionEvidenceIndex();
@@ -334,7 +335,7 @@ export class AgentLoopBuilder {
           (record) => runRecorder.recordExecutionEvidence(record)
         )
       : undefined;
-    const executionWorkingSet = ownsExecutionPlan
+    const executionWorkingSet = ownsForegroundSupervision
       ? new ExecutionWorkingSetController({
           profileId: substrate.profileId,
           sessionId: input.sessionId
@@ -595,7 +596,7 @@ export class AgentLoopBuilder {
       executionPlanReader: executionPlanController,
       executionPlanController,
       executionWorkingSet,
-      browserSessionLease: ownsExecutionPlan ? substrate.browserSessionLease : undefined,
+      browserSessionLease: ownsForegroundSupervision ? substrate.browserSessionLease : undefined,
       browserBackend: substrate.browserBackend
     });
     const skillPlaybookRunner = (this.#factories.skillPlaybookRunner ?? ((options) => new SkillPlaybookRunner(options)))({

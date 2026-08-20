@@ -156,10 +156,10 @@ describe("assembleProviderPrompt", () => {
     }));
   });
 
-  it("keeps confirmed Mission receipts in a protected layer across context packing", () => {
+  it("keeps confirmed foreground-turn receipts in a protected layer across context packing", () => {
     const prompt = assembleProviderPrompt(basePromptInput({
       executionWorkingSet: {
-        missionRevision: 3,
+        visibleTurnId: "turn-3",
         facts: [{
           key: "collection-id",
           summary: "Collection ID: collection-123",
@@ -177,7 +177,9 @@ describe("assembleProviderPrompt", () => {
     }));
     const rendered = renderMessages(prompt.messages);
 
-    expect(rendered).toContain("Confirmed Mission state");
+    expect(rendered).toContain("Confirmed foreground-turn state");
+    expect(rendered).toContain("Scope: current visible turn");
+    expect(rendered).not.toContain("turn-3");
     expect(rendered).toContain("Collection ID: collection-123");
     expect(rendered).toContain("freshness=historical");
     expect(rendered).toContain("reuse these instead of rediscovering them");

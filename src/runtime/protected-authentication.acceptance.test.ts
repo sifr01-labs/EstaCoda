@@ -306,7 +306,8 @@ describe("protected authentication journey acceptance", () => {
         if (scenario.cancelCollection || scenario.otpOutcome === "rejected") {
           expect(response!.text).toContain("The Mission needs your input before it can continue");
         } else {
-          expect(response!.text).toContain("The Mission is incomplete.");
+          expect(response!.text).toContain("Authentication could not be confirmed from the settled browser state.");
+          expect(response!.text).not.toContain("The Mission is incomplete.");
         }
       }
 

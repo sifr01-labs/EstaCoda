@@ -712,8 +712,8 @@ function renderExecutionPlan(plan: ExecutionPlan): string {
 
 function renderExecutionWorkingSet(workingSet: ExecutionWorkingSet): string {
   return [
-    "Confirmed Mission state (harness-derived receipts; reuse these instead of rediscovering them):",
-    `Mission revision: ${workingSet.missionRevision}`,
+    "Confirmed foreground-turn state (harness-derived receipts; reuse these instead of rediscovering them):",
+    "Scope: current visible turn",
     ...workingSet.facts.map((fact) =>
       `- ${fact.summary} · source=${fact.sourceCallId} · freshness=${fact.freshness}`
     ),

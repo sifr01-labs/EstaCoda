@@ -172,6 +172,7 @@ export class ProviderTurnLoop {
   readonly #browserSessionLease: BrowserSessionLease | undefined;
   readonly #browserBackend: BrowserBackend | undefined;
   #activeBrowserLease: { sessionId: string; owner: string } | undefined;
+  #foregroundTurnSequence = 0;
   #providerRequestSequence = 0;
   #lastPromptTokens = 0;
   #lastActualPromptTokens: number | undefined;
@@ -263,7 +264,7 @@ export class ProviderTurnLoop {
     executionPlanIncomplete?: boolean;
     emergencyDeadlineReached?: boolean;
   }> {
-    const releaseBrowserLeaseOnAbort = (): void => this.#syncBrowserSessionLease(true);
+    const releaseBrowserLeaseOnAbort = (): void => this.#releaseBrowserSessionLease();
     input.signal?.addEventListener("abort", releaseBrowserLeaseOnAbort, { once: true });
     try {
     this.#providerRequestSequence = 0;
@@ -296,14 +297,20 @@ export class ProviderTurnLoop {
     let planUpdateRepairUsed = false;
     let activeProviderTools = [...input.providerTools];
     const workingSessionId = this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
+    const foregroundTurnId = runtimeForegroundTurnId(
+      input.visibleTurnId,
+      workingSessionId,
+      ++this.#foregroundTurnSequence
+    );
     const mcpReadLedger = new TurnMcpReadLedger({
       profileId: this.#profileId,
       sessionId: workingSessionId
     });
-    this.#syncBrowserSessionLease(false);
+    this.#acquireOrRenewBrowserSessionLease(foregroundTurnId);
     const executionSupervision = new ExecutionSupervisionController({
       userText: input.userText,
       visibleTurnId: input.visibleTurnId,
+      foregroundTurnId,
       providerTools: input.providerTools,
       existingExecutions: input.toolExecutions,
       currentSessionId: () => this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId,
@@ -322,7 +329,7 @@ export class ProviderTurnLoop {
     }
 
     for (let iteration = 0; iteration < this.#budgets.maxProviderIterations; iteration += 1) {
-      this.#syncBrowserSessionLease(false);
+      this.#acquireOrRenewBrowserSessionLease(foregroundTurnId);
       activeProviderTools = extendProviderToolsForExecutionPlan({
         currentTools: activeProviderTools,
         catalog: input.providerToolSchemaCatalog,
@@ -383,14 +390,16 @@ export class ProviderTurnLoop {
       let execution = phase === "initial"
         ? await this.#completeWithProvider({
             ...input,
+            foregroundTurnId,
             providerTools: activeProviderTools,
             iteration,
             loopStartedAt,
             reasoningOnlyPrefill: pendingReasoningOnlyPrefill,
-            executionPlanProgressNudge: supervisionPrompt.executionPlanProgressNudge
+            toolLoopProgressNudge: supervisionPrompt.toolLoopProgressNudge
           })
         : await this.#continueProviderAfterTools({
           ...input,
+          foregroundTurnId,
           providerTools: activeProviderTools,
           toolExecutions: [
             ...input.toolExecutions,
@@ -402,8 +411,7 @@ export class ProviderTurnLoop {
           loopStartedAt,
           emptyResponseNudge: pendingEmptyResponseNudge,
           browserNoProgressNudge: supervisionPrompt.browserNoProgressNudge,
-          executionPlanContinuation: supervisionPrompt.executionPlanContinuation,
-          executionPlanProgressNudge: supervisionPrompt.executionPlanProgressNudge,
+          toolLoopProgressNudge: supervisionPrompt.toolLoopProgressNudge,
           reasoningOnlyPrefill: pendingReasoningOnlyPrefill,
           efficiencySignals: providerEfficiencySignals({
             providerCalls: providerCallsThisTurn,
@@ -460,37 +468,37 @@ export class ProviderTurnLoop {
           break;
         }
 
-        const executionPlanProgress = executionSupervision.observeReasoningOnly();
-        if (executionPlanProgress.active) {
+        const toolLoopProgress = executionSupervision.observeReasoningOnly();
+        if (toolLoopProgress.active) {
           await this.#runRecorder.recordProviderIteration({
             iteration,
             phase,
             ok: execution.ok,
             toolCalls: 0,
             executedTools: 0,
-            exhausted: executionPlanProgress.shouldStop
+            exhausted: toolLoopProgress.shouldStop
           });
           effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
           previousProviderExecution = execution;
-          if (executionPlanProgress.shouldStop) {
-            const reason = "The active execution plan reached its no-progress iteration limit.";
+          if (toolLoopProgress.shouldStop) {
+            const reason = "The foreground tool loop reached its no-progress iteration limit.";
             await this.#runRecorder.recordProviderBudgetExhausted({
-              budget: "execution-plan-no-progress-iterations",
+              budget: "tool-loop-no-progress-iterations",
               limit: this.#budgets.maxNoProgressIterations,
-              observed: executionPlanProgress.noProgressIterations,
+              observed: toolLoopProgress.noProgressIterations,
               reason
             }, input.onEvent);
             await this.#runRecorder.recordClassifiedFailure(
               {
                 kind: "budget",
-                budget: "execution-plan-no-progress-iterations",
+                budget: "tool-loop-no-progress-iterations",
                 limit: this.#budgets.maxNoProgressIterations,
-                observed: executionPlanProgress.noProgressIterations,
+                observed: toolLoopProgress.noProgressIterations,
                 reason
               },
               "provider-budget-exhausted"
             );
-            effectiveProviderExecution = executionSupervision.executionPlanNoProgressStopReceipt(execution);
+            effectiveProviderExecution = executionSupervision.toolLoopNoProgressStopReceipt(execution);
             break;
           }
           pendingReasoningOnlyPrefill = reasoningOnlyPrefillRetries < 2;
@@ -645,8 +653,8 @@ export class ProviderTurnLoop {
       if (shouldRepairFailedPlanUpdate) planUpdateRepairUsed = true;
       const repeatedFailureBudgetExceeded = this.#recordRepeatedToolFailures(loopToolExecutions, repeatedFailures);
       const supervisionAssessment = executionSupervision.assessProgress(loopToolExecutions);
-      const { browserObservation, executionPlanProgress, userInputBlocker, missingCapabilityBlocker } = supervisionAssessment;
-      this.#syncBrowserSessionLease(false);
+      const { browserObservation, toolLoopProgress, userInputBlocker, missingCapabilityBlocker } = supervisionAssessment;
+      this.#acquireOrRenewBrowserSessionLease(foregroundTurnId);
       if (userInputBlocker !== undefined && !shouldRepairFailedPlanUpdate) {
         execution = executionSupervision.userInputRequiredReceipt(execution, userInputBlocker.summary);
         await this.#runRecorder.recordProviderIteration({
@@ -706,20 +714,20 @@ export class ProviderTurnLoop {
           "provider-budget-exhausted"
         );
       }
-      if (executionPlanProgress.shouldStop) {
-        const reason = "The active execution plan reached its no-progress iteration limit.";
+      if (toolLoopProgress.shouldStop) {
+        const reason = "The foreground tool loop reached its no-progress iteration limit.";
         await this.#runRecorder.recordProviderBudgetExhausted({
-          budget: "execution-plan-no-progress-iterations",
+          budget: "tool-loop-no-progress-iterations",
           limit: this.#budgets.maxNoProgressIterations,
-          observed: executionPlanProgress.noProgressIterations,
+          observed: toolLoopProgress.noProgressIterations,
           reason
         }, input.onEvent);
         await this.#runRecorder.recordClassifiedFailure(
           {
             kind: "budget",
-            budget: "execution-plan-no-progress-iterations",
+            budget: "tool-loop-no-progress-iterations",
             limit: this.#budgets.maxNoProgressIterations,
-            observed: executionPlanProgress.noProgressIterations,
+            observed: toolLoopProgress.noProgressIterations,
             reason
           },
           "provider-budget-exhausted"
@@ -730,7 +738,7 @@ export class ProviderTurnLoop {
         providerToolExecutions.length >= this.#budgets.maxProviderToolCalls ||
         repeatedFailureBudgetExceeded !== undefined ||
         browserObservation?.shouldStop === true ||
-        executionPlanProgress.shouldStop
+        toolLoopProgress.shouldStop
       ) && execution.toolCalls.length > 0 && loopToolExecutions.length > 0;
 
       let terminalPostToolEmpty =
@@ -776,21 +784,8 @@ export class ProviderTurnLoop {
         break;
       }
 
-      if (executionPlanProgress.shouldStop) {
-        execution = executionSupervision.executionPlanNoProgressStopReceipt(execution);
-      }
-
-      const supervisionFinalization = executionSupervision.finalizeProviderExecution({
-        execution,
-        executionPlanProgress,
-        canContinue: iteration + consumedProviderIterations < this.#budgets.maxProviderIterations
-      });
-      execution = supervisionFinalization.execution;
-      if (supervisionFinalization.continueExecutionPlan) {
-        effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
-        previousProviderExecution = execution;
-        if (consumedProviderIterations > 1) iteration += consumedProviderIterations - 1;
-        continue;
+      if (toolLoopProgress.shouldStop) {
+        execution = executionSupervision.toolLoopNoProgressStopReceipt(execution);
       }
 
       if (
@@ -839,7 +834,7 @@ export class ProviderTurnLoop {
         (loopToolExecutions.length === 0 && !hasRecoverableToolFeedback) ||
         exhausted
       ) {
-        if (exhausted && execution.ok === true && !executionPlanProgress.shouldStop) {
+        if (exhausted && execution.ok === true && !toolLoopProgress.shouldStop) {
           const exhaustionReason = browserObservation?.shouldStop === true
             ? "repeated browser observations made no progress"
             : "max iterations, tool calls, or repeated tool failures reached with pending work";
@@ -871,7 +866,7 @@ export class ProviderTurnLoop {
     };
     } finally {
       input.signal?.removeEventListener("abort", releaseBrowserLeaseOnAbort);
-      this.#syncBrowserSessionLease(input.signal?.aborted === true);
+      this.#releaseBrowserSessionLease();
     }
   }
 
@@ -909,26 +904,9 @@ export class ProviderTurnLoop {
     return refreshed;
   }
 
-  #syncBrowserSessionLease(cancelled: boolean): void {
-    const plan = this.#executionPlanReader?.current();
-    const shouldHold = !cancelled && plan?.status === "active";
-    const owner = shouldHold
-      ? `execution-plan:${this.#profileId}:${plan.originTurnId}`
-      : undefined;
-
-    if (owner === undefined) {
-      if (this.#activeBrowserLease !== undefined) {
-        this.#browserSessionLease?.release(
-          this.#activeBrowserLease.sessionId,
-          this.#activeBrowserLease.owner
-        );
-        this.#activeBrowserLease = undefined;
-      }
-      return;
-    }
-    if (this.#browserSessionLease === undefined) {
-      return;
-    }
+  #acquireOrRenewBrowserSessionLease(foregroundTurnId: string): void {
+    if (this.#browserSessionLease === undefined) return;
+    const owner = `provider-turn:${this.#profileId}:${foregroundTurnId}`;
 
     const runtimeSessionId = this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
     const sessionId = deriveBrowserSessionKey({ currentSessionId: () => runtimeSessionId });
@@ -951,6 +929,15 @@ export class ProviderTurnLoop {
       return;
     }
     this.#browserSessionLease.renew(sessionId, owner);
+  }
+
+  #releaseBrowserSessionLease(): void {
+    if (this.#activeBrowserLease === undefined) return;
+    this.#browserSessionLease?.release(
+      this.#activeBrowserLease.sessionId,
+      this.#activeBrowserLease.owner
+    );
+    this.#activeBrowserLease = undefined;
   }
 
   #recordRepeatedToolFailures(
@@ -978,6 +965,7 @@ export class ProviderTurnLoop {
   }
 
   async #completeWithProvider(input: {
+    foregroundTurnId: string;
     visibleTurnId?: string;
     userText: string;
     routedText: string;
@@ -1005,8 +993,7 @@ export class ProviderTurnLoop {
     loopStartedAt: number;
     signal?: AbortSignal;
     reasoningOnlyPrefill?: boolean;
-    executionPlanContinuation?: boolean;
-    executionPlanProgressNudge?: boolean;
+    toolLoopProgressNudge?: boolean;
   }): Promise<ProviderExecutionResult | undefined> {
     if (this.#providerExecutor === undefined || this.#model === undefined || this.#model.provider === "unconfigured") {
       return undefined;
@@ -1039,7 +1026,7 @@ export class ProviderTurnLoop {
       agentProfile: this.#agentProfile,
       executionPlan: this.#executionPlanReader?.current(),
       executionWorkingSet: this.#executionWorkingSet?.snapshot(
-        this.#executionPlanReader?.current(),
+        input.foregroundTurnId,
         this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId
       ),
       browserState
@@ -1047,8 +1034,8 @@ export class ProviderTurnLoop {
     if (input.reasoningOnlyPrefill === true) {
       prompt.messages.push(reasoningOnlyPrefillMessage());
     }
-    if (input.executionPlanProgressNudge === true) {
-      prompt.messages.push({ role: "user", content: EXECUTION_SUPERVISION_PROMPTS.executionPlanProgress });
+    if (input.toolLoopProgressNudge === true) {
+      prompt.messages.push({ role: "user", content: EXECUTION_SUPERVISION_PROMPTS.toolLoopProgress });
     }
     this.#lastPromptTokens = prompt.budget.estimatedTokens;
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
@@ -1116,6 +1103,7 @@ export class ProviderTurnLoop {
   }
 
   async #continueProviderAfterTools(input: {
+    foregroundTurnId: string;
     visibleTurnId?: string;
     userText: string;
     routedText: string;
@@ -1144,8 +1132,7 @@ export class ProviderTurnLoop {
     loopStartedAt: number;
     emptyResponseNudge?: boolean;
     browserNoProgressNudge?: boolean;
-    executionPlanContinuation?: boolean;
-    executionPlanProgressNudge?: boolean;
+    toolLoopProgressNudge?: boolean;
     reasoningOnlyPrefill?: boolean;
     efficiencySignals?: string[];
     signal?: AbortSignal;
@@ -1158,12 +1145,10 @@ export class ProviderTurnLoop {
       (
         input.providerExecution.toolCalls.length === 0 &&
         input.emptyResponseNudge !== true &&
-        input.executionPlanContinuation !== true &&
-        input.executionPlanProgressNudge !== true
+        input.toolLoopProgressNudge !== true
       ) ||
       (
-        input.executionPlanContinuation !== true &&
-        input.executionPlanProgressNudge !== true &&
+        input.toolLoopProgressNudge !== true &&
         !input.toolPlans.some((plan) => plan.status === "executed" || isRecoverableToolPlanStatus(plan.status))
       )
     ) {
@@ -1199,7 +1184,7 @@ export class ProviderTurnLoop {
       agentProfile: this.#agentProfile,
       executionPlan: this.#executionPlanReader?.current(),
       executionWorkingSet: this.#executionWorkingSet?.snapshot(
-        this.#executionPlanReader?.current(),
+        input.foregroundTurnId,
         this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId
       ),
       browserState
@@ -1216,14 +1201,8 @@ export class ProviderTurnLoop {
         content: EXECUTION_SUPERVISION_PROMPTS.browserNoProgress
       });
     }
-    if (input.executionPlanContinuation === true) {
-      prompt.messages.push({
-        role: "user",
-        content: EXECUTION_SUPERVISION_PROMPTS.executionPlanContinuation
-      });
-    }
-    if (input.executionPlanProgressNudge === true) {
-      prompt.messages.push({ role: "user", content: EXECUTION_SUPERVISION_PROMPTS.executionPlanProgress });
+    if (input.toolLoopProgressNudge === true) {
+      prompt.messages.push({ role: "user", content: EXECUTION_SUPERVISION_PROMPTS.toolLoopProgress });
     }
     if (input.reasoningOnlyPrefill === true) {
       prompt.messages.push(reasoningOnlyPrefillMessage());
@@ -1279,8 +1258,7 @@ export class ProviderTurnLoop {
       })),
       ...providerExecutionEventMetadata(execution),
       nudge: input.emptyResponseNudge === true ||
-        input.executionPlanContinuation === true ||
-        input.executionPlanProgressNudge === true
+        input.toolLoopProgressNudge === true
     };
     await this.#sessionDb.appendEvent(this.#currentSessionId(), continuationEvent);
     this.#trajectoryRecorder.record("provider-continuation", {
@@ -1294,8 +1272,7 @@ export class ProviderTurnLoop {
       })),
       ...providerExecutionEventMetadata(execution),
       nudge: input.emptyResponseNudge === true ||
-        input.executionPlanContinuation === true ||
-        input.executionPlanProgressNudge === true
+        input.toolLoopProgressNudge === true
     });
 
     if (!execution.ok) {
@@ -2251,6 +2228,18 @@ function localReceiptExecution(model: ModelProfile | undefined): ProviderExecuti
       finishReason: "stop"
     }
   };
+}
+
+function runtimeForegroundTurnId(
+  visibleTurnId: string | undefined,
+  sessionId: string,
+  sequence: number
+): string {
+  const normalized = visibleTurnId?.trim();
+  if (normalized !== undefined && normalized.length > 0) {
+    return [...normalized].slice(0, 160).join("");
+  }
+  return `runtime-${sessionId}-${sequence}`;
 }
 
 function normalizeBrowserObservationLimit(limit: number): number {

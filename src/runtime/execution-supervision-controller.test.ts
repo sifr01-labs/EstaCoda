@@ -35,13 +35,13 @@ describe("ExecutionSupervisionController", () => {
     expect(planController.current()?.revision).toBe(1);
     expect(supervision.consumePromptState()).toEqual({
       browserNoProgressNudge: false,
-      executionPlanContinuation: false,
-      executionPlanProgressNudge: false
+      toolLoopProgressNudge: false
     });
     expect(supervision.observeReasoningOnly()).toMatchObject({
+      active: false,
       materialProgress: false,
-      progressKinds: ["incidental-observation"],
-      noProgressIterations: 1
+      progressKinds: [],
+      noProgressIterations: 0
     });
     await expect(supervision.superviseActivation(["mcp.postman.updateCollection"])).resolves.toBeUndefined();
     expect(planController.current()?.revision).toBe(1);
@@ -132,40 +132,39 @@ describe("ExecutionSupervisionController", () => {
     );
   });
 
-  it("owns Mission progress nudging, stopping, and incomplete receipts", async () => {
-    const planController = activePlan();
+  it("owns tool-loop progress nudging and stopping without Mission state", async () => {
     const { supervision } = createSupervision({
-      planController,
       noProgressNudgeIteration: 1,
       maxNoProgressIterations: 2
     });
 
-    const first = supervision.assessProgress([]);
-    expect(first.executionPlanProgress).toMatchObject({ shouldNudge: true, shouldStop: false });
-    expect(supervision.consumePromptState().executionPlanProgressNudge).toBe(true);
-    const second = supervision.assessProgress([]);
-    expect(second.executionPlanProgress).toMatchObject({ noProgressIterations: 2, shouldStop: true });
+    expect(supervision.assessProgress([readExecution("read-1")]).toolLoopProgress).toMatchObject({
+      materialProgress: true,
+      noProgressIterations: 0
+    });
+    const firstRepeat = supervision.assessProgress([readExecution("read-2")]);
+    expect(firstRepeat.toolLoopProgress).toMatchObject({ shouldNudge: true, shouldStop: false });
+    expect(supervision.consumePromptState().toolLoopProgressNudge).toBe(true);
+    const secondRepeat = supervision.assessProgress([readExecution("read-3")]);
+    expect(secondRepeat.toolLoopProgress).toMatchObject({ noProgressIterations: 2, shouldStop: true });
 
-    const receipt = supervision.executionPlanNoProgressStopReceipt(providerExecution());
-    expect(supervision.executionPlanIncomplete).toBe(true);
-    expect(receipt.response?.content).toContain("The Mission is incomplete.");
+    const receipt = supervision.toolLoopNoProgressStopReceipt(providerExecution());
+    expect(supervision.executionPlanIncomplete).toBe(false);
+    expect(receipt.response?.content).not.toContain("Mission");
     expect(receipt.response?.content).toContain("2 consecutive iterations");
   });
 
-  it("continues an unchanged Mission after a canonical browser state transition", () => {
-    const planController = activePlan();
+  it("recognizes a canonical browser state transition without consulting Mission state", () => {
     const baseline = pageSnapshot(identity(4, 6, 10), "Apps", []);
     baseline.url = "https://portal.example.com/apps";
     baseline.tab = { ...baseline.tab!, url: baseline.url };
     const { supervision } = createSupervision({
-      planController,
       existingExecutions: [snapshotExecution("apps-page", baseline)],
       noProgressNudgeIteration: 2,
       maxNoProgressIterations: 3
     });
     supervision.assessProgress([]);
     supervision.assessProgress([]);
-    const planBefore = JSON.stringify(planController.current());
     const changed: BrowserSnapshot = {
       ...baseline,
       url: "https://portal.example.com/apps/example/edit",
@@ -193,14 +192,13 @@ describe("ExecutionSupervisionController", () => {
       tool: toolDefinition("browser.click")
     }]);
 
-    expect(transition.executionPlanProgress).toMatchObject({
+    expect(transition.toolLoopProgress).toMatchObject({
       materialProgress: true,
-      progressKinds: ["browser-state-change"],
+      progressKinds: ["new-tool-result"],
       noProgressIterations: 0,
       shouldStop: false
     });
-    expect(JSON.stringify(planController.current())).toBe(planBefore);
-    expect(supervision.assessProgress([]).executionPlanProgress).toMatchObject({
+    expect(supervision.assessProgress([]).toolLoopProgress).toMatchObject({
       noProgressIterations: 1,
       shouldStop: false
     });
@@ -281,20 +279,12 @@ describe("ExecutionSupervisionController", () => {
     }
   });
 
-  it("owns finalization eligibility and deadline receipts for unfinished Missions", async () => {
+  it("uses a plan-independent deadline receipt", async () => {
     const { supervision } = createSupervision({ planController: activePlan() });
-    const progress = supervision.assessProgress([]);
-    const continuation = supervision.finalizeProviderExecution({
-      execution: providerExecution(),
-      executionPlanProgress: progress.executionPlanProgress,
-      canContinue: true
-    });
-    expect(continuation.continueExecutionPlan).toBe(true);
-    expect(supervision.consumePromptState().executionPlanContinuation).toBe(true);
-
     const deadline = supervision.emergencyDeadlineReceipt(providerExecution());
-    expect(supervision.executionPlanIncomplete).toBe(true);
+    expect(supervision.executionPlanIncomplete).toBe(false);
     expect(deadline.response?.content).toContain("emergency deadline reserve");
+    expect(deadline.response?.content).not.toContain("Mission");
   });
 });
 
@@ -316,6 +306,7 @@ function createSupervision(input: {
     supervision: new ExecutionSupervisionController({
       userText: input.userText ?? "Inspect the current state.",
       visibleTurnId: input.visibleTurnId,
+      foregroundTurnId: input.visibleTurnId ?? "turn-runtime",
       providerTools: input.providerTools ?? [],
       existingExecutions: input.existingExecutions ?? [],
       currentSessionId: () => "session-test",
@@ -364,6 +355,26 @@ function providerTool(name: string) {
   return {
     type: "function" as const,
     function: { name, description: name, parameters: { type: "object", properties: {} } }
+  };
+}
+
+function readExecution(toolCallId: string): ToolExecutionRecord {
+  return {
+    tool: {
+      name: "mcp.postman.getCollection",
+      description: "Read collection",
+      inputSchema: {},
+      riskClass: "read-only-network",
+      toolsets: ["mcp"],
+      progressLabel: "reading",
+      maxResultSizeChars: 8_000
+    },
+    input: { collectionId: "collection-1" },
+    decision: "allow",
+    riskClass: "read-only-network",
+    toolCallId,
+    executionEffect: { kind: "read", connector: { kind: "mcp", id: "postman" } },
+    result: { ok: true, content: "same collection state" }
   };
 }
 

@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import type { ExecutionPlan } from "../contracts/execution-plan.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { redactSensitiveText } from "../utils/redaction.js";
@@ -41,7 +40,7 @@ export type ExecutionWorkingFact = {
 };
 
 export type ExecutionWorkingSet = {
-  missionRevision: number;
+  visibleTurnId: string;
   facts: ExecutionWorkingFact[];
 };
 
@@ -56,8 +55,7 @@ export class ExecutionWorkingSetController {
   readonly #now: () => Date;
   readonly #facts = new Map<string, StoredFact>();
   #sessionId: string;
-  #missionId: string | undefined;
-  #missionRevision: number | undefined;
+  #visibleTurnId: string | undefined;
 
   constructor(input: { profileId: string; sessionId: string; now?: () => Date }) {
     this.#profileId = input.profileId;
@@ -65,19 +63,19 @@ export class ExecutionWorkingSetController {
     this.#now = input.now ?? (() => new Date());
   }
 
-  beginTurn(plan: ExecutionPlan | undefined, sessionId = this.#sessionId): void {
-    this.#syncScope(plan, sessionId);
+  beginTurn(visibleTurnId: string, sessionId = this.#sessionId): void {
+    this.#syncScope(visibleTurnId, sessionId);
     for (const stored of this.#facts.values()) {
       stored.fact.freshness = "historical";
     }
   }
 
   observe(
-    plan: ExecutionPlan | undefined,
     executions: readonly ToolExecutionRecord[],
+    visibleTurnId: string,
     sessionId = this.#sessionId
   ): void {
-    if (!this.#syncScope(plan, sessionId)) return;
+    this.#syncScope(visibleTurnId, sessionId);
     for (const execution of executions) {
       if (executionEvidenceStatus(execution) !== "success" || INELIGIBLE_TOOLS.has(execution.tool.name)) {
         continue;
@@ -103,43 +101,36 @@ export class ExecutionWorkingSetController {
     }
   }
 
-  snapshot(plan: ExecutionPlan | undefined, sessionId = this.#sessionId): ExecutionWorkingSet | undefined {
-    if (!this.#syncScope(plan, sessionId) || this.#missionRevision === undefined || this.#facts.size === 0) {
+  snapshot(visibleTurnId: string, sessionId = this.#sessionId): ExecutionWorkingSet | undefined {
+    this.#syncScope(visibleTurnId, sessionId);
+    if (this.#facts.size === 0) {
       return undefined;
     }
     return {
-      missionRevision: this.#missionRevision,
+      visibleTurnId,
       facts: [...this.#facts.values()].map(({ fact }) => ({ ...fact }))
     };
   }
 
   clear(): void {
     this.#facts.clear();
-    this.#missionId = undefined;
-    this.#missionRevision = undefined;
+    this.#visibleTurnId = undefined;
   }
 
-  #syncScope(plan: ExecutionPlan | undefined, sessionId: string): boolean {
+  #syncScope(visibleTurnId: string, sessionId: string): void {
+    const normalizedTurnId = visibleTurnId.trim();
+    if (normalizedTurnId.length === 0) {
+      throw new Error("Execution working-set turn ID must be non-empty.");
+    }
     if (sessionId !== this.#sessionId) {
       this.clear();
       this.#sessionId = sessionId;
     }
-    if (
-      plan === undefined ||
-      plan.status === "completed" ||
-      plan.status === "transferred" ||
-      plan.status === "abandoned"
-    ) {
-      this.clear();
-      return false;
-    }
-    const missionId = `${this.#profileId}:${plan.originTurnId}`;
-    if (this.#missionId !== undefined && this.#missionId !== missionId) {
+    const scopedTurnId = `${this.#profileId}:${this.#sessionId}:${normalizedTurnId}`;
+    if (this.#visibleTurnId !== undefined && this.#visibleTurnId !== scopedTurnId) {
       this.clear();
     }
-    this.#missionId = missionId;
-    this.#missionRevision = plan.revision;
-    return true;
+    this.#visibleTurnId = scopedTurnId;
   }
 
   #invalidate(namespace: string, identities: Set<string>): void {
@@ -277,6 +268,11 @@ function executionIdentities(execution: ToolExecutionRecord): Set<string> {
 }
 
 function isMutationExecution(execution: ToolExecutionRecord): boolean {
+  if (execution.executionEffect?.kind === "mutation") return true;
+  if (
+    execution.executionEffect?.kind === "read" ||
+    execution.executionEffect?.kind === "verification"
+  ) return false;
   if (toolHasVerb(execution.tool.name, MUTATION_TOOL_VERBS)) return true;
   if (toolHasVerb(execution.tool.name, READ_TOOL_VERBS)) return false;
   return MUTATION_RISK_CLASSES.has(execution.riskClass);

@@ -105,9 +105,9 @@ const scenarios: JourneyScenario[] = [
     expectedMutationCalls: 0,
     expectedVerificationCalls: 0,
     expectedTimeline: ["destination-read"],
-    expectedProviderRequests: 12,
-    expectedToolExecutions: 8,
-    expectedPlanExecutions: 5,
+    expectedProviderRequests: 8,
+    expectedToolExecutions: 7,
+    expectedPlanExecutions: 4,
   },
   {
     name: "a browser source changed after approval performs no destination mutation",
@@ -117,9 +117,9 @@ const scenarios: JourneyScenario[] = [
     expectedMutationCalls: 0,
     expectedVerificationCalls: 0,
     expectedTimeline: ["destination-read"],
-    expectedProviderRequests: 12,
-    expectedToolExecutions: 8,
-    expectedPlanExecutions: 5,
+    expectedProviderRequests: 8,
+    expectedToolExecutions: 7,
+    expectedPlanExecutions: 4,
   },
   {
     name: "an undeclared destination path performs no destination mutation",
@@ -129,9 +129,9 @@ const scenarios: JourneyScenario[] = [
     expectedMutationCalls: 0,
     expectedVerificationCalls: 0,
     expectedTimeline: ["destination-read"],
-    expectedProviderRequests: 12,
-    expectedToolExecutions: 8,
-    expectedPlanExecutions: 5,
+    expectedProviderRequests: 8,
+    expectedToolExecutions: 7,
+    expectedPlanExecutions: 4,
   },
   {
     name: "a missing mutation capability blocks before the browser opens",
@@ -146,7 +146,7 @@ const scenarios: JourneyScenario[] = [
     expectedPlanExecutions: 1,
   },
   {
-    name: "a successful mutation with failed verification leaves the Mission incomplete",
+    name: "a successful mutation with failed verification reports partial completion",
     failVerification: true,
     expectCompleted: false,
     expectedFinalOutcome: "partially_completed",
@@ -259,9 +259,8 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
       expect(harness.mcp.timeline).toEqual(scenario.expectedTimeline);
       expect(response!.finalOutcome?.status).toBe(scenario.expectedFinalOutcome);
 
-      // Temporary characterization of the current Mission protocol tax. Later
-      // migration commits intentionally update these counts while preserving
-      // the mutation, verification, approval, and secret-isolation assertions.
+      // Migration benchmark: supervision changes may reduce these counts while
+      // preserving mutation, verification, approval, and secret isolation.
       expect({
         providerRequests: harness.providerRequests.length,
         toolExecutions: response!.toolExecutions.length,

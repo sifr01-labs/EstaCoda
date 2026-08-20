@@ -1725,7 +1725,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(continuation).not.toContain(firstRawResult);
   });
 
-  it("nudges at three no-progress iterations and stops with a deterministic receipt at six", async () => {
+  it("does not continue provider narration merely because a Mission remains unfinished", async () => {
     const planStore = new ExecutionPlanStore();
     planStore.replace({
       objective: "Build the collection",
@@ -1745,41 +1745,17 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     });
 
     const result = await runBasicProviderTurn(harness.loop);
-    const recoveryText = "Your active execution plan has made no material progress for several iterations.";
+    const recoveryText = "The foreground tool loop has repeated the same calls or results without material progress.";
     const requests = harness.completeSpy.mock.calls.map((call) => call[0] as ProviderRequest);
 
-    expect(harness.completeSpy).toHaveBeenCalledTimes(6);
-    expect(requests.filter((request) => JSON.stringify(request.messages).includes(recoveryText))).toHaveLength(1);
-    expect(result.executionPlanIncomplete).toBe(true);
-    expect(result.providerExecution?.response?.content).toContain("The Mission is incomplete.");
-    expect(result.providerExecution?.response?.content).toContain("- Build collection");
-    expect(result.providerExecution?.response?.content).toContain("6 consecutive iterations");
+    expect(harness.completeSpy).toHaveBeenCalledTimes(1);
+    expect(requests.filter((request) => JSON.stringify(request.messages).includes(recoveryText))).toHaveLength(0);
+    expect(result.executionPlanIncomplete).toBeUndefined();
+    expect(result.providerExecution?.response?.content).toBe("Narration 1");
   });
 
-  it("stops a bounded MTN discovery loop despite changing read results", async () => {
-    const planStore = new ExecutionPlanStore();
-    planStore.replace({
-      objective: "Configure MTN products in Postman",
-      originTurnId: "turn-mtn-progress",
-      revision: 1,
-      status: "active",
-      items: [
-        { id: "inspect", content: "Inspect MTN products in Postman", status: "in_progress" },
-        { id: "update", content: "Update the Postman collection", status: "pending" },
-        { id: "verify", content: "Verify the collection", status: "pending" }
-      ]
-    });
-    const toolNames = [
-      "mcp.postman.getCollection",
-      "mcp.postman.getWorkspaces",
-      "browser.snapshot",
-      "mcp.postman.getCollection",
-      "browser.navigate",
-      "mcp.postman.getCollection",
-      "mcp.postman.getWorkspaces",
-      "browser.snapshot",
-      "mcp.postman.getCollection"
-    ];
+  it("stops a repeated tool loop despite changing provider result representations", async () => {
+    const toolNames = Array.from({ length: 7 }, () => "mcp.postman.getCollection");
     const harness = await createPostToolNudgeHarness({
       responses: toolNames.map((toolName, index) => providerExecution("", [
         providerToolCall(`call-loop-${index + 1}`, "{}", toolName)
@@ -1791,7 +1767,6 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
           `Changing representation ${index + 1}`
         )]
       })),
-      executionPlanReader: planStore,
       maxProviderIterations: 12
     });
     const events: RuntimeEvent[] = [];
@@ -1800,18 +1775,18 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       onEvent: (event) => events.push(event)
     });
     const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
-    const nudgeText = "Your active execution plan has made no material progress for several iterations.";
+    const nudgeText = "The foreground tool loop has repeated the same calls or results without material progress.";
 
-    expect(harness.completeSpy).toHaveBeenCalledTimes(8);
-    expect(harness.executePlans).toHaveBeenCalledTimes(8);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(7);
+    expect(harness.executePlans).toHaveBeenCalledTimes(7);
     expect(requests.filter((request) => JSON.stringify(request.messages).includes(nudgeText))).toHaveLength(1);
-    expect(result.executionPlanIncomplete).toBe(true);
-    expect(result.providerExecution?.response?.content).toContain("The Mission is incomplete.");
-    expect(result.providerExecution?.response?.content).toContain("no Mission transition, target mutation, verification evidence, or concrete blocker");
+    expect(result.executionPlanIncomplete).toBeUndefined();
+    expect(result.providerExecution?.response?.content).toContain("foreground tool loop stopped");
+    expect(result.providerExecution?.response?.content).toContain("independent of any plan");
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({
         kind: "provider-budget-exhausted",
-        budget: "execution-plan-no-progress-iterations",
+        budget: "tool-loop-no-progress-iterations",
         limit: 6,
         observed: 6
       })
@@ -1853,7 +1828,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     await runBasicProviderTurn(harness.loop);
 
     const continuation = JSON.stringify((harness.completeSpy.mock.calls[1]?.[0] as ProviderRequest).messages);
-    expect(continuation).toContain("Confirmed Mission state");
+    expect(continuation).toContain("Confirmed foreground-turn state");
     expect(continuation).toContain("Collection ID: collection-123");
     expect(continuation.match(/RAW COLLECTION PAYLOAD/gu)).toHaveLength(1);
   });
@@ -1967,39 +1942,36 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     });
   });
 
-  it("holds and renews the browser session lease while a foreground Mission remains active", async () => {
-    const planStore = new ExecutionPlanStore();
-    planStore.replace({
-      objective: "Configure MTN products in Postman",
-      originTurnId: "turn-browser-lease",
-      revision: 1,
-      status: "active",
-      items: [{ id: "inspect", content: "Inspect Postman", status: "in_progress" }]
-    });
+  it("holds and renews the browser session lease for the foreground provider turn without a Mission", async () => {
     const browserSessionLease = {
       acquire: vi.fn(),
       renew: vi.fn(),
       release: vi.fn()
     };
     const harness = await createPostToolNudgeHarness({
-      responses: [providerExecution("Still working."), providerExecution("Still working.")],
-      toolSteps: [],
-      executionPlanReader: planStore,
+      responses: [
+        providerExecution("", [providerToolCall("call-browser", "{}", "browser.snapshot")]),
+        providerExecution("Complete.")
+      ],
+      toolSteps: [{ executions: [toolExecutionForTool("call-browser", "browser.snapshot", "state")] }],
       browserSessionLease,
       maxProviderIterations: 2
     });
 
-    await runBasicProviderTurn(harness.loop);
+    await runBasicProviderTurn(harness.loop, { visibleTurnId: "turn-browser-lease" });
 
     expect(browserSessionLease.acquire).toHaveBeenCalledWith(
       `${harness.sessionId}:main`,
-      "execution-plan:default:turn-browser-lease"
+      "provider-turn:default:turn-browser-lease"
     );
     expect(browserSessionLease.renew).toHaveBeenCalled();
-    expect(browserSessionLease.release).not.toHaveBeenCalled();
+    expect(browserSessionLease.release).toHaveBeenCalledWith(
+      `${harness.sessionId}:main`,
+      "provider-turn:default:turn-browser-lease"
+    );
   });
 
-  it("releases the browser session lease when the Mission completes or the turn is cancelled", async () => {
+  it("releases the browser session lease when the foreground provider turn completes or is cancelled", async () => {
     const completedPlanStore = new ExecutionPlanStore();
     completedPlanStore.replace({
       objective: "Configure MTN products in Postman",
@@ -2034,10 +2006,10 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       }
     });
 
-    await runBasicProviderTurn(completedHarness.loop);
+    await runBasicProviderTurn(completedHarness.loop, { visibleTurnId: "turn-browser-complete" });
     expect(completedLease.release).toHaveBeenCalledWith(
       `${completedHarness.sessionId}:main`,
-      "execution-plan:default:turn-browser-complete"
+      "provider-turn:default:turn-browser-complete"
     );
 
     const cancelledPlanStore = new ExecutionPlanStore();
@@ -2058,15 +2030,18 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     const controller = new AbortController();
     controller.abort();
 
-    await runBasicProviderTurn(cancelledHarness.loop, { signal: controller.signal });
+    await runBasicProviderTurn(cancelledHarness.loop, {
+      visibleTurnId: "turn-browser-cancelled",
+      signal: controller.signal
+    });
     expect(cancelledLease.release).toHaveBeenCalledWith(
       `${cancelledHarness.sessionId}:main`,
-      "execution-plan:default:turn-browser-cancelled"
+      "provider-turn:default:turn-browser-cancelled"
     );
   });
 
   it.each(["blocked", "abandoned"] as const)(
-    "releases the browser session lease when the Mission becomes %s",
+    "keeps browser lease ownership independent when a Mission becomes %s",
     async (terminalStatus) => {
       const planStore = new ExecutionPlanStore();
       const originTurnId = `turn-browser-${terminalStatus}`;
@@ -2110,11 +2085,11 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
         }
       });
 
-      await runBasicProviderTurn(harness.loop);
+      await runBasicProviderTurn(harness.loop, { visibleTurnId: originTurnId });
 
       expect(browserSessionLease.release).toHaveBeenCalledWith(
         `${harness.sessionId}:main`,
-        `execution-plan:default:${originTurnId}`
+        `provider-turn:default:${originTurnId}`
       );
     }
   );
@@ -2668,7 +2643,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(harness.executePlans).toHaveBeenCalledTimes(1);
   });
 
-  it("resets no-progress counting after a material plan transition", async () => {
+  it("does not let a plan transition reset runtime tool-loop progress", async () => {
     const planStore = new ExecutionPlanStore();
     planStore.replace({
       objective: "Build and verify",
@@ -2714,9 +2689,10 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
     const result = await runBasicProviderTurn(harness.loop);
 
-    expect(harness.completeSpy).toHaveBeenCalledTimes(8);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(7);
     expect(result.executionPlanIncomplete).toBeUndefined();
-    const nudgeText = "Your active execution plan has made no material progress for several iterations.";
+    expect(result.providerExecution?.response?.content).toContain("foreground tool loop stopped");
+    const nudgeText = "The foreground tool loop has repeated the same calls or results without material progress.";
     const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
     expect(requests.filter((request) => JSON.stringify(request.messages).includes(nudgeText))).toHaveLength(1);
   });
@@ -2747,7 +2723,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       const result = await runBasicProviderTurn(harness.loop);
 
       expect(harness.executePlans).not.toHaveBeenCalled();
-      expect(result.executionPlanIncomplete).toBe(true);
+      expect(result.executionPlanIncomplete).toBeUndefined();
       expect(result.providerExecution?.response?.content).toContain("emergency deadline reserve");
     } finally {
       nowSpy.mockRestore();
@@ -2793,7 +2769,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
         toolCallId: "call-running-mutation",
         result: expect.objectContaining({ ok: true })
       })]);
-      expect(result.executionPlanIncomplete).toBe(true);
+      expect(result.executionPlanIncomplete).toBeUndefined();
       expect(result.providerExecution?.response?.content).toContain("emergency deadline reserve");
     } finally {
       nowSpy.mockRestore();
