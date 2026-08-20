@@ -146,11 +146,23 @@ type BrowserActionDeltaBase = {
     destination: Pick<BrowserTab, "ref" | "url" | "title">;
   };
   target?: Pick<BrowserLocatorCandidate, "ref" | "role" | "name" | "label" | "withinText" | "regionText">;
+  /** Browser-owned evidence from Page.windowOpen. Destination is included only after URL-policy validation. */
+  popup?: {
+    destination?: string;
+    userGesture: boolean;
+  };
 };
 
 export type BrowserActionDelta = BrowserActionDeltaBase & (
   | {
-      outcome: "changed" | "no-change" | "timeout";
+      outcome:
+        | "changed"
+        | "no-change"
+        | "timeout"
+        | "new-tab-opened"
+        | "popup-blocked"
+        | "same-tab-navigation"
+        | "action-no-change";
       actionDispatched?: never;
       settlementFailed?: never;
       documentChangeObserved?: never;
@@ -376,6 +388,7 @@ export type BrowserProtectedSourceReadInput = {
 export type BrowserNavigateInput = {
   url: string;
   sessionId?: string;
+  disposition?: "current-tab" | "new-tab";
   waitFor?: BrowserWaitCondition;
   waitTimeoutMs?: number;
   signal?: AbortSignal;

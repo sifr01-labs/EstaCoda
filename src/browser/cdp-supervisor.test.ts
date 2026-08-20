@@ -619,6 +619,31 @@ describe("CDPSupervisor", () => {
     });
   });
 
+  it("captures browser-owned popup attempts in a bounded, clearable queue", async () => {
+    const socket = new FakeCdpSocket("ws://127.0.0.1:9222/devtools/page/popup-attempts");
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://127.0.0.1:9222/devtools/page/popup-attempts",
+      webSocketFactory: () => socket
+    });
+    await supervisor.start();
+
+    socket.emitMessage({ method: "Page.windowOpen", params: { url: "", userGesture: true } });
+    socket.emitMessage({ method: "Page.windowOpen", params: { url: 42, userGesture: true } });
+    for (let index = 0; index < 10; index += 1) {
+      socket.emitMessage({
+        method: "Page.windowOpen",
+        params: { url: `https://example.com/popup-${index}`, userGesture: index % 2 === 0 }
+      });
+    }
+
+    expect(supervisor.popupAttempts()).toEqual(Array.from({ length: 8 }, (_, offset) => ({
+      url: `https://example.com/popup-${offset + 2}`,
+      userGesture: (offset + 2) % 2 === 0
+    })));
+    expect(supervisor.popupAttempts({ clear: true })).toHaveLength(8);
+    expect(supervisor.popupAttempts()).toEqual([]);
+  });
+
   it("captures console events and caps history at 50 entries", async () => {
     const socket = new FakeCdpSocket("ws://cdp/page-1");
     const supervisor = new CDPSupervisor({

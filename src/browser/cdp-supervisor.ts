@@ -39,6 +39,13 @@ export type BrowserSnapshotOptions = {
   full?: boolean;
 };
 
+export type BrowserPopupAttempt = {
+  url: string;
+  userGesture: boolean;
+};
+
+const MAX_POPUP_ATTEMPTS = 8;
+
 export type CDPSupervisorOptions = {
   webSocketUrl: string;
   webSocketFactory?: CdpWebSocketFactory;
@@ -67,6 +74,7 @@ export class CDPSupervisor {
   #mainFrameId: string | undefined;
   #mainLoaderId: string | undefined;
   #mainExecutionContextId: number | undefined;
+  #popupAttempts: BrowserPopupAttempt[] = [];
 
   constructor(options: CDPSupervisorOptions) {
     this.#webSocketUrl = options.webSocketUrl;
@@ -148,6 +156,12 @@ export class CDPSupervisor {
     return entries;
   }
 
+  popupAttempts(options: { clear?: boolean } = {}): BrowserPopupAttempt[] {
+    const attempts = this.#popupAttempts.map((attempt) => ({ ...attempt }));
+    if (options.clear === true) this.#popupAttempts = [];
+    return attempts;
+  }
+
   setSensitiveInputActive(active: boolean): void {
     this.#sensitiveInputActive = active;
     if (active) this.#consoleHistory = [];
@@ -160,6 +174,7 @@ export class CDPSupervisor {
     this.#client?.close();
     this.#client = undefined;
     this.#socket = undefined;
+    this.#popupAttempts = [];
   }
 
   #requireClient(): CdpClient {
@@ -212,6 +227,10 @@ export class CDPSupervisor {
       this.#handleDialogOpening(message.params);
       return;
     }
+    if (message.method === "Page.windowOpen") {
+      this.#handleWindowOpen(message.params);
+      return;
+    }
     if (message.method === "Page.javascriptDialogClosed") {
       this.#pendingDialogs.clear();
       return;
@@ -230,6 +249,17 @@ export class CDPSupervisor {
     }
     if (message.method === "Fetch.requestPaused") {
       void this.#handleRequestPaused(message.params);
+    }
+  }
+
+  #handleWindowOpen(params: unknown): void {
+    if (!isRecord(params) || typeof params.url !== "string" || params.url.trim() === "") return;
+    this.#popupAttempts.push({
+      url: params.url,
+      userGesture: params.userGesture === true
+    });
+    if (this.#popupAttempts.length > MAX_POPUP_ATTEMPTS) {
+      this.#popupAttempts.splice(0, this.#popupAttempts.length - MAX_POPUP_ATTEMPTS);
     }
   }
 

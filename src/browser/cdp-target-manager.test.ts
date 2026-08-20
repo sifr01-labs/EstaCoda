@@ -176,6 +176,37 @@ describe("CdpTargetManager", () => {
     expect(target.supervisor).toBe(harness.supervisors[0]);
   });
 
+  it("creates a page target in an existing browser context without creating or disposing context state", async () => {
+    const client = new FakeCdpClient();
+    client.targetId = "target-2";
+    client.targetInfos = [{
+      targetId: "target-2",
+      type: "page",
+      title: "Controlled tab",
+      url: "about:blank",
+      browserContextId: "context-1"
+    }];
+    const fetch = createFetch(createDefaultRoutes({
+      list: { payload: [{ id: "target-2", webSocketDebuggerUrl: "ws://page/target-2" }] }
+    }));
+    const harness = createHarness({ client, fetch });
+
+    const target = await harness.manager.createPageTarget("context-1", "about:blank");
+
+    expect(target).toEqual({
+      browserContextId: "context-1",
+      targetId: "target-2",
+      pageWebSocketDebuggerUrl: "ws://page/target-2",
+      url: "about:blank",
+      title: "Controlled tab"
+    });
+    expect(client.calls).toEqual([
+      { method: "Target.createTarget", params: { url: "about:blank", browserContextId: "context-1" } },
+      { method: "Target.getTargets", params: undefined }
+    ]);
+    expect(harness.supervisorFactory).not.toHaveBeenCalled();
+  });
+
   it("closes supervisor before Target.closeTarget and disposes the browser context last", async () => {
     const order: string[] = [];
     const client = new FakeCdpClient();

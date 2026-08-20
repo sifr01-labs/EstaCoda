@@ -324,7 +324,7 @@ export class AuthenticationEvidenceTracker {
       return { effects: [], assessments: [] };
     }
     const stateTransitionObserved = actionStateAdvanced(pending.afterIdentity, snapshot.identity) ||
-      snapshot.actionDelta?.outcome === "changed";
+      browserActionOutcomeAdvanced(snapshot.actionDelta?.outcome);
     const nextPending: PendingAuthenticationEvidence = {
       ...pending,
       submissionToolCallId: evidenceToolCallId,
@@ -710,9 +710,9 @@ function isChallengeBrowserAction(
     execution.result?.ok !== true ||
     !CHALLENGE_BROWSER_ACTION_TOOLS.has(execution.tool.name) ||
     snapshotScope(snapshot, execution) !== pending.scope ||
-    snapshot.actionDelta?.outcome === "no-change"
+    browserActionOutcomeIneffective(snapshot.actionDelta?.outcome)
   ) return false;
-  return snapshot.actionDelta?.outcome === "changed" || actionStateAdvanced(pending.afterIdentity, snapshot.identity);
+  return browserActionOutcomeAdvanced(snapshot.actionDelta?.outcome) || actionStateAdvanced(pending.afterIdentity, snapshot.identity);
 }
 
 function isConsequentialBrowserAction(
@@ -727,9 +727,21 @@ function isConsequentialBrowserAction(
     BROWSER_OBSERVATION_TOOLS.has(execution.tool.name) ||
     snapshot === undefined
   ) return false;
-  if (snapshot.actionDelta?.outcome === "no-change") return false;
-  if (snapshot.actionDelta?.outcome === "changed") return true;
+  if (browserActionOutcomeIneffective(snapshot.actionDelta?.outcome)) return false;
+  if (browserActionOutcomeAdvanced(snapshot.actionDelta?.outcome)) return true;
   return actionStateAdvanced(anchor, snapshot.identity);
+}
+
+function browserActionOutcomeAdvanced(
+  outcome: NonNullable<BrowserSnapshot["actionDelta"]>["outcome"] | undefined
+): boolean {
+  return outcome === "changed" || outcome === "new-tab-opened" || outcome === "same-tab-navigation";
+}
+
+function browserActionOutcomeIneffective(
+  outcome: NonNullable<BrowserSnapshot["actionDelta"]>["outcome"] | undefined
+): boolean {
+  return outcome === "no-change" || outcome === "action-no-change" || outcome === "popup-blocked";
 }
 
 function isCausalObservation(execution: ToolExecutionRecord): boolean {

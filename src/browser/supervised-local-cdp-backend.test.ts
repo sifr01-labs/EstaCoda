@@ -266,6 +266,106 @@ describe("supervised local CDP backend", () => {
     ]));
   });
 
+  it("opens and controls new-tab navigation through the existing supervised session", async () => {
+    const sent: Array<{ tab: string; method: string; params?: Record<string, unknown> }> = [];
+    const mainSupervisor = {
+      send: vi.fn(async (method: string, params?: Record<string, unknown>) => {
+        sent.push({ tab: "@t1", method, params });
+        return {};
+      }),
+      waitFor: vi.fn(async () => undefined),
+      getSnapshot: vi.fn(async () => ({
+        sessionId: "session-1",
+        url: "https://example.com/apps",
+        title: "Apps",
+        text: "Apps",
+        elements: []
+      })),
+      consoleHistory: vi.fn(() => []),
+      respondToDialog: vi.fn(async () => undefined),
+      close: vi.fn()
+    };
+    const newTabSupervisor = {
+      ...mainSupervisor,
+      send: vi.fn(async (method: string, params?: Record<string, unknown>) => {
+        sent.push({ tab: "@t2", method, params });
+        return {};
+      }),
+      getSnapshot: vi.fn(async () => ({
+        sessionId: "session-1",
+        url: "https://example.com/connect",
+        title: "Connect",
+        text: "Connect",
+        elements: []
+      }))
+    };
+    const session = {
+      key: "session-1",
+      browserContextId: "context-1",
+      targetId: "target-1",
+      tabRef: "@t1",
+      pageWebSocketDebuggerUrl: "ws://target-1",
+      supervisor: mainSupervisor,
+      lastActiveAt: 1,
+      touch: vi.fn(),
+      close: vi.fn(async () => undefined)
+    };
+    const sessionManager = {
+      acquire: vi.fn(async () => session),
+      openTab: vi.fn(async (_key: string, url: string) => {
+        expect(url).toBe("about:blank");
+        session.targetId = "target-2";
+        session.tabRef = "@t2";
+        session.pageWebSocketDebuggerUrl = "ws://target-2";
+        session.supervisor = newTabSupervisor;
+        return session;
+      }),
+      close: vi.fn(async () => undefined),
+      closeAll: vi.fn(async () => undefined),
+      has: vi.fn(() => true),
+      observeSnapshot: createSnapshotObserver()
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      resolveHostname: () => ["93.184.216.34"],
+      settling: { pollIntervalMs: 5, stableWindowMs: 10, minimumObservationMs: 20 },
+      createTargetManager: () => ({
+        createTarget: vi.fn(async () => { throw new Error("unused"); }),
+        close: vi.fn(async () => undefined)
+      }),
+      createSessionManager: () => sessionManager
+    });
+
+    await backend.navigate({ url: "https://example.com/apps", sessionId: "session-1" });
+    const opened = await backend.navigate({
+      url: "https://example.com/connect",
+      sessionId: "session-1",
+      disposition: "new-tab"
+    });
+
+    expect(sessionManager.openTab).toHaveBeenCalledWith("session-1", "about:blank");
+    expect(sent).toContainEqual({
+      tab: "@t2",
+      method: "Page.navigate",
+      params: { url: "https://example.com/connect" }
+    });
+    expect(opened).toMatchObject({
+      snapshot: {
+        url: "https://example.com/connect",
+        tab: { ref: "@t2", controlled: true },
+        actionDelta: {
+          outcome: "new-tab-opened",
+          tabTransition: {
+            source: { ref: "@t1" },
+            destination: { ref: "@t2" }
+          }
+        }
+      },
+      metadata: { disposition: "new-tab", controlledTab: "@t2" }
+    });
+  });
+
   it("reuses the same managed session and browser context for the same session key", async () => {
     const socket = new FakeCdpSocket();
     const backend = createSupervisedLocalCdpBrowserBackend({
@@ -1483,8 +1583,7 @@ describe("supervised local CDP backend", () => {
     });
     const page = sockets.pageSocket();
     expect(page).toBeDefined();
-    page!.onRuntimeEvaluate = (expression) => {
-      if (!expression.includes("return 'clicked'")) return;
+    page!.onNativeClick = () => {
       setTimeout(() => {
         page!.snapshot = {
           url: "https://example.com/final",
@@ -1517,6 +1616,112 @@ describe("supervised local CDP backend", () => {
       }
     });
     expect(result!.identity.actionRevision).toBeGreaterThan(navigation.snapshot.identity.actionRevision);
+  });
+
+  it("dispatches native pointer input and reports a safe blocked popup without changing Chrome permissions", async () => {
+    const sockets = createSocketFactory();
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: sockets.webSocketFactory,
+      resolveHostname: () => ["93.184.216.34"],
+      settling: { pollIntervalMs: 5, stableWindowMs: 10, minimumObservationMs: 20 }
+    });
+    const navigation = await backend.navigate({
+      url: "https://example.com/apps",
+      sessionId: "session-popup"
+    });
+    const page = sockets.pageSocket()!;
+    page.onNativeClick = () => {
+      page.emitMessage({
+        method: "Page.windowOpen",
+        params: {
+          url: "https://example.com/connect?source=apps",
+          windowName: "connect",
+          windowFeatures: ["popup"],
+          userGesture: true
+        }
+      });
+    };
+
+    const result = await backend.click?.({
+      sessionId: "session-popup",
+      ref: "@e1",
+      identity: navigation.snapshot.identity,
+      tabRef: navigation.snapshot.tab!.ref
+    });
+
+    expect(result?.actionDelta).toMatchObject({
+      outcome: "popup-blocked",
+      popup: {
+        destination: "https://example.com/connect?source=apps",
+        userGesture: true
+      }
+    });
+    expect(page.sent.filter((message) => message.method === "Input.dispatchMouseEvent").map((message) =>
+      message.params?.type)).toEqual(["mouseMoved", "mousePressed", "mouseReleased"]);
+    expect(page.sent.some((message) =>
+      message.method === "Runtime.evaluate" && String(message.params?.expression).includes(".click()"))).toBe(false);
+    expect(page.sent.some((message) => message.method.includes("Permission"))).toBe(false);
+  });
+
+  it("does not expose an unsafe blocked-popup destination", async () => {
+    const sockets = createSocketFactory();
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: sockets.webSocketFactory,
+      resolveHostname: () => ["93.184.216.34"],
+      settling: { pollIntervalMs: 5, stableWindowMs: 10, minimumObservationMs: 20 }
+    });
+    const navigation = await backend.navigate({ url: "https://example.com/apps", sessionId: "session-unsafe-popup" });
+    const page = sockets.pageSocket()!;
+    page.onNativeClick = () => page.emitMessage({
+      method: "Page.windowOpen",
+      params: { url: "http://169.254.169.254/latest/meta-data", userGesture: true }
+    });
+
+    const result = await backend.click?.({
+      sessionId: "session-unsafe-popup",
+      ref: "@e1",
+      identity: navigation.snapshot.identity,
+      tabRef: navigation.snapshot.tab!.ref
+    });
+
+    expect(result?.actionDelta).toMatchObject({
+      outcome: "popup-blocked",
+      popup: { userGesture: true }
+    });
+    expect(result?.actionDelta?.popup).not.toHaveProperty("destination");
+  });
+
+  it("preserves a partially dispatched native click as unverified instead of inviting a retry", async () => {
+    const sockets = createSocketFactory();
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: sockets.webSocketFactory,
+      resolveHostname: () => ["93.184.216.34"],
+      settling: { pollIntervalMs: 5, stableWindowMs: 10, minimumObservationMs: 20 }
+    });
+    const navigation = await backend.navigate({ url: "https://example.com/apps", sessionId: "session-partial-click" });
+    const page = sockets.pageSocket()!;
+    page.failNextMouseRelease = "CDP response lost after pointer press";
+
+    const result = await backend.click?.({
+      sessionId: "session-partial-click",
+      ref: "@e1",
+      identity: navigation.snapshot.identity,
+      tabRef: navigation.snapshot.tab!.ref
+    });
+
+    expect(result?.actionDelta).toMatchObject({
+      outcome: "dispatched-unverified",
+      actionDispatched: true,
+      settlementFailed: true
+    });
+    expect(page.sent.filter((message) =>
+      message.method === "Input.dispatchMouseEvent" && message.params?.type === "mouseReleased")).toHaveLength(2);
   });
 
   it("rejects an invalid wait before dispatching click()", async () => {
@@ -1582,8 +1787,7 @@ describe("supervised local CDP backend", () => {
       }
     });
     const beforeClick = await backend.snapshot?.({ sessionId: "session-settlement-failure" });
-    page.onRuntimeEvaluate = (expression) => {
-      if (!expression.includes("return 'clicked'")) return;
+    page.onNativeClick = () => {
       page.snapshot = {
         url: "https://example.com/apps/example/edit",
         title: "Edit app",
@@ -1858,7 +2062,9 @@ describe("supervised local CDP backend", () => {
       elements: []
     };
     const mainSupervisor = {
-      send: vi.fn(async () => ({})),
+      send: vi.fn(async (method: string) => method === "Runtime.evaluate"
+        ? { result: { value: { x: 48, y: 24 } } }
+        : {}),
       waitFor: vi.fn(async () => undefined),
       getSnapshot: vi.fn(async () => mainSnapshot),
       consoleHistory: vi.fn(() => []),
@@ -1930,7 +2136,7 @@ describe("supervised local CDP backend", () => {
       tab: { ref: "@t2", controlled: true },
       openedTabs: [{ ref: "@t2", controlled: true }],
       actionDelta: {
-        outcome: "changed",
+        outcome: "new-tab-opened",
         openedTabs: [{ ref: "@t2" }]
       }
     });

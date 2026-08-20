@@ -272,7 +272,11 @@ function tabKeys(tabs: readonly BrowserTab[] | undefined): string[] {
 }
 
 function browserExecutionChanged(tool: string, snapshot: BrowserSnapshot | undefined): boolean {
-  if (snapshot?.actionDelta !== undefined) return snapshot.actionDelta.outcome === "changed";
+  if (snapshot?.actionDelta !== undefined) {
+    return snapshot.actionDelta.outcome === "changed" ||
+      snapshot.actionDelta.outcome === "new-tab-opened" ||
+      snapshot.actionDelta.outcome === "same-tab-navigation";
+  }
   return tool === "browser.navigate" || tool === "browser.switch_tab" || tool === "browser.dialog";
 }
 

@@ -82,6 +82,24 @@ class FakeTargetManager {
   readonly findVisiblePageTargetId = vi.fn(async (browserContextId: string) =>
     this.pageTargets.find((target) =>
       target.browserContextId === browserContextId && target.targetId === this.visibleTargetId)?.targetId);
+  readonly createPageTarget = vi.fn(async (browserContextId: string, url: string): Promise<CdpPageTarget> => {
+    const targetId = `target-${this.pageTargets.length + 1}`;
+    const target = {
+      browserContextId,
+      targetId,
+      pageWebSocketDebuggerUrl: `ws://${targetId}`,
+      url,
+      title: targetId
+    };
+    this.pageTargets.push(target);
+    return target;
+  });
+  readonly closePageTarget = vi.fn(async (browserContextId: string, targetId: string) => {
+    const index = this.pageTargets.findIndex((target) =>
+      target.browserContextId === browserContextId && target.targetId === targetId);
+    if (index < 0) throw new Error("target unavailable");
+    this.pageTargets.splice(index, 1);
+  });
 
   createError: Error | undefined;
   visibleTargetId: string | undefined;
@@ -324,6 +342,21 @@ describe("BrowserSessionManager", () => {
     expect(returned.supervisor).toBe(targetManager.targets[0]?.supervisor);
     expect(targetManager.attachments[0]?.close).toHaveBeenCalledTimes(1);
     expect(targetManager.targets[0]?.close).not.toHaveBeenCalled();
+  });
+
+  it("opens, attaches, and controls a new tab inside the existing browser context", async () => {
+    const targetManager = new FakeTargetManager();
+    const manager = new BrowserSessionManager({ targetManager });
+    const owner = await manager.acquire("session-1");
+
+    const opened = await manager.openTab("session-1", "about:blank");
+
+    expect(targetManager.createPageTarget).toHaveBeenCalledWith(owner.browserContextId, "about:blank");
+    expect(opened.browserContextId).toBe(owner.browserContextId);
+    expect(opened.targetId).toBe("target-2");
+    expect(opened.tabRef).toBe("@t2");
+    expect(targetManager.attachTarget).toHaveBeenCalledWith(owner.browserContextId, "target-2");
+    expect(targetManager.activated).toContain("target-2");
   });
 
   it("closes the active attachment before closing the context-owning target", async () => {

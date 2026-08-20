@@ -3007,7 +3007,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(result.terminationCause).toBe("normal");
 
     const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
-    const nudge = "The last browser call repeated evidence already available for this document. Do not repeat the same locator, target, or observation result. Use a different grounded action or a distinct inspection that can reveal new structure; if neither exists, return the truthful incomplete result.";
+    const nudge = "The last browser call did not change state or repeated evidence already available for this document. Do not repeat the same locator, target, popup destination, or observation result. Use a different grounded action or a distinct inspection that can reveal new structure. If the result reports popup-blocked with a safe destination, browser.navigate with disposition=new-tab is the one bounded recovery path; do not change Chrome permissions. If no grounded alternative exists, return the truthful incomplete result.";
     expect(requests.filter((request) => JSON.stringify(request.messages).includes(nudge))).toHaveLength(1);
     const recoveryRequest = requests[2]!;
     const recoveryTools = (recoveryRequest.tools as OpenAICompatibleToolSchema[])

@@ -25,7 +25,7 @@ import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { connectCdp, type CdpFetchLike, type CdpWebSocketFactory } from "./cdp-client.js";
 import { isSafeUrl, redactUrlForMetadata, scanUrlForSecrets, type ResolveHostnameFn } from "./url-safety.js";
 import { checkWebsiteAccess, loadWebsiteBlocklist } from "./website-policy.js";
-import { CDPSupervisor } from "./cdp-supervisor.js";
+import { CDPSupervisor, type BrowserPopupAttempt } from "./cdp-supervisor.js";
 import type { BrowserSessionLifecycle } from "./session-lifecycle.js";
 import { BrowserSessionStateError, browserSessionStateReason } from "./session-state.js";
 import {
@@ -58,6 +58,7 @@ import {
   assertBrowserRuntimeEvaluationSucceeded,
   browserInteractabilityGuardSource
 } from "./browser-interactability.js";
+import { dispatchNativeBrowserClick, NativeBrowserInputDispatchError } from "./native-input.js";
 
 export type SupervisedLocalCdpBackendOptions = {
   cdpUrl?: string;
@@ -83,10 +84,13 @@ export type SupervisedLocalCdpBackendOptions = {
   };
 };
 
-type TargetManagerLike = Pick<CdpTargetManager, "createTarget" | "close">;
+type TargetManagerLike = Pick<CdpTargetManager, "createTarget" | "close"> & Partial<Pick<CdpTargetManager,
+  "createPageTarget" | "closePageTarget" | "listPageTargets" | "attachTarget" |
+  "activateTarget" | "findVisiblePageTargetId"
+>>;
 
 type BrowserSessionManagerLike = Pick<BrowserSessionManager, "acquire" | "close" | "closeAll" | "has" | "observeSnapshot"> &
-  Partial<Pick<BrowserSessionManager, "listTabs" | "visibleTab" | "switchTab">>;
+  Partial<Pick<BrowserSessionManager, "listTabs" | "visibleTab" | "switchTab" | "openTab">>;
 
 type BrowserSessionStack = {
   endpoint: string;
@@ -107,7 +111,7 @@ type PageSupervisor = Pick<CDPSupervisor,
   | "respondToDialog"
   | "setSensitiveInputActive"
   | "close"
->;
+> & Partial<Pick<CDPSupervisor, "popupAttempts">>;
 
 type BackendRawSnapshot = BrowserSnapshotInput & {
   documentSignal?: BrowserDocumentSignal;
@@ -284,6 +288,8 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     initialSnapshot?: BrowserSnapshot;
     openedTabs?: BrowserTab[];
     target?: BrowserLocatorCandidate;
+    outcome?: Exclude<NonNullable<BrowserSnapshot["actionDelta"]>["outcome"], "dispatched-unverified">;
+    popup?: NonNullable<BrowserSnapshot["actionDelta"]>["popup"];
     full?: boolean;
     actionDispatched?: true;
   }): Promise<BrowserSnapshot> => {
@@ -301,12 +307,31 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         stableWindowMs: options.settling?.stableWindowMs,
         minimumObservationMs: options.settling?.minimumObservationMs
       });
-      settledSnapshot = withBrowserActionDelta({
+      const baseline = withBrowserActionDelta({
         before: input.before,
         settlement,
         openedTabs: input.openedTabs,
-        target: input.target
+        target: input.target,
+        outcome: input.outcome,
+        popup: input.popup
       });
+      const observedOutcome = input.outcome ?? (
+        baseline.actionDelta?.url.changed === true
+          ? "same-tab-navigation"
+          : baseline.actionDelta?.outcome === "no-change"
+            ? "action-no-change"
+            : undefined
+      );
+      settledSnapshot = observedOutcome === undefined || observedOutcome === input.outcome
+        ? baseline
+        : withBrowserActionDelta({
+            before: input.before,
+            settlement,
+            openedTabs: input.openedTabs,
+            target: input.target,
+            outcome: observedOutcome,
+            popup: input.popup
+          });
     } catch (error) {
       if (input.actionDispatched !== true) throw error;
       settledSnapshot = await preserveDispatchedSettlementFailure({
@@ -732,6 +757,10 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     status: resolveAvailabilityStatus,
     async navigate(input: BrowserNavigateInput): Promise<BrowserNavigateResult> {
       normalizeBrowserActionSettlementInput(input);
+      const disposition = input.disposition ?? "current-tab";
+      if (disposition !== "current-tab" && disposition !== "new-tab") {
+        throw new Error("Browser navigation disposition must be current-tab or new-tab.");
+      }
       if (closed) {
         throw new BrowserSessionStateError("browser_process_missing", "Browser backend is closed.");
       }
@@ -786,11 +815,18 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         if (session === undefined) {
           throw new BrowserSessionStateError("session_missing", `Browser session not found: ${sessionId}`);
         }
-        await protectedFields.invalidateSession(session);
-        const supervisor = session.supervisor;
-        const before = latestSnapshots.get(sessionId);
-        await supervisor.send("Page.navigate", { url: input.url });
         sessionStacks.set(sessionId, existingStack ?? sessionStack);
+        const before = latestSnapshots.get(sessionId);
+        await protectedFields.invalidateSession(session);
+        if (disposition === "new-tab") {
+          const openTab = sessionStack.sessionManager.openTab;
+          if (openTab === undefined) {
+            throw new Error("Browser backend does not support controlled new-tab navigation.");
+          }
+          session = asBackendSession(await openTab.call(sessionStack.sessionManager, sessionId, "about:blank"));
+        }
+        const supervisor = session.supervisor;
+        await supervisor.send("Page.navigate", { url: input.url });
         const capture = () => captureSessionSnapshot(session!);
         let snapshot: BrowserSnapshot;
         try {
@@ -801,6 +837,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
             before,
             actionInput: input,
             initialSnapshot,
+            outcome: disposition === "new-tab" ? "new-tab-opened" : undefined,
             actionDispatched: true
           });
         } catch (error) {
@@ -824,12 +861,18 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
             createdAt: new Date().toISOString(),
           },
           snapshot,
-          ...(priorSessionLoss === undefined ? {} : {
+          ...(disposition === "current-tab" && priorSessionLoss === undefined ? {} : {
             metadata: {
-              sessionRecovery: {
-                reason: priorSessionLoss,
-                authenticationPreserved: false
-              }
+              ...(disposition === "current-tab" ? {} : {
+                disposition,
+                controlledTab: snapshot.tab?.ref
+              }),
+              ...(priorSessionLoss === undefined ? {} : {
+                sessionRecovery: {
+                  reason: priorSessionLoss,
+                  authenticationPreserved: false
+                }
+              })
             }
           })
         };
@@ -902,11 +945,8 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       const beforeObservedUrl = latestObservedUrls.get(session.key);
       const target = resolveBrowserTarget(before, input);
       const beforeTabs = supportsTabManagement(session.key) ? await listManagedTabs(session.key) : undefined;
-      const actionEvaluation = await session.supervisor.send("Runtime.evaluate", {
-        expression: refActionExpression(target.ref, "click"),
-        awaitPromise: true
-      });
-      assertBrowserRuntimeEvaluationSucceeded(actionEvaluation);
+      const actionSupervisor = session.supervisor;
+      actionSupervisor.popupAttempts?.({ clear: true });
       const priorRefs = new Set(beforeTabs?.map((tab) => tab.ref) ?? []);
       let openedTabs: BrowserTab[] = [];
       const capture = async (): Promise<BrowserSnapshot> => {
@@ -915,7 +955,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
           const openedCandidates = afterTabs.filter((tab) => !priorRefs.has(tab.ref));
           openedTabs = (await Promise.all(openedCandidates.map(async (tab) => (
             await tabIsAllowed(tab) ? toBrowserTab(tab) : undefined
-          )))).filter((tab): tab is BrowserTab => tab !== undefined);
+          )))).filter((tab): tab is BrowserTab => tab !== undefined).slice(0, 5);
           if (openedTabs.length === 1) {
             const switched = await switchSafeTab({
               sessionId: session.key,
@@ -928,6 +968,27 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         }
         return captureSessionSnapshot(session, openedTabs, targetState.full);
       };
+      try {
+        await dispatchNativeBrowserClick(actionSupervisor, target.ref);
+      } catch (error) {
+        if (!(error instanceof NativeBrowserInputDispatchError) || !error.actionDispatched) throw error;
+        const unverified = await preserveDispatchedSettlementFailure({
+          session,
+          before,
+          actionInput: input,
+          capture,
+          openedTabs,
+          target,
+          cause: error
+        });
+        const snapshot = protectedFields.protectSnapshot(session.key, unverified);
+        latestSnapshots.set(session.key, snapshot);
+        const afterObservedUrl = latestObservedUrls.get(session.key);
+        if (beforeObservedUrl !== undefined && afterObservedUrl !== undefined && beforeObservedUrl !== afterObservedUrl) {
+          await protectedFields.invalidateSession(session);
+        }
+        return snapshot;
+      }
       let settledSnapshot: BrowserSnapshot;
       try {
         const settlement = await settleBrowserAction({
@@ -939,7 +1000,21 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
           stableWindowMs: options.settling?.stableWindowMs,
           minimumObservationMs: options.settling?.minimumObservationMs
         });
-        settledSnapshot = withBrowserActionDelta({ before, settlement, openedTabs, target });
+        const popupAttempts = actionSupervisor.popupAttempts?.({ clear: true }) ?? [];
+        const popup = await safePopupEvidence(popupAttempts, tabUrlIsAllowed);
+        const baseline = withBrowserActionDelta({ before, settlement, openedTabs, target, popup });
+        const outcome = openedTabs.length > 0
+          ? "new-tab-opened"
+          : popupAttempts.length > 0
+            ? "popup-blocked"
+            : before.url !== settlement.snapshot.url
+              ? "same-tab-navigation"
+              : baseline.actionDelta?.outcome === "no-change"
+                ? "action-no-change"
+                : undefined;
+        settledSnapshot = outcome === undefined
+          ? baseline
+          : withBrowserActionDelta({ before, settlement, openedTabs, target, popup, outcome });
       } catch (error) {
         settledSnapshot = await preserveDispatchedSettlementFailure({
           session,
@@ -966,7 +1041,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       const before = targetState.snapshot;
       const target = resolveBrowserTarget(before, input);
       const actionEvaluation = await session.supervisor.send("Runtime.evaluate", {
-        expression: refActionExpression(target.ref, "type", input.text ?? ""),
+        expression: refTypeActionExpression(target.ref, input.text ?? ""),
         awaitPromise: true
       });
       assertBrowserRuntimeEvaluationSucceeded(actionEvaluation);
@@ -1330,13 +1405,22 @@ function withSessionTab(
   };
 }
 
-function refActionExpression(ref: string | undefined, action: "click" | "type", text = ""): string {
+function refTypeActionExpression(ref: string | undefined, text = ""): string {
   const index = refToIndex(ref);
   const guard = browserInteractabilityGuardSource(`window.__estacodaElements?.[${index}]`, ref ?? "");
-  if (action === "click") {
-    return `(() => { ${guard} el.click(); return 'clicked'; })()`;
-  }
   return `(() => { ${guard} if (!(el instanceof HTMLInputElement) && !(el instanceof HTMLTextAreaElement) && !el.isContentEditable) throw new Error('Browser target does not accept text: ${ref ?? ""}'); el.focus(); if (el.isContentEditable) el.textContent = ${JSON.stringify(text)}; else el.value = ${JSON.stringify(text)}; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return 'typed'; })()`;
+}
+
+async function safePopupEvidence(
+  attempts: BrowserPopupAttempt[],
+  isAllowed: (url: string) => Promise<boolean>
+): Promise<NonNullable<BrowserSnapshot["actionDelta"]>["popup"] | undefined> {
+  const attempt = attempts.at(-1);
+  if (attempt === undefined) return undefined;
+  return {
+    userGesture: attempt.userGesture,
+    ...(await isAllowed(attempt.url) ? { destination: redactUrlForMetadata(attempt.url) } : {})
+  };
 }
 
 async function inspectBrowserActionTarget(

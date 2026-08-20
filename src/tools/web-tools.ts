@@ -738,6 +738,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           url: { type: "string" },
           text: { type: "string" },
           sessionId: { type: "string" },
+          disposition: { type: "string", enum: ["current-tab", "new-tab"] },
           ...browserWaitInputProperties()
         }
       },
@@ -810,6 +811,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         const browserInput = deriveBrowserInput({
           url,
           sessionId: input.sessionId,
+          disposition: input.disposition,
           waitFor: input.waitFor,
           waitTimeoutMs: input.waitTimeoutMs,
           signal: context?.signal
@@ -2225,6 +2227,14 @@ function renderBrowserActionDelta(delta: BrowserActionDelta): string {
     ? "Action was dispatched, but settlement verification failed. Do not retry automatically; inspect the current browser state first."
     : delta.outcome === "timeout"
     ? "Action wait timed out; current browser state was captured."
+    : delta.outcome === "new-tab-opened"
+      ? "A new browser tab opened. One safe tab is controlled automatically; multiple safe tabs remain explicit choices."
+    : delta.outcome === "popup-blocked"
+      ? "Chrome blocked a popup. Use a different strategy; when a safe destination is shown, browser.navigate with disposition=new-tab can open it once without changing Chrome permissions."
+    : delta.outcome === "same-tab-navigation"
+      ? "Action completed with navigation in the controlled tab."
+    : delta.outcome === "action-no-change"
+      ? "Action was dispatched, but no observable browser state change occurred."
     : delta.outcome === "no-change"
       ? "Action dispatched; no observable page change was detected."
       : "Action completed with an observable page change.";
@@ -2243,6 +2253,13 @@ function renderBrowserActionDelta(delta: BrowserActionDelta): string {
     ...(delta.addedElements ?? []).map((element) => `Added: ${renderDeltaElement(element)}`),
     ...(delta.removedElements ?? []).map((element) => `Removed: ${renderDeltaElement(element)}`),
     ...(delta.openedTabs ?? []).map((tab) => `Opened tab: ${tab.ref}${tab.title === undefined ? "" : ` ${tab.title}`} — ${tab.url}`),
+    ...((delta.openedTabs?.length ?? 0) > 1 ? ["Multiple safe tabs opened; choose one explicitly with browser.switch_tab."] : []),
+    ...(delta.popup === undefined ? [] : [
+      `Popup attempt: ${delta.popup.userGesture ? "user-gesture" : "no-user-gesture"}`,
+      delta.popup.destination === undefined
+        ? "Popup destination is unavailable under browser URL policy."
+        : `Safe popup destination: ${delta.popup.destination}`
+    ]),
     ...(delta.tabTransition === undefined ? [] : [
       `Controlled tab: ${delta.tabTransition.source.ref} → ${delta.tabTransition.destination.ref}`,
       `Source: ${delta.tabTransition.source.url}`,

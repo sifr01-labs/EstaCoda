@@ -1743,6 +1743,33 @@ describe("web and browser tools baselines", () => {
     expect(navigate.description).toContain("local browser profile data requires explicit authorization");
   });
 
+  it("offers controlled current-tab or new-tab navigation and forwards the disposition", async () => {
+    const calls: Array<{ method: string; input: BrowserActionInput | BrowserNavigateInput }> = [];
+    const navigate = tool("browser.navigate", createTestWebTools({
+      browserBackend: createSessionRecordingBrowserBackend(calls),
+      currentSessionId: () => "runtime-session",
+      resolveHostname: publicResolver
+    }));
+
+    expect(navigate.inputSchema).toMatchObject({
+      properties: {
+        disposition: { type: "string", enum: ["current-tab", "new-tab"] }
+      }
+    });
+    await expect(navigate.run({
+      url: "https://example.com/connect",
+      disposition: "new-tab"
+    })).resolves.toMatchObject({ ok: true });
+    expect(calls).toContainEqual({
+      method: "navigate",
+      input: expect.objectContaining({
+        url: "https://example.com/connect",
+        sessionId: "runtime-session:main",
+        disposition: "new-tab"
+      })
+    });
+  });
+
   it("blocks browser.cdp Page.navigate to metadata and private URLs before the backend call", async () => {
     const calls: BrowserActionInput[] = [];
     const cdp = tool("browser.cdp", createTestWebTools({
@@ -3443,6 +3470,38 @@ describe("web and browser tools baselines", () => {
     expect(result.content.indexOf("@e23")).toBeLessThan(result.content.indexOf("@e1 "));
     expect(result.content).toContain("@e24");
     expect(result.content).toContain("@e25");
+  });
+
+  it("renders blocked-popup recovery as bounded controlled navigation", async () => {
+    const browserBackend: BrowserBackend = {
+      ...createMockBrowserBackend(),
+      click: async (input) => ({
+        sessionId: input.sessionId ?? "session-1",
+        url: "https://example.com/apps",
+        identity: browserIdentity(5),
+        observedAt: "2026-08-13T00:00:00.000Z",
+        tab: { ref: "@t1", url: "https://example.com/apps", controlled: true },
+        actionDelta: {
+          outcome: "popup-blocked",
+          beforeIdentity: browserIdentity(5),
+          afterIdentity: browserIdentity(5),
+          waitCondition: "dom-stable",
+          conditionMet: true,
+          url: { changed: false, after: "https://example.com/apps" },
+          popup: {
+            destination: "https://example.com/connect",
+            userGesture: true
+          }
+        }
+      })
+    };
+
+    const result = await tool("browser.click", createTestWebTools({ browserBackend })).run({ ref: "@e1" });
+
+    expect(result.content).toContain("Chrome blocked a popup");
+    expect(result.content).toContain("browser.navigate with disposition=new-tab");
+    expect(result.content).toContain("Safe popup destination: https://example.com/connect");
+    expect(result.content).toContain("without changing Chrome permissions");
   });
 
   it("renders dispatched settlement failures as non-retryable action outcomes", async () => {

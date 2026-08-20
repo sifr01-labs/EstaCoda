@@ -160,7 +160,7 @@ export class BrowserObservationGuard {
     const repeatedAction = signatures.some((signature) => this.#ineffectiveActionSignatures.has(signature));
     for (const signature of signatures) this.#ineffectiveActionSignatures.add(signature);
     this.#noProgressCount += 1;
-    const shouldStop = repeatedAction || this.#retargetUsed || this.#ineffectiveActionSignatures.size > 1;
+    const shouldStop = repeatedAction || this.#ineffectiveActionSignatures.size > 1;
     return assessment({
       executions,
       count: this.#noProgressCount,
@@ -216,7 +216,7 @@ function assessment(input: {
 function isStateChangingBrowserAction(execution: ToolExecutionRecord): boolean {
   if (!BROWSER_ACTION_TOOLS.has(execution.tool.name) || execution.result?.ok !== true) return false;
   const outcome = browserActionOutcome(execution);
-  if (outcome === "changed") return true;
+  if (outcome === "changed" || outcome === "new-tab-opened" || outcome === "same-tab-navigation") return true;
   if (outcome === "dispatched-unverified") {
     const delta = browserActionDelta(execution);
     return delta?.documentChangeObserved === true || asRecord(delta?.url)?.changed === true;
@@ -227,7 +227,7 @@ function isStateChangingBrowserAction(execution: ToolExecutionRecord): boolean {
 function isIneffectiveDispatchedAction(execution: ToolExecutionRecord): boolean {
   if (!BROWSER_ACTION_TOOLS.has(execution.tool.name) || execution.result?.ok !== true) return false;
   const outcome = browserActionOutcome(execution);
-  if (outcome === "no-change" || outcome === "timeout") return true;
+  if (outcome === "no-change" || outcome === "timeout" || outcome === "action-no-change" || outcome === "popup-blocked") return true;
   if (outcome !== "dispatched-unverified") return false;
   const delta = browserActionDelta(execution);
   return delta?.documentChangeObserved !== true && asRecord(delta?.url)?.changed !== true;
@@ -331,6 +331,11 @@ function stableBrowserIdentity(value: unknown): unknown {
 
 function browserCallSignature(execution: ToolExecutionRecord): string {
   const snapshot = asRecord(execution.result?.metadata?.snapshot);
+  const delta = asRecord(snapshot?.actionDelta);
+  const popup = asRecord(delta?.popup);
+  if (delta?.outcome === "popup-blocked" && typeof popup?.destination === "string") {
+    return fingerprint({ kind: "popup-blocked", destination: popup.destination });
+  }
   return fingerprint({
     tool: execution.tool.name,
     input: stableBrowserCallInput(execution.input),

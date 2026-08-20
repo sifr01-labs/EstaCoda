@@ -33,7 +33,14 @@ export type BrowserManagedTab = CdpPageTarget & {
 };
 
 type BrowserTargetManager = Pick<CdpTargetManager, "createTarget"> &
-  Partial<Pick<CdpTargetManager, "listPageTargets" | "attachTarget" | "activateTarget" | "findVisiblePageTargetId">>;
+  Partial<Pick<CdpTargetManager,
+    | "listPageTargets"
+    | "attachTarget"
+    | "activateTarget"
+    | "findVisiblePageTargetId"
+    | "createPageTarget"
+    | "closePageTarget"
+  >>;
 
 export interface BrowserSessionManagerOptions {
   targetManager: BrowserTargetManager;
@@ -195,6 +202,27 @@ export class BrowserSessionManager {
       }
     }
     return session;
+  }
+
+  async openTab(key: string, url: string): Promise<BrowserManagedSession> {
+    const session = this.#requireSession(key);
+    const createPageTarget = this.#targetManager.createPageTarget;
+    if (createPageTarget === undefined) {
+      throw new Error("Browser target manager does not support controlled tab creation.");
+    }
+    const target = await createPageTarget.call(this.#targetManager, session.browserContextId, url);
+    const tabRef = this.#tabRef(session, target.targetId);
+    try {
+      return await this.switchTab(session.key, tabRef);
+    } catch (error) {
+      await this.#targetManager.closePageTarget?.call(
+        this.#targetManager,
+        session.browserContextId,
+        target.targetId
+      ).catch(() => undefined);
+      session.tabRefs.delete(target.targetId);
+      throw new Error(`Failed to open controlled browser tab ${tabRef}: ${errorMessage(error)}`, { cause: error });
+    }
   }
 
   async close(key: string): Promise<void> {

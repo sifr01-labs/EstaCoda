@@ -14,7 +14,7 @@ import type { ExecutionWorkingSetController } from "./execution-working-set.js";
 import type { RunRecorder } from "./run-recorder.js";
 
 export const EXECUTION_SUPERVISION_PROMPTS = {
-  browserEvidence: "The last browser call repeated evidence already available for this document. Do not repeat the same locator, target, or observation result. Use a different grounded action or a distinct inspection that can reveal new structure; if neither exists, return the truthful incomplete result.",
+  browserEvidence: "The last browser call did not change state or repeated evidence already available for this document. Do not repeat the same locator, target, popup destination, or observation result. Use a different grounded action or a distinct inspection that can reveal new structure. If the result reports popup-blocked with a safe destination, browser.navigate with disposition=new-tab is the one bounded recovery path; do not change Chrome permissions. If no grounded alternative exists, return the truthful incomplete result.",
   browserRetarget: "The last browser target could not be resolved, so no action was dispatched. You have one bounded retargeting opportunity. Use current document and tab identity with a different grounded ref or locator; do not retry the same missing target.",
   toolLoopProgress: "The foreground tool loop has repeated the same calls or results without material progress. Change approach before continuing the original request. Use a different relevant action, surface a concrete runtime blocker, or return the truthful result already established."
 } as const;

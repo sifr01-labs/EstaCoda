@@ -24,6 +24,7 @@ import {
   assertBrowserRuntimeEvaluationSucceeded,
   browserInteractabilityGuardSource
 } from "./browser-interactability.js";
+import { dispatchNativeBrowserClick } from "./native-input.js";
 
 export type { CdpFetchLike, CdpWebSocketEvent, CdpWebSocketFactory, CdpWebSocketLike } from "./cdp-client.js";
 
@@ -143,6 +144,9 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
     isAvailable: async () => (await checkLocalCdpStatus(endpoint, options.fetch)).available,
     status: () => checkLocalCdpStatus(endpoint, options.fetch),
     async navigate(input) {
+      if (input.disposition === "new-tab") {
+        throw new Error("Controlled new-tab navigation requires the supervised local CDP backend.");
+      }
       return navigateWithLocalCdp({
         endpoint,
         input,
@@ -170,11 +174,7 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
       action: async (client, sessionId) => {
         const current = await observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
         const target = resolveBrowserTarget(current, input);
-        const actionEvaluation = await client.send("Runtime.evaluate", {
-          expression: refActionExpression(target.ref, "click"),
-          awaitPromise: true
-        });
-        assertBrowserRuntimeEvaluationSucceeded(actionEvaluation);
+        await dispatchNativeBrowserClick(client, target.ref);
         return observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
       }
     }),
@@ -187,7 +187,7 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
         const current = await observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
         const target = resolveBrowserTarget(current, input);
         const actionEvaluation = await client.send("Runtime.evaluate", {
-          expression: refActionExpression(target.ref, "type", input.text ?? ""),
+          expression: refTypeActionExpression(target.ref, input.text ?? ""),
           awaitPromise: true
         });
         assertBrowserRuntimeEvaluationSucceeded(actionEvaluation);
@@ -371,12 +371,9 @@ async function ensureConsoleCapture(client: CdpClient): Promise<void> {
   });
 }
 
-function refActionExpression(ref: string | undefined, action: "click" | "type", text = ""): string {
+function refTypeActionExpression(ref: string | undefined, text = ""): string {
   const index = refToIndex(ref);
   const guard = browserInteractabilityGuardSource(`window.__estacodaElements?.[${index}]`, ref ?? "");
-  if (action === "click") {
-    return `(() => { ${guard} el.click(); return 'clicked'; })()`;
-  }
   return `(() => { ${guard} el.focus(); el.value = ${JSON.stringify(text)}; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return 'typed'; })()`;
 }
 

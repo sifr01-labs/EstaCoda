@@ -139,6 +139,48 @@ export class CdpTargetManager {
     }
   }
 
+  async createPageTarget(browserContextId: string, url: string): Promise<CdpPageTarget> {
+    if (this.#closed) throw new Error("CDP target manager is closed.");
+    const contextId = requireNonEmptyString(browserContextId, "browserContextId");
+    const destination = requireNonEmptyString(url, "url");
+    const client = await this.#getBrowserClient();
+    const targetId = await sendRequiredStringResult(
+      client,
+      "Target.createTarget",
+      { url: destination, browserContextId: contextId },
+      "targetId",
+      "Target.createTarget"
+    );
+    try {
+      const pageWebSocketDebuggerUrl = await this.#findPageWebSocketDebuggerUrl(targetId);
+      const info = (await this.#fetchTargetInfos()).find((candidate) => candidate.targetId === targetId);
+      if (info?.browserContextId !== contextId || info.type !== "page") {
+        throw new Error(`Created CDP target ${targetId} was not a page in browser context ${contextId}.`);
+      }
+      return {
+        browserContextId: contextId,
+        targetId,
+        pageWebSocketDebuggerUrl,
+        url: typeof info.url === "string" ? info.url : destination,
+        ...(typeof info.title === "string" && info.title.trim() !== "" ? { title: info.title } : {}),
+        ...(typeof info.openerId === "string" && info.openerId.trim() !== "" ? { openerId: info.openerId } : {})
+      };
+    } catch (error) {
+      await client.send("Target.closeTarget", { targetId }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async closePageTarget(browserContextId: string, targetId: string): Promise<void> {
+    const contextId = requireNonEmptyString(browserContextId, "browserContextId");
+    const requestedTargetId = requireNonEmptyString(targetId, "targetId");
+    const target = (await this.listPageTargets(contextId)).find((entry) => entry.targetId === requestedTargetId);
+    if (target === undefined) {
+      throw new Error(`CDP page target ${requestedTargetId} is not available in browser context ${contextId}.`);
+    }
+    await (await this.#getBrowserClient()).send("Target.closeTarget", { targetId: requestedTargetId });
+  }
+
   async listPageTargets(browserContextId: string): Promise<CdpPageTarget[]> {
     if (this.#closed) {
       throw new Error("CDP target manager is closed.");

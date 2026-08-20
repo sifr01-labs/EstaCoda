@@ -247,4 +247,27 @@ describe("browser action settling", () => {
     });
     expect(delta.outcome).toBe("changed");
   });
+
+  it("bounds safe new-tab choices and preserves an explicit navigation outcome", () => {
+    const before = snapshot({ actionRevision: 4, tabRef: "@t1" });
+    const after = snapshot({ actionRevision: 5, tabRef: "@t1" });
+    const openedTabs = Array.from({ length: 8 }, (_, index) => ({
+      ref: `@t${index + 2}`,
+      url: `https://example.com/choice-${index + 1}`,
+      controlled: false
+    }));
+    const delta = createBrowserActionDelta({
+      before,
+      after,
+      waitCondition: "dom-stable",
+      conditionMet: true,
+      timedOut: false,
+      openedTabs,
+      outcome: "new-tab-opened"
+    });
+
+    expect(delta.outcome).toBe("new-tab-opened");
+    expect(delta.openedTabs).toHaveLength(5);
+    expect(delta.openedTabs?.map((tab) => tab.ref)).toEqual(["@t2", "@t3", "@t4", "@t5", "@t6"]);
+  });
 });

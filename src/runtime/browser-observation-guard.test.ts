@@ -69,6 +69,13 @@ function action(toolInput: Record<string, unknown>, outcome: string): ToolExecut
   });
 }
 
+function blockedPopup(ref: string, destination: string): ToolExecutionRecord {
+  const record = action({ ref }, "popup-blocked");
+  const actionDelta = (record.result!.metadata!.snapshot as Record<string, unknown>).actionDelta as Record<string, unknown>;
+  actionDelta.popup = { destination, userGesture: true };
+  return record;
+}
+
 describe("BrowserObservationGuard", () => {
   it("treats a focused find and a structural snapshot as distinct new evidence on an unchanged page", () => {
     const guard = new BrowserObservationGuard(3);
@@ -205,6 +212,26 @@ describe("BrowserObservationGuard", () => {
     const different = new BrowserObservationGuard(3);
     different.observe([action({ ref: "@e62" }, "no-change")]);
     expect(different.observe([action({ ref: "@e65" }, "no-change")])).toMatchObject({ shouldStop: true });
+  });
+
+  it("allows one blocked-popup strategy change and stops the same destination across different targets", () => {
+    const guard = new BrowserObservationGuard(3);
+    guard.observe([targetFailure("TikTok Connect")]);
+    expect(guard.observe([blockedPopup("@e62", "https://example.com/connect")])).toMatchObject({
+      actionDispatched: true,
+      shouldNudge: true,
+      shouldStop: false
+    });
+    expect(guard.observe([blockedPopup("@e65", "https://example.com/connect")])).toMatchObject({
+      shouldNudge: false,
+      shouldStop: true
+    });
+  });
+
+  it("treats controlled new-tab and same-tab navigation as progress", () => {
+    const guard = new BrowserObservationGuard(3);
+    expect(guard.observe([action({ disposition: "new-tab" }, "new-tab-opened")])).toBeUndefined();
+    expect(guard.observe([action({ ref: "@e1" }, "same-tab-navigation")])).toBeUndefined();
   });
 
   it("does not expose page content, inputs, or fingerprints in assessments", () => {

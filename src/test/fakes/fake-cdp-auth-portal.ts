@@ -70,7 +70,9 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
   onProtectedDelivery?: () => void;
   onProtectedSubmit?: () => void;
   onRuntimeEvaluate?: (expression: string) => void;
+  onNativeClick?: () => void;
   rejectBrowserActions = false;
+  failNextMouseRelease: string | undefined;
   browserActionPreflight: Record<string, unknown> = {
     kind: "button",
     tag: "button",
@@ -89,6 +91,17 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
     this.sent.push(message);
     if (message.method === "Runtime.evaluate" && typeof message.params?.expression === "string") {
       this.onRuntimeEvaluate?.(message.params.expression);
+    }
+    if (message.method === "Input.dispatchMouseEvent" && message.params?.type === "mouseReleased") {
+      this.onNativeClick?.();
+      if (this.failNextMouseRelease !== undefined) {
+        const failure = this.failNextMouseRelease;
+        this.failNextMouseRelease = undefined;
+        this.#emit("message", {
+          data: JSON.stringify({ id: message.id, error: { message: failure } }),
+        });
+        return;
+      }
     }
     if (message.method === "Runtime.evaluate" && typeof message.params?.expression === "string") {
       const index = /__estacodaElements\?\.\[(\d+)\]/u.exec(message.params.expression)?.[1];
@@ -186,7 +199,8 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
     }
     if (method === "Runtime.evaluate") {
       if (this.rejectBrowserActions && typeof message.params?.expression === "string" &&
-          /\.(?:click|focus)\(\)/u.test(message.params.expression)) {
+          (/\.(?:click|focus)\(\)/u.test(message.params.expression) ||
+            message.params.expression.includes("getBoundingClientRect"))) {
         return { exceptionDetails: { text: "Element became non-interactable" } };
       }
       if (message.params?.expression === "document") {
@@ -201,6 +215,9 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
       }
       if (typeof message.params?.expression === "string" && message.params.expression.includes("const inlineScripted")) {
         return { result: { value: this.browserActionPreflight } };
+      }
+      if (typeof message.params?.expression === "string" && message.params.expression.includes("getBoundingClientRect")) {
+        return { result: { value: { x: 48, y: 24 } } };
       }
       return { result: { value: JSON.stringify(this.snapshot) } };
     }

@@ -130,6 +130,8 @@ export function withBrowserActionDelta(input: {
   after?: BrowserSnapshot;
   openedTabs?: BrowserTab[];
   target?: BrowserLocatorCandidate;
+  outcome?: Exclude<BrowserActionDelta["outcome"], "dispatched-unverified">;
+  popup?: BrowserActionDelta["popup"];
 }): BrowserSnapshot {
   const after = input.after ?? input.settlement.snapshot;
   return {
@@ -141,7 +143,9 @@ export function withBrowserActionDelta(input: {
       conditionMet: input.settlement.conditionMet,
       timedOut: input.settlement.timedOut,
       openedTabs: input.openedTabs,
-      target: input.target
+      target: input.target,
+      outcome: input.outcome,
+      popup: input.popup
     })
   };
 }
@@ -154,6 +158,8 @@ export function createBrowserActionDelta(input: {
   timedOut: boolean;
   openedTabs?: BrowserTab[];
   target?: BrowserLocatorCandidate;
+  outcome?: Exclude<BrowserActionDelta["outcome"], "dispatched-unverified">;
+  popup?: BrowserActionDelta["popup"];
 }): BrowserActionDelta {
   const beforeElements = deltaElements(input.before?.elements ?? []);
   const afterElements = deltaElements(input.after.elements ?? []);
@@ -180,7 +186,7 @@ export function createBrowserActionDelta(input: {
     tabTransition !== undefined;
 
   return {
-    outcome: input.timedOut ? "timeout" : changed ? "changed" : "no-change",
+    outcome: input.outcome ?? (input.timedOut ? "timeout" : changed ? "changed" : "no-change"),
     ...(input.before === undefined ? {} : { beforeIdentity: { ...input.before.identity } }),
     afterIdentity: { ...input.after.identity },
     waitCondition: input.waitCondition,
@@ -200,6 +206,14 @@ export function createBrowserActionDelta(input: {
       }))
     }),
     ...(tabTransition === undefined ? {} : { tabTransition }),
+    ...(input.popup === undefined ? {} : {
+      popup: {
+        userGesture: input.popup.userGesture,
+        ...(input.popup.destination === undefined ? {} : {
+          destination: redactUrlForMetadata(input.popup.destination)
+        })
+      }
+    }),
     ...(input.target === undefined ? {} : {
       target: {
         ref: input.target.ref,
