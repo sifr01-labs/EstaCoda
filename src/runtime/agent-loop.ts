@@ -56,6 +56,7 @@ import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { buildFallbackResponse, cancelledResponse, buildResumeNote, renderToolPlanProgress } from "./response-builders.js";
 import { renderProviderExecutionSummary, summarizeProviderExecution } from "./provider-execution-summary.js";
 import {
+  continuesConversationCommitment,
   sanitizeConversationContinuationState,
   updateConversationContinuationState,
   type ConversationContinuationState
@@ -712,19 +713,26 @@ export class AgentLoop {
     });
     const setupApprovals = buildSetupApprovalRequests(selectedSkillSetup, selectedSkill?.name);
     const deterministicImageGenerationRan = deterministicNativeTools.executions.some((execution) => execution.tool.name === "image.generate");
+    const previousConversationContinuationState = await this.#latestConversationContinuationState();
+    const continuedConversationState = continuesConversationCommitment(
+      routedText,
+      previousConversationContinuationState
+    )
+      ? previousConversationContinuationState
+      : undefined;
     const narrowedProviderTools = this.#model?.supportsTools === true
       ? this.#providerToolsForTurn({
           intent,
           userText: routedText,
           selectedSkill,
-          attachments
+          attachments,
+          conversationContinuationState: continuedConversationState
         })
       : [];
     const providerTools = deterministicImageGenerationRan
       ? suppressImageGenerationTools(narrowedProviderTools)
       : narrowedProviderTools;
     const preflightCompression = await this.#compactBeforeProviderTurn(input.signal, input.onEvent);
-    const previousConversationContinuationState = await this.#latestConversationContinuationState();
     await this.#emitLiveContextUsageEstimate({
       onEvent: input.onEvent,
       routedText,
@@ -768,7 +776,7 @@ export class AgentLoop {
       toolPlans,
       trustedWorkspace,
       initialRiskClass,
-      conversationContinuationState: previousConversationContinuationState,
+      conversationContinuationState: continuedConversationState,
       signal: input.signal
     });
     const effectiveProviderExecution = providerLoop.providerExecution;
@@ -1113,6 +1121,7 @@ export class AgentLoop {
     userText: string;
     selectedSkill?: LoadedSkill | SkillDefinition;
     attachments?: readonly ChannelAttachment[];
+    conversationContinuationState?: ConversationContinuationState;
   }): OpenAICompatibleToolSchema[] {
     if (this.#providerToolSchemaCatalog === undefined || this.#taskExecution !== undefined) {
       return this.#providerTools;
@@ -1122,7 +1131,15 @@ export class AgentLoop {
       intent: input.intent,
       userText: input.userText,
       selectedSkill: input.selectedSkill,
-      attachments: input.attachments
+      attachments: input.attachments,
+      continuity: {
+        activeBrowser: this.#sessionRuntimeContext?.browserState()?.sessionStatus === "active",
+        ...(input.conversationContinuationState === undefined ? {} : {
+          userRequest: input.conversationContinuationState.userRequest,
+          toolsets: input.conversationContinuationState.capabilityContext?.toolsets,
+          connectors: input.conversationContinuationState.capabilityContext?.connectors
+        })
+      }
     });
   }
 

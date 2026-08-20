@@ -658,6 +658,67 @@ describe("AgentLoop provider availability gating", () => {
     ]);
   });
 
+  it("keeps browser actions beside Postman for the active-session wording from the MTN journey", async () => {
+    const providerToolDefinitions: ToolDefinition[] = [
+      { ...tool, name: "plan", toolsets: ["core"] },
+      { ...tool, name: "browser.status", toolsets: ["browser", "core"] },
+      { ...tool, name: "browser.snapshot", toolsets: ["browser"] },
+      { ...tool, name: "browser.click", toolsets: ["browser"] },
+      { ...tool, name: "browser.tabs", toolsets: ["browser"] },
+      { ...tool, name: "browser.switch_tab", toolsets: ["browser"] },
+      {
+        ...tool,
+        name: "mcp.postman.getCollection",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "postman" }
+      },
+      {
+        ...tool,
+        name: "mcp.postman.updateCollection",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "postman" }
+      },
+      {
+        ...tool,
+        name: "mcp.linear.getIssues",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "linear" }
+      }
+    ];
+    const { loop, providerTurnLoop, sessionRuntimeContext } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      providerToolDefinitions,
+      routeIntent: { ...intent, confidence: 0.35, suggestedToolsets: [] }
+    });
+    sessionRuntimeContext.setBrowserState({
+      sessionStatus: "active",
+      sessionId: "active-browser:main",
+      freshness: "current"
+    });
+
+    await loop.handle({
+      text: "okay great - now i want you to click on the tiktok connect app shown there. you'll see 6 products listed under them. i want you to get all 6 products set up in our postman collection.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    const runInput = vi.mocked(providerTurnLoop.run).mock.calls[0]?.[0] as {
+      providerTools: Array<{ function: { name: string } }>;
+    };
+    const names = runInput.providerTools.map((entry) => entry.function.name);
+    expect(names).toEqual(expect.arrayContaining([
+      "browser_snapshot",
+      "browser_click",
+      "browser_tabs",
+      "browser_switch_tab",
+      "mcp_postman_getCollection",
+      "mcp_postman_updateCollection"
+    ]));
+    expect(names).not.toContain("mcp_linear_getIssues");
+  });
+
   it("keeps a deterministically executed image tool out of the provider inventory", async () => {
     const providerToolDefinitions: ToolDefinition[] = [
       { ...tool, name: "plan", toolsets: ["core"] },
@@ -1044,6 +1105,86 @@ describe("AgentLoop provider availability gating", () => {
     });
     const latestAgent = [...await sessionDb.listMessages(sessionId)].reverse().find((message) => message.role === "agent");
     expect(latestAgent?.metadata?.conversationContinuationState).toMatchObject({ status: "satisfied" });
+  });
+
+  it("reuses only observed browser and connector surfaces on a continued turn", async () => {
+    const browserExecution: ToolExecutionRecord = {
+      tool: { ...tool, name: "browser.snapshot", toolsets: ["browser"] },
+      decision: "allow",
+      riskClass: "read-only-network",
+      result: { ok: true, content: "bounded browser state" }
+    };
+    const postmanExecution: ToolExecutionRecord = {
+      tool: {
+        ...tool,
+        name: "mcp.postman.getCollection",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "postman" }
+      },
+      decision: "allow",
+      riskClass: "read-only-network",
+      result: { ok: true, content: "bounded collection state" }
+    };
+    const providerToolDefinitions: ToolDefinition[] = [
+      { ...tool, name: "plan", toolsets: ["core"] },
+      { ...tool, name: "browser.click", toolsets: ["browser"] },
+      { ...tool, name: "browser.switch_tab", toolsets: ["browser"] },
+      postmanExecution.tool,
+      {
+        ...tool,
+        name: "mcp.postman.updateCollection",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "postman" }
+      },
+      {
+        ...tool,
+        name: "mcp.linear.getIssues",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "linear" }
+      }
+    ];
+    const { loop, providerTurnLoop, sessionRuntimeContext } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("I'll finish the protected Postman update next."),
+      providerLoopToolExecutions: [browserExecution, postmanExecution],
+      providerToolDefinitions,
+      routeIntent: { ...intent, confidence: 0.35, suggestedToolsets: [] }
+    });
+    sessionRuntimeContext.setBrowserState({
+      sessionStatus: "active",
+      sessionId: "active-browser:main",
+      freshness: "current"
+    });
+
+    await loop.handle({
+      text: "Set up the app key and secret in Postman.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+    vi.mocked(providerTurnLoop.run).mockResolvedValueOnce({
+      providerExecution: successfulProviderExecution("I continued the existing browser and Postman work."),
+      toolExecutions: [],
+      iterations: 1
+    });
+    await loop.handle({ text: "let's do this [pasted text]", channel: "cli", trustedWorkspace: true });
+
+    const continuedInput = vi.mocked(providerTurnLoop.run).mock.calls[1]?.[0] as {
+      providerTools: Array<{ function: { name: string } }>;
+      conversationContinuationState?: { capabilityContext?: unknown };
+    };
+    const names = continuedInput.providerTools.map((entry) => entry.function.name);
+    expect(names).toEqual(expect.arrayContaining([
+      "browser_click",
+      "browser_switch_tab",
+      "mcp_postman_getCollection",
+      "mcp_postman_updateCollection"
+    ]));
+    expect(names).not.toContain("mcp_linear_getIssues");
+    expect(continuedInput.conversationContinuationState?.capabilityContext).toEqual({
+      toolsets: ["browser"],
+      connectors: [{ kind: "mcp", id: "postman" }]
+    });
   });
 
   it("ignores retired activeTaskState metadata", async () => {

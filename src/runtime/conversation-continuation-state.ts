@@ -1,5 +1,11 @@
 import type { ProviderExecutionSummary } from "../contracts/provider.js";
+import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import { redactSensitiveText } from "../utils/redaction.js";
+
+export type ConversationCapabilityContext = {
+  toolsets: ToolsetName[];
+  connectors: NonNullable<ToolDefinition["connector"]>[];
+};
 
 export type ConversationContinuationState = {
   id: string;
@@ -9,12 +15,21 @@ export type ConversationContinuationState = {
   lastProgress?: string;
   updatedAt: string;
   source: "heuristic" | "explicit";
+  capabilityContext?: ConversationCapabilityContext;
 };
 
 type ToolExecutionSummary = {
-  tool?: { name?: string };
+  tool?: {
+    name?: string;
+    toolsets?: readonly ToolsetName[];
+    connector?: ToolDefinition["connector"];
+  };
   result?: { ok?: boolean };
 };
+
+const CONTINUITY_TOOLSETS = new Set<ToolsetName>(["browser"]);
+const MAX_CONTINUITY_TOOLSETS = 4;
+const MAX_CONTINUITY_CONNECTORS = 8;
 
 export function detectPromisedAction(agentText: string): string | undefined {
   const text = singleLine(agentText);
@@ -40,7 +55,17 @@ export function detectPromisedAction(agentText: string): string | undefined {
 
 export function isAcknowledgementContinuation(userText: string): boolean {
   const text = normalizeUserText(userText);
-  return /^(ok|okay|yes|go on|continue|do that|carry on)$/u.test(text);
+  return /^(?:ok|okay|yes|go on|continue|do that|carry on)$/u.test(text) ||
+    /^(?:let'?s do (?:it|this)|please continue)(?:\b|$)/u.test(text);
+}
+
+export function continuesConversationCommitment(
+  userText: string,
+  previous: ConversationContinuationState | undefined
+): boolean {
+  if (previous?.status !== "open" || isCancellation(userText)) return false;
+  if (isAcknowledgementContinuation(userText) || hasDeicticContinuationReference(userText)) return true;
+  return !isExplicitNewRequest(userText);
 }
 
 export function updateConversationContinuationState(input: {
@@ -66,45 +91,54 @@ export function updateConversationContinuationState(input: {
   }
 
   const promisedAction = detectPromisedAction(input.agentText ?? "");
-  const continuation = isAcknowledgementContinuation(input.userText) && previous?.status === "open";
+  const continuation = previous !== undefined && continuesConversationCommitment(input.userText, previous);
+  const continuedState = continuation ? previous : undefined;
   const explicitNewRequest = !continuation && isExplicitNewRequest(input.userText);
-  const baseRequest = continuation ? previous.userRequest : userRequest;
+  const baseRequest = continuedState?.userRequest ?? userRequest;
+  const capabilityContext = mergeCapabilityContexts(
+    continuedState?.capabilityContext,
+    capabilityContextFromExecutions(input.toolExecutions)
+  );
 
   if (promisedAction !== undefined) {
     return {
-      id: continuation ? previous.id : continuationId(baseRequest, promisedAction),
+      id: continuedState?.id ?? continuationId(baseRequest, promisedAction),
       status: "open",
       userRequest: baseRequest,
       promisedAction,
       lastProgress: summarizeProgress(input),
       updatedAt: now,
-      source: "heuristic"
+      source: "heuristic",
+      ...(capabilityContext === undefined ? {} : { capabilityContext })
     };
   }
 
-  if (continuation) {
+  if (continuedState !== undefined) {
     if (hasSubstantiveAnswer(input.agentText) && (input.toolExecutions?.length ?? 0) === 0) {
       return {
-        ...previous,
+        ...continuedState,
         status: "satisfied",
         lastProgress: summarizeProgress(input) ?? "Assistant provided a substantive answer.",
-        updatedAt: now
+        updatedAt: now,
+        ...(capabilityContext === undefined ? {} : { capabilityContext })
       };
     }
 
     if (hasSubstantiveAnswer(input.agentText) && input.providerExecution?.status !== "failed") {
       return {
-        ...previous,
+        ...continuedState,
         status: "satisfied",
         lastProgress: summarizeProgress(input) ?? "Assistant provided a substantive answer.",
-        updatedAt: now
+        updatedAt: now,
+        ...(capabilityContext === undefined ? {} : { capabilityContext })
       };
     }
 
     return {
-      ...previous,
-      lastProgress: summarizeProgress(input) ?? previous.lastProgress,
-      updatedAt: now
+      ...continuedState,
+      lastProgress: summarizeProgress(input) ?? continuedState.lastProgress,
+      updatedAt: now,
+      ...(capabilityContext === undefined ? {} : { capabilityContext })
     };
   }
 
@@ -152,6 +186,7 @@ export function sanitizeConversationContinuationState(value: unknown): Conversat
   if (status === undefined || source === undefined || id === undefined || userRequest === undefined || updatedAt === undefined) {
     return undefined;
   }
+  const capabilityContext = sanitizeCapabilityContext(value.capabilityContext);
 
   return {
     id,
@@ -160,12 +195,23 @@ export function sanitizeConversationContinuationState(value: unknown): Conversat
     ...(sanitizeStateText(value.promisedAction) === undefined ? {} : { promisedAction: sanitizeStateText(value.promisedAction) }),
     ...(sanitizeStateText(value.lastProgress) === undefined ? {} : { lastProgress: sanitizeStateText(value.lastProgress) }),
     updatedAt,
-    source
+    source,
+    ...(capabilityContext === undefined ? {} : { capabilityContext })
   };
 }
 
 function isCancellation(userText: string): boolean {
   return /^(stop|never mind|nevermind|new topic|cancel|drop it)$/iu.test(normalizeUserText(userText));
+}
+
+function hasDeicticContinuationReference(userText: string): boolean {
+  const text = normalizeUserText(userText);
+  const action = /\b(?:click|press|open|select|scroll|switch|type|enter|fill|use|inspect|check|continue|finish|complete|update|add|create|set\s+up)\b/iu;
+  const reference = /\b(?:it|that|this|there|those|them|the same|shown|above|previous|existing)\b/iu;
+  const arabicAction = /(?:انقر|اضغط|افتح|اختر|مرر|بد[ّ]?ل|اكتب|أدخل|استخدم|تابع|أكمل)/u;
+  const arabicReference = /(?:هذا|هذه|ذلك|تلك|هناك|الموضح|المعروض|السابق)/u;
+  return (action.test(text) && reference.test(text)) ||
+    (arabicAction.test(text) && arabicReference.test(text));
 }
 
 export function isExplicitNewRequest(userText: string): boolean {
@@ -205,6 +251,74 @@ function summarizeProgress(input: {
 
   const text = sanitizeStateText(input.agentText);
   return text === undefined ? undefined : truncate(text, 180);
+}
+
+function capabilityContextFromExecutions(
+  executions: readonly ToolExecutionSummary[] | undefined
+): ConversationCapabilityContext | undefined {
+  const toolsets = new Set<ToolsetName>();
+  const connectors = new Map<string, NonNullable<ToolDefinition["connector"]>>();
+  for (const execution of executions ?? []) {
+    if (execution.result?.ok !== true) continue;
+    for (const toolset of execution.tool?.toolsets ?? []) {
+      if (CONTINUITY_TOOLSETS.has(toolset)) toolsets.add(toolset);
+    }
+    const connector = execution.tool?.connector;
+    if (connector !== undefined) connectors.set(`${connector.kind}:${connector.id}`, connector);
+  }
+  return boundedCapabilityContext({
+    toolsets: [...toolsets],
+    connectors: [...connectors.values()]
+  });
+}
+
+function mergeCapabilityContexts(
+  previous: ConversationCapabilityContext | undefined,
+  current: ConversationCapabilityContext | undefined
+): ConversationCapabilityContext | undefined {
+  return boundedCapabilityContext({
+    toolsets: [...(previous?.toolsets ?? []), ...(current?.toolsets ?? [])],
+    connectors: [...(previous?.connectors ?? []), ...(current?.connectors ?? [])]
+  });
+}
+
+function sanitizeCapabilityContext(value: unknown): ConversationCapabilityContext | undefined {
+  if (!isRecord(value)) return undefined;
+  const toolsets = Array.isArray(value.toolsets)
+    ? value.toolsets.flatMap((entry) => {
+        const toolset = safeToolset(entry);
+        return toolset === undefined ? [] : [toolset];
+      })
+    : [];
+  const connectors = Array.isArray(value.connectors)
+    ? value.connectors.flatMap((entry) => {
+        if (!isRecord(entry) || entry.kind !== "mcp") return [];
+        const id = safeConnectorId(entry.id);
+        return id === undefined ? [] : [{ kind: "mcp" as const, id }];
+      })
+    : [];
+  return boundedCapabilityContext({ toolsets, connectors });
+}
+
+function boundedCapabilityContext(input: ConversationCapabilityContext): ConversationCapabilityContext | undefined {
+  const toolsets = [...new Set(input.toolsets.filter((entry) => CONTINUITY_TOOLSETS.has(entry)))]
+    .slice(0, MAX_CONTINUITY_TOOLSETS);
+  const connectors = [...new Map(input.connectors
+    .filter((entry) => safeConnectorId(entry.id) !== undefined)
+    .map((entry) => [`${entry.kind}:${entry.id}`, entry] as const)).values()]
+    .slice(0, MAX_CONTINUITY_CONNECTORS);
+  if (toolsets.length === 0 && connectors.length === 0) return undefined;
+  return { toolsets, connectors };
+}
+
+function safeToolset(value: unknown): ToolsetName | undefined {
+  return typeof value === "string" && CONTINUITY_TOOLSETS.has(value) ? value : undefined;
+}
+
+function safeConnectorId(value: unknown): string | undefined {
+  return typeof value === "string" && /^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,79}$/u.test(value)
+    ? value
+    : undefined;
 }
 
 function sanitizeStateText(value: unknown): string | undefined {

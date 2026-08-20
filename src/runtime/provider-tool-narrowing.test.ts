@@ -28,6 +28,9 @@ const tools = [
   tool("task.status", ["core"]),
   tool("file.read", ["files"]),
   tool("browser.snapshot", ["browser"]),
+  tool("browser.click", ["browser"]),
+  tool("browser.tabs", ["browser"]),
+  tool("browser.switch_tab", ["browser"]),
   tool("vision.analyze", ["media"]),
   tool("web.extract", ["web"]),
   tool("mcp.postman.getCollection", ["mcp"], { kind: "mcp", id: "postman" }),
@@ -73,6 +76,83 @@ describe("narrowProviderToolsForTurn", () => {
       "mcp_postman_getCollection",
       "mcp_postman_updateCollection"
     ]);
+  });
+
+  it("keeps browser actions beside Postman for a deictic action in an active browser", () => {
+    const catalog = buildProviderToolSchemaCatalog({ tools });
+
+    const selected = names(narrowProviderToolsForTurn({
+      catalog,
+      intent: intent(0.35),
+      userText: "okay great - now i want you to click on the tiktok connect app shown there. i want you to get all 6 products set up in our postman collection.",
+      continuity: { activeBrowser: true }
+    }));
+
+    expect(selected).toEqual(expect.arrayContaining([
+      "browser_snapshot",
+      "browser_click",
+      "browser_tabs",
+      "browser_switch_tab",
+      "mcp_postman_getCollection",
+      "mcp_postman_updateCollection"
+    ]));
+    expect(selected).not.toContain("workspaces_list");
+  });
+
+  it("does not infer browser continuity without an active browser", () => {
+    const catalog = buildProviderToolSchemaCatalog({ tools });
+
+    const selected = names(narrowProviderToolsForTurn({
+      catalog,
+      intent: intent(0.35),
+      userText: "click on the app shown there and update Postman",
+      continuity: { activeBrowser: false }
+    }));
+
+    expect(selected).toContain("mcp_postman_updateCollection");
+    expect(selected).not.toContain("browser_click");
+  });
+
+  it("preserves bounded browser and connector context for an open continuation", () => {
+    const catalog = buildProviderToolSchemaCatalog({ tools });
+
+    const selected = names(narrowProviderToolsForTurn({
+      catalog,
+      intent: intent(0.95, ["browser"]),
+      userText: "let's do this",
+      continuity: {
+        userRequest: "Set up the app key and secret in Postman.",
+        toolsets: ["browser"],
+        connectors: [{ kind: "mcp", id: "postman" }],
+        activeBrowser: true
+      }
+    }));
+
+    expect(selected).toEqual(expect.arrayContaining([
+      "browser_click",
+      "browser_switch_tab",
+      "mcp_postman_getCollection",
+      "mcp_postman_updateCollection"
+    ]));
+    expect(selected).not.toContain("workspaces_list");
+  });
+
+  it("lets a current negation retire a continued connector", () => {
+    const catalog = buildProviderToolSchemaCatalog({ tools });
+
+    const selected = names(narrowProviderToolsForTurn({
+      catalog,
+      intent: intent(0.95, ["browser"]),
+      userText: "Continue in the browser, but do not use Postman.",
+      continuity: {
+        userRequest: "Update Postman.",
+        toolsets: ["browser"],
+        connectors: [{ kind: "mcp", id: "postman" }]
+      }
+    }));
+
+    expect(selected).toContain("browser_click");
+    expect(selected).not.toContain("mcp_postman_getCollection");
   });
 
   it("uses connector provenance even when MCP tools have custom prefixes", () => {
@@ -183,7 +263,10 @@ describe("narrowProviderToolsForTurn", () => {
     expect(names(narrowProviderToolsForTurn({ catalog, intent: browserIntent }))).toEqual([
       "plan",
       "task_status",
-      "browser_snapshot"
+      "browser_snapshot",
+      "browser_click",
+      "browser_tabs",
+      "browser_switch_tab"
     ]);
   });
 
@@ -211,6 +294,9 @@ describe("narrowProviderToolsForTurn", () => {
       "task_status",
       "file_read",
       "browser_snapshot",
+      "browser_click",
+      "browser_tabs",
+      "browser_switch_tab",
       "mcp_postman_getCollection",
       "mcp_postman_updateCollection",
       "workspaces_list"

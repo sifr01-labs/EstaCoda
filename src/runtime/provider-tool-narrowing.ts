@@ -1,7 +1,7 @@
 import type { ChannelAttachment } from "../contracts/channel.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
-import type { ToolsetName } from "../contracts/tool.js";
+import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import type {
   OpenAICompatibleToolSchema,
   ProviderToolSchemaCatalog
@@ -9,6 +9,14 @@ import type {
 
 /** Matches the deterministic router's minimum primary-skill score. */
 export const PROVIDER_TOOL_NARROWING_MIN_CONFIDENCE = 0.7;
+const CONTINUITY_TOOLSETS = new Set<ToolsetName>(["browser"]);
+
+export type ProviderToolContinuityContext = {
+  userRequest?: string;
+  toolsets?: readonly ToolsetName[];
+  connectors?: readonly NonNullable<ToolDefinition["connector"]>[];
+  activeBrowser?: boolean;
+};
 
 /**
  * Narrows an already availability-filtered foreground catalog. It never adds a
@@ -20,11 +28,14 @@ export function narrowProviderToolsForTurn(input: {
   userText?: string;
   selectedSkill?: LoadedSkill | SkillDefinition;
   attachments?: readonly ChannelAttachment[];
+  continuity?: ProviderToolContinuityContext;
 }): OpenAICompatibleToolSchema[] {
   const namedConnectors = selectNamedConnectors(input);
+  const continuityToolsets = selectContinuityToolsets(input);
   if (
     input.intent.confidence < PROVIDER_TOOL_NARROWING_MIN_CONFIDENCE &&
-    namedConnectors.size === 0
+    namedConnectors.size === 0 &&
+    continuityToolsets.size === 0
   ) {
     return input.catalog.tools;
   }
@@ -32,6 +43,7 @@ export function narrowProviderToolsForTurn(input: {
   const includedToolsets = new Set<ToolsetName>([
     "core",
     ...input.intent.suggestedToolsets,
+    ...continuityToolsets,
     ...(input.selectedSkill?.requiredToolsets ?? []),
     ...(input.selectedSkill?.optionalToolsets ?? []),
     ...attachmentToolsets(input.attachments)
@@ -51,10 +63,11 @@ export function narrowProviderToolsForTurn(input: {
 function selectNamedConnectors(input: {
   catalog: ProviderToolSchemaCatalog;
   userText?: string;
+  continuity?: ProviderToolContinuityContext;
 }): Set<string> {
-  if ((input.userText?.trim().length ?? 0) === 0) return new Set();
-
   const normalizedUserText = normalizeConnectorSearchText(input.userText ?? "");
+  const normalizedContinuationText = normalizeConnectorSearchText(input.continuity?.userRequest ?? "");
+  const continuedConnectorKeys = new Set((input.continuity?.connectors ?? []).map(connectorKey));
   const identities = new Map<string, { key: string; phrase: string; sourceId: string }>();
   const ambiguousKeys = new Set<string>();
   for (const entry of input.catalog.entries) {
@@ -77,9 +90,42 @@ function selectNamedConnectors(input: {
     const currentTurnReference = connectorReferenceState(normalizedUserText, identity.phrase);
     if (currentTurnReference === "positive") {
       matched.add(identity.key);
+      continue;
+    }
+    if (currentTurnReference === "negative") continue;
+    if (
+      connectorReferenceState(normalizedContinuationText, identity.phrase) === "positive" ||
+      continuedConnectorKeys.has(identity.key)
+    ) {
+      matched.add(identity.key);
     }
   }
   return matched;
+}
+
+function selectContinuityToolsets(input: {
+  userText?: string;
+  continuity?: ProviderToolContinuityContext;
+}): Set<ToolsetName> {
+  const selected = new Set((input.continuity?.toolsets ?? [])
+    .filter((toolset) => CONTINUITY_TOOLSETS.has(toolset)));
+  if (
+    input.continuity?.activeBrowser === true &&
+    matchesActiveBrowserContinuation(input.userText ?? "")
+  ) {
+    selected.add("browser");
+  }
+  return selected;
+}
+
+function matchesActiveBrowserContinuation(userText: string): boolean {
+  const normalized = userText.normalize("NFKC").toLocaleLowerCase("en-US");
+  const action = /\b(?:click|press|open|select|scroll|switch|type|enter|fill|inspect|show|use)\b/iu;
+  const surface = /\b(?:it|that|this|there|shown|above|page|screen|site|portal|app|button|link|tab|form)\b/iu;
+  const arabicAction = /(?:انقر|اضغط|افتح|اختر|مرر|بد[ّ]?ل|اكتب|أدخل|افحص|استخدم)/u;
+  const arabicSurface = /(?:هذا|هذه|ذلك|تلك|هناك|الموضح|المعروض|صفحة|شاشة|موقع|بوابة|تطبيق|زر|رابط|تبويب|نموذج)/u;
+  return (action.test(normalized) && surface.test(normalized)) ||
+    (arabicAction.test(normalized) && arabicSurface.test(normalized));
 }
 
 function connectorKey(connector: NonNullable<ProviderToolSchemaCatalog["entries"][number]["tool"]["connector"]>): string {
