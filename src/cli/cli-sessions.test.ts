@@ -555,7 +555,7 @@ describe("CLI session commands", () => {
       expect(result.output).toContain("Slow provider calls: 1 of 1 timed; slowest 11.5s");
       expect(result.output).toContain("Repeated observation calls: 1");
       expect(result.output).toContain("Status: completed");
-      expect(result.output).toContain("Final cause: Mission completed");
+      expect(result.output).toContain("Final cause: Plan completed");
       expect(result.output).toContain("Submission observed: yes");
       expect(result.output).toContain("Causal evidence: verified");
       expect(result.output).toContain("Provider seam: no");

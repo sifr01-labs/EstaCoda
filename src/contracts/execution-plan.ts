@@ -11,6 +11,16 @@ export const EXECUTION_PLAN_MAX_TOOL_NAME_CHARS = 160;
 
 export type ExecutionPlanOperation = "read" | "write" | "merge";
 
+/** The complete model-visible status vocabulary for lightweight Plan steps. */
+export type ExecutionPlanStepStatus = "pending" | "in_progress" | "completed";
+
+/** Model-visible coordination data. It carries no evidence or runtime authority. */
+export type ExecutionPlanStep = {
+  id: string;
+  content: string;
+  status: ExecutionPlanStepStatus;
+};
+
 /** Trusted runtime progress emitted by protected browser authentication receipts. */
 export type AuthenticationExecutionEffect =
   | "credentials-required"
@@ -252,7 +262,7 @@ export type ExecutionPlanLifecycleEvent = {
 export type ExecutionPlanEventSink = (event: ExecutionPlanLifecycleEvent) => void | Promise<void>;
 
 export type ExecutionPlanWriteInput = {
-  objective: string;
+  objective?: string;
   items: Array<{
     id: string;
     content: string;
@@ -280,8 +290,16 @@ export type ExecutionPlanMergeInput = {
 
 export type ExecutionPlanToolInput =
   | { operation: "read" }
-  | ({ operation: "write" } & ExecutionPlanWriteInput)
-  | ({ operation: "merge" } & ExecutionPlanMergeInput);
+  | {
+      operation: "write";
+      objective?: string;
+      items: ExecutionPlanStep[];
+    }
+  | {
+      operation: "merge";
+      objective?: string;
+      items: ExecutionPlanStep[];
+    };
 
 export type ExecutionPlanReader = {
   current(): ExecutionPlan | undefined;
@@ -295,5 +313,4 @@ export type ExecutionPlanControllerApi = ExecutionPlanReader & {
     context?: ExecutionPlanWriteContext
   ): Promise<ExecutionPlan>;
   merge(input: ExecutionPlanMergeInput, sink?: ExecutionPlanEventSink): Promise<ExecutionPlan>;
-  evidenceCandidates(itemId: string, visibleTurnId: string): ExecutionEvidenceCandidate[];
 };

@@ -1,909 +1,171 @@
-import { describe, expect, it } from "vitest";
-import { EXECUTION_PLAN_MAX_ITEMS, type ExecutionEvidenceRecord } from "../contracts/execution-plan.js";
-import {
-  ExecutionPlanController,
-  ExecutionPlanValidationError,
-  isRuntimeProvisionalExecutionPlan
-} from "./execution-plan-controller.js";
+import { describe, expect, it, vi } from "vitest";
+import type { ExecutionPlan } from "../contracts/execution-plan.js";
+import { ExecutionPlanController, ExecutionPlanValidationError } from "./execution-plan-controller.js";
 import { ExecutionPlanStore } from "./execution-plan-store.js";
-import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
-import { ExecutionCapabilityPreflight } from "./execution-capability-preflight.js";
-import { ToolRegistry } from "../tools/tool-registry.js";
 
-function controller() {
-  return new ExecutionPlanController(new ExecutionPlanStore(), undefined, evidenceIndex());
-}
-
-function evidenceIndex() {
-  const index = new ExecutionEvidenceIndex();
-  index.record({
-    tool: {
-      name: "postman.update",
-      description: "Update Postman",
-      inputSchema: {},
-      riskClass: "external-side-effect",
-      toolsets: ["mcp"],
-      progressLabel: "updating",
-      maxResultSizeChars: 1000
-    },
-    input: { token: "must-not-persist" },
-    decision: "allow",
-    riskClass: "external-side-effect",
-    targetSummary: "Collection token=must-not-persist",
-    toolCallId: "call-1",
-    result: { ok: true, content: "raw result must not persist" }
-  });
-  index.record({
-    tool: {
-      name: "postman.update",
-      description: "Update Postman",
-      inputSchema: {},
-      riskClass: "external-side-effect",
-      toolsets: ["mcp"],
-      progressLabel: "updating",
-      maxResultSizeChars: 1000
-    },
-    decision: "allow",
-    riskClass: "external-side-effect",
-    toolCallId: "call-failed",
-    result: { ok: false, content: "failed" }
-  });
-  return index;
+function controller(): ExecutionPlanController {
+  return new ExecutionPlanController(new ExecutionPlanStore());
 }
 
 describe("ExecutionPlanController", () => {
-  it("atomically replaces only a same-turn same-Session runtime provisional Mission", async () => {
-    const events: string[] = [];
-    const target = new ExecutionPlanController(
-      new ExecutionPlanStore(),
-      async (event) => { events.push(event.kind); },
-      evidenceIndex()
-    );
-    const provisional = await target.write({
-      objective: "Configure the destination and verify it",
-      items: [
-        { id: "execute", content: "Complete the requested multi-step work", status: "in_progress" },
-        { id: "verify", content: "Verify the resulting state", status: "pending" }
-      ]
-    }, "turn-1", undefined, {
-      source: "runtime",
-      provisional: true,
-      sessionId: "session-1"
-    });
-
-    expect(isRuntimeProvisionalExecutionPlan(provisional)).toBe(true);
-    const refined = await target.write({
-      objective: "Configure the destination and verify every change",
-      items: [
-        { id: "inspect", content: "Inspect the destination", status: "in_progress" },
-        { id: "update", content: "Update the destination", status: "pending" },
-        { id: "verify-update", content: "Verify the update", status: "pending" }
-      ]
-    }, "turn-1", undefined, {
-      source: "provider",
-      sessionId: "session-1"
-    });
-
-    expect(refined).toMatchObject({
-      originTurnId: "turn-1",
-      revision: 2,
-      provenance: { source: "provider", provisional: false, sessionId: "session-1" },
-      items: [
-        { id: "inspect", status: "in_progress" },
-        { id: "update", status: "pending" },
-        { id: "verify-update", status: "pending" }
-      ]
-    });
-    expect(isRuntimeProvisionalExecutionPlan(refined)).toBe(false);
-    expect(events).toEqual(["execution-plan-started", "execution-plan-updated"]);
-  });
-
-  it("rejects provisional replacement from another turn or Session without mutating it", async () => {
-    for (const replacement of [
-      { originTurnId: "turn-2", sessionId: "session-1" },
-      { originTurnId: "turn-1", sessionId: "session-2" }
-    ]) {
-      const target = controller();
-      await target.write({
-        objective: "Original request",
-        items: [{ id: "execute", content: "Execute", status: "in_progress" }]
-      }, "turn-1", undefined, {
-        source: "runtime",
-        provisional: true,
-        sessionId: "session-1"
-      });
-      const before = target.current();
-
-      await expect(target.write({
-        objective: "Replacement",
-        items: [{ id: "replace", content: "Replace", status: "in_progress" }]
-      }, replacement.originTurnId, undefined, {
-        source: "provider",
-        sessionId: replacement.sessionId
-      })).rejects.toThrow("Use operation=merge");
-      expect(target.current()).toEqual(before);
-    }
-  });
-
-  it("does not replace a provisional Mission after it has recorded progress", async () => {
+  it("writes a bounded lightweight Plan and derives its objective when omitted", async () => {
     const target = controller();
-    await target.write({
-      objective: "Original request",
-      items: [
-        { id: "execute", content: "Execute", status: "in_progress" },
-        { id: "verify", content: "Verify", status: "pending" }
-      ]
-    }, "turn-1", undefined, {
-      source: "runtime",
-      provisional: true,
-      sessionId: "session-1"
-    });
-    await target.merge({
-      items: [{ id: "execute", content: "Execute the discovered workflow" }]
-    });
-    const progressed = target.current();
-
-    await expect(target.write({
-      objective: "Replacement",
-      items: [{ id: "replacement", content: "Replace", status: "in_progress" }]
-    }, "turn-1", undefined, {
-      source: "provider",
-      sessionId: "session-1"
-    })).rejects.toThrow("Use operation=merge");
-    expect(target.current()).toEqual(progressed);
-  });
-
-  it("rejects a replacement with multiple active items without mutating the provisional Mission", async () => {
-    const target = controller();
-    await target.write({
-      objective: "Original request",
-      items: [{ id: "execute", content: "Execute", status: "in_progress" }]
-    }, "turn-1", undefined, {
-      source: "runtime",
-      provisional: true,
-      sessionId: "session-1"
-    });
-    const provisional = target.current();
-
-    await expect(target.write({
-      objective: "Invalid replacement",
-      items: [
-        { id: "one", content: "One", status: "in_progress" },
-        { id: "two", content: "Two", status: "in_progress" }
-      ]
-    }, "turn-1", undefined, {
-      source: "provider",
-      sessionId: "session-1"
-    })).rejects.toThrow("Only one plan item may be in_progress");
-    expect(target.current()).toEqual(provisional);
-  });
-
-  it("never replaces an established Mission and preserves ordinary merge behavior", async () => {
-    const target = controller();
-    await target.write({
-      objective: "Established Mission",
-      items: [{ id: "work", content: "Do the work", status: "in_progress" }]
-    }, "turn-1");
-
-    await expect(target.write({
-      objective: "Overwrite",
-      items: [{ id: "other", content: "Other work", status: "in_progress" }]
-    }, "turn-1", undefined, { source: "provider", sessionId: "session-1" })).rejects.toThrow(
-      "Use operation=merge"
-    );
-    await expect(target.merge({
-      objective: "Refined established Mission",
-      items: [{ id: "work", content: "Do the refined work" }]
-    })).resolves.toMatchObject({
-      objective: "Refined established Mission",
-      revision: 2,
-      items: [{ id: "work", content: "Do the refined work", status: "in_progress" }]
-    });
-  });
-
-  it("requires runtime provenance and a Session for provisional plans", async () => {
-    const target = controller();
-    await expect(target.write({
-      objective: "Invalid provider provisional",
-      items: [{ id: "work", content: "Work", status: "in_progress" }]
-    }, "turn-1", undefined, {
-      source: "provider",
-      provisional: true,
-      sessionId: "session-1"
-    })).rejects.toThrow("Only the runtime");
-    await expect(target.write({
-      objective: "Missing Session",
-      items: [{ id: "work", content: "Work", status: "in_progress" }]
-    }, "turn-1", undefined, {
-      source: "runtime",
-      provisional: true
-    })).rejects.toThrow("originating Session");
-    expect(target.current()).toBeUndefined();
-  });
-
-  it("preflights requirements, stores only runtime assessments, and keeps a ready Mission active", async () => {
-    const registry = new ToolRegistry();
-    registry.register({
-      name: "mcp.target.read",
-      description: "read target",
-      inputSchema: {},
-      riskClass: "read-only-network",
-      toolsets: ["mcp"],
-      progressLabel: "reading",
-      maxResultSizeChars: 100,
-      isAvailable: () => true,
-      run: async () => ({ ok: true, content: "unused" })
-    });
-    registry.register({
-      name: "mcp.target.update",
-      description: "update target",
-      inputSchema: {},
-      riskClass: "external-side-effect",
-      toolsets: ["mcp"],
-      progressLabel: "updating",
-      maxResultSizeChars: 100,
-      isAvailable: () => true,
-      run: async () => ({ ok: true, content: "unused" })
-    });
-    const target = new ExecutionPlanController(
-      new ExecutionPlanStore(),
-      undefined,
-      evidenceIndex(),
-      new ExecutionCapabilityPreflight({ registry })
-    );
-
     const plan = await target.write({
-      objective: "Inspect the destination",
       items: [
-        { id: "inspect", content: "Inspect target state", status: "in_progress" },
-        { id: "update", content: "Update target state", status: "pending" },
-        { id: "verify", content: "Verify target state", status: "pending" }
-      ],
-      requirements: [
-        { id: "destination-read", itemId: "inspect", tool: "mcp.target.read", capability: "read" },
-        { id: "destination-write", itemId: "update", tool: "mcp.target.update", capability: "mutate" },
-        { id: "destination-verify", itemId: "verify", tool: "mcp.target.read", capability: "verify" }
-      ],
-      ...({ capabilityPreflight: { status: "ready", assessments: [] } } as object)
-    }, "turn-preflight");
+        { id: "inspect", content: "Inspect APIs", status: "in_progress" },
+        { id: "update", content: "Update APIs", status: "pending" }
+      ]
+    }, "turn-1");
 
     expect(plan).toMatchObject({
+      objective: "Inspect APIs",
+      originTurnId: "turn-1",
+      revision: 1,
       status: "active",
-      requirements: [
-        { id: "destination-read", tool: "mcp.target.read" },
-        { id: "destination-write", tool: "mcp.target.update" },
-        { id: "destination-verify", tool: "mcp.target.read" }
-      ],
-      capabilityPreflight: {
-        status: "ready",
-        assessments: [
-          { requirementId: "destination-read", status: "ready" },
-          { requirementId: "destination-write", status: "ready" },
-          { requirementId: "destination-verify", status: "ready" }
-        ]
-      }
+      items: [
+        { id: "inspect", content: "Inspect APIs", status: "in_progress" },
+        { id: "update", content: "Update APIs", status: "pending" }
+      ]
     });
   });
 
-  it("blocks the associated item before substantive work when a mandatory capability is missing", async () => {
-    const registry = new ToolRegistry();
-    for (const [name, capability] of [
-      ["mcp.target.read", "read"],
-      ["mcp.target.verify", "read"]
-    ] as const) {
-      registry.register({
-        name,
-        description: capability,
-        inputSchema: {},
-        riskClass: "read-only-network",
-        toolsets: ["mcp"],
-        progressLabel: capability,
-        maxResultSizeChars: 100,
-        isAvailable: () => true,
-        run: async () => ({ ok: true, content: "unused" })
-      });
-    }
-    const receipts: ExecutionEvidenceRecord[] = [];
-    const target = new ExecutionPlanController(
-      new ExecutionPlanStore(),
-      undefined,
-      evidenceIndex(),
-      new ExecutionCapabilityPreflight({ registry }),
-      async (record) => { receipts.push(record); }
-    );
-    const events: string[] = [];
-
-    const plan = await target.write({
-      objective: "Move configuration between systems",
-      items: [
-        { id: "inspect-source", content: "Inspect source state", status: "in_progress" },
-        { id: "update-target", content: "Update target state", status: "pending" }
-      ],
-      requirements: [
-        { id: "destination-read", itemId: "inspect-source", tool: "mcp.target.read", capability: "read" },
-        { id: "destination-write", itemId: "update-target", tool: "mcp.target.update", capability: "mutate" },
-        { id: "destination-verify", itemId: "update-target", tool: "mcp.target.verify", capability: "verify" }
-      ]
-    }, "turn-blocked", async (event) => { events.push(event.kind); });
-
-    expect(plan.status).toBe("blocked");
-    expect(plan.items).toEqual([
-      expect.objectContaining({ id: "inspect-source", status: "in_progress" }),
-      expect.objectContaining({
-        id: "update-target",
-        status: "blocked",
-        blocker: {
-          kind: "missing_capability",
-          summary: 'Required tool "mcp.target.update" is not exposed to this session.'
-        }
-      })
-    ]);
-    expect(events).toEqual(["execution-plan-blocked"]);
-    expect(receipts).toEqual([{
-      kind: "execution-evidence-recorded",
-      toolCallId: expect.stringMatching(/^capability:[0-9a-f]{16}:destination-write$/u),
-      tool: "mcp.target.update",
-      status: "unavailable",
-      visibleTurnId: "turn-blocked"
-    }]);
-  });
-
-  it("rejects tampered runtime capability resolutions during hydration", () => {
-    const persisted = {
-      objective: "Update and verify the destination",
-      originTurnId: "turn-capability",
-      revision: 1,
-      status: "active" as const,
-      items: [
-        { id: "read", content: "Read", status: "in_progress" as const },
-        { id: "update", content: "Update", status: "pending" as const },
-        { id: "verify", content: "Verify", status: "pending" as const }
-      ],
-      requirements: [
-        { id: "read", itemId: "read", tool: "target.read", capability: "read" as const },
-        {
-          id: "update", itemId: "update", tool: "target.update", capability: "mutate" as const,
-          requiresProtectedInput: true, protectedSource: "browser" as const
-        },
-        { id: "verify", itemId: "verify", tool: "target.verify", capability: "verify" as const }
-      ],
-      capabilityPreflight: {
-        status: "ready" as const,
-        assessments: [
-          {
-            requirementId: "read", itemId: "read", tool: "target.read", capability: "read" as const,
-            status: "ready" as const,
-            resolution: { canonicalTool: "target.read", riskClass: "read-only-network" as const, classification: "read" as const }
-          },
-          {
-            requirementId: "update", itemId: "update", tool: "target.update", capability: "mutate" as const,
-            status: "ready" as const,
-            resolution: {
-              canonicalTool: "target.update",
-              riskClass: "external-side-effect" as const,
-              classification: "mutate" as const,
-              protectedInput: { paths: ["/values/*/value"], grouped: true, source: "browser" as const }
-            }
-          },
-          {
-            requirementId: "verify", itemId: "verify", tool: "target.verify", capability: "verify" as const,
-            status: "ready" as const,
-            resolution: {
-              canonicalTool: "target.verify",
-              riskClass: "read-only-network" as const,
-              classification: "read" as const,
-              verification: { mutationTools: ["target.update"] }
-            }
-          }
-        ]
-      }
-    };
-
-    expect(controller().hydrate(structuredClone(persisted))).toMatchObject({ status: "active" });
-    const badGrouping = structuredClone(persisted);
-    badGrouping.capabilityPreflight.assessments[1]!.resolution.protectedInput!.grouped = false;
-    expect(() => controller().hydrate(badGrouping)).toThrow("protected capability resolution");
-    const badVerification = structuredClone(persisted);
-    badVerification.capabilityPreflight.assessments[2]!.resolution.verification!.mutationTools = ["other.update"];
-    expect(() => controller().hydrate(badVerification)).toThrow("invalid mutation tool");
-  });
-
-  it("keeps capability requirements bounded and persists no undeclared secret fields", async () => {
-    const target = new ExecutionPlanController(
-      new ExecutionPlanStore(),
-      undefined,
-      evidenceIndex(),
-      new ExecutionCapabilityPreflight({ registry: new ToolRegistry() })
-    );
-    const plan = await target.write({
-      objective: "Check destination access",
-      items: [{ id: "inspect", content: "Inspect destination", status: "in_progress" }],
-      requirements: [
-        {
-          id: "read",
-          itemId: "inspect",
-          tool: "mcp.target.read",
-          capability: "read",
-          ...({ credential: "must-not-persist" } as object)
-        },
-        { id: "mutate", itemId: "inspect", tool: "mcp.target.update", capability: "mutate" },
-        { id: "verify", itemId: "inspect", tool: "mcp.target.verify", capability: "verify" }
-      ]
-    }, "turn-bounded");
-    expect(JSON.stringify(plan)).not.toContain("must-not-persist");
-
-    await expect(target.write({
-      objective: "Too many requirements",
-      items: [{ id: "inspect", content: "Inspect destination", status: "in_progress" }],
-      requirements: Array.from({ length: 13 }, (_, index) => ({
-        id: `read-${index}`,
-        itemId: "inspect",
-        tool: "mcp.target.read",
-        capability: "read" as const
-      }))
-    }, "turn-overflow")).rejects.toThrow("requirements must contain 1-12");
-  });
-
-  it("rejects incomplete cross-system requirement sets", async () => {
+  it("merges complete steps without asking the Plan for execution evidence", async () => {
     const target = controller();
-    await expect(target.write({
-      objective: "Update a destination",
-      items: [
-        { id: "read", content: "Read destination", status: "in_progress" },
-        { id: "update", content: "Update destination", status: "pending" }
-      ],
-      requirements: [
-        { id: "read", itemId: "read", tool: "mcp.target.read", capability: "read" },
-        { id: "update", itemId: "update", tool: "mcp.target.update", capability: "mutate" }
-      ]
-    }, "turn-incomplete")).rejects.toThrow("destination verify capability");
+    await target.write({
+      objective: "Inspect APIs",
+      items: [{ id: "inspect", content: "Inspect APIs", status: "in_progress" }]
+    }, "turn-1");
+
+    const plan = await target.merge({
+      items: [{ id: "inspect", content: "Inspect APIs", status: "completed" }]
+    });
+
+    expect(plan).toMatchObject({
+      revision: 2,
+      status: "completed",
+      items: [{ id: "inspect", content: "Inspect APIs", status: "completed" }]
+    });
+    expect(plan.items[0]).toEqual({ id: "inspect", content: "Inspect APIs", status: "completed" });
   });
 
-  it("records started, updated, completed, transferred, and abandoned lifecycle snapshots", async () => {
-    const events: string[] = [];
-    const target = new ExecutionPlanController(
-      new ExecutionPlanStore(),
-      async (event) => { events.push(event.kind); },
-      evidenceIndex()
-    );
-    await target.write({
-      objective: "Complete the mission",
-      items: [{ id: "work", content: "Do the work", status: "in_progress" }]
+  it("strips legacy governance fields from new writes", async () => {
+    const target = controller();
+    const plan = await target.write({
+      objective: "Update destination",
+      items: [{
+        id: "update",
+        content: "Update destination",
+        status: "completed",
+        evidenceCallIds: ["fabricated-call"],
+        completionKind: "reasoning",
+        blocker: { kind: "approval_required", summary: "model-authored" }
+      }],
+      requirements: [{ id: "invented", itemId: "update", tool: "invented.tool", capability: "mutate" }]
     }, "turn-1");
-    await target.merge({ items: [{ id: "work", status: "pending" }] });
-    await target.merge({ items: [{ id: "work", status: "completed", evidenceCallIds: ["call-1"] }] });
-    target.clear();
+
+    expect(plan.items[0]).toEqual({ id: "update", content: "Update destination", status: "completed" });
+    expect(plan).not.toHaveProperty("requirements");
+    expect(plan).not.toHaveProperty("capabilityPreflight");
+    expect(JSON.stringify(plan)).not.toContain("fabricated-call");
+    expect(JSON.stringify(plan)).not.toContain("invented.tool");
+  });
+
+  it("hydrates legacy Mission snapshots into lightweight Plan state", () => {
+    const target = controller();
+    const legacy = {
+      objective: "Legacy work",
+      originTurnId: "turn-legacy",
+      revision: 4,
+      status: "blocked",
+      provenance: { source: "provider", provisional: false },
+      requirements: [{ id: "mutate", itemId: "write", tool: "fabricated.tool", capability: "mutate" }],
+      capabilityPreflight: { status: "blocked", assessments: [] },
+      items: [{
+        id: "write",
+        content: "Write destination",
+        status: "blocked",
+        evidenceCallIds: ["fabricated-call"],
+        evidence: [{
+          toolCallId: "fabricated-call",
+          tool: "fabricated.tool",
+          outcome: "success",
+          riskClass: "external-side-effect"
+        }],
+        blocker: { kind: "missing_capability", summary: "legacy blocker" }
+      }]
+    } as ExecutionPlan;
+
+    const hydrated = target.hydrate(legacy);
+
+    expect(hydrated).toEqual({
+      objective: "Legacy work",
+      originTurnId: "turn-legacy",
+      revision: 4,
+      status: "active",
+      items: [{ id: "write", content: "Write destination", status: "pending" }]
+    });
+  });
+
+  it("keeps lifecycle snapshots inspectable", async () => {
+    const events: string[] = [];
+    const record = vi.fn(async (event: { kind: string }) => { events.push(event.kind); });
+    const target = new ExecutionPlanController(new ExecutionPlanStore(), record);
     await target.write({
-      objective: "Delegate the mission",
-      items: [{ id: "delegate", content: "Create a Task", status: "in_progress" }]
-    }, "turn-2");
+      items: [{ id: "one", content: "One", status: "pending" }]
+    }, "turn-1");
+    await target.merge({
+      items: [{ id: "one", content: "One", status: "completed" }]
+    });
     await target.transfer(["task-1", "task-1"]);
-    target.clear();
-    await target.write({
-      objective: "Replace the mission",
-      items: [{ id: "old", content: "Old work", status: "pending" }]
-    }, "turn-3");
-    await target.prepareForTurn("Please review a different codebase");
 
     expect(events).toEqual([
       "execution-plan-started",
-      "execution-plan-updated",
       "execution-plan-completed",
-      "execution-plan-started",
-      "execution-plan-transferred",
-      "execution-plan-started",
-      "execution-plan-abandoned"
+      "execution-plan-transferred"
     ]);
-    expect(target.current()).toBeUndefined();
+    expect(record.mock.calls[2]?.[0]).toMatchObject({ taskIds: ["task-1"] });
   });
 
-  it("keeps active state for explicit continuation", async () => {
-    const target = controller();
-    await target.write({
-      objective: "Continue this mission",
-      items: [{ id: "work", content: "Continue", status: "in_progress" }]
-    }, "turn-1");
-    await target.prepareForTurn("continue");
-    expect(target.current()?.status).toBe("active");
-  });
-
-  it("reopens a user-input-blocked Mission when the user retries", async () => {
-    const events: string[] = [];
-    const target = controller();
-    await target.write({
-      objective: "Authenticate the account",
-      items: [{
-        id: "verify",
-        content: "Verify authentication",
-        status: "blocked",
-        evidenceCallIds: ["stale-failure-evidence"],
-        blocker: { kind: "user_input_required", summary: "Provide corrected credentials." }
-      }]
-    }, "turn-1");
-
-    await target.prepareForTurn("okay lets retry...", async (event) => { events.push(event.kind); });
-
-    expect(target.current()).toMatchObject({
-      revision: 2,
+  it("requires explicit continuation before resuming hydrated Plan state", async () => {
+    const persisted: ExecutionPlan = {
+      objective: "Continue migration",
+      originTurnId: "turn-1",
+      revision: 1,
       status: "active",
-      items: [{ id: "verify", status: "in_progress" }]
-    });
-    expect(target.current()?.items[0]).not.toHaveProperty("blocker");
-    expect(target.current()?.items[0]).not.toHaveProperty("evidenceCallIds");
-    expect(events).toEqual(["execution-plan-updated"]);
-  });
-
-  it("reopens a user-input blocker inside an otherwise active Mission", async () => {
-    const events: string[] = [];
-    const target = controller();
-    await target.write({
-      objective: "Sign in and verify the account",
-      items: [
-        {
-          id: "credentials",
-          content: "Submit credentials",
-          status: "blocked",
-          blocker: { kind: "user_input_required", summary: "Provide the credentials." }
-        },
-        { id: "verify", content: "Verify authentication", status: "pending" }
-      ]
-    }, "turn-1");
-    expect(target.current()?.status).toBe("active");
-
-    await target.prepareForTurn("but that was the wrong portal, use the correct one", async (event) => {
-      events.push(event.kind);
-    });
-
-    expect(target.current()).toMatchObject({
-      revision: 2,
-      status: "active",
-      items: [
-        { id: "credentials", status: "in_progress" },
-        { id: "verify", status: "pending" }
-      ]
-    });
-    expect(target.current()?.items[0]).not.toHaveProperty("blocker");
-    expect(events).toEqual(["execution-plan-updated"]);
-  });
-
-  it("clears a blocker when merge moves an item back to executable work", async () => {
-    const target = controller();
-    await target.write({
-      objective: "Recover authentication",
-      items: [
-        {
-          id: "credentials",
-          content: "Submit credentials",
-          status: "blocked",
-          blocker: { kind: "user_input_required", summary: "Provide corrected credentials." }
-        },
-        { id: "verify", content: "Verify authentication", status: "pending" }
-      ]
-    }, "turn-1");
-
-    await expect(target.merge({
-      items: [{ id: "credentials", status: "in_progress" }]
-    })).resolves.toMatchObject({
-      status: "active",
-      items: [
-        { id: "credentials", status: "in_progress" },
-        { id: "verify", status: "pending" }
-      ]
-    });
-    expect(target.current()?.items[0]).not.toHaveProperty("blocker");
-  });
-
-  it("does not reopen non-user blockers or empty follow-ups", async () => {
-    const external = controller();
-    await external.write({
-      objective: "Wait for the external service",
-      items: [{
-        id: "wait",
-        content: "Wait for service recovery",
-        status: "blocked",
-        blocker: { kind: "external_state", summary: "The external service is unavailable." }
-      }]
-    }, "turn-1");
-    await external.prepareForTurn("retry");
-    expect(external.current()?.status).toBe("blocked");
-
-    const empty = controller();
-    await empty.write({
-      objective: "Authenticate the account",
-      items: [{
-        id: "credentials",
-        content: "Collect credentials",
-        status: "blocked",
-        blocker: { kind: "user_input_required", summary: "Provide the credentials." }
-      }]
-    }, "turn-2");
-    await empty.prepareForTurn("...");
-    expect(empty.current()?.status).toBe("blocked");
-  });
-
-  it("abandons a blocked Mission when the user cancels", async () => {
-    const target = controller();
-    await target.write({
-      objective: "Authenticate the account",
-      items: [{
-        id: "credentials",
-        content: "Collect credentials",
-        status: "blocked",
-        blocker: { kind: "user_input_required", summary: "Provide the credentials." }
-      }]
-    }, "turn-1");
-
-    await target.prepareForTurn("never mind");
-    expect(target.current()).toBeUndefined();
-  });
-
-  it("hydrates only when the next turn explicitly resumes", async () => {
-    const persisted = {
-      objective: "Resume this mission",
-      originTurnId: "turn-old",
-      revision: 2,
-      status: "active" as const,
-      items: [{ id: "work", content: "Continue", status: "in_progress" as const }]
+      items: [{ id: "migrate", content: "Migrate", status: "in_progress" }]
     };
     const resumed = controller();
     resumed.hydrate(persisted);
     await resumed.prepareForTurn("resume this work");
-    expect(resumed.current()).toEqual(persisted);
+    expect(resumed.current()).toBeDefined();
 
     const unrelated = controller();
     unrelated.hydrate(persisted);
-    await unrelated.prepareForTurn("hello");
+    await unrelated.prepareForTurn("review a different codebase");
     expect(unrelated.current()).toBeUndefined();
   });
 
-  it("writes a redacted bounded plan and derives active state", async () => {
+  it("redacts and bounds Plan text", async () => {
     const target = controller();
     const plan = await target.write({
-      objective: "Test API\ntoken=super-secret-value-1234567890",
-      items: [
-        { id: "inspect", content: "Inspect APIs", status: "completed", evidenceCallIds: ["call-1"] },
-        { id: "verify", content: "Verify collection", status: "in_progress" }
-      ]
+      objective: "API token=sk-secret\ninspect",
+      items: [{ id: "inspect", content: "Use token=sk-secret\n safely", status: "pending" }]
     }, "turn-1");
 
-    expect(plan).toMatchObject({
-      originTurnId: "turn-1",
-      revision: 1,
-      status: "active",
-      items: [
-        {
-          id: "inspect",
-          status: "completed",
-          evidenceCallIds: ["call-1"],
-          evidence: [{ toolCallId: "call-1", tool: "postman.update", outcome: "success" }]
-        },
-        { id: "verify", status: "in_progress" }
-      ]
-    });
-    expect(plan.objective).toContain("API token=[REDACTED]");
+    expect(plan.objective).toContain("[REDACTED]");
+    expect(plan.items[0]?.content).toContain("[REDACTED]");
+    expect(JSON.stringify(plan)).not.toContain("sk-secret");
     expect(plan.objective).not.toContain("\n");
-    expect(JSON.stringify(plan)).not.toContain("super-secret-value");
-    expect(JSON.stringify(plan)).not.toContain("raw result must not persist");
-    expect(JSON.stringify(plan)).not.toContain("must-not-persist");
   });
 
-  it("merges existing items, appends new items, and increments revision", async () => {
-    const target = controller();
-    await target.write({
-      objective: "Build collection",
-      items: [
-        { id: "build", content: "Build it", status: "in_progress" },
-        { id: "publish", content: "Publish it", status: "pending" }
-      ]
-    }, "turn-1");
-
-    const plan = await target.merge({
-      objective: "Build and verify collection",
-      items: [
-        { id: "build", status: "completed", evidenceCallIds: ["call-1"] },
-        { id: "verify", content: "Verify it", status: "in_progress" }
-      ]
-    });
-
-    expect(plan).toMatchObject({
-      objective: "Build and verify collection",
-      revision: 2,
-      status: "active",
-      items: [
-        { id: "build", status: "completed", evidenceCallIds: ["call-1"] },
-        { id: "publish", status: "pending" },
-        { id: "verify", status: "in_progress" }
-      ]
-    });
-  });
-
-  it("rejects appending follow-up work while completing the final unfinished objective item", async () => {
-    const target = controller();
-    await target.write({
-      objective: "Authenticate the account",
-      items: [{ id: "verify-login", content: "Verify authenticated state", status: "in_progress" }]
-    }, "turn-1");
-
-    await expect(target.merge({
-      items: [
-        { id: "verify-login", status: "completed", evidenceCallIds: ["call-1"] },
-        { id: "cancel-dialogs", content: "Cancel optional pending dialogs", status: "pending" }
-      ]
-    })).rejects.toThrow("cannot extend a Mission while completing its final unfinished objective item");
-    expect(target.current()).toMatchObject({
-      revision: 1,
-      status: "active",
-      items: [{ id: "verify-login", status: "in_progress" }]
-    });
-  });
-
-  it("allows a required discovered step while meaningful original work remains", async () => {
-    const target = controller();
-    await target.write({
-      objective: "Build and publish the collection",
-      items: [
-        { id: "build", content: "Build the collection", status: "in_progress" },
-        { id: "publish", content: "Publish the collection", status: "pending" }
-      ]
-    }, "turn-1");
-
-    const plan = await target.merge({
-      items: [
-        { id: "build", status: "completed", evidenceCallIds: ["call-1"] },
-        { id: "verify", content: "Verify the collection before publishing", status: "in_progress" }
-      ]
-    });
-    expect(plan).toMatchObject({
-      status: "active",
-      items: [
-        { id: "build", status: "completed" },
-        { id: "publish", status: "pending" },
-        { id: "verify", status: "in_progress" }
-      ]
-    });
-  });
-
-  it("derives terminal status after reasoning completion passes enforcement", async () => {
-    const target = controller();
-    await target.write({
-      objective: "Finish work",
-      items: [{ id: "finish", content: "Explain the result", status: "in_progress" }]
-    }, "turn-1");
-
-    expect((await target.merge({
-      items: [{ id: "finish", status: "completed", completionKind: "reasoning" }]
-    })).status).toBe("completed");
-  });
-
-  it("rejects unknown and failed evidence and reasoning for consequential actions", async () => {
-    const target = controller();
-    await target.write({
-      objective: "Update the collection",
-      items: [{ id: "update", content: "Update Postman collection", status: "in_progress" }]
-    }, "turn-1");
-
-    await expect(target.merge({
-      items: [{ id: "update", status: "completed", evidenceCallIds: ["unknown-call"] }]
-    })).rejects.toThrow("Unknown evidence call id");
-    await expect(target.merge({
-      items: [{ id: "update", status: "completed", evidenceCallIds: ["call-failed"] }]
-    })).rejects.toThrow("cannot prove completion");
-    await expect(target.merge({
-      items: [{ id: "update", status: "completed", completionKind: "reasoning" }]
-    })).rejects.toThrow("cannot use completionKind=reasoning");
-    await expect(target.merge({
-      items: [{
-        id: "update",
-        content: "Review the result and commit the changes",
-        status: "completed",
-        completionKind: "reasoning"
-      }]
-    })).rejects.toThrow("cannot use completionKind=reasoning");
-    expect(target.current()?.items[0]?.status).toBe("in_progress");
-  });
-
-  it("identifies missing completion evidence without string matching", async () => {
-    const target = controller();
-    await target.write({
-      objective: "Locate the destination collection",
-      items: [{ id: "locate-collection", content: "Locate the collection", status: "in_progress" }]
-    }, "turn-1");
-
-    const failure = await target.merge({
-      items: [{ id: "locate-collection", status: "completed" }]
-    }).catch((error: unknown) => error);
-
-    expect(failure).toBeInstanceOf(ExecutionPlanValidationError);
-    expect(failure).toMatchObject({
-      code: "completion-evidence-required",
-      itemId: "locate-collection"
-    });
-    expect(target.current()?.items[0]).toMatchObject({ status: "in_progress" });
-  });
-
-  it("accepts reasoning completion only for non-consequential work", async () => {
-    const target = controller();
-    await target.write({
-      objective: "Explain the tradeoff",
-      items: [{ id: "explain", content: "Explain the tradeoff", status: "in_progress" }]
-    }, "turn-1");
-
-    const completed = await target.merge({
-      items: [{ id: "explain", status: "completed", completionKind: "reasoning" }]
-    });
-    expect(completed).toMatchObject({ status: "completed", items: [{ completionKind: "reasoning" }] });
-  });
-
-  it("rejects non-concrete blocker excuses", async () => {
+  it("rejects malformed or duplicate steps without mutating existing state", async () => {
     const target = controller();
     await expect(target.write({
-      objective: "Finish the work",
-      items: [{
-        id: "work",
-        content: "Finish work",
-        status: "blocked",
-        blocker: { kind: "external_state", summary: "Would you like me to continue?" }
-      }]
-    }, "turn-1")).rejects.toThrow("concrete blocker");
-    await expect(target.write({
-      objective: "Finish the work",
-      items: [{
-        id: "work",
-        content: "Finish work",
-        status: "blocked",
-        blocker: { kind: "external_state", summary: "I need more time before finishing, please." }
-      }]
-    }, "turn-1")).rejects.toThrow("concrete blocker");
-  });
-
-  it("distinguishes an abandoned all-cancelled plan from completed work", async () => {
-    const target = controller();
-    const blocker = { kind: "external_state" as const, summary: "The target was withdrawn." };
-    const plan = await target.write({
-      objective: "Work that is no longer needed",
-      items: [{ id: "stop", content: "Stop the work", status: "cancelled", blocker }]
-    }, "turn-1");
-
-    expect(plan.status).toBe("abandoned");
-  });
-
-  it("rejects invalid state without mutating the previous plan", async () => {
-    const target = controller();
-    await target.write({
-      objective: "Safe objective",
-      items: [{ id: "first", content: "First", status: "in_progress" }]
-    }, "turn-1");
-
-    await expect(target.merge({
-      items: [{ id: "second", content: "Second", status: "in_progress" }]
-    })).rejects.toThrow("Only one plan item may be in_progress");
-    expect(target.current()?.items).toHaveLength(1);
-    expect(target.current()?.revision).toBe(1);
-  });
-
-  it("requires reasons for blocked and cancelled items", async () => {
-    const target = controller();
-    await expect(target.write({
-      objective: "Blocked work",
-      items: [{ id: "blocked", content: "Blocked", status: "blocked" }]
-    }, "turn-1")).rejects.toThrow("requires a blocker reason");
-  });
-
-  it("enforces item count, stable IDs, and merge preconditions", async () => {
-    const target = controller();
-    await expect(target.merge({ items: [{ id: "missing", status: "completed" }] })).rejects.toThrow(
-      "Call plan with operation=write first"
-    );
-    await expect(target.write({
-      objective: "Too many",
-      items: Array.from({ length: EXECUTION_PLAN_MAX_ITEMS + 1 }, (_, index) => ({
-        id: `item-${index}`,
-        content: `Item ${index}`
-      }))
-    }, "turn-1")).rejects.toThrow(`at most ${EXECUTION_PLAN_MAX_ITEMS} items`);
-    await expect(target.write({
-      objective: "Bad ID",
-      items: [{ id: "bad id", content: "Bad" }]
-    }, "turn-1")).rejects.toThrow(ExecutionPlanValidationError);
+      items: [
+        { id: "same", content: "One", status: "pending" },
+        { id: "same", content: "Two", status: "pending" }
+      ]
+    }, "turn-1")).rejects.toBeInstanceOf(ExecutionPlanValidationError);
+    expect(target.current()).toBeUndefined();
   });
 });

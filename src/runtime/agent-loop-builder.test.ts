@@ -211,7 +211,7 @@ describe("AgentLoopBuilder", () => {
     });
   });
 
-  it("hydrates safe execution evidence so a resumed root plan can complete", async () => {
+  it("keeps hydrated execution evidence independent from resumed Plan progress", async () => {
     const harness = await createBuilderHarness();
     await harness.sessionDb.createSession({ id: "evidence-resume", profileId: "default" });
     await harness.sessionDb.appendEvent("evidence-resume", {
@@ -242,10 +242,11 @@ describe("AgentLoopBuilder", () => {
       status: "completed",
       items: [{
         id: "verify",
-        status: "completed",
-        evidence: [{ toolCallId: "call-verified", tool: "browser.snapshot" }]
+        status: "completed"
       }]
     });
+    expect(completed?.items[0]).not.toHaveProperty("evidence");
+    expect(completed?.items[0]).not.toHaveProperty("evidenceCallIds");
   });
 
   it("seeds each provider loop from its own persisted session usage", async () => {
@@ -813,7 +814,7 @@ describe("AgentLoopBuilder", () => {
     expect(delegationVisibleTools?.().map((tool) => tool.name)).toContain("mcp.read");
   });
 
-  it("preflights against the final session-filtered registry", async () => {
+  it("does not turn Plan requirements into capability authority", async () => {
     const parentOnly = registeredTool("mcp.parent-only.read", ["research"]);
     const parentMutation = {
       ...registeredTool("mcp.parent-only.update", ["research"]),
@@ -855,11 +856,10 @@ describe("AgentLoopBuilder", () => {
       ]
     }, "turn-narrowed");
 
-    expect(parentPlan.capabilityPreflight?.assessments[0]).toMatchObject({ status: "ready" });
-    expect(narrowedPlan.capabilityPreflight?.assessments[0]).toMatchObject({
-      status: "missing",
-      reasonCode: "tool_missing"
-    });
+    expect(parentPlan).not.toHaveProperty("requirements");
+    expect(parentPlan).not.toHaveProperty("capabilityPreflight");
+    expect(narrowedPlan).not.toHaveProperty("requirements");
+    expect(narrowedPlan).not.toHaveProperty("capabilityPreflight");
   });
 
   it("exposes cron runtime toolsets after disabled toolsets are removed", async () => {

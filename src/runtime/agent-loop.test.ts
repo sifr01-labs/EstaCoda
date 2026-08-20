@@ -1806,7 +1806,7 @@ describe("AgentLoop provider availability gating", () => {
     });
   });
 
-  it("reopens a user-input-blocked Mission before a retry reaches the provider loop", async () => {
+  it("does not carry a model-authored blocker into the provider loop", async () => {
     const executionPlanController = new ExecutionPlanController(new ExecutionPlanStore());
     await executionPlanController.write({
       objective: "Authenticate the account",
@@ -1837,7 +1837,7 @@ describe("AgentLoop provider availability gating", () => {
     expect(providerTurnLoop.run).toHaveBeenCalledOnce();
     expect(planAtProviderStart).toMatchObject({
       status: "active",
-      items: [{ id: "credentials", status: "in_progress" }]
+      items: [{ id: "credentials", status: "pending" }]
     });
     expect(planAtProviderStart?.items[0]).not.toHaveProperty("blocker");
   });

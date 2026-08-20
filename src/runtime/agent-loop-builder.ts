@@ -314,7 +314,7 @@ export class AgentLoopBuilder {
     const ownsForegroundSupervision = input.parentSessionId === undefined && input.taskExecution === undefined;
     const ownsExecutionPlan = ownsForegroundSupervision;
     // Every runtime records authoritative execution receipts. Only root
-    // foreground sessions additionally expose the legacy Mission controller.
+    // foreground sessions additionally expose the optional Plan controller.
     const executionEvidenceIndex = new ExecutionEvidenceIndex();
     const persistedSessionEvents = ownsExecutionPlan
       ? await input.sessionDb.listEvents(input.sessionId)

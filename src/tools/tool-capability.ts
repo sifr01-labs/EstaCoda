@@ -48,7 +48,7 @@ export type RegisteredToolCapabilityResolution =
   | { ok: true; capability: ResolvedRegisteredToolCapability }
   | { ok: false; reason: "risk_class_missing" | "capability_metadata_invalid" };
 
-/** Resolves trusted execution facts without consulting model-authored Mission text. */
+/** Resolves trusted execution facts without consulting model-authored Plan text. */
 export function resolveRegisteredToolCapability(
   tool: RegisteredTool
 ): RegisteredToolCapabilityResolution {

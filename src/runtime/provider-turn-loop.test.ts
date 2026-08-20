@@ -2163,7 +2163,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(JSON.stringify(firstRequest.messages)).not.toContain("Before doing anything else");
   });
 
-  it("does not widen the next provider inventory from Mission requirements", async () => {
+  it("does not widen the next provider inventory from Plan text", async () => {
     const registry = new ToolRegistry();
     const requirementTools: RegisteredTool[] = [
       {
@@ -2279,10 +2279,11 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       "mcp_target_update",
       "mcp_target_verify"
     ]);
-    expect(controller.current()?.capabilityPreflight?.status).toBe("ready");
+    expect(controller.current()).not.toHaveProperty("requirements");
+    expect(controller.current()).not.toHaveProperty("capabilityPreflight");
   });
 
-  it("returns a missing-evidence plan failure through standard tool-result continuation", async () => {
+  it("keeps execution evidence out of Plan progress during standard continuation", async () => {
     const evidence = new ExecutionEvidenceIndex();
     const controller = new ExecutionPlanController(new ExecutionPlanStore(), undefined, evidence);
     await controller.write({
@@ -2304,17 +2305,18 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     };
     const missingEvidenceMerge = {
       operation: "merge" as const,
-      items: [{ id: "locate-collection", status: "completed" as const }]
+      items: [{ id: "locate-collection", content: "Locate the destination collection", status: "completed" as const }]
     };
     const repairedMerge = {
       operation: "merge" as const,
       items: [{
         id: "locate-collection",
+        content: "Locate the destination collection",
         status: "completed" as const,
         evidenceCallIds: ["call-read"]
       }]
     };
-    let stateAfterRejectedUpdate: string | undefined;
+    let stateAfterLightweightUpdate: string | undefined;
     const harness = await createPostToolNudgeHarness({
       responses: [
         providerExecution("", [providerToolCall("call-read", "{}", "mcp.target.read")]),
@@ -2336,7 +2338,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
           evidence.record(readExecution, "visible-turn");
         } else if (call?.id === "call-plan-missing") {
           rejectedPlanExecution.result = await planTool.run(missingEvidenceMerge, { visibleTurnId: "visible-turn" });
-          stateAfterRejectedUpdate = controller.current()?.items[0]?.status;
+          stateAfterLightweightUpdate = controller.current()?.items[0]?.status;
         } else if (call?.id === "call-plan-retry") {
           acceptedPlanExecution.result = await planTool.run(repairedMerge, { visibleTurnId: "visible-turn" });
         }
@@ -2349,23 +2351,23 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       providerTools: [planProviderSchema(), toolProviderSchema("mcp.target.read")]
     });
 
-    const repairRequest = harness.completeSpy.mock.calls[2]?.[0] as ProviderRequest;
-    const repairContext = JSON.stringify(repairRequest.messages);
-    expect(repairContext).toContain("completion-evidence-required");
-    expect(repairContext).toContain("call-read");
-    expect(repairContext).toContain("Retry the plan merge using only successful evidence");
-    expect(stateAfterRejectedUpdate).toBe("in_progress");
+    const continuationRequest = harness.completeSpy.mock.calls[2]?.[0] as ProviderRequest;
+    const continuationContext = JSON.stringify(continuationRequest.messages);
+    expect(continuationContext).not.toContain("completion-evidence-required");
+    expect(continuationContext).toContain("call-read");
+    expect(stateAfterLightweightUpdate).toBe("completed");
     expect(controller.current()).toMatchObject({
       status: "completed",
       items: [{
         id: "locate-collection",
-        status: "completed",
-        evidenceCallIds: ["call-read"]
+        status: "completed"
       }]
     });
+    expect(controller.current()?.items[0]).not.toHaveProperty("evidenceCallIds");
+    expect(controller.current()?.items[0]).not.toHaveProperty("evidence");
   });
 
-  it("does not let plan preflight govern runtime continuation", async () => {
+  it("does not let Plan text govern runtime continuation", async () => {
     const registry = new ToolRegistry();
     for (const name of ["mcp.target.read", "mcp.target.verify"]) {
       registry.register({
@@ -2428,7 +2430,9 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(harness.completeSpy).toHaveBeenCalledTimes(2);
     expect(harness.executePlans).toHaveBeenCalledTimes(2);
     expect(result.providerExecution?.response?.content).not.toContain("stopped before substantive work");
-    expect(controller.current()?.status).toBe("blocked");
+    expect(controller.current()?.status).toBe("active");
+    expect(controller.current()).not.toHaveProperty("requirements");
+    expect(controller.current()).not.toHaveProperty("capabilityPreflight");
   });
 
   it("does not create a provisional Mission before the model's first action", async () => {

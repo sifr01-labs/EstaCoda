@@ -18,10 +18,10 @@ const plan: ExecutionPlan = {
   ]
 };
 
-describe("Mission surface", () => {
-  it("renders the English Mission checklist", () => {
+describe("Plan surface", () => {
+  it("renders the English Plan checklist", () => {
     expect(renderMissionSurface(plan, { width: 80, locale: "en" })).toEqual([
-      "Mission · 1 / 3 · Build six MTN products in Postman",
+      "Plan · 1 / 3 · Build six MTN products in Postman",
       "✓ Identify products",
       "● Obtain specifications",
       "○ Build collection"
@@ -32,7 +32,7 @@ describe("Mission surface", () => {
     const arabic = { ...plan, objective: "إنشاء مجموعة MTN في Postman" };
     const header = renderMissionSurface(arabic, { width: 80, locale: "ar" })[0] ?? "";
 
-    expect(header).toContain("خطة التنفيذ");
+    expect(header).toContain("الخطة");
     expect(header).toContain(`${LRI}1 / 3${PDI}`);
     expect(header).toContain(`${FSI}إنشاء مجموعة ${LRI}MTN${PDI} في ${LRI}Postman${PDI}${PDI}`);
   });
@@ -41,10 +41,10 @@ describe("Mission surface", () => {
     const lines = renderMissionSurface(plan, { width: 18, height: 3, locale: "en" });
     expect(lines).toHaveLength(3);
     expect(lines.every((line) => stringWidth(line) <= 18)).toBe(true);
-    expect(lines[0]).toContain("Mission");
+    expect(lines[0]).toContain("Plan");
   });
 
-  it("uses Papyrus tokens to distinguish Mission hierarchy and statuses", () => {
+  it("uses Papyrus tokens to distinguish Plan hierarchy and statuses", () => {
     const tokens = resolveTokens("standard", "dark", "kemetBlue");
     const style = createOperatorConsoleStyle({
       tokens,
@@ -60,13 +60,13 @@ describe("Mission surface", () => {
     };
     const output = renderMissionSurface(withAllStatuses, { width: 100, locale: "en", style }).join("\n");
 
-    expect(output).toContain(`${ansiFg(tokens.contract.palette.accent)}Mission\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.palette.accent)}Plan\x1b[0m`);
     expect(output).toContain(ansiFg(tokens.contract.severity.ok));
     expect(output).toContain(ansiFg(tokens.contract.palette.action));
     expect(output).toContain(ansiFg(tokens.contract.text.muted));
     expect(output).toContain(ansiFg(tokens.contract.severity.warn));
     expect(output).toContain(ansiFg(tokens.contract.severity.error));
-    expect(stripAnsi(output)).toContain("Mission · 1 / 5 · Build six MTN products in Postman");
+    expect(stripAnsi(output)).toContain("Plan · 1 / 5 · Build six MTN products in Postman");
   });
 
   it("keeps live plain-mode rendering color-free and deterministic", () => {
@@ -79,23 +79,23 @@ describe("Mission surface", () => {
 
     expect(first).toEqual(second);
     expect(first.join("\n")).not.toContain("\x1b");
-    expect(first[0]).toBe("Mission · 1 / 3 · Build six MTN products in Postman");
+    expect(first[0]).toBe("Plan · 1 / 3 · Build six MTN products in Postman");
   });
 
   it("has a deterministic plain rendering", () => {
     expect(formatPlainExecutionPlan(plan)).toContain("✓ Identify products\n● Obtain specifications");
   });
 
-  it("hides terminal Missions from the live surface while retaining a durable plain summary", () => {
+  it("hides terminal Plans from the live surface while retaining a durable plain summary", () => {
     for (const status of ["completed", "abandoned", "transferred"] as const) {
       const terminal = { ...plan, status };
       expect(getMissionSurfaceDesiredHeight(terminal)).toBe(0);
       expect(renderMissionSurface(terminal, { width: 80, locale: "en" })).toEqual([]);
-      expect(formatPlainExecutionPlan(terminal)).toContain("Mission · Build six MTN products in Postman");
+      expect(formatPlainExecutionPlan(terminal)).toContain("Plan · Build six MTN products in Postman");
     }
   });
 
-  it("continues rendering blocked and hydrated unfinished Missions", () => {
+  it("continues rendering blocked and hydrated unfinished Plans", () => {
     const blocked: ExecutionPlan = {
       ...plan,
       status: "blocked",

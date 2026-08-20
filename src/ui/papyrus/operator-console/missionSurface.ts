@@ -15,7 +15,7 @@ import {
   type OperatorConsoleStyle,
 } from "./operatorConsoleStyle.js";
 
-export type MissionSurfaceRenderOptions = {
+export type PlanSurfaceRenderOptions = {
   readonly width: number;
   readonly height?: number;
   readonly locale?: "en" | "ar";
@@ -28,7 +28,7 @@ export function getMissionSurfaceDesiredHeight(plan: ExecutionPlan | undefined):
 
 export function renderMissionSurface(
   plan: ExecutionPlan | undefined,
-  options: MissionSurfaceRenderOptions
+  options: PlanSurfaceRenderOptions
 ): readonly string[] {
   const width = Math.max(0, Math.floor(options.width));
   const height = Math.max(0, Math.floor(options.height ?? getMissionSurfaceDesiredHeight(plan)));
@@ -39,11 +39,11 @@ export function renderMissionSurface(
 function liveMissionRows(
   plan: ExecutionPlan,
   width: number,
-  options: Pick<MissionSurfaceRenderOptions, "locale" | "style">
+  options: Pick<PlanSurfaceRenderOptions, "locale" | "style">
 ): string[] {
   const locale = options.locale;
   const style = options.style;
-  const label = locale === "ar" ? "خطة التنفيذ" : "Mission";
+  const label = locale === "ar" ? "الخطة" : "Plan";
   const completed = plan.items.filter((item) => item.status === "completed").length;
   const progress = prepareMissionValue(`${completed} / ${plan.items.length}`, locale, true);
   const objective = prepareMissionValue(plan.objective, locale);
@@ -64,7 +64,7 @@ export function formatPlainExecutionPlan(
   locale: "en" | "ar" = "en"
 ): string | undefined {
   if (plan === undefined) return undefined;
-  const label = locale === "ar" ? "خطة التنفيذ" : "Mission";
+  const label = locale === "ar" ? "الخطة" : "Plan";
   return [
     `${label} · ${plan.objective}`,
     ...plan.items.map((item) => `${statusGlyph(item.status)} ${item.content}`),

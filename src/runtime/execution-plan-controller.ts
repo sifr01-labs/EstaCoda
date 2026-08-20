@@ -124,8 +124,7 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
   ): Promise<ExecutionPlan> {
     this.#awaitingResumeDecision = false;
     const previous = this.#store.current();
-    const items = validateWriteItems(input.items).map((item) => this.#validateCompletion(item));
-    const requirements = validateCapabilityRequirements(input.requirements, items);
+    const items = validateWriteItems(input.items);
     const requestedOriginTurnId = stableId(originTurnId, "originTurnId", 256);
     const provenance = validateWriteProvenance(context);
     const replacesProvisional = previous !== undefined && canReplaceProvisionalPlan({
@@ -135,11 +134,11 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
     });
     if (previous !== undefined && !replacesProvisional) {
       throw new ExecutionPlanValidationError(
-        "An execution plan already exists. Use operation=merge to refine or progress the active Mission."
+        "A Plan already exists. Use operation=merge to refine it."
       );
     }
-    let plan = validatePlan({
-      objective: boundedText(input.objective, "objective", EXECUTION_PLAN_MAX_OBJECTIVE_CHARS),
+    const plan = validatePlan({
+      objective: optionalObjective(input.objective) ?? items[0]!.content,
       originTurnId: replacesProvisional ? previous.originTurnId : requestedOriginTurnId,
       revision: (previous?.revision ?? 0) + 1,
       status: "active",
@@ -150,28 +149,8 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
             provisional: false,
             ...(previous.provenance?.sessionId === undefined ? {} : { sessionId: previous.provenance.sessionId })
           }
-        : provenance,
-      ...(requirements === undefined ? {} : { requirements })
+        : provenance
     });
-    if (requirements !== undefined) {
-      const capabilityPreflight = this.#capabilityPreflight === undefined
-        ? unavailableCapabilityPreflight(requirements)
-        : await this.#capabilityPreflight.assess(requirements, context);
-      plan = validatePlan({
-        ...plan,
-        items: applyCapabilityBlockers(plan.items, capabilityPreflight),
-        capabilityPreflight
-      });
-      for (const assessment of capabilityPreflight.assessments) {
-        if (assessment.status === "ready") continue;
-        const record = this.#evidenceIndex.recordUnavailable(
-          capabilityReceiptId(plan.originTurnId, assessment.requirementId),
-          assessment.tool,
-          plan.originTurnId
-        );
-        if (record !== undefined) await this.#recordEvidence?.(record);
-      }
-    }
     await this.#recordTransition({
       kind: replacesProvisional
         ? eventKindForPlan(plan)
@@ -194,7 +173,6 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
     const items = current.items.map((item) => ({ ...item }));
     const indexes = new Map(items.map((item, index) => [item.id, index]));
     const patchedIds = new Set<string>();
-    const completionValidationIds = new Set<string>();
     for (const rawPatch of input.items) {
       if (!isRecord(rawPatch)) {
         throw new ExecutionPlanValidationError("Each merge item must be an object.");
@@ -209,52 +187,23 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
         if (typeof rawPatch.content !== "string") {
           throw new ExecutionPlanValidationError(`New item ${id} requires content.`);
         }
-        const item = validateItem({
+        const item = validateLightweightItem({
           id,
           content: rawPatch.content,
-          status: rawPatch.status ?? "pending",
-          evidenceCallIds: rawPatch.evidenceCallIds,
-          completionKind: rawPatch.completionKind,
-          blocker: rawPatch.blocker ?? undefined
+          status: rawPatch.status ?? "pending"
         });
         indexes.set(id, items.length);
         items.push(item);
-        if (item.status === "completed") completionValidationIds.add(id);
         continue;
       }
 
       const existing = items[index]!;
-      const statusLeavesBlockedState = rawPatch.status !== undefined &&
-        rawPatch.status !== "blocked" &&
-        rawPatch.status !== "cancelled";
-      items[index] = validateItem({
-        ...existing,
+      items[index] = validateLightweightItem({
+        id,
         ...(rawPatch.content === undefined ? {} : { content: rawPatch.content }),
-        ...(rawPatch.status === undefined ? {} : { status: rawPatch.status }),
-        ...(rawPatch.evidenceCallIds === undefined ? {} : { evidenceCallIds: rawPatch.evidenceCallIds }),
-        ...(rawPatch.completionKind === undefined ? {} : { completionKind: rawPatch.completionKind }),
-        ...(rawPatch.blocker === undefined
-          ? statusLeavesBlockedState
-            ? { blocker: undefined }
-            : {}
-          : rawPatch.blocker === null
-            ? { blocker: undefined }
-            : { blocker: rawPatch.blocker })
+        content: rawPatch.content ?? existing.content,
+        status: normalizeLegacyItemStatus(rawPatch.status ?? existing.status)
       });
-      if (
-        rawPatch.status === "completed" ||
-        rawPatch.evidenceCallIds !== undefined ||
-        rawPatch.completionKind !== undefined
-      ) {
-        completionValidationIds.add(id);
-      }
-    }
-
-    if (isTerminalExtension(current, items)) {
-      throw new ExecutionPlanValidationError(
-        "merge cannot extend a Mission while completing its final unfinished objective item. " +
-        "Report optional follow-up work in the final response or wait for a separate user-authorized request."
-      );
     }
 
     const plan = validatePlan({
@@ -264,7 +213,7 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
         : boundedText(input.objective, "objective", EXECUTION_PLAN_MAX_OBJECTIVE_CHARS),
       revision: current.revision + 1,
       status: "active",
-      items: items.map((item) => completionValidationIds.has(item.id) ? this.#validateCompletion(item) : item)
+      items
     });
     await this.#recordTransition({ kind: eventKindForPlan(plan), plan }, sink);
     return this.#store.replace(plan);
@@ -475,26 +424,22 @@ function validateHydratedPlan(input: ExecutionPlan): ExecutionPlan {
   }
   const items = input.items.map((item) => {
     if (!isRecord(item)) throw new ExecutionPlanValidationError("Persisted execution plan item is malformed.");
-    return validateItem(item, { persisted: true });
+    return validateLightweightItem({
+      id: item.id,
+      content: item.content,
+      status: normalizeLegacyItemStatus(item.status)
+    });
   });
-  const requirements = validateCapabilityRequirements(input.requirements, items);
-  const capabilityPreflight = validateCapabilityPreflight(input.capabilityPreflight, requirements);
-  const provenance = validatePersistedProvenance(input.provenance);
   const validated = validatePlan({
     objective: boundedText(input.objective, "objective", EXECUTION_PLAN_MAX_OBJECTIVE_CHARS),
     originTurnId: stableId(input.originTurnId, "originTurnId", 256),
     revision: input.revision,
     status: "active",
-    items,
-    ...(provenance === undefined ? {} : { provenance }),
-    ...(requirements === undefined ? {} : { requirements }),
-    ...(capabilityPreflight === undefined ? {} : { capabilityPreflight })
+    items
   });
-  const derived = validated.status;
-  if (input.status !== derived && input.status !== "transferred" && input.status !== "abandoned") {
-    throw new ExecutionPlanValidationError("Persisted execution plan status does not match its items.");
-  }
-  const plan = { ...validated, status: input.status };
+  const plan = input.status === "transferred" || input.status === "abandoned"
+    ? { ...validated, status: input.status }
+    : validated;
   if (Buffer.byteLength(JSON.stringify(plan), "utf8") > EXECUTION_PLAN_MAX_SERIALIZED_BYTES) {
     throw new ExecutionPlanValidationError(`Execution plan exceeds ${EXECUTION_PLAN_MAX_SERIALIZED_BYTES} serialized bytes.`);
   }
@@ -566,15 +511,31 @@ function validateWriteItems(input: unknown): ExecutionPlanItem[] {
     if (!isRecord(item)) {
       throw new ExecutionPlanValidationError("Each plan item must be an object.");
     }
-    return validateItem({
+    return validateLightweightItem({
       id: item.id,
       content: item.content,
-      status: item.status ?? "pending",
-      evidenceCallIds: item.evidenceCallIds,
-      completionKind: item.completionKind,
-      blocker: item.blocker
+      status: normalizeLegacyItemStatus(item.status ?? "pending")
     });
   });
+}
+
+function validateLightweightItem(input: Record<string, unknown>): ExecutionPlanItem {
+  const id = stableId(input.id, "item id", EXECUTION_PLAN_MAX_ID_CHARS);
+  const content = boundedText(input.content, `content for ${id}`, EXECUTION_PLAN_MAX_ITEM_CHARS);
+  const status = normalizeLegacyItemStatus(input.status);
+  return { id, content, status };
+}
+
+function normalizeLegacyItemStatus(input: unknown): "pending" | "in_progress" | "completed" {
+  if (input === "pending" || input === "in_progress" || input === "completed") return input;
+  if (input === "blocked" || input === "cancelled") return "pending";
+  throw new ExecutionPlanValidationError("Plan item has an invalid status.");
+}
+
+function optionalObjective(input: unknown): string | undefined {
+  return input === undefined
+    ? undefined
+    : boundedText(input, "objective", EXECUTION_PLAN_MAX_OBJECTIVE_CHARS);
 }
 
 function validatePlan(input: ExecutionPlan): ExecutionPlan {
@@ -596,7 +557,7 @@ function validatePlan(input: ExecutionPlan): ExecutionPlan {
 
   const plan = {
     ...input,
-    status: deriveStatus(input.items, input.capabilityPreflight)
+    status: deriveStatus(input.items)
   };
   if (Buffer.byteLength(JSON.stringify(plan), "utf8") > EXECUTION_PLAN_MAX_SERIALIZED_BYTES) {
     throw new ExecutionPlanValidationError(`Execution plan exceeds ${EXECUTION_PLAN_MAX_SERIALIZED_BYTES} serialized bytes.`);

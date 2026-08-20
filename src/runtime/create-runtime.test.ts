@@ -974,7 +974,6 @@ describe("createRuntime MCP trust gating", () => {
               "items",
               "objective",
               "operation",
-              "requirements",
             ],
             "toolsets": [
               "core",

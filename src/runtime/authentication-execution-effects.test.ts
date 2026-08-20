@@ -98,7 +98,7 @@ describe("authentication execution effects", () => {
     ]);
   });
 
-  it("attributes credential settlement failure to the credential phase without regressing completed navigation", async () => {
+  it("does not encode credential settlement failure as Plan authority", async () => {
     const evidence = new ExecutionEvidenceIndex();
     evidence.record({
       tool: toolDefinition("browser.navigate"),
@@ -134,16 +134,10 @@ describe("authentication execution effects", () => {
 
     expect(controller.current()?.items).toMatchObject([
       { id: "navigate-login", status: "completed" },
-      {
-        id: "authenticate",
-        status: "blocked",
-        blocker: {
-          kind: "external_state",
-          summary: "Protected credential delivery failed before authentication could continue.",
-        },
-      },
+      { id: "authenticate", status: "pending" },
       { id: "verify-account", status: "pending" },
     ]);
+    expect(controller.current()?.items[1]).not.toHaveProperty("blocker");
   });
 
   it("turns a post-submit authentication error page into a blocker instead of a candidate", () => {
@@ -169,7 +163,7 @@ describe("authentication execution effects", () => {
     }]);
   });
 
-  it("advances an existing Mission through credentials, challenge, and verification without replacing post-login work", async () => {
+  it("keeps authentication coordination lightweight without replacing post-login work", async () => {
     const evidence = new ExecutionEvidenceIndex();
     const controller = new ExecutionPlanController(new ExecutionPlanStore(), undefined, evidence);
     await controller.write({
@@ -198,7 +192,7 @@ describe("authentication execution effects", () => {
     expect(controller.current()).toMatchObject({
       objective: "Log in, then update the Postman collection",
       items: [
-        { id: "login", status: "completed", evidenceCallIds: ["credentials-call"] },
+        { id: "login", status: "completed" },
         { id: "otp", status: "in_progress" },
         { id: "verify-login", status: "pending" },
         { id: "postman", status: "pending" },
@@ -219,7 +213,7 @@ describe("authentication execution effects", () => {
 
     expect(controller.current()?.items).toMatchObject([
       { id: "login", status: "completed" },
-      { id: "otp", status: "pending", evidenceCallIds: ["challenge-call"] },
+      { id: "otp", status: "pending" },
       { id: "verify-login", status: "in_progress" },
       { id: "postman", status: "pending" },
     ]);
@@ -233,7 +227,7 @@ describe("authentication execution effects", () => {
     expect(controller.current()?.items.filter((item) => item.id === "otp")).toHaveLength(1);
     expect(controller.current()?.items).toMatchObject([
       { id: "login", status: "completed" },
-      { id: "otp", status: "in_progress", evidenceCallIds: ["challenge-call"] },
+      { id: "otp", status: "in_progress" },
       { id: "verify-login", status: "pending" },
       { id: "postman", status: "pending" },
     ]);
@@ -294,12 +288,12 @@ describe("authentication execution effects", () => {
     expect(controller.current()?.items).toMatchObject([
       { id: "login", status: "completed" },
       { id: "otp", status: "completed" },
-      { id: "verify-login", status: "blocked" },
+      { id: "verify-login", status: "pending" },
       { id: "postman", status: "pending" },
     ]);
   });
 
-  it("creates a catch-up Mission when linguistic activation missed a credential request", async () => {
+  it("keeps a catch-up authentication Plan free of model-authored blockers", async () => {
     const controller = new ExecutionPlanController(new ExecutionPlanStore());
     const execution = protectedExecution("browser.fill_protected_form", "credentials-call", {
       secureInputGroupReceipt: { status: "cancelled" },
@@ -316,18 +310,12 @@ describe("authentication execution effects", () => {
       objective: "Access the developer workspace, then update its collection",
       originTurnId: "turn-missed",
       items: [
-        {
-          id: "authentication.credentials",
-          status: "blocked",
-          blocker: {
-            kind: "user_input_required",
-            summary: "The required authentication credentials were not provided.",
-          },
-        },
+        { id: "authentication.credentials", status: "pending" },
         { id: "authentication.verify", status: "pending" },
         { id: "authentication.continue", content: "Continue the requested post-login work", status: "pending" },
       ],
     });
+    expect(controller.current()?.items[0]).not.toHaveProperty("blocker");
   });
 
   it("does not invent credential completion evidence when catch-up begins at a challenge", async () => {
@@ -346,11 +334,11 @@ describe("authentication execution effects", () => {
     expect(controller.current()?.items).toMatchObject([
       {
         id: "authentication.challenge",
-        status: "blocked",
-        blocker: { kind: "user_input_required" },
+        status: "pending",
       },
       { id: "authentication.verify", status: "pending" },
     ]);
+    expect(controller.current()?.items[0]).not.toHaveProperty("blocker");
     expect(controller.current()?.items.some((item) => item.id === "authentication.credentials")).toBe(false);
   });
 });

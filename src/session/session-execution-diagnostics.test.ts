@@ -123,7 +123,7 @@ describe("diagnoseSessionExecution", () => {
         items: { pending: 0, in_progress: 0, completed: 0, blocked: 1, cancelled: 0 },
       },
       evidence: { mutations: 1, verifications: 4 },
-      finalCause: "Mission blocked (missing capability)",
+      finalCause: "Plan blocked (missing capability)",
       authentication: {
         submissionObserved: "yes",
         challenge: "departed",

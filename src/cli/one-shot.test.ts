@@ -128,7 +128,7 @@ describe("one-shot prompt", () => {
     expect(result.output).toContain("Warning: background memory finalization could not be queued.");
   });
 
-  it("prints only the final plain Mission snapshot", async () => {
+  it("prints only the final plain Plan snapshot", async () => {
     const basePlan = {
       objective: "Test APIs",
       originTurnId: "turn-1",
@@ -159,11 +159,11 @@ describe("one-shot prompt", () => {
 
     const result = await runOneShotPrompt({ runtime, argv: ["test APIs"] });
 
-    expect(result.output).toContain("Mission · Test APIs\n✓ Test APIs");
-    expect(result.output.match(/Mission ·/gu)).toHaveLength(1);
+    expect(result.output).toContain("Plan · Test APIs\n✓ Test APIs");
+    expect(result.output.match(/Plan ·/gu)).toHaveLength(1);
   });
 
-  it("uses the Arabic Mission label in one-shot output", async () => {
+  it("uses the Arabic Plan label in one-shot output", async () => {
     const plan = {
       objective: "اختبار الواجهات",
       originTurnId: "turn-1",
@@ -184,6 +184,6 @@ describe("one-shot prompt", () => {
 
     const result = await runOneShotPrompt({ runtime, argv: ["اختبر"], locale: "ar" });
 
-    expect(result.output).toContain("خطة التنفيذ · اختبار الواجهات");
+    expect(result.output).toContain("الخطة · اختبار الواجهات");
   });
 });

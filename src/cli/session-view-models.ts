@@ -83,7 +83,7 @@ export function buildSessionExecutionDiagnosisViewModel(data: SessionExecutionDi
         ],
       }),
       buildKeyValueBlockViewModel({
-        title: "Mission",
+        title: "Plan",
         entries: [
           kv("Activation observed", data.mission.activationObserved ? "yes" : "no"),
           kv("Progress transitions", data.mission.progressTransitions),

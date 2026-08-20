@@ -13,7 +13,7 @@ export type ToolDisplayLabelSet = {
 };
 
 export const TOOL_DISPLAY_LABELS: Readonly<Record<string, ToolDisplayLabelSet>> = {
-  plan: { en: "Update Mission", ar: "تحديث خطة التنفيذ" },
+  plan: { en: "Update Plan", ar: "تحديث الخطة" },
   "trajectory.record": { en: "Record Trajectory", ar: "تسجيل المسار" },
   "file.read": { en: "Read File", ar: "قراءة ملف" },
   "file.write": { en: "Write File", ar: "كتابة ملف" },

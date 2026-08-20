@@ -243,10 +243,10 @@ function finalCause(
         .filter((kind): kind is ExecutionPlanBlockerKind => kind !== undefined))]
         .sort();
       return blockerKinds.length === 0
-        ? "Mission blocked"
-        : `Mission blocked (${blockerKinds.map(formatBlockerKind).join(", ")})`;
+        ? "Plan blocked"
+        : `Plan blocked (${blockerKinds.map(formatBlockerKind).join(", ")})`;
     }
-    if (latestPlan.status !== "active") return `Mission ${latestPlan.status}`;
+    if (latestPlan.status !== "active") return `Plan ${latestPlan.status}`;
   }
 
   for (let index = events.length - 1; index >= 0; index -= 1) {
@@ -256,7 +256,7 @@ function finalCause(
       return event.ok ? "Provider turn completed" : "Provider execution failed";
     }
   }
-  return latestPlan === undefined ? "Unknown" : "Mission active";
+  return latestPlan === undefined ? "Unknown" : "Plan active";
 }
 
 /**
