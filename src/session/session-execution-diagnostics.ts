@@ -42,6 +42,11 @@ export type SessionExecutionDiagnosis = {
     readonly verifications: number;
   };
   readonly finalCause: string;
+  readonly finalOutcome?: {
+    readonly status: import("../contracts/execution-plan.js").ExecutionFinalOutcomeStatus;
+    readonly terminationCause: import("../contracts/execution-plan.js").ExecutionTerminationCause;
+    readonly completionFloor: import("../contracts/execution-plan.js").ExecutionCompletionFloor;
+  };
   readonly authentication: {
     readonly submissionObserved: "yes" | "no";
     readonly challenge: "departed" | "still present" | "unknown";
@@ -149,6 +154,10 @@ export function diagnoseSessionExecution(input: {
     .reduce((total, calls) => total + Math.max(0, calls - 1), 0);
   const latestPlan = plans.at(-1)?.plan;
   const latestAuthentication = authenticationAssessments.at(-1);
+  const latestFinalOutcome = [...input.events].reverse()
+    .find((event): event is Extract<SessionEvent, { kind: "execution-final-outcome-recorded" }> =>
+      event.kind === "execution-final-outcome-recorded"
+    );
 
   return {
     sessionId: input.sessionId,
@@ -183,6 +192,13 @@ export function diagnoseSessionExecution(input: {
       verifications: verificationEvidence,
     },
     finalCause: finalCause(input.events, plans),
+    ...(latestFinalOutcome === undefined ? {} : {
+      finalOutcome: {
+        status: latestFinalOutcome.status,
+        terminationCause: latestFinalOutcome.terminationCause,
+        completionFloor: latestFinalOutcome.completionFloor
+      }
+    }),
     authentication: authenticationDiagnosis(latestAuthentication),
   };
 }
@@ -235,6 +251,12 @@ function finalCause(
   events: readonly SessionEvent[],
   plans: ReadonlyArray<{ readonly kind: string; readonly plan: ExecutionPlan }>
 ): string {
+  const recordedOutcome = [...events].reverse()
+    .find((event): event is Extract<SessionEvent, { kind: "execution-final-outcome-recorded" }> =>
+      event.kind === "execution-final-outcome-recorded"
+    );
+  if (recordedOutcome !== undefined) return recordedOutcome.terminationCause;
+
   const latestPlan = plans.at(-1)?.plan;
   if (latestPlan !== undefined) {
     if (latestPlan.status === "blocked") {
@@ -251,12 +273,20 @@ function finalCause(
 
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]!;
-    if (event.kind === "provider-budget-exhausted") return "Provider budget exhausted";
+    if (event.kind === "provider-budget-exhausted") return legacyTerminationCause(event.budget);
     if (event.kind === "provider-completion" || event.kind === "provider-continuation") {
       return event.ok ? "Provider turn completed" : "Provider execution failed";
     }
   }
   return latestPlan === undefined ? "Unknown" : "Plan active";
+}
+
+function legacyTerminationCause(budget: string): string {
+  if (budget === "repeated-browser-observations") return "browser_no_progress";
+  if (budget === "tool-loop-no-progress-iterations") return "tool_loop_no_progress";
+  if (budget === "provider-wall-clock-ms") return "deadline_reached";
+  if (budget === "abort-signal") return "cancelled";
+  return "Provider budget exhausted";
 }
 
 /**

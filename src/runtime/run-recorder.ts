@@ -22,7 +22,7 @@ import type {
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolsetName, ToolRiskClass } from "../contracts/tool.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
-import type { ExecutionEvidenceRecord, ExecutionPlanLifecycleEvent } from "../contracts/execution-plan.js";
+import type { ExecutionEvidenceRecord, ExecutionFinalOutcome, ExecutionPlanLifecycleEvent } from "../contracts/execution-plan.js";
 import type { Trajectory } from "../contracts/trajectory.js";
 import type { TrajectoryStore } from "../contracts/trajectory-store.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
@@ -97,6 +97,17 @@ export class RunRecorder {
     if (persisted === undefined) return;
     await this.#sessionDb.appendEvent(this.#currentSessionId(), persisted);
     this.#trajectoryRecorder.record(persisted.kind, persisted);
+  }
+
+  async recordExecutionFinalOutcome(outcome: ExecutionFinalOutcome): Promise<void> {
+    const event = {
+      kind: "execution-final-outcome-recorded" as const,
+      status: outcome.status,
+      terminationCause: outcome.terminationCause,
+      completionFloor: outcome.completionFloor
+    };
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), event);
+    this.#trajectoryRecorder.record(event.kind, event);
   }
 
   async recordAuthenticationEvidenceAssessment(

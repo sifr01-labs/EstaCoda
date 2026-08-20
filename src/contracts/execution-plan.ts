@@ -182,8 +182,28 @@ export type ExecutionFinalOutcomeStatus =
   | "failed"
   | "cancelled";
 
+/** Runtime-owned reason the foreground provider/tool loop stopped. */
+export type ExecutionTerminationCause =
+  | "normal"
+  | "provider_failed"
+  | "budget_exhausted"
+  | "browser_no_progress"
+  | "tool_loop_no_progress"
+  | "user_input_required"
+  | "deadline_reached"
+  | "cancelled";
+
+/** Coarse effect expectation. It is not a plan and grants no authority. */
+export type ExecutionCompletionFloor =
+  | "none"
+  | "read"
+  | "mutation"
+  | "mutation_with_verification";
+
 export type ExecutionFinalOutcome = {
   status: ExecutionFinalOutcomeStatus;
+  terminationCause: ExecutionTerminationCause;
+  completionFloor: ExecutionCompletionFloor;
   confirmedActions: ConfirmedActionReceipt[];
   uncertainActions: UncertainActionReceipt[];
 };

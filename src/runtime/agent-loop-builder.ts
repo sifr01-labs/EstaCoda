@@ -46,6 +46,7 @@ import { SkillRegistry } from "../skills/skill-registry.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
 import { ToolCallPlanner } from "../tools/tool-call-planner.js";
+import { resolveRegisteredToolCapability } from "../tools/tool-capability.js";
 import { buildProviderToolSchemaCatalog, type OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import { toolRegistrationPlan, type ToolRegistrationPhase } from "../tools/index.js";
 import type { WorkspaceFsAdapter } from "../tools/workspace-tools.js";
@@ -542,6 +543,21 @@ export class AgentLoopBuilder {
     const providerToolSchemaCatalog = buildProviderToolSchemaCatalog({
       tools: providerToolAvailability.available
     });
+    const executionCompletionCapabilities = providerToolAvailability.available.flatMap((definition) => {
+      const registered = toolRegistry.get(definition.name);
+      if (registered === undefined) return [];
+      const resolution = resolveRegisteredToolCapability(registered);
+      if (resolution.ok === false || resolution.capability.classification === "unsupported") return [];
+      const capability = resolution.capability;
+      return [{
+        tool: capability.canonicalTool,
+        kind: capability.verification === undefined
+          ? capability.classification === "mutate" ? "mutation" as const : "read" as const
+          : "verification" as const,
+        ...(capability.verification === undefined ? {} : { verifies: capability.verification.verifies }),
+        ...(capability.connector === undefined ? {} : { connector: capability.connector })
+      }];
+    });
     const toolCallPlanner = new ToolCallPlanner({
       registry: toolRegistry,
       aliases: providerToolSchemaCatalog.aliases
@@ -647,6 +663,7 @@ export class AgentLoopBuilder {
       projectContext: input.projectContext ?? substrate.projectContext,
       providerTools: providerToolSchemaCatalog.tools,
       providerToolSchemaCatalog: ownsExecutionPlan ? providerToolSchemaCatalog : undefined,
+      executionCompletionCapabilities,
       soul: undefined,
       skillsIndex: sessionSkillCatalog,
       skillConfig: input.skillConfig,

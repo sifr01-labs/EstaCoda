@@ -494,6 +494,12 @@ export type SessionEvent =
       reason: string;
     }
   | {
+      kind: "execution-final-outcome-recorded";
+      status: import("./execution-plan.js").ExecutionFinalOutcomeStatus;
+      terminationCause: import("./execution-plan.js").ExecutionTerminationCause;
+      completionFloor: import("./execution-plan.js").ExecutionCompletionFloor;
+    }
+  | {
       kind: "provider-spending-warning";
       warningId: string;
       scopeKind: "session" | "root_task";

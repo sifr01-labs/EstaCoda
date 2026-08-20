@@ -5,6 +5,7 @@ import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { isolateLtr } from "../ui/bidi.js";
 import {
   appendExecutionReceipt,
+  deriveExecutionCompletionFloor,
   deriveExecutionFinalOutcome,
   learningOutcomeStatus
 } from "./execution-outcome.js";
@@ -154,6 +155,128 @@ function toolPlan(overrides: Partial<ToolCallPlan> = {}): ToolCallPlan {
 }
 
 describe("execution outcome receipts", () => {
+  it("derives only a coarse completion floor from the request and trusted capabilities", () => {
+    const capabilities = [{
+      tool: "mcp.postman.updateCollection",
+      kind: "mutation" as const,
+      connector: { kind: "mcp" as const, id: "postman" }
+    }, {
+      tool: "mcp.postman.getCollection",
+      kind: "verification" as const,
+      verifies: ["mcp.postman.updateCollection"],
+      connector: { kind: "mcp" as const, id: "postman" }
+    }];
+
+    expect(deriveExecutionCompletionFloor({ userText: "Inspect the Postman collection." })).toBe("read");
+    expect(deriveExecutionCompletionFloor({ userText: "Review the update." })).toBe("none");
+    expect(deriveExecutionCompletionFloor({ userText: "Review the Postman update." })).toBe("read");
+    expect(deriveExecutionCompletionFloor({ userText: "Update the Postman collection." })).toBe("mutation");
+    expect(deriveExecutionCompletionFloor({ userText: "Review and update Postman." })).toBe("mutation");
+    expect(deriveExecutionCompletionFloor({ userText: "Complete the Postman work." })).toBe("mutation");
+    expect(deriveExecutionCompletionFloor({
+      userText: "Update the Postman collection.",
+      capabilities
+    })).toBe("mutation_with_verification");
+    expect(deriveExecutionCompletionFloor({ userText: "Tell me how to update Postman." })).toBe("none");
+    expect(deriveExecutionCompletionFloor({ userText: "Write a concise summary." })).toBe("none");
+    expect(deriveExecutionCompletionFloor({ userText: "Create an email draft." })).toBe("none");
+  });
+
+  it("does not complete requested mutation work from read receipts alone", () => {
+    const read = successfulReceipt({
+      toolCallId: "call-read",
+      tool: "mcp.postman.getCollection",
+      riskClass: "read-only-network",
+      executionEffect: { kind: "read", connector: { kind: "mcp", id: "postman" } }
+    });
+    const outcome = deriveExecutionFinalOutcome({
+      providerExecution: {
+        ok: true,
+        fallbackUsed: false,
+        attempts: [],
+        toolCalls: [],
+        response: { ok: true, content: "done", model: "test", provider: "openai" }
+      },
+      toolExecutions: [],
+      executionReceipts: [read],
+      completionFloor: "mutation"
+    });
+
+    expect(outcome).toMatchObject({
+      status: "partially_completed",
+      terminationCause: "normal",
+      completionFloor: "mutation"
+    });
+  });
+
+  it("settles mutation and configured verification floors only from authoritative receipts", () => {
+    const base = {
+      providerExecution: {
+        ok: true,
+        fallbackUsed: false,
+        attempts: [],
+        toolCalls: [],
+        response: { ok: true, content: "done", model: "test", provider: "openai" }
+      },
+      toolExecutions: [execution()]
+    };
+
+    expect(deriveExecutionFinalOutcome({
+      ...base,
+      executionReceipts: [successfulReceipt()],
+      completionFloor: "mutation"
+    }).status).toBe("completed");
+    expect(deriveExecutionFinalOutcome({
+      ...base,
+      executionReceipts: [successfulReceipt()],
+      completionFloor: "mutation_with_verification"
+    }).status).toBe("partially_completed");
+    expect(deriveExecutionFinalOutcome({
+      ...base,
+      executionReceipts: [successfulReceipt(), verificationReceipt()],
+      completionFloor: "mutation_with_verification"
+    }).status).toBe("completed");
+  });
+
+  it("keeps stop causes and open continuations truthful independently of provider ok", () => {
+    const providerExecution = {
+      ok: true as const,
+      fallbackUsed: false,
+      attempts: [],
+      toolCalls: [],
+      response: { ok: true as const, content: "local stop receipt", model: "test", provider: "openai" as const }
+    };
+    expect(deriveExecutionFinalOutcome({
+      providerExecution,
+      toolExecutions: [],
+      executionReceipts: [],
+      terminationCause: "browser_no_progress"
+    }).status).toBe("blocked");
+    expect(deriveExecutionFinalOutcome({
+      providerExecution,
+      toolExecutions: [],
+      executionReceipts: [successfulReceipt({
+        toolCallId: "call-read",
+        tool: "browser.snapshot",
+        riskClass: "read-only-network",
+        executionEffect: { kind: "read" }
+      })],
+      terminationCause: "browser_no_progress"
+    }).status).toBe("partially_completed");
+    expect(deriveExecutionFinalOutcome({
+      providerExecution,
+      toolExecutions: [],
+      executionReceipts: [],
+      terminationCause: "budget_exhausted"
+    }).status).not.toBe("completed");
+    expect(deriveExecutionFinalOutcome({
+      providerExecution,
+      toolExecutions: [],
+      executionReceipts: [],
+      openContinuation: true
+    }).status).toBe("blocked");
+  });
+
   it("creates redacted confirmed receipts only for successful consequential executions", () => {
     const outcome = deriveExecutionFinalOutcome({
       providerExecution: { ok: false, fallbackUsed: false, attempts: [], toolCalls: [] },
@@ -180,6 +303,8 @@ describe("execution outcome receipts", () => {
 
     expect(outcome).toEqual({
       status: "partially_completed",
+      terminationCause: "provider_failed",
+      completionFloor: "none",
       confirmedActions: [{
         toolCallId: "call-update",
         tool: "mcp.postman.updateCollection",
@@ -360,6 +485,8 @@ describe("execution outcome receipts", () => {
 
     expect(outcome).toEqual({
       status: "partially_completed",
+      terminationCause: "normal",
+      completionFloor: "none",
       confirmedActions: [],
       uncertainActions: [{
         toolCallId: "call-update",
@@ -467,6 +594,8 @@ describe("execution outcome receipts", () => {
 
     expect(outcome).toEqual({
       status: "cancelled",
+      terminationCause: "cancelled",
+      completionFloor: "none",
       confirmedActions: [],
       uncertainActions: [{
         toolCallId: "call-update",

@@ -1,7 +1,7 @@
 import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
-import type { ExecutionPlanReader } from "../contracts/execution-plan.js";
+import type { ExecutionPlanReader, ExecutionTerminationCause } from "../contracts/execution-plan.js";
 import type { MemoryPromptContext } from "../contracts/memory.js";
 import type {
   ModelProfile,
@@ -106,6 +106,15 @@ type NormalizedProviderTurnLoopBudgets = Required<ProviderTurnLoopBudgets>;
 export type ProviderTurnLoopRequestDefaults = {
   temperature?: number;
   maxTokens?: number;
+};
+
+export type ProviderTurnLoopResult = {
+  providerExecution: ProviderExecutionResult | undefined;
+  toolExecutions: ToolExecutionRecord[];
+  iterations: number;
+  terminationCause: ExecutionTerminationCause;
+  delegatedAnswerOwnership?: PendingDelegatedAnswerOwnership;
+  emergencyDeadlineReached?: boolean;
 };
 
 export type ProviderTurnLoopOptions = {
@@ -251,13 +260,7 @@ export class ProviderTurnLoop {
     trustedWorkspace: boolean;
     initialRiskClass: ToolRiskClass;
     signal?: AbortSignal;
-  }): Promise<{
-    providerExecution: ProviderExecutionResult | undefined;
-    toolExecutions: ToolExecutionRecord[];
-    iterations: number;
-    delegatedAnswerOwnership?: PendingDelegatedAnswerOwnership;
-    emergencyDeadlineReached?: boolean;
-  }> {
+  }): Promise<ProviderTurnLoopResult> {
     const releaseBrowserLeaseOnAbort = (): void => this.#releaseBrowserSessionLease();
     input.signal?.addEventListener("abort", releaseBrowserLeaseOnAbort, { once: true });
     try {
@@ -285,6 +288,7 @@ export class ProviderTurnLoop {
     let retryReasoningOnlyInitialResponse = false;
     let delegatedAnswerOwnership: PendingDelegatedAnswerOwnership | undefined;
     let emergencyDeadlineReached = false;
+    let terminationCause: ExecutionTerminationCause = "normal";
     let toolFeedbackLedger = createTurnToolFeedbackLedger();
     let providerCallsThisTurn = 0;
     let providerTokensThisTurn = 0;
@@ -319,6 +323,7 @@ export class ProviderTurnLoop {
     for (let iteration = 0; iteration < this.#budgets.maxProviderIterations; iteration += 1) {
       this.#acquireOrRenewBrowserSessionLease(foregroundTurnId);
       if (isAborted(input.signal)) {
+        terminationCause = "cancelled";
         await this.#runRecorder.recordProviderBudgetExhausted({
           budget: "abort-signal",
           limit: 1,
@@ -335,6 +340,7 @@ export class ProviderTurnLoop {
       const remainingMs = this.#budgets.maxProviderWallClockMs - elapsedMs;
       if (remainingMs <= this.#budgets.finalizationReserveMs) {
         emergencyDeadlineReached = true;
+        terminationCause = "deadline_reached";
         await this.#runRecorder.recordProviderBudgetExhausted({
           budget: "provider-wall-clock-ms",
           limit: this.#budgets.maxProviderWallClockMs,
@@ -351,6 +357,7 @@ export class ProviderTurnLoop {
         break;
       }
       if (providerToolExecutions.length >= this.#budgets.maxProviderToolCalls) {
+        terminationCause = "budget_exhausted";
         await this.#runRecorder.recordProviderBudgetExhausted({
           budget: "provider-tool-calls",
           limit: this.#budgets.maxProviderToolCalls,
@@ -406,6 +413,7 @@ export class ProviderTurnLoop {
       pendingReasoningOnlyPrefill = false;
 
       if (execution === undefined) {
+        terminationCause = "provider_failed";
         break;
       }
 
@@ -414,8 +422,12 @@ export class ProviderTurnLoop {
 
       const consumedProviderIterations = providerIterationCost(execution);
       iterations += consumedProviderIterations;
+      if (execution.runtimeMetadata?.continuation?.exhausted === true) {
+        terminationCause = execution.runtimeMetadata.continuation.exhaustionCause ?? "budget_exhausted";
+      }
 
       if (isTruncatedToolCallRefusalExecution(execution)) {
+        terminationCause = "provider_failed";
         await this.#runRecorder.recordProviderIteration({
           iteration,
           phase,
@@ -434,6 +446,7 @@ export class ProviderTurnLoop {
 
       if (isReasoningOnlyExecution(execution)) {
         if (isReasoningOnlyLengthExhaustion(execution)) {
+          terminationCause = "provider_failed";
           execution = reasoningOnlySafeGuidanceExecution(execution, REASONING_ONLY_LENGTH_EXHAUSTION_MESSAGE);
           await this.#runRecorder.recordProviderIteration({
             iteration,
@@ -464,6 +477,7 @@ export class ProviderTurnLoop {
           effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
           previousProviderExecution = execution;
           if (toolLoopProgress.shouldStop) {
+            terminationCause = "tool_loop_no_progress";
             const reason = "The foreground tool loop reached its no-progress iteration limit.";
             await this.#runRecorder.recordProviderBudgetExhausted({
               budget: "tool-loop-no-progress-iterations",
@@ -515,6 +529,7 @@ export class ProviderTurnLoop {
         }
 
         execution = reasoningOnlySafeGuidanceExecution(execution, REASONING_ONLY_EMPTY_RESPONSE_MESSAGE);
+        terminationCause = "provider_failed";
         await this.#runRecorder.recordProviderIteration({
           iteration,
           phase,
@@ -537,6 +552,7 @@ export class ProviderTurnLoop {
         (execution.ok !== true || execution.toolCalls.length > 0)
       ) {
         emergencyDeadlineReached = true;
+        terminationCause = "deadline_reached";
         const elapsedAfterProviderMs = Date.now() - loopStartedAt;
         await this.#runRecorder.recordProviderBudgetExhausted({
           budget: "provider-wall-clock-ms",
@@ -620,6 +636,9 @@ export class ProviderTurnLoop {
       const repeatedFailureBudgetExceeded = this.#recordRepeatedToolFailures(loopToolExecutions, repeatedFailures);
       const supervisionAssessment = executionSupervision.assessProgress(loopToolExecutions);
       const { browserObservation, toolLoopProgress, runtimeUserInputBlocker } = supervisionAssessment;
+      if (supervisionAssessment.terminationCause !== undefined) {
+        terminationCause = supervisionAssessment.terminationCause;
+      }
       this.#acquireOrRenewBrowserSessionLease(foregroundTurnId);
       if (runtimeUserInputBlocker !== undefined) {
         execution = executionSupervision.runtimeUserInputRequiredReceipt(execution, runtimeUserInputBlocker.summary);
@@ -786,6 +805,13 @@ export class ProviderTurnLoop {
         (loopToolExecutions.length === 0 && !hasRecoverableToolFeedback) ||
         exhausted
       ) {
+        if (terminationCause === "normal") {
+          terminationCause = execution.ok !== true
+            ? "provider_failed"
+            : exhausted
+              ? "budget_exhausted"
+              : "normal";
+        }
         if (exhausted && execution.ok === true && !toolLoopProgress.shouldStop) {
           const exhaustionReason = browserObservation?.shouldStop === true
             ? "repeated browser observations made no progress"
@@ -812,6 +838,7 @@ export class ProviderTurnLoop {
       providerExecution: effectiveProviderExecution,
       toolExecutions: providerToolExecutions,
       iterations,
+      terminationCause,
       ...(delegatedAnswerOwnership === undefined ? {} : { delegatedAnswerOwnership }),
       ...(emergencyDeadlineReached ? { emergencyDeadlineReached: true } : {})
     };
@@ -1402,6 +1429,7 @@ export class ProviderTurnLoop {
     let continuationAttempts = 0;
     let consumedProviderIterations = providerIterationCost(input.initial);
     let exhausted = false;
+    let exhaustionCause: NonNullable<ProviderLoopRuntimeMetadata["continuation"]>["exhaustionCause"];
     let finalFinishReason: ProviderFinishReason | undefined = input.initial.response?.finishReason;
 
     while (continuationAttempts < MAX_TEXT_CONTINUATION_ATTEMPTS && isLengthTruncatedTextExecution(current)) {
@@ -1409,11 +1437,13 @@ export class ProviderTurnLoop {
       const retryPrimaryRoute = retryChain[0];
       if (retryPrimaryRoute === undefined) {
         exhausted = true;
+        exhaustionCause = "provider_failed";
         break;
       }
 
       if (input.iteration + consumedProviderIterations >= this.#budgets.maxProviderIterations) {
         exhausted = true;
+        exhaustionCause = "budget_exhausted";
         break;
       }
 
@@ -1430,6 +1460,7 @@ export class ProviderTurnLoop {
           "provider-budget-exhausted"
         );
         exhausted = true;
+        exhaustionCause = "deadline_reached";
         break;
       }
 
@@ -1481,12 +1512,14 @@ export class ProviderTurnLoop {
 
     if (isLengthTruncatedTextExecution(current)) {
       exhausted = true;
+      exhaustionCause ??= "budget_exhausted";
     }
 
     return mergeTextContinuationExecutions(executions, accumulatedVisibleText, {
       reason: "provider_length",
       attempts: continuationAttempts,
       exhausted,
+      ...(exhaustionCause === undefined ? {} : { exhaustionCause }),
       initialFinishReason: "length",
       ...(finalFinishReason === undefined ? {} : { finalFinishReason })
     });

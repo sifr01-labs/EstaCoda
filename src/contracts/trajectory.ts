@@ -1,6 +1,8 @@
 import type {
+  ExecutionCompletionFloor,
   ConfirmedActionReceipt,
   ExecutionFinalOutcomeStatus,
+  ExecutionTerminationCause,
   UncertainActionReceipt
 } from "./execution-plan.js";
 
@@ -32,6 +34,7 @@ export type TrajectoryEventKind =
   | "execution-plan-transferred"
   | "execution-plan-abandoned"
   | "execution-evidence-recorded"
+  | "execution-final-outcome-recorded"
   | "skill-route-usage"
   | "skill-route-telemetry"
   | "skill-lifecycle-changed"
@@ -67,6 +70,8 @@ export type Trajectory = {
   outcome?: {
     success: boolean;
     status?: ExecutionFinalOutcomeStatus;
+    terminationCause?: ExecutionTerminationCause;
+    completionFloor?: ExecutionCompletionFloor;
     summary: string;
     userAccepted?: boolean;
     confirmedActions?: ConfirmedActionReceipt[];

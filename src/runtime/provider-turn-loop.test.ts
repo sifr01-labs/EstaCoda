@@ -2494,6 +2494,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
     expect(harness.executePlans).toHaveBeenCalledTimes(1);
     expect(result.providerExecution?.response?.content).toContain("Authentication needs your input");
+    expect(result.terminationCause).toBe("user_input_required");
     expect(controller.current()).toBeUndefined();
   });
 
@@ -2699,6 +2700,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
       expect(harness.executePlans).not.toHaveBeenCalled();
       expect(result.providerExecution?.response?.content).toContain("emergency deadline reserve");
+      expect(result.terminationCause).toBe("deadline_reached");
     } finally {
       nowSpy.mockRestore();
     }
@@ -2744,6 +2746,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
         result: expect.objectContaining({ ok: true })
       })]);
       expect(result.providerExecution?.response?.content).toContain("emergency deadline reserve");
+      expect(result.terminationCause).toBe("deadline_reached");
     } finally {
       nowSpy.mockRestore();
     }
@@ -2980,6 +2983,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(result.providerExecution?.response?.content).toBe(
       "I stopped this browser turn because repeated observations showed no state change. I can continue after switching tabs, taking a different browser action, or receiving clarification about the next step."
     );
+    expect(result.terminationCause).toBe("browser_no_progress");
 
     const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
     const nudge = "Repeated browser observations show no semantic state change. Do not alternate snapshot, tabs, find, extract, screenshot, console, or CDP calls to inspect the same state. Take a relevant browser action; if protected input or another external condition blocks progress, record that precise blocker.";
@@ -4620,6 +4624,7 @@ describe("ProviderTurnLoop length-truncated text continuation", () => {
       reason: "provider_length",
       attempts: 3,
       exhausted: true,
+      exhaustionCause: "budget_exhausted",
       initialFinishReason: "length",
       finalFinishReason: "length"
     });
@@ -4794,10 +4799,12 @@ describe("ProviderTurnLoop length-truncated text continuation", () => {
     expect(result.iterations).toBe(1);
     expect(harness.completeSpy).toHaveBeenCalledTimes(1);
     expect(result.providerExecution?.response?.content).toBe("Partial answer");
+    expect(result.terminationCause).toBe("budget_exhausted");
     expect(result.providerExecution?.runtimeMetadata?.continuation).toEqual({
       reason: "provider_length",
       attempts: 0,
       exhausted: true,
+      exhaustionCause: "budget_exhausted",
       initialFinishReason: "length",
       finalFinishReason: "length"
     });
@@ -5648,6 +5655,7 @@ describe("ProviderTurnLoop explicit route propagation", () => {
 
     expect(result.providerExecution).toBeUndefined();
     expect(result.iterations).toBe(0);
+    expect(result.terminationCause).toBe("provider_failed");
     expect(toolPlans).toEqual([
       expect.objectContaining({
         id: "call-pending",

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelAttachment } from "../contracts/channel.js";
 import type { IntentRoute } from "../contracts/intent.js";
-import type { ExecutionPlan, ExecutionPlanReader } from "../contracts/execution-plan.js";
+import type { ExecutionPlan, ExecutionPlanReader, ExecutionTerminationCause } from "../contracts/execution-plan.js";
 import type { MemoryProvider } from "../contracts/memory.js";
 import type { ModelProfile, ProviderStreamDiagnostics } from "../contracts/provider.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
@@ -19,6 +19,7 @@ import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { buildProviderToolSchemaCatalog } from "../tools/tool-schema.js";
 import { deriveAgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
+import { diagnoseSessionExecution } from "../session/session-execution-diagnostics.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE, type SessionRecallService } from "../session/session-recall-service.js";
 import { MemoryPromptContextBuilder } from "../memory/memory-prompt-context-builder.js";
 import { MemoryRecallOrchestrator } from "../memory/memory-recall-orchestrator.js";
@@ -32,6 +33,7 @@ import { AgentLoop } from "./agent-loop.js";
 import { ExecutionPlanController } from "./execution-plan-controller.js";
 import { ExecutionPlanStore } from "./execution-plan-store.js";
 import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
+import type { ExecutionCompletionCapability } from "./execution-outcome.js";
 import type { SkillLearningManager } from "../skills/skill-learning.js";
 import type { CompactResult, SessionCompressionService } from "../prompt/session-compression-service.js";
 import type { NativeToolExecutor } from "./native-tool-executor.js";
@@ -273,6 +275,16 @@ function postmanVerification(overrides: Partial<ToolExecutionRecord> = {}): Tool
   };
 }
 
+function postmanRead(overrides: Partial<ToolExecutionRecord> = {}): ToolExecutionRecord {
+  return {
+    ...postmanVerification(),
+    executionEffect: { kind: "read", connector: { kind: "mcp", id: "postman" } },
+    toolCallId: "call-postman-read",
+    result: { ok: true, content: "read collection" },
+    ...overrides
+  };
+}
+
 function fallbackProviderExecution(content: string): ProviderExecutionResult {
   return {
     ok: true,
@@ -347,6 +359,7 @@ async function createAgentLoop(input: {
   memoryProvider?: MemoryProvider;
   trajectoryStore?: Pick<TrajectoryStore, "saveTrajectory">;
   providerExecution?: ProviderExecutionResult;
+  providerTerminationCause?: ExecutionTerminationCause;
   providerLoopToolExecutions?: ToolExecutionRecord[];
   delegatedAnswerOwnership?: PendingDelegatedAnswerOwnership;
   providerUsageCostUsd?: number;
@@ -357,6 +370,7 @@ async function createAgentLoop(input: {
   routeIntent?: IntentRoute;
   routeAttachments?: ChannelAttachment[];
   providerToolDefinitions?: ToolDefinition[];
+  executionCompletionCapabilities?: readonly ExecutionCompletionCapability[];
   nativeToolExecutions?: ToolExecutionRecord[];
   executionPlanReader?: ExecutionPlanReader;
   executionPlanController?: ExecutionPlanController;
@@ -476,6 +490,9 @@ async function createAgentLoop(input: {
         providerExecution: input.providerExecution,
         toolExecutions: providerLoopExecutions,
         iterations: input.providerExecution === undefined ? 0 : 1,
+        terminationCause: input.providerTerminationCause ?? (
+          input.providerExecution?.ok === false ? "provider_failed" : "normal"
+        ),
         ...(input.delegatedAnswerOwnership === undefined ? {} : {
           delegatedAnswerOwnership: input.delegatedAnswerOwnership
         })
@@ -513,6 +530,7 @@ async function createAgentLoop(input: {
     model,
     providerTools: providerToolSchemaCatalog.tools,
     providerToolSchemaCatalog,
+    executionCompletionCapabilities: input.executionCompletionCapabilities,
     memoryProvider: input.memoryProvider,
     memoryRecallOrchestrator,
     sessionCompressionService: input.sessionCompressionService,
@@ -1058,13 +1076,13 @@ describe("AgentLoop provider availability gating", () => {
   });
 
   it("persists conversation continuation when the assistant promises follow-up work", async () => {
-    const { loop, sessionDb, sessionId } = await createAgentLoop({
+    const { loop, sessionDb, sessionId, trajectoryRecorder } = await createAgentLoop({
       canRunProvider: true,
       runSkillPlaybook: vi.fn(async () => []),
       providerExecution: successfulProviderExecution("Let me inspect provider routing.")
     });
 
-    await loop.handle({
+    const response = await loop.handle({
       text: "why did the model switch?",
       channel: "cli",
       trustedWorkspace: true
@@ -1077,6 +1095,13 @@ describe("AgentLoop provider availability gating", () => {
       promisedAction: "inspect provider routing",
       source: "heuristic"
     });
+    expect(response.finalOutcome).toMatchObject({
+      status: "blocked",
+      terminationCause: "normal",
+      completionFloor: "none"
+    });
+    expect(agent?.metadata?.finalOutcome).toMatchObject({ status: "blocked" });
+    expect(trajectoryRecorder.snapshot().outcome).toMatchObject({ success: false, status: "blocked" });
   });
 
   it("passes open conversation continuation state into an acknowledgement turn", async () => {
@@ -1092,7 +1117,8 @@ describe("AgentLoop provider availability gating", () => {
         "I inspected the provider routing path and found the model switch comes from fallback selection after the primary route fails, with metadata persisted on the assistant message."
       ),
       toolExecutions: [],
-      iterations: 1
+      iterations: 1,
+      terminationCause: "normal"
     });
     await loop.handle({ text: "okay", channel: "cli", trustedWorkspace: true });
 
@@ -1165,7 +1191,8 @@ describe("AgentLoop provider availability gating", () => {
     vi.mocked(providerTurnLoop.run).mockResolvedValueOnce({
       providerExecution: successfulProviderExecution("I continued the existing browser and Postman work."),
       toolExecutions: [],
-      iterations: 1
+      iterations: 1,
+      terminationCause: "normal"
     });
     await loop.handle({ text: "let's do this [pasted text]", channel: "cli", trustedWorkspace: true });
 
@@ -1225,7 +1252,8 @@ describe("AgentLoop provider availability gating", () => {
     vi.mocked(providerTurnLoop.run).mockResolvedValueOnce({
       providerExecution: successfulProviderExecution("The README is already concise and does not need a rewrite for this request."),
       toolExecutions: [],
-      iterations: 1
+      iterations: 1,
+      terminationCause: "normal"
     });
     await loop.handle({ text: "Can you review the README?", channel: "cli", trustedWorkspace: true });
 
@@ -1247,13 +1275,15 @@ describe("AgentLoop provider availability gating", () => {
     vi.mocked(providerTurnLoop.run).mockResolvedValueOnce({
       providerExecution: successfulProviderExecution("The README is already concise and does not need a rewrite for this request."),
       toolExecutions: [],
-      iterations: 1
+      iterations: 1,
+      terminationCause: "normal"
     });
     await loop.handle({ text: "Can you review the README?", channel: "cli", trustedWorkspace: true });
     vi.mocked(providerTurnLoop.run).mockResolvedValueOnce({
       providerExecution: successfulProviderExecution("Okay."),
       toolExecutions: [],
-      iterations: 1
+      iterations: 1,
+      terminationCause: "normal"
     });
     await loop.handle({ text: "okay", channel: "cli", trustedWorkspace: true });
 
@@ -1276,7 +1306,8 @@ describe("AgentLoop provider availability gating", () => {
     vi.mocked(providerTurnLoop.run).mockResolvedValueOnce({
       providerExecution: successfulProviderExecution("Okay, stopping."),
       toolExecutions: [],
-      iterations: 1
+      iterations: 1,
+      terminationCause: "normal"
     });
     await loop.handle({ text: "stop", channel: "cli", trustedWorkspace: true });
 
@@ -1352,6 +1383,8 @@ describe("AgentLoop provider availability gating", () => {
     expect(trajectoryRecorder.snapshot().outcome).toEqual({
       success: false,
       status: "failed",
+      terminationCause: "normal",
+      completionFloor: "none",
       confirmedActions: [],
       uncertainActions: [],
       summary: "Turn failed."
@@ -1401,7 +1434,8 @@ describe("AgentLoop provider availability gating", () => {
     vi.mocked(providerTurnLoop.run).mockResolvedValueOnce({
       providerExecution: successfulProviderToolCallExecution(""),
       toolExecutions: [artifactExecution],
-      iterations: 1
+      iterations: 1,
+      terminationCause: "normal"
     });
     await sessionDb.appendMessage({
       sessionId,
@@ -1723,6 +1757,8 @@ describe("AgentLoop provider availability gating", () => {
 
     expect(response.finalOutcome).toEqual({
       status: "partially_completed",
+      terminationCause: "provider_failed",
+      completionFloor: "mutation_with_verification",
       confirmedActions: [expect.objectContaining({
         toolCallId: "call-postman-update",
         tool: "mcp.postman.updateCollection",
@@ -1746,6 +1782,83 @@ describe("AgentLoop provider availability gating", () => {
     expect(finalMessage?.metadata?.finalOutcome).toEqual(response.finalOutcome);
     expect(vi.mocked(learning.observeTurn)).toHaveBeenCalledWith(expect.objectContaining({
       outcomeStatus: "partial"
+    }));
+  });
+
+  it("records one truthful incomplete outcome when requested Postman mutation produced only reads", async () => {
+    const learning = { observeTurn: vi.fn(async () => undefined) } as unknown as SkillLearningManager;
+    const { loop, sessionDb, sessionId, trajectoryRecorder } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("I inspected the collection."),
+      providerLoopToolExecutions: [postmanRead()],
+      skillLearningManager: learning
+    });
+
+    const response = await loop.handle({
+      text: "Update the Postman collection.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+    const messages = await sessionDb.listMessages(sessionId);
+    const agent = [...messages].reverse().find((message) => message.role === "agent");
+    const events = await sessionDb.listEvents(sessionId);
+    const diagnosis = diagnoseSessionExecution({ sessionId, events, providerUsage: [] });
+
+    expect(response.finalOutcome).toMatchObject({
+      status: "partially_completed",
+      terminationCause: "normal",
+      completionFloor: "mutation",
+      confirmedActions: []
+    });
+    expect(agent?.metadata?.finalOutcome).toEqual(response.finalOutcome);
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "execution-final-outcome-recorded",
+      status: "partially_completed",
+      terminationCause: "normal",
+      completionFloor: "mutation"
+    }));
+    expect(diagnosis.finalOutcome).toEqual({
+      status: "partially_completed",
+      terminationCause: "normal",
+      completionFloor: "mutation"
+    });
+    expect(learning.observeTurn).toHaveBeenCalledWith(expect.objectContaining({ outcomeStatus: "partial" }));
+    expect(trajectoryRecorder.snapshot().outcome).toMatchObject({
+      success: false,
+      status: "partially_completed",
+      terminationCause: "normal",
+      completionFloor: "mutation"
+    });
+  });
+
+  it("records browser no-progress as incomplete even when its stop receipt is provider-successful", async () => {
+    const { loop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution(
+        "I stopped because repeated browser observations showed no state change."
+      ),
+      providerTerminationCause: "browser_no_progress",
+      providerLoopToolExecutions: [postmanRead()]
+    });
+
+    const response = await loop.handle({
+      text: "Update the Postman collection from the browser page.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+    const events = await sessionDb.listEvents(sessionId);
+
+    expect(response.finalOutcome).toMatchObject({
+      status: "partially_completed",
+      terminationCause: "browser_no_progress",
+      completionFloor: "mutation"
+    });
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "execution-final-outcome-recorded",
+      status: "partially_completed",
+      terminationCause: "browser_no_progress"
     }));
   });
 
@@ -1806,6 +1919,8 @@ describe("AgentLoop provider availability gating", () => {
 
     expect(response.finalOutcome).toEqual({
       status: "cancelled",
+      terminationCause: "cancelled",
+      completionFloor: "mutation",
       confirmedActions: [],
       uncertainActions: [expect.objectContaining({
         toolCallId: "call-postman-update",
@@ -1879,13 +1994,15 @@ describe("AgentLoop provider availability gating", () => {
     expect(saveTrajectory).toHaveBeenCalledTimes(1);
     expect(saveTrajectory).toHaveBeenCalledWith(expect.objectContaining({
       id: trajectoryRecorder.trajectoryId,
-      outcome: {
+      outcome: expect.objectContaining({
         success: true,
         status: "completed",
+        terminationCause: "normal",
+        completionFloor: "none",
         confirmedActions: [],
         uncertainActions: [],
         summary: "Turn completed."
-      },
+      }),
       events: expect.arrayContaining([
         expect.objectContaining({ kind: "assistant-output" }),
         expect.objectContaining({ kind: "session-end" })
@@ -1916,7 +2033,7 @@ describe("AgentLoop provider availability gating", () => {
     });
 
     const first = await loop.handle({
-      text: "inspect the current state",
+      text: "summarize the current state",
       channel: "cli",
       trustedWorkspace: true
     });
@@ -1934,7 +2051,7 @@ describe("AgentLoop provider availability gating", () => {
       ]
     };
     const second = await loop.handle({
-      text: "complete the Postman and MTN work",
+      text: "summarize the Postman and MTN work",
       channel: "cli",
       trustedWorkspace: true
     });

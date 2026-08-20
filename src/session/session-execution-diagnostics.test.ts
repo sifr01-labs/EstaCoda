@@ -219,6 +219,35 @@ describe("diagnoseSessionExecution", () => {
     expect(diagnosis.finalCause).toBe("Provider budget exhausted");
   });
 
+  it("prefers the runtime-owned final outcome over stale Plan state", () => {
+    const diagnosis = diagnoseSessionExecution({
+      sessionId: "session-browser-stop",
+      events: [{
+        kind: "execution-plan-completed",
+        plan: {
+          objective: "stale plan",
+          originTurnId: "turn-stale",
+          revision: 2,
+          status: "completed",
+          items: [{ id: "stale", content: "stale", status: "completed" }]
+        }
+      }, {
+        kind: "execution-final-outcome-recorded",
+        status: "partially_completed",
+        terminationCause: "browser_no_progress",
+        completionFloor: "mutation"
+      }],
+      providerUsage: []
+    });
+
+    expect(diagnosis.finalCause).toBe("browser_no_progress");
+    expect(diagnosis.finalOutcome).toEqual({
+      status: "partially_completed",
+      terminationCause: "browser_no_progress",
+      completionFloor: "mutation"
+    });
+  });
+
   it("caps repeated observation details while retaining the aggregate", () => {
     const events = Array.from({ length: MAX_REPEATED_OBSERVATION_GROUPS + 3 }, (_, index) => [
       evidence(`observer.${index}`, "success", "read-only-local"),

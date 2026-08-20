@@ -204,6 +204,10 @@ export type ProviderLoopRuntimeMetadata = {
     reason: "provider_length";
     attempts: number;
     exhausted: boolean;
+    exhaustionCause?: Extract<
+      import("./execution-plan.js").ExecutionTerminationCause,
+      "provider_failed" | "budget_exhausted" | "deadline_reached"
+    >;
     initialFinishReason: ProviderFinishReason;
     finalFinishReason?: ProviderFinishReason;
   };

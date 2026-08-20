@@ -159,6 +159,44 @@ describe("AgentLoopBuilder", () => {
     expect(catalogs.slice(1)).toEqual([undefined, undefined]);
   });
 
+  it("passes only trusted available execution capability facts into completion classification", async () => {
+    const captured: unknown[] = [];
+    const mutation: RegisteredTool = {
+      ...registeredTool("mcp.postman.updateCollection", ["mcp"]),
+      riskClass: "external-side-effect",
+      connector: { kind: "mcp", id: "postman" }
+    };
+    const verifier: RegisteredTool = {
+      ...registeredTool("mcp.postman.getCollection", ["mcp"]),
+      connector: { kind: "mcp", id: "postman" },
+      capabilityMetadata: {
+        verification: { verifies: ["mcp.postman.updateCollection"] }
+      }
+    };
+    const harness = await createBuilderHarness({
+      mcpTools: [mutation, verifier],
+      factories: {
+        agentLoop(options) {
+          captured.push(options.executionCompletionCapabilities);
+          return { handle: vi.fn() } as never;
+        }
+      }
+    });
+
+    await harness.build("completion-capabilities");
+
+    expect(captured[0]).toEqual(expect.arrayContaining([{
+      tool: "mcp.postman.updateCollection",
+      kind: "mutation",
+      connector: { kind: "mcp", id: "postman" }
+    }, {
+      tool: "mcp.postman.getCollection",
+      kind: "verification",
+      verifies: ["mcp.postman.updateCollection"],
+      connector: { kind: "mcp", id: "postman" }
+    }]));
+  });
+
   it("shares one read-only execution-plan projection with the root provider and agent loops", async () => {
     const providerReaders: unknown[] = [];
     const providerWorkingSets: unknown[] = [];

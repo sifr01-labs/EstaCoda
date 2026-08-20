@@ -74,8 +74,10 @@ import { renderDelegatedAnswerAcknowledgement } from "./delegated-answer-ownersh
 import { visionInputProvenanceForTurn } from "../vision/vision-egress-policy.js";
 import {
   appendExecutionReceipt,
+  deriveExecutionCompletionFloor,
   deriveExecutionFinalOutcome,
-  learningOutcomeStatus
+  learningOutcomeStatus,
+  type ExecutionCompletionCapability
 } from "./execution-outcome.js";
 import { narrowProviderToolsForTurn } from "./provider-tool-narrowing.js";
 
@@ -157,6 +159,7 @@ export type AgentLoopOptions = {
   projectContext?: ProjectContextSnapshot;
   providerTools?: OpenAICompatibleToolSchema[];
   providerToolSchemaCatalog?: ProviderToolSchemaCatalog;
+  executionCompletionCapabilities?: readonly ExecutionCompletionCapability[];
   soul?: string;
   skillsIndex?: SkillCatalogEntry[];
   skillConfig?: Record<string, Record<string, unknown>>;
@@ -246,6 +249,7 @@ export class AgentLoop {
   readonly #projectContext: ProjectContextSnapshot | undefined;
   readonly #providerTools: OpenAICompatibleToolSchema[];
   readonly #providerToolSchemaCatalog: ProviderToolSchemaCatalog | undefined;
+  readonly #executionCompletionCapabilities: readonly ExecutionCompletionCapability[];
   readonly #providerTurnLoop: ProviderTurnLoop;
   readonly #skillPlaybookRunner: SkillPlaybookRunner;
   readonly #nativeToolExecutor: NativeToolExecutor;
@@ -294,6 +298,7 @@ export class AgentLoop {
     this.#projectContext = options.projectContext;
     this.#providerTools = options.providerTools ?? [];
     this.#providerToolSchemaCatalog = options.providerToolSchemaCatalog;
+    this.#executionCompletionCapabilities = options.executionCompletionCapabilities ?? [];
     this.#providerTurnLoop = options.providerTurnLoop;
     this.#skillPlaybookRunner = options.skillPlaybookRunner;
     this.#nativeToolExecutor = options.nativeToolExecutor;
@@ -821,8 +826,14 @@ export class AgentLoop {
         toolExecutions,
         executionReceipts: this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id),
         toolPlans,
-        cancelled: true
+        cancelled: true,
+        terminationCause: "cancelled",
+        completionFloor: deriveExecutionCompletionFloor({
+          userText: effectiveText,
+          capabilities: this.#executionCompletionCapabilities
+        })
       });
+      await this.#runRecorder.recordExecutionFinalOutcome(cancellationOutcome);
       response.finalOutcome = cancellationOutcome;
       response.text = appendExecutionReceipt(
         response.text,
@@ -863,21 +874,6 @@ export class AgentLoop {
         input.onEvent
       );
     }
-    const finalOutcome = deriveExecutionFinalOutcome({
-      providerExecution: providerLoop.delegatedAnswerOwnership === undefined ? effectiveProviderExecution : undefined,
-      toolExecutions,
-      executionReceipts: this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id),
-      toolPlans,
-      emergencyDeadlineReached: providerLoop.emergencyDeadlineReached,
-      delegatedAnswerOwned: providerLoop.delegatedAnswerOwnership !== undefined
-    });
-    const skillOutcomes = await this.#runRecorder.recordSkillOutcomes({
-      selectedSkill,
-      userText: effectiveText,
-      toolExecutions,
-      toolPlans,
-      finalOutcomeStatus: learningOutcomeStatus(finalOutcome.status)
-    });
     const rawProviderContent = effectiveProviderExecution?.ok === true
       ? (effectiveProviderExecution.response?.content ?? "")
       : "";
@@ -890,6 +886,45 @@ export class AgentLoop {
           providerLoop.delegatedAnswerOwnership,
           this.#ui?.language === "ar" ? "ar" : "en"
         );
+    const providerSummary = summarizeProviderExecution({
+      configuredModel: this.#model === undefined
+        ? undefined
+        : { provider: this.#model.provider, id: this.#model.id },
+      execution: effectiveProviderExecution
+    });
+    const prospectiveAgentText = delegatedAnswerAcknowledgement ?? (
+      rawProviderContent.trim().length > 0 ? rawProviderContent : fallbackResponse.text
+    );
+    const conversationContinuationState = updateConversationContinuationState({
+      previous: previousConversationContinuationState,
+      userText: effectiveText,
+      agentText: prospectiveAgentText,
+      toolExecutions,
+      providerExecution: providerSummary
+    });
+    const completionFloor = deriveExecutionCompletionFloor({
+      userText: effectiveText,
+      capabilities: this.#executionCompletionCapabilities
+    });
+    const finalOutcome = deriveExecutionFinalOutcome({
+      providerExecution: providerLoop.delegatedAnswerOwnership === undefined ? effectiveProviderExecution : undefined,
+      toolExecutions,
+      executionReceipts: this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id),
+      toolPlans,
+      emergencyDeadlineReached: providerLoop.emergencyDeadlineReached,
+      delegatedAnswerOwned: providerLoop.delegatedAnswerOwnership !== undefined,
+      terminationCause: providerLoop.terminationCause,
+      completionFloor,
+      openContinuation: conversationContinuationState?.status === "open"
+    });
+    await this.#runRecorder.recordExecutionFinalOutcome(finalOutcome);
+    const skillOutcomes = await this.#runRecorder.recordSkillOutcomes({
+      selectedSkill,
+      userText: effectiveText,
+      toolExecutions,
+      toolPlans,
+      finalOutcomeStatus: learningOutcomeStatus(finalOutcome.status)
+    });
     const completedReceiptSupersedesStalePlanCopy =
       this.#executionPlanReader?.current() !== undefined &&
       this.#executionPlanReader.current()?.status !== "completed" &&
@@ -904,12 +939,6 @@ export class AgentLoop {
           ? "اكتملت الإجراءات المطلوبة وفق إيصالات التنفيذ الموثوقة."
           : "The requested actions completed according to authoritative execution receipts."
         : rawProviderContent);
-    const providerSummary = summarizeProviderExecution({
-      configuredModel: this.#model === undefined
-        ? undefined
-        : { provider: this.#model.provider, id: this.#model.id },
-      execution: effectiveProviderExecution
-    });
     const providerProgress = renderProviderExecutionSummary(providerSummary);
     const delegatedAnswerResponse = delegatedAnswerAcknowledgement === undefined
       ? undefined
@@ -1011,14 +1040,6 @@ export class AgentLoop {
         this.#ui?.language === "ar" ? "ar" : "en"
       ), artifacts);
     }
-    const conversationContinuationState = updateConversationContinuationState({
-      previous: previousConversationContinuationState,
-      userText: effectiveText,
-      agentText: response.text,
-      toolExecutions,
-      providerExecution: providerSummary
-    });
-
     await this.#skillLearningManager?.observeTurn({
       profileId: this.#profileId,
       sessionId: this.#currentSessionId(),
@@ -1551,6 +1572,8 @@ export class AgentLoop {
     const executionPlan = this.#executionPlanReader?.current();
     const finalOutcome = response.finalOutcome ?? {
       status: outcome.status,
+      terminationCause: outcome.status === "cancelled" ? "cancelled" as const : "normal" as const,
+      completionFloor: "none" as const,
       confirmedActions: outcome.confirmedActions ?? [],
       uncertainActions: outcome.uncertainActions ?? []
     };
@@ -1746,12 +1769,16 @@ function trajectoryOutcome(outcome: ExecutionFinalOutcome): {
   success: boolean;
   status: ExecutionFinalOutcome["status"];
   summary: string;
+  terminationCause: ExecutionFinalOutcome["terminationCause"];
+  completionFloor: ExecutionFinalOutcome["completionFloor"];
   confirmedActions: ExecutionFinalOutcome["confirmedActions"];
   uncertainActions: ExecutionFinalOutcome["uncertainActions"];
 } {
   return {
     success: outcome.status === "completed" || outcome.status === "completed_with_recovered_errors",
     status: outcome.status,
+    terminationCause: outcome.terminationCause,
+    completionFloor: outcome.completionFloor,
     summary: trajectoryOutcomeSummary(outcome.status),
     confirmedActions: outcome.confirmedActions,
     uncertainActions: outcome.uncertainActions

@@ -1,4 +1,5 @@
 import type { ProviderResponse } from "../contracts/provider.js";
+import type { ExecutionTerminationCause } from "../contracts/execution-plan.js";
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
@@ -26,6 +27,10 @@ export type ExecutionSupervisionAssessment = {
   browserObservation: BrowserObservationAssessment;
   toolLoopProgress: ToolLoopProgressAssessment;
   runtimeUserInputBlocker?: { summary: string };
+  terminationCause?: Extract<
+    ExecutionTerminationCause,
+    "browser_no_progress" | "tool_loop_no_progress" | "user_input_required"
+  >;
 };
 
 export type ExecutionSupervisionControllerOptions = {
@@ -146,7 +151,14 @@ export class ExecutionSupervisionController {
       toolLoopProgress,
       ...(this.#runtimeUserInputBlocker === undefined
         ? {}
-        : { runtimeUserInputBlocker: this.#runtimeUserInputBlocker })
+        : { runtimeUserInputBlocker: this.#runtimeUserInputBlocker }),
+      ...(this.#runtimeUserInputBlocker !== undefined
+        ? { terminationCause: "user_input_required" as const }
+        : browserObservation?.shouldStop === true
+          ? { terminationCause: "browser_no_progress" as const }
+          : toolLoopProgress.shouldStop
+            ? { terminationCause: "tool_loop_no_progress" as const }
+            : {})
     };
   }
 

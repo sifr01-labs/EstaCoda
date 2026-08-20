@@ -82,6 +82,7 @@ describe("ExecutionSupervisionController", () => {
     const assessment = supervision.assessProgress([snapshotExecution("snapshot-3", snapshot)]);
 
     expect(assessment.browserObservation).toMatchObject({ count: 3, shouldStop: true });
+    expect(assessment.terminationCause).toBe("browser_no_progress");
     expect(supervision.browserNoProgressStopReceipt(providerExecution()).response?.content).toContain(
       "repeated observations showed no state change"
     );
@@ -102,6 +103,7 @@ describe("ExecutionSupervisionController", () => {
     expect(supervision.consumePromptState().toolLoopProgressNudge).toBe(true);
     const secondRepeat = supervision.assessProgress([readExecution("read-3")]);
     expect(secondRepeat.toolLoopProgress).toMatchObject({ noProgressIterations: 2, shouldStop: true });
+    expect(secondRepeat.terminationCause).toBe("tool_loop_no_progress");
 
     const receipt = supervision.toolLoopNoProgressStopReceipt(providerExecution());
     expect(receipt.response?.content).not.toContain("Mission");
@@ -166,6 +168,7 @@ describe("ExecutionSupervisionController", () => {
     const assessment = supervision.assessProgress([]);
 
     expect(assessment.runtimeUserInputBlocker?.summary).toBe("The required authentication credentials were not provided.");
+    expect(assessment.terminationCause).toBe("user_input_required");
     const receipt = supervision.runtimeUserInputRequiredReceipt(
       providerExecution(),
       assessment.runtimeUserInputBlocker!.summary
