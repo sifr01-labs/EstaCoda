@@ -222,6 +222,11 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
         expect(toolNames).not.toContain("browser.navigate");
         expect(harness.socket.sent.some((command) => command.method === "Page.navigate")).toBe(false);
         expect(response!.text).toContain("required capability is unavailable");
+        expect(evidenceEvents).toContainEqual(expect.objectContaining({
+          tool: MUTATION_TOOL,
+          status: "unavailable",
+          visibleTurnId: expect.any(String),
+        }));
       } else {
         const preflightReady = events.find((event) =>
           (event.kind === "execution-plan-started" || event.kind === "execution-plan-updated") &&

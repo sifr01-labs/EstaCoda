@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   EXECUTION_PLAN_MAX_BLOCKER_CHARS,
   EXECUTION_PLAN_MAX_EVIDENCE_CALL_IDS,
@@ -18,6 +19,7 @@ import {
   type ExecutionPlanCompletionKind,
   type ExecutionPlanControllerApi,
   type ExecutionEvidenceCandidate,
+  type ExecutionEvidenceRecord,
   type ExecutionPlanEventSink,
   type ExecutionPlanEvidence,
   type ExecutionPlanLifecycleEvent,
@@ -84,18 +86,21 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
   readonly #record: ((event: ExecutionPlanLifecycleEvent, sink?: ExecutionPlanEventSink) => Promise<void>) | undefined;
   readonly #evidenceIndex: ExecutionEvidenceIndex;
   readonly #capabilityPreflight: ExecutionCapabilityPreflight | undefined;
+  readonly #recordEvidence: ((record: ExecutionEvidenceRecord) => Promise<void>) | undefined;
   #awaitingResumeDecision = false;
 
   constructor(
     store: ExecutionPlanStore,
     record?: (event: ExecutionPlanLifecycleEvent, sink?: ExecutionPlanEventSink) => Promise<void>,
     evidenceIndex = new ExecutionEvidenceIndex(),
-    capabilityPreflight?: ExecutionCapabilityPreflight
+    capabilityPreflight?: ExecutionCapabilityPreflight,
+    recordEvidence?: (record: ExecutionEvidenceRecord) => Promise<void>
   ) {
     this.#store = store;
     this.#record = record;
     this.#evidenceIndex = evidenceIndex;
     this.#capabilityPreflight = capabilityPreflight;
+    this.#recordEvidence = recordEvidence;
   }
 
   current(): ExecutionPlan | undefined {
@@ -157,6 +162,15 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
         items: applyCapabilityBlockers(plan.items, capabilityPreflight),
         capabilityPreflight
       });
+      for (const assessment of capabilityPreflight.assessments) {
+        if (assessment.status === "ready") continue;
+        const record = this.#evidenceIndex.recordUnavailable(
+          capabilityReceiptId(plan.originTurnId, assessment.requirementId),
+          assessment.tool,
+          plan.originTurnId
+        );
+        await this.#recordEvidence?.(record);
+      }
     }
     await this.#recordTransition({
       kind: replacesProvisional
@@ -368,6 +382,11 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
     }
     await sink?.(event);
   }
+}
+
+function capabilityReceiptId(originTurnId: string, requirementId: string): string {
+  const turnHash = createHash("sha256").update(originTurnId).digest("hex").slice(0, 16);
+  return `capability:${turnHash}:${requirementId}`;
 }
 
 function isTerminalExtension(current: ExecutionPlan, nextItems: readonly ExecutionPlanItem[]): boolean {

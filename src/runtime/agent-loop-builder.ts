@@ -330,7 +330,8 @@ export class AgentLoopBuilder {
           new ExecutionCapabilityPreflight({
             registry: toolRegistry,
             browserSourceAvailable: () => substrate.browserBackend.isAvailable()
-          })
+          }),
+          (record) => runRecorder.recordExecutionEvidence(record)
         )
       : undefined;
     const executionWorkingSet = ownsExecutionPlan

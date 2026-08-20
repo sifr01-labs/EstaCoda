@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ExecutionPlan } from "../contracts/execution-plan.js";
+import type { ExecutionEvidenceRecord, ExecutionPlan } from "../contracts/execution-plan.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { isolateLtr } from "../ui/bidi.js";
@@ -26,6 +26,7 @@ function execution(overrides: Partial<ToolExecutionRecord> = {}): ToolExecutionR
     },
     decision: "allow",
     riskClass: "external-side-effect",
+    executionEffect: { kind: "mutation", connector: { kind: "mcp", id: "postman" } },
     targetSummary: "collection token=raw-secret",
     toolCallId: "call-update",
     result: {
@@ -34,6 +35,61 @@ function execution(overrides: Partial<ToolExecutionRecord> = {}): ToolExecutionR
     },
     ...overrides
   };
+}
+
+type SuccessfulExecutionReceipt = Extract<ExecutionEvidenceRecord, { status: "success" }>;
+type UnsuccessfulExecutionReceipt = Exclude<ExecutionEvidenceRecord, { status: "success" }>;
+
+function successfulReceipt(
+  overrides: Partial<SuccessfulExecutionReceipt> = {}
+): SuccessfulExecutionReceipt {
+  return {
+    kind: "execution-evidence-recorded",
+    toolCallId: "call-update",
+    tool: "mcp.postman.updateCollection",
+    status: "success",
+    riskClass: "external-side-effect",
+    targetSummary: "Collection Alpha",
+    visibleTurnId: "turn-1",
+    executionEffect: { kind: "mutation", connector: { kind: "mcp", id: "postman" } },
+    ...overrides
+  };
+}
+
+function unsuccessfulReceipt(
+  status: UnsuccessfulExecutionReceipt["status"],
+  overrides: Partial<UnsuccessfulExecutionReceipt> = {}
+): UnsuccessfulExecutionReceipt {
+  return {
+    kind: "execution-evidence-recorded",
+    toolCallId: `call-${status}`,
+    tool: "mcp.postman.updateCollection",
+    status,
+    riskClass: "external-side-effect",
+    visibleTurnId: "turn-1",
+    executionEffect: { kind: "mutation", connector: { kind: "mcp", id: "postman" } },
+    ...overrides
+  };
+}
+
+function verificationReceipt(
+  overrides: Partial<SuccessfulExecutionReceipt> = {}
+): SuccessfulExecutionReceipt {
+  return successfulReceipt({
+    toolCallId: "call-verify",
+    tool: "mcp.postman.getCollection",
+    riskClass: "read-only-network",
+    executionEffect: {
+      kind: "verification",
+      verifies: ["mcp.postman.updateCollection"],
+      connector: { kind: "mcp", id: "postman" }
+    },
+    verifiedMutation: {
+      toolCallId: "call-update",
+      tool: "mcp.postman.updateCollection"
+    },
+    ...overrides
+  });
 }
 
 function completedPlan(): ExecutionPlan {
@@ -109,6 +165,16 @@ describe("execution outcome receipts", () => {
           toolCallId: "call-read"
         }),
         execution({ toolCallId: "call-failed", result: { ok: false, content: "failed raw body" } })
+      ],
+      executionReceipts: [
+        successfulReceipt(),
+        successfulReceipt({
+          toolCallId: "call-read",
+          tool: "mcp.postman.getCollection",
+          riskClass: "read-only-network",
+          executionEffect: { kind: "read", connector: { kind: "mcp", id: "postman" } }
+        }),
+        unsuccessfulReceipt("failed", { toolCallId: "call-failed" })
       ]
     });
 
@@ -118,6 +184,7 @@ describe("execution outcome receipts", () => {
         toolCallId: "call-update",
         tool: "mcp.postman.updateCollection",
         riskClass: "external-side-effect",
+        targetSummary: "Collection Alpha",
         status: "confirmed",
         verification: "not_verified"
       }],
@@ -128,7 +195,7 @@ describe("execution outcome receipts", () => {
     expect(JSON.stringify(outcome)).not.toContain("raw Postman collection body");
   });
 
-  it("marks an earlier mutation verified only when a later evidence-backed verification completes", () => {
+  it("marks a mutation verified only from a linked authoritative verification receipt", () => {
     const outcome = deriveExecutionFinalOutcome({
       providerExecution: {
         ok: true,
@@ -145,7 +212,7 @@ describe("execution outcome receipts", () => {
           toolCallId: "call-verify"
         })
       ],
-      executionPlan: completedPlan()
+      executionReceipts: [successfulReceipt(), verificationReceipt()]
     });
 
     expect(outcome.status).toBe("completed");
@@ -153,10 +220,85 @@ describe("execution outcome receipts", () => {
       toolCallId: "call-update",
       verification: "verified"
     })]);
+    expect(deriveExecutionFinalOutcome({
+      toolExecutions: [],
+      executionReceipts: [verificationReceipt(), successfulReceipt()]
+    }).confirmedActions[0]).toMatchObject({ verification: "not_verified" });
   });
 
-  it("does not report success while a Mission remains active after successful reads", () => {
+  it("does not let fabricated Mission evidence create a verified mutation", () => {
     const outcome = deriveExecutionFinalOutcome({
+      providerExecution: {
+        ok: true,
+        fallbackUsed: false,
+        attempts: [],
+        toolCalls: [],
+        response: { ok: true, content: "done", model: "test", provider: "openai" }
+      },
+      toolExecutions: [execution()],
+      executionReceipts: [successfulReceipt()],
+      executionPlan: completedPlan()
+    } as Parameters<typeof deriveExecutionFinalOutcome>[0]);
+
+    expect(outcome.status).toBe("completed");
+    expect(outcome.confirmedActions).toEqual([
+      expect.objectContaining({ toolCallId: "call-update", verification: "not_verified" })
+    ]);
+    expect(deriveExecutionFinalOutcome({
+      toolExecutions: [],
+      executionReceipts: [successfulReceipt({ riskClass: "read-only-network" })]
+    }).confirmedActions).toEqual([]);
+  });
+
+  it("returns partial completion when independent verification fails after a mutation", () => {
+    const outcome = deriveExecutionFinalOutcome({
+      providerExecution: {
+        ok: true,
+        fallbackUsed: false,
+        attempts: [],
+        toolCalls: [],
+        response: { ok: true, content: "verification failed", model: "test", provider: "openai" }
+      },
+      toolExecutions: [execution()],
+      executionReceipts: [
+        successfulReceipt(),
+        unsuccessfulReceipt("failed", {
+          toolCallId: "call-verify",
+          tool: "mcp.postman.getCollection",
+          riskClass: "read-only-network",
+          executionEffect: {
+            kind: "verification",
+            verifies: ["mcp.postman.updateCollection"],
+            connector: { kind: "mcp", id: "postman" }
+          }
+        })
+      ]
+    });
+
+    expect(outcome.status).toBe("partially_completed");
+    expect(outcome.confirmedActions[0]).toMatchObject({ verification: "not_verified" });
+  });
+
+  it("does not let a completed Mission hide a failed or blocked execution", () => {
+    const withCompletedPlan = (executionReceipts: ExecutionEvidenceRecord[]) => deriveExecutionFinalOutcome({
+      providerExecution: {
+        ok: true,
+        fallbackUsed: false,
+        attempts: [],
+        toolCalls: [],
+        response: { ok: true, content: "done", model: "test", provider: "openai" }
+      },
+      toolExecutions: [],
+      executionReceipts,
+      executionPlan: completedPlan()
+    } as Parameters<typeof deriveExecutionFinalOutcome>[0]);
+
+    expect(withCompletedPlan([unsuccessfulReceipt("failed")]).status).toBe("failed");
+    expect(withCompletedPlan([unsuccessfulReceipt("blocked")]).status).toBe("blocked");
+  });
+
+  it("returns the same outcome with no Mission, a completed Mission, or a stale active Mission", () => {
+    const input = {
       providerExecution: {
         ok: true,
         fallbackUsed: false,
@@ -169,49 +311,37 @@ describe("execution outcome receipts", () => {
         riskClass: "read-only-network",
         toolCallId: "call-read"
       })],
-      executionPlan: activePlan()
-    });
+      executionReceipts: [successfulReceipt({
+        toolCallId: "call-read",
+        tool: "mcp.postman.getCollection",
+        riskClass: "read-only-network",
+        executionEffect: { kind: "read", connector: { kind: "mcp", id: "postman" } }
+      })]
+    };
+    const withLegacyPlan = (executionPlan: ExecutionPlan) => deriveExecutionFinalOutcome({
+      ...input,
+      executionPlan
+    } as Parameters<typeof deriveExecutionFinalOutcome>[0]);
 
-    expect(outcome.status).toBe("partially_completed");
+    expect(deriveExecutionFinalOutcome(input).status).toBe("completed");
+    expect(withLegacyPlan(completedPlan())).toEqual(deriveExecutionFinalOutcome(input));
+    expect(withLegacyPlan(activePlan())).toEqual(deriveExecutionFinalOutcome(input));
   });
 
-  it("reports a blocked Mission with no completed items as blocked despite successful exploration", () => {
-    const plan = activePlan();
-    plan.status = "blocked";
-    plan.items[0] = {
-      ...plan.items[0]!,
-      status: "blocked",
-      blocker: { kind: "external_state", summary: "Postman authentication expired." }
-    };
-
+  it("reports an authoritative blocked execution with no completed work as blocked", () => {
     const outcome = deriveExecutionFinalOutcome({
-      toolExecutions: [execution({
-        tool: { ...execution().tool, name: "mcp.postman.getCollection", riskClass: "read-only-network" },
-        riskClass: "read-only-network",
-        toolCallId: "call-read"
-      })],
-      executionPlan: plan
+      toolExecutions: [],
+      executionReceipts: [unsuccessfulReceipt("blocked")]
     });
 
     expect(outcome.status).toBe("blocked");
   });
 
-  it("reports a blocked Mission with a completed item as partially completed", () => {
-    const plan = activePlan();
-    plan.status = "blocked";
-    plan.items[0] = {
-      ...plan.items[0]!,
-      status: "completed",
-      completionKind: "reasoning"
-    };
-    plan.items[1] = {
-      ...plan.items[1]!,
-      status: "blocked",
-      blocker: { kind: "external_state", summary: "Postman authentication expired." }
-    };
-
-    expect(deriveExecutionFinalOutcome({ toolExecutions: [], executionPlan: plan }).status)
-      .toBe("partially_completed");
+  it("reports an authoritative blocker after successful work as partially completed", () => {
+    expect(deriveExecutionFinalOutcome({
+      toolExecutions: [],
+      executionReceipts: [successfulReceipt(), unsuccessfulReceipt("blocked")]
+    }).status).toBe("partially_completed");
   });
 
   it("keeps a planned consequential call without a result uncertain and non-successful", () => {
@@ -224,6 +354,7 @@ describe("execution outcome receipts", () => {
         response: { ok: true, content: "done", model: "test", provider: "openai" }
       },
       toolExecutions: [],
+      executionReceipts: [],
       toolPlans: [toolPlan()]
     });
 
@@ -239,14 +370,15 @@ describe("execution outcome receipts", () => {
     });
   });
 
-  it("does not let delegated answer ownership bypass an active Mission", () => {
+  it("does not let stale Mission state downgrade delegated answer ownership", () => {
     const outcome = deriveExecutionFinalOutcome({
       toolExecutions: [],
+      executionReceipts: [],
       executionPlan: activePlan(),
       delegatedAnswerOwned: true
-    });
+    } as Parameters<typeof deriveExecutionFinalOutcome>[0]);
 
-    expect(outcome.status).toBe("partially_completed");
+    expect(outcome.status).toBe("completed");
   });
 
   it("classifies successful recovery after an intermediate failure", () => {
@@ -270,6 +402,10 @@ describe("execution outcome receipts", () => {
           riskClass: "external-side-effect",
           toolCallId: "call-generated"
         })
+      ],
+      executionReceipts: [
+        unsuccessfulReceipt("failed", { toolCallId: "call-python-failed", tool: "python.exec" }),
+        successfulReceipt({ toolCallId: "call-generated", tool: "image.generate" })
       ]
     });
 
@@ -287,6 +423,7 @@ describe("execution outcome receipts", () => {
         response: { ok: true, content: "Emergency receipt", model: "test", provider: "openai" }
       },
       toolExecutions: [],
+      executionReceipts: [],
       emergencyDeadlineReached: true
     });
 
@@ -311,6 +448,10 @@ describe("execution outcome receipts", () => {
           toolCallId: "call-python-failed",
           result: { ok: false, content: "syntax error" }
         })
+      ],
+      executionReceipts: [
+        successfulReceipt({ toolCallId: "call-generated" }),
+        unsuccessfulReceipt("failed", { toolCallId: "call-python-failed", tool: "python.exec" })
       ]
     });
 
@@ -320,7 +461,8 @@ describe("execution outcome receipts", () => {
   it("keeps a dispatched consequential action uncertain when no result exists", () => {
     const outcome = deriveExecutionFinalOutcome({
       cancelled: true,
-      toolExecutions: [execution({ result: undefined })]
+      toolExecutions: [execution({ result: undefined })],
+      executionReceipts: [unsuccessfulReceipt("failed")]
     });
 
     expect(outcome).toEqual({
@@ -345,7 +487,8 @@ describe("execution outcome receipts", () => {
           content: "Tool execution cancelled.",
           metadata: { reason: "cancelled" }
         }
-      })]
+      })],
+      executionReceipts: [unsuccessfulReceipt("failed")]
     });
 
     expect(outcome.uncertainActions).toEqual([
@@ -356,7 +499,8 @@ describe("execution outcome receipts", () => {
   it("renders Arabic receipt labels with isolated technical tokens", () => {
     const outcome = deriveExecutionFinalOutcome({
       providerExecution: { ok: false, fallbackUsed: false, attempts: [], toolCalls: [] },
-      toolExecutions: [execution()]
+      toolExecutions: [execution()],
+      executionReceipts: [successfulReceipt()]
     });
     const rendered = appendExecutionReceipt("تعذر إكمال الملخص.", outcome, "ar");
 

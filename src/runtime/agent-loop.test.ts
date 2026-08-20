@@ -31,6 +31,7 @@ import { RunRecorder } from "./run-recorder.js";
 import { AgentLoop } from "./agent-loop.js";
 import { ExecutionPlanController } from "./execution-plan-controller.js";
 import { ExecutionPlanStore } from "./execution-plan-store.js";
+import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 import type { SkillLearningManager } from "../skills/skill-learning.js";
 import type { CompactResult, SessionCompressionService } from "../prompt/session-compression-service.js";
 import type { NativeToolExecutor } from "./native-tool-executor.js";
@@ -239,9 +240,35 @@ function postmanMutation(overrides: Partial<ToolExecutionRecord> = {}): ToolExec
     input: { apiKey: "raw-postman-secret", collection: "private collection contents" },
     decision: "allow",
     riskClass: "external-side-effect",
+    executionEffect: { kind: "mutation", connector: { kind: "mcp", id: "postman" } },
     targetSummary: "collection token=raw-postman-secret",
     toolCallId: "call-postman-update",
     result: { ok: true, content: "private Postman collection response" },
+    ...overrides
+  };
+}
+
+function postmanVerification(overrides: Partial<ToolExecutionRecord> = {}): ToolExecutionRecord {
+  return {
+    tool: {
+      name: "mcp.postman.getCollection",
+      description: "Read Postman",
+      inputSchema: {},
+      riskClass: "read-only-network",
+      toolsets: ["mcp"],
+      progressLabel: "reading Postman",
+      maxResultSizeChars: 1_000
+    },
+    input: {},
+    decision: "allow",
+    riskClass: "read-only-network",
+    executionEffect: {
+      kind: "verification",
+      verifies: ["mcp.postman.updateCollection"],
+      connector: { kind: "mcp", id: "postman" }
+    },
+    toolCallId: "call-postman-verify",
+    result: { ok: true, content: "verified" },
     ...overrides
   };
 }
@@ -333,6 +360,7 @@ async function createAgentLoop(input: {
   nativeToolExecutions?: ToolExecutionRecord[];
   executionPlanReader?: ExecutionPlanReader;
   executionPlanController?: ExecutionPlanController;
+  executionPlanIncomplete?: boolean;
 }) {
   const sessionDb = new InMemorySessionDB();
   const sessionId = `agent-loop-test-${Date.now()}-${Math.random()}`;
@@ -394,6 +422,7 @@ async function createAgentLoop(input: {
   const providerToolSchemaCatalog = buildProviderToolSchemaCatalog({
     tools: input.providerToolDefinitions ?? []
   });
+  const executionEvidenceIndex = new ExecutionEvidenceIndex();
 
   const providerTurnLoop = {
     canRunProvider: vi.fn(() => input.canRunProvider),
@@ -401,6 +430,17 @@ async function createAgentLoop(input: {
     lastActualPromptTokens: vi.fn(() => 88),
     run: vi.fn(async () => {
       input.onProviderTurnRun?.();
+      const providerLoopExecutions = input.providerLoopToolExecutions ?? [];
+      if (providerLoopExecutions.length > 0) {
+        const currentSessionId = sessionRuntimeContext.currentSessionId();
+        const visibleTurn = [...await sessionDb.listMessages(currentSessionId)].reverse()
+          .find((message) => message.role === "user");
+        if (visibleTurn === undefined) throw new Error("Expected a visible user turn before provider execution.");
+        for (const execution of providerLoopExecutions) {
+          const receipt = executionEvidenceIndex.record(execution, visibleTurn.id);
+          if (receipt !== undefined) await runRecorder.recordExecutionEvidence(receipt);
+        }
+      }
       if (input.providerUsageCostUsd !== undefined) {
         const currentSessionId = sessionRuntimeContext.currentSessionId();
         const visibleTurn = [...await sessionDb.listMessages(currentSessionId)].reverse()
@@ -435,8 +475,9 @@ async function createAgentLoop(input: {
       }
       return {
         providerExecution: input.providerExecution,
-        toolExecutions: input.providerLoopToolExecutions ?? [],
+        toolExecutions: providerLoopExecutions,
         iterations: input.providerExecution === undefined ? 0 : 1,
+        ...(input.executionPlanIncomplete === true ? { executionPlanIncomplete: true } : {}),
         ...(input.delegatedAnswerOwnership === undefined ? {} : {
           delegatedAnswerOwnership: input.delegatedAnswerOwnership
         })
@@ -483,7 +524,8 @@ async function createAgentLoop(input: {
     skillRouteShadowReranker: input.skillRouteShadowReranker,
     agentEvolutionPolicy: input.agentEvolutionPolicy ?? deriveAgentEvolutionPolicy("suggest"),
     executionPlanReader: input.executionPlanController ?? input.executionPlanReader,
-    executionPlanController: input.executionPlanController
+    executionPlanController: input.executionPlanController,
+    executionEvidenceIndex
   });
 
   return {
@@ -1570,6 +1612,43 @@ describe("AgentLoop provider availability gating", () => {
     }));
   });
 
+  it("does not render Mission-incomplete copy after authoritative mutation verification", async () => {
+    const stalePlan: ExecutionPlan = {
+      objective: "Update and verify Postman",
+      originTurnId: "stale-turn",
+      revision: 1,
+      status: "active",
+      items: [
+        { id: "update", content: "Update Postman", status: "in_progress" },
+        { id: "verify", content: "Verify Postman", status: "pending" }
+      ]
+    };
+    const { loop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("The Mission is incomplete."),
+      providerLoopToolExecutions: [postmanMutation(), postmanVerification()],
+      executionPlanIncomplete: true,
+      executionPlanReader: { current: () => stalePlan }
+    });
+
+    const response = await loop.handle({
+      text: "Update the Postman collection and verify it.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(response.finalOutcome).toMatchObject({
+      status: "completed",
+      confirmedActions: [{
+        toolCallId: "call-postman-update",
+        verification: "verified"
+      }]
+    });
+    expect(response.text).toContain("authoritative execution receipts");
+    expect(response.text).not.toContain("Mission is incomplete");
+  });
+
   it("records an uncertain receipt when cancellation interrupts a consequential execution", async () => {
     const controller = new AbortController();
     const learning = { observeTurn: vi.fn(async () => undefined) } as unknown as SkillLearningManager;
@@ -1678,7 +1757,7 @@ describe("AgentLoop provider availability gating", () => {
     }));
   });
 
-  it("clears a prior successful trajectory outcome before later incomplete Mission work", async () => {
+  it("clears a prior trajectory outcome without letting a stale Mission downgrade the next turn", async () => {
     const savedTrajectories: Array<ReturnType<TrajectoryRecorder["snapshot"]>> = [];
     const saveTrajectory = vi.fn(async (trajectory: ReturnType<TrajectoryRecorder["snapshot"]>) => {
       savedTrajectories.push(structuredClone(trajectory));
@@ -1725,10 +1804,10 @@ describe("AgentLoop provider availability gating", () => {
     });
 
     expect(outcomeObservedDuringSecondTurn).toBeUndefined();
-    expect(second.finalOutcome?.status).toBe("partially_completed");
+    expect(second.finalOutcome?.status).toBe("completed");
     expect(savedTrajectories.at(-1)?.outcome).toMatchObject({
-      success: false,
-      status: "partially_completed"
+      success: true,
+      status: "completed"
     });
   });
 

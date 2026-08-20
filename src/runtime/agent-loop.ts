@@ -177,7 +177,7 @@ export type AgentLoopOptions = {
   taskExecution?: ProviderUsageTaskAttribution;
   executionPlanReader?: ExecutionPlanReader;
   executionPlanController?: ExecutionPlanController;
-  executionEvidenceIndex?: ExecutionEvidenceIndex;
+  executionEvidenceIndex: ExecutionEvidenceIndex;
 };
 
 export type AgentLoopBudgets = {
@@ -261,7 +261,7 @@ export class AgentLoop {
   readonly #taskExecution: ProviderUsageTaskAttribution | undefined;
   readonly #executionPlanReader: ExecutionPlanReader | undefined;
   readonly #executionPlanController: ExecutionPlanController | undefined;
-  readonly #executionEvidenceIndex: ExecutionEvidenceIndex | undefined;
+  readonly #executionEvidenceIndex: ExecutionEvidenceIndex;
 
   constructor(options: AgentLoopOptions) {
     this.#responseLabel = options.responseLabel;
@@ -674,12 +674,10 @@ export class AgentLoop {
       ...deterministicNativeTools.executions,
       ...skillPlaybookToolExecutions
     ];
-    if (this.#executionEvidenceIndex !== undefined) {
-      for (const execution of toolExecutions) {
-        const evidenceRecord = this.#executionEvidenceIndex.record(execution, visibleTurn.id);
-        if (evidenceRecord !== undefined) {
-          await this.#runRecorder.recordExecutionEvidence(evidenceRecord);
-        }
+    for (const execution of toolExecutions) {
+      const evidenceRecord = this.#executionEvidenceIndex.record(execution, visibleTurn.id);
+      if (evidenceRecord !== undefined) {
+        await this.#runRecorder.recordExecutionEvidence(evidenceRecord);
       }
     }
     await this.#emitLiveContextUsageEstimate({
@@ -818,8 +816,8 @@ export class AgentLoop {
       const cancellationOutcome = deriveExecutionFinalOutcome({
         providerExecution: effectiveProviderExecution,
         toolExecutions,
+        executionReceipts: this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id),
         toolPlans,
-        executionPlan: this.#executionPlanReader?.current(),
         cancelled: true
       });
       response.finalOutcome = cancellationOutcome;
@@ -865,9 +863,8 @@ export class AgentLoop {
     const finalOutcome = deriveExecutionFinalOutcome({
       providerExecution: providerLoop.delegatedAnswerOwnership === undefined ? effectiveProviderExecution : undefined,
       toolExecutions,
+      executionReceipts: this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id),
       toolPlans,
-      executionPlan: this.#executionPlanReader?.current(),
-      executionPlanIncomplete: providerLoop.executionPlanIncomplete,
       emergencyDeadlineReached: providerLoop.emergencyDeadlineReached,
       delegatedAnswerOwned: providerLoop.delegatedAnswerOwnership !== undefined
     });
@@ -890,9 +887,18 @@ export class AgentLoop {
           providerLoop.delegatedAnswerOwnership,
           this.#ui?.language === "ar" ? "ar" : "en"
         );
+    const completedReceiptSupersedesMissionState =
+      providerLoop.executionPlanIncomplete === true &&
+      (finalOutcome.status === "completed" || finalOutcome.status === "completed_with_recovered_errors") &&
+      finalOutcome.confirmedActions.length > 0 &&
+      finalOutcome.confirmedActions.every((receipt) => receipt.verification === "verified");
     const displayText = delegatedAnswerAcknowledgement ?? (providerReturnedEmptyContent
       ? "I completed the requested actions but did not produce any visible output."
-      : rawProviderContent);
+      : completedReceiptSupersedesMissionState
+        ? this.#ui?.language === "ar"
+          ? "اكتملت الإجراءات المطلوبة وفق إيصالات التنفيذ الموثوقة."
+          : "The requested actions completed according to authoritative execution receipts."
+        : rawProviderContent);
     const providerSummary = summarizeProviderExecution({
       configuredModel: this.#model === undefined
         ? undefined

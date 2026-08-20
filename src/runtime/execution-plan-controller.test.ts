@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EXECUTION_PLAN_MAX_ITEMS } from "../contracts/execution-plan.js";
+import { EXECUTION_PLAN_MAX_ITEMS, type ExecutionEvidenceRecord } from "../contracts/execution-plan.js";
 import {
   ExecutionPlanController,
   ExecutionPlanValidationError,
@@ -303,11 +303,13 @@ describe("ExecutionPlanController", () => {
         run: async () => ({ ok: true, content: "unused" })
       });
     }
+    const receipts: ExecutionEvidenceRecord[] = [];
     const target = new ExecutionPlanController(
       new ExecutionPlanStore(),
       undefined,
       evidenceIndex(),
-      new ExecutionCapabilityPreflight({ registry })
+      new ExecutionCapabilityPreflight({ registry }),
+      async (record) => { receipts.push(record); }
     );
     const events: string[] = [];
 
@@ -337,6 +339,13 @@ describe("ExecutionPlanController", () => {
       })
     ]);
     expect(events).toEqual(["execution-plan-blocked"]);
+    expect(receipts).toEqual([{
+      kind: "execution-evidence-recorded",
+      toolCallId: expect.stringMatching(/^capability:[0-9a-f]{16}:destination-write$/u),
+      tool: "mcp.target.update",
+      status: "unavailable",
+      visibleTurnId: "turn-blocked"
+    }]);
   });
 
   it("rejects tampered runtime capability resolutions during hydration", () => {

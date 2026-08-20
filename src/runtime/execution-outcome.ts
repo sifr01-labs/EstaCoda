@@ -1,8 +1,8 @@
 import type {
   ConfirmedActionReceipt,
+  ExecutionEvidenceRecord,
   ExecutionFinalOutcome,
   ExecutionFinalOutcomeStatus,
-  ExecutionPlan,
   UncertainActionReceipt
 } from "../contracts/execution-plan.js";
 import type { SkillRouteFinalOutcomeStatus } from "../contracts/skill.js";
@@ -21,27 +21,22 @@ const RECEIPT_RISK_CLASSES = new Set<ToolRiskClass>([
   "sandbox-escape"
 ]);
 const RECEIPT_INELIGIBLE_TOOLS = new Set(["plan", "delegate_task"]);
-const VERIFICATION_ITEM_PATTERN = /\b(?:verify|verification|validate|validation|check|read[ -]?back|confirm)\b|(?:تحقق|التحقق|تأكيد|راجع|مراجعة)/iu;
 
 export function deriveExecutionFinalOutcome(input: {
   providerExecution?: ProviderExecutionResult;
   toolExecutions: readonly ToolExecutionRecord[];
+  executionReceipts: readonly ExecutionEvidenceRecord[];
   toolPlans?: readonly ToolCallPlan[];
-  executionPlan?: ExecutionPlan;
-  executionPlanIncomplete?: boolean;
   emergencyDeadlineReached?: boolean;
   delegatedAnswerOwned?: boolean;
   cancelled?: boolean;
 }): ExecutionFinalOutcome {
-  const verification = planVerificationStatus(input.executionPlan);
-  const verifiedCallIds = verifiedActionCallIds(input.executionPlan);
-  const confirmedActions = confirmedActionReceipts(input.toolExecutions, verifiedCallIds);
+  const confirmedActions = confirmedActionReceipts(input.executionReceipts);
   const uncertainActions = uncertainActionReceipts(input.toolExecutions, input.toolPlans ?? []);
   const status = classifyFinalStatus({
     ...input,
     confirmedActions,
-    uncertainActions,
-    verificationMissing: verification === "required_but_incomplete"
+    uncertainActions
   });
   return { status, confirmedActions, uncertainActions };
 }
@@ -79,19 +74,23 @@ export function appendExecutionReceipt(
 }
 
 function confirmedActionReceipts(
-  executions: readonly ToolExecutionRecord[],
-  verifiedCallIds: ReadonlySet<string>
+  executionReceipts: readonly ExecutionEvidenceRecord[]
 ): ConfirmedActionReceipt[] {
+  const verifiedCallIds = verifiedMutationCallIds(executionReceipts);
   const receipts = new Map<string, ConfirmedActionReceipt>();
-  for (const execution of executions) {
-    if (!isReceiptEligible(execution) || execution.result?.ok !== true) continue;
+  for (const execution of executionReceipts) {
+    if (
+      execution.status !== "success" ||
+      execution.executionEffect?.kind !== "mutation" ||
+      !RECEIPT_RISK_CLASSES.has(execution.riskClass) ||
+      RECEIPT_INELIGIBLE_TOOLS.has(execution.tool)
+    ) continue;
     const receipt = confirmedReceipt({
       toolCallId: execution.toolCallId,
-      tool: execution.tool.name,
+      tool: execution.tool,
       riskClass: execution.riskClass,
-      verification: execution.toolCallId !== undefined && verifiedCallIds.has(execution.toolCallId)
-        ? "verified"
-        : "not_verified"
+      targetSummary: execution.targetSummary,
+      verification: verifiedCallIds.has(execution.toolCallId) ? "verified" : "not_verified"
     });
     receipts.set(receiptKey(receipt, receipts.size), receipt);
   }
@@ -149,12 +148,14 @@ function confirmedReceipt(input: {
   toolCallId?: string;
   tool: string;
   riskClass: ToolRiskClass;
+  targetSummary?: string;
   verification: ConfirmedActionReceipt["verification"];
 }): ConfirmedActionReceipt {
   return {
     ...(input.toolCallId === undefined ? {} : { toolCallId: input.toolCallId }),
     tool: input.tool,
     riskClass: input.riskClass,
+    ...(input.targetSummary === undefined ? {} : { targetSummary: input.targetSummary }),
     status: "confirmed",
     verification: input.verification
   };
@@ -173,93 +174,82 @@ function receiptKey(
   return receipt.toolCallId ?? `${receipt.tool}:${receipt.targetSummary ?? ""}:${fallbackIndex}`;
 }
 
-type PlanVerificationStatus = "not_requested" | "required_but_incomplete" | "verified";
-
-function planVerificationStatus(plan: ExecutionPlan | undefined): PlanVerificationStatus {
-  const verificationItems = plan?.items.filter((item) => VERIFICATION_ITEM_PATTERN.test(item.content)) ?? [];
-  if (verificationItems.length === 0) return "not_requested";
-  return verificationItems.every((item) =>
-    item.status === "completed" &&
-    item.completionKind !== "reasoning" &&
-    (item.evidence?.length ?? 0) > 0
-  ) ? "verified" : "required_but_incomplete";
-}
-
-function verifiedActionCallIds(plan: ExecutionPlan | undefined): ReadonlySet<string> {
+function verifiedMutationCallIds(receipts: readonly ExecutionEvidenceRecord[]): ReadonlySet<string> {
+  const mutations = new Map<string, Extract<ExecutionEvidenceRecord, { status: "success" }>>();
   const verified = new Set<string>();
-  const planItems = plan?.items ?? [];
-  for (const [verificationIndex, item] of planItems.entries()) {
-    if (!isCompletedVerificationItem(item)) continue;
-    for (const prior of planItems.slice(0, verificationIndex)) {
-      for (const evidence of prior.evidence ?? []) verified.add(evidence.toolCallId);
+  for (const receipt of receipts) {
+    if (
+      receipt.status === "success" &&
+      receipt.executionEffect?.kind === "mutation" &&
+      RECEIPT_RISK_CLASSES.has(receipt.riskClass) &&
+      !RECEIPT_INELIGIBLE_TOOLS.has(receipt.tool)
+    ) {
+      mutations.set(receipt.toolCallId, receipt);
+      continue;
     }
+    if (
+      receipt.status !== "success" ||
+      receipt.executionEffect?.kind !== "verification" ||
+      receipt.verifiedMutation === undefined
+    ) continue;
+    const mutation = mutations.get(receipt.verifiedMutation.toolCallId);
+    if (
+      mutation === undefined ||
+      mutation.tool !== receipt.verifiedMutation.tool ||
+      !receipt.executionEffect.verifies.includes(mutation.tool) ||
+      !sameVisibleTurn(receipt.visibleTurnId, mutation.visibleTurnId)
+    ) continue;
+    verified.add(mutation.toolCallId);
   }
   return verified;
 }
 
-function isCompletedVerificationItem(item: ExecutionPlan["items"][number]): boolean {
-  return VERIFICATION_ITEM_PATTERN.test(item.content) &&
-    item.status === "completed" &&
-    item.completionKind !== "reasoning" &&
-    (item.evidence?.length ?? 0) > 0;
+function sameVisibleTurn(left: string | undefined, right: string | undefined): boolean {
+  return left === undefined || right === undefined || left === right;
 }
 
 function classifyFinalStatus(input: {
   providerExecution?: ProviderExecutionResult;
-  toolExecutions: readonly ToolExecutionRecord[];
+  executionReceipts: readonly ExecutionEvidenceRecord[];
   toolPlans?: readonly ToolCallPlan[];
-  executionPlan?: ExecutionPlan;
-  executionPlanIncomplete?: boolean;
   emergencyDeadlineReached?: boolean;
   delegatedAnswerOwned?: boolean;
   cancelled?: boolean;
   confirmedActions: readonly ConfirmedActionReceipt[];
   uncertainActions: readonly UncertainActionReceipt[];
-  verificationMissing: boolean;
 }): ExecutionFinalOutcomeStatus {
   if (input.cancelled === true) return "cancelled";
 
   const successfulIndexes: number[] = [];
   const failedIndexes: number[] = [];
-  for (const [index, execution] of input.toolExecutions.entries()) {
-    if (execution.result?.ok === true) successfulIndexes.push(index);
-    if (execution.decision === "allow" && execution.result?.ok === false) failedIndexes.push(index);
+  const authoritativeReceipts = input.executionReceipts.filter((receipt) => receipt.status !== "ineligible");
+  for (const [index, receipt] of authoritativeReceipts.entries()) {
+    if (receipt.status === "success") successfulIndexes.push(index);
+    if (receipt.status === "failed") failedIndexes.push(index);
   }
   const succeeded = successfulIndexes.length;
   const failed = failedIndexes.length;
-  const blocked = input.toolExecutions.some((execution) => execution.decision !== "allow");
-  const hasCompletedPlanWork = input.executionPlan?.items.some((item) => item.status === "completed") === true;
-  const hasConfirmedWork = input.confirmedActions.length > 0 || hasCompletedPlanWork || (
-    input.executionPlan === undefined && succeeded > 0
+  const blocked = authoritativeReceipts.some((receipt) =>
+    receipt.status === "blocked" || receipt.status === "unavailable"
   );
-  const planIncomplete = input.executionPlanIncomplete === true || input.executionPlan?.status === "active";
+  const hasConfirmedWork = input.confirmedActions.length > 0 || succeeded > 0;
   const unresolvedToolPlans = (input.toolPlans ?? []).some(isUnresolvedPlan);
 
   if (
     input.delegatedAnswerOwned === true &&
-    input.executionPlanIncomplete !== true &&
     input.emergencyDeadlineReached !== true &&
     input.uncertainActions.length === 0 &&
     !unresolvedToolPlans &&
-    (
-      input.executionPlan === undefined ||
-      input.executionPlan.status === "completed" ||
-      input.executionPlan.status === "transferred" ||
-      input.executionPlan.status === "abandoned"
-    )
+    !blocked &&
+    failed === 0
   ) {
     return "completed";
   }
 
-  if (input.executionPlan?.status === "blocked") {
-    return hasConfirmedWork ? "partially_completed" : "blocked";
-  }
   if (
     input.emergencyDeadlineReached === true ||
     input.uncertainActions.length > 0 ||
-    unresolvedToolPlans ||
-    input.verificationMissing ||
-    planIncomplete
+    unresolvedToolPlans
   ) {
     return "partially_completed";
   }
