@@ -386,7 +386,6 @@ async function runBasicProviderTurn(
     attachments: callbacks.attachments,
     memoryPromptContext: undefined,
     providerTools: callbacks.providerTools ?? [],
-    providerToolSchemaCatalog: callbacks.providerToolSchemaCatalog,
     fallbackText: "",
     toolPlans: callbacks.toolPlans ?? [],
     trustedWorkspace: false,
@@ -665,7 +664,7 @@ async function createPostToolNudgeHarness(input: {
   finalizationReserveMs?: number;
   taskExecution?: ProviderTurnLoopOptions["taskExecution"];
   executionPlanReader?: ProviderTurnLoopOptions["executionPlanReader"];
-  executionPlanController?: ProviderTurnLoopOptions["executionPlanController"];
+  executionPlanController?: ExecutionPlanController;
   executionWorkingSet?: ProviderTurnLoopOptions["executionWorkingSet"];
   browserSessionLease?: ProviderTurnLoopOptions["browserSessionLease"];
   browserBackend?: BrowserBackend;
@@ -764,8 +763,7 @@ async function createPostToolNudgeHarness(input: {
       finalizationReserveMs: input.finalizationReserveMs ?? 0
     },
     taskExecution: input.taskExecution,
-    executionPlanReader: input.executionPlanReader,
-    executionPlanController: input.executionPlanController,
+    executionPlanReader: input.executionPlanController ?? input.executionPlanReader,
     executionWorkingSet: input.executionWorkingSet,
     browserSessionLease: input.browserSessionLease,
     browserBackend: input.browserBackend,
@@ -1750,7 +1748,6 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
     expect(harness.completeSpy).toHaveBeenCalledTimes(1);
     expect(requests.filter((request) => JSON.stringify(request.messages).includes(recoveryText))).toHaveLength(0);
-    expect(result.executionPlanIncomplete).toBeUndefined();
     expect(result.providerExecution?.response?.content).toBe("Narration 1");
   });
 
@@ -1780,7 +1777,6 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(harness.completeSpy).toHaveBeenCalledTimes(7);
     expect(harness.executePlans).toHaveBeenCalledTimes(7);
     expect(requests.filter((request) => JSON.stringify(request.messages).includes(nudgeText))).toHaveLength(1);
-    expect(result.executionPlanIncomplete).toBeUndefined();
     expect(result.providerExecution?.response?.content).toContain("foreground tool loop stopped");
     expect(result.providerExecution?.response?.content).toContain("independent of any plan");
     expect(events).toEqual(expect.arrayContaining([
@@ -2094,12 +2090,13 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     }
   );
 
-  it("starts a Mission without restricting the first MTN and Postman tool batch", async () => {
+  it("executes a provider-authored plan with the first substantive tool batch", async () => {
     const planStore = new ExecutionPlanStore();
     const controller = new ExecutionPlanController(planStore);
     const firstCalls = [
       providerToolCall("call-plan", JSON.stringify({
-        operation: "merge",
+        operation: "write",
+        objective: "Inspect MTN products and update Postman",
         items: [
           { id: "execute", content: "Inspect MTN product details", status: "in_progress" },
           { id: "update", content: "Update Postman", status: "pending" },
@@ -2132,13 +2129,14 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       maxProviderIterations: 3,
       onExecutePlans: ({ stepInput }) => {
         if (stepInput.providerExecution?.toolCalls.some((call) => call.name === "plan")) {
-          return controller.merge({
+          return controller.write({
+            objective: "Inspect MTN products and update Postman",
             items: [
               { id: "execute", content: "Inspect MTN product details", status: "in_progress" },
               { id: "update", content: "Update Postman", status: "pending" },
               { id: "verify", content: "Verify the collection", status: "pending" }
             ]
-          }).then(() => undefined);
+          }, "visible-turn").then(() => undefined);
         }
       }
     });
@@ -2161,11 +2159,11 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       "browser.snapshot",
       "mcp.postman.getCollection"
     ]);
-    expect(JSON.stringify(firstRequest.messages)).toContain("Active execution plan");
+    expect(JSON.stringify(firstRequest.messages)).not.toContain("Active execution plan");
     expect(JSON.stringify(firstRequest.messages)).not.toContain("Before doing anything else");
   });
 
-  it("adds ready Mission requirements to the next provider iteration without a new user turn", async () => {
+  it("does not widen the next provider inventory from Mission requirements", async () => {
     const registry = new ToolRegistry();
     const requirementTools: RegisteredTool[] = [
       {
@@ -2279,16 +2277,12 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       "plan",
       "mcp_target_read",
       "mcp_target_update",
-      "mcp_target_verify",
-      "browser_snapshot"
+      "mcp_target_verify"
     ]);
     expect(controller.current()?.capabilityPreflight?.status).toBe("ready");
-    expect(harness.executePlans.mock.calls.flatMap(([call]) =>
-      call.providerExecution?.toolCalls.map((toolCall) => toolCall.name) ?? []
-    )).toContain("browser.snapshot");
   });
 
-  it("repairs a missing-evidence Mission update in one bounded provider iteration", async () => {
+  it("returns a missing-evidence plan failure through standard tool-result continuation", async () => {
     const evidence = new ExecutionEvidenceIndex();
     const controller = new ExecutionPlanController(new ExecutionPlanStore(), undefined, evidence);
     await controller.write({
@@ -2371,7 +2365,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     });
   });
 
-  it("stops after plan preflight and before browser work when a destination capability is missing", async () => {
+  it("does not let plan preflight govern runtime continuation", async () => {
     const registry = new ToolRegistry();
     for (const name of ["mcp.target.read", "mcp.target.verify"]) {
       registry.register({
@@ -2431,13 +2425,13 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       providerTools: [planProviderSchema(), toolProviderSchema("browser.navigate")]
     });
 
-    expect(harness.completeSpy).toHaveBeenCalledOnce();
-    expect(harness.executePlans).toHaveBeenCalledOnce();
-    expect(result.providerExecution?.response?.content).toContain("stopped before substantive work");
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    expect(harness.executePlans).toHaveBeenCalledTimes(2);
+    expect(result.providerExecution?.response?.content).not.toContain("stopped before substantive work");
     expect(controller.current()?.status).toBe("blocked");
   });
 
-  it("creates a provisional Mission before executing the model's first action", async () => {
+  it("does not create a provisional Mission before the model's first action", async () => {
     const controller = new ExecutionPlanController(new ExecutionPlanStore());
     const mutationCall = providerToolCall("call-update", "{}", "mcp.postman.updateCollection");
     const harness = await createPostToolNudgeHarness({
@@ -2463,18 +2457,11 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       "plan",
       "mcp.postman.updateCollection"
     ]);
-    expect(JSON.stringify(firstRequest.messages)).toContain("Active execution plan");
-    expect(controller.current()).toMatchObject({
-      status: "active",
-      originTurnId: "visible-turn",
-      items: [
-        { id: "execute", status: "in_progress" },
-        { id: "verify", status: "pending" }
-      ]
-    });
+    expect(JSON.stringify(firstRequest.messages)).not.toContain("Active execution plan");
+    expect(controller.current()).toBeUndefined();
   });
 
-  it("creates a Mission from a trusted browser effect when authentication wording classification misses", async () => {
+  it("surfaces a trusted authentication blocker without creating a Mission", async () => {
     const controller = new ExecutionPlanController(new ExecutionPlanStore());
     const protectedFormExecution: ToolExecutionRecord = {
       ...toolExecutionForTool("call-auth", "browser.fill_protected_form", "credentials not provided"),
@@ -2495,30 +2482,15 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       maxProviderIterations: 2
     });
 
-    await runBasicProviderTurn(harness.loop, {
+    const result = await runBasicProviderTurn(harness.loop, {
       visibleTurnId: "visible-auth-turn",
       userText: "Access the developer workspace and update its Postman collection.",
       providerTools: [planProviderSchema(), toolProviderSchema("browser.fill_protected_form")]
     });
 
     expect(harness.executePlans).toHaveBeenCalledTimes(1);
-    expect(controller.current()).toMatchObject({
-      objective: "Access the developer workspace and update its Postman collection.",
-      originTurnId: "visible-auth-turn",
-      items: [
-        {
-          id: "authentication.credentials",
-          content: "Submit the required authentication credentials",
-          status: "blocked",
-          blocker: {
-            kind: "user_input_required",
-            summary: "The required authentication credentials were not provided."
-          }
-        },
-        { id: "authentication.verify", content: "Verify the authenticated state", status: "pending" },
-        { id: "authentication.continue", content: "Continue the requested post-login work", status: "pending" }
-      ]
-    });
+    expect(result.providerExecution?.response?.content).toContain("Authentication needs your input");
+    expect(controller.current()).toBeUndefined();
   });
 
   it("keeps a repaired five-step MTN Mission instead of substituting the provisional fallback", async () => {
@@ -2598,7 +2570,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(controller.current()).toBeUndefined();
   });
 
-  it("does not replace an existing Mission during automatic activation assessment", async () => {
+  it("does not mutate an existing Mission while executing substantive tools", async () => {
     const controller = new ExecutionPlanController(new ExecutionPlanStore());
     await controller.write({
       objective: "Existing Mission",
@@ -2690,7 +2662,6 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     const result = await runBasicProviderTurn(harness.loop);
 
     expect(harness.completeSpy).toHaveBeenCalledTimes(7);
-    expect(result.executionPlanIncomplete).toBeUndefined();
     expect(result.providerExecution?.response?.content).toContain("foreground tool loop stopped");
     const nudgeText = "The foreground tool loop has repeated the same calls or results without material progress.";
     const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
@@ -2723,7 +2694,6 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       const result = await runBasicProviderTurn(harness.loop);
 
       expect(harness.executePlans).not.toHaveBeenCalled();
-      expect(result.executionPlanIncomplete).toBeUndefined();
       expect(result.providerExecution?.response?.content).toContain("emergency deadline reserve");
     } finally {
       nowSpy.mockRestore();
@@ -2769,14 +2739,13 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
         toolCallId: "call-running-mutation",
         result: expect.objectContaining({ ok: true })
       })]);
-      expect(result.executionPlanIncomplete).toBeUndefined();
       expect(result.providerExecution?.response?.content).toContain("emergency deadline reserve");
     } finally {
       nowSpy.mockRestore();
     }
   });
 
-  it("suspends deterministically when any active Mission item requires user input", async () => {
+  it("does not suspend runtime execution for a Mission-authored blocker", async () => {
     const planStore = new ExecutionPlanStore();
     planStore.replace({
       objective: "Sign in and finish setup",
@@ -2814,14 +2783,12 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
     const result = await runBasicProviderTurn(harness.loop);
 
-    expect(harness.completeSpy).toHaveBeenCalledOnce();
-    expect(harness.executePlans).toHaveBeenCalledOnce();
-    expect(result.providerExecution?.response?.content).toBe(
-      "The Mission needs your input before it can continue: Enter the email and password in the secure prompt."
-    );
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    expect(harness.executePlans).toHaveBeenCalledTimes(2);
+    expect(result.providerExecution?.response?.content).not.toContain("Mission needs your input");
   });
 
-  it("allows one provider continuation to repair a failed plan update before surfacing an existing blocker", async () => {
+  it("continues normally after a failed plan update even when the optional plan is blocked", async () => {
     const planStore = new ExecutionPlanStore();
     planStore.replace({
       objective: "Sign in to the correct fictional portal",
@@ -2884,7 +2851,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(result.providerExecution?.response?.content).not.toContain("Mission needs your input");
   });
 
-  it("bounds failed plan-update repair to one continuation", async () => {
+  it("uses standard tool-result continuation for repeated failed plan updates", async () => {
     const planStore = new ExecutionPlanStore();
     planStore.replace({
       objective: "Recover a fictional sign-in",
@@ -2922,10 +2889,8 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
     const result = await runBasicProviderTurn(harness.loop);
 
-    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
-    expect(result.providerExecution?.response?.content).toBe(
-      "The Mission needs your input before it can continue: Provide the credentials."
-    );
+    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
+    expect(result.providerExecution?.response?.content).toBe("must not run");
   });
 
   it("does not charge protected operator input time to the provider wall-clock budget", async () => {
@@ -3073,7 +3038,6 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     });
     expect(result.providerExecution?.response?.content).toContain("premature substitute");
     expect(result.providerExecution?.response?.content).not.toContain("direct synthesis");
-    expect(result.executionPlanIncomplete).toBeUndefined();
     const messages = await harness.sessionDb.listMessages(harness.sessionId);
     const protocolTurn = messages.find((message) => message.metadata?.kind === "provider-tool-call-turn");
     expect(protocolTurn?.content).toBe("");

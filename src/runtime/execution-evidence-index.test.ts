@@ -183,6 +183,8 @@ describe("ExecutionEvidenceIndex", () => {
       tool: { ...execution().tool, name: "plan" }
     }), "turn-current");
     index.recordUnavailable("unavailable-current", "missing.tool", "turn-current");
+    expect(index.recordUnavailable("unavailable-secret", "token=raw-secret", "turn-current")).toBeUndefined();
+    expect(index.recordUnavailable("unavailable-long", "x".repeat(161), "turn-current")).toBeUndefined();
     expect(index.record(execution({ toolCallId: "x".repeat(257) }), "turn-current")).toBeUndefined();
     expect(index.record(execution({ toolCallId: "token=raw-secret" }), "turn-current")).toBeUndefined();
     expect(index.record(execution({

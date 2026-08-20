@@ -84,15 +84,16 @@ export class ExecutionEvidenceIndex {
     return normalized;
   }
 
-  recordUnavailable(toolCallId: string, tool: string, visibleTurnId?: string): ExecutionEvidenceRecord {
+  recordUnavailable(toolCallId: string, tool: string, visibleTurnId?: string): ExecutionEvidenceRecord | undefined {
     const safeTurnId = safeVisibleTurnId(visibleTurnId);
-    const record: ExecutionEvidenceRecord = {
+    const record = normalizeExecutionEvidenceRecord({
       kind: "execution-evidence-recorded",
       toolCallId,
       tool,
       status: "unavailable",
       ...(safeTurnId === undefined ? {} : { visibleTurnId: safeTurnId })
-    };
+    });
+    if (record === undefined) return undefined;
     this.#indexRecord(record);
     return record;
   }

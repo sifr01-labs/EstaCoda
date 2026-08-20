@@ -360,7 +360,6 @@ async function createAgentLoop(input: {
   nativeToolExecutions?: ToolExecutionRecord[];
   executionPlanReader?: ExecutionPlanReader;
   executionPlanController?: ExecutionPlanController;
-  executionPlanIncomplete?: boolean;
 }) {
   const sessionDb = new InMemorySessionDB();
   const sessionId = `agent-loop-test-${Date.now()}-${Math.random()}`;
@@ -477,7 +476,6 @@ async function createAgentLoop(input: {
         providerExecution: input.providerExecution,
         toolExecutions: providerLoopExecutions,
         iterations: input.providerExecution === undefined ? 0 : 1,
-        ...(input.executionPlanIncomplete === true ? { executionPlanIncomplete: true } : {}),
         ...(input.delegatedAnswerOwnership === undefined ? {} : {
           delegatedAnswerOwnership: input.delegatedAnswerOwnership
         })
@@ -660,7 +658,7 @@ describe("AgentLoop provider availability gating", () => {
     ]);
   });
 
-  it("keeps a deterministically executed image tool out of the Mission expansion catalog", async () => {
+  it("keeps a deterministically executed image tool out of the provider inventory", async () => {
     const providerToolDefinitions: ToolDefinition[] = [
       { ...tool, name: "plan", toolsets: ["core"] },
       { ...tool, name: "image.generate", toolsets: ["media"] },
@@ -710,10 +708,8 @@ describe("AgentLoop provider availability gating", () => {
 
     const runInput = vi.mocked(providerTurnLoop.run).mock.calls[0]?.[0] as {
       providerTools: Array<{ function: { name: string } }>;
-      providerToolSchemaCatalog?: { entries: Array<{ tool: { name: string } }> };
     };
     expect(runInput.providerTools.map((entry) => entry.function.name)).not.toContain("image_generate");
-    expect(runInput.providerToolSchemaCatalog?.entries.map((entry) => entry.tool.name)).not.toContain("image.generate");
   });
 
   it("persists the bounded parent abort source for provider-loop cancellation", async () => {
@@ -1628,7 +1624,6 @@ describe("AgentLoop provider availability gating", () => {
       runSkillPlaybook: vi.fn(async () => []),
       providerExecution: successfulProviderExecution("The Mission is incomplete."),
       providerLoopToolExecutions: [postmanMutation(), postmanVerification()],
-      executionPlanIncomplete: true,
       executionPlanReader: { current: () => stalePlan }
     });
 

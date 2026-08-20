@@ -594,7 +594,6 @@ export class AgentLoopBuilder {
       initialContextWindowUsage,
       taskExecution: input.taskExecution,
       executionPlanReader: executionPlanController,
-      executionPlanController,
       executionWorkingSet,
       browserSessionLease: ownsForegroundSupervision ? substrate.browserSessionLease : undefined,
       browserBackend: substrate.browserBackend

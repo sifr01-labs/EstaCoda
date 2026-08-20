@@ -13,7 +13,6 @@ import type {
   ResolvedModelRoute,
 } from "../contracts/provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
-import { latestExecutionPlanSnapshot } from "../session/execution-plan-state.js";
 import {
   FakeApiManagementMcp,
   FAKE_API_MANAGEMENT_MCP_URL,
@@ -93,9 +92,9 @@ const scenarios: JourneyScenario[] = [
     expectedMutationCalls: 1,
     expectedVerificationCalls: 1,
     expectedTimeline: ["destination-read", "destination-mutation", "destination-verification"],
-    expectedProviderRequests: 10,
-    expectedToolExecutions: 9,
-    expectedPlanExecutions: 5,
+    expectedProviderRequests: 5,
+    expectedToolExecutions: 4,
+    expectedPlanExecutions: 0,
   },
   {
     name: "denied grouped approval performs no destination mutation",
@@ -105,9 +104,9 @@ const scenarios: JourneyScenario[] = [
     expectedMutationCalls: 0,
     expectedVerificationCalls: 0,
     expectedTimeline: ["destination-read"],
-    expectedProviderRequests: 8,
-    expectedToolExecutions: 7,
-    expectedPlanExecutions: 4,
+    expectedProviderRequests: 4,
+    expectedToolExecutions: 3,
+    expectedPlanExecutions: 0,
   },
   {
     name: "a browser source changed after approval performs no destination mutation",
@@ -117,9 +116,9 @@ const scenarios: JourneyScenario[] = [
     expectedMutationCalls: 0,
     expectedVerificationCalls: 0,
     expectedTimeline: ["destination-read"],
-    expectedProviderRequests: 8,
-    expectedToolExecutions: 7,
-    expectedPlanExecutions: 4,
+    expectedProviderRequests: 4,
+    expectedToolExecutions: 3,
+    expectedPlanExecutions: 0,
   },
   {
     name: "an undeclared destination path performs no destination mutation",
@@ -129,21 +128,21 @@ const scenarios: JourneyScenario[] = [
     expectedMutationCalls: 0,
     expectedVerificationCalls: 0,
     expectedTimeline: ["destination-read"],
-    expectedProviderRequests: 8,
-    expectedToolExecutions: 7,
-    expectedPlanExecutions: 4,
+    expectedProviderRequests: 4,
+    expectedToolExecutions: 3,
+    expectedPlanExecutions: 0,
   },
   {
-    name: "a missing mutation capability blocks before the browser opens",
+    name: "a missing mutation capability is reported without fabricated authority",
     exposeMutation: false,
     expectCompleted: false,
-    expectedFinalOutcome: "blocked",
+    expectedFinalOutcome: "partially_completed",
     expectedMutationCalls: 0,
     expectedVerificationCalls: 0,
-    expectedTimeline: [],
-    expectedProviderRequests: 1,
-    expectedToolExecutions: 1,
-    expectedPlanExecutions: 1,
+    expectedTimeline: ["destination-read"],
+    expectedProviderRequests: 4,
+    expectedToolExecutions: 2,
+    expectedPlanExecutions: 0,
   },
   {
     name: "a successful mutation with failed verification reports partial completion",
@@ -153,9 +152,9 @@ const scenarios: JourneyScenario[] = [
     expectedMutationCalls: 1,
     expectedVerificationCalls: 1,
     expectedTimeline: ["destination-read", "destination-mutation", "destination-verification"],
-    expectedProviderRequests: 10,
-    expectedToolExecutions: 9,
-    expectedPlanExecutions: 5,
+    expectedProviderRequests: 5,
+    expectedToolExecutions: 4,
+    expectedPlanExecutions: 0,
   },
 ];
 
@@ -176,7 +175,7 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
 
     try {
       response = await harness.runtime.handle({
-        text: "Configure the fictional control plane from the approved source records, then read back and verify the resulting state.",
+        text: "Configure the fictional control plane from the approved browser source records, then read back and verify the resulting state.",
         channel: "cli",
         trustedWorkspace: true,
         onSecureInputRequest: harness.secureInputHandler,
@@ -190,55 +189,36 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
       expect(thrown).toBeUndefined();
       expect(response).toBeDefined();
       const toolNames = response!.toolExecutions.map((execution) => execution.tool.name);
-      expect(toolNames[0]).toBe("plan");
+      expect(toolNames[0]).toBe(READ_TOOL);
       const firstRequestTools = firstRequestToolNames(harness.providerRequests[0]);
       expect(firstRequestTools).toEqual(expect.arrayContaining([
         "plan",
+        providerToolName("browser.navigate"),
         providerToolName(READ_TOOL),
         providerToolName(VERIFY_TOOL),
       ]));
-      expect(firstRequestTools).not.toContain(providerToolName("browser.navigate"));
       if (scenario.exposeMutation === false) expect(firstRequestTools).not.toContain(providerToolName(MUTATION_TOOL));
       else expect(firstRequestTools).toContain(providerToolName(MUTATION_TOOL));
 
       const messages = await harness.runtime.sessionDb.listMessages(harness.runtime.sessionId);
       const events = await harness.runtime.sessionDb.listEvents(harness.runtime.sessionId);
       const evidenceEvents = events.filter((event) => event.kind === "execution-evidence-recorded");
-      const mission = latestExecutionPlanSnapshot(events);
-      expect(mission).toBeDefined();
-      expect(mission?.requirements).toHaveLength(4);
+      expect(events.some((event) => event.kind === "execution-plan-started")).toBe(false);
 
       if (scenario.exposeMutation === false) {
-        expect(mission).toMatchObject({
-          status: "blocked",
-          capabilityPreflight: {
-            status: "blocked",
-            assessments: expect.arrayContaining([
-              expect.objectContaining({ tool: MUTATION_TOOL, status: "missing", reasonCode: "tool_missing" }),
-            ]),
-          },
-        });
-        expect(toolNames).toEqual(["plan"]);
-        expect(toolNames).not.toContain("browser.navigate");
-        expect(harness.socket.sent.some((command) => command.method === "Page.navigate")).toBe(false);
-        expect(response!.text).toContain("required capability is unavailable");
+        expect(toolNames).toEqual([READ_TOOL, "browser.navigate"]);
+        expect(harness.socket.sent.some((command) => command.method === "Page.navigate")).toBe(true);
+        expect(response!.text).toContain("could not safely complete");
         expect(evidenceEvents).toContainEqual(expect.objectContaining({
           tool: MUTATION_TOOL,
           status: "unavailable",
           visibleTurnId: expect.any(String),
         }));
       } else {
-        const preflightReady = events.find((event) =>
-          (event.kind === "execution-plan-started" || event.kind === "execution-plan-updated") &&
-          event.plan.capabilityPreflight?.status === "ready"
-        );
-        expect(preflightReady).toBeDefined();
-        expect(firstRequestToolNames(harness.providerRequests[1])).toContain(providerToolName("browser.navigate"));
-        expect(toolNames.indexOf("plan")).toBeLessThan(toolNames.indexOf("browser.navigate"));
         expect(toolNames.indexOf(READ_TOOL)).toBeLessThan(toolNames.indexOf("browser.navigate"));
         expect(harness.mcp.readInputs).toHaveLength(1);
         expect(evidenceEvents).toContainEqual(expect.objectContaining({
-          toolCallId: "journey-call-2",
+          toolCallId: "journey-call-1",
           tool: READ_TOOL,
           status: "success",
           executionEffect: {
@@ -284,7 +264,7 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
         });
         expect(harness.mcp.state().settings).toEqual(harness.mcp.initialSettings);
         expect(evidenceEvents).toContainEqual(expect.objectContaining({
-          toolCallId: "journey-call-6",
+          toolCallId: "journey-call-3",
           tool: MUTATION_TOOL,
           status: "success",
           executionEffect: {
@@ -294,12 +274,12 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
         }));
         if (scenario.failVerification === true) {
           const failedVerification = evidenceEvents.find((event) =>
-            event.kind === "execution-evidence-recorded" && event.toolCallId === "journey-call-8"
+            event.kind === "execution-evidence-recorded" && event.toolCallId === "journey-call-4"
           );
           expect(failedVerification).not.toHaveProperty("verifiedMutation");
         }
         expect(evidenceEvents).toContainEqual(expect.objectContaining({
-          toolCallId: "journey-call-8",
+          toolCallId: "journey-call-4",
           tool: VERIFY_TOOL,
           status: scenario.failVerification === true ? "failed" : "success",
           executionEffect: {
@@ -311,7 +291,7 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
             ? {}
             : {
                 verifiedMutation: {
-                  toolCallId: "journey-call-6",
+                  toolCallId: "journey-call-3",
                   tool: MUTATION_TOOL,
                 },
               }),
@@ -338,17 +318,6 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
           MUTATION_TOOL,
           VERIFY_TOOL,
         ]);
-        expect(mission).toMatchObject({
-          status: "completed",
-          capabilityPreflight: { status: "ready" },
-          items: [
-            { id: "inspect-target", status: "completed", evidenceCallIds: ["journey-call-2"] },
-            { id: "bind-sources", status: "completed", evidenceCallIds: ["journey-call-4"] },
-            { id: "update-target", status: "completed", evidenceCallIds: ["journey-call-6"] },
-            { id: "verify-target", status: "completed", evidenceCallIds: ["journey-call-8"] },
-          ],
-        });
-        expect(mission?.items[3]?.evidence?.[0]).toMatchObject({ tool: VERIFY_TOOL, outcome: "success" });
         expect(response!.finalOutcome?.confirmedActions).toEqual([
           expect.objectContaining({
             tool: MUTATION_TOOL,
@@ -358,7 +327,6 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
         ]);
         expect(response!.text).not.toContain("Mission is incomplete");
       } else {
-        expect(mission?.status).not.toBe("completed");
         expect(response!.text).not.toContain("Provisioning completed and independently verified.");
         if (scenario.expectedMutationCalls === 0) {
           expect(response!.finalOutcome?.confirmedActions).toEqual([]);
@@ -383,7 +351,6 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
       const leakSurfaces = {
         messages,
         events,
-        mission,
         providerRequests: harness.providerRequests,
         providerResponses: harness.providerResponses,
         toolResults: response!.toolExecutions,
@@ -545,76 +512,21 @@ function createProviderScript(input: {
     let response: ProviderResponse;
     switch (phase++) {
       case 0:
-        response = call("plan", initialPlan());
-        break;
-      case 1:
         response = call(READ_TOOL, { targetId: TARGET_ID });
         break;
-      case 2:
-        response = call("plan", {
-          operation: "merge",
-          items: [
-            { id: "inspect-target", status: "completed", evidenceCallIds: ["journey-call-2"] },
-            { id: "bind-sources", status: "in_progress" },
-          ],
-        });
-        break;
-      case 3:
+      case 1:
         response = call("browser.navigate", { url: FAKE_DEVELOPER_PORTAL_URL });
         break;
-      case 4:
-        response = call("plan", {
-          operation: "merge",
-          items: [
-            { id: "bind-sources", status: "completed", evidenceCallIds: ["journey-call-4"] },
-            { id: "update-target", status: "in_progress" },
-          ],
-        });
-        break;
-      case 5:
+      case 2:
         response = call(MUTATION_TOOL, mutationInput(request, input.sessionId, input.scenario.undeclaredDestination === true));
         break;
-      case 6:
+      case 3:
         if (input.scenario.approval === "denied" || input.scenario.changeSourceAfterApproval === true ||
-            input.scenario.undeclaredDestination === true) {
-          response = call("plan", {
-            operation: "merge",
-            items: [{
-              id: "update-target",
-              status: "blocked",
-              blocker: { kind: "external_state", summary: "The protected destination mutation did not complete." },
-            }],
-          });
+            input.scenario.undeclaredDestination === true || input.scenario.exposeMutation === false) {
+          response = finalResponse("Provisioning could not safely complete.");
         } else {
-          response = call("plan", {
-            operation: "merge",
-            items: [
-              { id: "update-target", status: "completed", evidenceCallIds: ["journey-call-6"] },
-              { id: "verify-target", status: "in_progress" },
-            ],
-          });
+          response = call(VERIFY_TOOL, { targetId: TARGET_ID });
         }
-        break;
-      case 7:
-        response = input.scenario.approval === "denied" || input.scenario.changeSourceAfterApproval === true ||
-          input.scenario.undeclaredDestination === true
-          ? finalResponse("Provisioning could not safely complete.")
-          : call(VERIFY_TOOL, { targetId: TARGET_ID });
-        break;
-      case 8:
-        response = input.scenario.failVerification === true
-          ? call("plan", {
-              operation: "merge",
-              items: [{
-                id: "verify-target",
-                status: "blocked",
-                blocker: { kind: "external_state", summary: "Independent destination verification failed." },
-              }],
-            })
-          : call("plan", {
-              operation: "merge",
-              items: [{ id: "verify-target", status: "completed", evidenceCallIds: ["journey-call-8"] }],
-            });
         break;
       default:
         response = finalResponse(input.scenario.failVerification === true
@@ -623,32 +535,6 @@ function createProviderScript(input: {
     }
     input.providerResponses.push(structuredClone(response));
     return response;
-  };
-}
-
-function initialPlan(): Record<string, unknown> {
-  return {
-    operation: "write",
-    objective: "Provision protected browser values into a managed destination and verify the result",
-    items: [
-      { id: "inspect-target", content: "Read and preserve existing destination state", status: "in_progress" },
-      { id: "bind-sources", content: "Open the portal and identify both protected sources", status: "pending" },
-      { id: "update-target", content: "Apply both protected values in one destination mutation", status: "pending" },
-      { id: "verify-target", content: "Read back and verify the changed destination state", status: "pending" },
-    ],
-    requirements: [
-      { id: "source-read", itemId: "bind-sources", tool: "browser.navigate", capability: "read" },
-      { id: "destination-read", itemId: "inspect-target", tool: READ_TOOL, capability: "read" },
-      {
-        id: "destination-mutation",
-        itemId: "update-target",
-        tool: MUTATION_TOOL,
-        capability: "mutate",
-        requiresProtectedInput: true,
-        protectedSource: "browser",
-      },
-      { id: "destination-verification", itemId: "verify-target", tool: VERIFY_TOOL, capability: "verify" },
-    ],
   };
 }
 

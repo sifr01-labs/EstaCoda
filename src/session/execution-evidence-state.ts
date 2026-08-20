@@ -34,7 +34,7 @@ export function normalizeExecutionEvidenceRecord(
   record: ExecutionEvidenceRecord
 ): ExecutionEvidenceRecord | undefined {
   const toolCallId = boundedIdentifier(record.toolCallId);
-  const tool = boundedIdentifier(record.tool);
+  const tool = boundedToolName(record.tool);
   if (toolCallId === undefined || tool === undefined || !isEvidenceStatus(record.status)) return undefined;
   const targetSummary = safeTargetSummary(record.targetSummary);
   const visibleTurnId = boundedIdentifier(record.visibleTurnId);

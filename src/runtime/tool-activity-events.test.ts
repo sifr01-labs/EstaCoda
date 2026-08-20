@@ -261,6 +261,45 @@ describe("runtime tool activity events", () => {
     }));
   });
 
+  it("records unavailable provider calls from trusted registry resolution", async () => {
+    const recorder = runRecorder();
+    const evidenceIndex = new ExecutionEvidenceIndex();
+    const runner = new ToolPlanRunner({
+      toolCallPlanner: {
+        planFromProviderDelta: () => ({
+          id: "tc-missing",
+          tool: "mcp.target.update",
+          input: {},
+          source: "provider-tool-call",
+          status: "unavailable",
+          error: "Tool is not registered: mcp.target.update",
+        }),
+      } as never,
+      toolExecutor: {} as never,
+      runRecorder: recorder as never,
+      sessionId: "s1",
+      maxConcurrentSafeTools: 1,
+      executionEvidenceIndex: evidenceIndex,
+    });
+
+    await runner.executePlans({
+      providerExecution: providerExecution(),
+      toolPlans: [],
+      trustedWorkspace: true,
+      remainingToolCalls: 1,
+      riskBaseline: "read-only-local",
+      visibleTurnId: "turn-1",
+    });
+
+    expect(recorder.recordExecutionEvidence).toHaveBeenCalledWith({
+      kind: "execution-evidence-recorded",
+      toolCallId: "tc-missing",
+      tool: "mcp.target.update",
+      status: "unavailable",
+      visibleTurnId: "turn-1",
+    });
+  });
+
   it("emits failed tool results for invalid provider tool plans", async () => {
     const events: RuntimeEvent[] = [];
     const runner = new ToolPlanRunner({

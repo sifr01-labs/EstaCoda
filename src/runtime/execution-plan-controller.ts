@@ -169,7 +169,7 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
           assessment.tool,
           plan.originTurnId
         );
-        await this.#recordEvidence?.(record);
+        if (record !== undefined) await this.#recordEvidence?.(record);
       }
     }
     await this.#recordTransition({

@@ -100,6 +100,14 @@ export class ToolPlanRunner {
       await this.#runRecorder.recordToolPlan(plan);
 
       if (plan.status !== "planned") {
+        if (
+          plan.status === "unavailable" &&
+          plan.tool.length > 0 &&
+          this.#executionEvidenceIndex !== undefined
+        ) {
+          const receipt = this.#executionEvidenceIndex.recordUnavailable(plan.id, plan.tool, input.visibleTurnId);
+          if (receipt !== undefined) await this.#runRecorder.recordExecutionEvidence(receipt);
+        }
         await emit(input.onEvent, {
           kind: "tool-result",
           tool: plan.tool.length === 0 ? "provider-tool" : plan.tool,
@@ -253,9 +261,8 @@ export class ToolPlanRunner {
         activityId: plan.id
       });
       if (this.#executionEvidenceIndex !== undefined) {
-        await this.#runRecorder.recordExecutionEvidence(
-          this.#executionEvidenceIndex.recordUnavailable(plan.id, plan.tool, input.visibleTurnId)
-        );
+        const receipt = this.#executionEvidenceIndex.recordUnavailable(plan.id, plan.tool, input.visibleTurnId);
+        if (receipt !== undefined) await this.#runRecorder.recordExecutionEvidence(receipt);
       }
       return undefined;
     }

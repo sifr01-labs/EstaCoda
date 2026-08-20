@@ -358,9 +358,10 @@ describe("plan tool", () => {
       toolsets: ["core"],
       maxResultSizeChars: 8192
     });
-    expect(tools[0]!.description).toContain("automatically starts a provisional Mission");
+    expect(tools[0]!.description).toContain("Ordinary execution does not require a plan");
     expect(tools[0]!.description).toContain("use merge to refine");
-    expect(tools[0]!.description).toContain("use write once to replace it");
+    expect(tools[0]!.description).toContain("Use write only when persistent coordination materially helps");
+    expect(tools[0]!.description).toContain("does not change the provider tool inventory");
     expect(JSON.stringify(tools[0]!.inputSchema)).toContain('"requirements"');
     expect(JSON.stringify(tools[0]!.inputSchema)).toContain('"requiresProtectedInput"');
     expect(JSON.stringify(tools[0]!.inputSchema)).not.toContain('"protectedPaths"');

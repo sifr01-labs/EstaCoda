@@ -17,7 +17,6 @@ import type {
   SecureInputRequestSnapshot,
 } from "../contracts/secure-input.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
-import { latestExecutionPlanSnapshot } from "../session/execution-plan-state.js";
 import {
   FakeCdpAuthPortalSocket,
   createFakeCdpFetch,
@@ -254,30 +253,12 @@ describe("protected authentication journey acceptance", () => {
 
       const messages = await harness.runtime.sessionDb.listMessages(harness.runtime.sessionId);
       const events = await harness.runtime.sessionDb.listEvents(harness.runtime.sessionId);
-      const mission = latestExecutionPlanSnapshot(events);
-      expect(mission).toBeDefined();
+      expect(events.some((event) => event.kind === "execution-plan-started")).toBe(false);
       const authenticationAssessments = events.filter((event) => event.kind === "authentication-evidence-assessed");
 
       if (scenario.authenticated) {
         expect(response!.text).toContain("Authentication confirmed from the authenticated account page.");
         expect(response!.text).not.toContain("The Mission is incomplete.");
-        expect(mission).toMatchObject({ status: "completed" });
-        expect(mission!.items).toEqual(expect.arrayContaining([
-            { id: "authentication.credentials", status: "completed" },
-            {
-              id: "authentication.verify",
-              status: "completed",
-              evidenceCallIds: [scenario.expectedOtpPrompts === 0 ? "acceptance-call-2" : "acceptance-call-3"],
-            },
-        ].map((item) => expect.objectContaining(item))));
-        if (scenario.expectedOtpPrompts > 0) {
-          expect(mission!.items).toContainEqual(expect.objectContaining({
-            id: "authentication.challenge",
-            status: "completed",
-          }));
-        } else {
-          expect(mission!.items.some((item) => item.id === "authentication.challenge")).toBe(false);
-        }
         const expectedVerificationCallId = scenario.expectedOtpPrompts === 0
           ? "acceptance-call-2"
           : "acceptance-call-3";
@@ -302,9 +283,8 @@ describe("protected authentication journey acceptance", () => {
       } else {
         expect(response!.text).not.toContain("Authentication confirmed from the authenticated account page.");
         expect(authenticationAssessments.some((event) => event.outcome === "verified")).toBe(false);
-        expect(mission!.items.some((item) => item.status === "blocked" && item.blocker !== undefined)).toBe(true);
         if (scenario.cancelCollection || scenario.otpOutcome === "rejected") {
-          expect(response!.text).toContain("The Mission needs your input before it can continue");
+          expect(response!.text).toContain("Authentication needs your input before the runtime can continue");
         } else {
           expect(response!.text).toContain("Authentication could not be confirmed from the settled browser state.");
           expect(response!.text).not.toContain("The Mission is incomplete.");
@@ -339,7 +319,7 @@ describe("protected authentication journey acceptance", () => {
     }
   });
 
-  it("recovers a partially blocked Mission when the user corrects the fictional portal", async () => {
+  it("recovers from a runtime authentication blocker when the user corrects the fictional portal", async () => {
     const harness = await createAcceptanceHarness({
       name: "corrected fictional portal recovery",
       cancelFirstCollectionOnly: true,
@@ -359,22 +339,13 @@ describe("protected authentication journey acceptance", () => {
         trustedWorkspace: true,
         onSecureInputRequest: harness.secureInputHandler,
       });
-      expect(first.text).toContain("The Mission needs your input before it can continue");
+      expect(first.text).toContain("Authentication needs your input before the runtime can continue");
       expect(harness.providerRequests[0] === undefined ? [] : providerToolNames(harness.providerRequests[0])).toContain("browser_navigate");
       expect(first.toolExecutions.find((execution) => execution.tool.name === "browser.navigate")?.input).toMatchObject({
         url: legacyUrl,
       });
-      expect(latestExecutionPlanSnapshot(await harness.runtime.sessionDb.listEvents(harness.runtime.sessionId))).toMatchObject({
-        status: "active",
-        items: expect.arrayContaining([
-          expect.objectContaining({
-            id: "execute",
-            content: "Submit the required authentication credentials",
-            status: "blocked",
-            blocker: expect.objectContaining({ kind: "user_input_required" }),
-          }),
-        ]),
-      });
+      expect((await harness.runtime.sessionDb.listEvents(harness.runtime.sessionId))
+        .some((event) => event.kind === "execution-plan-started")).toBe(false);
 
       showCredentialLoginPage(harness.socket);
       harness.socket.snapshot.url = correctUrl;
@@ -391,22 +362,8 @@ describe("protected authentication journey acceptance", () => {
       expect(second.toolExecutions.find((execution) => execution.tool.name === "browser.navigate")?.input).toMatchObject({
         url: correctUrl,
       });
-      expect(latestExecutionPlanSnapshot(await harness.runtime.sessionDb.listEvents(harness.runtime.sessionId))).toMatchObject({
-        status: "completed",
-        items: expect.arrayContaining([
-          expect.objectContaining({
-            id: "execute",
-            content: "Submit the required authentication credentials",
-            status: "completed"
-          }),
-          expect.objectContaining({
-            id: "verify",
-            content: "Verify the authenticated state",
-            status: "completed"
-          }),
-          expect.objectContaining({ id: "authentication.challenge", status: "completed" }),
-        ]),
-      });
+      expect((await harness.runtime.sessionDb.listEvents(harness.runtime.sessionId))
+        .some((event) => event.kind === "execution-plan-started")).toBe(false);
       expect(harness.groupedCredentialPrompts).toBe(2);
       expect(harness.credentialSubmits).toBe(1);
       expect(harness.otpSubmits).toBe(1);
@@ -495,8 +452,8 @@ describe("protected authentication journey acceptance", () => {
       if (intentEvent?.kind === "intent-routed") {
         expect(intentEvent.route.confidence).toBeGreaterThanOrEqual(0.9);
       }
-      expect(missionStartedIndex).toBeGreaterThanOrEqual(0);
-      expect(navigationPlannedIndex).toBeGreaterThan(missionStartedIndex);
+      expect(missionStartedIndex).toBe(-1);
+      expect(navigationPlannedIndex).toBeGreaterThanOrEqual(0);
       expect(planOnlyRequests).toHaveLength(0);
       expect(primaryRequests[0] === undefined ? [] : providerToolNames(primaryRequests[0])).toContain("browser_navigate");
       expect(response.text).toContain("Authentication confirmed from the authenticated account page.");

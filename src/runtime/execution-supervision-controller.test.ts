@@ -5,34 +5,14 @@ import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ToolDefinition } from "../contracts/tool.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
-import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
-import { ExecutionPlanController } from "./execution-plan-controller.js";
-import { ExecutionPlanStore } from "./execution-plan-store.js";
 import { ExecutionSupervisionController } from "./execution-supervision-controller.js";
 
 describe("ExecutionSupervisionController", () => {
-  it("creates the provisional Mission before provider work without an activation retry", async () => {
-    const planController = new ExecutionPlanController(new ExecutionPlanStore());
-    const supervision = createSupervision({
-      userText: "Update the collection and then verify the resulting state.",
-      visibleTurnId: "turn-activation",
-      providerTools: [providerTool("plan"), providerTool("mcp.postman.updateCollection")],
-      planController
-    }).supervision;
+  it("initializes supervision without creating or requiring an execution plan", async () => {
+    const supervision = createSupervision({ foregroundTurnId: "turn-runtime" }).supervision;
 
     await supervision.initialize();
-    expect(planController.current()).toMatchObject({
-      objective: "Update the collection and then verify the resulting state.",
-      originTurnId: "turn-activation",
-      provenance: { source: "runtime", provisional: true, sessionId: "session-test" },
-      items: [
-        { id: "execute", status: "in_progress" },
-        { id: "verify", status: "pending" }
-      ]
-    });
-    expect(planController.current()?.revision).toBe(1);
     await supervision.initialize();
-    expect(planController.current()?.revision).toBe(1);
     expect(supervision.consumePromptState()).toEqual({
       browserNoProgressNudge: false,
       toolLoopProgressNudge: false
@@ -43,42 +23,23 @@ describe("ExecutionSupervisionController", () => {
       progressKinds: [],
       noProgressIterations: 0
     });
-    await expect(supervision.superviseActivation(["mcp.postman.updateCollection"])).resolves.toBeUndefined();
-    expect(planController.current()?.revision).toBe(1);
   });
 
-  it("orchestrates causal authentication assessment and Mission effects", async () => {
-    const evidenceIndex = new ExecutionEvidenceIndex();
-    const planController = new ExecutionPlanController(new ExecutionPlanStore(), undefined, evidenceIndex);
+  it("orchestrates causal authentication assessment without creating Mission state", async () => {
     const before = loginSnapshot(identity(1, 1, 1));
     const submission = protectedExecution("submit-auth", before.identity, identity(2, 2, 2));
-    evidenceIndex.record(submission);
     const { supervision, recordAuthenticationEvidenceAssessment } = createSupervision({
-      userText: "Sign me in and then update the Postman collection.",
-      visibleTurnId: "turn-auth",
-      providerTools: [providerTool("plan"), providerTool("browser.fill_protected_form")],
-      existingExecutions: [snapshotExecution("before-auth", before)],
-      planController
+      existingExecutions: [snapshotExecution("before-auth", before)]
     });
 
-    await supervision.applyRuntimeMissionEffects({
-      executions: [submission],
-      providerToolNames: ["browser.fill_protected_form"]
-    });
+    await supervision.applyRuntimeEffects({ executions: [submission] });
 
     expect(recordAuthenticationEvidenceAssessment).toHaveBeenCalledWith(expect.objectContaining({
       outcome: "verified",
       submissionToolCallId: "submit-auth",
       evidenceToolCallId: "submit-auth"
     }));
-    expect(planController.current()).toMatchObject({
-      originTurnId: "turn-auth",
-      items: expect.arrayContaining([
-        expect.objectContaining({ id: "authentication.credentials", status: "completed" }),
-        expect.objectContaining({ id: "authentication.verify", status: "completed" }),
-        expect.objectContaining({ id: "authentication.continue", status: "in_progress" })
-      ])
-    });
+    expect(supervision.assessProgress([]).runtimeUserInputBlocker).toBeUndefined();
   });
 
   it("emits authentication lifecycle events without allowing observers to interrupt execution", async () => {
@@ -88,17 +49,11 @@ describe("ExecutionSupervisionController", () => {
       .mockRejectedValueOnce(new Error("observer unavailable"))
       .mockResolvedValue(undefined);
     const { supervision } = createSupervision({
-      userText: "Sign me in.",
-      providerTools: [providerTool("plan"), providerTool("browser.fill_protected_form")],
       existingExecutions: [snapshotExecution("before-auth", before)],
-      planController: new ExecutionPlanController(new ExecutionPlanStore()),
       onEvent,
     });
 
-    await expect(supervision.applyRuntimeMissionEffects({
-      executions: [submission],
-      providerToolNames: ["browser.fill_protected_form"],
-    })).resolves.toBeUndefined();
+    await expect(supervision.applyRuntimeEffects({ executions: [submission] })).resolves.toBeUndefined();
 
     expect(onEvent).toHaveBeenCalledWith({
       kind: "authentication-lifecycle",
@@ -149,7 +104,6 @@ describe("ExecutionSupervisionController", () => {
     expect(secondRepeat.toolLoopProgress).toMatchObject({ noProgressIterations: 2, shouldStop: true });
 
     const receipt = supervision.toolLoopNoProgressStopReceipt(providerExecution());
-    expect(supervision.executionPlanIncomplete).toBe(false);
     expect(receipt.response?.content).not.toContain("Mission");
     expect(receipt.response?.content).toContain("2 consecutive iterations");
   });
@@ -204,96 +158,35 @@ describe("ExecutionSupervisionController", () => {
     });
   });
 
-  it("owns user-input blocker receipts without exposing provider continuation", async () => {
-    const store = new ExecutionPlanStore();
-    store.replace({
-      objective: "Sign in and continue",
-      originTurnId: "turn-blocked",
-      revision: 1,
-      status: "active",
-      items: [
-        {
-          id: "credentials",
-          content: "Provide credentials",
-          status: "blocked",
-          blocker: { kind: "user_input_required", summary: "Provide the credentials in the secure prompt." }
-        },
-        { id: "continue", content: "Continue", status: "pending" }
-      ]
+  it("owns trusted runtime user-input blocker receipts without Mission state", async () => {
+    const { supervision } = createSupervision();
+    await supervision.applyRuntimeEffects({
+      executions: [cancelledProtectedExecution("call-cancelled")]
     });
-    const { supervision } = createSupervision({ planController: new ExecutionPlanController(store) });
     const assessment = supervision.assessProgress([]);
 
-    expect(assessment.userInputBlocker?.summary).toBe("Provide the credentials in the secure prompt.");
-    const receipt = supervision.userInputRequiredReceipt(providerExecution(), assessment.userInputBlocker!.summary);
+    expect(assessment.runtimeUserInputBlocker?.summary).toBe("The required authentication credentials were not provided.");
+    const receipt = supervision.runtimeUserInputRequiredReceipt(
+      providerExecution(),
+      assessment.runtimeUserInputBlocker!.summary
+    );
     expect(receipt.toolCalls).toEqual([]);
     expect(receipt.response?.content).toBe(
-      "The Mission needs your input before it can continue: Provide the credentials in the secure prompt."
+      "Authentication needs your input before the runtime can continue: The required authentication credentials were not provided."
     );
   });
 
-  it("stops on the first missing capability with localized deterministic receipts", () => {
-    const store = new ExecutionPlanStore();
-    store.replace({
-      objective: "Provision the destination",
-      originTurnId: "turn-capability",
-      revision: 1,
-      status: "blocked",
-      items: [{
-        id: "update",
-        content: "Update destination",
-        status: "blocked",
-        blocker: { kind: "missing_capability", summary: "stored English fallback" }
-      }],
-      requirements: [{
-        id: "destination-write",
-        itemId: "update",
-        tool: "mcp.target.update",
-        capability: "mutate"
-      }],
-      capabilityPreflight: {
-        status: "blocked",
-        assessments: [{
-          requirementId: "destination-write",
-          itemId: "update",
-          tool: "mcp.target.update",
-          capability: "mutate",
-          status: "missing",
-          reasonCode: "tool_missing"
-        }]
-      }
-    });
-
-    for (const [locale, expected] of [
-      ["en", 'The Mission stopped before substantive work because a required capability is unavailable: Required tool "mcp.target.update" is not exposed to this session.'],
-      ["ar", 'توقفت خطة التنفيذ قبل بدء العمل لأن قدرة مطلوبة غير متاحة: الأداة المطلوبة "mcp.target.update" غير متاحة في هذه الجلسة.']
-    ] as const) {
-      const { supervision } = createSupervision({
-        planController: new ExecutionPlanController(store),
-        locale
-      });
-      const blocker = supervision.assessProgress([]).missingCapabilityBlocker;
-      expect(blocker).toBeDefined();
-      expect(supervision.missingCapabilityReceipt(providerExecution(), blocker!.summary).response?.content).toBe(expected);
-      expect(supervision.executionPlanIncomplete).toBe(true);
-    }
-  });
-
   it("uses a plan-independent deadline receipt", async () => {
-    const { supervision } = createSupervision({ planController: activePlan() });
+    const { supervision } = createSupervision();
     const deadline = supervision.emergencyDeadlineReceipt(providerExecution());
-    expect(supervision.executionPlanIncomplete).toBe(false);
     expect(deadline.response?.content).toContain("emergency deadline reserve");
     expect(deadline.response?.content).not.toContain("Mission");
   });
 });
 
 function createSupervision(input: {
-  userText?: string;
-  visibleTurnId?: string;
-  providerTools?: ReturnType<typeof providerTool>[];
+  foregroundTurnId?: string;
   existingExecutions?: ToolExecutionRecord[];
-  planController?: ExecutionPlanController;
   maxRepeatedBrowserObservations?: number;
   noProgressNudgeIteration?: number;
   maxNoProgressIterations?: number;
@@ -304,36 +197,17 @@ function createSupervision(input: {
   return {
     recordAuthenticationEvidenceAssessment,
     supervision: new ExecutionSupervisionController({
-      userText: input.userText ?? "Inspect the current state.",
-      visibleTurnId: input.visibleTurnId,
-      foregroundTurnId: input.visibleTurnId ?? "turn-runtime",
-      providerTools: input.providerTools ?? [],
+      foregroundTurnId: input.foregroundTurnId ?? "turn-runtime",
       existingExecutions: input.existingExecutions ?? [],
       currentSessionId: () => "session-test",
       locale: input.locale ?? "en",
       maxRepeatedBrowserObservations: input.maxRepeatedBrowserObservations ?? 3,
       noProgressNudgeIteration: input.noProgressNudgeIteration ?? 3,
       maxNoProgressIterations: input.maxNoProgressIterations ?? 6,
-      executionPlanController: input.planController,
       runRecorder: { recordAuthenticationEvidenceAssessment },
       onEvent: input.onEvent,
     })
   };
-}
-
-function activePlan(): ExecutionPlanController {
-  const store = new ExecutionPlanStore();
-  store.replace({
-    objective: "Build and verify",
-    originTurnId: "turn-plan",
-    revision: 1,
-    status: "active",
-    items: [
-      { id: "build", content: "Build the collection", status: "in_progress" },
-      { id: "verify", content: "Verify the collection", status: "pending" }
-    ]
-  });
-  return new ExecutionPlanController(store);
 }
 
 function providerExecution(): ProviderExecutionResult {
@@ -348,13 +222,6 @@ function providerExecution(): ProviderExecutionResult {
       model: "test-model",
       provider: "test-provider" as ProviderResponse["provider"]
     }
-  };
-}
-
-function providerTool(name: string) {
-  return {
-    type: "function" as const,
-    function: { name, description: name, parameters: { type: "object", properties: {} } }
   };
 }
 
@@ -406,6 +273,21 @@ function protectedExecution(
         },
         snapshot: authenticatedSnapshot(after)
       }
+    }
+  };
+}
+
+function cancelledProtectedExecution(toolCallId: string): ToolExecutionRecord {
+  return {
+    tool: toolDefinition("browser.fill_protected_form"),
+    input: { tabRef: "@t1" },
+    decision: "allow",
+    riskClass: "external-side-effect",
+    toolCallId,
+    result: {
+      ok: false,
+      content: "protected input cancelled",
+      metadata: { secureInputGroupReceipt: { status: "cancelled" } }
     }
   };
 }

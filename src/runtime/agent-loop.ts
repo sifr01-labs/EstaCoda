@@ -717,16 +717,12 @@ export class AgentLoop {
           intent,
           userText: routedText,
           selectedSkill,
-          attachments,
-          executionPlan: this.#executionPlanReader?.current()
+          attachments
         })
       : [];
     const providerTools = deterministicImageGenerationRan
       ? suppressImageGenerationTools(narrowedProviderTools)
       : narrowedProviderTools;
-    const providerToolSchemaCatalog = deterministicImageGenerationRan
-      ? suppressImageGenerationToolCatalog(this.#providerToolSchemaCatalog)
-      : this.#providerToolSchemaCatalog;
     const preflightCompression = await this.#compactBeforeProviderTurn(input.signal, input.onEvent);
     const previousConversationContinuationState = await this.#latestConversationContinuationState();
     await this.#emitLiveContextUsageEstimate({
@@ -762,7 +758,6 @@ export class AgentLoop {
       attachments,
       memoryPromptContext: turnMemoryPromptContext,
       providerTools,
-      providerToolSchemaCatalog,
       preflightCompression,
       fallbackText: fallbackResponse.text,
       onEvent: input.onEvent,
@@ -887,14 +882,16 @@ export class AgentLoop {
           providerLoop.delegatedAnswerOwnership,
           this.#ui?.language === "ar" ? "ar" : "en"
         );
-    const completedReceiptSupersedesMissionState =
-      providerLoop.executionPlanIncomplete === true &&
+    const completedReceiptSupersedesStalePlanCopy =
+      this.#executionPlanReader?.current() !== undefined &&
+      this.#executionPlanReader.current()?.status !== "completed" &&
+      providerReportsIncompletePlan(rawProviderContent) &&
       (finalOutcome.status === "completed" || finalOutcome.status === "completed_with_recovered_errors") &&
       finalOutcome.confirmedActions.length > 0 &&
       finalOutcome.confirmedActions.every((receipt) => receipt.verification === "verified");
     const displayText = delegatedAnswerAcknowledgement ?? (providerReturnedEmptyContent
       ? "I completed the requested actions but did not produce any visible output."
-      : completedReceiptSupersedesMissionState
+      : completedReceiptSupersedesStalePlanCopy
         ? this.#ui?.language === "ar"
           ? "اكتملت الإجراءات المطلوبة وفق إيصالات التنفيذ الموثوقة."
           : "The requested actions completed according to authoritative execution receipts."
@@ -989,7 +986,6 @@ export class AgentLoop {
       (finalOutcome.confirmedActions.length > 0 || finalOutcome.uncertainActions.length > 0) &&
       (
         effectiveProviderExecution?.ok === false ||
-        providerLoop.executionPlanIncomplete === true ||
         providerLoop.emergencyDeadlineReached === true
       );
     if (needsDeterministicReceipt) {
@@ -1117,7 +1113,6 @@ export class AgentLoop {
     userText: string;
     selectedSkill?: LoadedSkill | SkillDefinition;
     attachments?: readonly ChannelAttachment[];
-    executionPlan?: ExecutionPlan;
   }): OpenAICompatibleToolSchema[] {
     if (this.#providerToolSchemaCatalog === undefined || this.#taskExecution !== undefined) {
       return this.#providerTools;
@@ -1127,8 +1122,7 @@ export class AgentLoop {
       intent: input.intent,
       userText: input.userText,
       selectedSkill: input.selectedSkill,
-      attachments: input.attachments,
-      resumedExecutionPlan: input.executionPlan
+      attachments: input.attachments
     });
   }
 
@@ -1810,6 +1804,10 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function providerReportsIncompletePlan(content: string): boolean {
+  return /\b(?:mission|plan)\b.{0,40}\b(?:incomplete|unfinished|not complete)\b|(?:الخطة|المهمة).{0,40}(?:غير مكتملة|لم تكتمل)/iu.test(content);
+}
+
 function truncate(value: string, maxChars: number): string {
   return value.length <= maxChars ? value : `${value.slice(0, maxChars - 3)}...`;
 }
@@ -1824,19 +1822,4 @@ function truncate(value: string, maxChars: number): string {
 
 function suppressImageGenerationTools(tools: OpenAICompatibleToolSchema[]): OpenAICompatibleToolSchema[] {
   return tools.filter((tool) => tool.function.name !== "image_generate" && tool.function.name !== "image.generate");
-}
-
-function suppressImageGenerationToolCatalog(
-  catalog: ProviderToolSchemaCatalog | undefined
-): ProviderToolSchemaCatalog | undefined {
-  if (catalog === undefined) return undefined;
-  const entries = catalog.entries.filter((entry) =>
-    entry.schema.function.name !== "image_generate" && entry.schema.function.name !== "image.generate"
-  );
-  const providerNames = new Set(entries.map((entry) => entry.schema.function.name));
-  return {
-    entries,
-    tools: entries.map((entry) => entry.schema),
-    aliases: new Map([...catalog.aliases].filter(([alias]) => providerNames.has(alias)))
-  };
 }
