@@ -11,6 +11,7 @@ import { isBrowserSnapshotElementInteractable } from "./browser-interactability.
 
 const MAX_LOCATOR_TEXT = 500;
 const MAX_CANDIDATES = 8;
+const MAX_NEARBY_CANDIDATES = 4;
 
 export type BrowserTargetFailureReason =
   | "invalid-browser-target"
@@ -57,13 +58,71 @@ export function findBrowserLocator(snapshot: BrowserSnapshot, locator: BrowserLo
     .filter((element) => locatorMatches(element, normalized))
     .slice(0, MAX_CANDIDATES)
     .map((element) => locatorCandidate(element, snapshot.identity, tabRef));
+  const nearbyCandidates = candidates.length === 0
+    ? nearbyBrowserLocatorCandidates(available, normalized, snapshot.identity, tabRef)
+    : [];
   return {
     sessionId: snapshot.sessionId,
     identity: { ...snapshot.identity },
     tabRef,
     status: candidates.length === 0 ? "not-found" : candidates.length === 1 ? "found" : "ambiguous",
-    candidates
+    candidates,
+    ...(nearbyCandidates.length === 0 ? {} : { nearbyCandidates })
   };
+}
+
+function nearbyBrowserLocatorCandidates(
+  elements: NonNullable<BrowserSnapshot["elements"]>,
+  locator: BrowserLocator,
+  identity: BrowserStateIdentity,
+  tabRef: string
+): BrowserLocatorCandidate[] {
+  const requestedTokens = locatorTextTokens(locator);
+  if (requestedTokens.length === 0) return [];
+  return elements
+    .map((element, index) => ({
+      element,
+      index,
+      score: nearbyCandidateScore(element, locator, requestedTokens)
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .slice(0, MAX_NEARBY_CANDIDATES)
+    .map(({ element }) => locatorCandidate(element, identity, tabRef));
+}
+
+function nearbyCandidateScore(
+  element: NonNullable<BrowserSnapshot["elements"]>[number],
+  locator: BrowserLocator,
+  requestedTokens: readonly string[]
+): number {
+  const candidateText = comparable([
+    element.name,
+    element.text,
+    element.label,
+    element.withinText
+  ].filter((value): value is string => value !== undefined).join(" "));
+  const candidateTokens = new Set(tokenizeLocatorText(candidateText));
+  const overlap = requestedTokens.filter((token) => candidateTokens.has(token)).length;
+  const phrase = requestedTokens.join(" ");
+  const partialPhrase = phrase.length >= 4 && candidateText.includes(phrase) ? 2 : 0;
+  const role = locator.role !== undefined && comparable(element.role ?? "") === comparable(locator.role) ? 1 : 0;
+  return overlap * 4 + partialPhrase + (overlap > 0 ? role : 0);
+}
+
+function locatorTextTokens(locator: BrowserLocator): string[] {
+  return tokenizeLocatorText([
+    locator.name,
+    locator.text,
+    locator.label,
+    locator.withinText
+  ].filter((value): value is string => value !== undefined).join(" "));
+}
+
+function tokenizeLocatorText(value: string): string[] {
+  return [...new Set(comparable(value)
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((token) => token.length >= 2))];
 }
 
 export function resolveBrowserTarget(snapshot: BrowserSnapshot, input: BrowserActionInput): BrowserLocatorCandidate {

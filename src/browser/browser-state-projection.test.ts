@@ -171,6 +171,7 @@ describe("browser state projection", () => {
     const serialized = JSON.stringify(projection);
 
     expect(projection.tabs).toHaveLength(BROWSER_STATE_MAX_TABS);
+    expect(projection.tabInventoryComplete).toBe(true);
     expect(serialized).not.toContain(secret);
     expect(serialized).toContain("[REDACTED]");
   });
@@ -209,5 +210,38 @@ describe("browser state projection", () => {
       identity: current.identity,
       lastAction: { tool: "browser.click", status: "succeeded", changed: true }
     });
+    expect(projection).not.toHaveProperty("tabInventoryComplete");
+  });
+
+  it("does not carry complete tab inventory across browser session identities", async () => {
+    const previous = await refreshBrowserStateProjection({
+      backend: activeBackend({ snapshot: snapshot({ actionRevision: 2 }) }),
+      sessionId: "browser-session"
+    });
+    const nextSnapshot = {
+      ...snapshot({ actionRevision: 3 }),
+      sessionId: "replacement-browser-session"
+    };
+    const projection = projectBrowserStateFromExecutions({
+      sessionId: "replacement-browser-session",
+      previous,
+      executions: [{
+        tool: {
+          name: "browser.snapshot",
+          description: "snapshot",
+          inputSchema: {},
+          riskClass: "read-only-network",
+          toolsets: ["browser"],
+          progressLabel: "snapshotting",
+          maxResultSizeChars: 1000
+        },
+        decision: "allow",
+        riskClass: "read-only-network",
+        result: { ok: true, content: "snapshot", metadata: { snapshot: nextSnapshot } }
+      }]
+    });
+
+    expect(projection?.sessionId).toBe("replacement-browser-session");
+    expect(projection).not.toHaveProperty("tabInventoryComplete");
   });
 });

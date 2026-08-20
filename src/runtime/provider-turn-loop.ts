@@ -85,6 +85,7 @@ import {
   ExecutionSupervisionController,
   EXECUTION_SUPERVISION_PROMPTS
 } from "./execution-supervision-controller.js";
+import { isBrowserActionTool } from "./browser-observation-guard.js";
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
 const PROVIDER_CALL_EFFICIENCY_WARNING_THRESHOLD = 12;
@@ -314,7 +315,13 @@ export class ProviderTurnLoop {
       maxNoProgressIterations: this.#budgets.maxNoProgressIterations,
       executionWorkingSet: this.#executionWorkingSet,
       runRecorder: this.#runRecorder,
-      onEvent: input.onEvent
+      onEvent: input.onEvent,
+      hasCurrentBrowserTabInventory: () => {
+        const state = this.#sessionRuntimeContext?.browserState();
+        return state?.sessionStatus === "active" &&
+          state.freshness === "current" &&
+          state.tabInventoryComplete === true;
+      }
     });
     if (this.canRunProvider()) {
       await executionSupervision.initialize();
@@ -376,12 +383,15 @@ export class ProviderTurnLoop {
         : "continuation";
       retryEmptyInitialResponse = false;
       retryReasoningOnlyInitialResponse = false;
+      const providerToolsForIteration = supervisionPrompt.browserActionRecovery
+        ? browserActionRecoveryProviderTools(activeProviderTools, supervisionPrompt.browserTabsAllowed)
+        : activeProviderTools;
 
       let execution = phase === "initial"
         ? await this.#completeWithProvider({
             ...input,
             foregroundTurnId,
-            providerTools: activeProviderTools,
+            providerTools: providerToolsForIteration,
             iteration,
             loopStartedAt,
             reasoningOnlyPrefill: pendingReasoningOnlyPrefill,
@@ -390,7 +400,7 @@ export class ProviderTurnLoop {
         : await this.#continueProviderAfterTools({
           ...input,
           foregroundTurnId,
-          providerTools: activeProviderTools,
+          providerTools: providerToolsForIteration,
           toolExecutions: [
             ...input.toolExecutions,
             ...providerToolExecutions
@@ -401,6 +411,8 @@ export class ProviderTurnLoop {
           loopStartedAt,
           emptyResponseNudge: pendingEmptyResponseNudge,
           browserNoProgressNudge: supervisionPrompt.browserNoProgressNudge,
+          browserActionRecovery: supervisionPrompt.browserActionRecovery,
+          browserTabsAllowed: supervisionPrompt.browserTabsAllowed,
           toolLoopProgressNudge: supervisionPrompt.toolLoopProgressNudge,
           reasoningOnlyPrefill: pendingReasoningOnlyPrefill,
           efficiencySignals: providerEfficiencySignals({
@@ -426,7 +438,7 @@ export class ProviderTurnLoop {
         terminationCause = execution.runtimeMetadata.continuation.exhaustionCause ?? "budget_exhausted";
       }
 
-      if (isTruncatedToolCallRefusalExecution(execution)) {
+      if (isTruncatedToolCallRefusalExecution(execution) && !supervisionPrompt.browserActionRecovery) {
         terminationCause = "provider_failed";
         await this.#runRecorder.recordProviderIteration({
           iteration,
@@ -444,7 +456,7 @@ export class ProviderTurnLoop {
         break;
       }
 
-      if (isReasoningOnlyExecution(execution)) {
+      if (isReasoningOnlyExecution(execution) && !supervisionPrompt.browserActionRecovery) {
         if (isReasoningOnlyLengthExhaustion(execution)) {
           terminationCause = "provider_failed";
           execution = reasoningOnlySafeGuidanceExecution(execution, REASONING_ONLY_LENGTH_EXHAUSTION_MESSAGE);
@@ -1110,6 +1122,8 @@ export class ProviderTurnLoop {
     loopStartedAt: number;
     emptyResponseNudge?: boolean;
     browserNoProgressNudge?: boolean;
+    browserActionRecovery?: boolean;
+    browserTabsAllowed?: boolean;
     toolLoopProgressNudge?: boolean;
     reasoningOnlyPrefill?: boolean;
     efficiencySignals?: string[];
@@ -1177,6 +1191,15 @@ export class ProviderTurnLoop {
       prompt.messages.push({
         role: "user",
         content: EXECUTION_SUPERVISION_PROMPTS.browserNoProgress
+      });
+    }
+    if (input.browserActionRecovery === true) {
+      prompt.messages.push({
+        role: "user",
+        content: [
+          EXECUTION_SUPERVISION_PROMPTS.browserActionRecovery,
+          ...(input.browserTabsAllowed === true ? [EXECUTION_SUPERVISION_PROMPTS.browserTabsRecovery] : [])
+        ].join("\n")
       });
     }
     if (input.toolLoopProgressNudge === true) {
@@ -2230,6 +2253,23 @@ function normalizeBrowserObservationLimit(limit: number): number {
   return Number.isFinite(limit)
     ? Math.max(2, Math.floor(limit))
     : 3;
+}
+
+function browserActionRecoveryProviderTools(
+  tools: readonly OpenAICompatibleToolSchema[],
+  allowTabs: boolean
+): OpenAICompatibleToolSchema[] {
+  return tools.filter((tool) => {
+    const canonicalName = canonicalBrowserProviderToolName(tool.function.name);
+    if (canonicalName === undefined) return false;
+    return isBrowserActionTool(canonicalName) || (allowTabs && canonicalName === "browser.tabs");
+  });
+}
+
+function canonicalBrowserProviderToolName(name: string): string | undefined {
+  if (name.startsWith("browser.")) return name;
+  if (name.startsWith("browser_")) return `browser.${name.slice("browser_".length)}`;
+  return undefined;
 }
 
 function normalizeNoProgressStopIteration(limit: number): number {

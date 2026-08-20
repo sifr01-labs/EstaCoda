@@ -173,6 +173,11 @@ function currentProjection(input: {
     sessionId: boundedText(input.sessionId),
     ...(controlledTab === undefined ? {} : { controlledTab }),
     ...(tabs.length === 0 ? {} : { tabs }),
+    ...(input.tabs !== undefined || (
+      input.previous?.sessionId === input.sessionId && input.previous.tabInventoryComplete === true
+    )
+      ? { tabInventoryComplete: true }
+      : {}),
     ...(input.snapshot?.identity === undefined ? input.previous?.identity === undefined ? {} : { identity: input.previous.identity } : { identity: { ...input.snapshot.identity } }),
     ...(input.snapshot?.readiness === undefined ? input.previous?.readiness === undefined ? {} : { readiness: input.previous.readiness } : { readiness: input.snapshot.readiness }),
     freshness: "current",

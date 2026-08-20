@@ -3172,6 +3172,39 @@ describe("web and browser tools baselines", () => {
     ]));
   });
 
+  it("renders grounded nearby browser.find candidates as non-exact current-document refs", async () => {
+    const backend: BrowserBackend = {
+      ...createMockBrowserBackend(),
+      find: async () => ({
+        sessionId: "runtime-session:main",
+        identity: browserIdentity(4),
+        tabRef: "@t2",
+        status: "not-found",
+        candidates: [],
+        nearbyCandidates: [{
+          ref: "@e7",
+          identity: browserIdentity(4),
+          tabRef: "@t2",
+          role: "button",
+          name: "TikTok notifications"
+        }]
+      })
+    };
+
+    const result = await tool("browser.find", createTestWebTools({
+      browserBackend: backend,
+      currentSessionId: () => "runtime-session"
+    })).run({ locator: { role: "button", name: "TikTok Connect", exact: true } });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("No visible, enabled browser element matched exactly");
+    expect(result.content).toContain("Nearby current-document candidates (not exact matches");
+    expect(result.content).toContain(`@e7 identity=${JSON.stringify(browserIdentity(4))} tab=@t2`);
+    expect(result.metadata).toMatchObject({
+      nearbyCandidates: [{ ref: "@e7", identity: browserIdentity(4), tabRef: "@t2" }]
+    });
+  });
+
   it("surfaces stale and ambiguous browser targets as structured failures", async () => {
     const backend: BrowserBackend = {
       ...createMockBrowserBackend(),

@@ -29,8 +29,14 @@ export type BrowserObservationAssessment = {
   tool: string;
   count: number;
   shouldNudge: boolean;
+  shouldRecover: boolean;
   shouldStop: boolean;
+  tabInventoryObserved: boolean;
 } | undefined;
+
+export function isBrowserActionTool(tool: string): boolean {
+  return BROWSER_ACTION_TOOLS.has(tool);
+}
 
 /**
  * Tracks browser observation work that does not change semantic page/tab state.
@@ -46,7 +52,10 @@ export class BrowserObservationGuard {
     this.#limit = Math.max(2, Math.floor(limit));
   }
 
-  observe(executions: ToolExecutionRecord[]): BrowserObservationAssessment {
+  observe(
+    executions: ToolExecutionRecord[],
+    options: { actionRecovery?: boolean } = {}
+  ): BrowserObservationAssessment {
     const successfulActions = executions.filter((execution) =>
       execution.result?.ok === true && BROWSER_ACTION_TOOLS.has(execution.tool.name)
     );
@@ -54,6 +63,31 @@ export class BrowserObservationGuard {
     if (successfulActions.length > unchangedActions.length) {
       this.#reset();
       return undefined;
+    }
+
+    if (options.actionRecovery === true) {
+      const tabInventoryObserved = executions.length > 0 && executions.every((execution) =>
+        execution.tool.name === "browser.tabs" && execution.result?.ok === true
+      );
+      if (tabInventoryObserved) {
+        return {
+          tool: "browser.tabs",
+          count: this.#noProgressCount,
+          shouldNudge: false,
+          shouldRecover: true,
+          shouldStop: false,
+          tabInventoryObserved: true
+        };
+      }
+      this.#noProgressCount += 1;
+      return {
+        tool: browserRecoveryAttemptLabel(executions),
+        count: this.#noProgressCount,
+        shouldNudge: false,
+        shouldRecover: false,
+        shouldStop: true,
+        tabInventoryObserved: false
+      };
     }
 
     const observations = executions.filter((execution) => BROWSER_OBSERVATION_TOOLS.has(execution.tool.name));
@@ -83,7 +117,9 @@ export class BrowserObservationGuard {
       tool: tools.join(", "),
       count: this.#noProgressCount,
       shouldNudge: this.#noProgressCount === this.#limit - 1,
-      shouldStop: this.#noProgressCount >= this.#limit,
+      shouldRecover: this.#noProgressCount >= this.#limit,
+      shouldStop: false,
+      tabInventoryObserved: false
     };
   }
 
@@ -91,6 +127,11 @@ export class BrowserObservationGuard {
     this.#lastStateFingerprint = undefined;
     this.#noProgressCount = 0;
   }
+}
+
+function browserRecoveryAttemptLabel(executions: ToolExecutionRecord[]): string {
+  const tools = [...new Set(executions.map((execution) => execution.tool.name))].sort();
+  return tools.length === 0 ? "provider-response" : tools.join(", ");
 }
 
 function isExplicitNoChangeBrowserAction(execution: ToolExecutionRecord): boolean {

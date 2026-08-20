@@ -52,6 +52,49 @@ describe("semantic browser locators", () => {
     );
   });
 
+  it("returns bounded current-document nearby candidates without treating them as exact", () => {
+    const current = snapshot([
+      { ref: "@e1", role: "button", name: "TikTok notifications", withinText: "Connected apps" },
+      { ref: "@e2", role: "button", name: "TikTok settings", withinText: "Developer tools" },
+      { ref: "@e3", role: "button", name: "TikTok analytics" },
+      { ref: "@e4", role: "button", name: "TikTok business center" },
+      { ref: "@e5", role: "button", name: "TikTok account" },
+      { ref: "@e6", role: "button", name: "MTN application" }
+    ]);
+
+    const result = findBrowserLocator(current, {
+      role: "button",
+      name: "TikTok Connect application",
+      exact: true
+    });
+
+    expect(result).toMatchObject({
+      status: "not-found",
+      candidates: [],
+      nearbyCandidates: [
+        { ref: "@e1", identity: current.identity, tabRef: "@t2" },
+        { ref: "@e2", identity: current.identity, tabRef: "@t2" },
+        { ref: "@e3", identity: current.identity, tabRef: "@t2" },
+        { ref: "@e4", identity: current.identity, tabRef: "@t2" }
+      ]
+    });
+    expect(() => resolveBrowserTarget(current, {
+      locator: { role: "button", name: "TikTok Connect application", exact: true }
+    })).toThrowError(expect.objectContaining({ reason: "browser-target-not-found" }));
+  });
+
+  it("does not invent nearby candidates without structural text overlap", () => {
+    const result = findBrowserLocator(snapshot([
+      { ref: "@e1", role: "button", name: "MTN developer portal" }
+    ]), { role: "button", name: "TikTok Connect" });
+
+    expect(result).toEqual(expect.objectContaining({
+      status: "not-found",
+      candidates: []
+    }));
+    expect(result).not.toHaveProperty("nearbyCandidates");
+  });
+
   it("rejects stale refs and refs from another tab", () => {
     const current = snapshot([{ ref: "@e1", role: "button", name: "Open" }]);
 

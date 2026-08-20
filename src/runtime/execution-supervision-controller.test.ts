@@ -15,6 +15,8 @@ describe("ExecutionSupervisionController", () => {
     await supervision.initialize();
     expect(supervision.consumePromptState()).toEqual({
       browserNoProgressNudge: false,
+      browserActionRecovery: false,
+      browserTabsAllowed: false,
       toolLoopProgressNudge: false
     });
     expect(supervision.observeReasoningOnly()).toMatchObject({
@@ -79,13 +81,38 @@ describe("ExecutionSupervisionController", () => {
     supervision.assessProgress([snapshotExecution("snapshot-1", snapshot)]);
     supervision.assessProgress([snapshotExecution("snapshot-2", snapshot)]);
     expect(supervision.consumePromptState().browserNoProgressNudge).toBe(true);
-    const assessment = supervision.assessProgress([snapshotExecution("snapshot-3", snapshot)]);
+    const recovery = supervision.assessProgress([snapshotExecution("snapshot-3", snapshot)]);
 
-    expect(assessment.browserObservation).toMatchObject({ count: 3, shouldStop: true });
+    expect(recovery.browserObservation).toMatchObject({ count: 3, shouldRecover: true, shouldStop: false });
+    expect(recovery.terminationCause).toBeUndefined();
+    expect(supervision.consumePromptState()).toMatchObject({
+      browserActionRecovery: true,
+      browserTabsAllowed: true
+    });
+    const assessment = supervision.assessProgress([]);
+    expect(assessment.browserObservation).toMatchObject({ count: 4, shouldStop: true });
     expect(assessment.terminationCause).toBe("browser_no_progress");
     expect(supervision.browserNoProgressStopReceipt(providerExecution()).response?.content).toContain(
       "repeated observations showed no state change"
     );
+  });
+
+  it("does not re-expose browser.tabs when current complete inventory is already known", () => {
+    const { supervision } = createSupervision({
+      maxRepeatedBrowserObservations: 3,
+      hasCurrentBrowserTabInventory: true
+    });
+    const snapshot = pageSnapshot(identity(1, 1, 1), "Account", []);
+
+    supervision.assessProgress([snapshotExecution("snapshot-1", snapshot)]);
+    supervision.assessProgress([snapshotExecution("snapshot-2", snapshot)]);
+    supervision.consumePromptState();
+    supervision.assessProgress([snapshotExecution("snapshot-3", snapshot)]);
+
+    expect(supervision.consumePromptState()).toMatchObject({
+      browserActionRecovery: true,
+      browserTabsAllowed: false
+    });
   });
 
   it("owns tool-loop progress nudging and stopping without Mission state", async () => {
@@ -195,6 +222,7 @@ function createSupervision(input: {
   maxNoProgressIterations?: number;
   locale?: "en" | "ar";
   onEvent?: RuntimeEventSink;
+  hasCurrentBrowserTabInventory?: boolean;
 } = {}) {
   const recordAuthenticationEvidenceAssessment = vi.fn(async () => undefined);
   return {
@@ -209,6 +237,7 @@ function createSupervision(input: {
       maxNoProgressIterations: input.maxNoProgressIterations ?? 6,
       runRecorder: { recordAuthenticationEvidenceAssessment },
       onEvent: input.onEvent,
+      hasCurrentBrowserTabInventory: () => input.hasCurrentBrowserTabInventory === true,
     })
   };
 }

@@ -30,7 +30,7 @@ function execution(input: {
 }
 
 describe("BrowserObservationGuard", () => {
-  it("nudges once before stopping an unchanged observation loop", () => {
+  it("nudges once and then requires bounded action recovery before stopping", () => {
     const guard = new BrowserObservationGuard(3);
     const observation = execution({
       metadata: {
@@ -48,7 +48,17 @@ describe("BrowserObservationGuard", () => {
       tool: "browser.snapshot",
       count: 3,
       shouldNudge: false,
-      shouldStop: true
+      shouldRecover: true,
+      shouldStop: false,
+      tabInventoryObserved: false
+    });
+    expect(guard.observe([], { actionRecovery: true })).toEqual({
+      tool: "provider-response",
+      count: 4,
+      shouldNudge: false,
+      shouldRecover: false,
+      shouldStop: true,
+      tabInventoryObserved: false
     });
   });
 
@@ -87,7 +97,7 @@ describe("BrowserObservationGuard", () => {
     expect(guard.observe([execution({ tool: "browser.switch_tab" })])).toBeUndefined();
     expect(guard.observe([observation])).toMatchObject({ count: 1 });
     expect(guard.observe([execution({ ok: false })])).toMatchObject({ count: 2, shouldNudge: true });
-    expect(guard.observe([observation])).toMatchObject({ count: 3, shouldStop: true });
+    expect(guard.observe([observation])).toMatchObject({ count: 3, shouldRecover: true, shouldStop: false });
   });
 
   it("does not reset no-progress detection for an explicitly unchanged browser action", () => {
@@ -109,6 +119,13 @@ describe("BrowserObservationGuard", () => {
     expect(guard.observe([noChange])).toMatchObject({
       tool: "browser.click",
       count: 3,
+      shouldRecover: true,
+      shouldStop: false
+    });
+    expect(guard.observe([noChange], { actionRecovery: true })).toMatchObject({
+      tool: "browser.click",
+      count: 4,
+      shouldRecover: false,
       shouldStop: true
     });
   });
@@ -128,7 +145,11 @@ describe("BrowserObservationGuard", () => {
     expect(guard.observe([execution({
       tool: "browser.extract",
       content: "No bounded text was available."
-    })])).toMatchObject({ count: 3, shouldStop: true });
+    })])).toMatchObject({ count: 3, shouldRecover: true, shouldStop: false });
+    expect(guard.observe([execution({
+      tool: "browser.find",
+      content: "No visible element matched."
+    })], { actionRecovery: true })).toMatchObject({ count: 4, shouldStop: true });
   });
 
   it("does not treat concurrent observation ordering as a state change", () => {
@@ -160,7 +181,33 @@ describe("BrowserObservationGuard", () => {
       tool: "browser.snapshot",
       count: 1,
       shouldNudge: false,
-      shouldStop: false
+      shouldRecover: false,
+      shouldStop: false,
+      tabInventoryObserved: false
     });
+  });
+
+  it("allows one tab-inventory observation inside recovery before requiring an action", () => {
+    const guard = new BrowserObservationGuard(3);
+    const observation = execution();
+    guard.observe([observation]);
+    guard.observe([observation]);
+    expect(guard.observe([observation])?.shouldRecover).toBe(true);
+
+    expect(guard.observe([execution({
+      tool: "browser.tabs",
+      metadata: {
+        sessionId: "session-1",
+        tabs: [{ ref: "@t1", url: "https://example.com", controlled: true }],
+        blockedCount: 0
+      }
+    })], { actionRecovery: true })).toMatchObject({
+      count: 3,
+      shouldRecover: true,
+      shouldStop: false,
+      tabInventoryObserved: true
+    });
+    expect(guard.observe([execution({ tool: "browser.switch_tab" })], { actionRecovery: true })).toBeUndefined();
+    expect(guard.observe([observation])).toMatchObject({ count: 1 });
   });
 });

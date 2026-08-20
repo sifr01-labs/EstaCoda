@@ -77,6 +77,8 @@ export type BrowserFindResult = {
   tabRef: string;
   status: "found" | "ambiguous" | "not-found";
   candidates: BrowserLocatorCandidate[];
+  /** Structurally grounded current-document candidates; never treated as exact matches. */
+  nearbyCandidates?: BrowserLocatorCandidate[];
 };
 
 export type BrowserActionPreflightKind = "click" | "press" | "dialog";
@@ -229,6 +231,7 @@ export type BrowserStateProjection = {
   sessionId?: string;
   controlledTab?: BrowserTab;
   tabs?: BrowserTab[];
+  tabInventoryComplete?: boolean;
   identity?: BrowserStateIdentity;
   readiness?: BrowserReadiness;
   freshness: "current" | "stale";

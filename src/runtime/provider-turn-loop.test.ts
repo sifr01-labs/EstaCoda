@@ -368,6 +368,7 @@ async function runBasicProviderTurn(
     providerToolSchemaCatalog?: ProviderToolSchemaCatalog;
     signal?: AbortSignal;
     onSecureInputRequest?: SecureInputRequestHandler;
+    onApprovalRequest?: Parameters<ProviderTurnLoop["run"]>[0]["onApprovalRequest"];
   } = {}
 ): Promise<Awaited<ReturnType<ProviderTurnLoop["run"]>>> {
   return await loop.run({
@@ -394,6 +395,7 @@ async function runBasicProviderTurn(
     onDelta: callbacks.onDelta,
     onSegmentBreak: callbacks.onSegmentBreak,
     onSecureInputRequest: callbacks.onSecureInputRequest,
+    onApprovalRequest: callbacks.onApprovalRequest,
     signal: callbacks.signal
   });
 }
@@ -2941,7 +2943,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       nowSpy.mockRestore();
     }
   });
-  it("nudges once and then stops repeated unchanged browser observations", async () => {
+  it("nudges once, exposes one action-only recovery step, and stops a refusal truthfully", async () => {
     const sensitivePageText = "private account marker";
     const snapshotExecution = (id: string): ToolExecutionRecord => ({
       ...toolExecutionForTool(id, "browser.snapshot", "Rendered browser snapshot."),
@@ -2963,7 +2965,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
         providerExecution("", [providerToolCall("call-snapshot-1", "{}", "browser.snapshot")]),
         providerExecution("", [providerToolCall("call-snapshot-2", "{}", "browser.snapshot")]),
         providerExecution("", [providerToolCall("call-snapshot-3", "{}", "browser.snapshot")]),
-        providerExecution("This fourth response must not run.")
+        providerExecution("I cannot identify a safe grounded browser action.")
       ],
       toolSteps: [
         { executions: [snapshotExecution("call-snapshot-1")] },
@@ -2974,12 +2976,33 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     });
     const events: RuntimeEvent[] = [];
 
+    const providerTools = [
+      "browser_snapshot",
+      "browser_find",
+      "browser_extract",
+      "browser_screenshot",
+      "browser_console",
+      "browser_cdp",
+      "browser_click",
+      "browser_scroll",
+      "browser_tabs",
+      "browser_switch_tab",
+      "browser_dialog",
+      "browser_back",
+      "browser_navigate",
+      "browser_press",
+      "browser_type",
+      "browser_fill_protected_form",
+      "browser_select",
+      "mcp_postman_updateCollection"
+    ].map(toolProviderSchema);
     const result = await runBasicProviderTurn(harness.loop, {
-      onEvent: (event) => events.push(event)
+      onEvent: (event) => events.push(event),
+      providerTools
     });
 
-    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
-    expect(result.iterations).toBe(3);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(4);
+    expect(result.iterations).toBe(4);
     expect(result.providerExecution?.response?.content).toBe(
       "I stopped this browser turn because repeated observations showed no state change. I can continue after switching tabs, taking a different browser action, or receiving clarification about the next step."
     );
@@ -2988,6 +3011,21 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
     const nudge = "Repeated browser observations show no semantic state change. Do not alternate snapshot, tabs, find, extract, screenshot, console, or CDP calls to inspect the same state. Take a relevant browser action; if protected input or another external condition blocks progress, record that precise blocker.";
     expect(requests.filter((request) => JSON.stringify(request.messages).includes(nudge))).toHaveLength(1);
+    const recoveryRequest = requests[3]!;
+    expect(JSON.stringify(recoveryRequest.messages)).toContain("bounded browser action-recovery step");
+    expect((recoveryRequest.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name)).toEqual([
+      "browser_click",
+      "browser_scroll",
+      "browser_tabs",
+      "browser_switch_tab",
+      "browser_dialog",
+      "browser_back",
+      "browser_navigate",
+      "browser_press",
+      "browser_type",
+      "browser_fill_protected_form",
+      "browser_select"
+    ]);
 
     const budgetEvent = events.find((event) =>
       event.kind === "provider-budget-exhausted" && event.budget === "repeated-browser-observations"
@@ -2996,9 +3034,148 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       kind: "provider-budget-exhausted",
       budget: "repeated-browser-observations",
       limit: 3,
-      observed: 3
+      observed: 4
     }));
     expect(JSON.stringify(budgetEvent)).not.toContain(sensitivePageText);
+  });
+
+  it("recovers snapshot-find-find stalls through one grounded action and restores the full inventory", async () => {
+    const onApprovalRequest = vi.fn(async () => "approved" as const);
+    const sameSnapshot = (id: string, tool = "browser.snapshot"): ToolExecutionRecord => ({
+      ...toolExecutionForTool(id, tool, "Same browser state."),
+      result: {
+        ok: true,
+        content: "Same browser state.",
+        metadata: tool === "browser.snapshot" ? {
+          snapshot: { sessionId: "browser-session", url: "https://example.com/apps", text: "Apps" }
+        } : undefined
+      }
+    });
+    const changedClick: ToolExecutionRecord = {
+      ...toolExecutionForTool("call-click", "browser.click", "App opened."),
+      result: {
+        ok: true,
+        content: "App opened.",
+        metadata: {
+          snapshot: {
+            sessionId: "browser-session",
+            url: "https://example.com/apps/tiktok",
+            actionDelta: { outcome: "changed" }
+          }
+        }
+      }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-snapshot", "{}", "browser.snapshot")]),
+        providerExecution("", [providerToolCall("call-find-1", "{}", "browser.find")]),
+        providerExecution("", [providerToolCall("call-find-2", "{}", "browser.find")]),
+        providerExecution("", [providerToolCall("call-click", JSON.stringify({
+          ref: "@e7",
+          identity: { documentEpoch: 1, actionRevision: 3, observationId: 3 },
+          tabRef: "@t1"
+        }), "browser.click")]),
+        providerExecution("Recovered after opening the grounded app.")
+      ],
+      toolSteps: [
+        { executions: [sameSnapshot("call-snapshot")] },
+        { executions: [sameSnapshot("call-find-1", "browser.find")] },
+        { executions: [sameSnapshot("call-find-2", "browser.find")] },
+        { executions: [changedClick] }
+      ],
+      maxProviderIterations: 6
+    });
+    const providerTools = [
+      "browser.snapshot",
+      "browser.find",
+      "browser.extract",
+      "browser.click",
+      "browser.scroll",
+      "browser.tabs",
+      "browser.switch_tab",
+      "mcp.postman.updateCollection"
+    ].map(toolProviderSchema);
+
+    const result = await runBasicProviderTurn(harness.loop, { providerTools, onApprovalRequest });
+    const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
+    const recoveryTools = (requests[3]!.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name);
+    const restoredTools = (requests[4]!.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name);
+
+    expect(result.terminationCause).toBe("normal");
+    expect(result.providerExecution?.response?.content).toBe("Recovered after opening the grounded app.");
+    expect(recoveryTools).toEqual([
+      "browser.click",
+      "browser.scroll",
+      "browser.tabs",
+      "browser.switch_tab"
+    ]);
+    expect(restoredTools).toEqual(providerTools.map((tool) => tool.function.name));
+    expect(harness.executePlans.mock.calls[3]?.[0].onApprovalRequest).toBe(onApprovalRequest);
+    expect(harness.executePlans.mock.calls[3]?.[0].providerExecution?.toolCalls[0]?.argumentsText).toBe(
+      JSON.stringify({
+        ref: "@e7",
+        identity: { documentEpoch: 1, actionRevision: 3, observationId: 3 },
+        tabRef: "@t1"
+      })
+    );
+  });
+
+  it("permits browser.tabs once when recovery lacks inventory, then requires a grounded action", async () => {
+    const observation = (id: string, tool: string): ToolExecutionRecord =>
+      toolExecutionForTool(id, tool, "No browser state change.");
+    const tabs: ToolExecutionRecord = {
+      ...toolExecutionForTool("call-tabs", "browser.tabs", "Two safe tabs."),
+      result: {
+        ok: true,
+        content: "Two safe tabs.",
+        metadata: {
+          sessionId: "browser-session",
+          tabs: [
+            { ref: "@t1", url: "https://example.com/apps", controlled: true },
+            { ref: "@t2", url: "https://example.com/notifications", controlled: false }
+          ],
+          blockedCount: 0
+        }
+      }
+    };
+    const switched = toolExecutionForTool("call-switch", "browser.switch_tab", "Switched tabs.");
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-snapshot", "{}", "browser.snapshot")]),
+        providerExecution("", [providerToolCall("call-find", "{}", "browser.find")]),
+        providerExecution("", [providerToolCall("call-extract", "{}", "browser.extract")]),
+        providerExecution("", [providerToolCall("call-tabs", "{}", "browser.tabs")]),
+        providerExecution("", [providerToolCall("call-switch", "{}", "browser.switch_tab")]),
+        providerExecution("Recovered on the notifications tab.")
+      ],
+      toolSteps: [
+        { executions: [observation("call-snapshot", "browser.snapshot")] },
+        { executions: [observation("call-find", "browser.find")] },
+        { executions: [observation("call-extract", "browser.extract")] },
+        { executions: [tabs] },
+        { executions: [switched] }
+      ],
+      maxProviderIterations: 7
+    });
+    const providerTools = [
+      "browser.snapshot",
+      "browser.find",
+      "browser.extract",
+      "browser.click",
+      "browser.tabs",
+      "browser.switch_tab"
+    ].map(toolProviderSchema);
+
+    const result = await runBasicProviderTurn(harness.loop, { providerTools });
+    const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
+    const firstRecoveryTools = (requests[3]!.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name);
+    const secondRecoveryTools = (requests[4]!.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name);
+
+    expect(firstRecoveryTools).toContain("browser.tabs");
+    expect(secondRecoveryTools).not.toContain("browser.tabs");
+    expect(secondRecoveryTools).toContain("browser.switch_tab");
+    expect(result.terminationCause).toBe("normal");
+    expect(harness.completeSpy).toHaveBeenCalledTimes(6);
   });
 
   it("stops before a substitute continuation when a delegated Task owns the answer", async () => {

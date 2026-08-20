@@ -2299,7 +2299,13 @@ function renderDeltaElement(element: BrowserActionDeltaElement): string {
 
 function renderBrowserFindResult(result: BrowserFindResult): string {
   if (result.status === "not-found") {
-    return `No visible, enabled browser element matched at ${renderBrowserIdentity(result.identity)} on tab ${result.tabRef}.`;
+    const heading = `No visible, enabled browser element matched exactly at ${renderBrowserIdentity(result.identity)} on tab ${result.tabRef}.`;
+    if ((result.nearbyCandidates?.length ?? 0) === 0) return heading;
+    return [
+      heading,
+      "Nearby current-document candidates (not exact matches; inspect structure before acting):",
+      ...result.nearbyCandidates!.map(renderBrowserLocatorCandidate)
+    ].join("\n");
   }
   const heading = result.status === "ambiguous"
     ? `Locator is ambiguous: ${result.candidates.length} candidates matched. Refine it instead of guessing.`

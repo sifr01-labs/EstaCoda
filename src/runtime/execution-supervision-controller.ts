@@ -15,11 +15,15 @@ import type { RunRecorder } from "./run-recorder.js";
 
 export const EXECUTION_SUPERVISION_PROMPTS = {
   browserNoProgress: "Repeated browser observations show no semantic state change. Do not alternate snapshot, tabs, find, extract, screenshot, console, or CDP calls to inspect the same state. Take a relevant browser action; if protected input or another external condition blocks progress, record that precise blocker.",
+  browserActionRecovery: "This is the bounded browser action-recovery step. Observation tools are unavailable. Use one grounded browser action to change state, report a concrete blocker, or return a truthful incomplete answer. Do not claim completion without an observed state change.",
+  browserTabsRecovery: "The runtime does not have a current complete tab inventory, so browser.tabs is available once. If you use it, the next recovery step must switch to a grounded tab or take another browser action.",
   toolLoopProgress: "The foreground tool loop has repeated the same calls or results without material progress. Change approach before continuing the original request. Use a different relevant action, surface a concrete runtime blocker, or return the truthful result already established."
 } as const;
 
 export type ExecutionSupervisionPromptState = {
   browserNoProgressNudge: boolean;
+  browserActionRecovery: boolean;
+  browserTabsAllowed: boolean;
   toolLoopProgressNudge: boolean;
 };
 
@@ -44,6 +48,7 @@ export type ExecutionSupervisionControllerOptions = {
   executionWorkingSet?: ExecutionWorkingSetController;
   runRecorder: Pick<RunRecorder, "recordAuthenticationEvidenceAssessment">;
   onEvent?: RuntimeEventSink;
+  hasCurrentBrowserTabInventory?: () => boolean;
 };
 
 /**
@@ -62,11 +67,15 @@ export class ExecutionSupervisionController {
   readonly #executionWorkingSet: ExecutionWorkingSetController | undefined;
   readonly #runRecorder: Pick<RunRecorder, "recordAuthenticationEvidenceAssessment">;
   readonly #onEvent: RuntimeEventSink | undefined;
+  readonly #hasCurrentBrowserTabInventory: () => boolean;
   readonly #existingExecutions: readonly ToolExecutionRecord[];
   readonly #browserObservationGuard: BrowserObservationGuard;
   #toolLoopProgressGuard: ToolLoopProgressGuard;
   readonly #authenticationEvidenceTracker: AuthenticationEvidenceTracker;
   #pendingBrowserNoProgressNudge = false;
+  #pendingBrowserActionRecovery = false;
+  #browserActionRecoveryInFlight = false;
+  #browserTabsObservedDuringRecovery = false;
   #pendingToolLoopProgressNudge = false;
   #runtimeUserInputBlocker: { summary: string } | undefined;
   #initialized = false;
@@ -80,6 +89,7 @@ export class ExecutionSupervisionController {
     this.#executionWorkingSet = options.executionWorkingSet;
     this.#runRecorder = options.runRecorder;
     this.#onEvent = options.onEvent;
+    this.#hasCurrentBrowserTabInventory = options.hasCurrentBrowserTabInventory ?? (() => false);
     this.#existingExecutions = options.existingExecutions;
     this.#browserObservationGuard = new BrowserObservationGuard(options.maxRepeatedBrowserObservations);
     this.#toolLoopProgressGuard = new ToolLoopProgressGuard({
@@ -107,11 +117,18 @@ export class ExecutionSupervisionController {
   }
 
   consumePromptState(): ExecutionSupervisionPromptState {
+    const browserActionRecovery = this.#pendingBrowserActionRecovery;
     const state = {
       browserNoProgressNudge: this.#pendingBrowserNoProgressNudge,
+      browserActionRecovery,
+      browserTabsAllowed: browserActionRecovery &&
+        !this.#browserTabsObservedDuringRecovery &&
+        !this.#hasCurrentBrowserTabInventory(),
       toolLoopProgressNudge: this.#pendingToolLoopProgressNudge
     };
     this.#pendingBrowserNoProgressNudge = false;
+    this.#pendingBrowserActionRecovery = false;
+    this.#browserActionRecoveryInFlight = browserActionRecovery;
     this.#pendingToolLoopProgressNudge = false;
     return state;
   }
@@ -136,7 +153,11 @@ export class ExecutionSupervisionController {
   }
 
   assessProgress(executions: ToolExecutionRecord[]): ExecutionSupervisionAssessment {
-    const browserObservation = this.#browserObservationGuard.observe(executions);
+    const browserActionRecoveryWasInFlight = this.#browserActionRecoveryInFlight;
+    const browserObservation = this.#browserObservationGuard.observe(executions, {
+      actionRecovery: browserActionRecoveryWasInFlight
+    });
+    this.#browserActionRecoveryInFlight = false;
     const toolLoopProgress = this.#toolLoopProgressGuard.observe(executions);
     this.#executionWorkingSet?.observe(
       executions,
@@ -144,6 +165,11 @@ export class ExecutionSupervisionController {
       this.#currentSessionId()
     );
     if (browserObservation?.shouldNudge === true) this.#pendingBrowserNoProgressNudge = true;
+    if (browserActionRecoveryWasInFlight && browserObservation === undefined) {
+      this.#browserTabsObservedDuringRecovery = false;
+    }
+    if (browserObservation?.tabInventoryObserved === true) this.#browserTabsObservedDuringRecovery = true;
+    if (browserObservation?.shouldRecover === true) this.#pendingBrowserActionRecovery = true;
     if (toolLoopProgress.shouldNudge) this.#pendingToolLoopProgressNudge = true;
 
     return {
