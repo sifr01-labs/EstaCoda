@@ -5,6 +5,7 @@ import {
 } from "./assistantMessageFrame.js";
 import type { StreamingState } from "./operatorConsoleState.js";
 import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
+import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
 
 export type StreamingSurfaceRenderOptions = {
   readonly width: number;
@@ -12,6 +13,7 @@ export type StreamingSurfaceRenderOptions = {
   readonly terminalHeight?: number;
   readonly style?: OperatorConsoleStyle;
   readonly motionElapsedMs?: number;
+  readonly locale?: OperatorConsoleLocale;
 };
 
 export function hasStreamingSurface(state: StreamingState | undefined): state is StreamingState {
@@ -50,7 +52,13 @@ export function renderStreamingSurface(
   return renderAssistantMessageFrame({
     lines: [],
     blocks: streamingContentBlocks(state),
-  }, { width, height, style: options.style, motionElapsedMs: options.motionElapsedMs });
+  }, {
+    width,
+    height,
+    style: options.style,
+    motionElapsedMs: options.motionElapsedMs,
+    locale: options.locale,
+  });
 }
 
 function streamingContentBlocks(state: StreamingState): readonly AssistantMessageFrameBlock[] {

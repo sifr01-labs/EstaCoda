@@ -12,6 +12,20 @@ export type ToolDisplayLabelSet = {
   readonly ar: string;
 };
 
+export type ToolActivityPresentation = {
+  readonly family: string;
+  readonly action: string;
+  readonly object?: string;
+  readonly context?: string;
+};
+
+export type ToolActivityPresentationInput = {
+  readonly tool: string;
+  readonly displayLabel?: string;
+  readonly target?: string;
+  readonly locale?: ToolDisplayLocale;
+};
+
 export const TOOL_DISPLAY_LABELS: Readonly<Record<string, ToolDisplayLabelSet>> = {
   plan: { en: "Update Plan", ar: "تحديث الخطة" },
   "trajectory.record": { en: "Record Trajectory", ar: "تسجيل المسار" },
@@ -243,6 +257,90 @@ const TITLE_CASE_OVERRIDES: Readonly<Record<string, string>> = {
   urls: "URLs"
 };
 
+const TOOL_ACTIVITY_ALIASES: Readonly<Record<string, string>> = {
+  apply_patch: "file.patch",
+  delegate_task: "agents.delegate",
+  execute_code: "code.execute",
+  glob: "file.glob",
+  grep: "file.grep",
+  plan: "plan.update",
+  read_file: "file.read",
+  rg: "file.search",
+  session_search: "session.search",
+  shell: "terminal.run",
+  "terminal.exec": "terminal.run",
+  test: "terminal.test",
+  typecheck: "code.typecheck",
+  write_file: "file.write",
+};
+
+const TOOL_ACTIVITY_FAMILY_LABELS: Readonly<Record<string, ToolDisplayLabelSet>> = {
+  agents: { en: "Agents", ar: "الوكلاء" },
+  artifact: { en: "Artifacts", ar: "النواتج" },
+  browser: { en: "Browser", ar: "المتصفح" },
+  code: { en: "Code", ar: "الكود" },
+  config: { en: "Config", ar: "الإعدادات" },
+  document: { en: "Documents", ar: "المستندات" },
+  file: { en: "Files", ar: "الملفات" },
+  image: { en: "Images", ar: "الصور" },
+  knowledge: { en: "Knowledge", ar: "المعرفة" },
+  media: { en: "Media", ar: "الوسائط" },
+  memory: { en: "Memory", ar: "الذاكرة" },
+  notebook: { en: "Notebook", ar: "دفتر الملاحظات" },
+  plan: { en: "Plan", ar: "الخطة" },
+  process: { en: "Processes", ar: "العمليات" },
+  python: { en: "Python", ar: "Python" },
+  session: { en: "Sessions", ar: "الجلسات" },
+  skill: { en: "Skills", ar: "المهارات" },
+  task: { en: "Tasks", ar: "المهام" },
+  terminal: { en: "Shell", ar: "الطرفية" },
+  trajectory: { en: "Trajectory", ar: "المسار" },
+  vision: { en: "Vision", ar: "الرؤية" },
+  voice: { en: "Voice", ar: "الصوت" },
+  web: { en: "Web", ar: "الويب" },
+  workspace: { en: "Workspace", ar: "مساحة العمل" },
+};
+
+const TOOL_ACTIVITY_ARABIC_ACTIONS: Readonly<Record<string, string>> = {
+  "agents.delegate": "إسناد",
+  "browser.back": "رجوع",
+  "browser.cdp": "CDP",
+  "browser.click": "نقر",
+  "browser.console": "وحدة التحكم",
+  "browser.dialog": "حوار",
+  "browser.fill_protected_form": "تعبئة نموذج محمي",
+  "browser.get_images": "جلب الصور",
+  "browser.navigate": "فتح",
+  "browser.press": "ضغط مفتاح",
+  "browser.screenshot": "لقطة شاشة",
+  "browser.scroll": "تمرير",
+  "browser.snapshot": "لقطة",
+  "browser.status": "الحالة",
+  "browser.type": "كتابة",
+  "browser.vision": "تحليل بصري",
+  "code.execute": "تنفيذ",
+  "code.typecheck": "فحص الأنواع",
+  "file.glob": "مطابقة",
+  "file.grep": "بحث نصي",
+  "file.patch": "تعديل",
+  "file.read": "قراءة",
+  "file.search": "بحث",
+  "file.write": "كتابة",
+  "plan.update": "تحديث",
+  "process.list": "عرض",
+  "process.logs": "سجلات",
+  "process.start": "بدء",
+  "process.stop": "إيقاف",
+  "terminal.inspect": "فحص",
+  "terminal.run": "تشغيل",
+  "terminal.test": "اختبار",
+  "web.crawl": "زحف",
+  "web.extract": "استخراج",
+  "web.search": "بحث",
+};
+
+const MAX_TOOL_ACTIVITY_TEXT_CHARS = 160;
+
 export function toolDisplayLabel(tool: string, locale: ToolDisplayLocale = "en"): string {
   const label = TOOL_DISPLAY_LABELS[tool]?.[locale];
   if (label !== undefined) {
@@ -251,6 +349,25 @@ export function toolDisplayLabel(tool: string, locale: ToolDisplayLocale = "en")
 
   const fallback = dynamicToolDisplayLabel(tool);
   return locale === "ar" ? `أداة ${fallback}` : fallback;
+}
+
+export function resolveToolActivityPresentation(
+  input: ToolActivityPresentationInput
+): ToolActivityPresentation {
+  const locale = input.locale ?? "en";
+  const rawTool = sanitizeToolActivityText(input.tool) || "tool";
+  const canonicalTool = TOOL_ACTIVITY_ALIASES[rawTool] ?? rawTool;
+  const identity = toolActivityIdentity(canonicalTool, locale, input.displayLabel);
+  const target = sanitizeToolActivityText(input.target);
+  const browserTarget = browserTargetPresentation(canonicalTool, target);
+  const object = browserTarget?.object ?? meaningfulToolActivityObject(target, rawTool, identity, input.displayLabel);
+
+  return {
+    family: identity.family,
+    action: identity.action,
+    ...(object === undefined ? {} : { object }),
+    ...(browserTarget?.context === undefined ? {} : { context: browserTarget.context }),
+  };
 }
 
 export function toolDisplayIcon(tool: string, surface: ToolDisplaySurface = "cli"): string {
@@ -280,6 +397,99 @@ function dynamicToolDisplayLabel(tool: string): string {
     .map((part) => titleCaseSegment(part))
     .filter((part) => part.length > 0)
     .join(" ") || "Tool";
+}
+
+function toolActivityIdentity(
+  tool: string,
+  locale: ToolDisplayLocale,
+  displayLabel: string | undefined
+): Pick<ToolActivityPresentation, "family" | "action"> {
+  const parts = tool.split(".").filter((part) => part.length > 0);
+  if (parts[0] === "mcp" && parts.length >= 3) {
+    return {
+      family: humanizeToolActivityWords(parts[1] ?? "MCP"),
+      action: humanizeToolActivityWords(parts.slice(2).join(" ")),
+    };
+  }
+
+  const familyKey = parts.length >= 2 ? parts[0] ?? "tool" : "tool";
+  const familyLabels = TOOL_ACTIVITY_FAMILY_LABELS[familyKey];
+  const family = familyLabels?.[locale] ?? (locale === "ar" ? "أداة" : humanizeToolActivityWords(familyKey));
+  const approvedArabicAction = locale === "ar"
+    ? TOOL_ACTIVITY_ARABIC_ACTIONS[tool]
+    : undefined;
+  const fallbackAction = parts.length >= 2
+    ? humanizeToolActivityWords(parts.slice(1).join(" "))
+    : sanitizeToolActivityText(displayLabel) || humanizeToolActivityWords(tool);
+  const action = approvedArabicAction ?? (
+    locale === "ar" && TOOL_DISPLAY_LABELS[tool]?.ar !== undefined
+      ? TOOL_DISPLAY_LABELS[tool]!.ar
+      : fallbackAction
+  );
+
+  return {
+    family: sanitizeToolActivityText(family) || (locale === "ar" ? "أداة" : "Tool"),
+    action: sanitizeToolActivityText(action) || (locale === "ar" ? "تنفيذ" : "Run"),
+  };
+}
+
+function humanizeToolActivityWords(value: string): string {
+  return sanitizeToolActivityText(value)
+    .replace(/([a-z\d])([A-Z])/gu, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/gu, "$1 $2")
+    .split(/[._\-\s]+/u)
+    .map(titleCaseSegment)
+    .filter((part) => part.length > 0)
+    .join(" ") || "Tool";
+}
+
+function meaningfulToolActivityObject(
+  target: string,
+  rawTool: string,
+  identity: Pick<ToolActivityPresentation, "family" | "action">,
+  displayLabel: string | undefined
+): string | undefined {
+  if (target.length === 0) return undefined;
+  const normalizedTarget = comparableToolActivityText(target);
+  const redundantValues = [
+    rawTool,
+    displayLabel,
+    identity.family,
+    identity.action,
+    `${identity.family} ${identity.action}`,
+  ].map((value) => comparableToolActivityText(value ?? ""));
+  return redundantValues.includes(normalizedTarget) ? undefined : target;
+}
+
+function browserTargetPresentation(
+  tool: string,
+  target: string
+): Pick<ToolActivityPresentation, "object" | "context"> | undefined {
+  if (tool !== "browser.click" || target.length === 0) return undefined;
+  const match = /^Click (?:button|link|form control|scripted control|element)(?: “(.+)”)? on (.+)$/u.exec(target);
+  if (match === null) return undefined;
+  const label = sanitizeToolActivityText(match[1]);
+  const context = sanitizeToolActivityText(match[2]);
+  return {
+    ...(label.length === 0 ? {} : { object: `“${label}”` }),
+    ...(context.length === 0 ? {} : { context }),
+  };
+}
+
+function comparableToolActivityText(value: string): string {
+  return sanitizeToolActivityText(value).toLocaleLowerCase("en").replace(/[._\-\s]+/gu, " ");
+}
+
+function sanitizeToolActivityText(value: string | undefined): string {
+  if (value === undefined) return "";
+  const normalized = value
+    .replace(/\u001b\[[0-?]*[ -\/]*[@-~]/gu, "")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return normalized.length <= MAX_TOOL_ACTIVITY_TEXT_CHARS
+    ? normalized
+    : `${normalized.slice(0, MAX_TOOL_ACTIVITY_TEXT_CHARS - 1)}…`;
 }
 
 function titleCaseSegment(segment: string): string {

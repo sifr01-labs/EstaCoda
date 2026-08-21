@@ -551,7 +551,7 @@ explain the setup editor flow
 ╭──────────────────────────── EstaCoda ────────────────────────────╮
 │ The setup editor is split into detection, review, apply, and      │
 │                                                                   │
-│   ◷ read_file   src/cli/setup-editor.ts                    00:04 │
+│   ◷ Files      Read        src/cli/setup-editor.ts            4s │
 │                                                                   │
 │ verification.▍                                                    │
 ╰───────────────────────────────────────────────────────────────────╯
@@ -576,9 +576,10 @@ Streaming contract:
   `Assistant stream` or `assistant:` must not appear in normal rendering. The
   live-only marker is the trailing cursor on incomplete text.
 - Inline tool trails render inside that shared assistant-message frame using
-  the Papyrus active-work visual grammar for status symbols. They are part of
-  the assistant answer surface, not a detached dashboard or separate transcript
-  role.
+  the canonical `status | family | action | object | telemetry` grammar. They
+  are part of the assistant answer surface, not a detached dashboard or
+  separate transcript role. Narration remains primary; execution rows are
+  indented and visually subordinate.
 - Local interactive Operator Console turns receive visible text through
   `runtime.handle({ onDelta })`. Plain CLI turns keep the append-only stdout
   `provider-token` path and must not be converted to managed-frame rendering.
@@ -591,6 +592,13 @@ Streaming contract:
   between the segment it follows and later assistant text when possible.
 - Inline trail rendering is passive: it formats the current trail metadata and
   does not add optional progress plumbing or independent live duration ticks.
+- Live trails and the completed-tools panel share the same row formatter. The
+  completed panel uses a quieter historical tone and carries its compact
+  success/failure/elapsed summary in the header; it has no duplicate footer.
+- Status color is semantic: running uses the activity accent, success uses the
+  success token, approval/waiting uses caution, and failure/cancellation uses
+  error. Tool families use one muted accent while objects and durations recede;
+  elapsed time alone never changes a row to caution.
 - If a provider attempt reports `provider-result.willFallback`, the Operator
   Console resets live streaming for that attempt before fallback output starts.
   Failed-attempt text must not survive into the visible fallback stream.
@@ -752,8 +760,8 @@ Active turn with steer draft:
 ```text
 Assistant is working…
 ╭─ Active work ─────────────────────────────────────────────────────────╮
-│ ◷ reading setup editor files                                   00:08  │
-│ ◷ searching approval tests                                      00:04  │
+│ ◷ Files       Read        src/cli/setup-editor.ts                8s  │
+│ ◷ Files       Search      approval tests                         4s  │
 ╰───────────────────────────────────────────────────────────────────────╯
 ╭─ Steer current turn ──────────────────────────────────────────────────╮
 │ › focus only on approval cards and pasted attachments                  │
@@ -766,8 +774,8 @@ Queued steer:
 ```text
 Assistant is working…
 ╭─ Active work ─────────────────────────────────────────────────────────╮
-│ ◷ terminal.exec     pnpm test                                  00:31  │
-│ ◷ read_file         src/cli/session-loop.ts                    00:08  │
+│ ◷ Shell       Run         pnpm test                               31s  │
+│ ◷ Files       Read        src/cli/session-loop.ts                  8s  │
 ╰───────────────────────────────────────────────────────────────────────╯
 ╭─ Queued steer ────────────────────────────────────────────────────────╮
 │ focus only on approval cards and pasted attachments                    │
@@ -799,8 +807,8 @@ Assistant:
 The structure is sound. The critical change is that Papyrus owns the interactive
 frame while runtime and setup code send semantic state into the Operator Console.
 ╭─ Active work ─────────────────────────────────────────────────────────╮
-│ ✓ searched operator console files                              00:01  │
-│ ◷ reading setup editor tests                                   00:04  │
+│ ✓ Files       Search      operator console files                  1s  │
+│ ◷ Files       Read        setup editor tests                      4s  │
 ╰───────────────────────────────────────────────────────────────────────╯
 Attachments
 ╭─ pasted text ─────────────╮ ╭─ file excerpt ────────────╮

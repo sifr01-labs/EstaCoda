@@ -152,6 +152,33 @@ describe("active work runtime mapper", () => {
     });
   });
 
+  it("does not synthesize a duplicate target from the tool display label", () => {
+    const mapper = new ActiveWorkRuntimeEventMapper();
+    const event = mapper.build({
+      kind: "tool-start",
+      tool: "browser.snapshot",
+    });
+
+    expect(event).toMatchObject({
+      toolName: "browser.snapshot",
+      displayLabel: "Browser Snapshot",
+    });
+    expect(event.target).toBeUndefined();
+  });
+
+  it("keeps governed browser click summaries for completed row compaction", () => {
+    const mapper = new ActiveWorkRuntimeEventMapper();
+    const event = mapper.build({
+      kind: "tool-result",
+      tool: "browser.click",
+      ok: true,
+      displayPreview: "TikTok Connect",
+      targetSummary: "Click scripted control “TikTok Connect” on developers.mtn.com",
+    });
+
+    expect(event.target).toBe("Click scripted control “TikTok Connect” on developers.mtn.com");
+  });
+
   it("maps bounded delegation progress into one stable subagent row", () => {
     let now = 1_000;
     const mapper = new ActiveWorkRuntimeEventMapper({ now: () => now });
@@ -669,7 +696,8 @@ describe("active work runtime mapper", () => {
     });
 
     const rendered = renderActiveWorkSurface(state, { width: 80, height: 4, locale: "ar" }).join("\n");
-    expect(rendered).toContain("قراءة ملف");
+    expect(rendered).toContain("الملفات");
+    expect(rendered).toContain("قراءة");
     expect(rendered).not.toContain("file.read");
   });
 
@@ -723,12 +751,12 @@ describe("active work runtime mapper", () => {
     ]);
 
     const rendered = renderActiveWorkSurface(state, { width: 88, height: 8 }).join("\n");
-    expect(rendered.indexOf("rg")).toBeLessThan(rendered.indexOf("read_file"));
-    expect(rendered.indexOf("read_file")).toBeLessThan(rendered.indexOf("shell"));
-    expect(rendered.indexOf("shell")).toBeLessThan(rendered.indexOf("typecheck"));
+    expect(rendered.indexOf("Search")).toBeLessThan(rendered.indexOf("Read"));
+    expect(rendered.indexOf("Read")).toBeLessThan(rendered.indexOf("Shell"));
+    expect(rendered.indexOf("Shell")).toBeLessThan(rendered.indexOf("Typecheck"));
   });
 
-  it("keeps technical tokens unchanged in Arabic renders", () => {
+  it("localizes tool identity while keeping technical targets unchanged in Arabic renders", () => {
     const state = applyActiveWorkRuntimeEvent(createActiveWorkRuntimeState(), {
       id: "read-output",
       toolName: "read_file",
@@ -740,7 +768,8 @@ describe("active work runtime mapper", () => {
 
     const rendered = renderActiveWorkSurface(state, { width: 80, height: 5, locale: "ar" }).join("\n");
     expect(rendered).toContain("تنفيذ الأدوات");
-    expect(rendered).toContain("read_file");
+    expect(rendered).toContain("الملفات");
+    expect(rendered).toContain("قراءة");
     expect(rendered).toContain("src/ui/papyrus/screen/output.ts");
     expect(rendered).toContain("3s");
     expect(rendered.split("\n").every((line) => stringWidth(line) <= 80)).toBe(true);

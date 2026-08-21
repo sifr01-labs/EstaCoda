@@ -130,7 +130,8 @@ describe("Papyrus operator console assistant message frame", () => {
     const rendered = rows.join("\n");
 
     expect(rendered).toContain("I'll inspect the runtime path first.");
-    expect(rendered).toContain("◷ read_file");
+    expect(rendered).toContain("◷ Files");
+    expect(rendered).toContain("Read");
     expect(rendered).toContain("src/cli/session-loop.ts");
     expect(rendered).toContain("3s");
     expect(rendered).toContain("The session loop wires deltas through the console.▍");
@@ -158,7 +159,8 @@ describe("Papyrus operator console assistant message frame", () => {
       }],
     }, { width: 72, style });
 
-    expect(rows.join("\n")).toContain(`${ansiFg(tokens.contract.severity.error)}✗\x1b[0m terminal.run`);
+    expect(rows.join("\n")).toContain(`${ansiFg(tokens.contract.severity.error)}✗\x1b[0m`);
+    expect(rows.join("\n")).toContain(`${ansiFg(tokens.contract.palette.accent)}Shell`);
     expect(rows.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 

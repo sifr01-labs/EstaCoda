@@ -350,6 +350,8 @@ buildApprovalSecurityViewModel({
 | Writing terminal output into the live prompt region | Route through the Papyrus raw prompt, surface controller, or Operator Console host. |
 | Mirroring secret prompt input into preview/status chrome | Keep secret prompt content inside the prompt answer path only. |
 | Rendering tool activity with fixed live slots or timers | Route tool-start/tool-result rows through the Operator Console active-work surface, with durable/plain fallbacks outside TTY console rendering. |
+| Rendering raw tool or MCP identifiers as the primary label | Resolve the shared `status | family | action | object | telemetry` presentation and retain the raw identity only in runtime state and diagnostics. |
+| Using caution color for elapsed time | Reserve caution for waiting, approval, and attention states; durations remain muted telemetry regardless of length. |
 | Putting a prompt marker inside placeholder copy | Let the prompt row own `>`/`›`; placeholder copy starts with the hint text. |
 
 ---

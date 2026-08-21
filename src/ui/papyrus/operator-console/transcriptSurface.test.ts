@@ -42,7 +42,8 @@ describe("Papyrus operator console transcript surface", () => {
 
     expect(rendered).toContain("EstaCoda");
     expect(rendered).toContain("I inspected the runtime path.");
-    expect(rendered).toContain("✓ read_file");
+    expect(rendered).toContain("✓ Files");
+    expect(rendered).toContain("Read");
     expect(rendered).toContain("src/cli/session-loop.ts");
     expect(rendered).toContain("1s");
     expect(rendered).not.toContain("Tool │");

@@ -8,6 +8,7 @@ import {
   ACTIVE_WORK_STATUS_SYMBOLS,
   createOperatorConsoleStyle,
   createDefaultToolActivityState,
+  formatCompletedActiveWorkSummary,
   formatActiveWorkSummary,
   formatLiveActiveWorkStatus,
   getActiveWorkSurfaceDesiredHeight,
@@ -41,7 +42,7 @@ describe("Papyrus operator console active work surface", () => {
     const state = createState({ items: manyItems(12) });
 
     expect(state.items).toHaveLength(12);
-    expect(renderActiveWorkSurface(state, { width: 80, height: 14 }).filter((line) => line.includes("tool_"))).toHaveLength(12);
+    expect(renderActiveWorkSurface(state, { width: 80, height: 14 }).filter((line) => line.includes("target "))).toHaveLength(12);
   });
 
   it("does not impose a fixed 5-slot or 8-slot render cap when viewport allows", () => {
@@ -49,7 +50,7 @@ describe("Papyrus operator console active work surface", () => {
       expanded: true,
       items: manyItems(12, "running"),
     }), { width: 90, height: 16 });
-    const renderedItemRows = output.filter((line) => line.includes("tool_"));
+    const renderedItemRows = output.filter((line) => line.includes("target "));
 
     expect(renderedItemRows).toHaveLength(12);
     expect(renderedItemRows.length).toBeGreaterThan(8);
@@ -111,7 +112,7 @@ describe("Papyrus operator console active work surface", () => {
     const output = renderActiveWorkSurface(createLiveState(), { width: 80, height: 8 }).join("\n");
 
     expect(output).toContain("✓");
-    expect(output).toContain("typecheck");
+    expect(output).toContain("Typecheck");
     expect(output).toContain("passed");
   });
 
@@ -120,8 +121,8 @@ describe("Papyrus operator console active work surface", () => {
     const output = renderActiveWorkSurface(state, { width: 80 });
 
     expect(output[0]).toMatch(/^╭─ Running tools ─+╮$/u);
-    expect(output).toContainEqual(expect.stringContaining("read_file"));
-    expect(output).toContainEqual(expect.stringContaining("tool_18"));
+    expect(output).toContainEqual(expect.stringContaining("Files"));
+    expect(output).toContainEqual(expect.stringContaining("Tool 18"));
     expect(output.join("\n")).not.toContain("more completed this turn");
     expect(output).toHaveLength(getActiveWorkSurfaceDesiredHeight(state));
     expect(output.at(-1)).toMatch(/^╰─+╯$/u);
@@ -162,9 +163,9 @@ describe("Papyrus operator console active work surface", () => {
     const text = output.join("\n");
 
     expect(output[0]).toContain("Running tools");
-    expect(text).toContain("terminal.exec");
-    expect(text).toContain("rg");
-    expect(text).toContain("tool_42");
+    expect(text).toContain("Run");
+    expect(text).toContain("Search");
+    expect(text).toContain("Tool 42");
     expect(text).not.toContain("↑↓ scroll · Enter inspect · Esc collapse");
     expect(output).toHaveLength(getActiveWorkSurfaceDesiredHeight(state));
     expect(output.every((line) => stringWidth(line) <= 80)).toBe(true);
@@ -188,10 +189,10 @@ describe("Papyrus operator console active work surface", () => {
     const top = renderActiveWorkSurface({ ...base, scrollOffset: 0 }, { width: 80 }).join("\n");
     const scrolled = renderActiveWorkSurface({ ...base, scrollOffset: 4 }, { width: 80 }).join("\n");
 
-    expect(top).toContain("tool_1");
-    expect(top).toContain("tool_12");
-    expect(scrolled).toContain("tool_1");
-    expect(scrolled).toContain("tool_7");
+    expect(top).toContain("target 1");
+    expect(top).toContain("target 12");
+    expect(scrolled).toContain("target 1");
+    expect(scrolled).toContain("target 7");
   });
 
   it("formats durations deterministically from explicit or start/end timing", () => {
@@ -242,7 +243,7 @@ describe("Papyrus operator console active work surface", () => {
       ],
     }), { width: 96 }).join("\n");
 
-    expect(output).toMatch(/✓ Inspect Terminal {3,}inspecting terminal/u);
+    expect(output).toMatch(/✓ Shell {2,}Inspect {2,}inspecting terminal/u);
     expect(output).toContain("0.1s");
   });
 
@@ -257,9 +258,9 @@ describe("Papyrus operator console active work surface", () => {
         }),
       ],
     }), { width: 96, height: 3 });
-    const row = output.find((line) => line.includes("Run Command")) ?? "";
+    const row = output.find((line) => line.includes("git log")) ?? "";
 
-    expect(row).toMatch(/ {3,}0\.2s\s+│$/u);
+    expect(row).toMatch(/ {2,}0\.2s\s+│$/u);
     expect(output.every((line) => stringWidth(line) <= 96)).toBe(true);
   });
 
@@ -521,10 +522,11 @@ describe("Papyrus operator console active work surface", () => {
     });
     const output = renderCompletedActiveWorkSurface(state, { width: 72 }).join("\n");
 
-    expect(getCompletedActiveWorkSurfaceDesiredHeight(state)).toBe(5);
-    expect(output).toContain("Delegate Task");
+    expect(getCompletedActiveWorkSurfaceDesiredHeight(state)).toBe(3);
+    expect(output).toContain("Agents");
+    expect(output).toContain("Delegate");
     expect(output).not.toContain("Worker 1");
-    expect(output).toContain("1 completed · 0 failed");
+    expect(output).toContain("1 succeeded · 0s");
   });
 
   it("keeps the live working timer visible for queued and approval work", () => {
@@ -539,7 +541,7 @@ describe("Papyrus operator console active work surface", () => {
     const text = output.join("\n");
 
     expect(output[0]).toContain("Running tools  ◷ 01:01");
-    expect(text).toContain("! shell");
+    expect(text).toContain("! Shell");
     expect(text).toContain("pnpm run build");
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
@@ -559,7 +561,7 @@ describe("Papyrus operator console active work surface", () => {
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
-  it("renders completed tool logs with the summary and worked duration at the bottom", () => {
+  it("renders completed tool logs with one compact summary in the header", () => {
     const output = renderCompletedActiveWorkSurface(createState({
       startedAtMs: 0,
       completedAtMs: 1_532_000,
@@ -571,25 +573,71 @@ describe("Papyrus operator console active work surface", () => {
     const text = output.join("\n");
 
     expect(output[0]).toContain("Tools completed");
-    expect(text).toContain("read_file");
+    expect(output[0]).toContain("1 succeeded · 1 failed · 25m 32s");
+    expect(text).toContain("Files");
+    expect(text).toContain("Read");
     expect(text).toContain("src/app.ts");
-    expect(text).toContain("test");
+    expect(text).toContain("Test");
     expect(text).toContain("failed");
-    expect(text).toContain("1 completed · 1 failed · Worked for 25:32");
+    expect(text).not.toContain("Worked for");
+    expect(text.match(/1 succeeded/gu)).toHaveLength(1);
     expect(output.every((line) => stringWidth(line) <= 96)).toBe(true);
   });
 
-  it("keeps response accounting out of the completed tool footer", () => {
-    const output = renderCompletedActiveWorkSurface(createState({
+  it("keeps response accounting out of the completed tool header", () => {
+    const state = createState({
       items: [item("read", "succeeded", { toolName: "read_file", target: "src/app.ts" })],
-    }), {
+    });
+    const output = renderCompletedActiveWorkSurface(state, {
       width: 72,
     }).join("\n");
 
-    expect(output).toContain("1 completed · 0 failed");
+    expect(formatCompletedActiveWorkSummary(state)).toBe("1 succeeded · 0s");
+    expect(output).toContain("1 succeeded · 0s");
     expect(output).not.toContain("Main agent");
     expect(output).not.toContain("Turn total");
     expect(output).not.toContain("$0.14");
+  });
+
+  it("does not report cancelled work as succeeded in the completed summary", () => {
+    const state = createState({
+      items: [
+        item("ok", "succeeded"),
+        item("stop", "cancelled"),
+      ],
+    });
+
+    expect(formatCompletedActiveWorkSummary(state)).toBe("1 succeeded · 1 cancelled · 0s");
+  });
+
+  it("compacts governed browser click summaries into object and context columns", () => {
+    const output = renderCompletedActiveWorkSurface(createState({
+      items: [item("click", "succeeded", {
+        toolName: "browser.click",
+        target: "Click scripted control “TikTok Connect” on developers.mtn.com",
+        durationMs: 1_000,
+      })],
+    }), { width: 96 }).join("\n");
+
+    expect(output).toContain("Browser");
+    expect(output).toContain("Click");
+    expect(output).toContain("“TikTok Connect” · developers.mtn.com");
+    expect(output).not.toContain("Click scripted control");
+  });
+
+  it("keeps family and action visible before optional object detail on narrow rows", () => {
+    const output = renderActiveWorkSurface(createState({
+      items: [item("click", "running", {
+        toolName: "browser.click",
+        target: "Click scripted control “A very long authentication control” on developers.mtn.com",
+        durationMs: 1_000,
+      })],
+    }), { width: 32, height: 3 }).join("\n");
+
+    expect(output).toContain("Browser");
+    expect(output).toContain("Click");
+    expect(output).not.toContain("authentication control");
+    expect(output.split("\n").every((line) => stringWidth(line) <= 32)).toBe(true);
   });
 
   it("renders Arabic completed tool logs with localized duration copy within bounds", () => {
@@ -605,9 +653,9 @@ describe("Papyrus operator console active work surface", () => {
     const logicalText = text.replace(/[\u2068\u2069]/gu, "");
 
     expect(output[0]).toContain("اكتمل تنفيذ الأدوات");
-    expect(logicalText).toContain("1 اكتملت · 1 فشلت · المدة 01:05");
-    expect(logicalText).toContain("read_file");
-    expect(logicalText).toContain("shell");
+    expect(logicalText).toContain("1 نجحت · 1 فشلت · 1m 5s");
+    expect(logicalText).toContain("الملفات");
+    expect(logicalText).toContain("الطرفية");
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
@@ -626,12 +674,14 @@ describe("Papyrus operator console active work surface", () => {
 
     expect(row).toContain("0.1s");
     expect(row).toContain("src/app.ts");
-    expect(row).toContain("قراءة ملف");
+    expect(row).toContain("قراءة");
+    expect(row).toContain("الملفات");
     expect(row).toContain("✓");
     expect(row.indexOf("0.1s")).toBeLessThan(row.indexOf("src/app.ts"));
     expect(row).toMatch(/0\.1s {7,}src\/app\.ts/u);
-    expect(row.indexOf("src/app.ts")).toBeLessThan(row.indexOf("قراءة ملف"));
-    expect(row.indexOf("قراءة ملف")).toBeLessThan(row.indexOf("✓"));
+    expect(row.indexOf("src/app.ts")).toBeLessThan(row.indexOf("قراءة"));
+    expect(row.indexOf("قراءة")).toBeLessThan(row.indexOf("الملفات"));
+    expect(row.indexOf("الملفات")).toBeLessThan(row.indexOf("✓"));
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
@@ -650,12 +700,14 @@ describe("Papyrus operator console active work surface", () => {
 
     expect(row).toContain("0.1s");
     expect(row).toContain("src/done.ts");
-    expect(row).toContain("قراءة ملف");
+    expect(row).toContain("قراءة");
+    expect(row).toContain("الملفات");
     expect(row).toContain("✓");
     expect(row.indexOf("0.1s")).toBeLessThan(row.indexOf("src/done.ts"));
     expect(row).toMatch(/0\.1s {7,}src\/done\.ts/u);
-    expect(row.indexOf("src/done.ts")).toBeLessThan(row.indexOf("قراءة ملف"));
-    expect(row.indexOf("قراءة ملف")).toBeLessThan(row.indexOf("✓"));
+    expect(row.indexOf("src/done.ts")).toBeLessThan(row.indexOf("قراءة"));
+    expect(row.indexOf("قراءة")).toBeLessThan(row.indexOf("الملفات"));
+    expect(row.indexOf("الملفات")).toBeLessThan(row.indexOf("✓"));
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
@@ -714,7 +766,7 @@ describe("Papyrus operator console active work surface", () => {
     }), { width: 44, height: 4 });
     const text = output.join("\n");
 
-    expect(text).toContain("terminal");
+    expect(text).toContain("Shell");
     expect(text).not.toContain("terminal.exec.with.a.very.long.name");
     expect(text).not.toContain("provider-turn-loop-with-a-very-long-name.ts");
     expect(output.every((line) => stringWidth(line) <= 44)).toBe(true);
@@ -846,7 +898,7 @@ describe("Papyrus operator console active work surface", () => {
     expect(source).not.toMatch(/from\s+["'][^"']*(?:cli|setup)[^"']*["']/u);
   });
 
-  it("renders Arabic labels while preserving technical tool names, paths, and durations", () => {
+  it("renders Arabic family and action labels while preserving paths and durations", () => {
     const output = renderActiveWorkSurface(createState({
       expanded: true,
       items: [
@@ -865,10 +917,12 @@ describe("Papyrus operator console active work surface", () => {
     const text = output.join("\n");
 
     expect(text).toContain("تنفيذ الأدوات");
-    expect(text).toContain("read_file");
+    expect(text).toContain("الملفات");
+    expect(text).toContain("قراءة");
     expect(text).toContain("src/ui/papyrus/screen/output.ts");
     expect(text).toContain("3s");
-    expect(text).toContain("typecheck");
+    expect(text).toContain("الكود");
+    expect(text).toContain("فحص الأنواع");
     expect(text).toContain("passed");
     expect(text).toContain("18s");
     expect(text).not.toContain("↑↓ تمرير");
@@ -880,7 +934,7 @@ describe("Papyrus operator console active work surface", () => {
     const text = output.join("\n");
 
     expect(text).toContain("تنفيذ الأدوات");
-    expect(text).toContain("tool_18");
+    expect(text).toContain("Tool 18");
     expect(text).not.toContain("أخرى مكتملة في هذه الجولة");
     expect(output.every((line) => stringWidth(line) <= 80)).toBe(true);
   });

@@ -608,7 +608,8 @@ describe("LiveOperatorConsoleController", () => {
     })]);
     const text = stripAnsi(output.text());
     expect(text).toContain("I will inspect the file first.");
-    expect(text).toContain("read_file");
+    expect(text).toContain("Files");
+    expect(text).toContain("Read");
     expect(text).toContain("src/app.ts");
     expect(text).not.toContain("Running tools");
 
@@ -862,7 +863,8 @@ describe("LiveOperatorConsoleController", () => {
     expect(runtimeHost.getState().terminal.height).toBe(24);
     expect(lines.length).toBeLessThanOrEqual(24);
     expect(text).not.toContain("Running tools");
-    expect(text).toContain("read_file");
+    expect(text).toContain("Files");
+    expect(text).toContain("Read");
     expect(text).toContain("src/file-19.ts");
     expect(runtimeHost.getState().streaming?.segments).toContainEqual(expect.objectContaining({
       text: "I will inspect the memory files.",

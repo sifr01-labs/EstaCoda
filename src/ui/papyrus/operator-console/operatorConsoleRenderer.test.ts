@@ -283,7 +283,7 @@ describe("Papyrus operator console renderer", () => {
     expect(tailIndex).toBeGreaterThan(streamingIndex);
     expect(turnActivityIndex).toBeGreaterThan(streamingIndex);
     expect(output).toContainEqual(expect.stringContaining("I am reading the operator console path."));
-    expect(output).toContainEqual(expect.stringContaining("◷ read_file"));
+    expect(output).toContainEqual(expect.stringContaining("◷ Files"));
     expect(output).toContainEqual(expect.stringContaining("Now checking the layout"));
     expect(output).toContainEqual(expect.stringContaining("Now checking the layout▍"));
     expect(output).toContainEqual(expect.stringContaining("working · activity: 1 active · 1 done · 00:33"));

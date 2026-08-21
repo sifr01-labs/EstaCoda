@@ -1,6 +1,7 @@
 import { stringWidth } from "../screen/stringWidth.js";
 import { truncateVisible } from "../../renderers/layout.js";
 import { semanticMotionFrame } from "../../semantic-motion.js";
+import { resolveToolActivityPresentation } from "../../tool-display.js";
 import {
   resolveActiveWorkCopy,
   type OperatorConsoleLocale,
@@ -36,9 +37,8 @@ export const ACTIVE_WORK_STATUS_SYMBOLS: Readonly<Record<ActiveWorkItemStatus, s
 
 const LTR_ISOLATE_START = "\u2068";
 const LTR_ISOLATE_END = "\u2069";
-const TOOL_DETAIL_GAP_CELLS = 3;
-const DURATION_DETAIL_GAP_CELLS = 3;
-const ARABIC_DURATION_DETAIL_GAP_CELLS = 7;
+const TOOL_ACTIVITY_COLUMN_GAP_CELLS = 2;
+const TOOL_ACTIVITY_DURATION_GAP_CELLS = 2;
 const MAX_VISIBLE_WORKER_CARDS = 3;
 const MAX_WORKER_ACTIVITY_ROWS = 6;
 const MIN_WORKER_CARD_WIDTH = 44;
@@ -82,7 +82,7 @@ export function getActiveWorkSurfaceDesiredHeight(state: ToolActivityState, widt
 export function getCompletedActiveWorkSurfaceDesiredHeight(state: ToolActivityState): number {
   const durableItems = activeWorkItemsForCompletedSurface(state);
   if (durableItems.length === 0) return 0;
-  return durableItems.length + 4;
+  return durableItems.length + 2;
 }
 
 export function renderActiveWorkSurface(
@@ -370,7 +370,8 @@ export function renderCompletedActiveWorkSurface(
   const height = normalizeDimension(options.height ?? getCompletedActiveWorkSurfaceDesiredHeight(visibleState));
   if (height <= 0) return [];
   const copy = resolveActiveWorkCopy(options.locale);
-  if (height < 3) return [truncateVisibleCells(formatActiveWorkSummary(visibleState, { locale: options.locale }), width)];
+  const summary = formatCompletedActiveWorkSummary(visibleState, { locale: options.locale });
+  if (height < 3) return [truncateVisibleCells(summary, width)];
 
   const contentWidth = Math.max(0, width - 4);
   const contentRows = Math.max(1, height - 2);
@@ -384,10 +385,27 @@ export function renderCompletedActiveWorkSurface(
   );
 
   return [
-    renderTopBorder(copy.toolsCompleted, width),
-    ...visibleRows.map((row) => renderContentRow(row, contentWidth, width)),
-    renderBottomBorder(width),
+    renderTopBorder(copy.toolsCompleted, width, completedHeaderRightLabel(copy.toolsCompleted, summary, width), options.style, true),
+    ...visibleRows.map((row) => renderContentRow(row, contentWidth, width, options.style, true)),
+    renderBottomBorder(width, options.style, true),
   ];
+}
+
+export function formatCompletedActiveWorkSummary(
+  state: ToolActivityState,
+  options: Pick<ActiveWorkSummaryOptions, "locale"> = {}
+): string {
+  const copy = resolveActiveWorkCopy(options.locale);
+  const failedCount = state.items.filter((item) => item.status === "failed").length;
+  const activeCount = state.items.filter(isActiveStatusItem).length;
+  const succeededCount = state.items.filter((item) => item.status === "succeeded").length;
+  const cancelledCount = state.items.filter((item) => item.status === "cancelled").length;
+  const parts = [`${formatNumber(succeededCount)} ${copy.succeeded}`];
+  if (cancelledCount > 0) parts.push(`${formatNumber(cancelledCount)} ${copy.cancelled}`);
+  if (activeCount > 0) parts.push(`${formatNumber(activeCount)} ${copy.active}`);
+  if (failedCount > 0) parts.push(`${formatNumber(failedCount)} ${copy.failed}`);
+  parts.push(isolateIfNeeded(formatHumanElapsedDuration(resolveActiveWorkElapsedMs(state)), options.locale));
+  return parts.join(" · ");
 }
 
 export function formatActiveWorkSummary(
@@ -463,26 +481,16 @@ function renderCompletedActiveWorkContentRows(
   style: OperatorConsoleStyle | undefined,
   motionElapsedMs: number | undefined
 ): readonly string[] {
-  const footer = formatCompletionFooterRows(state, contentWidth, locale);
-  if (contentRows <= footer.length) return footer.slice(0, contentRows);
-
-  const itemRows = Math.max(0, contentRows - footer.length);
-  const visibleItems = state.items.slice(0, itemRows);
-  const rows = visibleItems.map((item) => formatActiveWorkRow(item, state, contentWidth, locale, style, motionElapsedMs));
-
-  return [
-    ...padRows(rows, itemRows),
-    ...footer,
-  ];
-}
-
-function formatCompletionFooterRows(
-  state: ToolActivityState,
-  contentWidth: number,
-  locale: OperatorConsoleLocale | undefined
-): readonly string[] {
-  const summary = formatActiveWorkSummary(state, { locale, includeActive: false });
-  return [truncateVisibleCells(summary, contentWidth)];
+  const visibleItems = state.items.slice(0, contentRows);
+  const rows = visibleItems.map((item) => formatActiveWorkRow(
+    item,
+    contentWidth,
+    locale,
+    style,
+    motionElapsedMs,
+    "history"
+  ));
+  return padRows(rows, contentRows);
 }
 
 function renderActiveWorkContentRows(
@@ -495,85 +503,197 @@ function renderActiveWorkContentRows(
   motionElapsedMs: number | undefined
 ): readonly string[] {
   const visibleItems = sortedItems.slice(0, contentRows);
-  const rows = visibleItems.map((item) => formatActiveWorkRow(item, state, contentWidth, locale, style, motionElapsedMs));
+  const rows = visibleItems.map((item) => formatActiveWorkRow(item, contentWidth, locale, style, motionElapsedMs, "live"));
   return padRows(rows, contentRows);
 }
 
 function formatActiveWorkRow(
   item: ActiveWorkItem,
-  state: ToolActivityState,
   contentWidth: number,
   locale: OperatorConsoleLocale | undefined,
   style: OperatorConsoleStyle | undefined,
-  motionElapsedMs: number | undefined
+  motionElapsedMs: number | undefined,
+  tone: ToolActivityRowTone
+): string {
+  return formatToolActivityRow({
+    toolName: item.toolName,
+    displayLabel: item.displayLabel,
+    status: item.status,
+    summary: item.summary,
+    target: item.target,
+    durationMs: resolveDurationMs(item),
+  }, contentWidth, { locale, style, motionElapsedMs, tone });
+}
+
+export type ToolActivityRowTone = "live" | "history";
+
+export type ToolActivityRowInput = {
+  readonly toolName: string;
+  readonly displayLabel?: string;
+  readonly status: ActiveWorkItemStatus;
+  readonly summary: string;
+  readonly target?: string;
+  readonly durationMs: number;
+};
+
+export type ToolActivityRowOptions = {
+  readonly locale?: OperatorConsoleLocale;
+  readonly style?: OperatorConsoleStyle;
+  readonly motionElapsedMs?: number;
+  readonly tone?: ToolActivityRowTone;
+  readonly indent?: number;
+};
+
+export function formatToolActivityRow(
+  input: ToolActivityRowInput,
+  contentWidth: number,
+  options: ToolActivityRowOptions = {}
 ): string {
   const width = normalizeDimension(contentWidth);
   if (width <= 0) return "";
-
-  const symbol = activeWorkStatusSymbol(item.status, motionElapsedMs, style);
-  const renderedTool = item.displayLabel ?? item.toolName;
-  const rawTool = renderedTool.trim().length === 0 ? "tool" : renderedTool.trim();
-  const rawDetail = (item.target ?? item.summary).trim();
-  const duration = formatActiveWorkDuration(resolveDurationMs(item));
+  const locale = options.locale;
+  const tone = options.tone ?? "live";
+  const indent = " ".repeat(normalizeDimension(options.indent ?? 0));
+  const symbol = activeWorkStatusSymbol(input.status, options.motionElapsedMs, options.style);
+  const presentation = resolveToolActivityPresentation({
+    tool: input.toolName,
+    displayLabel: input.displayLabel,
+    target: input.target ?? input.summary,
+    locale,
+  });
+  const object = [presentation.object, presentation.context].filter((value): value is string => value !== undefined).join(" · ");
+  const duration = formatActiveWorkDuration(input.durationMs);
 
   if (locale === "ar") {
-    return formatArabicActiveWorkRow({ symbol, rawTool, rawDetail, duration, width });
+    return formatArabicToolActivityRow({
+      symbol,
+      family: presentation.family,
+      action: presentation.action,
+      object,
+      duration,
+      width,
+      indent,
+      style: options.style,
+      tone,
+    });
   }
 
-  if (width <= 8) return truncateVisibleCells(`${symbol} ${rawTool}`, width);
-
-  const prefixCells = stringWidth(symbol) + 1;
-  const durationPartCells = width >= 16 ? stringWidth(duration) + DURATION_DETAIL_GAP_CELLS : 0;
-  const availableMainCells = Math.max(0, width - prefixCells - durationPartCells);
-  if (availableMainCells <= 0) return truncateVisibleCells(`${symbol} ${rawTool}`, width);
-
-  const toolCells = Math.min(16, Math.max(1, Math.min(availableMainCells, Math.floor(availableMainCells * 0.35))));
-  const detailGapCells = availableMainCells > toolCells ? Math.min(TOOL_DETAIL_GAP_CELLS, availableMainCells - toolCells) : 0;
-  const detailCells = Math.max(0, availableMainCells - toolCells - detailGapCells);
-  const tool = isolateIfNeeded(truncateVisibleCells(rawTool, toolCells), locale);
-  const detail = isolateIfNeeded(truncateVisibleCells(rawDetail, detailCells), locale);
-  const detailGap = " ".repeat(detailGapCells);
-  const left = `${symbol} ${padVisibleEnd(tool, toolCells)}${detailGapCells > 0 ? `${detailGap}${padVisibleEnd(detail, detailCells)}` : ""}`;
-
-  if (durationPartCells === 0) return truncateVisibleCells(left, width);
-  const row = `${left}${" ".repeat(DURATION_DETAIL_GAP_CELLS)}${isolateIfNeeded(duration, locale)}`;
+  const prefix = `${indent}${symbol} `;
+  if (width <= stringWidth(prefix) + 1) return truncateVisibleCells(prefix.trimEnd(), width);
+  const columns = resolveToolActivityColumns(width, stringWidth(prefix), duration, object.length > 0);
+  const family = styleToolActivitySegment(
+    padVisibleEnd(truncateVisibleCells(presentation.family, columns.family), columns.family),
+    "family",
+    tone,
+    options.style
+  );
+  const action = styleToolActivitySegment(
+    padVisibleEnd(truncateVisibleCells(presentation.action, columns.action), columns.action),
+    "action",
+    tone,
+    options.style
+  );
+  const objectPart = columns.object <= 0
+    ? ""
+    : styleToolActivitySegment(
+      padVisibleEnd(truncateVisibleCells(object, columns.object), columns.object),
+      "object",
+      tone,
+      options.style
+    );
+  const durationPart = columns.duration <= 0
+    ? ""
+    : `${" ".repeat(TOOL_ACTIVITY_DURATION_GAP_CELLS)}${styleToolActivitySegment(duration, "duration", tone, options.style)}`;
+  const gap = " ".repeat(TOOL_ACTIVITY_COLUMN_GAP_CELLS);
+  const row = `${prefix}${family}${gap}${action}${columns.object <= 0 ? "" : `${gap}${objectPart}`}${durationPart}`;
   return truncateVisibleCells(row, width);
 }
 
-function formatArabicActiveWorkRow(input: {
+function formatArabicToolActivityRow(input: {
   readonly symbol: string;
-  readonly rawTool: string;
-  readonly rawDetail: string;
+  readonly family: string;
+  readonly action: string;
+  readonly object: string;
   readonly duration: string;
   readonly width: number;
+  readonly indent: string;
+  readonly style: OperatorConsoleStyle | undefined;
+  readonly tone: ToolActivityRowTone;
 }): string {
-  const { symbol, rawTool, rawDetail, duration, width } = input;
-  if (width <= 8) return truncateVisibleCells(`${rawTool} ${symbol}`, width);
-
-  const durationPartCells = width >= 16 ? stringWidth(duration) + ARABIC_DURATION_DETAIL_GAP_CELLS : 0;
-  const availableMainCells = Math.max(0, width - durationPartCells);
-  if (availableMainCells <= 0) return truncateVisibleCells(`${rawTool} ${symbol}`, width);
-
-  const actionCells = Math.min(18, Math.max(1, Math.min(availableMainCells, Math.floor(availableMainCells * 0.35))));
-  const symbolCells = stringWidth(symbol);
-  const actionGapCells = actionCells > symbolCells ? 1 : 0;
-  const toolCells = Math.max(0, actionCells - symbolCells - actionGapCells);
-  const detailGapCells = availableMainCells > actionCells ? Math.min(TOOL_DETAIL_GAP_CELLS, availableMainCells - actionCells) : 0;
-  const detailCells = Math.max(0, availableMainCells - actionCells - detailGapCells);
-  const durationPart = durationPartCells === 0
-    ? ""
-    : `${isolateIfNeeded(duration, "ar")}${" ".repeat(ARABIC_DURATION_DETAIL_GAP_CELLS)}`;
-  const detail = detailCells <= 0
-    ? ""
-    : padVisibleEnd(isolateIfNeeded(truncateVisibleCells(rawDetail, detailCells), "ar"), detailCells);
-  const tool = toolCells <= 0 ? "" : isolateIfNeeded(truncateVisibleCells(rawTool, toolCells), "ar");
-  const action = padVisibleStart(
-    `${tool}${actionGapCells > 0 && tool.length > 0 ? " " : ""}${symbol}`,
-    actionCells
+  const symbolSuffix = ` ${input.symbol}${input.indent}`;
+  if (input.width <= stringWidth(symbolSuffix) + 1) return truncateVisibleCells(symbolSuffix.trimStart(), input.width);
+  const columns = resolveToolActivityColumns(input.width, stringWidth(symbolSuffix), input.duration, input.object.length > 0);
+  const family = styleToolActivitySegment(
+    padVisibleStart(isolateIfNeeded(truncateVisibleCells(input.family, columns.family), "ar"), columns.family),
+    "family",
+    input.tone,
+    input.style
   );
-  const detailGap = " ".repeat(detailGapCells);
-  const row = `${durationPart}${detailGapCells > 0 ? `${detail}${detailGap}` : detail}${action}`;
-  return truncateVisibleCells(row, width);
+  const action = styleToolActivitySegment(
+    padVisibleStart(isolateIfNeeded(truncateVisibleCells(input.action, columns.action), "ar"), columns.action),
+    "action",
+    input.tone,
+    input.style
+  );
+  const objectPart = columns.object <= 0
+    ? ""
+    : styleToolActivitySegment(
+      padVisibleStart(isolateIfNeeded(truncateVisibleCells(input.object, columns.object), "ar"), columns.object),
+      "object",
+      input.tone,
+      input.style
+    );
+  const durationPart = columns.duration <= 0
+    ? ""
+    : `${styleToolActivitySegment(isolateIfNeeded(input.duration, "ar"), "duration", input.tone, input.style)}${" ".repeat(TOOL_ACTIVITY_DURATION_GAP_CELLS)}`;
+  const gap = " ".repeat(TOOL_ACTIVITY_COLUMN_GAP_CELLS);
+  const row = `${durationPart}${columns.object <= 0 ? "" : `${objectPart}${gap}`}${action}${gap}${family}${symbolSuffix}`;
+  return truncateVisibleCells(row, input.width);
+}
+
+function resolveToolActivityColumns(
+  width: number,
+  prefixCells: number,
+  duration: string,
+  hasObject: boolean
+): { readonly family: number; readonly action: number; readonly object: number; readonly duration: number } {
+  const durationCells = stringWidth(duration);
+  const showDuration = width - prefixCells - durationCells - TOOL_ACTIVITY_DURATION_GAP_CELLS >= 12;
+  const durationColumn = showDuration ? durationCells : 0;
+  const mainCells = Math.max(0, width - prefixCells - (durationColumn > 0 ? durationColumn + TOOL_ACTIVITY_DURATION_GAP_CELLS : 0));
+  if (mainCells <= 1) return { family: mainCells, action: 0, object: 0, duration: durationColumn };
+
+  const familyTarget = mainCells >= 48 ? 12 : mainCells >= 28 ? 9 : Math.max(3, Math.ceil(mainCells * 0.35));
+  const family = Math.min(mainCells, familyTarget);
+  const afterFamily = Math.max(0, mainCells - family - TOOL_ACTIVITY_COLUMN_GAP_CELLS);
+  if (afterFamily <= 0) return { family, action: 0, object: 0, duration: durationColumn };
+
+  const showObject = hasObject && afterFamily >= 18;
+  const action = showObject
+    ? Math.min(mainCells >= 48 ? 20 : 14, Math.max(6, Math.floor(afterFamily * 0.58)))
+    : afterFamily;
+  const object = showObject
+    ? Math.max(0, afterFamily - action - TOOL_ACTIVITY_COLUMN_GAP_CELLS)
+    : 0;
+  return { family, action, object, duration: durationColumn };
+}
+
+function styleToolActivitySegment(
+  value: string,
+  segment: "family" | "action" | "object" | "duration",
+  tone: ToolActivityRowTone,
+  style: OperatorConsoleStyle | undefined
+): string {
+  const tokens = style?.tokens.contract;
+  if (tokens === undefined) return value;
+  if (segment === "family") return styleColor(style, value, tokens.palette.accent);
+  if (segment === "action") {
+    return styleColor(style, value, tone === "live" ? tokens.text.primary : tokens.text.secondary);
+  }
+  if (segment === "object") {
+    return styleColor(style, value, tone === "live" ? tokens.text.secondary : tokens.text.muted);
+  }
+  return styleColor(style, value, tokens.text.muted);
 }
 
 export function activeWorkStatusSymbol(
@@ -656,6 +776,17 @@ function formatClockDuration(durationMs: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+function formatHumanElapsedDuration(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (totalMinutes < 60) return seconds === 0 ? `${totalMinutes}m` : `${totalMinutes}m ${seconds}s`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+}
+
 function formatActiveWorkTitle(
   runningTools: string,
   duration: string | undefined,
@@ -685,17 +816,34 @@ export function formatActiveWorkDuration(durationMs: number): string {
   return `${minutes}m${seconds}s`;
 }
 
-function renderTopBorder(title: string, width: number, rightLabel?: string): string {
+function completedHeaderRightLabel(title: string, summary: string, width: number): string | undefined {
+  const fixedCells = 2 + stringWidth(`─ ${title} `) + stringWidth(` ${summary} `);
+  return fixedCells + 1 <= width ? summary : undefined;
+}
+
+function renderTopBorder(
+  title: string,
+  width: number,
+  rightLabel?: string,
+  style?: OperatorConsoleStyle,
+  subtle = false
+): string {
   if (width <= 1) return "╭".slice(0, width);
   const label = `─ ${title} `;
   const right = rightLabel === undefined ? "" : ` ${rightLabel} `;
   const remaining = Math.max(0, width - 2 - stringWidth(label) - stringWidth(right));
-  return truncateVisibleCells(`╭${label}${"─".repeat(remaining)}${right}╮`, width);
+  const rendered = truncateVisibleCells(`╭${label}${"─".repeat(remaining)}${right}╮`, width);
+  return subtle && style !== undefined
+    ? styleColor(style, rendered, style.tokens.contract.surface.borderSubtle)
+    : rendered;
 }
 
-function renderBottomBorder(width: number): string {
+function renderBottomBorder(width: number, style?: OperatorConsoleStyle, subtle = false): string {
   if (width <= 1) return "╰".slice(0, width);
-  return `╰${"─".repeat(Math.max(0, width - 2))}╯`;
+  const rendered = `╰${"─".repeat(Math.max(0, width - 2))}╯`;
+  return subtle && style !== undefined
+    ? styleColor(style, rendered, style.tokens.contract.surface.borderSubtle)
+    : rendered;
 }
 
 function renderMiddleBorder(width: number): string {
@@ -703,10 +851,19 @@ function renderMiddleBorder(width: number): string {
   return `├${"─".repeat(Math.max(0, width - 2))}┤`;
 }
 
-function renderContentRow(row: string, contentWidth: number, width: number): string {
+function renderContentRow(
+  row: string,
+  contentWidth: number,
+  width: number,
+  style?: OperatorConsoleStyle,
+  subtle = false
+): string {
   if (width <= 1) return "│".slice(0, width);
   const content = padVisibleEnd(truncateVisibleCells(row, contentWidth), contentWidth);
-  return truncateVisibleCells(`│ ${content} │`, width);
+  const rail = subtle && style !== undefined
+    ? styleColor(style, "│", style.tokens.contract.surface.borderSubtle)
+    : "│";
+  return truncateVisibleCells(`${rail} ${content} ${rail}`, width);
 }
 
 function padRows(rows: readonly string[], count: number): readonly string[] {

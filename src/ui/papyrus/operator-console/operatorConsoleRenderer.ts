@@ -141,6 +141,7 @@ function renderRegionLines(
     return renderStreamingSurface(state.streaming, {
       width: region.width,
       height: region.height,
+      locale: state.locale,
       style: state.style,
       motionElapsedMs: state.motionElapsedMs,
     }).map((text) => ({ region: region.kind, text }));

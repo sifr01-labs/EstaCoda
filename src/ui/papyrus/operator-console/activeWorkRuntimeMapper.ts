@@ -99,7 +99,7 @@ export class ActiveWorkRuntimeEventMapper {
         summary: "preparing",
         target: event.tool === "delegate_task"
           ? delegationStartingLabel(this.#locale)
-          : event.displayPreview ?? event.targetSummary ?? toolDisplayLabel(event.tool),
+          : activityTarget(event),
         detailsRef: event.activityId,
       };
     }
@@ -122,7 +122,7 @@ export class ActiveWorkRuntimeEventMapper {
       displayLabel: toolDisplayLabel(event.tool, this.#locale),
       status,
       summary: gated ? "gated" : failed ? "failed" : activeWorkSummaryKeyForTool(event.tool),
-      target: delegationTarget ?? event.displayPreview ?? event.targetSummary ?? toolDisplayLabel(event.tool),
+      target: delegationTarget ?? activityTarget(event),
       ...(elapsedMs === undefined ? {} : { durationMs: elapsedMs }),
       detailsRef: event.activityId,
       ...(gated ? { riskClass: event.riskClass } : {}),
@@ -204,6 +204,15 @@ export class ActiveWorkRuntimeEventMapper {
   #eventKey(event: Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" }>): string {
     return event.activityId ?? `${event.tool}\0${event.targetSummary ?? ""}`;
   }
+}
+
+function activityTarget(
+  event: Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" }>
+): string | undefined {
+  if (event.kind === "tool-result" && event.tool === "browser.click" && event.targetSummary !== undefined) {
+    return event.targetSummary;
+  }
+  return event.displayPreview ?? event.targetSummary;
 }
 
 function delegationStartingLabel(locale: ToolDisplayLocale): string {

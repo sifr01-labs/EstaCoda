@@ -2899,9 +2899,9 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(durableOutput).toContain("src/completed-7.ts");
     expect(durableOutput).toContain("approval required");
     expect(durableOutput).toContain("failed");
-    expect(durableOutput).toContain("Worked for");
+    expect(durableOutput).not.toContain("Worked for");
     expect(durableOutput).toContain(
-      "9 completed · 3 active · 1 failed · Worked for 00:00"
+      "9 succeeded · 3 active · 1 failed · 0s"
     );
   });
 
@@ -3006,7 +3006,8 @@ describe("runSessionLoop — active turn spinner", () => {
     const rendered = stripAnsi(outputChunks.join(""));
     expect(rendered).toContain("Delegated work");
     const completedOutput = rendered.slice(rendered.lastIndexOf("Tools completed"));
-    expect(completedOutput).toContain("Delegate Task");
+    expect(completedOutput).toContain("Agents");
+    expect(completedOutput).toContain("Delegate");
     expect(completedOutput).toContain("1 completed");
     expect(completedOutput).not.toContain("Subagent 1");
     expect(completedOutput).not.toContain("Read File");

@@ -80,6 +80,7 @@ function renderTranscriptBlockRows(
     }, {
       width,
       height: answerHeight,
+      locale,
       style,
     });
     if (block.taskTrace === undefined) return renderAnswer(height);
