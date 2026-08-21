@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sanitized developer apps fixture</title>
+    <style>
+      body { margin: 0; font-family: sans-serif; }
+      .viewport { width: 319px; overflow: hidden; }
+      .apps-table { width: 956px; }
+      .app-card { min-height: 63px; }
+      .toggle-app { width: 232px; cursor: pointer; }
+      .products, .actions-menu { display: none; }
+      .app-card.expanded { min-height: 427px; }
+      .app-card.expanded .products { display: block; }
+      .app-card.actions-open .actions-menu { display: block; }
+      .notification-main-container,
+      .dormant-dialog {
+        opacity: 0;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <aside class="notification-main-container">
+      <h2>Notifications</h2>
+      <a href="/notifications/1">TikTok Connect was updated</a>
+      <button type="button">Mark as read</button>
+      <button type="button">Dismiss</button>
+    </aside>
+
+    <main class="viewport">
+      <h1>My apps</h1>
+      <section class="apps-table" aria-label="Approved apps">
+        <article class="app-card" id="tiktok-card">
+          <p class="name toggle-app" onclick="toggleApp()"><span>TikTok Connect</span></p>
+          <a href="https://example.invalid/callback">Callback URL</a>
+          <section class="products">
+            <a href="/products/loans-v2">Loans v2</a>
+            <a href="/products/product-offering-v3">Product Offering v3</a>
+            <a href="/products/subscriptions-v2">Subscriptions v2</a>
+            <a href="/products/oauth-v1">OAuth V1</a>
+            <a href="/products/payments-v1">Payments V1</a>
+            <a href="/products/usage-management">Usage Management</a>
+            <button type="button">Renew credentials</button>
+            <button type="button" onclick="openActions()">Open actions menu</button>
+          </section>
+          <menu class="actions-menu">
+            <button type="button">Edit</button>
+            <button type="button">Delete</button>
+          </menu>
+        </article>
+      </section>
+    </main>
+
+    <section class="dormant-dialog" role="dialog" aria-modal="true">
+      <h2>App delete</h2>
+      <button type="button">Delete app</button>
+    </section>
+    <section class="dormant-dialog" role="dialog" aria-modal="true">
+      <h2>Renew credentials</h2>
+      <button type="button">Confirm renewal</button>
+    </section>
+
+    <script>
+      function toggleApp() {
+        document.querySelector('#tiktok-card').classList.toggle('expanded');
+      }
+      function openActions() {
+        document.querySelector('#tiktok-card').classList.add('actions-open');
+      }
+    </script>
+  </body>
+</html>

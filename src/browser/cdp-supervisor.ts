@@ -9,6 +9,12 @@ import {
   isBrowserSnapshotElementInteractable
 } from "./browser-interactability.js";
 import {
+  BROWSER_GROUNDED_POINT_EVALUATOR_SOURCE,
+  BROWSER_RENDERING_EVALUATOR_SOURCE,
+  BROWSER_VIEWPORT_POSITION_EVALUATOR_SOURCE,
+  BROWSER_VISIBLE_TEXT_EVALUATOR_SOURCE
+} from "./browser-page-perception.js";
+import {
   type CdpClient,
   type CdpSendOptions,
   type CdpWebSocketEvent,
@@ -611,16 +617,17 @@ export async function evaluateCdpSnapshot(client: CdpClient, sessionId: string, 
 async function evaluateAxSnapshot(client: CdpClient, sessionId: string, options: BrowserSnapshotOptions): Promise<BrowserSnapshotInput | undefined> {
   const axTree = await client.send("Accessibility.getFullAXTree") as unknown;
   const candidates = parseAxElements(axTree, options);
-  const elements = await bindAxElements(client, candidates, options);
-  if (elements.length === 0) {
+  const boundElements = await bindAxElements(client, candidates, options);
+  if (boundElements.length === 0) {
     return undefined;
   }
 
-  const pageMetadata = await evaluatePageSnapshotMetadata(client).catch(() => undefined);
+  const pageMetadata = await evaluatePageSnapshotMetadata(client, options).catch(() => undefined);
   if (pageMetadata === undefined) {
     return undefined;
   }
-  const { regions: observedRegions, ...metadata } = pageMetadata;
+  const { regions: observedRegions, scriptedElements, ...metadata } = pageMetadata;
+  const elements = [...boundElements, ...scriptedElements];
   const regions = bindVisibleRegionActions(observedRegions, elements);
 
   return {
@@ -631,22 +638,61 @@ async function evaluateAxSnapshot(client: CdpClient, sessionId: string, options:
   };
 }
 
-async function evaluatePageSnapshotMetadata(client: CdpClient): Promise<Omit<BrowserSnapshotInput, "sessionId" | "elements"> | undefined> {
+type PageSnapshotMetadata = Omit<BrowserSnapshotInput, "sessionId" | "elements"> & {
+  scriptedElements: BrowserSnapshotElement[];
+};
+
+async function evaluatePageSnapshotMetadata(client: CdpClient, options: BrowserSnapshotOptions): Promise<PageSnapshotMetadata | undefined> {
   const evaluated = await client.send("Runtime.evaluate", {
-    expression: pageSnapshotMetadataExpression(),
+    expression: pageSnapshotMetadataExpression(options),
     returnByValue: true
   }) as { result?: { value?: unknown } };
   return parsePageSnapshotMetadata(evaluated.result?.value);
 }
 
-function pageSnapshotMetadataExpression(): string {
+function pageSnapshotMetadataExpression(options: BrowserSnapshotOptions): string {
   return `(() => {
     ${visibleRegionsSource()}
+    ${scriptedControlDiscoverySource()}
+    const existing = Array.isArray(window.__estacodaElements) ? window.__estacodaElements : [];
+    const scripted = collectScriptedControls(existing, ${options.full === true ? 200 : 40});
+    for (const element of scripted) existing.push(element);
+    window.__estacodaElements = existing;
+    const clean = (value, max = 240) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, max);
+    const regionText = (element) => {
+      let node = element.parentElement;
+      for (let depth = 0; node && depth < 7 && node !== document.body && node !== document.documentElement; depth += 1, node = node.parentElement) {
+        const rawText = estacodaVisibleText(node, 1200);
+        if (rawText.length === 0 || rawText.length > 1200) continue;
+        const controls = existing.filter((control) => control instanceof Element && node.contains(control)).slice(0, 17);
+        if (controls.length === 0 || controls.length > 16) continue;
+        const controlText = controls.map((control) => estacodaVisibleText(control, 160) || control.getAttribute?.('aria-label') || '').join(' ').replace(/\\s+/g, ' ').trim();
+        if (rawText.length <= controlText.length + 2) continue;
+        return clean(rawText, 480);
+      }
+      return '';
+    };
     return JSON.stringify({
       url: location.href,
       title: document.title,
       readiness: document.readyState,
-      text: (document.body && document.body.innerText ? document.body.innerText : '').slice(0, 12000),
+      text: document.body ? estacodaVisibleText(document.body, 12000) : '',
+      scriptedElements: scripted.map((element, index) => {
+        const region = regionText(element);
+        const text = clean(estacodaVisibleText(element, 240));
+        return {
+          ref: '@e' + (existing.length - scripted.length + index + 1),
+          role: 'button',
+          name: clean(element.getAttribute('aria-label') || text || element.getAttribute('title') || element.id || '', 160),
+          text,
+          withinText: region || clean(estacodaVisibleText(element.closest('article,li,form,section,[role="listitem"],[role="group"],[role="row"],tr') || element.parentElement, 480)),
+          regionText: region,
+          viewport: estacodaViewportPosition(element),
+          interactable: true,
+          hidden: false,
+          disabled: false
+        };
+      }),
       regions: collectVisibleRegions()
     });
   })()`;
@@ -654,15 +700,16 @@ function pageSnapshotMetadataExpression(): string {
 
 export function snapshotExpression(): string {
   return `(() => {
-    const candidates = Array.from(document.querySelectorAll('a,button,input,textarea,select,[role],[tabindex]')).slice(0, 120);
+    ${visibleRegionsSource()}
+    ${scriptedControlDiscoverySource()}
+    const semanticCandidates = Array.from(document.querySelectorAll('a,button,input,textarea,select,[role],[tabindex]'));
+    const candidates = [...new Set([...semanticCandidates, ...collectScriptedControls(semanticCandidates, 40)])].slice(0, 120);
     window.__estacodaElements = candidates;
     const assessInteractability = ${BROWSER_INTERACTABILITY_EVALUATOR_SOURCE};
     const clean = (value, max = 240) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, max);
-    const actionSelector = 'a[href],button,input,select,textarea,[role="button"],[role="link"],[role="tab"],[role="menuitem"]';
     const labelText = (el) => clean(Array.from(el.labels || []).map((label) => label.innerText || label.textContent || '').join(' ') || el.getAttribute('aria-label') || el.closest('label')?.innerText || '');
-    const elementText = (el) => clean(el.innerText || el.textContent || '');
-    const sensitive = (el) => el instanceof HTMLInputElement && el.type.toLowerCase() === 'password';
-    const name = (el) => clean(el.getAttribute('aria-label') || labelText(el) || el.innerText || el.getAttribute('title') || el.getAttribute('name') || el.id || '', 160);
+    const elementText = (el) => clean(estacodaVisibleText(el, 240));
+    const name = (el) => clean(el.getAttribute('aria-label') || labelText(el) || estacodaVisibleText(el, 160) || el.getAttribute('title') || el.getAttribute('name') || el.id || '', 160);
     const role = (el) => {
       const explicit = el.getAttribute('role');
       if (explicit) return explicit;
@@ -679,16 +726,17 @@ export function snapshotExpression(): string {
         if (type === 'number') return 'spinbutton';
         return 'textbox';
       }
+      if (isScriptedControl(el)) return 'button';
       return tag;
     };
     const regionText = (el) => {
       let node = el.parentElement;
       for (let depth = 0; node && depth < 7 && node !== document.body && node !== document.documentElement; depth += 1, node = node.parentElement) {
-        const rawText = String(node.innerText || node.textContent || '').replace(/\\s+/g, ' ').trim();
+        const rawText = estacodaVisibleText(node, 1200);
         if (rawText.length === 0 || rawText.length > 1200) continue;
-        const controls = Array.from(node.querySelectorAll(actionSelector)).slice(0, 17);
+        const controls = candidates.filter((control) => node.contains(control) && assessInteractability(control).interactable).slice(0, 17);
         if (controls.length === 0 || controls.length > 16) continue;
-        const controlText = controls.map((control) => String(control.innerText || control.textContent || control.getAttribute?.('aria-label') || '')).join(' ').replace(/\\s+/g, ' ').trim();
+        const controlText = controls.map((control) => estacodaVisibleText(control, 160) || control.getAttribute?.('aria-label') || '').join(' ').replace(/\\s+/g, ' ').trim();
         if (rawText.length <= controlText.length + 2) continue;
         return clean(rawText, 480);
       }
@@ -703,38 +751,87 @@ export function snapshotExpression(): string {
         name: name(el),
         text: elementText(el),
         label: labelText(el),
-        withinText: region || clean(el.closest('article,li,form,section,[role="listitem"],[role="group"],[role="row"],tr')?.innerText || el.parentElement?.innerText || ''),
+        withinText: region || clean(estacodaVisibleText(el.closest('article,li,form,section,[role="listitem"],[role="group"],[role="row"],tr') || el.parentElement, 480)),
         regionText: region,
+        viewport: estacodaViewportPosition(el),
         interactable: interactability.interactable,
         interactabilityReason: interactability.reason,
         hidden: interactability.hidden,
         disabled: interactability.disabled
       };
     });
-    ${visibleRegionsSource()}
     return JSON.stringify({
       url: location.href,
       title: document.title,
       readiness: document.readyState,
-      text: (document.body && document.body.innerText ? document.body.innerText : '').slice(0, 12000),
+      text: document.body ? estacodaVisibleText(document.body, 12000) : '',
       elements: elements.filter((element) => element.interactable),
       regions: collectVisibleRegions()
     });
   })()`;
 }
 
+function pagePerceptionSource(): string {
+  return `
+    const estacodaAssessRendering = ${BROWSER_RENDERING_EVALUATOR_SOURCE};
+    const estacodaViewportPosition = ${BROWSER_VIEWPORT_POSITION_EVALUATOR_SOURCE};
+    const estacodaGroundedPoint = ${BROWSER_GROUNDED_POINT_EVALUATOR_SOURCE};
+    const estacodaVisibleTextRaw = ${BROWSER_VISIBLE_TEXT_EVALUATOR_SOURCE};
+    const estacodaVisibleTextCache = new WeakMap();
+    const estacodaVisibleText = (root, maxChars = 12000) => {
+      if (!root || typeof root !== 'object') return '';
+      const cached = estacodaVisibleTextCache.get(root);
+      if (cached && cached.maxChars >= maxChars) return cached.text.slice(0, maxChars);
+      const text = estacodaVisibleTextRaw(root, maxChars);
+      estacodaVisibleTextCache.set(root, { maxChars, text });
+      return text;
+    };`;
+}
+
+function scriptedControlDiscoverySource(): string {
+  return `
+    const scriptedSeedSelector = 'p,div,span,li,tr,td,section,article,[onclick],[class*="toggle"],[class*="click"]';
+    const nativeControlSelector = 'a[href],button,input,select,textarea,[role],[tabindex]';
+    const hasExplicitScriptedEvidence = (element) => element.hasAttribute('onclick') || typeof element.onclick === 'function';
+    const isScriptedControl = (element) => {
+      if (!(element instanceof HTMLElement) || element.matches(nativeControlSelector)) return false;
+      const style = getComputedStyle(element);
+      const explicit = hasExplicitScriptedEvidence(element);
+      if (!explicit && style.cursor !== 'pointer') return false;
+      if (!estacodaAssessRendering(element, true).rendered || style.pointerEvents === 'none') return false;
+      if (!explicit && element.parentElement instanceof HTMLElement && getComputedStyle(element.parentElement).cursor === 'pointer') return false;
+      return estacodaGroundedPoint(element) !== undefined;
+    };
+    const collectScriptedControls = (existing = [], limit = 40) => {
+      const existingSet = new Set(existing);
+      const observed = Array.from(document.querySelectorAll(scriptedSeedSelector)).slice(0, 4000)
+        .filter((element) => !existingSet.has(element) && isScriptedControl(element))
+        .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+        .sort((left, right) => left.rect.width * left.rect.height - right.rect.width * right.rect.height);
+      const selected = [];
+      for (const candidate of observed) {
+        if (selected.some((entry) => candidate.element.contains(entry))) continue;
+        selected.push(candidate.element);
+        if (selected.length >= limit) break;
+      }
+      return selected;
+    };`;
+}
+
 function visibleRegionsSource(): string {
   return `
+    ${pagePerceptionSource()}
     const collectVisibleRegions = () => {
       const cleanRegion = (value, max = 600) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, max);
       const actionSelector = 'a[href],button,input,select,textarea,[role="button"],[role="link"],[role="tab"],[role="menuitem"]';
-      const containers = Array.from(document.querySelectorAll('article,li,tr,section,[role="listitem"],[role="row"],[role="group"],[data-testid],.card,[class*="card"],div')).slice(0, 600);
+      const containers = Array.from(document.querySelectorAll('article,li,tr,section,p,[role="listitem"],[role="row"],[role="group"],[data-testid],.card,[class*="card"],div')).slice(0, 600);
       const elementBindings = Array.isArray(window.__estacodaElements) ? window.__estacodaElements : [];
       const actionAt = (point, container) => {
         const hit = document.elementFromPoint(point.x, point.y);
         if (!(hit instanceof Element) || !(hit === container || container.contains(hit))) return undefined;
-        const nestedAction = hit.closest(actionSelector);
-        if (nestedAction && nestedAction !== container && container.contains(nestedAction)) return undefined;
+        const nestedAction = elementBindings.find((action) => action instanceof Element && action !== container &&
+          container.contains(action) && (action === hit || action.contains(hit)));
+        if (nestedAction) return undefined;
         return point;
       };
       const pointFor = (container, rect) => {
@@ -751,28 +848,29 @@ function visibleRegionsSource(): string {
       };
       const candidates = [];
       for (const container of containers) {
-        if (!(container instanceof HTMLElement) || !container.isConnected || container.hidden || container.getAttribute('aria-hidden') === 'true') continue;
+        if (!(container instanceof HTMLElement) || !estacodaAssessRendering(container, true).rendered) continue;
         const style = getComputedStyle(container);
-        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) continue;
         const rect = container.getBoundingClientRect();
         if (rect.width <= 8 || rect.height <= 8 || rect.bottom <= 0 || rect.right <= 0 || rect.top >= innerHeight || rect.left >= innerWidth) continue;
-        const text = cleanRegion(container.innerText || container.textContent || '');
+        const text = cleanRegion(estacodaVisibleText(container, 600));
         if (text.length < 2 || text.length > 600) continue;
-        const actions = Array.from(container.querySelectorAll(actionSelector)).slice(0, 17);
-        const explicit = container.matches(actionSelector) || container.hasAttribute('onclick') || typeof container.onclick === 'function' ||
-          container.tabIndex >= 0 || style.cursor === 'pointer';
-        if (!explicit && (actions.length === 0 || actions.length > 16)) continue;
-        const point = pointFor(container, rect);
+        const boundActions = elementBindings.filter((element) => element instanceof Element && container.contains(element) &&
+          estacodaAssessRendering(element, true).rendered && getComputedStyle(element).pointerEvents !== 'none').slice(0, 17);
+        const explicit = elementBindings.includes(container) || container.matches(actionSelector) || container.hasAttribute('onclick') ||
+          typeof container.onclick === 'function' || container.tabIndex >= 0 || style.cursor === 'pointer';
+        if (!explicit && (boundActions.length === 0 || boundActions.length > 16)) continue;
+        const point = style.pointerEvents === 'none' ? undefined : pointFor(container, rect);
         const centerHit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
         const actionRefs = elementBindings
-          .map((element, index) => element instanceof Element && container.contains(element) ? '@e' + (index + 1) : undefined)
+          .map((element, index) => boundActions.includes(element) ? '@e' + (index + 1) : undefined)
           .filter(Boolean)
           .slice(0, 16);
-        const links = Array.from(container.querySelectorAll('a[href]')).slice(0, 12).map((link) => ({
-          text: cleanRegion(link.innerText || link.textContent || link.getAttribute('aria-label') || '', 160),
+        const links = Array.from(container.querySelectorAll('a[href]')).filter((link) => estacodaAssessRendering(link, true).rendered).slice(0, 12).map((link) => ({
+          text: cleanRegion(estacodaVisibleText(link, 160) || link.getAttribute('aria-label') || '', 160),
           href: String(link.href || '').slice(0, 2000)
         })).filter((link) => link.text && /^https?:/u.test(link.href));
         candidates.push({ container, text, actionRefs, links, hitTestable: point !== undefined,
+          viewport: estacodaViewportPosition(container),
           blockedBy: point !== undefined ? undefined : cleanRegion(centerHit?.getAttribute?.('aria-label') || centerHit?.innerText || centerHit?.textContent || centerHit?.tagName || '', 120) });
       }
       candidates.sort((left, right) => left.text.length - right.text.length);
@@ -792,6 +890,7 @@ function visibleRegionsSource(): string {
         actionRefs: candidate.actionRefs,
         links: candidate.links,
         hitTestable: candidate.hitTestable,
+        viewport: candidate.viewport,
         blockedBy: candidate.blockedBy
       }));
     };`;
@@ -804,7 +903,7 @@ type AxSnapshotElementCandidate = BrowserSnapshotElement & {
 };
 
 type BoundElementMetadata = Pick<BrowserSnapshotElement,
-  "text" | "label" | "withinText" | "regionText" | "hidden" | "disabled" | "interactable" | "interactabilityReason"> & {
+  "text" | "label" | "withinText" | "regionText" | "hidden" | "disabled" | "interactable" | "interactabilityReason" | "viewport"> & {
   sensitive?: boolean;
 };
 
@@ -944,29 +1043,30 @@ async function bindAxElement(
       functionDeclaration: `function(index) {
         window.__estacodaElements = window.__estacodaElements || [];
         window.__estacodaElements[index] = this;
+        ${pagePerceptionSource()}
         const assessInteractability = ${BROWSER_INTERACTABILITY_EVALUATOR_SOURCE};
         const clean = (value, max = 240) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, max);
-        const label = clean(Array.from(this.labels || []).map((entry) => entry.innerText || entry.textContent || '').join(' ') || this.getAttribute?.('aria-label') || this.closest?.('label')?.innerText || '');
+        const label = clean(Array.from(this.labels || []).map((entry) => estacodaVisibleText(entry, 160)).join(' ') || this.getAttribute?.('aria-label') || estacodaVisibleText(this.closest?.('label'), 160) || '');
         const interactability = assessInteractability(this);
-        const actionSelector = 'a[href],button,input,select,textarea,[role="button"],[role="link"],[role="tab"],[role="menuitem"]';
         const region = (() => {
           let node = this.parentElement;
           for (let depth = 0; node && depth < 7 && node !== document.body && node !== document.documentElement; depth += 1, node = node.parentElement) {
-            const rawText = String(node.innerText || node.textContent || '').replace(/\\s+/g, ' ').trim();
+            const rawText = estacodaVisibleText(node, 1200);
             if (rawText.length === 0 || rawText.length > 1200) continue;
-            const controls = Array.from(node.querySelectorAll(actionSelector)).slice(0, 17);
+            const controls = window.__estacodaElements.filter((control) => control instanceof Element && node.contains(control)).slice(0, 17);
             if (controls.length === 0 || controls.length > 16) continue;
-            const controlText = controls.map((control) => String(control.innerText || control.textContent || control.getAttribute?.('aria-label') || '')).join(' ').replace(/\\s+/g, ' ').trim();
+            const controlText = controls.map((control) => estacodaVisibleText(control, 160) || control.getAttribute?.('aria-label') || '').join(' ').replace(/\\s+/g, ' ').trim();
             if (rawText.length <= controlText.length + 2) continue;
             return clean(rawText, 480);
           }
           return '';
         })();
         return {
-          text: clean(this.innerText || this.textContent || ''),
+          text: clean(estacodaVisibleText(this, 240)),
           label,
-          withinText: region || clean(this.closest?.('article,li,form,section,[role="listitem"],[role="group"],[role="row"],tr')?.innerText || this.parentElement?.innerText || ''),
+          withinText: region || clean(estacodaVisibleText(this.closest?.('article,li,form,section,[role="listitem"],[role="group"],[role="row"],tr') || this.parentElement, 480)),
           regionText: region,
+          viewport: estacodaViewportPosition(this),
           interactable: interactability.interactable,
           interactabilityReason: interactability.reason,
           hidden: interactability.hidden,
@@ -990,11 +1090,13 @@ function parseBoundElementMetadata(value: unknown): BoundElementMetadata | undef
   const withinText = boundedMetadataText(value.withinText);
   const regionText = boundedMetadataText(value.regionText, 480);
   const interactabilityReason = parseInteractabilityReason(value.interactabilityReason);
+  const viewport = parseViewportPosition(value.viewport);
   return {
     ...(text === undefined ? {} : { text }),
     ...(label === undefined ? {} : { label }),
     ...(withinText === undefined ? {} : { withinText }),
     ...(regionText === undefined ? {} : { regionText }),
+    ...(viewport === undefined ? {} : { viewport }),
     ...(typeof value.hidden === "boolean" ? { hidden: value.hidden } : {}),
     ...(typeof value.disabled === "boolean" ? { disabled: value.disabled } : {}),
     ...(typeof value.interactable === "boolean" ? { interactable: value.interactable } : {}),
@@ -1004,9 +1106,14 @@ function parseBoundElementMetadata(value: unknown): BoundElementMetadata | undef
 }
 
 function parseInteractabilityReason(value: unknown): BrowserSnapshotElement["interactabilityReason"] | undefined {
-  return value === "detached" || value === "hidden" || value === "inert" || value === "disabled" || value === "modal-blocked"
+  return value === "detached" || value === "hidden" || value === "inert" || value === "disabled" || value === "modal-blocked" ||
+    value === "pointer-events-none"
     ? value
     : undefined;
+}
+
+function parseViewportPosition(value: unknown): BrowserSnapshotElement["viewport"] | undefined {
+  return value === "visible" || value === "partially-visible" || value === "offscreen" ? value : undefined;
 }
 
 function boundedMetadataText(value: unknown, maxChars = 240): string | undefined {
@@ -1057,23 +1164,36 @@ function axBackendDomNodeId(node: Record<string, unknown>): number | undefined {
   return typeof raw === "number" && Number.isInteger(raw) && raw > 0 ? raw : undefined;
 }
 
-function parsePageSnapshotMetadata(value: unknown): Omit<BrowserSnapshotInput, "sessionId" | "elements"> | undefined {
+function parsePageSnapshotMetadata(value: unknown): PageSnapshotMetadata | undefined {
   if (typeof value !== "string") {
     return undefined;
   }
   try {
     const parsed = JSON.parse(value) as Partial<BrowserSnapshotInput>;
     const regions = parseVisibleRegions(parsed.regions);
+    const scriptedElements = parseScriptedElements((parsed as { scriptedElements?: unknown }).scriptedElements);
     return {
       url: typeof parsed.url === "string" ? parsed.url : "about:blank",
       ...(typeof parsed.title === "string" ? { title: parsed.title } : {}),
       readiness: parseReadiness(parsed.readiness),
       ...(typeof parsed.text === "string" ? { text: parsed.text } : { text: "" }),
+      scriptedElements,
       ...(regions.length === 0 ? {} : { regions })
     };
   } catch {
     return undefined;
   }
+}
+
+function parseScriptedElements(value: unknown): BrowserSnapshotElement[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 200).flatMap((entry) => {
+    if (!isRecord(entry) || typeof entry.ref !== "string" || !/^@e\d+$/u.test(entry.ref)) return [];
+    const name = boundedMetadataText(entry.name, 160);
+    const metadata = parseBoundElementMetadata(entry);
+    if (name === undefined || metadata === undefined || metadata.interactable === false) return [];
+    return [{ ref: entry.ref, role: "button", name, ...metadata }];
+  });
 }
 
 export function parseCdpSnapshot(value: unknown, sessionId: string): BrowserSnapshotInput {
@@ -1132,12 +1252,14 @@ function parseVisibleRegions(value: unknown): NonNullable<BrowserSnapshot["regio
       return [{ text: safeText, href: redactUrlForMetadata(link.href) }];
     }) : [];
     const blockedBy = boundedMetadataText(entry.blockedBy, 120);
+    const viewport = parseViewportPosition(entry.viewport);
     return [{
       ref,
       text,
       actionRefs,
       links,
       hitTestable: entry.hitTestable === true,
+      ...(viewport === undefined ? {} : { viewport }),
       ...(blockedBy === undefined ? {} : { blockedBy })
     }];
   });

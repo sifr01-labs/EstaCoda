@@ -16,6 +16,8 @@ class FakeCdpSocket implements CdpWebSocketLike {
         title: string;
         text: string;
         elements: Array<{ ref: string; role?: string; name?: string }>;
+        scriptedElements?: Array<Record<string, unknown>>;
+        regions?: Array<Record<string, unknown>>;
       };
       axTree?: unknown;
       failAxTree?: boolean;
@@ -115,7 +117,13 @@ async function flushAsyncEvents(): Promise<void> {
 
 describe("CDPSupervisor", () => {
   it("keeps the browser-side structured snapshot expression syntactically valid", () => {
-    expect(() => new Function(`return ${snapshotExpression()};`)).not.toThrow();
+    const expression = snapshotExpression();
+
+    expect(() => new Function(`return ${expression};`)).not.toThrow();
+    expect(expression).toContain("collectScriptedControls");
+    expect(expression).toContain("style.cursor !== 'pointer'");
+    expect(expression).toContain("estacodaVisibleText");
+    expect(expression).toContain("estacodaAssessRendering");
   });
 
   it("preserves page text while removing non-interactable DOM controls", () => {
@@ -167,7 +175,8 @@ describe("CDPSupervisor", () => {
           { text: "Credential URL", href: "https://user:password@example.com/callback" },
           { text: "Unsafe", href: "javascript:alert(1)" }
         ],
-        hitTestable: true
+        hitTestable: true,
+        viewport: "partially-visible"
       }]
     }), "session-1");
 
@@ -176,7 +185,8 @@ describe("CDPSupervisor", () => {
       text: "TikTok Connect Callback URL Edit Delete",
       actionRefs: ["@e1", "@e2", "@e3"],
       links: [{ text: "Callback URL", href: "https://example.com/callback" }],
-      hitTestable: true
+      hitTestable: true,
+      viewport: "partially-visible"
     }]);
     expect(JSON.stringify(parsed)).not.toContain("do-not-render");
     expect(JSON.stringify(parsed)).not.toContain("also-do-not-render");
@@ -415,6 +425,69 @@ describe("CDPSupervisor", () => {
         regionText: "TikTok Connect Callback URL Edit Delete"
       }]
     });
+  });
+
+  it("supplements AX controls with a grounded scripted control from page metadata", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1", {
+      snapshot: {
+        url: "https://example.com/apps",
+        title: "My apps",
+        text: "TikTok Connect Callback URL",
+        elements: [],
+        scriptedElements: [{
+          ref: "@e2",
+          role: "button",
+          name: "TikTok Connect",
+          text: "TikTok Connect",
+          withinText: "TikTok Connect Callback URL",
+          regionText: "TikTok Connect Callback URL",
+          viewport: "visible",
+          interactable: true,
+          hidden: false,
+          disabled: false
+        }],
+        regions: [{
+          ref: "@r1",
+          text: "TikTok Connect Callback URL",
+          actionRefs: ["@e2"],
+          links: [],
+          hitTestable: true,
+          viewport: "partially-visible"
+        }]
+      },
+      axTree: {
+        nodes: [{
+          nodeId: "callback-link",
+          backendDOMNodeId: 101,
+          role: { value: "link" },
+          name: { value: "Callback URL" }
+        }]
+      },
+      callFunctionValue: {
+        text: "Callback URL",
+        withinText: "TikTok Connect Callback URL",
+        regionText: "TikTok Connect Callback URL",
+        interactable: true,
+        hidden: false,
+        disabled: false,
+        viewport: "offscreen"
+      }
+    });
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+
+    await supervisor.start();
+    const observed = await supervisor.getSnapshot("session-1");
+
+    expect(observed.elements).toEqual([
+      expect.objectContaining({ ref: "@e1", role: "link", name: "Callback URL", viewport: "offscreen" }),
+      expect.objectContaining({ ref: "@e2", role: "button", name: "TikTok Connect", viewport: "visible" })
+    ]);
+    expect(observed.regions).toEqual([
+      expect.objectContaining({ ref: "@r1", actionRefs: ["@e2"], viewport: "partially-visible" })
+    ]);
   });
 
   it("getSnapshot() falls back when compact AX refs cannot be bound to DOM nodes", async () => {

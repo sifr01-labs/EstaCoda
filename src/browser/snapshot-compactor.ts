@@ -98,6 +98,7 @@ function browserSnapshotSections(
   const regions = (snapshot.regions ?? []).slice(0, 30).map((region) => [
     region.ref,
     JSON.stringify(safeText(region.text)),
+    region.viewport === undefined ? undefined : `viewport=${region.viewport}`,
     region.hitTestable ? "hitTestable=true" : "hitTestable=false",
     region.blockedBy === undefined ? undefined : `blockedBy=${JSON.stringify(safeText(region.blockedBy))}`,
     region.actionRefs.length === 0 ? undefined : `actions=${region.actionRefs.join(",")}`,
@@ -367,6 +368,7 @@ function renderSnapshotElement(element: NonNullable<BrowserSnapshot["elements"]>
     element.name,
     element.label === undefined || element.label === element.name ? undefined : `label=${JSON.stringify(element.label)}`,
     element.withinText === undefined ? undefined : `within=${JSON.stringify(element.withinText.slice(0, 120))}`,
+    element.viewport === undefined ? undefined : `viewport=${element.viewport}`,
     redactedValue === undefined ? undefined : `value=${JSON.stringify(redactedValue)}`,
     element.disabled === undefined ? undefined : `disabled=${element.disabled}`,
     element.checked === undefined ? undefined : `checked=${element.checked}`

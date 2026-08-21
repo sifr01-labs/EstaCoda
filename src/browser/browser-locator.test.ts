@@ -123,6 +123,42 @@ describe("semantic browser locators", () => {
     }));
   });
 
+  it("prefers a directly named scripted app toggle over a richer incidental region", () => {
+    const current = snapshot([
+      {
+        ref: "@e1",
+        role: "button",
+        name: "TikTok Connect",
+        text: "TikTok Connect",
+        regionText: "TikTok Connect Callback URL"
+      },
+      {
+        ref: "@e2",
+        role: "link",
+        name: "TikTok Connect was updated",
+        regionText: "Notifications Recent events TikTok Connect was updated Mark as read Dismiss"
+      },
+      { ref: "@e3", role: "button", name: "Mark as read", regionText: "Notifications Recent events TikTok Connect was updated Mark as read Dismiss" },
+      { ref: "@e4", role: "button", name: "Dismiss", regionText: "Notifications Recent events TikTok Connect was updated Mark as read Dismiss" }
+    ], {
+      regions: [
+        { ref: "@r1", text: "TikTok Connect Callback URL", actionRefs: ["@e1"], links: [], hitTestable: true },
+        {
+          ref: "@r2",
+          text: "Notifications Recent events TikTok Connect was updated Mark as read Dismiss",
+          actionRefs: ["@e2", "@e3", "@e4"],
+          links: [],
+          hitTestable: true
+        }
+      ]
+    });
+
+    expect(findBrowserLocator(current, { name: "TikTok Connect" })).toMatchObject({
+      status: "found",
+      candidates: [{ ref: "@e1", kind: "element", role: "button", name: "TikTok Connect" }]
+    });
+  });
+
   it("finds and resolves a trusted visible region when no element names the card", () => {
     const current = snapshot([
       { ref: "@e1", role: "link", name: "Callback URL" },

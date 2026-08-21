@@ -1,4 +1,5 @@
 import type { BrowserSnapshot } from "../contracts/browser.js";
+import { BROWSER_RENDERING_EVALUATOR_SOURCE } from "./browser-page-perception.js";
 
 /**
  * One browser-owned interactability decision, serialized into page evaluation
@@ -13,16 +14,9 @@ export const BROWSER_INTERACTABILITY_EVALUATOR_SOURCE = `(element) => {
   }
   const view = doc.defaultView;
   const styleFor = (candidate) => view?.getComputedStyle?.(candidate) || getComputedStyle(candidate);
+  const assessRendering = ${BROWSER_RENDERING_EVALUATOR_SOURCE};
   const visuallyHidden = (candidate, includeGeometry) => {
-    for (let current = candidate; current && current.nodeType === 1; current = current.parentElement) {
-      if (current.hidden === true || current.getAttribute?.('aria-hidden') === 'true') return true;
-      const style = styleFor(current);
-      if (style?.display === 'none' || style?.visibility === 'hidden' || style?.visibility === 'collapse' ||
-          style?.contentVisibility === 'hidden') return true;
-    }
-    if (!includeGeometry) return false;
-    const rects = Array.from(candidate.getClientRects?.() || []);
-    return rects.length === 0 || rects.every((rect) => Number(rect.width) <= 0 || Number(rect.height) <= 0);
+    return !assessRendering(candidate, includeGeometry).rendered;
   };
   if (visuallyHidden(element, true)) return blocked('hidden', true, false);
 
@@ -41,6 +35,8 @@ export const BROWSER_INTERACTABILITY_EVALUATOR_SOURCE = `(element) => {
     if (!firstLegend?.contains?.(element)) disabledFieldset = true;
   }
   if (nativelyDisabled || ariaDisabled || disabledFieldset) return blocked('disabled', false, true);
+
+  if (styleFor(element)?.pointerEvents === 'none') return blocked('pointer-events-none', false, false);
 
   let modals = [];
   try {

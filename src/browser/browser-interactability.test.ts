@@ -16,6 +16,8 @@ type FakeStyle = {
   display: string;
   visibility: string;
   contentVisibility: string;
+  opacity: string;
+  pointerEvents: string;
 };
 
 class FakeDocument {
@@ -36,7 +38,9 @@ class FakeElement {
   readonly style: FakeStyle = {
     display: "block",
     visibility: "visible",
-    contentVisibility: "visible"
+    contentVisibility: "visible",
+    opacity: "1",
+    pointerEvents: "auto"
   };
   parentElement: FakeElement | undefined;
   isConnected = true;
@@ -98,6 +102,8 @@ describe("shared browser interactability evaluator", () => {
     ["visibility hidden", (ancestor: FakeElement) => { ancestor.style.visibility = "hidden"; }],
     ["visibility collapse", (ancestor: FakeElement) => { ancestor.style.visibility = "collapse"; }],
     ["content visibility hidden", (ancestor: FakeElement) => { ancestor.style.contentVisibility = "hidden"; }],
+    ["transparent", (ancestor: FakeElement) => { ancestor.style.opacity = "0"; }],
+    ["effectively transparent", (ancestor: FakeElement) => { ancestor.style.opacity = "0.01"; }],
     ["aria hidden", (ancestor: FakeElement) => { ancestor.attributes.set("aria-hidden", "true"); }]
   ])("blocks a control under %s on an ancestor", (_label, configure) => {
     const doc = new FakeDocument();
@@ -106,6 +112,18 @@ describe("shared browser interactability evaluator", () => {
     configure(ancestor);
 
     expect(evaluate(element)).toMatchObject({ interactable: false, reason: "hidden", hidden: true });
+  });
+
+  it("separates rendered text from pointer actionability", () => {
+    const element = new FakeElement(new FakeDocument());
+    element.style.pointerEvents = "none";
+
+    expect(evaluate(element)).toEqual({
+      interactable: false,
+      reason: "pointer-events-none",
+      hidden: false,
+      disabled: false
+    });
   });
 
   it("blocks empty geometry, detached controls, and inert ancestry", () => {

@@ -58,21 +58,25 @@ export function findBrowserLocator(snapshot: BrowserSnapshot, locator: BrowserLo
   assertLocatorIdentity(normalized, snapshot, tabRef);
   const available = (snapshot.elements ?? []).filter(isBrowserSnapshotElementInteractable);
   const elementMatches = available
-    .filter((element) => locatorMatches(element, normalized))
+    .filter((element) => locatorMatches(element, normalized));
+  const directExactMatches = elementMatches
+    .filter((element) => directlyNamesRequestedTarget(element, normalized))
     .slice(0, MAX_CANDIDATES);
   const regionMatchesForLocator = (snapshot.regions ?? [])
     .filter((region) => region.hitTestable && regionMatches(region.text, normalized));
-  const structurallyRichRegions = strongestRegionMatches(regionMatchesForLocator);
-  const elementsInStrongRegions = elementMatches.filter((element) => structurallyRichRegions.some((region) =>
+  const strongestRegions = strongestRegionMatches(regionMatchesForLocator, normalized);
+  const elementsInStrongRegions = elementMatches.filter((element) => strongestRegions.some((region) =>
     comparable(element.regionText ?? element.withinText ?? "") === comparable(region.text)
   ));
-  const preferRegions = normalized.exact !== true && structurallyRichRegions.some((region) => region.actionRefs.length >= 2) &&
+  const preferRegions = normalized.exact !== true && strongestRegions.some((region) => region.actionRefs.length >= 1) &&
     elementsInStrongRegions.length === 0;
-  const exactCandidates = (elementsInStrongRegions.length > 0
+  const exactCandidates = (directExactMatches.length > 0
+    ? directExactMatches.map((element) => locatorCandidate(element, snapshot.identity, tabRef))
+    : elementsInStrongRegions.length > 0
     ? elementsInStrongRegions.map((element) => locatorCandidate(element, snapshot.identity, tabRef))
     : elementMatches.length > 0 && !preferRegions
       ? elementMatches.map((element) => locatorCandidate(element, snapshot.identity, tabRef))
-      : structurallyRichRegions.map((region) => regionCandidate(region, snapshot.identity, tabRef)))
+      : strongestRegions.map((region) => regionCandidate(region, snapshot.identity, tabRef)))
     .slice(0, MAX_CANDIDATES);
   const nearbyCandidates = exactCandidates.length === 0
     ? nearbyBrowserLocatorCandidates(available, normalized, snapshot.identity, tabRef)
@@ -88,11 +92,38 @@ export function findBrowserLocator(snapshot: BrowserSnapshot, locator: BrowserLo
 }
 
 function strongestRegionMatches(
-  regions: NonNullable<BrowserSnapshot["regions"]>
+  regions: NonNullable<BrowserSnapshot["regions"]>,
+  locator: BrowserLocator
 ): NonNullable<BrowserSnapshot["regions"]> {
   if (regions.length <= 1) return regions;
-  const highestActionCount = Math.max(...regions.map((region) => region.actionRefs.length));
-  return regions.filter((region) => region.actionRefs.length === highestActionCount);
+  const scored = regions.map((region) => ({ region, score: visibleRegionMatchScore(region.text, locator) }));
+  const highestScore = Math.max(...scored.map((entry) => entry.score));
+  return scored.filter((entry) => entry.score === highestScore).map((entry) => entry.region);
+}
+
+function visibleRegionMatchScore(text: string, locator: BrowserLocator): number {
+  const region = comparable(text);
+  const requested = [locator.name, locator.text, locator.label, locator.withinText]
+    .filter((value): value is string => value !== undefined)
+    .map(comparable);
+  return requested.reduce((score, phrase) => {
+    const beginsRecord = region === phrase || region.startsWith(`${phrase} `) ? 80 : 0;
+    const compactness = Math.max(0, 24 - Math.floor(region.length / Math.max(phrase.length, 1)));
+    const occurrences = region.split(phrase).length - 1;
+    return score + beginsRecord + compactness - Math.max(0, occurrences - 1) * 4;
+  }, 0);
+}
+
+function directlyNamesRequestedTarget(
+  element: NonNullable<BrowserSnapshot["elements"]>[number],
+  locator: BrowserLocator
+): boolean {
+  const pairs: Array<[string | undefined, string | undefined]> = [
+    [element.name, locator.name],
+    [element.text ?? element.name, locator.text],
+    [element.label ?? element.name, locator.label]
+  ];
+  return pairs.some(([actual, expected]) => actual !== undefined && expected !== undefined && comparable(actual) === comparable(expected));
 }
 
 function nearbyBrowserLocatorCandidates(
@@ -139,6 +170,7 @@ function nearbyCandidateScore(
   const phrase = requestedTokens.join(" ");
   const directPhrase = phrase.length >= 4 && directText.includes(phrase) ? 12 : 0;
   const regionPhrase = phrase.length >= 4 && regionText.includes(phrase) ? 8 : 0;
+  const regionBeginsWithPhrase = phrase.length >= 4 && (regionText === phrase || regionText.startsWith(`${phrase} `)) ? 32 : 0;
   const regionCompactness = regionOverlap === 0
     ? 0
     : regionTokens.size <= 16
@@ -147,9 +179,9 @@ function nearbyCandidateScore(
         ? 3
         : 0;
   const sharedRegionActions = regionOverlap === 0 ? 0 : regionActionCounts.get(regionText) ?? 0;
-  const sharedRegionBonus = Math.max(0, Math.min(sharedRegionActions, 4) - 1) * 16;
+  const sharedRegionBonus = Math.max(0, Math.min(sharedRegionActions, 4) - 1) * 2;
   const role = locator.role !== undefined && comparable(element.role ?? "") === comparable(locator.role) ? 1 : 0;
-  return directOverlap * 8 + regionOverlap * 4 + directPhrase + regionPhrase + regionCompactness + sharedRegionBonus +
+  return directOverlap * 8 + regionOverlap * 4 + directPhrase + regionPhrase + regionBeginsWithPhrase + regionCompactness + sharedRegionBonus +
     (directOverlap > 0 || regionOverlap > 0 ? role : 0);
 }
 

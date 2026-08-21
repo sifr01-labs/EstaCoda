@@ -1589,7 +1589,7 @@ function browserActionPreflightExpression(targetRef: { kind: "element" | "region
     const role = clean(el.getAttribute('role') || '');
     const inputType = tag === 'input' ? String(el.getAttribute('type') || 'text').toLowerCase() : undefined;
     const href = el instanceof HTMLAnchorElement ? el.href : undefined;
-    const inlineScripted = el.hasAttribute('onclick') || typeof el.onclick === 'function';
+    const inlineScripted = el.hasAttribute('onclick') || typeof el.onclick === 'function' || getComputedStyle(el).cursor === 'pointer';
     const boundElementIndex = Array.isArray(window.__estacodaElements) ? window.__estacodaElements.indexOf(el) : -1;
     const boundRegionIndex = Array.isArray(window.__estacodaRegions) ? window.__estacodaRegions.indexOf(el) : -1;
     const formAssociated = Boolean(el.form || el.closest('form'));

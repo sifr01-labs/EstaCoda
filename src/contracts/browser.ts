@@ -95,6 +95,8 @@ export type BrowserRegionLink = {
   href: string;
 };
 
+export type BrowserViewportPosition = "visible" | "partially-visible" | "offscreen";
+
 /**
  * Runtime-bound visible page container. Coordinates remain browser-owned;
  * model-visible callers can reference only the canonical region identity.
@@ -105,6 +107,7 @@ export type BrowserVisibleRegion = {
   actionRefs: string[];
   links: BrowserRegionLink[];
   hitTestable: boolean;
+  viewport?: BrowserViewportPosition;
   blockedBy?: string;
 };
 
@@ -241,8 +244,9 @@ export type BrowserSnapshot = {
     regionText?: string;
     /** Runtime-owned result from the shared browser interactability evaluator. */
     interactable?: boolean;
-    interactabilityReason?: "detached" | "hidden" | "inert" | "disabled" | "modal-blocked";
+    interactabilityReason?: "detached" | "hidden" | "inert" | "disabled" | "modal-blocked" | "pointer-events-none";
     hidden?: boolean;
+    viewport?: BrowserViewportPosition;
     value?: string;
     disabled?: boolean;
     checked?: boolean | "mixed";
