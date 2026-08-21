@@ -1,6 +1,7 @@
 export const APPROVAL_FOCUS_CONTROLS = ["inspect", "approve", "reject"] as const;
 
 export type ApprovalFocusControl = typeof APPROVAL_FOCUS_CONTROLS[number];
+export type ApprovalFocusScope = "once" | "session" | "always";
 
 export const DEFAULT_APPROVAL_FOCUS_CONTROL: ApprovalFocusControl = "inspect";
 
@@ -14,6 +15,7 @@ export type FocusTarget =
       readonly kind: "approval";
       readonly approvalId: string;
       readonly control: ApprovalFocusControl;
+      readonly scope?: ApprovalFocusScope;
     }
   | { readonly kind: "slashMenu"; readonly itemId: string }
   | { readonly kind: "steer" }
@@ -50,12 +52,18 @@ export function isPromptFocused(state: FocusState): boolean {
 
 export function createApprovalFocusTarget(
   approvalId: string,
-  control: ApprovalFocusControl
+  control: ApprovalFocusControl,
+  scope?: ApprovalFocusScope
 ): FocusTarget {
   if (!isApprovalFocusControl(control)) {
     throw new Error(`Unsupported approval focus control: ${String(control)}`);
   }
-  return { kind: "approval", approvalId, control };
+  return {
+    kind: "approval",
+    approvalId,
+    control,
+    ...(scope === undefined ? {} : { scope }),
+  };
 }
 
 export function createDefaultApprovalFocusTarget(approvalId: string): FocusTarget {
@@ -84,7 +92,9 @@ function isSameFocusTarget(left: FocusTarget, right: FocusTarget): boolean {
       return left.toolEventId === (right as Extract<FocusTarget, { kind: "activeWork" }>).toolEventId;
     case "approval": {
       const approval = right as Extract<FocusTarget, { kind: "approval" }>;
-      return left.approvalId === approval.approvalId && left.control === approval.control;
+      return left.approvalId === approval.approvalId &&
+        left.control === approval.control &&
+        left.scope === approval.scope;
     }
     case "slashMenu":
       return left.itemId === (right as Extract<FocusTarget, { kind: "slashMenu" }>).itemId;

@@ -1,5 +1,6 @@
 import {
   createInitialFocusState,
+  type ApprovalFocusScope,
   type ApprovalFocusControl,
   type FocusState,
 } from "./focusModel.js";
@@ -445,6 +446,10 @@ export type StreamingState = {
 
 export type ApprovalControl = ApprovalFocusControl;
 
+export type ApprovalCardScope = ApprovalFocusScope;
+
+export type ApprovalGrantMatch = "target" | "tool";
+
 export type ApprovalCardState = {
   readonly id: string;
   readonly status: "pending" | "approved" | "rejected" | "expired" | "superseded";
@@ -452,11 +457,16 @@ export type ApprovalCardState = {
   readonly target: string;
   readonly risk?: string;
   readonly summary?: string;
+  /** Defaults to approve-once only when omitted. */
+  readonly availableScopes?: readonly ApprovalCardScope[];
+  /** Describes whether a broader grant matches this target or the whole tool. */
+  readonly grantMatch?: ApprovalGrantMatch;
   readonly diffStats?: {
     readonly added?: number;
     readonly removed?: number;
   };
   readonly focusedControl?: ApprovalControl;
+  readonly focusedScope?: ApprovalCardScope;
 };
 
 export type SlashMenuItemState = {

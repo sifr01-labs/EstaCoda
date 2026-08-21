@@ -141,6 +141,12 @@ describe("Papyrus operator console state model", () => {
       approvalId: "approval-1",
       control: "inspect",
     });
+    expect(createApprovalFocusTarget("approval-1", "approve", "session")).toEqual({
+      kind: "approval",
+      approvalId: "approval-1",
+      control: "approve",
+      scope: "session",
+    });
     expect(createDefaultApprovalFocusTarget("approval-1")).toEqual({
       kind: "approval",
       approvalId: "approval-1",

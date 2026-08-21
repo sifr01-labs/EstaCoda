@@ -635,6 +635,10 @@ I need approval before modifying the database.
   │                                                  │
   │ ❯ Inspect       Review details before deciding   │
   │   Approve once  Permit only this action          │
+  │   Approve for session                            │
+  │                 Permit matches this session      │
+  │   Always approve in workspace                    │
+  │                 Permit matches here until revoked │
   │   Reject        Deny this action                 │
   │                                                  │
   │ ↑↓ move · Enter select · Esc reject              │
@@ -654,16 +658,21 @@ Focused approval control:
   │                                                        │
   │ ❯ Inspect       Review details before deciding         │
   │   Approve once  Permit only this action                │
+  │   Approve for session  Permit matches this session     │
+  │   Always approve in workspace                          │
+  │                 Permit matches here until revoked      │
   │   Reject        Deny this action                       │
   │                                                        │
   │ ↑↓ move · Enter select · Esc reject                    │
   ╰────────────────────────────────────────────────────────╯
 ```
 
-Approval v1 controls:
+Runtime approval controls:
 
 - Inspect
 - Approve once
+- Approve for session
+- Always approve in workspace, when persistent revocation is available
 - Reject
 
 The card is bounded and inset on wide terminals, but falls back to the available
@@ -672,10 +681,13 @@ Shift+Tab, left, and right remain supported for compatibility. Fixed copy is
 localized, while action, target, risk, and summary values are rendered with
 mixed-direction isolation. New approval prompts initially focus **Inspect**, so
 pressing Enter before navigating inspects the request and never approves it.
-
-Feedback, amend, session approval, and persistent approval controls are out of
-scope for approval v1 unless the implementation adds a separately reviewed
-runtime path.
+Session and workspace scopes use the existing runtime grant path. When an
+approval has a stable target key, broader choices say that matching actions are
+permitted. When no stable target key exists, they explicitly say that the whole
+tool is permitted. Persistent approval remains workspace-scoped and revocable;
+the hardline floor remains non-overridable. Durable Task approval cards remain
+approve-once only and cannot create session or persistent grants. Feedback and
+amend controls remain out of scope.
 
 Protected input is also a modal attention card. It presents the request kind as
 the primary heading, verified destination separately from retention and compact

@@ -443,6 +443,8 @@ function approvalAnswerKeypresses(answer: string): readonly string[] {
   if (normalized === "inspect") return ["\r"];
   if (normalized === "reject" || normalized === "deny" || normalized === "no") return ["\x1b[A", "\r"];
   if (normalized === "escape" || normalized === "esc" || normalized === "cancel") return ["\x1b"];
+  if (normalized === "session") return ["\x1b[B", "\x1b[B", "\r"];
+  if (normalized === "always") return ["\x1b[B", "\x1b[B", "\x1b[B", "\r"];
   return ["\x1b[B", "\r"];
 }
 
@@ -6239,10 +6241,10 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.rendered).toContain("Target · npm install left-pad");
     expect(result.rendered).toContain("destructive-local");
     expect(result.rendered).toContain("❯ Approve once");
+    expect(result.rendered).toContain("Approve for session");
+    expect(result.rendered).toContain("Always approve in workspace");
     expect(result.rendered).toContain("Reject");
     expect(result.rendered).toContain("Inspect");
-    expect(result.rendered).not.toContain("Allow for this session");
-    expect(result.rendered).not.toContain("Always allow");
     expect(result.rendered).not.toContain("Feedback");
     expect(result.rendered).not.toContain("Amend");
     expect(result.rendered).toContain("Approval granted (once). Retrying now.");
@@ -6250,6 +6252,26 @@ describe("runSessionLoop — active turn spinner", () => {
     const statusRailLine = result.rendered.split("\n").find((line) => line.includes("mock-model"));
     expect(statusRailLine).toBeDefined();
     expect(statusRailLine).not.toMatch(/\b(approval|tool|workspace|trust|setup|steer|channel)\b/iu);
+  });
+
+  it("grants session and workspace scopes selected from inline Operator Console cards", async () => {
+    for (const scope of ["session", "always"] as const) {
+      const result = await runApprovalPromptScenario([scope], {
+        response: commandApprovalAskResponse(),
+        operatorConsoleHost: createOperatorConsoleRuntimeHost({
+          terminal: { width: 96, height: 16, isTty: true },
+        }),
+        ttyCoreSession: true,
+      });
+
+      expect(result.grants).toEqual([
+        expect.objectContaining({
+          toolName: "terminal.run",
+          scope,
+        }),
+      ]);
+      expect(result.handleInputs).toEqual(["write file", "write file"]);
+    }
   });
 
   it("keeps the Operator Console prompt and status rail visible during plain provider turns", async () => {

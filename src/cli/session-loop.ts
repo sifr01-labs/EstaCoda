@@ -477,6 +477,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   };
   const onOperatorConsoleApprovalIntent = async (intent: ApprovalIntent): Promise<void> => {
     if (intent.type !== "approve" && intent.type !== "reject") return;
+    if (intent.type === "approve" && intent.scope !== "once") {
+      throw new Error("Interactive Task approvals support approve-once only.");
+    }
     const taskApprovals = options.taskApprovals;
     if (taskApprovals === undefined) throw new Error("Interactive Task approvals are unavailable.");
     await taskApprovals.resolve({
@@ -3549,7 +3552,9 @@ function taskApprovalToCard(
     action: toolDisplayLabel(approval.toolName, locale),
     target: approval.targetPreview,
     risk: approval.riskClass,
-    summary
+    summary,
+    availableScopes: ["once"],
+    grantMatch: "target"
   };
 }
 

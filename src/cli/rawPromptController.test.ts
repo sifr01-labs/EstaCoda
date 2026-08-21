@@ -554,6 +554,9 @@ describe("raw prompt controller", () => {
     });
 
     expect(read.output.writes.join("")).toContain("Approval required");
+    expect(read.output.writes.join("")).toContain("Approve once");
+    expect(read.output.writes.join("")).not.toContain("Approve for session");
+    expect(read.output.writes.join("")).not.toContain("Always approve in workspace");
     read.input.send("\r");
 
     await expect(read.pending).resolves.toEqual({ type: "submit", text: "" });
@@ -608,7 +611,11 @@ describe("raw prompt controller", () => {
     approved.input.send("\r");
     await flushPromises();
     expect(approved.isResolved()).toBe(false);
-    expect(onApprovalIntent).toHaveBeenCalledWith({ type: "approve", approvalId: "approval-raw-1" });
+    expect(onApprovalIntent).toHaveBeenCalledWith({
+      type: "approve",
+      approvalId: "approval-raw-1",
+      scope: "once",
+    });
     approved.input.send("continue\r");
     await expect(approved.pending).resolves.toEqual({ type: "submit", text: "continue" });
 

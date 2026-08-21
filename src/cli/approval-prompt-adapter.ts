@@ -60,6 +60,9 @@ async function operatorConsoleApprovalPromptAdapter(input: ApprovalPromptAdapter
   const approval = approvalCardStateFromToolExecution(input.execution, {
     focused: true,
     locale: input.locale,
+    availableScopes: input.allowPersistentApproval
+      ? ["once", "session", "always"]
+      : ["once", "session"],
   });
   if (input.input?.isTTY === true) {
     return await readInlineOperatorConsoleApproval({
@@ -214,7 +217,7 @@ function approvalIntentFromAnswer(answer: string, approvalId: string): ApprovalI
 function mapOperatorConsoleApprovalIntent(intent: ApprovalIntent): string {
   switch (intent.type) {
     case "approve":
-      return "once";
+      return intent.scope;
     case "reject":
       return "deny";
     case "inspect":

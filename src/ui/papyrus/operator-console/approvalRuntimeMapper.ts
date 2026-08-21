@@ -3,11 +3,16 @@ import type { FileChangePreviewViewModel } from "../../../contracts/view-model.j
 import { buildToolDisplayPreview } from "../../../tools/tool-target-summary.js";
 import { toolDisplayLabel, type ToolDisplayLocale } from "../../tool-display.js";
 import { DEFAULT_APPROVAL_FOCUS_CONTROL } from "./focusModel.js";
-import type { ApprovalCardState } from "./operatorConsoleState.js";
+import type { ApprovalCardScope, ApprovalCardState } from "./operatorConsoleState.js";
 
 export function approvalCardStateFromToolExecution(
   execution: ToolExecutionRecord,
-  input: { readonly id?: string; readonly focused?: boolean; readonly locale?: ToolDisplayLocale } = {}
+  input: {
+    readonly id?: string;
+    readonly focused?: boolean;
+    readonly locale?: ToolDisplayLocale;
+    readonly availableScopes?: readonly ApprovalCardScope[];
+  } = {}
 ): ApprovalCardState {
   const diffStats = diffStatsFromExecution(execution);
   const status = execution.decision === "ask" ? "pending" : "rejected";
@@ -17,6 +22,8 @@ export function approvalCardStateFromToolExecution(
     action: toolDisplayLabel(execution.tool.name, input.locale),
     target: approvalTargetFromExecution(execution),
     risk: execution.riskClass,
+    grantMatch: execution.targetKey === undefined || execution.targetKey.length === 0 ? "tool" : "target",
+    ...(input.availableScopes === undefined ? {} : { availableScopes: input.availableScopes }),
     ...(diffStats === undefined ? {} : { diffStats }),
     ...(input.focused === true && status === "pending"
       ? { focusedControl: DEFAULT_APPROVAL_FOCUS_CONTROL }

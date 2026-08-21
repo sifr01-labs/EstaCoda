@@ -10,7 +10,20 @@ describe("approval runtime mapper", () => {
       action: "Workspace Write",
       target: "src/app.ts",
       risk: "workspace-write",
+      grantMatch: "target",
       focusedControl: "inspect",
+    });
+  });
+
+  it("carries explicitly available scopes and identifies tool-wide grants", () => {
+    expect(approvalCardStateFromToolExecution(execution({
+      targetKey: undefined,
+      targetSummary: undefined,
+    }), {
+      availableScopes: ["once", "session", "always"],
+    })).toMatchObject({
+      availableScopes: ["once", "session", "always"],
+      grantMatch: "tool",
     });
   });
 

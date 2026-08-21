@@ -153,8 +153,8 @@ describe("approval prompt adapter routing", () => {
     expect(rendered).not.toContain("❯ Approve once");
     expect(rendered).toContain("Reject");
     expect(rendered).toContain("Inspect");
-    expect(rendered).not.toContain("Allow for this session");
-    expect(rendered).not.toContain("Always allow");
+    expect(rendered).toContain("Approve for session");
+    expect(rendered).toContain("Always approve in workspace");
     expect(rendered).not.toContain("Feedback");
     expect(rendered).not.toContain("Amend");
     expect(rendered).not.toContain("Ask user");
@@ -179,6 +179,48 @@ describe("approval prompt adapter routing", () => {
 
     await expect(result).resolves.toBe("once");
     expect(outputChunks.join("")).toContain("❯ Approve once");
+  });
+
+  it("selects session and workspace scopes from inline Operator Console approvals", async () => {
+    const sessionInput = makeTtyInput();
+    const session = papyrusApprovalPromptAdapter({
+      ...adapterInput("").input,
+      input: sessionInput,
+      operatorConsoleHost: createOperatorConsoleRuntimeHost(),
+    });
+    sessionInput.press("\x1b[B");
+    sessionInput.press("\x1b[B");
+    sessionInput.press("\r");
+    await expect(session).resolves.toBe("session");
+
+    const alwaysInput = makeTtyInput();
+    const always = papyrusApprovalPromptAdapter({
+      ...adapterInput("").input,
+      input: alwaysInput,
+      operatorConsoleHost: createOperatorConsoleRuntimeHost(),
+    });
+    alwaysInput.press("\x1b[B");
+    alwaysInput.press("\x1b[B");
+    alwaysInput.press("\x1b[B");
+    alwaysInput.press("\r");
+    await expect(always).resolves.toBe("always");
+  });
+
+  it("omits workspace-persistent scope from inline approvals when revocation is unavailable", async () => {
+    const { input, outputChunks } = adapterInput("", { allowPersistentApproval: false });
+    const ttyInput = makeTtyInput();
+    const result = papyrusApprovalPromptAdapter({
+      ...input,
+      input: ttyInput,
+      operatorConsoleHost: createOperatorConsoleRuntimeHost(),
+    });
+    ttyInput.press("\x1b[B");
+    ttyInput.press("\x1b[B");
+    ttyInput.press("\r");
+
+    await expect(result).resolves.toBe("session");
+    expect(outputChunks.join("")).toContain("Approve for session");
+    expect(outputChunks.join("")).not.toContain("Always approve in workspace");
   });
 
   it("renders inline Operator Console file diff stats without prompt-region suspension", async () => {
@@ -277,12 +319,18 @@ describe("approval prompt adapter routing", () => {
 
     ttyInput.press("\x1b[B");
     ttyInput.press("\x1b[B");
+    ttyInput.press("\x1b[B");
+    ttyInput.press("\x1b[B");
+    ttyInput.press("\x1b[A");
+    ttyInput.press("\x1b[A");
     ttyInput.press("\x1b[A");
     ttyInput.press("\r");
     await expect(result).resolves.toBe("once");
 
     const rendered = outputChunks.join("");
     expect(rendered).toContain("❯ Approve once");
+    expect(rendered).toContain("❯ Approve for session");
+    expect(rendered).toContain("❯ Always approve in workspace");
     expect(rendered).toContain("❯ Reject");
     expect(rendered).toContain("❯ Inspect");
     expect(input.prompt).not.toHaveBeenCalled();

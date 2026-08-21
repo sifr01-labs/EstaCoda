@@ -7,10 +7,9 @@ import {
 } from "../../bidi.js";
 import { stringWidth } from "../screen/stringWidth.js";
 import {
-  APPROVAL_FOCUS_CONTROLS,
   createApprovalFocusTarget,
+  DEFAULT_APPROVAL_FOCUS_CONTROL,
   setFocus,
-  type ApprovalFocusControl,
 } from "./focusModel.js";
 import {
   attentionCardHeaderFitsRightLabel,
@@ -27,8 +26,10 @@ import {
   type OperatorConsoleStyle,
 } from "./operatorConsoleStyle.js";
 import type {
+  ApprovalCardScope,
   ApprovalCardState,
   ApprovalControl,
+  ApprovalGrantMatch,
   OperatorConsoleState,
 } from "./operatorConsoleState.js";
 
@@ -40,7 +41,7 @@ export type ApprovalSurfaceRenderOptions = {
 };
 
 export type ApprovalIntent =
-  | { readonly type: "approve"; readonly approvalId: string }
+  | { readonly type: "approve"; readonly approvalId: string; readonly scope: ApprovalCardScope }
   | { readonly type: "reject"; readonly approvalId: string }
   | { readonly type: "inspect"; readonly approvalId: string }
   | { readonly type: "none" };
@@ -54,10 +55,21 @@ type ApprovalCopy = {
   readonly titles: Readonly<Record<ApprovalCardState["status"], string>>;
   readonly target: string;
   readonly risk: string;
-  readonly controls: Readonly<Record<ApprovalControl, { readonly label: string; readonly description: string }>>;
+  readonly controls: Readonly<Record<ApprovalChoiceKey, {
+    readonly label: string;
+    readonly description: string | Readonly<Record<ApprovalGrantMatch, string>>;
+  }>>;
   readonly footer: string;
   readonly statuses: Readonly<Record<Exclude<ApprovalCardState["status"], "pending">, string>>;
   readonly lines: string;
+};
+
+type ApprovalChoiceKey = "inspect" | "approveOnce" | "approveSession" | "approveAlways" | "reject";
+
+type ApprovalChoice = {
+  readonly key: ApprovalChoiceKey;
+  readonly control: ApprovalControl;
+  readonly scope?: ApprovalCardScope;
 };
 
 const COPY: Readonly<Record<"en" | "ar", ApprovalCopy>> = {
@@ -73,7 +85,21 @@ const COPY: Readonly<Record<"en" | "ar", ApprovalCopy>> = {
     risk: "Risk",
     controls: {
       inspect: { label: "Inspect", description: "Review details before deciding" },
-      approve: { label: "Approve once", description: "Permit only this action" },
+      approveOnce: { label: "Approve once", description: "Permit only this action" },
+      approveSession: {
+        label: "Approve for session",
+        description: {
+          target: "Permit matches this session",
+          tool: "Permit this tool this session",
+        },
+      },
+      approveAlways: {
+        label: "Always approve in workspace",
+        description: {
+          target: "Permit matches here until revoked",
+          tool: "Permit this tool here until revoked",
+        },
+      },
       reject: { label: "Reject", description: "Deny this action" },
     },
     footer: "↑↓ move · Enter select · Esc reject",
@@ -97,7 +123,21 @@ const COPY: Readonly<Record<"en" | "ar", ApprovalCopy>> = {
     risk: "المخاطر",
     controls: {
       inspect: { label: "فحص", description: "راجع التفاصيل قبل اتخاذ القرار" },
-      approve: { label: "موافقة لمرة واحدة", description: "اسمح بهذا الإجراء فقط" },
+      approveOnce: { label: "موافقة لمرة واحدة", description: "اسمح بهذا الإجراء فقط" },
+      approveSession: {
+        label: "موافقة لهذه الجلسة",
+        description: {
+          target: "اسمح بالإجراءات المطابقة خلال هذه الجلسة",
+          tool: "اسمح لهذه الأداة خلال هذه الجلسة",
+        },
+      },
+      approveAlways: {
+        label: "موافقة دائمة في مساحة العمل",
+        description: {
+          target: "اسمح بالإجراءات المطابقة هنا حتى الإلغاء",
+          tool: "اسمح لهذه الأداة هنا حتى الإلغاء",
+        },
+      },
       reject: { label: "رفض", description: "امنع هذا الإجراء" },
     },
     footer: "↑↓ للتنقل · Enter للاختيار · Esc للرفض",
@@ -140,14 +180,18 @@ export function routeApprovalKey(
   if (key.key === "tab" || key.key === "right" || key.key === "left" || key.key === "up" || key.key === "down") {
     if (focused === undefined || focused.approval.status !== "pending") return { state, intent: { type: "none" } };
     const direction = key.key === "left" || key.key === "up" || key.shift === true ? -1 : 1;
-    const control = moveApprovalControl(focused.control, direction);
+    const choice = moveApprovalChoice(focused.approval, focused.choice, direction);
     return {
       state: {
         ...state,
         approvals: state.approvals.map((approval) => approval.id === focused.approval.id
-          ? { ...approval, focusedControl: control }
+          ? withFocusedApprovalChoice(approval, choice)
           : approval),
-        focus: setFocus(state.focus, createApprovalFocusTarget(focused.approval.id, control)),
+        focus: setFocus(state.focus, createApprovalFocusTarget(
+          focused.approval.id,
+          choice.control,
+          choice.scope
+        )),
       },
       intent: { type: "none" },
     };
@@ -156,7 +200,7 @@ export function routeApprovalKey(
   if (focused === undefined || focused.approval.status !== "pending") return { state, intent: { type: "none" } };
 
   if (key.key === "enter") {
-    return { state, intent: intentForControl(focused.approval.id, focused.control) };
+    return { state, intent: intentForChoice(focused.approval.id, focused.choice) };
   }
 
   if (key.key === "escape") {
@@ -210,8 +254,9 @@ function renderApprovalCard(
 
   if (approval.status === "pending") {
     rows.push(renderAttentionCardRow("", geometry, style));
-    for (const control of APPROVAL_FOCUS_CONTROLS) {
-      rows.push(...renderApprovalChoice(control, approval.focusedControl, geometry, copy, locale, style));
+    const choices = visibleApprovalChoices(approval);
+    for (const choice of choices) {
+      rows.push(...renderApprovalChoice(choice, approval, choices, geometry, copy, locale, style));
     }
     rows.push(renderAttentionCardRow("", geometry, style));
     rows.push(...renderFooter(copy.footer, geometry, locale, style));
@@ -265,31 +310,35 @@ function renderSecondaryText(
 }
 
 function renderApprovalChoice(
-  control: ApprovalControl,
-  focusedControl: ApprovalControl | undefined,
+  choice: ApprovalChoice,
+  approval: ApprovalCardState,
+  visibleChoices: readonly ApprovalChoice[],
   geometry: AttentionCardGeometry,
   copy: ApprovalCopy,
   locale: "en" | "ar",
   style: OperatorConsoleStyle | undefined
 ): readonly string[] {
-  const active = control === focusedControl;
+  const active = isFocusedApprovalChoice(approval, choice);
   const marker = active ? "❯ " : "  ";
-  const item = copy.controls[control];
-  const labelWidth = Math.max(...APPROVAL_FOCUS_CONTROLS.map((candidate) => stringWidth(copy.controls[candidate].label)));
+  const item = copy.controls[choice.key];
+  const description = typeof item.description === "string"
+    ? item.description
+    : item.description[approval.grantMatch ?? "target"];
+  const labelWidth = Math.max(...visibleChoices.map((candidate) => stringWidth(copy.controls[candidate.key].label)));
   const descriptionWidth = geometry.contentWidth - 2 - labelWidth - 2;
   const rawLines = descriptionWidth >= 12
-    ? wrapVisibleCells(item.description, descriptionWidth).map((description, index) => (
+    ? wrapVisibleCells(description, descriptionWidth).map((line, index) => (
         index === 0
-          ? `${marker}${padVisibleEnd(item.label, labelWidth)}  ${description}`
-          : `${" ".repeat(2 + labelWidth + 2)}${description}`
+          ? `${marker}${padVisibleEnd(item.label, labelWidth)}  ${line}`
+          : `${" ".repeat(2 + labelWidth + 2)}${line}`
       ))
     : [
         `${marker}${item.label}`,
-        ...wrapVisibleCells(item.description, Math.max(1, geometry.contentWidth - 2)).map((line) => `  ${line}`),
+        ...wrapVisibleCells(description, Math.max(1, geometry.contentWidth - 2)).map((line) => `  ${line}`),
       ];
 
   return rawLines.map((rawLine, lineIndex) => {
-    const semanticColor = controlColor(control, style);
+    const semanticColor = controlColor(choice.control, style);
     const descriptionOffset = descriptionWidth >= 12
       ? 2 + labelWidth + 2
       : lineIndex === 0 ? rawLine.length : 2;
@@ -353,30 +402,78 @@ function renderStatus(
 
 function getFocusedApproval(
   state: OperatorConsoleState
-): { readonly approval: ApprovalCardState; readonly control: ApprovalFocusControl } | undefined {
+): { readonly approval: ApprovalCardState; readonly choice: ApprovalChoice } | undefined {
   const target = state.focus.target;
   if (target.kind !== "approval") return undefined;
   const approval = state.approvals.find((candidate) => candidate.id === target.approvalId);
   if (approval === undefined) return undefined;
+  const visibleChoices = visibleApprovalChoices(approval);
+  const requestedControl = approval.focusedControl ?? target.control;
+  const requestedScope = approval.focusedScope ?? target.scope ??
+    (requestedControl === "approve" ? "once" : undefined);
+  const requestedChoice = visibleChoices.find((choice) =>
+    choice.control === requestedControl && choice.scope === requestedScope
+  );
   return {
     approval,
-    control: approval.focusedControl ?? target.control,
+    choice: requestedChoice ?? {
+      key: "inspect",
+      control: DEFAULT_APPROVAL_FOCUS_CONTROL,
+    },
   };
 }
 
-function moveApprovalControl(control: ApprovalControl, direction: 1 | -1): ApprovalControl {
-  const index = APPROVAL_FOCUS_CONTROLS.indexOf(control);
+function moveApprovalChoice(
+  approval: ApprovalCardState,
+  choice: ApprovalChoice,
+  direction: 1 | -1
+): ApprovalChoice {
+  const choices = visibleApprovalChoices(approval);
+  const index = choices.findIndex((candidate) => candidate.key === choice.key);
   const startIndex = index === -1 ? 0 : index;
-  const nextIndex = (startIndex + direction + APPROVAL_FOCUS_CONTROLS.length) % APPROVAL_FOCUS_CONTROLS.length;
-  return APPROVAL_FOCUS_CONTROLS[nextIndex]!;
+  const nextIndex = (startIndex + direction + choices.length) % choices.length;
+  return choices[nextIndex]!;
 }
 
-function intentForControl(approvalId: string, control: ApprovalControl): ApprovalIntent {
-  switch (control) {
-    case "approve": return { type: "approve", approvalId };
+function intentForChoice(approvalId: string, choice: ApprovalChoice): ApprovalIntent {
+  switch (choice.control) {
+    case "approve": return { type: "approve", approvalId, scope: choice.scope ?? "once" };
     case "reject": return { type: "reject", approvalId };
     case "inspect": return { type: "inspect", approvalId };
   }
+}
+
+function visibleApprovalChoices(approval: ApprovalCardState): readonly ApprovalChoice[] {
+  const scopes = approval.availableScopes ?? ["once"];
+  return [
+    { key: "inspect", control: "inspect" },
+    ...(scopes.includes("once")
+      ? [{ key: "approveOnce", control: "approve", scope: "once" } as const]
+      : []),
+    ...(scopes.includes("session")
+      ? [{ key: "approveSession", control: "approve", scope: "session" } as const]
+      : []),
+    ...(scopes.includes("always")
+      ? [{ key: "approveAlways", control: "approve", scope: "always" } as const]
+      : []),
+    { key: "reject", control: "reject" },
+  ];
+}
+
+function isFocusedApprovalChoice(approval: ApprovalCardState, choice: ApprovalChoice): boolean {
+  if (approval.focusedControl !== choice.control) return false;
+  return choice.control !== "approve" || (approval.focusedScope ?? "once") === choice.scope;
+}
+
+function withFocusedApprovalChoice(
+  approval: ApprovalCardState,
+  choice: ApprovalChoice
+): ApprovalCardState {
+  return {
+    ...approval,
+    focusedControl: choice.control,
+    ...(choice.scope === undefined ? { focusedScope: undefined } : { focusedScope: choice.scope }),
+  };
 }
 
 function controlColor(

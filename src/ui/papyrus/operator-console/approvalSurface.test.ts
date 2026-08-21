@@ -63,6 +63,30 @@ describe("Papyrus operator console approval surface", () => {
     expect(text).not.toContain("[Approve always]");
   });
 
+  it("renders the scopes explicitly enabled for an ordinary runtime approval", () => {
+    const text = renderApprovalSurface([approval({
+      availableScopes: ["once", "session", "always"],
+      grantMatch: "target",
+    })], { width: 88 }).join("\n");
+
+    expect(text).toContain("Approve once");
+    expect(text).toContain("Approve for session");
+    expect(text).toContain("Permit matches this session");
+    expect(text).toContain("Always approve in workspace");
+    expect(text).toContain("Permit matches here until revoked");
+    expect(text).toContain("Reject");
+  });
+
+  it("describes tool-wide grants when an approval has no stable target identity", () => {
+    const text = renderApprovalSurface([approval({
+      availableScopes: ["once", "session", "always"],
+      grantMatch: "tool",
+    })], { width: 88 }).join("\n");
+
+    expect(text).toContain("Permit this tool this session");
+    expect(text).toContain("Permit this tool here until revoked");
+  });
+
   it("renders visual focus for the focused approval control", () => {
     const output = renderApprovalSurface([
       approval({
@@ -110,6 +134,7 @@ describe("Papyrus operator console approval surface", () => {
     expect(routeApprovalKey(createState({ focusedControl: "approve" }), { type: "key", key: "enter" }).intent).toEqual({
       type: "approve",
       approvalId: "approval-1",
+      scope: "once",
     });
     expect(routeApprovalKey(createState({ focusedControl: "reject" }), { type: "key", key: "enter" }).intent).toEqual({
       type: "reject",
@@ -119,6 +144,21 @@ describe("Papyrus operator console approval surface", () => {
       type: "inspect",
       approvalId: "approval-1",
     });
+  });
+
+  it("routes session and workspace approval choices with explicit scopes", () => {
+    const state = createState({
+      availableScopes: ["once", "session", "always"],
+      focusedControl: "approve",
+      focusedScope: "session",
+    });
+    const session = routeApprovalKey(state, { type: "key", key: "enter" });
+    const alwaysState = routeApprovalKey(state, { type: "key", key: "down" }).state;
+    const always = routeApprovalKey(alwaysState, { type: "key", key: "enter" });
+
+    expect(session.intent).toEqual({ type: "approve", approvalId: "approval-1", scope: "session" });
+    expect(focusedApproval(alwaysState)).toMatchObject({ focusedControl: "approve", focusedScope: "always" });
+    expect(always.intent).toEqual({ type: "approve", approvalId: "approval-1", scope: "always" });
   });
 
   it("emits reject intent on Escape for pending approval", () => {
@@ -249,12 +289,15 @@ describe("Papyrus operator console approval surface", () => {
       target: "developers.mtn.com تسجيل الدخول",
       risk: "تأثير خارجي",
       focusedControl: "approve",
+      availableScopes: ["once", "session", "always"],
     })], { width: 88, locale: "ar" });
     const text = output.join("\n");
 
     expect(text).toContain("الموافقة مطلوبة");
     expect(text).toContain("فحص");
     expect(text).toContain("موافقة لمرة واحدة");
+    expect(text).toContain("موافقة لهذه الجلسة");
+    expect(text).toContain("موافقة دائمة في مساحة العمل");
     expect(text).toContain(`${FSI}`);
     expect(text).toContain(`${LRI}developers.mtn.com${PDI}`);
     expect(output.every((line) => stringWidth(line) <= 88)).toBe(true);
@@ -296,15 +339,15 @@ describe("Papyrus operator console approval surface", () => {
     expect(APPROVAL_FOCUS_CONTROLS).toEqual(["inspect", "approve", "reject"]);
   });
 
-  it("returns only approval UI intents without policy or grant metadata", () => {
+  it("returns scoped approval UI intents without grant or persistence metadata", () => {
     const result = routeApprovalKey(createState({ focusedControl: "approve" }), { type: "key", key: "enter" });
 
-    expect(Object.keys(result.intent).sort()).toEqual(["approvalId", "type"]);
+    expect(Object.keys(result.intent).sort()).toEqual(["approvalId", "scope", "type"]);
     expect(result.intent).toEqual({
       type: "approve",
       approvalId: "approval-1",
+      scope: "once",
     });
-    expect(result.intent).not.toHaveProperty("scope");
     expect(result.intent).not.toHaveProperty("persistent");
     expect(result.intent).not.toHaveProperty("grant");
   });
@@ -359,7 +402,10 @@ function approval(input: Partial<ApprovalCardState> = {}): ApprovalCardState {
     target: input.target ?? "production database",
     risk: input.risk ?? "schema change",
     ...(input.summary === undefined ? {} : { summary: input.summary }),
+    ...(input.availableScopes === undefined ? {} : { availableScopes: input.availableScopes }),
+    ...(input.grantMatch === undefined ? {} : { grantMatch: input.grantMatch }),
     ...(input.diffStats === undefined ? {} : { diffStats: input.diffStats }),
     ...(input.focusedControl === undefined ? {} : { focusedControl: input.focusedControl }),
+    ...(input.focusedScope === undefined ? {} : { focusedScope: input.focusedScope }),
   };
 }
