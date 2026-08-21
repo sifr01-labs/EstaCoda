@@ -32,7 +32,7 @@ import { ToolRegistry } from "../tools/tool-registry.js";
 import { createPlanTools } from "../tools/plan-tools.js";
 import { RunRecorder } from "./run-recorder.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
-import { ProviderTurnLoop, type ProviderTurnLoopOptions } from "./provider-turn-loop.js";
+import { ProviderTurnLoop, providerEfficiencySignals, type ProviderTurnLoopOptions } from "./provider-turn-loop.js";
 import { ExecutionPlanStore } from "./execution-plan-store.js";
 import { ExecutionPlanController } from "./execution-plan-controller.js";
 import { ExecutionCapabilityPreflight } from "./execution-capability-preflight.js";
@@ -932,6 +932,30 @@ function forwardingSessionDb(db: InMemorySessionDB, overrides: Partial<SessionDB
     saveFailure: overrides.saveFailure ?? db.saveFailure.bind(db)
   };
 }
+
+describe("providerEfficiencySignals", () => {
+  it("nudges at half the configured provider-call budget and prefers a grounded API artifact", () => {
+    expect(providerEfficiencySignals({
+      providerCalls: 9,
+      providerCallBudget: 20,
+      providerTokens: 0,
+      repeatedMcpReads: 0,
+      machineReadableApiDescriptionAvailable: false
+    })).not.toEqual(expect.arrayContaining([expect.stringContaining("provider calls have been used")]));
+
+    const signals = providerEfficiencySignals({
+      providerCalls: 10,
+      providerCallBudget: 20,
+      providerTokens: 0,
+      repeatedMcpReads: 0,
+      machineReadableApiDescriptionAvailable: true
+    });
+    expect(signals).toEqual(expect.arrayContaining([
+      expect.stringContaining("10 provider calls have been used"),
+      expect.stringContaining("grounded machine-readable API description")
+    ]));
+  });
+});
 
 describe("ProviderTurnLoop streaming callbacks", () => {
   it("continues emitting provider-token events when callbacks are omitted", async () => {

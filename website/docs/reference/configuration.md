@@ -625,6 +625,8 @@ On MCP discovery or reload, EstaCoda validates configured tool names and JSON Po
 
 `redactedToolResultPaths` declares structured JSON result fields that must be replaced before an MCP result reaches the model or persistence. If the reviewed structure is absent or the response is not structured JSON, EstaCoda withholds the complete result. The reviewed `config.mcp.setup` tool accepts these structured fields. The CLI accepts the equivalent JSON objects through `--protected-tool-arguments-json`, `--redacted-tool-result-paths-json`, and `--tool-verification-relationships-json`.
 
+`artifactToolArguments` declares exact string destinations that may receive a current-session governed browser download. The model supplies an artifact reference and receipt hash, while the runtime validates ownership, browser-download provenance, MIME type, size, origin, file state, and SHA-256 before injecting UTF-8 content immediately before the approved MCP call. Use `--artifact-tool-arguments-json` for the CLI equivalent. Artifact contents never become model-authored or persisted tool arguments.
+
 #### Postman protected-transfer recipe
 
 This is a reviewed configuration recipe over generic MCP behavior, not a Postman-specific Setup Editor feature. It is pinned to the inspected `@postman/postman-mcp-server` `2.11.2` minimal schemas:
@@ -642,7 +644,9 @@ This is a reviewed configuration recipe over generic MCP behavior, not a Postman
         "getCollections", "getCollection",
         "getEnvironments", "getEnvironment",
         "createCollection", "putCollection",
-        "createEnvironment", "putEnvironment"
+        "createEnvironment", "putEnvironment",
+        "createSpec", "getSpec",
+        "generateCollection", "getSpecCollections"
       ],
       "toolRiskClasses": {
         "getAuthenticatedUser": "read-only-network",
@@ -654,7 +658,18 @@ This is a reviewed configuration recipe over generic MCP behavior, not a Postman
         "createCollection": "external-side-effect",
         "putCollection": "external-side-effect",
         "createEnvironment": "external-side-effect",
-        "putEnvironment": "external-side-effect"
+        "putEnvironment": "external-side-effect",
+        "createSpec": "external-side-effect",
+        "getSpec": "read-only-network",
+        "generateCollection": "external-side-effect",
+        "getSpecCollections": "read-only-network"
+      },
+      "artifactToolArguments": {
+        "createSpec": {
+          "paths": ["/files/*/content"],
+          "allowedMimeTypes": ["application/json", "application/yaml"],
+          "maxBytes": 12582912
+        }
       },
       "protectedToolArguments": {
         "createEnvironment": {
@@ -681,14 +696,16 @@ This is a reviewed configuration recipe over generic MCP behavior, not a Postman
       },
       "toolVerificationRelationships": {
         "getEnvironment": ["createEnvironment", "putEnvironment"],
-        "getCollection": ["createCollection", "putCollection"]
+        "getCollection": ["createCollection", "putCollection"],
+        "getSpec": ["createSpec"],
+        "getSpecCollections": ["generateCollection"]
       }
     }
   }
 }
 ```
 
-Keep the Postman API key in the selected profile's `.env`. Create a dedicated environment and send its two to eight `type: "secret"` variables in one protected call, which produces one grouped approval and one remote invocation. Collections should use variable references such as `{{service_client_id}}`; never place copied credential values in collection content. `getEnvironment` then exposes names and types while the configured result rule removes values, and `getCollection` verifies the references. Because `putEnvironment` replaces state, read and preserve all intended fields before using it. Review the schemas and update the pin deliberately when upgrading the MCP package.
+Keep the Postman API key in the selected profile's `.env`. Create a dedicated environment and send its two to eight `type: "secret"` variables in one protected call, which produces one grouped approval and one remote invocation. Collections should use variable references such as `{{service_client_id}}`; never place copied credential values in collection content. When OpenAPI or Swagger is available, capture it with `browser.download`, relay its receipt to `createSpec.files[*].content`, generate the collection with `generateCollection`, and verify with the spec and collection read tools. The runtime injects the validated artifact text; do not paste it into model-authored arguments. Because `putEnvironment` replaces state, read and preserve all intended fields before using it. Review the schemas and update the pin deliberately when upgrading the MCP package.
 
 ### skills
 

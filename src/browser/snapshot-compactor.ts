@@ -4,6 +4,7 @@ import { isBrowserSnapshotElementInteractable } from "./browser-interactability.
 import { isActionableBrowserRole } from "./snapshot-state.js";
 import { redactSnapshotSecrets } from "./snapshot-summarizer.js";
 import { redactUrlForMetadata } from "./url-safety.js";
+import { machineReadableApiDescriptionHint } from "./api-description-hint.js";
 
 const DEFAULT_COMPACT_BUDGET_CHARS = 8_000;
 const MAX_RENDERED_LINE_CHARS = 360;
@@ -85,6 +86,7 @@ function browserSnapshotSections(
   pageText: CompactPageText
 ): SnapshotSection[] {
   const protectedGuidance = protectedFormGuidance(snapshot, elements);
+  const apiDescriptionHint = machineReadableApiDescriptionHint(snapshot);
   const actionState = renderActionState(snapshot);
   const dialogs = (snapshot.pendingDialogs ?? []).slice(0, 5).map((dialog) => {
     const prompt = dialog.defaultPrompt === undefined ? "" : ` default=${safeText(dialog.defaultPrompt)}`;
@@ -123,6 +125,7 @@ function browserSnapshotSections(
 
   return [
     section("Navigation/action state:", actionState, 1),
+    section("Efficient API source:", apiDescriptionHint === undefined ? [] : [apiDescriptionHint], 1),
     section("Pending dialogs:", dialogs, 1),
     section("Protected input:", protectedGuidance === undefined ? [] : protectedGuidance.split("\n"), 1),
     section("Errors and alerts:", deduplicateStrings([...elementAlerts, ...pageText.errors]), 1),

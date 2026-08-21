@@ -3099,6 +3099,7 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
         "  --env-ref CHILD_KEY=PROFILE_ENV_KEY forwards an explicitly named profile secret without storing its value in config",
         "  --tool-risk-classes TOOL=RISK,... classifies individual discovered operations; unknown tools stay conservative",
         "  --protected-tool-arguments-json JSON configures reviewed JSON Pointer mappings without credential values",
+        "  --artifact-tool-arguments-json JSON configures reviewed session-artifact content mappings",
         "  --redacted-tool-result-paths-json JSON removes reviewed fields from structured MCP results",
         "  --tool-verification-relationships-json JSON maps read-only verification tools to mutation tools"
       ].join("\n")
@@ -3142,6 +3143,7 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
                 `  protected delivery configured: ${capabilities.protectedDeliveryConfigured ? "yes" : "no"}`,
                 `  grouped delivery supported: ${capabilities.groupedDeliverySupported ? "yes" : "no"}`,
                 `  browser relay supported: ${capabilities.browserRelaySupported ? "yes" : "no"}`,
+                `  artifact relay configured: ${capabilities.artifactRelayConfigured ? "yes" : "no"}`,
                 `  result redaction configured: ${capabilities.resultRedactionConfigured ? "yes" : "no"}`,
                 `  verification configured: ${capabilities.verificationConfigured ? "yes" : "no"}`
               ].filter((line) => line !== undefined).join("\n");
@@ -3178,7 +3180,7 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
     return {
       handled: true,
       exitCode: 1,
-      output: "Usage: estacoda mcp setup --name <server> --command <cmd> [--args a,b,c] [--env-ref CHILD_KEY=PROFILE_ENV_KEY] [--protected-tool-arguments-json JSON] [--redacted-tool-result-paths-json JSON]"
+      output: "Usage: estacoda mcp setup --name <server> --command <cmd> [--args a,b,c] [--env-ref CHILD_KEY=PROFILE_ENV_KEY] [--protected-tool-arguments-json JSON] [--artifact-tool-arguments-json JSON] [--redacted-tool-result-paths-json JSON]"
     };
   }
   const result = await setupMcpConfig({
@@ -3908,6 +3910,9 @@ function parseMcpArgs(args: string[]): Partial<MCPSetupInput> {
       index += 1;
     } else if (arg === "--protected-tool-arguments-json") {
       parsed.protectedToolArguments = parseJsonRecord(next ?? "", "protected tool arguments") as MCPSetupInput["protectedToolArguments"];
+      index += 1;
+    } else if (arg === "--artifact-tool-arguments-json") {
+      parsed.artifactToolArguments = parseJsonRecord(next ?? "", "artifact tool arguments") as MCPSetupInput["artifactToolArguments"];
       index += 1;
     } else if (arg === "--redacted-tool-result-paths-json") {
       parsed.redactedToolResultPaths = parseJsonRecord(next ?? "", "redacted tool result paths") as MCPSetupInput["redactedToolResultPaths"];

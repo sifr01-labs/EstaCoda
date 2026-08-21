@@ -618,6 +618,8 @@ STT المستضاف المستقر: OpenAI، Groq، xAI. STT المحلي يد�
 
 يحدد `redactedToolResultPaths` حقول نتائج JSON المنظمة التي يجب استبدالها قبل وصول نتيجة MCP إلى النموذج أو التخزين. إذا غابت البنية التي تمت مراجعتها أو لم تكن الاستجابة JSON منظمة، يحجب EstaCoda النتيجة كاملة. يقبل مسار `config.mcp.setup` القابل للمراجعة هذه الحقول، وتقبل CLI الخيارات `--protected-tool-arguments-json` و`--redacted-tool-result-paths-json` و`--tool-verification-relationships-json`.
 
+يحدد `artifactToolArguments` وجهات نصية دقيقة يمكنها استقبال تنزيل متصفح خاضع للحوكمة من الجلسة الحالية. يرسل النموذج مرجع `artifact://` وبصمة SHA-256 فقط، بينما يتحقق وقت التشغيل من ملكية الجلسة ومصدر `browser.download` ونوع MIME والحجم والأصل وحالة الملف والبصمة قبل حقن محتوى UTF-8 مباشرة قبل استدعاء MCP المعتمد. يقبل CLI الإعداد المكافئ عبر `--artifact-tool-arguments-json`، ولا يدخل محتوى الأثر في وسيطات كتبها النموذج أو في وسيطات الأدوات المخزنة.
+
 #### وصفة النقل المحمي إلى Postman
 
 هذه وصفة إعداد تمت مراجعتها وتستخدم سلوك MCP العام، وليست ميزة خاصة بـ Postman داخل Setup Editor. وهي مثبتة على مخططات الحد الأدنى التي تمت مراجعتها من `@postman/postman-mcp-server` بالإصدار `2.11.2`:
@@ -635,7 +637,9 @@ STT المستضاف المستقر: OpenAI، Groq، xAI. STT المحلي يد�
         "getCollections", "getCollection",
         "getEnvironments", "getEnvironment",
         "createCollection", "putCollection",
-        "createEnvironment", "putEnvironment"
+        "createEnvironment", "putEnvironment",
+        "createSpec", "getSpec",
+        "generateCollection", "getSpecCollections"
       ],
       "toolRiskClasses": {
         "getAuthenticatedUser": "read-only-network",
@@ -647,7 +651,18 @@ STT المستضاف المستقر: OpenAI، Groq، xAI. STT المحلي يد�
         "createCollection": "external-side-effect",
         "putCollection": "external-side-effect",
         "createEnvironment": "external-side-effect",
-        "putEnvironment": "external-side-effect"
+        "putEnvironment": "external-side-effect",
+        "createSpec": "external-side-effect",
+        "getSpec": "read-only-network",
+        "generateCollection": "external-side-effect",
+        "getSpecCollections": "read-only-network"
+      },
+      "artifactToolArguments": {
+        "createSpec": {
+          "paths": ["/files/*/content"],
+          "allowedMimeTypes": ["application/json", "application/yaml"],
+          "maxBytes": 12582912
+        }
       },
       "protectedToolArguments": {
         "createEnvironment": {
@@ -674,14 +689,16 @@ STT المستضاف المستقر: OpenAI، Groq، xAI. STT المحلي يد�
       },
       "toolVerificationRelationships": {
         "getEnvironment": ["createEnvironment", "putEnvironment"],
-        "getCollection": ["createCollection", "putCollection"]
+        "getCollection": ["createCollection", "putCollection"],
+        "getSpec": ["createSpec"],
+        "getSpecCollections": ["generateCollection"]
       }
     }
   }
 }
 ```
 
-احتفظ بمفتاح Postman API في ملف `.env` للملف الشخصي المختار. أنشئ بيئة مخصصة وأرسل من متغيرين إلى ثمانية متغيرات من النوع `type: "secret"` في استدعاء محمي واحد؛ ينتج عن ذلك اعتماد مجمع واحد واستدعاء بعيد واحد. يجب أن تستخدم المجموعات مراجع مثل `{{service_client_id}}`، وألا تحتوي على قيم بيانات اعتماد منسوخة. تعرض `getEnvironment` الأسماء والأنواع بينما تحذف قاعدة النتيجة القيم، وتتحقق `getCollection` من المراجع. ولأن `putEnvironment` يستبدل الحالة، اقرأ جميع الحقول المقصودة وحافظ عليها قبل استخدامه. راجع المخططات وحدّث الإصدار المثبت بصورة مقصودة عند ترقية حزمة MCP.
+احتفظ بمفتاح Postman API في ملف `.env` للملف الشخصي المختار. أنشئ بيئة مخصصة وأرسل من متغيرين إلى ثمانية متغيرات من النوع `type: "secret"` في استدعاء محمي واحد؛ ينتج عن ذلك اعتماد مجمع واحد واستدعاء بعيد واحد. يجب أن تستخدم المجموعات مراجع مثل `{{service_client_id}}`، وألا تحتوي على قيم بيانات اعتماد منسوخة. عند توفر OpenAPI أو Swagger، التقطه عبر `browser.download`، ومرر إيصال الأثر إلى `createSpec.files[*].content`، ثم أنشئ المجموعة عبر `generateCollection` وتحقق منها بأدوات قراءة المواصفة والمجموعة. يحقن وقت التشغيل نص الأثر المتحقق منه؛ لا تلصقه في وسيطات يكتبها النموذج. ولأن `putEnvironment` يستبدل الحالة، اقرأ جميع الحقول المقصودة وحافظ عليها قبل استخدامه. راجع المخططات وحدّث الإصدار المثبت بصورة مقصودة عند ترقية حزمة MCP.
 
 ### skills
 

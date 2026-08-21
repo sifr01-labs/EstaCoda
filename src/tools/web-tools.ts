@@ -44,6 +44,7 @@ import { createTimeoutSignal } from "../utils/timeout-signal.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import { buildBrowserActionSecuritySummary } from "./tool-target-summary.js";
 import { enabledBrowserCapabilities } from "../browser/browser-capabilities.js";
+import { machineReadableApiDescriptionHint } from "../browser/api-description-hint.js";
 import {
   registerDefaultWebResearchProviders,
   selectWebResearchProvider,
@@ -2289,6 +2290,7 @@ function createBrowserDownloadTool(
             filename,
             sha256,
             sourceOrigin,
+            source: "browser.download",
             outcome: "download-completed"
           }
         });
@@ -2299,6 +2301,7 @@ function createBrowserDownloadTool(
           sizeBytes: bytes.byteLength,
           sha256,
           sourceOrigin,
+          ...(inspection.apiDescription === undefined ? {} : { apiDescription: inspection.apiDescription }),
           outcome: "download-completed" as const
         };
         return {
@@ -2309,8 +2312,11 @@ function createBrowserDownloadTool(
             `MIME: ${inspection.mimeType}`,
             `Bytes: ${bytes.byteLength}`,
             `SHA-256: ${sha256}`,
-            `Source origin: ${sourceOrigin}`
-          ].join("\n"),
+            `Source origin: ${sourceOrigin}`,
+            inspection.apiDescription === undefined
+              ? undefined
+              : `API description: ${inspection.apiDescription.format}${inspection.apiDescription.version === undefined ? "" : ` ${inspection.apiDescription.version}`}`
+          ].filter((line): line is string => line !== undefined).join("\n"),
           metadata: receipt
         };
       } finally {
@@ -2344,7 +2350,7 @@ function sanitizeBrowserDownloadFilename(value: string): string {
 }
 
 type BrowserDownloadInspection =
-  | { allowed: true; mimeType: string; kind: "data" | "document" }
+  | { allowed: true; mimeType: string; kind: "data" | "document"; apiDescription?: { format: string; version?: string } }
   | { allowed: false; reason: string };
 
 function inspectBrowserDownload(filename: string, bytes: Uint8Array): BrowserDownloadInspection {
@@ -2361,24 +2367,46 @@ function inspectBrowserDownload(filename: string, bytes: Uint8Array): BrowserDow
       ? { allowed: true, mimeType: "application/zip", kind: "data" }
       : { allowed: false, reason: "invalid-zip-content" };
   }
-  if (![".json", ".yaml", ".yml", ".txt", ".md", ".csv"].includes(extension)) {
+  if (![".json", ".yaml", ".yml", ".txt", ".md", ".csv", ".raml", ".graphql", ".gql", ".proto", ".smithy"].includes(extension)) {
     return { allowed: false, reason: "unsupported-download-type" };
   }
   if (!isSafeTextBytes(bytes)) return { allowed: false, reason: "binary-content-in-text-download" };
   if (extension === ".json") {
     try {
-      JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+      const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+      const apiDescription = describeJsonApiDescription(parsed);
+      return { allowed: true, mimeType: "application/json", kind: "data", ...(apiDescription === undefined ? {} : { apiDescription }) };
     } catch {
       return { allowed: false, reason: "invalid-json-content" };
     }
-    return { allowed: true, mimeType: "application/json", kind: "data" };
   }
   if (extension === ".yaml" || extension === ".yml") {
-    return { allowed: true, mimeType: "application/yaml", kind: "data" };
+    const text = new TextDecoder().decode(bytes);
+    const match = text.slice(0, 16_000).match(/^\s*(openapi|swagger|asyncapi)\s*:\s*["']?([^\s"']+)/imu);
+    const apiDescription = match === null ? undefined : {
+      format: match[1]!.toLowerCase() === "swagger" ? "Swagger" : match[1]!.toLowerCase() === "asyncapi" ? "AsyncAPI" : "OpenAPI",
+      version: match[2]
+    };
+    return { allowed: true, mimeType: "application/yaml", kind: "data", ...(apiDescription === undefined ? {} : { apiDescription }) };
   }
+  if (extension === ".raml") return { allowed: true, mimeType: "application/raml+yaml", kind: "data", apiDescription: { format: "RAML" } };
+  if (extension === ".graphql" || extension === ".gql") return { allowed: true, mimeType: "application/graphql", kind: "data", apiDescription: { format: "GraphQL" } };
+  if (extension === ".proto") return { allowed: true, mimeType: "text/x-protobuf", kind: "data", apiDescription: { format: "Protocol Buffers" } };
+  if (extension === ".smithy") return { allowed: true, mimeType: "text/x-smithy", kind: "data", apiDescription: { format: "Smithy" } };
   if (extension === ".csv") return { allowed: true, mimeType: "text/csv", kind: "data" };
   if (extension === ".md") return { allowed: true, mimeType: "text/markdown", kind: "document" };
   return { allowed: true, mimeType: "text/plain", kind: "document" };
+}
+
+function describeJsonApiDescription(value: unknown): { format: string; version?: string } | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (typeof record.openapi === "string") return { format: "OpenAPI", version: record.openapi.slice(0, 32) };
+  if (typeof record.swagger === "string") return { format: "Swagger", version: record.swagger.slice(0, 32) };
+  if (typeof record.asyncapi === "string") return { format: "AsyncAPI", version: record.asyncapi.slice(0, 32) };
+  const data = typeof record.data === "object" && record.data !== null ? record.data as Record<string, unknown> : undefined;
+  if (record.__schema !== undefined || data?.__schema !== undefined) return { format: "GraphQL introspection" };
+  return undefined;
 }
 
 function looksExecutableOrScript(bytes: Uint8Array): boolean {
@@ -2459,6 +2487,7 @@ function renderBrowserSnapshot(snapshot: BrowserSnapshot, options: BrowserSnapsh
   const frameTree = snapshot.frameTree ?? [];
   const consoleHistory = snapshot.consoleHistory ?? [];
   const protectedFormGuidance = renderProtectedFormGuidance(snapshot);
+  const apiDescriptionHint = machineReadableApiDescriptionHint(snapshot);
   const content = [
     options.full === true ? "[Full page snapshot]" : "[Compact viewport snapshot]",
     `Identity: ${renderBrowserIdentity(snapshot.identity)}`,
@@ -2466,6 +2495,7 @@ function renderBrowserSnapshot(snapshot: BrowserSnapshot, options: BrowserSnapsh
     snapshot.readiness === undefined ? undefined : `Readiness: ${snapshot.readiness}`,
     snapshot.tab === undefined ? undefined : `Controlled tab: ${renderSafeBrowserTab(snapshot.tab)}`,
     snapshot.openedTabs === undefined || snapshot.openedTabs.length === 0 ? undefined : `Opened tabs: ${snapshot.openedTabs.map((tab) => tab.ref).join(", ")}`,
+    apiDescriptionHint,
     "",
     snapshot.text,
     regions.length === 0 ? undefined : "",
@@ -2605,17 +2635,22 @@ function renderBrowserActionCurrentState(snapshot: BrowserSnapshot): string {
     ? []
     : actionable.filter((element) => browserRegionMatchesTarget(element, targetRegion));
   const refs = [...related, ...actionable.filter((element) => !related.includes(element))].slice(0, 20);
+  const apiDescriptionHint = machineReadableApiDescriptionHint(snapshot);
   return [
     `Identity: ${renderBrowserIdentity(snapshot.identity)}`,
     `URL: ${redactUrlForMetadata(snapshot.url)}`,
     snapshot.title === undefined ? undefined : `Title: ${redactSensitiveText(snapshot.title).slice(0, 240)}`,
     snapshot.readiness === undefined ? undefined : `Readiness: ${snapshot.readiness}`,
     snapshot.tab === undefined ? undefined : `Controlled tab: ${renderSafeBrowserTab(snapshot.tab)}`,
+    apiDescriptionHint,
     refs.length === 0
       ? "Actionable refs: none"
       : related.length === 0
         ? "Current actionable refs:"
         : `Current actionable refs (related region first: ${JSON.stringify(redactSensitiveText(targetRegion!).slice(0, 240))}):`,
+    refs.length === 0
+      ? undefined
+      : "Fresh actionable refs are included in this receipt; another snapshot is unnecessary unless the page changes or visual layout remains ambiguous.",
     ...refs.map((element) => [
       element.ref,
       `identity=${JSON.stringify(snapshot.identity)}`,

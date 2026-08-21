@@ -200,6 +200,20 @@ describe("setupMcpConfig capability validation", () => {
         input: {
           name: "records",
           command: "records-mcp",
+          artifactToolArguments: {
+            importSpec: {
+              paths: ["/files/*/content"],
+              allowedMimeTypes: ["application/octet-stream"],
+              maxBytes: 30 * 1024 * 1024
+            }
+          }
+        }
+      })).rejects.toThrow(/Invalid artifact argument declaration/u);
+      await expect(setupMcpConfig({
+        ...base,
+        input: {
+          name: "records",
+          command: "records-mcp",
           toolRiskClasses: { verify: "external-side-effect", update: "external-side-effect" },
           toolVerificationRelationships: { verify: ["update"] }
         }
@@ -3417,6 +3431,13 @@ describe("loadRuntimeConfig profile loading", () => {
           },
           redactedToolResultPaths: {
             verifyRecords: ["/values/*/value"]
+          },
+          artifactToolArguments: {
+            importSpec: {
+              paths: ["/files/*/content"],
+              allowedMimeTypes: ["application/json", "application/yaml"],
+              maxBytes: 12 * 1024 * 1024
+            }
           }
         }
       }
@@ -3440,6 +3461,13 @@ describe("loadRuntimeConfig profile loading", () => {
     });
     expect(loaded.mcp.servers.trusted?.redactedToolResultPaths).toEqual({
       verifyRecords: ["/values/*/value"]
+    });
+    expect(loaded.mcp.servers.trusted?.artifactToolArguments).toEqual({
+      importSpec: {
+        paths: ["/files/*/content"],
+        allowedMimeTypes: ["application/json", "application/yaml"],
+        maxBytes: 12 * 1024 * 1024
+      }
     });
     await rm(workspace, { recursive: true, force: true });
   });

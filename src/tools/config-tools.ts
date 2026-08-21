@@ -439,6 +439,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
                     `  protected delivery configured: ${capabilities.protectedDeliveryConfigured ? "yes" : "no"}`,
                     `  grouped delivery supported: ${capabilities.groupedDeliverySupported ? "yes" : "no"}`,
                     `  browser relay supported: ${capabilities.browserRelaySupported ? "yes" : "no"}`,
+                    `  artifact relay configured: ${capabilities.artifactRelayConfigured ? "yes" : "no"}`,
                     `  result redaction configured: ${capabilities.resultRedactionConfigured ? "yes" : "no"}`,
                     `  verification configured: ${capabilities.verificationConfigured ? "yes" : "no"}`
                     ].filter((line) => line !== undefined).join("\n");
@@ -512,6 +513,19 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
                 browserRelay: { type: "boolean" }
               },
               required: ["paths", "handling"]
+            }
+          },
+          artifactToolArguments: {
+            type: "object",
+            additionalProperties: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                paths: { type: "array", minItems: 1, maxItems: 8, items: { type: "string" } },
+                allowedMimeTypes: { type: "array", minItems: 1, maxItems: 8, items: { type: "string" } },
+                maxBytes: { type: "integer", minimum: 1, maximum: 25 * 1024 * 1024 }
+              },
+              required: ["paths", "allowedMimeTypes", "maxBytes"]
             }
           },
           redactedToolResultPaths: {

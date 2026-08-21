@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { lstat, readFile } from "node:fs/promises";
+import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import type { MCPServerConfig } from "../config/runtime-config.js";
 import type { RegisteredTool, ToolResult, ToolRiskClass } from "../contracts/tool.js";
 import { parseProtectedArgumentPattern } from "../security/protected-argument-path.js";
@@ -20,6 +23,7 @@ export type MCPServerCapabilitySummary = {
   protectedDeliveryConfigured: boolean;
   groupedDeliverySupported: boolean;
   browserRelaySupported: boolean;
+  artifactRelayConfigured: boolean;
   resultRedactionConfigured: boolean;
   verificationConfigured: boolean;
 };
@@ -36,6 +40,7 @@ export async function loadMcpServers(input: {
   servers: Record<string, MCPServerConfig>;
   fetch?: MCPFetchLike;
   environment?: NodeJS.ProcessEnv;
+  artifactStore?: ArtifactStore;
 }): Promise<LoadedMCPServer[]> {
   const loaded: LoadedMCPServer[] = [];
 
@@ -85,7 +90,7 @@ export async function loadMcpServers(input: {
         ? await client.listPrompts().catch(() => [])
         : [];
       const tools = [
-        ...filteredTools.map((tool) => createMcpTool(name, config, client, tool)),
+        ...filteredTools.map((tool) => createMcpTool(name, config, client, tool, input.artifactStore)),
         ...(resources.length === 0 ? [] : createResourceTools(name, config, client, resources)),
         ...(prompts.length === 0 ? [] : createPromptTools(name, config, client, prompts))
       ];
@@ -173,11 +178,13 @@ function createMcpTool(
   serverName: string,
   config: MCPServerConfig,
   client: MCPClient,
-  tool: MCPToolDescriptor
+  tool: MCPToolDescriptor,
+  artifactStore?: ArtifactStore
 ): RegisteredTool {
   const toolName = prefixTool(serverName, config, tool.name);
   const riskClass = resolveMcpToolRiskClass(config, client.transport, tool.name);
   const protectedConfig = config.protectedToolArguments?.[tool.name];
+  const artifactConfig = config.artifactToolArguments?.[tool.name];
   const verificationTargets = config.toolVerificationRelationships?.[tool.name]?.map((target) =>
     prefixTool(serverName, config, target)
   );
@@ -185,10 +192,11 @@ function createMcpTool(
     type: "object",
     additionalProperties: true
   }, protectedConfig?.paths ?? []);
+  const artifactProjection = addArtifactArgumentEnvelopes(protectedProjection.schema, artifactConfig?.paths ?? []);
   return {
     name: toolName,
     description: mcpToolDescription(serverName, tool, riskClass),
-    inputSchema: protectedProjection.schema,
+    inputSchema: artifactProjection.schema,
     riskClass,
     toolsets: ["mcp"],
     connector: mcpConnector(serverName),
@@ -214,14 +222,47 @@ function createMcpTool(
     }),
     isAvailable: () => true,
     run: async (input: Record<string, unknown>) => {
-      const result = await client.callTool(tool.name, input);
-      return normalizeMcpResult(result, config.redactedToolResultPaths?.[tool.name]);
+      const relay = await resolveArtifactArguments(input, artifactConfig, artifactStore);
+      if (!relay.ok) return relay.result;
+      let result: unknown;
+      try {
+        result = await client.callTool(tool.name, relay.input);
+      } catch (error) {
+        if (relay.artifacts.length === 0) throw error;
+        return {
+          ok: false,
+          content: "The destination connector did not complete the governed artifact relay.",
+          metadata: { reason: "artifact-connector-dispatch-failed", artifactRelay: true }
+        };
+      }
+      const relayedContents = relay.artifacts.map((artifact) => artifact.content);
+      const normalized = normalizeMcpResult(
+        redactRelayedArtifactValue(result, relayedContents),
+        config.redactedToolResultPaths?.[tool.name]
+      );
+      if (relay.artifacts.length === 0) return normalized;
+      const redacted = redactRelayedArtifactContent(normalized, relayedContents);
+      return {
+        ...redacted,
+        metadata: {
+          ...redacted.metadata,
+          artifactRelay: true,
+          artifactCount: relay.artifacts.length,
+          artifacts: relay.artifacts.map(({ id, sha256, sourceOrigin, mimeType, bytes }) => ({
+            id,
+            sha256,
+            sourceOrigin,
+            mimeType,
+            bytes
+          }))
+        }
+      };
     }
   };
 }
 
 export function summarizeMcpCapabilityConfig(
-  config: Pick<MCPServerConfig, "protectedToolArguments" | "redactedToolResultPaths" | "toolVerificationRelationships">
+  config: Pick<MCPServerConfig, "protectedToolArguments" | "artifactToolArguments" | "redactedToolResultPaths" | "toolVerificationRelationships">
 ): MCPServerCapabilitySummary {
   const protectedDeclarations = Object.values(config.protectedToolArguments ?? {});
   return {
@@ -230,6 +271,7 @@ export function summarizeMcpCapabilityConfig(
       protectedDeclarations.every((declaration) => declaration.groupedDelivery !== false),
     browserRelaySupported: protectedDeclarations.length > 0 &&
       protectedDeclarations.every((declaration) => declaration.browserRelay !== false),
+    artifactRelayConfigured: Object.keys(config.artifactToolArguments ?? {}).length > 0,
     resultRedactionConfigured: Object.keys(config.redactedToolResultPaths ?? {}).length > 0,
     verificationConfigured: Object.keys(config.toolVerificationRelationships ?? {}).length > 0
   };
@@ -258,6 +300,30 @@ export function validateMcpCapabilityConfiguration(
     }
     if (declaration.paths.some((path) => !schemaAcceptsProtectedString(tool.inputSchema, path))) {
       return `MCP protected argument mapping does not match the input schema for tool ${boundedToolName(toolName)}.`;
+    }
+  }
+  for (const [toolName, declaration] of Object.entries(config.artifactToolArguments ?? {})) {
+    const tool = byName.get(toolName);
+    if (tool === undefined) return unknownCapabilityTool(toolName);
+    if (!isMutationMcpRisk(resolveMcpToolRiskClass(config, transport, toolName))) {
+      return `MCP artifact argument configuration conflicts with the risk class for tool ${boundedToolName(toolName)}.`;
+    }
+    if (declaration.paths.length === 0 || declaration.paths.length > 8 ||
+      declaration.paths.some((path) => parseProtectedArgumentPattern(path) === undefined) ||
+      new Set(declaration.paths).size !== declaration.paths.length || protectedPatternsOverlap(declaration.paths) ||
+      declaration.allowedMimeTypes.length === 0 || declaration.allowedMimeTypes.length > 8 ||
+      declaration.allowedMimeTypes.some((mimeType) => !RELAYED_ARTIFACT_MIME_TYPES.has(mimeType)) ||
+      new Set(declaration.allowedMimeTypes).size !== declaration.allowedMimeTypes.length ||
+      !Number.isSafeInteger(declaration.maxBytes) || declaration.maxBytes <= 0 || declaration.maxBytes > MAX_RELAYED_ARTIFACT_BYTES) {
+      return `MCP artifact argument configuration is invalid for tool ${boundedToolName(toolName)}.`;
+    }
+    if (declaration.paths.some((path) => !schemaAcceptsProtectedString(tool.inputSchema, path))) {
+      return `MCP artifact argument mapping does not match the input schema for tool ${boundedToolName(toolName)}.`;
+    }
+    const protectedPaths = config.protectedToolArguments?.[toolName]?.paths ?? [];
+    const combinedPaths = [...protectedPaths, ...declaration.paths];
+    if (new Set(combinedPaths).size !== combinedPaths.length || protectedPatternsOverlap(combinedPaths)) {
+      return `MCP artifact argument configuration overlaps protected input for tool ${boundedToolName(toolName)}.`;
     }
   }
   for (const [toolName, paths] of Object.entries(config.redactedToolResultPaths ?? {})) {
@@ -290,19 +356,25 @@ export function validateMcpCapabilityConfiguration(
 function schemaAcceptsProtectedString(schema: unknown, path: string): boolean {
   const segments = parseProtectedArgumentPattern(path);
   if (segments === undefined || !isRecord(schema)) return false;
-  let node: Record<string, unknown> = schema;
+  let nodes: Record<string, unknown>[] = [schema];
   for (const [index, segment] of segments.entries()) {
-    if (segment === "*") {
-      if (index === segments.length - 1 || node.type !== "array" || !isRecord(node.items)) return false;
-      node = node.items;
-      continue;
-    }
-    if (!isRecord(node.properties) || !Object.hasOwn(node.properties, segment)) return false;
-    const property = node.properties[segment];
-    if (!isRecord(property)) return false;
-    node = property;
+    nodes = nodes.flatMap(expandSchemaAlternatives).flatMap((node) => {
+      if (segment === "*") {
+        return index === segments.length - 1 || node.type !== "array" || !isRecord(node.items) ? [] : [node.items];
+      }
+      return isRecord(node.properties) && isRecord(node.properties[segment]) ? [node.properties[segment]] : [];
+    });
+    if (nodes.length === 0) return false;
   }
-  return schemaNodeAcceptsString(node);
+  const leaves = nodes.flatMap(expandSchemaAlternatives);
+  return leaves.length > 0 && leaves.every(schemaNodeAcceptsString);
+}
+
+function expandSchemaAlternatives(node: Record<string, unknown>): Record<string, unknown>[] {
+  const alternatives = Array.isArray(node.oneOf) ? node.oneOf : Array.isArray(node.anyOf) ? node.anyOf : undefined;
+  return alternatives === undefined
+    ? [node]
+    : alternatives.filter(isRecord).flatMap(expandSchemaAlternatives);
 }
 
 function schemaNodeAcceptsString(node: Record<string, unknown>): boolean {
@@ -385,6 +457,276 @@ function addProtectedArgumentEnvelopes(
     if (applied) projected.push(path);
   }
   return { schema: clone, paths: projected };
+}
+
+function addArtifactArgumentEnvelopes(
+  schema: unknown,
+  paths: readonly string[]
+): { schema: unknown; paths: readonly string[] } {
+  if (paths.length === 0 || typeof schema !== "object" || schema === null || Array.isArray(schema)) {
+    return { schema, paths: [] };
+  }
+  const clone = structuredClone(schema) as Record<string, unknown>;
+  const projected: string[] = [];
+  for (const path of paths) {
+    const segments = parseProtectedArgumentPattern(path);
+    if (segments === undefined) continue;
+    if (applyArtifactEnvelopeAtSchemaPath(clone, segments, 0) > 0) projected.push(path);
+  }
+  return { schema: clone, paths: projected };
+}
+
+function applyArtifactEnvelopeAtSchemaPath(
+  node: Record<string, unknown>,
+  segments: readonly string[],
+  index: number
+): number {
+  const alternatives = Array.isArray(node.oneOf) ? node.oneOf : Array.isArray(node.anyOf) ? node.anyOf : undefined;
+  if (alternatives !== undefined) {
+    return alternatives.filter(isRecord).reduce((count, alternative) =>
+      count + applyArtifactEnvelopeAtSchemaPath(alternative, segments, index), 0);
+  }
+  const key = segments[index];
+  if (key === undefined) return 0;
+  if (key === "*") {
+    return index === segments.length - 1 || node.type !== "array" || !isRecord(node.items)
+      ? 0
+      : applyArtifactEnvelopeAtSchemaPath(node.items, segments, index + 1);
+  }
+  if (!isRecord(node.properties) || !isRecord(node.properties[key])) return 0;
+  if (index === segments.length - 1) {
+    const property = node.properties[key];
+    const existing = Array.isArray(property.oneOf) ? property.oneOf : [property];
+    node.properties[key] = { oneOf: [...existing, artifactArgumentEnvelopeSchema()] };
+    return 1;
+  }
+  return applyArtifactEnvelopeAtSchemaPath(node.properties[key], segments, index + 1);
+}
+
+function artifactArgumentEnvelopeSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      artifactInput: {
+        type: "object",
+        additionalProperties: false,
+        description: "A current-session governed browser download. The runtime validates and injects its text without placing the artifact content in model context.",
+        properties: {
+          reference: { type: "string", description: "artifact:// reference from browser.download." },
+          sha256: { type: "string", description: "SHA-256 from the browser.download receipt." },
+          sourceOrigin: { type: "string", description: "Optional exact source origin from the browser.download receipt." }
+        },
+        required: ["reference", "sha256"]
+      }
+    },
+    required: ["artifactInput"]
+  };
+}
+
+const MAX_RELAYED_ARTIFACT_BYTES = 25 * 1024 * 1024;
+const RELAYED_ARTIFACT_MIME_TYPES = new Set([
+  "application/json",
+  "application/yaml",
+  "application/raml+yaml",
+  "application/graphql",
+  "text/plain",
+  "text/markdown",
+  "text/x-protobuf",
+  "text/x-smithy"
+]);
+
+type ResolvedArtifactRelay = {
+  id: string;
+  sha256: string;
+  sourceOrigin: string;
+  mimeType: string;
+  bytes: number;
+  content: string;
+};
+
+async function resolveArtifactArguments(
+  input: Record<string, unknown>,
+  declaration: NonNullable<MCPServerConfig["artifactToolArguments"]>[string] | undefined,
+  artifactStore: ArtifactStore | undefined
+): Promise<
+  | { ok: true; input: Record<string, unknown>; artifacts: ResolvedArtifactRelay[] }
+  | { ok: false; result: ToolResult }
+> {
+  const envelopes = findArtifactArgumentEnvelopes(input);
+  if (envelopes.length === 0) return { ok: true, input, artifacts: [] };
+  if (declaration === undefined || artifactStore === undefined) return artifactRelayFailure("artifact-relay-unavailable");
+
+  const dispatchedInput = structuredClone(input);
+  const artifacts: ResolvedArtifactRelay[] = [];
+  for (const candidate of envelopes) {
+    const matches = declaration.paths.filter((path) =>
+      matchesArtifactArgumentPattern(path, candidate.pointer, input)
+    );
+    if (matches.length !== 1) return artifactRelayFailure("artifact-destination-not-reviewed");
+    const descriptor = parseArtifactInputDescriptor(candidate.envelope);
+    if (descriptor === undefined) return artifactRelayFailure("artifact-reference-invalid");
+    const artifact = artifactStore.get(descriptor.reference);
+    if (artifact === undefined || artifact.localPath === undefined || artifact.mimeType === undefined) {
+      return artifactRelayFailure("artifact-not-owned-by-current-session");
+    }
+    if (!declaration.allowedMimeTypes.includes(artifact.mimeType) || artifact.bytes > declaration.maxBytes) {
+      return artifactRelayFailure("artifact-type-or-size-not-reviewed");
+    }
+    const metadata = artifact.metadata;
+    if (metadata?.source !== "browser.download" || metadata.outcome !== "download-completed" ||
+      typeof metadata.sha256 !== "string" || typeof metadata.sourceOrigin !== "string" ||
+      metadata.sha256 !== descriptor.sha256 ||
+      (descriptor.sourceOrigin !== undefined && metadata.sourceOrigin !== descriptor.sourceOrigin)) {
+      return artifactRelayFailure("artifact-download-receipt-invalid");
+    }
+    let fileBytes: Buffer;
+    try {
+      const file = await lstat(artifact.localPath);
+      if (!file.isFile() || file.isSymbolicLink() || file.size !== artifact.bytes || file.size > declaration.maxBytes) {
+        return artifactRelayFailure("artifact-file-state-invalid");
+      }
+      fileBytes = await readFile(artifact.localPath);
+    } catch {
+      return artifactRelayFailure("artifact-file-unavailable");
+    }
+    const sha256 = createHash("sha256").update(fileBytes).digest("hex");
+    if (sha256 !== metadata.sha256 || sha256 !== descriptor.sha256) {
+      return artifactRelayFailure("artifact-hash-mismatch");
+    }
+    let content: string;
+    try {
+      content = new TextDecoder("utf-8", { fatal: true }).decode(fileBytes);
+    } catch {
+      return artifactRelayFailure("artifact-text-invalid");
+    }
+    if (content.includes("\u0000")) return artifactRelayFailure("artifact-text-invalid");
+    setArtifactArgumentAtPointer(dispatchedInput, candidate.pointer, content);
+    artifacts.push({
+      id: artifact.id,
+      sha256,
+      sourceOrigin: metadata.sourceOrigin,
+      mimeType: artifact.mimeType,
+      bytes: artifact.bytes,
+      content
+    });
+  }
+  return { ok: true, input: dispatchedInput, artifacts };
+}
+
+function parseArtifactInputDescriptor(value: Record<string, unknown>): {
+  reference: string;
+  sha256: string;
+  sourceOrigin?: string;
+} | undefined {
+  if (typeof value.reference !== "string" || !/^artifact:\/\/[A-Za-z0-9._:-]{1,200}$/u.test(value.reference) ||
+    typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/u.test(value.sha256)) return undefined;
+  if (value.sourceOrigin === undefined) return { reference: value.reference, sha256: value.sha256 };
+  if (typeof value.sourceOrigin !== "string") return undefined;
+  try {
+    const parsed = new URL(value.sourceOrigin);
+    if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || parsed.origin !== value.sourceOrigin) return undefined;
+  } catch {
+    return undefined;
+  }
+  return { reference: value.reference, sha256: value.sha256, sourceOrigin: value.sourceOrigin };
+}
+
+function findArtifactArgumentEnvelopes(root: unknown): readonly { pointer: string; envelope: Record<string, unknown> }[] {
+  const found: Array<{ pointer: string; envelope: Record<string, unknown> }> = [];
+  const seen = new WeakSet<object>();
+  const visit = (value: unknown, segments: readonly string[]): void => {
+    if (typeof value !== "object" || value === null || seen.has(value)) return;
+    seen.add(value);
+    if (isRecord(value) && isRecord(value.artifactInput)) {
+      found.push({ pointer: encodeArtifactPointer(segments), envelope: value.artifactInput });
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((entry, index) => visit(entry, [...segments, String(index)]));
+      return;
+    }
+    for (const [key, entry] of Object.entries(value)) visit(entry, [...segments, key]);
+  };
+  visit(root, []);
+  return found;
+}
+
+function matchesArtifactArgumentPattern(pattern: string, pointer: string, root: unknown): boolean {
+  const patternSegments = parseProtectedArgumentPattern(pattern);
+  const pointerSegments = parseArtifactPointer(pointer);
+  if (patternSegments === undefined || pointerSegments === undefined || patternSegments.length !== pointerSegments.length) return false;
+  let current = root;
+  for (let index = 0; index < patternSegments.length; index += 1) {
+    const expected = patternSegments[index]!;
+    const actual = pointerSegments[index]!;
+    if (Array.isArray(current)) {
+      if (expected !== "*" || !/^(?:0|[1-9][0-9]*)$/u.test(actual) || Number(actual) >= current.length) return false;
+      current = current[Number(actual)];
+    } else if (isRecord(current) && expected === actual && Object.hasOwn(current, actual)) {
+      current = current[actual];
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
+function setArtifactArgumentAtPointer(root: unknown, pointer: string, content: string): void {
+  const segments = parseArtifactPointer(pointer);
+  if (segments === undefined) throw new Error("Artifact argument pointer is invalid.");
+  let current = root;
+  for (const segment of segments.slice(0, -1)) {
+    if (Array.isArray(current) && /^(?:0|[1-9][0-9]*)$/u.test(segment)) current = current[Number(segment)];
+    else if (isRecord(current) && Object.hasOwn(current, segment)) current = current[segment];
+    else throw new Error("Artifact argument pointer changed before dispatch.");
+  }
+  const leaf = segments.at(-1)!;
+  if (Array.isArray(current) && /^(?:0|[1-9][0-9]*)$/u.test(leaf) && Number(leaf) < current.length) current[Number(leaf)] = content;
+  else if (isRecord(current) && Object.hasOwn(current, leaf)) current[leaf] = content;
+  else throw new Error("Artifact argument pointer changed before dispatch.");
+}
+
+function parseArtifactPointer(pointer: string): readonly string[] | undefined {
+  if (!pointer.startsWith("/") || pointer === "/") return undefined;
+  const segments = pointer.slice(1).split("/").map((segment) => segment.replaceAll("~1", "/").replaceAll("~0", "~"));
+  return segments.every((segment) => /^[A-Za-z_][A-Za-z0-9_-]*$/u.test(segment) || /^(?:0|[1-9][0-9]*)$/u.test(segment))
+    ? segments
+    : undefined;
+}
+
+function encodeArtifactPointer(segments: readonly string[]): string {
+  return `/${segments.map((segment) => segment.replaceAll("~", "~0").replaceAll("/", "~1")).join("/")}`;
+}
+
+function artifactRelayFailure(reason: string): { ok: false; result: ToolResult } {
+  return {
+    ok: false,
+    result: {
+      ok: false,
+      content: "The governed artifact could not be relayed to the reviewed connector argument.",
+      metadata: { reason }
+    }
+  };
+}
+
+function redactRelayedArtifactContent(result: ToolResult, contents: readonly string[]): ToolResult {
+  return redactRelayedArtifactValue(result, contents) as ToolResult;
+}
+
+function redactRelayedArtifactValue(value: unknown, contents: readonly string[]): unknown {
+  return contents.reduce((current, content) => {
+    if (content.length === 0) return current;
+    const escaped = JSON.stringify(content).slice(1, -1);
+    return replaceRelayedArtifactText(replaceRelayedArtifactText(current, content), escaped) as ToolResult;
+  }, value);
+}
+
+function replaceRelayedArtifactText(value: unknown, content: string): unknown {
+  if (typeof value === "string") return value.split(content).join("[RELAYED_ARTIFACT_CONTENT]");
+  if (Array.isArray(value)) return value.map((entry) => replaceRelayedArtifactText(entry, content));
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, replaceRelayedArtifactText(entry, content)]));
 }
 
 function protectedArgumentEnvelopeSchema(): Record<string, unknown> {

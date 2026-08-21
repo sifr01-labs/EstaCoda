@@ -53,4 +53,10 @@ export class ArtifactStore {
   list(): ArtifactRecord[] {
     return [...this.#artifacts.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
+
+  get(reference: string): ArtifactRecord | undefined {
+    const id = reference.startsWith("artifact://") ? reference.slice("artifact://".length) : reference;
+    if (id.length === 0 || id.includes("/") || id.includes("\\")) return undefined;
+    return this.#artifacts.get(id);
+  }
 }

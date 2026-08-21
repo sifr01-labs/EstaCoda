@@ -1,7 +1,51 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-06-28T20:08:45.586Z",
+  "generatedAt": "2026-08-21T18:35:15.969Z",
   "skills": [
+    {
+      "id": "official.api-integration",
+      "slug": "api-integration",
+      "name": "API Integration",
+      "description": "Connect an API to a destination system using machine-readable API descriptions when available, with separate protected credential transfer and read-back verification.",
+      "overview": "Prefer one comprehensive, visible machine-readable API description over page-by-page endpoint scraping when the task needs the full API structure.",
+      "labels": [
+        "api.integration",
+        "api.import"
+      ],
+      "triggerPatterns": [
+        "connect api",
+        "import api",
+        "api integration",
+        "import openapi",
+        "connect openapi",
+        "import swagger",
+        "connect swagger"
+      ],
+      "requiredToolsets": [
+        "browser",
+        "mcp"
+      ],
+      "optionalToolsets": [
+        "web",
+        "files"
+      ],
+      "playbookSteps": 4,
+      "evaluationCount": 1,
+      "routing": {
+        "confirmation": "policy"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/api-integration/SKILL.md",
+        "githubUrl": "https://github.com/sifr01-labs/EstaCoda/blob/main/skills/official/api-integration/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
     {
       "id": "official.ascii-video",
       "slug": "ascii-video",

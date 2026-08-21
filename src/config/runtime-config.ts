@@ -78,6 +78,14 @@ export type MCPProtectedToolArgumentsConfig = {
   /** Whether protected values may be relayed from a verified browser field. */
   browserRelay?: boolean;
 };
+export type MCPArtifactToolArgumentsConfig = {
+  /** Reviewed JSON Pointer patterns whose string value may come from a session artifact. */
+  paths: string[];
+  /** Exact textual MIME types accepted by the connector destination. */
+  allowedMimeTypes: string[];
+  /** Connector-specific upper bound, never greater than the browser download ceiling. */
+  maxBytes: number;
+};
 export type UiLanguage = "en" | "ar";
 export type UiFlavor = "standard" | "arabic-light" | "kemet-full";
 export type ActivityLabelsLocale = "en" | "ar";
@@ -365,6 +373,7 @@ export type MCPServerConfig = {
   toolRiskClass?: ToolRiskClass;
   toolRiskClasses?: Record<string, ToolRiskClass>;
   protectedToolArguments?: Record<string, MCPProtectedToolArgumentsConfig>;
+  artifactToolArguments?: Record<string, MCPArtifactToolArgumentsConfig>;
   /** Tool name -> reviewed JSON Pointer patterns removed from returned JSON. */
   redactedToolResultPaths?: Record<string, string[]>;
   /** Verification tool name -> mutation tool names, all unprefixed MCP names. */
@@ -815,6 +824,7 @@ export type MCPSetupInput = {
   toolRiskClass?: ToolRiskClass;
   toolRiskClasses?: Record<string, ToolRiskClass>;
   protectedToolArguments?: Record<string, MCPProtectedToolArgumentsConfig>;
+  artifactToolArguments?: Record<string, MCPArtifactToolArgumentsConfig>;
   redactedToolResultPaths?: Record<string, string[]>;
   toolVerificationRelationships?: Record<string, string[]>;
   resourceReadRiskClass?: ToolRiskClass;
@@ -2378,6 +2388,7 @@ function normalizeMcpServers(
       toolRiskClass: isToolRiskClass(record.toolRiskClass) ? record.toolRiskClass : undefined,
       toolRiskClasses: normalizeToolRiskClasses(record.toolRiskClasses),
       protectedToolArguments: normalizeProtectedToolArguments(record.protectedToolArguments),
+      artifactToolArguments: normalizeArtifactToolArguments(record.artifactToolArguments),
       redactedToolResultPaths: normalizeToolResultRedactionPaths(record.redactedToolResultPaths),
       toolVerificationRelationships: normalizeToolVerificationRelationships(record.toolVerificationRelationships),
       resourceReadRiskClass: isToolRiskClass(record.resourceReadRiskClass) ? record.resourceReadRiskClass : undefined,
@@ -2431,6 +2442,28 @@ function normalizeProtectedToolArguments(value: unknown): Record<string, MCPProt
       ...(typeof record?.groupedDelivery === "boolean" ? { groupedDelivery: record.groupedDelivery } : {}),
       ...(typeof record?.browserRelay === "boolean" ? { browserRelay: record.browserRelay } : {})
     }] as [string, MCPProtectedToolArgumentsConfig]];
+  });
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
+}
+
+function normalizeArtifactToolArguments(value: unknown): Record<string, MCPArtifactToolArgumentsConfig> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value).map(([toolName, declaration]) => {
+    if (toolName.trim().length === 0 || typeof declaration !== "object" || declaration === null || Array.isArray(declaration)) {
+      throw new Error(`Invalid MCP artifact argument configuration for tool ${toolName.slice(0, 160)}`);
+    }
+    const record = declaration as Record<string, unknown>;
+    if (!Array.isArray(record.paths) || record.paths.length === 0 || record.paths.some((path) => typeof path !== "string") ||
+        !Array.isArray(record.allowedMimeTypes) || record.allowedMimeTypes.length === 0 ||
+        record.allowedMimeTypes.some((mimeType) => typeof mimeType !== "string") ||
+        typeof record.maxBytes !== "number") {
+      throw new Error(`Invalid MCP artifact argument configuration for tool ${toolName.slice(0, 160)}`);
+    }
+    return [toolName, {
+      paths: record.paths as string[],
+      allowedMimeTypes: record.allowedMimeTypes as string[],
+      maxBytes: record.maxBytes
+    }] as [string, MCPArtifactToolArgumentsConfig];
   });
   return entries.length === 0 ? undefined : Object.fromEntries(entries);
 }
@@ -3176,6 +3209,7 @@ export async function setupMcpConfig(options: {
     toolRiskClass: options.input.toolRiskClass ?? previous.toolRiskClass,
     toolRiskClasses: options.input.toolRiskClasses ?? previous.toolRiskClasses,
     protectedToolArguments: options.input.protectedToolArguments ?? previous.protectedToolArguments,
+    artifactToolArguments: options.input.artifactToolArguments ?? previous.artifactToolArguments,
     redactedToolResultPaths: options.input.redactedToolResultPaths ?? previous.redactedToolResultPaths,
     toolVerificationRelationships: options.input.toolVerificationRelationships ?? previous.toolVerificationRelationships,
     resourceReadRiskClass: options.input.resourceReadRiskClass ?? previous.resourceReadRiskClass,
@@ -3883,6 +3917,27 @@ function validateMcpSetupInput(input: MCPSetupInput): void {
       throw new Error(`Invalid protected argument declaration for MCP tool ${toolName}`);
     }
   }
+  for (const [toolName, declaration] of Object.entries(input.artifactToolArguments ?? {})) {
+    requireNonEmpty(toolName, "MCP artifact argument tool name");
+    if (!Array.isArray(declaration.paths) || declaration.paths.length === 0 || declaration.paths.length > 8 ||
+        declaration.paths.some((path) => !isProtectedArgumentPattern(path)) ||
+        new Set(declaration.paths).size !== declaration.paths.length ||
+        hasOverlappingProtectedArgumentPatterns(declaration.paths) ||
+        !Array.isArray(declaration.allowedMimeTypes) || declaration.allowedMimeTypes.length === 0 ||
+        declaration.allowedMimeTypes.length > 8 ||
+        declaration.allowedMimeTypes.some((mimeType) => !isRelayedArtifactMimeType(mimeType)) ||
+        new Set(declaration.allowedMimeTypes).size !== declaration.allowedMimeTypes.length ||
+        !Number.isSafeInteger(declaration.maxBytes) || declaration.maxBytes <= 0 ||
+        declaration.maxBytes > 25 * 1024 * 1024 ||
+        !isMutationRiskClass(resolveMcpSetupToolRisk(input, toolName))) {
+      throw new Error(`Invalid artifact argument declaration for MCP tool ${toolName}`);
+    }
+    const protectedPaths = input.protectedToolArguments?.[toolName]?.paths ?? [];
+    const combinedPaths = [...protectedPaths, ...declaration.paths];
+    if (new Set(combinedPaths).size !== combinedPaths.length || hasOverlappingProtectedArgumentPatterns(combinedPaths)) {
+      throw new Error(`Invalid artifact argument declaration for MCP tool ${toolName}`);
+    }
+  }
   for (const [toolName, paths] of Object.entries(input.redactedToolResultPaths ?? {})) {
     requireNonEmpty(toolName, "MCP result redaction tool name");
     if (!Array.isArray(paths) || paths.length === 0 || paths.length > 8 ||
@@ -3959,6 +4014,12 @@ function isProtectedArgumentPersistence(value: unknown): value is MCPProtectedTo
 
 function isProtectedArgumentSharing(value: unknown): value is MCPProtectedToolArgumentsConfig["handling"]["sharing"] {
   return value === "private" || value === "workspace" || value === "account" || value === "external" || value === "unknown";
+}
+
+function isRelayedArtifactMimeType(value: unknown): value is string {
+  return value === "application/json" || value === "application/yaml" || value === "application/raml+yaml" ||
+    value === "application/graphql" || value === "text/plain" || value === "text/markdown" ||
+    value === "text/x-protobuf" || value === "text/x-smithy";
 }
 
 function validateSecuritySetupInput(input: SecuritySetupInput): void {

@@ -78,6 +78,8 @@ The CLI accepts the same map with `--tool-risk-classes TOOL=RISK,...`. When a pe
 
 `redactedToolResultPaths` is the corresponding reviewed output boundary for structured JSON results. Matching values are replaced before the result reaches the model, tool history, or persistence. If configured redaction cannot be applied to a returned structure, the entire result is withheld. The MCP server remains unavailable when a configured result-redaction tool is missing or its pointer declarations are invalid.
 
+`artifactToolArguments` reviews a different boundary: exact string arguments that may receive a current-session governed browser download. The model supplies only the `artifact://` reference, download hash, and optional origin. Immediately before the already-approved MCP call, the runtime rechecks session ownership, source receipt, MIME type, size, file state, origin, and SHA-256, then injects UTF-8 text at the reviewed path. Artifact bytes do not enter model input or persisted tool arguments. Unknown tools, changed schemas, non-text files, changed files, and stale or cross-session references fail closed.
+
 ## Reviewed Postman protected-transfer recipe
 
 Postman is configured through the same generic MCP entry as any other connector. It is not a Setup Editor integration and there is no Postman-specific runtime branch. This recipe is pinned to the inspected `@postman/postman-mcp-server` `2.11.2` minimal tool schemas; upgrades require schema discovery and test review before changing the pin.
@@ -104,7 +106,11 @@ Postman is configured through the same generic MCP entry as any other connector.
         "createCollection",
         "putCollection",
         "createEnvironment",
-        "putEnvironment"
+        "putEnvironment",
+        "createSpec",
+        "getSpec",
+        "generateCollection",
+        "getSpecCollections"
       ],
       "toolRiskClasses": {
         "getAuthenticatedUser": "read-only-network",
@@ -116,7 +122,18 @@ Postman is configured through the same generic MCP entry as any other connector.
         "createCollection": "external-side-effect",
         "putCollection": "external-side-effect",
         "createEnvironment": "external-side-effect",
-        "putEnvironment": "external-side-effect"
+        "putEnvironment": "external-side-effect",
+        "createSpec": "external-side-effect",
+        "getSpec": "read-only-network",
+        "generateCollection": "external-side-effect",
+        "getSpecCollections": "read-only-network"
+      },
+      "artifactToolArguments": {
+        "createSpec": {
+          "paths": ["/files/*/content"],
+          "allowedMimeTypes": ["application/json", "application/yaml"],
+          "maxBytes": 12582912
+        }
       },
       "protectedToolArguments": {
         "createEnvironment": {
@@ -143,7 +160,9 @@ Postman is configured through the same generic MCP entry as any other connector.
       },
       "toolVerificationRelationships": {
         "getEnvironment": ["createEnvironment", "putEnvironment"],
-        "getCollection": ["createCollection", "putCollection"]
+        "getCollection": ["createCollection", "putCollection"],
+        "getSpec": ["createSpec"],
+        "getSpecCollections": ["generateCollection"]
       }
     }
   }
@@ -152,13 +171,15 @@ Postman is configured through the same generic MCP entry as any other connector.
 
 Store the Postman API key only in the selected profile's `.env`; the committed or reviewed config contains the environment-variable reference only. Use a dedicated Postman environment and create its related variables in one `createEnvironment` call. Each variable should use `type: "secret"`, and all two to eight protected values in that call are authorized as one group and dispatched once only after every source remains valid. A collection should contain references such as `{{service_client_id}}` and `{{service_client_secret}}`, never copied credential values.
 
+When the source portal exposes OpenAPI or Swagger, capture it with `browser.download` and pass its receipt to `createSpec.files[*].content` through the artifact envelope. EstaCoda injects the validated text directly; do not paste the specification into a model-authored argument. Then use `generateCollection` and verify with `getSpec`, `getSpecCollections`, and `getCollection`. This is a generic artifact-to-MCP relay configured for Postman's inspected schema, not a Postman runtime branch.
+
 Read back the environment with `getEnvironment` and the collection with `getCollection`. The output rule removes every environment variable value while preserving the environment name, variable keys, enabled state, and type for verification. `putEnvironment` replaces environment state; read the existing dedicated environment first and preserve all intended fields rather than using it as a partial patch.
 
-After applying the recipe, reload MCP discovery and inspect `mcp status`. Protected delivery, grouped delivery, browser relay, result redaction, and verification should all report `yes`. A missing tool, changed input schema, invalid pointer, or non-JSON result that cannot be safely redacted fails closed without dispatching or returning the unreviewed data.
+After applying the recipe, reload MCP discovery and inspect `mcp status`. Protected delivery, grouped delivery, browser relay, artifact relay, result redaction, and verification should all report `yes`. A missing tool, changed input schema, invalid pointer, or non-JSON result that cannot be safely redacted fails closed without dispatching or returning the unreviewed data.
 
 At execution time, the runtime copies only the validated connector and verification relationship into its bounded effect receipt. A successful verifier is associated with the most recent compatible successful mutation from the same visible turn, using target identity when both calls provide one. MCP results and model-authored plan text cannot create or override that relationship.
 
-The reviewed configuration tool accepts these structured fields directly. The CLI accepts `--protected-tool-arguments-json`, `--redacted-tool-result-paths-json`, and `--tool-verification-relationships-json`. `mcp status` reports only yes/no capability summaries; it never prints protected paths or credential values.
+The reviewed configuration tool accepts these structured fields directly. The CLI accepts `--protected-tool-arguments-json`, `--artifact-tool-arguments-json`, `--redacted-tool-result-paths-json`, and `--tool-verification-relationships-json`. `mcp status` reports only yes/no capability summaries; it never prints reviewed paths, artifact contents, or credential values.
 
 ## Read Reuse
 

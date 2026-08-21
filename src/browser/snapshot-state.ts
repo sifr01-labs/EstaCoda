@@ -97,6 +97,7 @@ const ACTIONABLE_BROWSER_ROLES = new Set([
   "checkbox",
   "combobox",
   "link",
+  "scripted-control",
   "listbox",
   "menuitem",
   "menuitemcheckbox",

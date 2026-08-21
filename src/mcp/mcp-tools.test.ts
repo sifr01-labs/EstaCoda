@@ -1,4 +1,9 @@
+import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { ArtifactStore } from "../artifacts/artifact-store.js";
 import type { MCPProtectedToolArgumentsConfig } from "../config/runtime-config.js";
 import {
   loadMcpServers,
@@ -232,6 +237,7 @@ describe("MCP protected argument declarations", () => {
         protectedDeliveryConfigured: false,
         groupedDeliverySupported: false,
         browserRelaySupported: false,
+        artifactRelayConfigured: false,
         resultRedactionConfigured: false,
         verificationConfigured: false
       }
@@ -291,6 +297,7 @@ describe("MCP protected argument declarations", () => {
       protectedDeliveryConfigured: true,
       groupedDeliverySupported: true,
       browserRelaySupported: true,
+      artifactRelayConfigured: false,
       resultRedactionConfigured: false,
       verificationConfigured: true
     });
@@ -402,6 +409,7 @@ describe("MCP protected argument declarations", () => {
         protectedDeliveryConfigured: true,
         groupedDeliverySupported: true,
         browserRelaySupported: true,
+        artifactRelayConfigured: true,
         resultRedactionConfigured: true,
         verificationConfigured: true,
       },
@@ -430,6 +438,11 @@ describe("MCP protected argument declarations", () => {
           verifies: ["mcp.postman.createCollection", "mcp.postman.putCollection"],
         },
       });
+    const createSpec = server?.tools.find((tool) => tool.name === "mcp.postman.createSpec");
+    expect(createSpec?.riskClass).toBe("external-side-effect");
+    expect(JSON.stringify(createSpec?.inputSchema)).toContain("artifactInput");
+    expect(server?.tools.find((tool) => tool.name === "mcp.postman.getSpec")?.capabilityMetadata)
+      .toEqual({ verification: { verifies: ["mcp.postman.createSpec"] } });
     const readBack = await server?.tools.find((tool) => tool.name === "mcp.postman.getEnvironment")
       ?.run({ environmentId: "environment-fixture" });
     expect(readBack).toMatchObject({
@@ -457,6 +470,18 @@ describe("MCP protected argument declarations", () => {
     expect(server?.tools).toEqual([]);
   });
 
+  it("fails the reviewed Postman recipe closed when the spec content path changes", async () => {
+    const [server] = await loadMcpServers({
+      servers: { postman: postmanProtectedTransferConfig },
+      fetch: createPostmanCapabilityFetch({ omitSpecContent: true }),
+    });
+
+    expect(server?.snapshot).toMatchObject({ available: false });
+    expect(server?.snapshot.error).toMatch(/artifact argument mapping does not match the input schema/u);
+    expect(server?.snapshot.error).not.toContain("/files");
+    expect(server?.tools).toEqual([]);
+  });
+
   it("rejects unknown, duplicate, and overlapping MCP result redaction declarations", async () => {
     const invalidDeclarations: Array<Record<string, string[]>> = [
       { missingTool: ["/environment/values/*/value"] },
@@ -481,6 +506,194 @@ describe("MCP protected argument declarations", () => {
   });
 });
 
+describe("MCP governed artifact relay", () => {
+  it("injects a current-session browser artifact only at a reviewed string path", async () => {
+    const root = await mkdtemp(join(tmpdir(), "estacoda-mcp-artifact-"));
+    try {
+      const content = JSON.stringify({ openapi: "3.1.0", info: { title: "Example", version: "1" }, paths: {} });
+      const sha256 = createHash("sha256").update(content).digest("hex");
+      const localPath = join(root, "openapi.json");
+      await writeFile(localPath, content, { mode: 0o600 });
+      const artifactStore = new ArtifactStore({ id: () => "api-description" });
+      artifactStore.record({
+        path: localPath,
+        kind: "data",
+        bytes: Buffer.byteLength(content),
+        mimeType: "application/json",
+        metadata: {
+          filename: "openapi.json",
+          sha256,
+          sourceOrigin: "https://developer.example.test",
+          source: "browser.download",
+          outcome: "download-completed"
+        }
+      });
+      let dispatched: Record<string, unknown> | undefined;
+      const [server] = await loadMcpServers({
+        servers: {
+          destination: {
+            transport: "http",
+            url: "https://mcp.example.test",
+            toolRiskClasses: { importSpec: "external-side-effect" },
+            artifactToolArguments: {
+              importSpec: {
+                paths: ["/files/*/content"],
+                allowedMimeTypes: ["application/json", "application/yaml"],
+                maxBytes: 12 * 1024 * 1024
+              }
+            }
+          }
+        },
+        artifactStore,
+        fetch: artifactRelayFetch((args) => { dispatched = args; }, content)
+      });
+      const tool = server?.tools.find((candidate) => candidate.name === "mcp.destination.importSpec");
+      expect(server?.snapshot.capabilities.artifactRelayConfigured).toBe(true);
+      expect(JSON.stringify(tool?.inputSchema)).toContain("artifactInput");
+
+      const result = await tool?.run({
+        name: "Example",
+        files: [{
+          path: "openapi.json",
+          content: {
+            artifactInput: {
+              reference: "artifact://api-description",
+              sha256,
+              sourceOrigin: "https://developer.example.test"
+            }
+          }
+        }]
+      });
+
+      expect(result).toMatchObject({
+        ok: true,
+        metadata: {
+          artifactRelay: true,
+          artifactCount: 1,
+          artifacts: [{
+            id: "api-description",
+            sha256,
+            sourceOrigin: "https://developer.example.test",
+            mimeType: "application/json",
+            bytes: Buffer.byteLength(content)
+          }]
+        }
+      });
+      expect((dispatched?.files as Array<{ content: string }>)[0]?.content).toBe(content);
+      expect(JSON.stringify(result)).not.toContain(content);
+      expect(result?.content).toContain("[RELAYED_ARTIFACT_CONTENT]");
+      await server?.stop();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed for another store, a changed file, or an unreviewed destination", async () => {
+    const root = await mkdtemp(join(tmpdir(), "estacoda-mcp-artifact-invalid-"));
+    try {
+      const content = '{"openapi":"3.1.0","paths":{}}';
+      const sha256 = createHash("sha256").update(content).digest("hex");
+      const localPath = join(root, "openapi.json");
+      await writeFile(localPath, content);
+      const artifactStore = new ArtifactStore({ id: () => "owned" });
+      artifactStore.record({
+        path: localPath,
+        kind: "data",
+        bytes: Buffer.byteLength(content),
+        mimeType: "application/json",
+        metadata: {
+          sha256,
+          sourceOrigin: "https://developer.example.test",
+          source: "browser.download",
+          outcome: "download-completed"
+        }
+      });
+      let dispatchCount = 0;
+      const [server] = await loadMcpServers({
+        servers: {
+          destination: {
+            transport: "http",
+            url: "https://mcp.example.test",
+            artifactToolArguments: {
+              importSpec: {
+                paths: ["/files/*/content"],
+                allowedMimeTypes: ["application/json"],
+                maxBytes: 1024
+              }
+            }
+          }
+        },
+        artifactStore,
+        fetch: artifactRelayFetch(() => { dispatchCount += 1; })
+      });
+      const tool = server?.tools.find((candidate) => candidate.name === "mcp.destination.importSpec");
+      const missing = await tool?.run({ files: [{ path: "openapi.json", content: {
+        artifactInput: { reference: "artifact://not-in-this-session", sha256 }
+      } }] });
+      expect(missing).toMatchObject({ ok: false, metadata: { reason: "artifact-not-owned-by-current-session" } });
+
+      await writeFile(localPath, `${content}\nchanged`);
+      const changed = await tool?.run({ files: [{ path: "openapi.json", content: {
+        artifactInput: { reference: "artifact://owned", sha256 }
+      } }] });
+      expect(changed).toMatchObject({ ok: false, metadata: { reason: "artifact-file-state-invalid" } });
+      expect(dispatchCount).toBe(0);
+      await server?.stop();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+function artifactRelayFetch(
+  onCall: (args: Record<string, unknown>) => void,
+  echoedContent?: string
+) {
+  return async (_url: string, init?: { body?: string }) => {
+    const payload = JSON.parse(init?.body ?? "{}") as {
+      id?: number;
+      method?: string;
+      params?: { arguments?: Record<string, unknown> };
+    };
+    const result = payload.method === "initialize"
+      ? { capabilities: { tools: {} } }
+      : payload.method === "tools/list"
+        ? {
+            tools: [{
+              name: "importSpec",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  name: { type: "string" },
+                  files: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: { path: { type: "string" }, content: { type: "string" } },
+                      required: ["path", "content"]
+                    }
+                  }
+                },
+                required: ["files"]
+              }
+            }]
+          }
+        : payload.method === "tools/call"
+          ? (() => {
+              onCall(payload.params?.arguments ?? {});
+              return { content: [{ type: "text", text: echoedContent ?? '{"id":"spec-1"}' }] };
+            })()
+          : {};
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({ jsonrpc: "2.0", id: payload.id, result }),
+      text: async () => ""
+    };
+  };
+}
+
 const postmanProtectedTransferConfig = {
   transport: "http" as const,
   url: "https://postman-mcp.example.test",
@@ -495,6 +708,10 @@ const postmanProtectedTransferConfig = {
     "putCollection",
     "createEnvironment",
     "putEnvironment",
+    "createSpec",
+    "getSpec",
+    "generateCollection",
+    "getSpecCollections",
   ],
   toolRiskClasses: {
     getAuthenticatedUser: "read-only-network" as const,
@@ -507,6 +724,17 @@ const postmanProtectedTransferConfig = {
     putCollection: "external-side-effect" as const,
     createEnvironment: "external-side-effect" as const,
     putEnvironment: "external-side-effect" as const,
+    createSpec: "external-side-effect" as const,
+    getSpec: "read-only-network" as const,
+    generateCollection: "external-side-effect" as const,
+    getSpecCollections: "read-only-network" as const,
+  },
+  artifactToolArguments: {
+    createSpec: {
+      paths: ["/files/*/content"],
+      allowedMimeTypes: ["application/json", "application/yaml"],
+      maxBytes: 12 * 1024 * 1024,
+    },
   },
   protectedToolArguments: {
     createEnvironment: {
@@ -528,12 +756,14 @@ const postmanProtectedTransferConfig = {
   toolVerificationRelationships: {
     getEnvironment: ["createEnvironment", "putEnvironment"],
     getCollection: ["createCollection", "putCollection"],
+    getSpec: ["createSpec"],
+    getSpecCollections: ["generateCollection"],
   },
 };
 
 const POSTMAN_READ_BACK_SECRET = "postman-read-back-secret-that-must-not-survive";
 
-function createPostmanCapabilityFetch(options: { omitEnvironmentValue?: boolean } = {}) {
+function createPostmanCapabilityFetch(options: { omitEnvironmentValue?: boolean; omitSpecContent?: boolean } = {}) {
   return async (_url: string, init?: { body?: string }) => {
     const payload = JSON.parse(init?.body ?? "{}") as {
       id?: number;
@@ -573,7 +803,7 @@ function createPostmanCapabilityFetch(options: { omitEnvironmentValue?: boolean 
   };
 }
 
-function postmanTools(options: { omitEnvironmentValue?: boolean }) {
+function postmanTools(options: { omitEnvironmentValue?: boolean; omitSpecContent?: boolean }) {
   const environmentItemProperties = {
     enabled: { type: "boolean" },
     key: { type: "string" },
@@ -604,6 +834,39 @@ function postmanTools(options: { omitEnvironmentValue?: boolean }) {
     putCollection: { type: "object", properties: { collectionId: { type: "string" }, collection: { type: "object" } }, required: ["collectionId", "collection"] },
     createEnvironment: { type: "object", properties: { workspace: { type: "string" }, environment: environmentSchema }, required: ["workspace"] },
     putEnvironment: { type: "object", properties: { environmentId: { type: "string" }, environment: environmentSchema }, required: ["environmentId"] },
+    createSpec: {
+      type: "object",
+      properties: {
+        workspaceId: { type: "string" },
+        name: { type: "string" },
+        type: { type: "string" },
+        files: {
+          type: "array",
+          items: {
+            oneOf: [{
+              type: "object",
+              properties: {
+                path: { type: "string" },
+                ...(options.omitSpecContent === true ? {} : { content: { type: "string" } }),
+                type: { type: "string" }
+              },
+              required: ["path", "content", "type"]
+            }, {
+              type: "object",
+              properties: {
+                path: { type: "string" },
+                ...(options.omitSpecContent === true ? {} : { content: { type: "string" } })
+              },
+              required: ["path", "content"]
+            }]
+          }
+        }
+      },
+      required: ["workspaceId", "name", "type", "files"]
+    },
+    getSpec: { type: "object", properties: { specId: { type: "string" } }, required: ["specId"] },
+    generateCollection: { type: "object", properties: { specId: { type: "string" }, name: { type: "string" } }, required: ["specId", "name"] },
+    getSpecCollections: { type: "object", properties: { specId: { type: "string" } }, required: ["specId"] },
   };
   return Object.entries(schemas).map(([name, inputSchema]) => ({
     name,

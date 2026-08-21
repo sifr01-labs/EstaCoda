@@ -87,7 +87,6 @@ import {
 } from "./execution-supervision-controller.js";
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
-const PROVIDER_CALL_EFFICIENCY_WARNING_THRESHOLD = 12;
 const PROVIDER_TOKEN_EFFICIENCY_WARNING_THRESHOLD = 500_000;
 
 export type ProviderTurnLoopBudgets = {
@@ -411,8 +410,15 @@ export class ProviderTurnLoop {
           reasoningOnlyPrefill: pendingReasoningOnlyPrefill,
           efficiencySignals: providerEfficiencySignals({
             providerCalls: providerCallsThisTurn,
+            providerCallBudget: this.#budgets.maxProviderIterations,
             providerTokens: providerTokensThisTurn,
-            repeatedMcpReads: toolFeedbackLedger.repeatedMcpReadCount ?? 0
+            repeatedMcpReads: toolFeedbackLedger.repeatedMcpReadCount ?? 0,
+            machineReadableApiDescriptionAvailable: providerToolExecutions.some((record) =>
+              record.result?.ok === true && (
+                record.result.content.includes("Machine-readable API description available:") ||
+                record.result.metadata?.apiDescription !== undefined
+              )
+            )
           })
         });
       pendingEmptyResponseNudge = false;
@@ -2330,16 +2336,22 @@ function providerUsageTokenTotal(usage: ProviderUsage | undefined): number {
   return usage.totalTokens ?? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
 }
 
-function providerEfficiencySignals(input: {
+export function providerEfficiencySignals(input: {
   providerCalls: number;
+  providerCallBudget: number;
   providerTokens: number;
   repeatedMcpReads: number;
+  machineReadableApiDescriptionAvailable: boolean;
 }): string[] {
+  const providerCallThreshold = Math.max(1, Math.ceil(input.providerCallBudget * 0.5));
   return [
     input.repeatedMcpReads > 0
       ? `${input.repeatedMcpReads} identical MCP read${input.repeatedMcpReads === 1 ? " was" : "s were"} already reused. Do not request those facts again unless a mutation or input change makes them stale.`
       : undefined,
-    input.providerCalls >= PROVIDER_CALL_EFFICIENCY_WARNING_THRESHOLD
+    input.machineReadableApiDescriptionAvailable
+      ? "A grounded machine-readable API description is available. Prefer its governed download and a reviewed artifact import over manually scraping endpoint pages when comprehensive API structure is needed."
+      : undefined,
+    input.providerCalls >= providerCallThreshold
       ? `${input.providerCalls} provider calls have been used this turn. Prefer the shortest remaining path to mutation, verification, completion, or a concrete blocker.`
       : undefined,
     input.providerTokens >= PROVIDER_TOKEN_EFFICIENCY_WARNING_THRESHOLD

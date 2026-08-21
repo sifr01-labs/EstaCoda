@@ -154,4 +154,18 @@ describe("compactBrowserSnapshot", () => {
     expect(result.content).toContain("@e3 button Sign in within=\"Developer account\"");
     expect(result.content).toContain("identity={\"documentEpoch\":2,\"actionRevision\":4,\"observationId\":7}");
   });
+
+  it("soft-hints a grounded API description export without forcing a workflow", () => {
+    const result = compactBrowserSnapshot(snapshot({
+      text: "OAuth V1 documentation",
+      elements: [
+        { ref: "@e17", role: "link", name: "Read endpoint details" },
+        { ref: "@e18", role: "link", name: "Download Swagger" },
+        { ref: "@e19", role: "link", name: "Export CSV report" }
+      ]
+    }), { maxChars: 2_000 });
+
+    expect(result.content).toContain("Machine-readable API description available: @e18 Download Swagger");
+    expect(result.content).not.toContain("Machine-readable API description available: @e19");
+  });
 });

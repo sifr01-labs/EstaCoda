@@ -44,6 +44,7 @@ describe("browser.download", () => {
       sizeBytes: 30,
       sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
       sourceOrigin: "https://developer.example.test",
+      apiDescription: { format: "OpenAPI", version: "3.1.0" },
       outcome: "download-completed"
     });
     expect(result.content).not.toContain(root);
@@ -53,6 +54,7 @@ describe("browser.download", () => {
     expect(captured[0]?.maxBytes).toBe(25 * 1024 * 1024);
     const [artifact] = artifactStore.list();
     expect(artifact?.path).toBe("artifact://artifact-1");
+    expect(artifact?.metadata).toMatchObject({ source: "browser.download", outcome: "download-completed" });
     expect(await readFile(artifact!.localPath!, "utf8")).toContain('"openapi":"3.1.0"');
     expect((await stat(artifact!.localPath!)).mode & 0o777).toBe(0o600);
   });
@@ -83,11 +85,39 @@ describe("browser.download", () => {
         mimeType: "application/yaml",
         sizeBytes: Buffer.byteLength(yaml),
         sha256: "591376d036294574c649b1eef67413f22425b7d3692c95242c5ab4699b6fef8a",
+        apiDescription: { format: "OpenAPI", version: "3.1.0" },
         outcome: "download-completed"
       }
     });
     const [artifact] = artifactStore.list();
     expect(await readFile(artifact!.localPath!, "utf8")).toBe(yaml);
+  });
+
+  it("accepts a safe textual GraphQL schema as a machine-readable API artifact", async () => {
+    const root = await temporaryRoot();
+    const schema = "type Query { health: String! }\n";
+    const backend = downloadBackend(async (input) => {
+      const localPath = join(input.destinationDirectory, "download-guid");
+      await writeFile(localPath, schema, { mode: 0o600 });
+      return {
+        outcome: "download-completed",
+        localPath,
+        suggestedFilename: "schema.graphql",
+        sourceUrl: "https://developer.example.test/schema.graphql",
+        sizeBytes: Buffer.byteLength(schema)
+      };
+    });
+
+    const result = await browserDownloadTool(backend, root, new ArtifactStore()).run(groundedInput());
+
+    expect(result).toMatchObject({
+      ok: true,
+      metadata: {
+        mimeType: "application/graphql",
+        apiDescription: { format: "GraphQL" },
+        outcome: "download-completed"
+      }
+    });
   });
 
   it("blocks executable content and removes partial capture files", async () => {

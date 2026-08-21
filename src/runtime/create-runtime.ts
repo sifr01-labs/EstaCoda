@@ -568,7 +568,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const skillLoadWarnings: string[] = [];
   const effectiveMcpServers = options.workspaceTrusted === true ? (options.mcpServers ?? {}) : {};
   const loadedMcpServers = await loadMcpServers({
-    servers: effectiveMcpServers
+    servers: effectiveMcpServers,
+    artifactStore
   });
   const mcpTools = loadedMcpServers.flatMap((server) => server.tools);
   // Load skills from explicit profile-local and package sources:

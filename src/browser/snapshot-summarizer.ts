@@ -119,6 +119,7 @@ export async function maybeSummarizeSnapshot(
               "Preserve all useful interactive elements and their exact @eN refs.",
               "Preserve the snapshot identity and controlled tab ref because ref actions require both.",
               "Preserve headings, labels, buttons, links, input names, values, checked/disabled states, warnings, and page context.",
+              "Preserve any grounded machine-readable API description hint and its exact ref.",
               "Do not invent refs or browser state. Stay concise and task-relevant."
             ].join(" ")
           },

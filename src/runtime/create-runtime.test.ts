@@ -2118,6 +2118,7 @@ describe("createRuntime MCP trust gating", () => {
             "riskClass": "shared-state-mutation",
             "schemaAliasOrder": [
               "args",
+              "artifactToolArguments",
               "command",
               "connectTimeoutMs",
               "cwd",
