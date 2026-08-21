@@ -76,6 +76,21 @@ function blockedPopup(ref: string, destination: string): ToolExecutionRecord {
   return record;
 }
 
+function terminalNavigation(url: string, status: number, documentEpoch: number): ToolExecutionRecord {
+  return execution({
+    tool: "browser.navigate",
+    toolInput: { url, disposition: "current-tab" },
+    metadata: {
+      snapshot: {
+        ...snapshot(documentEpoch),
+        url,
+        identity: { documentEpoch, actionRevision: documentEpoch, observationId: documentEpoch },
+        mainDocument: { status }
+      }
+    }
+  });
+}
+
 describe("BrowserObservationGuard", () => {
   it("treats a focused find and a structural snapshot as distinct new evidence on an unchanged page", () => {
     const guard = new BrowserObservationGuard(3);
@@ -204,14 +219,18 @@ describe("BrowserObservationGuard", () => {
     expect(guard.observe([action({ ref: "@e65" }, "changed")])).toBeUndefined();
   });
 
-  it("stops repeated or multiple ineffective dispatched actions", () => {
+  it("stops a repeated ineffective action while allowing bounded distinct strategies", () => {
     const repeated = new BrowserObservationGuard(3);
     repeated.observe([action({ ref: "@e62" }, "no-change")]);
     expect(repeated.observe([action({ ref: "@e62" }, "no-change")])).toMatchObject({ shouldStop: true });
 
     const different = new BrowserObservationGuard(3);
     different.observe([action({ ref: "@e62" }, "no-change")]);
-    expect(different.observe([action({ ref: "@e65" }, "no-change")])).toMatchObject({ shouldStop: true });
+    expect(different.observe([action({ ref: "@e65" }, "no-change")])).toMatchObject({
+      shouldNudge: true,
+      shouldStop: false
+    });
+    expect(different.observe([action({ ref: "@e66" }, "no-change")])).toMatchObject({ shouldStop: true });
   });
 
   it("allows one blocked-popup strategy change and stops the same destination across different targets", () => {
@@ -223,6 +242,33 @@ describe("BrowserObservationGuard", () => {
       shouldStop: false
     });
     expect(guard.observe([blockedPopup("@e65", "https://example.com/connect")])).toMatchObject({
+      shouldNudge: false,
+      shouldStop: true
+    });
+  });
+
+  it("fingerprints terminal navigation semantically across document revisions", () => {
+    const guard = new BrowserObservationGuard(3);
+
+    expect(guard.observe([terminalNavigation("https://example.com/connect", 405, 3)])).toMatchObject({
+      shouldNudge: true,
+      shouldStop: false
+    });
+    expect(guard.observe([terminalNavigation("https://example.com/connect#retry", 405, 9)])).toMatchObject({
+      shouldNudge: false,
+      shouldStop: true
+    });
+  });
+
+  it("allows a different terminal navigation strategy but still bounds endless variations", () => {
+    const guard = new BrowserObservationGuard(3);
+
+    guard.observe([terminalNavigation("https://example.com/connect", 405, 3)]);
+    expect(guard.observe([terminalNavigation("https://example.com/apps/edit", 404, 4)])).toMatchObject({
+      shouldNudge: true,
+      shouldStop: false
+    });
+    expect(guard.observe([terminalNavigation("https://example.com/apps/settings", 404, 5)])).toMatchObject({
       shouldNudge: false,
       shouldStop: true
     });

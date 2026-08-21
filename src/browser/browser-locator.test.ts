@@ -123,6 +123,72 @@ describe("semantic browser locators", () => {
     }));
   });
 
+  it("finds and resolves a trusted visible region when no element names the card", () => {
+    const current = snapshot([
+      { ref: "@e1", role: "link", name: "Callback URL" },
+      { ref: "@e2", role: "button", name: "Edit" },
+      { ref: "@e3", role: "button", name: "Delete" },
+      { ref: "@e4", role: "link", name: "TikTok Connect notification", regionText: "Notifications TikTok Connect was updated" }
+    ], {
+      regions: [
+        {
+          ref: "@r1",
+          text: "TikTok Connect Callback URL Edit Delete",
+          actionRefs: ["@e1", "@e2", "@e3"],
+          links: [{ text: "Callback URL", href: "https://example.com/callback" }],
+          hitTestable: true
+        },
+        {
+          ref: "@r2",
+          text: "Notifications TikTok Connect was updated",
+          actionRefs: ["@e4"],
+          links: [],
+          hitTestable: true
+        }
+      ]
+    });
+
+    expect(findBrowserLocator(current, { text: "TikTok Connect" })).toMatchObject({
+      status: "found",
+      candidates: [{ ref: "@r1", kind: "region", text: "TikTok Connect Callback URL Edit Delete" }]
+    });
+    expect(resolveBrowserTarget(current, {
+      sessionId: current.sessionId,
+      regionRef: "@r1",
+      identity: current.identity,
+      tabRef: current.tab!.ref
+    })).toMatchObject({ ref: "@r1", kind: "region", tabRef: "@t2" });
+  });
+
+  it("rejects a blocked visible region and returns its grounded descendant actions", () => {
+    const current = snapshot([
+      { ref: "@e1", role: "button", name: "Edit" },
+      { ref: "@e2", role: "button", name: "Delete" }
+    ], {
+      regions: [{
+        ref: "@r1",
+        text: "TikTok Connect Edit Delete",
+        actionRefs: ["@e1", "@e2"],
+        links: [],
+        hitTestable: false,
+        blockedBy: "Consent dialog"
+      }]
+    });
+
+    expect(() => resolveBrowserTarget(current, {
+      sessionId: current.sessionId,
+      regionRef: "@r1",
+      identity: current.identity,
+      tabRef: current.tab!.ref
+    })).toThrowError(expect.objectContaining<Partial<BrowserTargetError>>({
+      reason: "browser-target-not-interactable",
+      nearbyCandidates: [
+        expect.objectContaining({ ref: "@e1", name: "Edit" }),
+        expect.objectContaining({ ref: "@e2", name: "Delete" })
+      ]
+    }));
+  });
+
   it("does not invent nearby candidates without structural text overlap", () => {
     const result = findBrowserLocator(snapshot([
       { ref: "@e1", role: "button", name: "MTN developer portal" }

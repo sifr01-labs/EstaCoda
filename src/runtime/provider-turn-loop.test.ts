@@ -37,6 +37,7 @@ import { ExecutionPlanController } from "./execution-plan-controller.js";
 import { ExecutionCapabilityPreflight } from "./execution-capability-preflight.js";
 import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 import { ExecutionWorkingSetController } from "./execution-working-set.js";
+import { EXECUTION_SUPERVISION_PROMPTS } from "./execution-supervision-controller.js";
 import { attachEphemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
 
@@ -3007,7 +3008,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(result.terminationCause).toBe("normal");
 
     const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
-    const nudge = "The last browser call did not change state or repeated evidence already available for this document. Do not repeat the same locator, target, popup destination, or observation result. Use a different grounded action or a distinct inspection that can reveal new structure. If the result reports popup-blocked with a safe destination, browser.navigate with disposition=new-tab is the one bounded recovery path; do not change Chrome permissions. If no grounded alternative exists, return the truthful incomplete result.";
+    const nudge = EXECUTION_SUPERVISION_PROMPTS.browserEvidence;
     expect(requests.filter((request) => JSON.stringify(request.messages).includes(nudge))).toHaveLength(1);
     const recoveryRequest = requests[2]!;
     const recoveryTools = (recoveryRequest.tools as OpenAICompatibleToolSchema[])
@@ -3147,8 +3148,8 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(result.providerExecution?.response?.content).toBe("Recovered after opening the grounded app editor.");
     expect(afterNoChangeTools).toEqual(providerTools.map((tool) => tool.function.name));
     expect(afterTargetFailureTools).toEqual(providerTools.map((tool) => tool.function.name));
-    expect(JSON.stringify(requests[3]!.messages)).toContain("repeated evidence already available");
-    expect(JSON.stringify(requests[4]!.messages)).toContain("one bounded retargeting opportunity");
+    expect(JSON.stringify(requests[3]!.messages)).toContain("same strategy and semantic outcome");
+    expect(JSON.stringify(requests[4]!.messages)).toContain("different grounded element, visible region");
     expect(harness.executePlans.mock.calls[4]?.[0].onApprovalRequest).toBe(onApprovalRequest);
     expect(harness.executePlans.mock.calls[4]?.[0].providerExecution?.toolCalls[0]?.argumentsText).toBe(
       JSON.stringify({ ref: "@e7", tabRef: "@t1" })
@@ -3190,7 +3191,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
 
     expect(harness.completeSpy).toHaveBeenCalledTimes(2);
-    expect(JSON.stringify(requests[1]!.messages)).toContain("one bounded retargeting opportunity");
+    expect(JSON.stringify(requests[1]!.messages)).toContain("different grounded element, visible region");
     expect((requests[1]!.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name))
       .toEqual(providerTools.map((tool) => tool.function.name));
     expect(result.terminationCause).toBe("browser_no_progress");

@@ -272,7 +272,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     session: ManagedBackendSession,
     input: BrowserActionInput
   ): Promise<{ snapshot: BrowserSnapshot; full: boolean }> => {
-    const full = input.ref !== undefined && latestSnapshotScopes.get(session.key) === true;
+    const full = (input.ref !== undefined || input.regionRef !== undefined) && latestSnapshotScopes.get(session.key) === true;
     const snapshot = await captureSessionSnapshot(session, [], full);
     if (!await tabUrlIsAllowed(snapshot.url)) {
       throw new Error("Browser target resolution is blocked because the controlled tab URL violates browser policy.");
@@ -1040,6 +1040,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       const targetState = await captureSafeTargetSnapshot(session, input);
       const before = targetState.snapshot;
       const target = resolveBrowserTarget(before, input);
+      assertElementOnlyBrowserTarget(target, before, "browser.type");
       const actionEvaluation = await session.supervisor.send("Runtime.evaluate", {
         expression: refTypeActionExpression(target.ref, input.text ?? ""),
         awaitPromise: true
@@ -1053,6 +1054,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       const targetState = await captureSafeTargetSnapshot(session, input);
       const before = targetState.snapshot;
       const target = resolveBrowserTarget(before, input);
+      assertElementOnlyBrowserTarget(target, before, "browser.select");
       if (input.value === undefined || input.value.length === 0) {
         throw new Error("browser.select requires a non-empty value.");
       }
@@ -1068,14 +1070,40 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       const { snapshot } = await captureSafeTargetSnapshot(session, input);
       protectedFields.assertContentObservationAllowed(session.key);
       const target = resolveBrowserTarget(snapshot, input);
+      const region = target.kind === "region"
+        ? snapshot.regions?.find((candidate) => candidate.ref === target.ref)
+        : undefined;
       const element = snapshot.elements?.find((candidate) => candidate.ref === target.ref);
+      const links = region === undefined
+        ? []
+        : (await Promise.all(region.links.map(async (link) => await tabUrlIsAllowed(link.href) ? link : undefined)))
+          .filter((link): link is NonNullable<typeof link> => link !== undefined);
+      const actions = region?.actionRefs.flatMap((ref) => {
+        const action = snapshot.elements?.find((candidate) => candidate.ref === ref);
+        if (action === undefined || snapshot.tab === undefined) return [];
+        return [{
+          ref: action.ref,
+          kind: "element" as const,
+          identity: { ...snapshot.identity },
+          tabRef: snapshot.tab.ref,
+          ...(action.role === undefined ? {} : { role: action.role }),
+          ...(action.name === undefined ? {} : { name: redactSensitiveText(action.name).slice(0, 240) }),
+          ...(action.label === undefined ? {} : { label: redactSensitiveText(action.label).slice(0, 240) }),
+          ...(action.withinText === undefined ? {} : { withinText: redactSensitiveText(action.withinText).slice(0, 240) }),
+          ...(action.regionText === undefined ? {} : { regionText: redactSensitiveText(action.regionText).slice(0, 240) })
+        }];
+      });
       return {
         sessionId: snapshot.sessionId,
         identity: { ...snapshot.identity },
         tabRef: target.tabRef,
         target,
-        ...(element?.text === undefined && element?.name === undefined ? {} : { text: redactSensitiveText(element.text ?? element.name ?? "").slice(0, 4_000) }),
-        ...(element?.value === undefined ? {} : { value: redactSensitiveText(element.value).slice(0, 1_000) })
+        ...(region === undefined && element?.text === undefined && element?.name === undefined
+          ? {}
+          : { text: redactSensitiveText(region?.text ?? element?.text ?? element?.name ?? "").slice(0, 4_000) }),
+        ...(element?.value === undefined ? {} : { value: redactSensitiveText(element.value).slice(0, 1_000) }),
+        ...(actions === undefined || actions.length === 0 ? {} : { actions }),
+        ...(links.length === 0 ? {} : { links })
       };
     },
     scroll: async (input) => {
@@ -1427,18 +1455,20 @@ async function inspectBrowserActionTarget(
   session: ManagedBackendSession,
   ref: string | undefined
 ): Promise<BrowserActionTargetSemantics | undefined> {
-  const index = ref === undefined ? undefined : refToIndex(ref);
+  const target = ref === undefined ? undefined : targetRef(ref);
   const result = await session.supervisor.send("Runtime.evaluate", {
-    expression: browserActionPreflightExpression(index),
+    expression: browserActionPreflightExpression(target),
     returnByValue: true
   }) as { result?: { value?: unknown } };
   return parseBrowserActionTargetSemantics(result.result?.value);
 }
 
-function browserActionPreflightExpression(index: number | undefined): string {
-  const target = index === undefined
+function browserActionPreflightExpression(targetRef: { kind: "element" | "region"; index: number } | undefined): string {
+  const target = targetRef === undefined
     ? "document.activeElement"
-    : `window.__estacodaElements?.[${index}]`;
+    : targetRef.kind === "region"
+      ? `window.__estacodaRegions?.[${targetRef.index}]`
+      : `window.__estacodaElements?.[${targetRef.index}]`;
   return `(() => {
     const el = ${target};
     if (!(el instanceof Element) || !el.isConnected) return undefined;
@@ -1450,7 +1480,8 @@ function browserActionPreflightExpression(index: number | undefined): string {
     const inputType = tag === 'input' ? String(el.getAttribute('type') || 'text').toLowerCase() : undefined;
     const href = el instanceof HTMLAnchorElement ? el.href : undefined;
     const inlineScripted = el.hasAttribute('onclick') || typeof el.onclick === 'function';
-    const boundIndex = Array.isArray(window.__estacodaElements) ? window.__estacodaElements.indexOf(el) : -1;
+    const boundElementIndex = Array.isArray(window.__estacodaElements) ? window.__estacodaElements.indexOf(el) : -1;
+    const boundRegionIndex = Array.isArray(window.__estacodaRegions) ? window.__estacodaRegions.indexOf(el) : -1;
     const formAssociated = Boolean(el.form || el.closest('form'));
     const submit = (el instanceof HTMLButtonElement && el.type === 'submit') ||
       (el instanceof HTMLInputElement && (inputType === 'submit' || inputType === 'image'));
@@ -1461,7 +1492,7 @@ function browserActionPreflightExpression(index: number | undefined): string {
     else if (el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement) kind = 'form-control';
     else if (inlineScripted || controlRole) kind = 'scripted-control';
     const label = clean(el.getAttribute('aria-label') || el.innerText || el.textContent || el.getAttribute('value') || el.getAttribute('title') || '');
-    return { ref: boundIndex >= 0 ? '@e' + (boundIndex + 1) : undefined, kind, tag, role: role || undefined, label: label || undefined, href, formAssociated, submit, interactable: interactability.interactable, interactabilityReason: interactability.reason };
+    return { ref: boundElementIndex >= 0 ? '@e' + (boundElementIndex + 1) : boundRegionIndex >= 0 ? '@r' + (boundRegionIndex + 1) : undefined, kind, tag, role: role || undefined, label: label || undefined, href, formAssociated, submit, interactable: interactability.interactable, interactabilityReason: interactability.reason };
   })()`;
 }
 
@@ -1475,7 +1506,7 @@ function parseBrowserActionTargetSemantics(value: unknown): BrowserActionTargetS
   }
   return {
     kind: value.kind,
-    ...(typeof value.ref === "string" && /^@e\d+$/u.test(value.ref) ? { ref: value.ref } : {}),
+    ...(typeof value.ref === "string" && /^@[er]\d+$/u.test(value.ref) ? { ref: value.ref } : {}),
     ...(boundedStructuralValue(value.tag, 24) === undefined ? {} : { tag: boundedStructuralValue(value.tag, 24) }),
     ...(boundedStructuralValue(value.role, 48) === undefined ? {} : { role: boundedStructuralValue(value.role, 48) }),
     ...(boundedRedactedActionLabel(value.label) === undefined ? {} : { label: boundedRedactedActionLabel(value.label) }),
@@ -1543,6 +1574,27 @@ function refToIndex(ref: string | undefined): number {
     throw new Error(`Invalid browser element ref: ${ref ?? ""}`);
   }
   return Number(match[1]) - 1;
+}
+
+function targetRef(ref: string): { kind: "element" | "region"; index: number } {
+  const match = /^@?([er])(\d+)$/u.exec(ref);
+  if (match === null) throw new Error(`Invalid browser target ref: ${ref}`);
+  return { kind: match[1] === "r" ? "region" : "element", index: Number(match[2]) - 1 };
+}
+
+function assertElementOnlyBrowserTarget(
+  target: BrowserLocatorCandidate,
+  snapshot: BrowserSnapshot,
+  operation: "browser.type" | "browser.select"
+): void {
+  if (target.kind !== "region") return;
+  throw new BrowserTargetError({
+    reason: "invalid-browser-target",
+    message: `${operation} requires a concrete browser element; visible regions are supported only for grounded click and extraction.`,
+    currentSessionId: snapshot.sessionId,
+    currentIdentity: snapshot.identity,
+    currentTabRef: snapshot.tab?.ref
+  });
 }
 
 function parseJsonArray(value: unknown): Array<{ src: string; alt?: string }> {

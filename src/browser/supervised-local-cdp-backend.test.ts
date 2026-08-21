@@ -705,6 +705,80 @@ describe("supervised local CDP backend", () => {
     ]));
   });
 
+  it("clicks a runtime-grounded visible region through native pointer input", async () => {
+    const socket = new FakeCdpSocket();
+    socket.snapshot = {
+      url: "https://example.com/apps",
+      title: "Apps",
+      text: "TikTok Connect Callback URL Edit Delete",
+      elements: [
+        { ref: "@e1", role: "link", name: "Callback URL" },
+        { ref: "@e2", role: "button", name: "Edit" },
+        { ref: "@e3", role: "button", name: "Delete" }
+      ],
+      regions: [{
+        ref: "@r1",
+        text: "TikTok Connect Callback URL Edit Delete",
+        actionRefs: ["@e1", "@e2", "@e3"],
+        links: [
+          { text: "Callback URL", href: "https://example.com/callback" },
+          { text: "Local admin", href: "http://127.0.0.1/admin" }
+        ],
+        hitTestable: true
+      }]
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"]
+    });
+
+    const navigation = await backend.navigate({ url: "https://example.com/apps", sessionId: "session-region" });
+    await expect(backend.extract?.({
+      sessionId: "session-region",
+      regionRef: "@r1",
+      identity: navigation.snapshot.identity,
+      tabRef: navigation.snapshot.tab!.ref
+    })).resolves.toMatchObject({
+      links: [{ text: "Callback URL", href: "https://example.com/callback" }]
+    });
+    const clicked = await backend.click!({
+      sessionId: "session-region",
+      regionRef: "@r1",
+      identity: navigation.snapshot.identity,
+      tabRef: navigation.snapshot.tab!.ref
+    });
+    expect(clicked).toMatchObject({
+      sessionId: "session-region",
+      actionDelta: expect.objectContaining({
+        outcome: "action-no-change",
+        target: expect.objectContaining({ ref: "@r1" })
+      })
+    });
+    await expect(backend.type?.({
+      sessionId: "session-region",
+      regionRef: "@r1",
+      identity: clicked.identity,
+      tabRef: clicked.tab!.ref,
+      text: "not permitted"
+    })).rejects.toThrow("visible regions are supported only for grounded click and extraction");
+    await expect(backend.select?.({
+      sessionId: "session-region",
+      regionRef: "@r1",
+      identity: clicked.identity,
+      tabRef: clicked.tab!.ref,
+      value: "not permitted"
+    })).rejects.toThrow("visible regions are supported only for grounded click and extraction");
+
+    const runtimeExpressions = socket.sent
+      .filter((message) => message.method === "Runtime.evaluate")
+      .map((message) => String(message.params?.expression));
+    expect(runtimeExpressions.some((expression) => expression.includes("window.__estacodaRegions?.[0]"))).toBe(true);
+    expect(runtimeExpressions.some((expression) => expression.includes(".click()"))).toBe(false);
+    expect(socket.sent.filter((message) => message.method === "Input.dispatchMouseEvent")).toHaveLength(3);
+  });
+
   it("resolves card-scoped semantic locators against the current identity", async () => {
     const socket = new FakeCdpSocket();
     socket.snapshot = {

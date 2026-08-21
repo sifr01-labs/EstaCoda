@@ -62,6 +62,7 @@ export type BrowserLocator = {
 
 export type BrowserLocatorCandidate = {
   ref: string;
+  kind?: "element" | "region";
   identity: BrowserStateIdentity;
   tabRef: string;
   role?: string;
@@ -71,6 +72,24 @@ export type BrowserLocatorCandidate = {
   withinText?: string;
   /** Smallest meaningful runtime-observed container shared with related actions. */
   regionText?: string;
+};
+
+export type BrowserRegionLink = {
+  text: string;
+  href: string;
+};
+
+/**
+ * Runtime-bound visible page container. Coordinates remain browser-owned;
+ * model-visible callers can reference only the canonical region identity.
+ */
+export type BrowserVisibleRegion = {
+  ref: string;
+  text: string;
+  actionRefs: string[];
+  links: BrowserRegionLink[];
+  hitTestable: boolean;
+  blockedBy?: string;
 };
 
 export type BrowserFindResult = {
@@ -121,6 +140,8 @@ export type BrowserExtractResult = {
   target: BrowserLocatorCandidate;
   text?: string;
   value?: string;
+  actions?: BrowserLocatorCandidate[];
+  links?: BrowserRegionLink[];
 };
 
 export type BrowserActionDeltaElement = {
@@ -210,6 +231,8 @@ export type BrowserSnapshot = {
     disabled?: boolean;
     checked?: boolean | "mixed";
   }>;
+  /** Visible, bounded text containers with runtime-owned geometry. */
+  regions?: BrowserVisibleRegion[];
   pendingDialogs?: Array<{
     id: string;
     type: string;
@@ -277,6 +300,7 @@ export type BrowserActionInput = {
   sessionId?: string;
   full?: boolean;
   ref?: string;
+  regionRef?: string;
   identity?: BrowserStateIdentity;
   tabRef?: string;
   locator?: BrowserLocator;

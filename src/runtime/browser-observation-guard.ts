@@ -66,6 +66,7 @@ export class BrowserObservationGuard {
   readonly #suppressedTools = new Set<string>();
   readonly #ineffectiveActionSignatures = new Set<string>();
   readonly #targetFailureSignatures = new Set<string>();
+  readonly #terminalStrategySignatures = new Set<string>();
   #noProgressCount = 0;
   #retargetUsed = false;
 
@@ -78,6 +79,9 @@ export class BrowserObservationGuard {
       BROWSER_OBSERVATION_TOOLS.has(execution.tool.name) || BROWSER_ACTION_TOOLS.has(execution.tool.name)
     );
     if (browserExecutions.length === 0) return undefined;
+
+    const terminalStrategies = browserExecutions.filter(isTerminalBrowserStrategyFailure);
+    if (terminalStrategies.length > 0) return this.#observeTerminalStrategies(terminalStrategies);
 
     const changedAction = browserExecutions.find(isStateChangingBrowserAction);
     if (changedAction !== undefined) {
@@ -160,7 +164,25 @@ export class BrowserObservationGuard {
     const repeatedAction = signatures.some((signature) => this.#ineffectiveActionSignatures.has(signature));
     for (const signature of signatures) this.#ineffectiveActionSignatures.add(signature);
     this.#noProgressCount += 1;
-    const shouldStop = repeatedAction || this.#ineffectiveActionSignatures.size > 1;
+    const shouldStop = repeatedAction || this.#noProgressCount >= this.#repeatLimit;
+    return assessment({
+      executions,
+      count: this.#noProgressCount,
+      evidenceAdvanced: false,
+      actionDispatched: true,
+      shouldNudge: !shouldStop,
+      shouldRetarget: false,
+      shouldStop,
+      suppressedTools: [...this.#suppressedTools].sort()
+    });
+  }
+
+  #observeTerminalStrategies(executions: readonly ToolExecutionRecord[]): NonNullable<BrowserObservationAssessment> {
+    const signatures = executions.map(browserTerminalStrategySignature);
+    const repeatedStrategy = signatures.some((signature) => this.#terminalStrategySignatures.has(signature));
+    for (const signature of signatures) this.#terminalStrategySignatures.add(signature);
+    this.#noProgressCount += 1;
+    const shouldStop = repeatedStrategy || this.#noProgressCount >= this.#repeatLimit;
     return assessment({
       executions,
       count: this.#noProgressCount,
@@ -233,6 +255,43 @@ function isIneffectiveDispatchedAction(execution: ToolExecutionRecord): boolean 
   return delta?.documentChangeObserved !== true && asRecord(delta?.url)?.changed !== true;
 }
 
+function isTerminalBrowserStrategyFailure(execution: ToolExecutionRecord): boolean {
+  if (execution.tool.name !== "browser.navigate" || execution.result?.ok !== true) return false;
+  return terminalBrowserStatus(execution) !== undefined;
+}
+
+function terminalBrowserStatus(execution: ToolExecutionRecord): number | undefined {
+  const metadata = execution.result?.metadata;
+  const snapshot = asRecord(metadata?.snapshot);
+  const explicit = asRecord(snapshot?.mainDocument)?.status;
+  if (typeof explicit === "number" && explicit >= 400 && explicit <= 599) return explicit;
+  const title = typeof snapshot?.title === "string" ? snapshot.title.trim() : "";
+  const text = typeof snapshot?.text === "string" ? snapshot.text.slice(0, 500) : "";
+  const match = /^(?:error\s*)?(4\d\d|5\d\d)\b/iu.exec(title) ??
+    /\b(?:error\s*)?(4\d\d|5\d\d)(?:\s+(?:error|forbidden|not\s+found|method\s+not\s+allowed|server\s+error))?\b/iu.exec(text);
+  return match === null ? undefined : Number(match[1]);
+}
+
+function browserTerminalStrategySignature(execution: ToolExecutionRecord): string {
+  const input = asRecord(execution.input);
+  return fingerprint({
+    kind: "terminal-navigation",
+    destination: typeof input?.url === "string" ? normalizeDestination(input.url) : "unknown",
+    disposition: input?.disposition ?? "current-tab",
+    status: terminalBrowserStatus(execution)
+  });
+}
+
+function normalizeDestination(value: string): string {
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return value.trim();
+  }
+}
+
 function isTargetResolutionFailure(execution: ToolExecutionRecord): boolean {
   if (!BROWSER_ACTION_TOOLS.has(execution.tool.name) || execution.result?.ok !== false) return false;
   return TARGET_FAILURE_REASONS.has(String(execution.result.metadata?.reason ?? ""));
@@ -301,9 +360,19 @@ function stableBrowserSnapshot(value: unknown): unknown {
     identity: stableBrowserIdentity(snapshot.identity),
     text: snapshot.text,
     elements,
+    regions: Array.isArray(snapshot.regions)
+      ? snapshot.regions.map(stableBrowserRegion).sort((left, right) => stableSerialize(left).localeCompare(stableSerialize(right)))
+      : undefined,
     pendingDialogs: snapshot.pendingDialogs,
     frameTree: snapshot.frameTree
   };
+}
+
+function stableBrowserRegion(value: unknown): unknown {
+  const region = asRecord(value);
+  if (region === undefined) return value;
+  const { ref: _ref, ...stable } = region;
+  return stable;
 }
 
 function stableBrowserElement(value: unknown): unknown {

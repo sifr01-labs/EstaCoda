@@ -95,6 +95,14 @@ function browserSnapshotSections(
     .map(renderSnapshotElement);
   const actionable = deduplicateElements(elements.filter((element) => isActionableBrowserRole(element.role)))
     .map(renderSnapshotElement);
+  const regions = (snapshot.regions ?? []).slice(0, 30).map((region) => [
+    region.ref,
+    JSON.stringify(safeText(region.text)),
+    region.hitTestable ? "hitTestable=true" : "hitTestable=false",
+    region.blockedBy === undefined ? undefined : `blockedBy=${JSON.stringify(safeText(region.blockedBy))}`,
+    region.actionRefs.length === 0 ? undefined : `actions=${region.actionRefs.join(",")}`,
+    region.links.length === 0 ? undefined : `links=${region.links.map((link) => JSON.stringify(safeText(link.text))).join(",")}`
+  ].filter((part): part is string => part !== undefined).join(" "));
   const headings = deduplicateStrings([
     ...elements.filter((element) => element.role === "heading").map(renderSnapshotElement),
     ...pageText.headings
@@ -117,6 +125,7 @@ function browserSnapshotSections(
     section("Pending dialogs:", dialogs, 1),
     section("Protected input:", protectedGuidance === undefined ? [] : protectedGuidance.split("\n"), 1),
     section("Errors and alerts:", deduplicateStrings([...elementAlerts, ...pageText.errors]), 1),
+    section("Visible regions:", regions, 1),
     section("Interactive elements:", actionable, 1),
     section("Authentication and challenge context:", pageText.authentication, 1),
     section("Headings and relevant context:", headings, 1),

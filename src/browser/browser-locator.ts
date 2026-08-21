@@ -57,21 +57,42 @@ export function findBrowserLocator(snapshot: BrowserSnapshot, locator: BrowserLo
   const tabRef = requireSnapshotTab(snapshot);
   assertLocatorIdentity(normalized, snapshot, tabRef);
   const available = (snapshot.elements ?? []).filter(isBrowserSnapshotElementInteractable);
-  const candidates = available
+  const elementMatches = available
     .filter((element) => locatorMatches(element, normalized))
-    .slice(0, MAX_CANDIDATES)
-    .map((element) => locatorCandidate(element, snapshot.identity, tabRef));
-  const nearbyCandidates = candidates.length === 0
+    .slice(0, MAX_CANDIDATES);
+  const regionMatchesForLocator = (snapshot.regions ?? [])
+    .filter((region) => region.hitTestable && regionMatches(region.text, normalized));
+  const structurallyRichRegions = strongestRegionMatches(regionMatchesForLocator);
+  const elementsInStrongRegions = elementMatches.filter((element) => structurallyRichRegions.some((region) =>
+    comparable(element.regionText ?? element.withinText ?? "") === comparable(region.text)
+  ));
+  const preferRegions = normalized.exact !== true && structurallyRichRegions.some((region) => region.actionRefs.length >= 2) &&
+    elementsInStrongRegions.length === 0;
+  const exactCandidates = (elementsInStrongRegions.length > 0
+    ? elementsInStrongRegions.map((element) => locatorCandidate(element, snapshot.identity, tabRef))
+    : elementMatches.length > 0 && !preferRegions
+      ? elementMatches.map((element) => locatorCandidate(element, snapshot.identity, tabRef))
+      : structurallyRichRegions.map((region) => regionCandidate(region, snapshot.identity, tabRef)))
+    .slice(0, MAX_CANDIDATES);
+  const nearbyCandidates = exactCandidates.length === 0
     ? nearbyBrowserLocatorCandidates(available, normalized, snapshot.identity, tabRef)
     : [];
   return {
     sessionId: snapshot.sessionId,
     identity: { ...snapshot.identity },
     tabRef,
-    status: candidates.length === 0 ? "not-found" : candidates.length === 1 ? "found" : "ambiguous",
-    candidates,
+    status: exactCandidates.length === 0 ? "not-found" : exactCandidates.length === 1 ? "found" : "ambiguous",
+    candidates: exactCandidates,
     ...(nearbyCandidates.length === 0 ? {} : { nearbyCandidates })
   };
+}
+
+function strongestRegionMatches(
+  regions: NonNullable<BrowserSnapshot["regions"]>
+): NonNullable<BrowserSnapshot["regions"]> {
+  if (regions.length <= 1) return regions;
+  const highestActionCount = Math.max(...regions.map((region) => region.actionRefs.length));
+  return regions.filter((region) => region.actionRefs.length === highestActionCount);
 }
 
 function nearbyBrowserLocatorCandidates(
@@ -149,10 +170,12 @@ function tokenizeLocatorText(value: string): string[] {
 
 export function resolveBrowserTarget(snapshot: BrowserSnapshot, input: BrowserActionInput): BrowserLocatorCandidate {
   const tabRef = requireSnapshotTab(snapshot);
-  const hasRef = input.ref !== undefined;
+  const hasElementRef = input.ref !== undefined;
+  const hasRegionRef = input.regionRef !== undefined;
+  const hasRef = hasElementRef || hasRegionRef;
   const hasLocator = input.locator !== undefined;
-  if (hasRef === hasLocator) {
-    throw targetError("invalid-browser-target", "Browser action requires exactly one of ref or locator.", snapshot, tabRef);
+  if (Number(hasElementRef) + Number(hasRegionRef) + Number(hasLocator) !== 1) {
+    throw targetError("invalid-browser-target", "Browser action requires exactly one of ref, regionRef, or locator.", snapshot, tabRef);
   }
 
   if (input.locator !== undefined) {
@@ -195,6 +218,25 @@ export function resolveBrowserTarget(snapshot: BrowserSnapshot, input: BrowserAc
   }
 
   assertBrowserTargetContext(snapshot, input);
+  if (input.regionRef !== undefined) {
+    const region = (snapshot.regions ?? []).find((candidate) => candidate.ref === input.regionRef);
+    if (region === undefined) {
+      throw targetError("browser-target-not-found", `Browser region ref not found: ${input.regionRef}`, snapshot, tabRef);
+    }
+    if (!region.hitTestable) {
+      throw targetError(
+        "browser-target-not-interactable",
+        `Browser region ref is not hit-testable${region.blockedBy === undefined ? "" : ` (blocked by ${safeCandidateText(region.blockedBy)})`}: ${input.regionRef}`,
+        snapshot,
+        tabRef,
+        region.actionRefs.map((ref) => {
+          const element = snapshot.elements?.find((candidate) => candidate.ref === ref);
+          return element === undefined ? undefined : locatorCandidate(element, snapshot.identity, tabRef);
+        }).filter((candidate): candidate is BrowserLocatorCandidate => candidate !== undefined)
+      );
+    }
+    return regionCandidate(region, snapshot.identity, tabRef);
+  }
   const element = (snapshot.elements ?? []).find((candidate) => candidate.ref === input.ref);
   if (element === undefined) {
     throw targetError("browser-target-not-found", `Browser element ref not found: ${input.ref}`, snapshot, tabRef);
@@ -230,7 +272,7 @@ export function assertBrowserTargetContext(snapshot: BrowserSnapshot, input: Bro
   if (input.sessionId !== snapshot.sessionId) {
     throw targetError(
       "browser-ref-wrong-session",
-      `Browser ref ${input.ref} belongs to session ${input.sessionId}, but the current session is ${snapshot.sessionId}.`,
+      `Browser ref ${input.ref ?? input.regionRef} belongs to session ${input.sessionId}, but the current session is ${snapshot.sessionId}.`,
       snapshot,
       tabRef
     );
@@ -238,7 +280,7 @@ export function assertBrowserTargetContext(snapshot: BrowserSnapshot, input: Bro
   if (input.tabRef !== tabRef) {
     throw targetError(
       "browser-ref-wrong-tab",
-      `Browser ref ${input.ref} belongs to tab ${input.tabRef}, but the controlled tab is ${tabRef}.`,
+      `Browser ref ${input.ref ?? input.regionRef} belongs to tab ${input.tabRef}, but the controlled tab is ${tabRef}.`,
       snapshot,
       tabRef
     );
@@ -246,7 +288,7 @@ export function assertBrowserTargetContext(snapshot: BrowserSnapshot, input: Bro
   if (!sameRefValidityIdentity(input.identity, snapshot.identity)) {
     throw targetError(
       "stale-browser-ref",
-      `Browser ref ${input.ref} came from documentEpoch=${input.identity.documentEpoch}, actionRevision=${input.identity.actionRevision}, but the current identity is documentEpoch=${snapshot.identity.documentEpoch}, actionRevision=${snapshot.identity.actionRevision}. Take a fresh snapshot or use a semantic locator.`,
+      `Browser ref ${input.ref ?? input.regionRef} came from documentEpoch=${input.identity.documentEpoch}, actionRevision=${input.identity.actionRevision}, but the current identity is documentEpoch=${snapshot.identity.documentEpoch}, actionRevision=${snapshot.identity.actionRevision}. Take a fresh snapshot or use a semantic locator.`,
       snapshot,
       tabRef
     );
@@ -323,6 +365,7 @@ function locatorCandidate(
 ): BrowserLocatorCandidate {
   return {
     ref: element.ref,
+    kind: "element",
     identity: { ...identity },
     tabRef,
     ...(element.role === undefined ? {} : { role: safeCandidateText(element.role) }),
@@ -332,6 +375,30 @@ function locatorCandidate(
     ...(element.withinText === undefined ? {} : { withinText: safeCandidateText(element.withinText) }),
     ...(element.regionText === undefined ? {} : { regionText: safeCandidateText(element.regionText) })
   };
+}
+
+function regionCandidate(
+  region: NonNullable<BrowserSnapshot["regions"]>[number],
+  identity: BrowserStateIdentity,
+  tabRef: string
+): BrowserLocatorCandidate {
+  return {
+    ref: region.ref,
+    kind: "region",
+    identity: { ...identity },
+    tabRef,
+    text: safeCandidateText(region.text),
+    withinText: safeCandidateText(region.text),
+    regionText: safeCandidateText(region.text)
+  };
+}
+
+function regionMatches(text: string, locator: BrowserLocator): boolean {
+  const expected = [locator.name, locator.text, locator.label, locator.withinText]
+    .filter((value): value is string => value !== undefined);
+  if (locator.role !== undefined || expected.length === 0) return false;
+  const region = comparable(text);
+  return expected.every((value) => region.includes(comparable(value)));
 }
 
 function safeCandidateText(value: string): string {

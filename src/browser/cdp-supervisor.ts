@@ -18,6 +18,7 @@ import {
 import { CdpClient as PersistentCdpClient } from "./cdp-client.js";
 import {
   isSafeUrl,
+  redactUrlForMetadata,
   scanUrlForSecrets,
   type ResolveHostnameFn
 } from "./url-safety.js";
@@ -470,11 +471,14 @@ async function evaluateAxSnapshot(client: CdpClient, sessionId: string, options:
   if (pageMetadata === undefined) {
     return undefined;
   }
+  const { regions: observedRegions, ...metadata } = pageMetadata;
+  const regions = bindVisibleRegionActions(observedRegions, elements);
 
   return {
     sessionId,
-    ...pageMetadata,
-    elements
+    ...metadata,
+    elements,
+    ...(regions.length === 0 ? {} : { regions })
   };
 }
 
@@ -487,12 +491,16 @@ async function evaluatePageSnapshotMetadata(client: CdpClient): Promise<Omit<Bro
 }
 
 function pageSnapshotMetadataExpression(): string {
-  return `(() => JSON.stringify({
-    url: location.href,
-    title: document.title,
-    readiness: document.readyState,
-    text: (document.body && document.body.innerText ? document.body.innerText : '').slice(0, 12000)
-  }))()`;
+  return `(() => {
+    ${visibleRegionsSource()}
+    return JSON.stringify({
+      url: location.href,
+      title: document.title,
+      readiness: document.readyState,
+      text: (document.body && document.body.innerText ? document.body.innerText : '').slice(0, 12000),
+      regions: collectVisibleRegions()
+    });
+  })()`;
 }
 
 export function snapshotExpression(): string {
@@ -554,14 +562,90 @@ export function snapshotExpression(): string {
         disabled: interactability.disabled
       };
     });
+    ${visibleRegionsSource()}
     return JSON.stringify({
       url: location.href,
       title: document.title,
       readiness: document.readyState,
       text: (document.body && document.body.innerText ? document.body.innerText : '').slice(0, 12000),
-      elements: elements.filter((element) => element.interactable)
+      elements: elements.filter((element) => element.interactable),
+      regions: collectVisibleRegions()
     });
   })()`;
+}
+
+function visibleRegionsSource(): string {
+  return `
+    const collectVisibleRegions = () => {
+      const cleanRegion = (value, max = 600) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, max);
+      const actionSelector = 'a[href],button,input,select,textarea,[role="button"],[role="link"],[role="tab"],[role="menuitem"]';
+      const containers = Array.from(document.querySelectorAll('article,li,tr,section,[role="listitem"],[role="row"],[role="group"],[data-testid],.card,[class*="card"],div')).slice(0, 600);
+      const elementBindings = Array.isArray(window.__estacodaElements) ? window.__estacodaElements : [];
+      const actionAt = (point, container) => {
+        const hit = document.elementFromPoint(point.x, point.y);
+        if (!(hit instanceof Element) || !(hit === container || container.contains(hit))) return undefined;
+        const nestedAction = hit.closest(actionSelector);
+        if (nestedAction && nestedAction !== container && container.contains(nestedAction)) return undefined;
+        return point;
+      };
+      const pointFor = (container, rect) => {
+        const insetX = Math.min(16, rect.width / 4);
+        const insetY = Math.min(16, rect.height / 4);
+        const points = [
+          { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+          { x: rect.left + insetX, y: rect.top + insetY },
+          { x: rect.right - insetX, y: rect.top + insetY },
+          { x: rect.left + insetX, y: rect.bottom - insetY },
+          { x: rect.right - insetX, y: rect.bottom - insetY }
+        ];
+        return points.map((point) => actionAt(point, container)).find(Boolean);
+      };
+      const candidates = [];
+      for (const container of containers) {
+        if (!(container instanceof HTMLElement) || !container.isConnected || container.hidden || container.getAttribute('aria-hidden') === 'true') continue;
+        const style = getComputedStyle(container);
+        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) continue;
+        const rect = container.getBoundingClientRect();
+        if (rect.width <= 8 || rect.height <= 8 || rect.bottom <= 0 || rect.right <= 0 || rect.top >= innerHeight || rect.left >= innerWidth) continue;
+        const text = cleanRegion(container.innerText || container.textContent || '');
+        if (text.length < 2 || text.length > 600) continue;
+        const actions = Array.from(container.querySelectorAll(actionSelector)).slice(0, 17);
+        const explicit = container.matches(actionSelector) || container.hasAttribute('onclick') || typeof container.onclick === 'function' ||
+          container.tabIndex >= 0 || style.cursor === 'pointer';
+        if (!explicit && (actions.length === 0 || actions.length > 16)) continue;
+        const point = pointFor(container, rect);
+        const centerHit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        const actionRefs = elementBindings
+          .map((element, index) => element instanceof Element && container.contains(element) ? '@e' + (index + 1) : undefined)
+          .filter(Boolean)
+          .slice(0, 16);
+        const links = Array.from(container.querySelectorAll('a[href]')).slice(0, 12).map((link) => ({
+          text: cleanRegion(link.innerText || link.textContent || link.getAttribute('aria-label') || '', 160),
+          href: String(link.href || '').slice(0, 2000)
+        })).filter((link) => link.text && /^https?:/u.test(link.href));
+        candidates.push({ container, text, actionRefs, links, hitTestable: point !== undefined,
+          blockedBy: point !== undefined ? undefined : cleanRegion(centerHit?.getAttribute?.('aria-label') || centerHit?.innerText || centerHit?.textContent || centerHit?.tagName || '', 120) });
+      }
+      candidates.sort((left, right) => left.text.length - right.text.length);
+      const unique = [];
+      const seen = new Set();
+      for (const candidate of candidates) {
+        const key = candidate.text.toLocaleLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        unique.push(candidate);
+        if (unique.length >= 60) break;
+      }
+      window.__estacodaRegions = unique.map((candidate) => candidate.container);
+      return unique.map((candidate, index) => ({
+        ref: '@r' + (index + 1),
+        text: candidate.text,
+        actionRefs: candidate.actionRefs,
+        links: candidate.links,
+        hitTestable: candidate.hitTestable,
+        blockedBy: candidate.blockedBy
+      }));
+    };`;
 }
 
 type BrowserSnapshotElement = NonNullable<BrowserSnapshot["elements"]>[number];
@@ -830,11 +914,13 @@ function parsePageSnapshotMetadata(value: unknown): Omit<BrowserSnapshotInput, "
   }
   try {
     const parsed = JSON.parse(value) as Partial<BrowserSnapshotInput>;
+    const regions = parseVisibleRegions(parsed.regions);
     return {
       url: typeof parsed.url === "string" ? parsed.url : "about:blank",
       ...(typeof parsed.title === "string" ? { title: parsed.title } : {}),
       readiness: parseReadiness(parsed.readiness),
-      ...(typeof parsed.text === "string" ? { text: parsed.text } : { text: "" })
+      ...(typeof parsed.text === "string" ? { text: parsed.text } : { text: "" }),
+      ...(regions.length === 0 ? {} : { regions })
     };
   } catch {
     return undefined;
@@ -847,26 +933,84 @@ export function parseCdpSnapshot(value: unknown, sessionId: string): BrowserSnap
   }
   try {
     const parsed = JSON.parse(value) as BrowserSnapshotInput;
+    const elements = Array.isArray(parsed.elements)
+      ? parsed.elements.filter(isBrowserSnapshotElementInteractable).map((element) => {
+          const {
+            interactable: _interactable,
+            interactabilityReason: _interactabilityReason,
+            ...publicElement
+          } = element;
+          return publicElement;
+        })
+      : [];
+    const regions = bindVisibleRegionActions(parseVisibleRegions(parsed.regions), elements);
     return {
       sessionId,
       url: parsed.url,
       readiness: parseReadiness(parsed.readiness),
       title: parsed.title,
       text: parsed.text,
-      elements: Array.isArray(parsed.elements)
-        ? parsed.elements.filter(isBrowserSnapshotElementInteractable).map((element) => {
-            const {
-              interactable: _interactable,
-              interactabilityReason: _interactabilityReason,
-              ...publicElement
-            } = element;
-            return publicElement;
-          })
-        : []
+      elements,
+      ...(regions.length === 0 ? {} : { regions })
     };
   } catch {
     return emptySnapshot(sessionId, value);
   }
+}
+
+function parseVisibleRegions(value: unknown): NonNullable<BrowserSnapshot["regions"]> {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 60).flatMap((entry, index) => {
+    if (!isRecord(entry) || typeof entry.text !== "string") return [];
+    const text = boundedMetadataText(entry.text, 600);
+    if (text === undefined) return [];
+    const ref = typeof entry.ref === "string" && /^@r\d+$/u.test(entry.ref) ? entry.ref : `@r${index + 1}`;
+    const actionRefs = Array.isArray(entry.actionRefs)
+      ? entry.actionRefs.filter((candidate): candidate is string => typeof candidate === "string" && /^@e\d+$/u.test(candidate)).slice(0, 16)
+      : [];
+    const links = Array.isArray(entry.links) ? entry.links.slice(0, 12).flatMap((link) => {
+      if (!isRecord(link) || typeof link.text !== "string" || typeof link.href !== "string") return [];
+      const safeText = boundedMetadataText(link.text, 160);
+      if (safeText === undefined || scanUrlForSecrets(link.href) !== undefined) return [];
+      let parsed: URL;
+      try {
+        parsed = new URL(link.href);
+      } catch {
+        return [];
+      }
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:" || parsed.username.length > 0 || parsed.password.length > 0 ||
+          hasSensitiveRegionLinkParameters(parsed)) return [];
+      return [{ text: safeText, href: redactUrlForMetadata(link.href) }];
+    }) : [];
+    const blockedBy = boundedMetadataText(entry.blockedBy, 120);
+    return [{
+      ref,
+      text,
+      actionRefs,
+      links,
+      hitTestable: entry.hitTestable === true,
+      ...(blockedBy === undefined ? {} : { blockedBy })
+    }];
+  });
+}
+
+function bindVisibleRegionActions(
+  regions: BrowserSnapshot["regions"],
+  elements: NonNullable<BrowserSnapshot["elements"]>
+): NonNullable<BrowserSnapshot["regions"]> {
+  const currentRefs = new Set(elements.map((element) => element.ref));
+  return (regions ?? []).map((region) => ({
+    ...region,
+    actionRefs: region.actionRefs.filter((ref) => currentRefs.has(ref))
+  }));
+}
+
+function hasSensitiveRegionLinkParameters(url: URL): boolean {
+  const sensitiveName = /(?:^|[_-])(?:access|auth|authorization|code|credential|csrf|key|nonce|secret|session|sig|signature|state|token|xsrf)(?:$|[_-])/iu;
+  for (const key of url.searchParams.keys()) {
+    if (sensitiveName.test(key)) return true;
+  }
+  return false;
 }
 
 function emptySnapshot(sessionId: string, text: string): BrowserSnapshotInput {

@@ -291,7 +291,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
     createBrowserFindTool(browserBackend, deriveBrowserInput),
     createBrowserActionTool({
       name: "browser.click",
-      description: "Click by semantic locator, or by a ref with its source canonical identity and tabRef. Ambiguous locators return candidates instead of guessing.",
+      description: "Click by semantic locator, element ref, or a runtime-grounded visible regionRef with its source canonical identity and tabRef. Region coordinates are resolved and hit-tested by the browser; the model never supplies coordinates.",
       progressLabel: "clicking browser element",
       browserBackend,
       deriveBrowserInput,
@@ -299,11 +299,11 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       inputSchema: {
         type: "object",
         properties: {
-          ...browserTargetInputProperties(),
+          ...browserTargetInputProperties({ allowRegion: true }),
           sessionId: { type: "string" },
           ...browserWaitInputProperties()
         },
-        oneOf: browserTargetOneOf()
+        oneOf: browserTargetOneOf({ allowRegion: true })
       }
     }),
     createBrowserTypeTool(browserBackend, deriveBrowserInput),
@@ -1486,7 +1486,7 @@ function browserActionSecurityResult(
     ? {
         action,
         sessionId: browserInput.sessionId,
-        ref: browserInput.ref,
+        ref: browserInput.ref ?? browserInput.regionRef,
         tabRef: browserInput.tabRef,
         identity: browserInput.identity,
         key,
@@ -1532,10 +1532,13 @@ function bindReviewedBrowserActionInput(
   input: BrowserActionInput,
   preflight: BrowserActionPreflight
 ): BrowserActionInput {
+  const ref = preflight.target!.ref!;
+  const isRegionRef = ref.startsWith("@r");
   return {
     ...input,
     sessionId: preflight.sessionId,
-    ref: preflight.target!.ref,
+    ref: isRegionRef ? undefined : ref,
+    regionRef: isRegionRef ? ref : undefined,
     identity: { ...preflight.identity },
     tabRef: preflight.tabRef,
     locator: undefined
@@ -2027,14 +2030,14 @@ function createBrowserExtractTool(
 ): RegisteredTool {
   return {
     name: "browser.extract",
-    description: "Extract bounded text/value from one current browser element selected semantically, or by a ref with its source canonical identity and tabRef.",
+    description: "Extract bounded visible text and safe grounded actions/links from one current browser element or visible region. Hidden inputs, protected values, and arbitrary DOM state are never returned.",
     inputSchema: {
       type: "object",
       properties: {
-        ...browserTargetInputProperties(),
+        ...browserTargetInputProperties({ allowRegion: true }),
         sessionId: { type: "string" }
       },
-      oneOf: browserTargetOneOf()
+      oneOf: browserTargetOneOf({ allowRegion: true })
     },
     riskClass: "read-only-network",
     toolsets: ["browser", "web", "research"],
@@ -2056,7 +2059,11 @@ function createBrowserExtractTool(
         content: [
           renderBrowserLocatorCandidate(result.target),
           result.text === undefined ? undefined : `Text: ${result.text}`,
-          result.value === undefined ? undefined : `Value: ${result.value}`
+          result.value === undefined ? undefined : `Value: ${result.value}`,
+          result.actions === undefined || result.actions.length === 0 ? undefined : "Actions:",
+          ...(result.actions ?? []).map(renderBrowserLocatorCandidate),
+          result.links === undefined || result.links.length === 0 ? undefined : "Links:",
+          ...(result.links ?? []).map((link) => `- ${JSON.stringify(link.text)} -> ${redactUrlForMetadata(link.href)}`)
         ].filter((line): line is string => line !== undefined).join("\n"),
         metadata: { backend: browserBackend.kind, ...result }
       };
@@ -2156,6 +2163,7 @@ function renderBrowserSnapshot(snapshot: BrowserSnapshot, options: BrowserSnapsh
     ].join("\n");
   }
   const elements = (snapshot.elements ?? []).filter(isBrowserSnapshotElementInteractable);
+  const regions = snapshot.regions ?? [];
   const pendingDialogs = snapshot.pendingDialogs ?? [];
   const frameTree = snapshot.frameTree ?? [];
   const consoleHistory = snapshot.consoleHistory ?? [];
@@ -2169,6 +2177,17 @@ function renderBrowserSnapshot(snapshot: BrowserSnapshot, options: BrowserSnapsh
     snapshot.openedTabs === undefined || snapshot.openedTabs.length === 0 ? undefined : `Opened tabs: ${snapshot.openedTabs.map((tab) => tab.ref).join(", ")}`,
     "",
     snapshot.text,
+    regions.length === 0 ? undefined : "",
+    regions.length === 0 ? undefined : "Visible regions:",
+    ...regions.slice(0, 30).map((region) => [
+      `${region.ref} identity=${JSON.stringify(snapshot.identity)}`,
+      snapshot.tab === undefined ? undefined : `tab=${snapshot.tab.ref}`,
+      JSON.stringify(redactSensitiveText(region.text).slice(0, 600)),
+      region.hitTestable ? "hitTestable=true" : "hitTestable=false",
+      region.blockedBy === undefined ? undefined : `blockedBy=${JSON.stringify(redactSensitiveText(region.blockedBy).slice(0, 120))}`,
+      region.actionRefs.length === 0 ? undefined : `actions=${region.actionRefs.join(",")}`,
+      region.links.length === 0 ? undefined : `links=${region.links.map((link) => JSON.stringify(link.text)).join(",")}`
+    ].filter((part): part is string => part !== undefined).join(" ")),
     protectedFormGuidance === undefined ? undefined : "",
     protectedFormGuidance,
     pendingDialogs.length === 0 ? undefined : "",
@@ -2346,13 +2365,16 @@ function renderBrowserFindResult(result: BrowserFindResult): string {
   }
   const heading = result.status === "ambiguous"
     ? `Locator is ambiguous: ${result.candidates.length} candidates matched. Refine it instead of guessing.`
-    : "Found one browser element.";
+    : result.candidates[0]?.kind === "region"
+      ? "Found one grounded visible region. It may be used with browser.extract or browser.click via regionRef."
+      : "Found one browser element.";
   return [heading, ...result.candidates.map(renderBrowserLocatorCandidate)].join("\n");
 }
 
 function renderBrowserLocatorCandidate(candidate: BrowserLocatorCandidate): string {
   return [
     `${candidate.ref} identity=${JSON.stringify(candidate.identity)} tab=${candidate.tabRef}`,
+    candidate.kind === "region" ? "visible-region" : undefined,
     candidate.role,
     candidate.name === undefined ? undefined : JSON.stringify(candidate.name),
     candidate.label === undefined ? undefined : `label=${JSON.stringify(candidate.label)}`,
@@ -2410,19 +2432,23 @@ function browserLocatorSchema(): Record<string, unknown> {
   };
 }
 
-function browserTargetInputProperties(): Record<string, unknown> {
+function browserTargetInputProperties(options: { allowRegion?: boolean } = {}): Record<string, unknown> {
   return {
     ref: { type: "string", description: "Element ref from a snapshot; canonical identity and tabRef are required with refs." },
+    ...(options.allowRegion === true ? {
+      regionRef: { type: "string", description: "Runtime-grounded visible region ref from browser.find/snapshot; canonical identity and tabRef are required." }
+    } : {}),
     identity: browserStateIdentitySchema("Canonical snapshot identity that produced ref."),
     tabRef: { type: "string", description: "Controlled tab that produced ref." },
     locator: browserLocatorSchema()
   };
 }
 
-function browserTargetOneOf(): Array<{ required: string[] }> {
+function browserTargetOneOf(options: { allowRegion?: boolean } = {}): Array<{ required: string[] }> {
   return [
     { required: ["locator"] },
-    { required: ["ref", "identity", "tabRef"] }
+    { required: ["ref", "identity", "tabRef"] },
+    ...(options.allowRegion === true ? [{ required: ["regionRef", "identity", "tabRef"] }] : [])
   ];
 }
 

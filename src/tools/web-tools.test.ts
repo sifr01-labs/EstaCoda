@@ -1518,6 +1518,55 @@ describe("web and browser tools baselines", () => {
     }
   });
 
+  it("security-binds a grounded region without converting it to an element or raw coordinates", async () => {
+    const current = browserIdentity(5);
+    const clickMethod = vi.fn(async (input: BrowserActionInput) => {
+      expect(input).toMatchObject({
+        sessionId: "runtime:main",
+        regionRef: "@r2",
+        identity: current,
+        tabRef: "@t1"
+      });
+      expect(input.ref).toBeUndefined();
+      expect(input.locator).toBeUndefined();
+      return createSessionRecordingBrowserBackend().snapshot!({ sessionId: "runtime:main" });
+    });
+    const preflightAction = vi.fn(async (_action: "click" | "press" | "dialog", input: BrowserActionInput): Promise<BrowserActionPreflight> => ({
+      action: "click",
+      sessionId: input.sessionId!,
+      identity: current,
+      tabRef: "@t1",
+      url: "https://developers.mtn.com/apps",
+      target: {
+        ref: "@r2",
+        kind: "scripted-control",
+        tag: "div",
+        label: "TikTok Connect",
+        formAssociated: false,
+        submit: false
+      }
+    }));
+    const click = tool("browser.click", createTestWebTools({
+      browserBackend: { ...createSessionRecordingBrowserBackend(), click: clickMethod, preflightAction }
+    }));
+    const input = {
+      sessionId: "runtime:main",
+      regionRef: "@r2",
+      identity: current,
+      tabRef: "@t1"
+    };
+    const approved = await click.resolveSecurity?.(input, { trustedWorkspace: true, sessionId: "runtime" });
+
+    expect(approved).toMatchObject({
+      riskClass: "external-side-effect",
+      targetKey: expect.stringMatching(/^browser-action:[a-f0-9]{64}$/u),
+      targetSummary: "Click scripted control “TikTok Connect” on developers.mtn.com"
+    });
+    await expect(click.run(input, { securityResolution: approved })).resolves.toMatchObject({ ok: true });
+    expect(preflightAction).toHaveBeenCalledOnce();
+    expect(clickMethod).toHaveBeenCalledOnce();
+  });
+
   it("fails closed when a reviewed bound target becomes stale before dispatch", async () => {
     const reviewedIdentity = browserIdentity(9);
     const currentIdentity = browserIdentity(10);

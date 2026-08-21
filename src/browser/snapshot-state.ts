@@ -84,6 +84,9 @@ export function browserActionMapFingerprint(snapshot: BrowserSnapshotInput): str
     elements: snapshot.elements
       ?.filter((element) => isActionableBrowserRole(element.role) && isBrowserSnapshotElementInteractable(element))
       .map(({ value: _value, checked: _checked, ...element }) => element),
+    regions: snapshot.regions
+      ?.filter((region) => region.hitTestable)
+      .map(({ ref: _ref, ...region }) => region),
     pendingDialogs: snapshot.pendingDialogs?.map(({ id: _id, ...dialog }) => dialog)
   };
   return createHash("sha256").update(JSON.stringify(stableState)).digest("hex");

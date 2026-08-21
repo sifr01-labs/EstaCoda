@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CDPSupervisor, parseCdpSnapshot } from "./cdp-supervisor.js";
+import { CDPSupervisor, parseCdpSnapshot, snapshotExpression } from "./cdp-supervisor.js";
 import type { CdpWebSocketEvent, CdpWebSocketLike } from "./cdp-client.js";
 
 class FakeCdpSocket implements CdpWebSocketLike {
@@ -114,6 +114,10 @@ async function flushAsyncEvents(): Promise<void> {
 }
 
 describe("CDPSupervisor", () => {
+  it("keeps the browser-side structured snapshot expression syntactically valid", () => {
+    expect(() => new Function(`return ${snapshotExpression()};`)).not.toThrow();
+  });
+
   it("preserves page text while removing non-interactable DOM controls", () => {
     expect(parseCdpSnapshot(JSON.stringify({
       url: "https://example.com",
@@ -140,6 +144,43 @@ describe("CDPSupervisor", () => {
         regionText: "Account Settings Confirm Cancel"
       }]
     });
+  });
+
+  it("parses bounded visible regions while omitting secret-bearing or unsafe links", () => {
+    const parsed = parseCdpSnapshot(JSON.stringify({
+      url: "https://example.com/apps",
+      title: "Apps",
+      text: "TikTok Connect",
+      elements: [
+        { ref: "@e1", role: "link", name: "Callback URL" },
+        { ref: "@e2", role: "button", name: "Edit" },
+        { ref: "@e3", role: "button", name: "Delete" }
+      ],
+      regions: [{
+        ref: "@r1",
+        text: "TikTok Connect Callback URL Edit Delete",
+        actionRefs: ["@e1", "@e2", "@e3", "@e99", "not-a-ref"],
+        links: [
+          { text: "Callback URL", href: "https://example.com/callback" },
+          { text: "Private callback", href: "https://example.com/callback?token=do-not-render" },
+          { text: "CSRF callback", href: "https://example.com/callback?csrf=also-do-not-render" },
+          { text: "Credential URL", href: "https://user:password@example.com/callback" },
+          { text: "Unsafe", href: "javascript:alert(1)" }
+        ],
+        hitTestable: true
+      }]
+    }), "session-1");
+
+    expect(parsed.regions).toEqual([{
+      ref: "@r1",
+      text: "TikTok Connect Callback URL Edit Delete",
+      actionRefs: ["@e1", "@e2", "@e3"],
+      links: [{ text: "Callback URL", href: "https://example.com/callback" }],
+      hitTestable: true
+    }]);
+    expect(JSON.stringify(parsed)).not.toContain("do-not-render");
+    expect(JSON.stringify(parsed)).not.toContain("also-do-not-render");
+    expect(JSON.stringify(parsed)).not.toContain("javascript:");
   });
 
   it("start() connects once and enables Page and Runtime", async () => {

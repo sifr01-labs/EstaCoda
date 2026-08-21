@@ -20,6 +20,14 @@ export type FakeCdpAuthSnapshot = {
   title: string;
   text: string;
   elements: FakeCdpAuthElement[];
+  regions?: Array<{
+    ref: string;
+    text: string;
+    actionRefs: string[];
+    links: Array<{ text: string; href: string }>;
+    hitTestable: boolean;
+    blockedBy?: string;
+  }>;
 };
 
 /**
@@ -200,7 +208,7 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
     if (method === "Runtime.evaluate") {
       if (this.rejectBrowserActions && typeof message.params?.expression === "string" &&
           (/\.(?:click|focus)\(\)/u.test(message.params.expression) ||
-            message.params.expression.includes("getBoundingClientRect"))) {
+            message.params.expression.includes("const rect = el.getBoundingClientRect()"))) {
         return { exceptionDetails: { text: "Element became non-interactable" } };
       }
       if (message.params?.expression === "document") {
@@ -216,7 +224,7 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
       if (typeof message.params?.expression === "string" && message.params.expression.includes("const inlineScripted")) {
         return { result: { value: this.browserActionPreflight } };
       }
-      if (typeof message.params?.expression === "string" && message.params.expression.includes("getBoundingClientRect")) {
+      if (typeof message.params?.expression === "string" && message.params.expression.includes("const rect = el.getBoundingClientRect()")) {
         return { result: { value: { x: 48, y: 24 } } };
       }
       return { result: { value: JSON.stringify(this.snapshot) } };
