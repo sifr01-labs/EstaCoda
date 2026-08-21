@@ -439,6 +439,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
                     `  protected delivery configured: ${capabilities.protectedDeliveryConfigured ? "yes" : "no"}`,
                     `  grouped delivery supported: ${capabilities.groupedDeliverySupported ? "yes" : "no"}`,
                     `  browser relay supported: ${capabilities.browserRelaySupported ? "yes" : "no"}`,
+                    `  result redaction configured: ${capabilities.resultRedactionConfigured ? "yes" : "no"}`,
                     `  verification configured: ${capabilities.verificationConfigured ? "yes" : "no"}`
                     ].filter((line) => line !== undefined).join("\n");
                   })()
@@ -511,6 +512,15 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
                 browserRelay: { type: "boolean" }
               },
               required: ["paths", "handling"]
+            }
+          },
+          redactedToolResultPaths: {
+            type: "object",
+            additionalProperties: {
+              type: "array",
+              minItems: 1,
+              maxItems: 8,
+              items: { type: "string" }
             }
           },
           toolVerificationRelationships: {

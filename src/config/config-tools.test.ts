@@ -737,6 +737,7 @@ describe("MCP capability configuration tools", () => {
               browserRelay: true
             }
           },
+          redactedToolResultPaths: { readRecords: ["/records/*/value"] },
           toolVerificationRelationships: { readRecords: ["updateRecords"] }
         }
       }
@@ -745,13 +746,16 @@ describe("MCP capability configuration tools", () => {
       const status = await configTool("config.mcp.status", homeDir).run({});
       const serialized = JSON.stringify(status);
       expect(status.content).toContain("protected delivery configured: yes");
+      expect(status.content).toContain("result redaction configured: yes");
       expect(status.content).toContain("verification configured: yes");
       expect(serialized).not.toContain(secret);
       expect(serialized).not.toContain("/values/*/value");
+      expect(serialized).not.toContain("/records/*/value");
 
       const setup = configTool("config.mcp.setup", homeDir);
       const schema = JSON.stringify(setup.inputSchema);
       expect(schema).toContain("protectedToolArguments");
+      expect(schema).toContain("redactedToolResultPaths");
       expect(schema).toContain("toolVerificationRelationships");
       expect(schema).toContain("toolRiskClasses");
     } finally {

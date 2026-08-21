@@ -1121,16 +1121,19 @@ describe("ToolExecutor tool-call metadata persistence", () => {
     expect(await persistedExecutionState(sessionDb, trajectoryRecorder)).not.toContain(sentinel);
   });
 
-  it("injects array-matched protected values and dispatches one atomic tool call", async () => {
+  it("dispatches a Postman environment with two protected values in one atomic tool call", async () => {
     const secrets = ["grouped-key-sentinel", "grouped-secret-sentinel"];
     const run = vi.fn(async (input: Record<string, unknown>): Promise<ToolResult> => ({
       ok: true,
       content: `stored ${JSON.stringify(input)}`,
     }));
     const tool: RegisteredTool = {
-      ...createEchoTool("trusted.multi"),
+      ...createEchoTool("mcp.postman.createEnvironment"),
       protectedArguments: [
-        { path: "/values/*/value", handling: { persistence: "destination-managed", sharing: "workspace" } }
+        {
+          path: "/environment/values/*/value",
+          handling: { persistence: "destination-managed", sharing: "workspace" },
+        }
       ],
       capabilityMetadata: { protectedInput: { groupedDelivery: true, sources: ["browser"] } },
       run
@@ -1140,8 +1143,8 @@ describe("ToolExecutor tool-call metadata persistence", () => {
     handler.transfer = vi.fn();
     handler.transferGroup = vi.fn(async (group: SecureInputTransferGroupRequest, consume: SecureInputTransferGroupConsumer) => {
       expect(group.items.map((item) => item.request.destination)).toEqual([
-        { type: "tool-argument", toolName: tool.name, argumentPath: "/values/0/value" },
-        { type: "tool-argument", toolName: tool.name, argumentPath: "/values/1/value" },
+        { type: "tool-argument", toolName: tool.name, argumentPath: "/environment/values/0/value" },
+        { type: "tool-argument", toolName: tool.name, argumentPath: "/environment/values/1/value" },
       ]);
       expect(group.items.every((item) => item.handling?.sharing === "workspace")).toBe(true);
       const bytes = secrets.map((secret) => new TextEncoder().encode(secret));
@@ -1163,7 +1166,7 @@ describe("ToolExecutor tool-call metadata persistence", () => {
         status: "delivered" as const,
         items: group.items.map((item) => ({
           id: item.id,
-          receipt: { status: "delivered" as const, destinationLabel: "trusted.multi", persisted: true },
+          receipt: { status: "delivered" as const, destinationLabel: tool.name, persisted: true },
         })),
       };
     });
@@ -1179,10 +1182,24 @@ describe("ToolExecutor tool-call metadata persistence", () => {
     const execution = await executor.executeTool({
       tool: tool.name,
       input: {
-        values: [
-          { key: "client_key", value: { protectedInput: { kind: "api-key", source: browserSource("@e1") } } },
-          { key: "client_secret", value: { protectedInput: { kind: "client-secret", source: browserSource("@e2") } } },
-        ],
+        workspace: "workspace-fixture",
+        environment: {
+          name: "Service credentials",
+          values: [
+            {
+              enabled: true,
+              key: "service_client_id",
+              type: "secret",
+              value: { protectedInput: { kind: "api-key", source: browserSource("@e1") } },
+            },
+            {
+              enabled: true,
+              key: "service_client_secret",
+              type: "secret",
+              value: { protectedInput: { kind: "client-secret", source: browserSource("@e2") } },
+            },
+          ],
+        },
       },
       trustedWorkspace: true,
       sessionId: "test-session",
@@ -1191,10 +1208,14 @@ describe("ToolExecutor tool-call metadata persistence", () => {
     expect(handler.transferGroup).toHaveBeenCalledOnce();
     expect(run).toHaveBeenCalledOnce();
     expect(run).toHaveBeenCalledWith({
-      values: [
-        { key: "client_key", value: secrets[0] },
-        { key: "client_secret", value: secrets[1] },
-      ],
+      workspace: "workspace-fixture",
+      environment: {
+        name: "Service credentials",
+        values: [
+          { enabled: true, key: "service_client_id", type: "secret", value: secrets[0] },
+          { enabled: true, key: "service_client_secret", type: "secret", value: secrets[1] },
+        ],
+      },
     }, expect.objectContaining({ onSecureInputRequest: undefined }));
     expect(execution?.result).toEqual({
       ok: true,

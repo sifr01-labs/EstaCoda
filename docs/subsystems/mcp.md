@@ -76,9 +76,89 @@ The CLI accepts the same map with `--tool-risk-classes TOOL=RISK,...`. When a pe
 
 `protectedToolArguments` contains reviewed JSON Pointer patterns only; it never contains credential values. `groupedDelivery` and `browserRelay` describe capabilities the generic secure dispatcher enforces. `toolVerificationRelationships` maps a read-only verification tool to the mutation tools whose resulting state it can independently verify. Tool names and protected paths are checked against the discovered MCP catalog and input schemas before any tools from that server are registered. Unknown tools, invalid or overlapping paths, non-string destinations, duplicate relationships, and risk conflicts leave the server unavailable with a bounded diagnostic.
 
+`redactedToolResultPaths` is the corresponding reviewed output boundary for structured JSON results. Matching values are replaced before the result reaches the model, tool history, or persistence. If configured redaction cannot be applied to a returned structure, the entire result is withheld. The MCP server remains unavailable when a configured result-redaction tool is missing or its pointer declarations are invalid.
+
+## Reviewed Postman protected-transfer recipe
+
+Postman is configured through the same generic MCP entry as any other connector. It is not a Setup Editor integration and there is no Postman-specific runtime branch. This recipe is pinned to the inspected `@postman/postman-mcp-server` `2.11.2` minimal tool schemas; upgrades require schema discovery and test review before changing the pin.
+
+```json
+{
+  "mcpServers": {
+    "postman": {
+      "enabled": true,
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["--yes", "@postman/postman-mcp-server@2.11.2"],
+      "envRefs": {
+        "POSTMAN_API_KEY": "POSTMAN_API_KEY"
+      },
+      "trust": "conservative",
+      "includeTools": [
+        "getAuthenticatedUser",
+        "getWorkspaces",
+        "getCollections",
+        "getCollection",
+        "getEnvironments",
+        "getEnvironment",
+        "createCollection",
+        "putCollection",
+        "createEnvironment",
+        "putEnvironment"
+      ],
+      "toolRiskClasses": {
+        "getAuthenticatedUser": "read-only-network",
+        "getWorkspaces": "read-only-network",
+        "getCollections": "read-only-network",
+        "getCollection": "read-only-network",
+        "getEnvironments": "read-only-network",
+        "getEnvironment": "read-only-network",
+        "createCollection": "external-side-effect",
+        "putCollection": "external-side-effect",
+        "createEnvironment": "external-side-effect",
+        "putEnvironment": "external-side-effect"
+      },
+      "protectedToolArguments": {
+        "createEnvironment": {
+          "paths": ["/environment/values/*/value"],
+          "handling": {
+            "persistence": "destination-managed",
+            "sharing": "workspace"
+          },
+          "groupedDelivery": true,
+          "browserRelay": true
+        },
+        "putEnvironment": {
+          "paths": ["/environment/values/*/value"],
+          "handling": {
+            "persistence": "destination-managed",
+            "sharing": "workspace"
+          },
+          "groupedDelivery": true,
+          "browserRelay": true
+        }
+      },
+      "redactedToolResultPaths": {
+        "getEnvironment": ["/environment/values/*/value"]
+      },
+      "toolVerificationRelationships": {
+        "getEnvironment": ["createEnvironment", "putEnvironment"],
+        "getCollection": ["createCollection", "putCollection"]
+      }
+    }
+  }
+}
+```
+
+Store the Postman API key only in the selected profile's `.env`; the committed or reviewed config contains the environment-variable reference only. Use a dedicated Postman environment and create its related variables in one `createEnvironment` call. Each variable should use `type: "secret"`, and all two to eight protected values in that call are authorized as one group and dispatched once only after every source remains valid. A collection should contain references such as `{{service_client_id}}` and `{{service_client_secret}}`, never copied credential values.
+
+Read back the environment with `getEnvironment` and the collection with `getCollection`. The output rule removes every environment variable value while preserving the environment name, variable keys, enabled state, and type for verification. `putEnvironment` replaces environment state; read the existing dedicated environment first and preserve all intended fields rather than using it as a partial patch.
+
+After applying the recipe, reload MCP discovery and inspect `mcp status`. Protected delivery, grouped delivery, browser relay, result redaction, and verification should all report `yes`. A missing tool, changed input schema, invalid pointer, or non-JSON result that cannot be safely redacted fails closed without dispatching or returning the unreviewed data.
+
 At execution time, the runtime copies only the validated connector and verification relationship into its bounded effect receipt. A successful verifier is associated with the most recent compatible successful mutation from the same visible turn, using target identity when both calls provide one. MCP results and model-authored plan text cannot create or override that relationship.
 
-The reviewed configuration tool accepts these structured fields directly. The CLI accepts `--protected-tool-arguments-json` and `--tool-verification-relationships-json`. `mcp status` reports only yes/no capability summaries; it never prints protected paths or credential values.
+The reviewed configuration tool accepts these structured fields directly. The CLI accepts `--protected-tool-arguments-json`, `--redacted-tool-result-paths-json`, and `--tool-verification-relationships-json`. `mcp status` reports only yes/no capability summaries; it never prints protected paths or credential values.
 
 ## Read Reuse
 

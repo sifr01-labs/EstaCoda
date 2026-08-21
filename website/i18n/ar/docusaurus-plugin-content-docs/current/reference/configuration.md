@@ -614,7 +614,74 @@ STT المستضاف المستقر: OpenAI، Groq، xAI. STT المحلي يد�
 }
 ```
 
-يتحقق EstaCoda عند اكتشاف خادم MCP أو إعادة تحميله من أسماء الأدوات والمسارات بمقارنتها مع مخططات الإدخال الفعلية. تؤدي الأداة غير المعروفة، أو المسارات المفقودة أو المتعارضة، أو تعارض تصنيف المخاطر إلى إبقاء الخادم غير متاح. تعرض التشخيصات حالة القدرات بصيغة نعم/لا فقط، ولا تعرض المسارات المحمية أو القيم السرية. يقبل مسار الإعداد القابل للمراجعة هذه الحقول المنظمة، وتقبل CLI الخيارين `--protected-tool-arguments-json` و`--tool-verification-relationships-json`.
+يتحقق EstaCoda عند اكتشاف خادم MCP أو إعادة تحميله من أسماء الأدوات والمسارات بمقارنتها مع مخططات الإدخال الفعلية. تؤدي الأداة غير المعروفة، أو المسارات المفقودة أو المتعارضة، أو تعارض تصنيف المخاطر إلى إبقاء الخادم غير متاح. تعرض التشخيصات حالة القدرات بصيغة نعم/لا فقط، ولا تعرض المسارات المحمية أو القيم السرية.
+
+يحدد `redactedToolResultPaths` حقول نتائج JSON المنظمة التي يجب استبدالها قبل وصول نتيجة MCP إلى النموذج أو التخزين. إذا غابت البنية التي تمت مراجعتها أو لم تكن الاستجابة JSON منظمة، يحجب EstaCoda النتيجة كاملة. يقبل مسار `config.mcp.setup` القابل للمراجعة هذه الحقول، وتقبل CLI الخيارات `--protected-tool-arguments-json` و`--redacted-tool-result-paths-json` و`--tool-verification-relationships-json`.
+
+#### وصفة النقل المحمي إلى Postman
+
+هذه وصفة إعداد تمت مراجعتها وتستخدم سلوك MCP العام، وليست ميزة خاصة بـ Postman داخل Setup Editor. وهي مثبتة على مخططات الحد الأدنى التي تمت مراجعتها من `@postman/postman-mcp-server` بالإصدار `2.11.2`:
+
+```json
+{
+  "mcpServers": {
+    "postman": {
+      "command": "npx",
+      "args": ["--yes", "@postman/postman-mcp-server@2.11.2"],
+      "envRefs": { "POSTMAN_API_KEY": "POSTMAN_API_KEY" },
+      "trust": "conservative",
+      "includeTools": [
+        "getAuthenticatedUser", "getWorkspaces",
+        "getCollections", "getCollection",
+        "getEnvironments", "getEnvironment",
+        "createCollection", "putCollection",
+        "createEnvironment", "putEnvironment"
+      ],
+      "toolRiskClasses": {
+        "getAuthenticatedUser": "read-only-network",
+        "getWorkspaces": "read-only-network",
+        "getCollections": "read-only-network",
+        "getCollection": "read-only-network",
+        "getEnvironments": "read-only-network",
+        "getEnvironment": "read-only-network",
+        "createCollection": "external-side-effect",
+        "putCollection": "external-side-effect",
+        "createEnvironment": "external-side-effect",
+        "putEnvironment": "external-side-effect"
+      },
+      "protectedToolArguments": {
+        "createEnvironment": {
+          "paths": ["/environment/values/*/value"],
+          "handling": {
+            "persistence": "destination-managed",
+            "sharing": "workspace"
+          },
+          "groupedDelivery": true,
+          "browserRelay": true
+        },
+        "putEnvironment": {
+          "paths": ["/environment/values/*/value"],
+          "handling": {
+            "persistence": "destination-managed",
+            "sharing": "workspace"
+          },
+          "groupedDelivery": true,
+          "browserRelay": true
+        }
+      },
+      "redactedToolResultPaths": {
+        "getEnvironment": ["/environment/values/*/value"]
+      },
+      "toolVerificationRelationships": {
+        "getEnvironment": ["createEnvironment", "putEnvironment"],
+        "getCollection": ["createCollection", "putCollection"]
+      }
+    }
+  }
+}
+```
+
+احتفظ بمفتاح Postman API في ملف `.env` للملف الشخصي المختار. أنشئ بيئة مخصصة وأرسل من متغيرين إلى ثمانية متغيرات من النوع `type: "secret"` في استدعاء محمي واحد؛ ينتج عن ذلك اعتماد مجمع واحد واستدعاء بعيد واحد. يجب أن تستخدم المجموعات مراجع مثل `{{service_client_id}}`، وألا تحتوي على قيم بيانات اعتماد منسوخة. تعرض `getEnvironment` الأسماء والأنواع بينما تحذف قاعدة النتيجة القيم، وتتحقق `getCollection` من المراجع. ولأن `putEnvironment` يستبدل الحالة، اقرأ جميع الحقول المقصودة وحافظ عليها قبل استخدامه. راجع المخططات وحدّث الإصدار المثبت بصورة مقصودة عند ترقية حزمة MCP.
 
 ### skills
 

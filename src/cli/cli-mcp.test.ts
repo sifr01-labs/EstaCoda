@@ -124,6 +124,9 @@ describe("cli mcp setup", () => {
           browserRelay: true
         }
       };
+      const resultRedactions = {
+        readRecords: ["/records/*/value"]
+      };
       const initial = await runCliCommand({
         argv: [
           "mcp", "setup", "--name", "records", "--command", "records-mcp",
@@ -138,6 +141,7 @@ describe("cli mcp setup", () => {
           "mcp", "setup", "--name", "records",
           "--tool-risk-classes", "updateRecords=external-side-effect,readRecords=read-only-network",
           "--protected-tool-arguments-json", JSON.stringify(protectedConfig),
+          "--redacted-tool-result-paths-json", JSON.stringify(resultRedactions),
           "--tool-verification-relationships-json", JSON.stringify({ readRecords: ["updateRecords"] })
         ],
         workspaceRoot: tmpDir,
@@ -151,12 +155,14 @@ describe("cli mcp setup", () => {
           command?: string;
           envRefs?: Record<string, string>;
           protectedToolArguments?: unknown;
+          redactedToolResultPaths?: unknown;
           toolVerificationRelationships?: unknown;
         }>;
       };
       expect(config.mcpServers?.records?.command).toBe("records-mcp");
       expect(config.mcpServers?.records?.envRefs).toEqual({ API_TOKEN: "RECORDS_API_TOKEN" });
       expect(config.mcpServers?.records?.protectedToolArguments).toEqual(protectedConfig);
+      expect(config.mcpServers?.records?.redactedToolResultPaths).toEqual(resultRedactions);
       expect(config.mcpServers?.records?.toolVerificationRelationships).toEqual({
         readRecords: ["updateRecords"]
       });
@@ -170,8 +176,10 @@ describe("cli mcp setup", () => {
       expect(status.output).toContain("protected delivery configured: yes");
       expect(status.output).toContain("grouped delivery supported: yes");
       expect(status.output).toContain("browser relay supported: yes");
+      expect(status.output).toContain("result redaction configured: yes");
       expect(status.output).toContain("verification configured: yes");
       expect(status.output).not.toContain("/values/*/value");
+      expect(status.output).not.toContain("/records/*/value");
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }

@@ -365,6 +365,8 @@ export type MCPServerConfig = {
   toolRiskClass?: ToolRiskClass;
   toolRiskClasses?: Record<string, ToolRiskClass>;
   protectedToolArguments?: Record<string, MCPProtectedToolArgumentsConfig>;
+  /** Tool name -> reviewed JSON Pointer patterns removed from returned JSON. */
+  redactedToolResultPaths?: Record<string, string[]>;
   /** Verification tool name -> mutation tool names, all unprefixed MCP names. */
   toolVerificationRelationships?: Record<string, string[]>;
   resourceReadRiskClass?: ToolRiskClass;
@@ -813,6 +815,7 @@ export type MCPSetupInput = {
   toolRiskClass?: ToolRiskClass;
   toolRiskClasses?: Record<string, ToolRiskClass>;
   protectedToolArguments?: Record<string, MCPProtectedToolArgumentsConfig>;
+  redactedToolResultPaths?: Record<string, string[]>;
   toolVerificationRelationships?: Record<string, string[]>;
   resourceReadRiskClass?: ToolRiskClass;
   promptGetRiskClass?: ToolRiskClass;
@@ -2375,6 +2378,7 @@ function normalizeMcpServers(
       toolRiskClass: isToolRiskClass(record.toolRiskClass) ? record.toolRiskClass : undefined,
       toolRiskClasses: normalizeToolRiskClasses(record.toolRiskClasses),
       protectedToolArguments: normalizeProtectedToolArguments(record.protectedToolArguments),
+      redactedToolResultPaths: normalizeToolResultRedactionPaths(record.redactedToolResultPaths),
       toolVerificationRelationships: normalizeToolVerificationRelationships(record.toolVerificationRelationships),
       resourceReadRiskClass: isToolRiskClass(record.resourceReadRiskClass) ? record.resourceReadRiskClass : undefined,
       promptGetRiskClass: isToolRiskClass(record.promptGetRiskClass) ? record.promptGetRiskClass : undefined
@@ -2439,6 +2443,18 @@ function normalizeToolVerificationRelationships(value: unknown): Record<string, 
       throw new Error(`Invalid MCP verification configuration for tool ${toolName.slice(0, 160)}`);
     }
     return [[toolName, targets as string[]] as [string, string[]]];
+  });
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
+}
+
+function normalizeToolResultRedactionPaths(value: unknown): Record<string, string[]> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value).flatMap(([toolName, paths]) => {
+    if (toolName.trim().length === 0 || !Array.isArray(paths) || paths.length === 0 ||
+      paths.some((path) => typeof path !== "string")) {
+      throw new Error(`Invalid MCP result redaction configuration for tool ${toolName.slice(0, 160)}`);
+    }
+    return [[toolName, paths as string[]] as [string, string[]]];
   });
   return entries.length === 0 ? undefined : Object.fromEntries(entries);
 }
@@ -3160,6 +3176,7 @@ export async function setupMcpConfig(options: {
     toolRiskClass: options.input.toolRiskClass ?? previous.toolRiskClass,
     toolRiskClasses: options.input.toolRiskClasses ?? previous.toolRiskClasses,
     protectedToolArguments: options.input.protectedToolArguments ?? previous.protectedToolArguments,
+    redactedToolResultPaths: options.input.redactedToolResultPaths ?? previous.redactedToolResultPaths,
     toolVerificationRelationships: options.input.toolVerificationRelationships ?? previous.toolVerificationRelationships,
     resourceReadRiskClass: options.input.resourceReadRiskClass ?? previous.resourceReadRiskClass,
     promptGetRiskClass: options.input.promptGetRiskClass ?? previous.promptGetRiskClass
@@ -3864,6 +3881,14 @@ function validateMcpSetupInput(input: MCPSetupInput): void {
         (declaration.browserRelay !== undefined && typeof declaration.browserRelay !== "boolean") ||
         !isMutationRiskClass(resolveMcpSetupToolRisk(input, toolName))) {
       throw new Error(`Invalid protected argument declaration for MCP tool ${toolName}`);
+    }
+  }
+  for (const [toolName, paths] of Object.entries(input.redactedToolResultPaths ?? {})) {
+    requireNonEmpty(toolName, "MCP result redaction tool name");
+    if (!Array.isArray(paths) || paths.length === 0 || paths.length > 8 ||
+        paths.some((path) => !isProtectedArgumentPattern(path)) ||
+        new Set(paths).size !== paths.length || hasOverlappingProtectedArgumentPatterns(paths)) {
+      throw new Error(`Invalid result redaction declaration for MCP tool ${toolName}`);
     }
   }
   for (const [verificationTool, mutationTools] of Object.entries(input.toolVerificationRelationships ?? {})) {

@@ -190,6 +190,16 @@ describe("setupMcpConfig capability validation", () => {
         input: {
           name: "records",
           command: "records-mcp",
+          redactedToolResultPaths: {
+            read: ["/records", "/records/*/value"]
+          }
+        }
+      })).rejects.toThrow(/Invalid result redaction declaration/u);
+      await expect(setupMcpConfig({
+        ...base,
+        input: {
+          name: "records",
+          command: "records-mcp",
           toolRiskClasses: { verify: "external-side-effect", update: "external-side-effect" },
           toolVerificationRelationships: { verify: ["update"] }
         }
@@ -232,6 +242,18 @@ describe("setupMcpConfig capability validation", () => {
       }));
       await expect(loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace }))
         .rejects.toThrow(/Invalid MCP verification configuration/u);
+
+      await writeFile(profileConfigPath(workspace), JSON.stringify({
+        model: { provider: "openai", id: "gpt-4o" },
+        mcpServers: {
+          records: {
+            command: "records-mcp",
+            redactedToolResultPaths: { read: [] }
+          }
+        }
+      }));
+      await expect(loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace }))
+        .rejects.toThrow(/Invalid MCP result redaction configuration/u);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -3392,6 +3414,9 @@ describe("loadRuntimeConfig profile loading", () => {
           },
           toolVerificationRelationships: {
             verifyRecords: ["updateRecords"]
+          },
+          redactedToolResultPaths: {
+            verifyRecords: ["/values/*/value"]
           }
         }
       }
@@ -3412,6 +3437,9 @@ describe("loadRuntimeConfig profile loading", () => {
     });
     expect(loaded.mcp.servers.trusted?.toolVerificationRelationships).toEqual({
       verifyRecords: ["updateRecords"]
+    });
+    expect(loaded.mcp.servers.trusted?.redactedToolResultPaths).toEqual({
+      verifyRecords: ["/values/*/value"]
     });
     await rm(workspace, { recursive: true, force: true });
   });

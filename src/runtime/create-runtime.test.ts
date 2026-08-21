@@ -2131,6 +2131,7 @@ describe("createRuntime MCP trust gating", () => {
               "name",
               "promptGetRiskClass",
               "protectedToolArguments",
+              "redactedToolResultPaths",
               "resourceReadRiskClass",
               "timeoutMs",
               "toolPrefix",

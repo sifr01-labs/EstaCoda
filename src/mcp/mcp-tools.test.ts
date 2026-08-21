@@ -13,8 +13,12 @@ describe("MCP per-tool risk classification", () => {
     getWorkspaces: "read-only-network",
     getCollections: "read-only-network",
     getCollection: "read-only-network",
-    updateCollection: "external-side-effect",
-    updateCollectionRequest: "external-side-effect"
+    getEnvironments: "read-only-network",
+    getEnvironment: "read-only-network",
+    createCollection: "external-side-effect",
+    putCollection: "external-side-effect",
+    createEnvironment: "external-side-effect",
+    putEnvironment: "external-side-effect"
   } as const;
 
   it("classifies configured Postman reads as read-only and mutations as consequential", () => {
@@ -23,8 +27,12 @@ describe("MCP per-tool risk classification", () => {
     expect(resolveMcpToolRiskClass(config, "stdio", "getWorkspaces")).toBe("read-only-network");
     expect(resolveMcpToolRiskClass(config, "stdio", "getCollections")).toBe("read-only-network");
     expect(resolveMcpToolRiskClass(config, "stdio", "getCollection")).toBe("read-only-network");
-    expect(resolveMcpToolRiskClass(config, "stdio", "updateCollection")).toBe("external-side-effect");
-    expect(resolveMcpToolRiskClass(config, "stdio", "updateCollectionRequest")).toBe("external-side-effect");
+    expect(resolveMcpToolRiskClass(config, "stdio", "getEnvironments")).toBe("read-only-network");
+    expect(resolveMcpToolRiskClass(config, "stdio", "getEnvironment")).toBe("read-only-network");
+    expect(resolveMcpToolRiskClass(config, "stdio", "createCollection")).toBe("external-side-effect");
+    expect(resolveMcpToolRiskClass(config, "stdio", "putCollection")).toBe("external-side-effect");
+    expect(resolveMcpToolRiskClass(config, "stdio", "createEnvironment")).toBe("external-side-effect");
+    expect(resolveMcpToolRiskClass(config, "stdio", "putEnvironment")).toBe("external-side-effect");
   });
 
   it("keeps unknown operations conservative", () => {
@@ -58,6 +66,47 @@ describe("MCP structural summaries", () => {
     expect(summary).toContain("[REDACTED]");
     expect(summary?.length).toBeLessThanOrEqual(1_231);
     expect(summary).not.toContain(secret);
+  });
+
+  it("removes reviewed fields from structured MCP results before model delivery", () => {
+    const secret = "postman-environment-secret-that-must-not-survive";
+    const result = normalizeMcpResult({
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          environment: {
+            name: "Service credentials",
+            values: [
+              { key: "service_client_id", type: "secret", value: secret },
+              { key: "service_client_secret", type: "secret", value: `${secret}-two` },
+            ],
+          },
+        }),
+      }],
+      structuredContent: { unsafeEcho: secret },
+    }, ["/environment/values/*/value"]);
+
+    expect(result).toMatchObject({ ok: true, metadata: { resultRedactionApplied: true } });
+    expect(result.content).toContain("Service credentials");
+    expect(result.content).toContain("service_client_id");
+    expect(result.content).toContain('"type": "secret"');
+    expect(result.content).toContain("[PROTECTED_VALUE]");
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(result.metadata).not.toHaveProperty("structuredContent");
+  });
+
+  it("withholds an MCP result when reviewed structural redaction cannot be applied", () => {
+    const secret = "unstructured-secret-that-must-not-survive";
+    const result = normalizeMcpResult({
+      content: [{ type: "text", text: `unstructured response ${secret}` }],
+    }, ["/environment/values/*/value"]);
+
+    expect(result).toEqual({
+      ok: false,
+      content: "MCP response withheld because its configured result redaction could not be applied safely.",
+      metadata: { resultRedactionApplied: false },
+    });
+    expect(JSON.stringify(result)).not.toContain(secret);
   });
 });
 
@@ -183,6 +232,7 @@ describe("MCP protected argument declarations", () => {
         protectedDeliveryConfigured: false,
         groupedDeliverySupported: false,
         browserRelaySupported: false,
+        resultRedactionConfigured: false,
         verificationConfigured: false
       }
     });
@@ -241,6 +291,7 @@ describe("MCP protected argument declarations", () => {
       protectedDeliveryConfigured: true,
       groupedDeliverySupported: true,
       browserRelaySupported: true,
+      resultRedactionConfigured: false,
       verificationConfigured: true
     });
     expect(JSON.stringify(tool?.inputSchema)).toContain("protectedInput");
@@ -336,4 +387,227 @@ describe("MCP protected argument declarations", () => {
       expect(server?.tools).toEqual([]);
     }
   });
+
+  it("validates the reviewed Postman protected-transfer recipe against discovered schemas", async () => {
+    const [server] = await loadMcpServers({
+      servers: {
+        postman: postmanProtectedTransferConfig,
+      },
+      fetch: createPostmanCapabilityFetch(),
+    });
+
+    expect(server?.snapshot).toMatchObject({
+      available: true,
+      capabilities: {
+        protectedDeliveryConfigured: true,
+        groupedDeliverySupported: true,
+        browserRelaySupported: true,
+        resultRedactionConfigured: true,
+        verificationConfigured: true,
+      },
+    });
+    for (const toolName of ["createEnvironment", "putEnvironment"] as const) {
+      const tool = server?.tools.find((candidate) => candidate.name === `mcp.postman.${toolName}`);
+      expect(tool?.riskClass).toBe("external-side-effect");
+      expect(tool?.protectedArguments).toEqual([{
+        path: "/environment/values/*/value",
+        handling: { persistence: "destination-managed", sharing: "workspace" },
+        destination: { type: "mcp-argument", serverId: "postman", toolName },
+      }]);
+      expect(tool?.capabilityMetadata).toEqual({
+        protectedInput: { groupedDelivery: true, sources: ["browser"] },
+      });
+    }
+    expect(server?.tools.find((tool) => tool.name === "mcp.postman.getEnvironment")?.capabilityMetadata)
+      .toEqual({
+        verification: {
+          verifies: ["mcp.postman.createEnvironment", "mcp.postman.putEnvironment"],
+        },
+      });
+    expect(server?.tools.find((tool) => tool.name === "mcp.postman.getCollection")?.capabilityMetadata)
+      .toEqual({
+        verification: {
+          verifies: ["mcp.postman.createCollection", "mcp.postman.putCollection"],
+        },
+      });
+    const readBack = await server?.tools.find((tool) => tool.name === "mcp.postman.getEnvironment")
+      ?.run({ environmentId: "environment-fixture" });
+    expect(readBack).toMatchObject({
+      ok: true,
+      metadata: { resultRedactionApplied: true },
+    });
+    expect(readBack?.content).toContain("service_client_id");
+    expect(readBack?.content).toContain('"type": "secret"');
+    expect(readBack?.content).toContain("[PROTECTED_VALUE]");
+    expect(JSON.stringify(readBack)).not.toContain(POSTMAN_READ_BACK_SECRET);
+    await server?.stop();
+  });
+
+  it("fails the reviewed Postman recipe closed when the protected schema path changes", async () => {
+    const [server] = await loadMcpServers({
+      servers: {
+        postman: postmanProtectedTransferConfig,
+      },
+      fetch: createPostmanCapabilityFetch({ omitEnvironmentValue: true }),
+    });
+
+    expect(server?.snapshot).toMatchObject({ available: false });
+    expect(server?.snapshot.error).toMatch(/does not match the input schema/u);
+    expect(server?.snapshot.error).not.toContain("/environment/values");
+    expect(server?.tools).toEqual([]);
+  });
+
+  it("rejects unknown, duplicate, and overlapping MCP result redaction declarations", async () => {
+    const invalidDeclarations: Array<Record<string, string[]>> = [
+      { missingTool: ["/environment/values/*/value"] },
+      { getEnvironment: ["/environment/values/*/value", "/environment/values/*/value"] },
+      { getEnvironment: ["/environment/values", "/environment/values/*/value"] },
+    ];
+    for (const redactedToolResultPaths of invalidDeclarations) {
+      const [server] = await loadMcpServers({
+        servers: {
+          postman: {
+            ...postmanProtectedTransferConfig,
+            redactedToolResultPaths,
+          },
+        },
+        fetch: createPostmanCapabilityFetch(),
+      });
+      expect(server?.snapshot.available).toBe(false);
+      expect(server?.snapshot.error).toMatch(/unknown tool|result redaction/u);
+      expect(server?.snapshot.error).not.toContain("/environment/values");
+      expect(server?.tools).toEqual([]);
+    }
+  });
 });
+
+const postmanProtectedTransferConfig = {
+  transport: "http" as const,
+  url: "https://postman-mcp.example.test",
+  includeTools: [
+    "getAuthenticatedUser",
+    "getWorkspaces",
+    "getCollections",
+    "getCollection",
+    "getEnvironments",
+    "getEnvironment",
+    "createCollection",
+    "putCollection",
+    "createEnvironment",
+    "putEnvironment",
+  ],
+  toolRiskClasses: {
+    getAuthenticatedUser: "read-only-network" as const,
+    getWorkspaces: "read-only-network" as const,
+    getCollections: "read-only-network" as const,
+    getCollection: "read-only-network" as const,
+    getEnvironments: "read-only-network" as const,
+    getEnvironment: "read-only-network" as const,
+    createCollection: "external-side-effect" as const,
+    putCollection: "external-side-effect" as const,
+    createEnvironment: "external-side-effect" as const,
+    putEnvironment: "external-side-effect" as const,
+  },
+  protectedToolArguments: {
+    createEnvironment: {
+      paths: ["/environment/values/*/value"],
+      handling: { persistence: "destination-managed" as const, sharing: "workspace" as const },
+      groupedDelivery: true,
+      browserRelay: true,
+    },
+    putEnvironment: {
+      paths: ["/environment/values/*/value"],
+      handling: { persistence: "destination-managed" as const, sharing: "workspace" as const },
+      groupedDelivery: true,
+      browserRelay: true,
+    },
+  },
+  redactedToolResultPaths: {
+    getEnvironment: ["/environment/values/*/value"],
+  },
+  toolVerificationRelationships: {
+    getEnvironment: ["createEnvironment", "putEnvironment"],
+    getCollection: ["createCollection", "putCollection"],
+  },
+};
+
+const POSTMAN_READ_BACK_SECRET = "postman-read-back-secret-that-must-not-survive";
+
+function createPostmanCapabilityFetch(options: { omitEnvironmentValue?: boolean } = {}) {
+  return async (_url: string, init?: { body?: string }) => {
+    const payload = JSON.parse(init?.body ?? "{}") as {
+      id?: number;
+      method?: string;
+      params?: { name?: string };
+    };
+    const result = payload.method === "initialize"
+      ? { capabilities: { tools: {} } }
+      : payload.method === "tools/list"
+        ? { tools: postmanTools(options) }
+        : payload.method === "tools/call" && payload.params?.name === "getEnvironment"
+          ? {
+              content: [{
+                type: "text",
+                text: JSON.stringify({
+                  environment: {
+                    id: "environment-fixture",
+                    name: "Service credentials",
+                    values: [{
+                      enabled: true,
+                      key: "service_client_id",
+                      type: "secret",
+                      value: POSTMAN_READ_BACK_SECRET,
+                    }],
+                  },
+                }),
+              }],
+            }
+          : {};
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({ jsonrpc: "2.0", id: payload.id, result }),
+      text: async () => "",
+    };
+  };
+}
+
+function postmanTools(options: { omitEnvironmentValue?: boolean }) {
+  const environmentItemProperties = {
+    enabled: { type: "boolean" },
+    key: { type: "string" },
+    type: { type: "string", enum: ["secret", "default"] },
+    ...(options.omitEnvironmentValue === true ? {} : { value: { type: "string" } }),
+  };
+  const environmentSchema = {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      values: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: environmentItemProperties,
+        },
+      },
+    },
+  };
+  const schemas: Record<string, Record<string, unknown>> = {
+    getAuthenticatedUser: { type: "object", properties: {} },
+    getWorkspaces: { type: "object", properties: {} },
+    getCollections: { type: "object", properties: { workspace: { type: "string" } } },
+    getCollection: { type: "object", properties: { collectionId: { type: "string" } }, required: ["collectionId"] },
+    getEnvironments: { type: "object", properties: { workspace: { type: "string" } } },
+    getEnvironment: { type: "object", properties: { environmentId: { type: "string" } }, required: ["environmentId"] },
+    createCollection: { type: "object", properties: { workspace: { type: "string" }, collection: { type: "object" } }, required: ["workspace", "collection"] },
+    putCollection: { type: "object", properties: { collectionId: { type: "string" }, collection: { type: "object" } }, required: ["collectionId", "collection"] },
+    createEnvironment: { type: "object", properties: { workspace: { type: "string" }, environment: environmentSchema }, required: ["workspace"] },
+    putEnvironment: { type: "object", properties: { environmentId: { type: "string" }, environment: environmentSchema }, required: ["environmentId"] },
+  };
+  return Object.entries(schemas).map(([name, inputSchema]) => ({
+    name,
+    description: `Sanitized Postman ${name} fixture.`,
+    inputSchema,
+  }));
+}

@@ -621,9 +621,74 @@ When one tool call contains two to eight protected browser sources, EstaCoda bin
 
 `groupedDelivery` and `browserRelay` default to `true` for an existing protected declaration and are enforced by the secure dispatcher. Set either to `false` when the integration does not support that capability. `toolVerificationRelationships` maps a read-only verification tool to one or more mutation tools using their unprefixed MCP names.
 
-On MCP discovery or reload, EstaCoda validates configured tool names and JSON Pointer patterns against the actual MCP input schemas. Unknown tools, missing or incompatible paths, duplicates, overlapping paths, and risk conflicts leave that server unavailable. Diagnostics report only whether protected delivery, grouped delivery, browser relay, and verification are configured; they do not print protected paths or values.
+On MCP discovery or reload, EstaCoda validates configured tool names and JSON Pointer patterns against the discovered tools and actual MCP input schemas. Unknown tools, missing or incompatible paths, duplicates, overlapping paths, and risk conflicts leave that server unavailable. Diagnostics report only whether protected delivery, grouped delivery, browser relay, result redaction, and verification are configured; they do not print protected paths or values.
 
-The reviewed `config.mcp.setup` tool accepts these structured fields. The CLI accepts the equivalent JSON objects through `--protected-tool-arguments-json` and `--tool-verification-relationships-json`.
+`redactedToolResultPaths` declares structured JSON result fields that must be replaced before an MCP result reaches the model or persistence. If the reviewed structure is absent or the response is not structured JSON, EstaCoda withholds the complete result. The reviewed `config.mcp.setup` tool accepts these structured fields. The CLI accepts the equivalent JSON objects through `--protected-tool-arguments-json`, `--redacted-tool-result-paths-json`, and `--tool-verification-relationships-json`.
+
+#### Postman protected-transfer recipe
+
+This is a reviewed configuration recipe over generic MCP behavior, not a Postman-specific Setup Editor feature. It is pinned to the inspected `@postman/postman-mcp-server` `2.11.2` minimal schemas:
+
+```json
+{
+  "mcpServers": {
+    "postman": {
+      "command": "npx",
+      "args": ["--yes", "@postman/postman-mcp-server@2.11.2"],
+      "envRefs": { "POSTMAN_API_KEY": "POSTMAN_API_KEY" },
+      "trust": "conservative",
+      "includeTools": [
+        "getAuthenticatedUser", "getWorkspaces",
+        "getCollections", "getCollection",
+        "getEnvironments", "getEnvironment",
+        "createCollection", "putCollection",
+        "createEnvironment", "putEnvironment"
+      ],
+      "toolRiskClasses": {
+        "getAuthenticatedUser": "read-only-network",
+        "getWorkspaces": "read-only-network",
+        "getCollections": "read-only-network",
+        "getCollection": "read-only-network",
+        "getEnvironments": "read-only-network",
+        "getEnvironment": "read-only-network",
+        "createCollection": "external-side-effect",
+        "putCollection": "external-side-effect",
+        "createEnvironment": "external-side-effect",
+        "putEnvironment": "external-side-effect"
+      },
+      "protectedToolArguments": {
+        "createEnvironment": {
+          "paths": ["/environment/values/*/value"],
+          "handling": {
+            "persistence": "destination-managed",
+            "sharing": "workspace"
+          },
+          "groupedDelivery": true,
+          "browserRelay": true
+        },
+        "putEnvironment": {
+          "paths": ["/environment/values/*/value"],
+          "handling": {
+            "persistence": "destination-managed",
+            "sharing": "workspace"
+          },
+          "groupedDelivery": true,
+          "browserRelay": true
+        }
+      },
+      "redactedToolResultPaths": {
+        "getEnvironment": ["/environment/values/*/value"]
+      },
+      "toolVerificationRelationships": {
+        "getEnvironment": ["createEnvironment", "putEnvironment"],
+        "getCollection": ["createCollection", "putCollection"]
+      }
+    }
+  }
+}
+```
+
+Keep the Postman API key in the selected profile's `.env`. Create a dedicated environment and send its two to eight `type: "secret"` variables in one protected call, which produces one grouped approval and one remote invocation. Collections should use variable references such as `{{service_client_id}}`; never place copied credential values in collection content. `getEnvironment` then exposes names and types while the configured result rule removes values, and `getCollection` verifies the references. Because `putEnvironment` replaces state, read and preserve all intended fields before using it. Review the schemas and update the pin deliberately when upgrading the MCP package.
 
 ### skills
 

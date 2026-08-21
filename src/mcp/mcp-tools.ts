@@ -20,6 +20,7 @@ export type MCPServerCapabilitySummary = {
   protectedDeliveryConfigured: boolean;
   groupedDeliverySupported: boolean;
   browserRelaySupported: boolean;
+  resultRedactionConfigured: boolean;
   verificationConfigured: boolean;
 };
 
@@ -214,13 +215,13 @@ function createMcpTool(
     isAvailable: () => true,
     run: async (input: Record<string, unknown>) => {
       const result = await client.callTool(tool.name, input);
-      return normalizeMcpResult(result);
+      return normalizeMcpResult(result, config.redactedToolResultPaths?.[tool.name]);
     }
   };
 }
 
 export function summarizeMcpCapabilityConfig(
-  config: Pick<MCPServerConfig, "protectedToolArguments" | "toolVerificationRelationships">
+  config: Pick<MCPServerConfig, "protectedToolArguments" | "redactedToolResultPaths" | "toolVerificationRelationships">
 ): MCPServerCapabilitySummary {
   const protectedDeclarations = Object.values(config.protectedToolArguments ?? {});
   return {
@@ -229,6 +230,7 @@ export function summarizeMcpCapabilityConfig(
       protectedDeclarations.every((declaration) => declaration.groupedDelivery !== false),
     browserRelaySupported: protectedDeclarations.length > 0 &&
       protectedDeclarations.every((declaration) => declaration.browserRelay !== false),
+    resultRedactionConfigured: Object.keys(config.redactedToolResultPaths ?? {}).length > 0,
     verificationConfigured: Object.keys(config.toolVerificationRelationships ?? {}).length > 0
   };
 }
@@ -256,6 +258,14 @@ export function validateMcpCapabilityConfiguration(
     }
     if (declaration.paths.some((path) => !schemaAcceptsProtectedString(tool.inputSchema, path))) {
       return `MCP protected argument mapping does not match the input schema for tool ${boundedToolName(toolName)}.`;
+    }
+  }
+  for (const [toolName, paths] of Object.entries(config.redactedToolResultPaths ?? {})) {
+    if (!byName.has(toolName)) return unknownCapabilityTool(toolName);
+    if (paths.length === 0 || paths.length > 8 ||
+      paths.some((path) => parseProtectedArgumentPattern(path) === undefined) ||
+      new Set(paths).size !== paths.length || protectedPatternsOverlap(paths)) {
+      return `MCP result redaction configuration is invalid for tool ${boundedToolName(toolName)}.`;
     }
   }
   for (const [verificationTool, mutationTools] of Object.entries(config.toolVerificationRelationships ?? {})) {
@@ -631,11 +641,23 @@ function promptsEnabled(config: MCPServerConfig): boolean {
   return config.exposePrompts ?? config.tools?.prompts ?? false;
 }
 
-export function normalizeMcpResult(result: unknown): ToolResult {
+export function normalizeMcpResult(result: unknown, redactedPaths: readonly string[] = []): ToolResult {
+  const protectedResult = redactedPaths.length === 0
+    ? result
+    : redactStructuredMcpResult(result, redactedPaths);
+  if (protectedResult === undefined) {
+    return {
+      ok: false,
+      content: "MCP response withheld because its configured result redaction could not be applied safely.",
+      metadata: { resultRedactionApplied: false }
+    };
+  }
+  result = protectedResult;
   if (typeof result === "string") {
     return {
       ok: true,
-      content: result
+      content: result,
+      ...(redactedPaths.length === 0 ? {} : { metadata: { resultRedactionApplied: true } })
     };
   }
 
@@ -672,9 +694,79 @@ export function normalizeMcpResult(result: unknown): ToolResult {
       : rendered,
     metadata: {
       ...boundedMetadata,
+      ...(redactedPaths.length === 0 ? {} : { resultRedactionApplied: true }),
       ...(structuralSummary === undefined ? {} : { _estacoda_context_summary: structuralSummary })
     }
   };
+}
+
+function redactStructuredMcpResult(result: unknown, paths: readonly string[]): unknown | undefined {
+  if (typeof result === "string") {
+    const redacted = redactStructuredMcpText(result, paths);
+    return redacted;
+  }
+  if (typeof result !== "object" || result === null || Array.isArray(result)) return undefined;
+  const record = result as Record<string, unknown>;
+  if (!Array.isArray(record.content)) {
+    const payload = structuredClone(record);
+    return redactStructuredPayload(payload, paths) ? payload : undefined;
+  }
+
+  const content: unknown[] = [];
+  for (const part of record.content) {
+    if (typeof part !== "object" || part === null || Array.isArray(part)) return undefined;
+    const contentPart = part as Record<string, unknown>;
+    if (contentPart.type !== "text" || typeof contentPart.text !== "string") return undefined;
+    const text = redactStructuredMcpText(contentPart.text, paths);
+    if (text === undefined) return undefined;
+    content.push({ type: "text", text });
+  }
+  return {
+    content,
+    ...(record.isError === true ? { isError: true } : {})
+  };
+}
+
+function redactStructuredMcpText(text: string, paths: readonly string[]): string | undefined {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (!redactStructuredPayload(payload, paths)) return undefined;
+  return JSON.stringify(payload, null, 2);
+}
+
+function redactStructuredPayload(payload: unknown, paths: readonly string[]): boolean {
+  return paths.every((path) => {
+    const segments = parseProtectedArgumentPattern(path);
+    return segments !== undefined && redactStructuredPath(payload, segments, 0);
+  });
+}
+
+function redactStructuredPath(current: unknown, segments: readonly string[], index: number): boolean {
+  const segment = segments[index];
+  if (segment === undefined) return false;
+  const leaf = index === segments.length - 1;
+  if (segment === "*") {
+    if (!Array.isArray(current)) return false;
+    if (leaf) {
+      for (let itemIndex = 0; itemIndex < current.length; itemIndex += 1) {
+        current[itemIndex] = "[PROTECTED_VALUE]";
+      }
+      return true;
+    }
+    return current.length === 0 || current.every((entry) => redactStructuredPath(entry, segments, index + 1));
+  }
+  if (typeof current !== "object" || current === null || Array.isArray(current)) return false;
+  const record = current as Record<string, unknown>;
+  if (leaf) {
+    if (Object.hasOwn(record, segment)) record[segment] = "[PROTECTED_VALUE]";
+    return true;
+  }
+  if (!Object.hasOwn(record, segment)) return false;
+  return redactStructuredPath(record[segment], segments, index + 1);
 }
 
 function mcpStructuralSummary(content: string): string | undefined {
