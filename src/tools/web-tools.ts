@@ -14,6 +14,7 @@ import type {
   BrowserFindResult,
   BrowserLocatorCandidate,
   BrowserNavigateInput,
+  BrowserScreenshotResult,
   BrowserSnapshot,
   BrowserStateIdentity,
   BrowserTab,
@@ -298,8 +299,10 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
     createBrowserFindTool(browserBackend, deriveBrowserInput),
     createBrowserActionTool({
       name: "browser.click",
-      description: browserBackend.capabilities.visibleRegionActions
-        ? "Click by semantic locator, element ref, or a runtime-grounded visible regionRef with its source canonical identity and tabRef. Region coordinates are resolved and hit-tested by the browser; the model never supplies coordinates."
+      description: browserBackend.capabilities.visibleRegionActions && browserBackend.capabilities.screenshots
+        ? "Click by semantic locator, current element/region ref, or a one-use visualTarget from a governed screenshot. Visual coordinates must resolve to a grounded current target and still pass normal native-action security."
+        : browserBackend.capabilities.visibleRegionActions
+          ? "Click by semantic locator, element ref, or a runtime-grounded visible regionRef with its source canonical identity and tabRef. Region coordinates are resolved and hit-tested by the browser; the model never supplies coordinates."
         : "Click by semantic locator or element ref with its source canonical identity and tabRef.",
       progressLabel: "clicking browser element",
       browserBackend,
@@ -308,11 +311,17 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       inputSchema: {
         type: "object",
         properties: {
-          ...browserTargetInputProperties({ allowRegion: browserBackend.capabilities.visibleRegionActions }),
+          ...browserTargetInputProperties({
+            allowRegion: browserBackend.capabilities.visibleRegionActions,
+            allowVisual: browserBackend.capabilities.visibleRegionActions && browserBackend.capabilities.screenshots
+          }),
           sessionId: { type: "string" },
           ...browserWaitInputProperties()
         },
-        oneOf: browserTargetOneOf({ allowRegion: browserBackend.capabilities.visibleRegionActions })
+        oneOf: browserTargetOneOf({
+          allowRegion: browserBackend.capabilities.visibleRegionActions,
+          allowVisual: browserBackend.capabilities.visibleRegionActions && browserBackend.capabilities.screenshots
+        })
       }
     }),
     createBrowserTypeTool(browserBackend, deriveBrowserInput),
@@ -607,7 +616,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
     },
     {
       name: "browser.screenshot",
-      description: "Capture a screenshot of the active browser page and save it under .estacoda/browser/screenshots.",
+      description: "Capture a sanitized, viewport-bounded screenshot of the current controlled tab for explicit visual inspection.",
       inputSchema: {
         type: "object",
         properties: {
@@ -643,13 +652,17 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           content: [
             `Screenshot: ${saved.path}`,
             `MIME: ${screenshot.mimeType}`,
-            `Bytes: ${saved.bytes}`
-          ].join("\n"),
+            `Bytes: ${saved.bytes}`,
+            screenshot.observation === undefined ? undefined : `Screenshot ID: ${screenshot.observation.screenshotId}`,
+            screenshot.observation === undefined ? undefined : `Viewport pixels: ${screenshot.observation.viewport.pixelWidth}x${screenshot.observation.viewport.pixelHeight}`,
+            screenshot.observation === undefined ? undefined : `Sanitized masks: ${screenshot.observation.maskedRegionCount}`
+          ].filter((line): line is string => line !== undefined).join("\n"),
           metadata: {
             backend: browserBackend.kind,
             path: saved.path,
             mimeType: screenshot.mimeType,
-            bytes: saved.bytes
+            bytes: saved.bytes,
+            ...(screenshot.observation === undefined ? {} : { observation: screenshot.observation })
           }
         };
       }
@@ -660,7 +673,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
     }),
     {
       name: "browser.vision",
-      description: "Capture a browser screenshot and analyze it with the configured vision route.",
+      description: "Fallback visual inspection for ambiguous, missing, conflicting, or ineffective semantic browser evidence. Captures only the sanitized current viewport.",
       inputSchema: {
         type: "object",
         properties: {
@@ -707,7 +720,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         );
         const analysis = await options.visionDispatcher.dispatch({
           path: saved.path,
-          prompt: input.prompt,
+          prompt: governedBrowserVisionPrompt(input.prompt, screenshot.observation),
           mode: "screenshot"
         }, context);
         return inheritEphemeralVisionImages({
@@ -720,7 +733,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             ...(analysis.metadata ?? {}),
             backend: browserBackend.kind,
             screenshotPath: saved.path,
-            screenshotBytes: saved.bytes
+            screenshotBytes: saved.bytes,
+            ...(screenshot.observation === undefined ? {} : { observation: screenshot.observation })
           }
         }, analysis);
       }
@@ -1565,7 +1579,8 @@ function bindReviewedBrowserActionInput(
     regionRef: isRegionRef ? ref : undefined,
     identity: { ...preflight.identity },
     tabRef: preflight.tabRef,
-    locator: undefined
+    locator: undefined,
+    visualTarget: undefined
   };
 }
 
@@ -2632,19 +2647,46 @@ function renderDeltaElement(element: BrowserActionDeltaElement): string {
 function renderBrowserFindResult(result: BrowserFindResult): string {
   if (result.status === "not-found") {
     const heading = `No visible, enabled browser element matched exactly at ${renderBrowserIdentity(result.identity)} on tab ${result.tabRef}.`;
-    if ((result.nearbyCandidates?.length ?? 0) === 0) return heading;
+    const escalation = renderVisualEscalation(result.visualEscalation?.reason);
+    if ((result.nearbyCandidates?.length ?? 0) === 0) return [heading, escalation].filter(Boolean).join("\n");
     return [
       heading,
       "Nearby current-document candidates (not exact matches; inspect structure before acting):",
-      ...renderBrowserCandidateRegions(result.nearbyCandidates!)
-    ].join("\n");
+      ...renderBrowserCandidateRegions(result.nearbyCandidates!),
+      escalation
+    ].filter((line): line is string => line !== undefined).join("\n");
   }
   const heading = result.status === "ambiguous"
     ? `Locator is ambiguous: ${result.candidates.length} candidates matched. Refine it instead of guessing.`
     : result.candidates[0]?.kind === "region"
       ? "Found one grounded visible region. It may be used with browser.extract or browser.click via regionRef."
       : "Found one browser element.";
-  return [heading, ...result.candidates.map(renderBrowserLocatorCandidate)].join("\n");
+  return [heading, ...result.candidates.map(renderBrowserLocatorCandidate), renderVisualEscalation(result.visualEscalation?.reason)]
+    .filter((line): line is string => line !== undefined).join("\n");
+}
+
+function renderVisualEscalation(
+  reason: NonNullable<BrowserFindResult["visualEscalation"]>["reason"] | undefined
+): string | undefined {
+  if (reason === undefined) return undefined;
+  return reason === "semantic-match-ambiguous"
+    ? "Semantic matches remain ambiguous. Request browser.vision for bounded current-viewport layout evidence if semantic refinement cannot disambiguate them."
+    : reason === "visible-text-without-grounded-action"
+      ? "The requested text is visible but no grounded action matches it. Request browser.vision to inspect its current layout."
+      : "No grounded target was found. Request browser.vision if the control may be visually discoverable.";
+}
+
+function governedBrowserVisionPrompt(
+  prompt: string | undefined,
+  observation: BrowserScreenshotResult["observation"]
+): string {
+  return [
+    prompt?.trim().length ? prompt.trim() : "Inspect the current viewport for the browser control or layout relevant to the active task.",
+    "This image is a sanitized, current-viewport fallback. Describe only visible layout and candidate controls; do not infer or reconstruct masked values.",
+    observation === undefined
+      ? "Prefer semantic labels and relative layout. Do not propose arbitrary JavaScript or DOM access."
+      : `For a visual click fallback, report only candidates that appear to be real controls, using screenshot pixel coordinates within ${observation.viewport.pixelWidth}x${observation.viewport.pixelHeight} and screenshotId ${observation.screenshotId}. Coordinates remain advisory until the runtime resolves them to a grounded current target.`
+  ].join("\n\n");
 }
 
 function renderBrowserLocatorCandidate(candidate: BrowserLocatorCandidate): string {
@@ -2708,11 +2750,24 @@ function browserLocatorSchema(): Record<string, unknown> {
   };
 }
 
-function browserTargetInputProperties(options: { allowRegion?: boolean } = {}): Record<string, unknown> {
+function browserTargetInputProperties(options: { allowRegion?: boolean; allowVisual?: boolean } = {}): Record<string, unknown> {
   return {
     ref: { type: "string", description: "Element ref from a snapshot; canonical identity and tabRef are required with refs." },
     ...(options.allowRegion === true ? {
       regionRef: { type: "string", description: "Runtime-grounded visible region ref from browser.find/snapshot; canonical identity and tabRef are required." }
+    } : {}),
+    ...(options.allowVisual === true ? {
+      visualTarget: {
+        type: "object",
+        additionalProperties: false,
+        description: "One-use fallback from the most recent governed viewport screenshot. Pixel coordinates must hit a runtime-grounded current target.",
+        properties: {
+          screenshotId: { type: "string" },
+          x: { type: "number", minimum: 0 },
+          y: { type: "number", minimum: 0 }
+        },
+        required: ["screenshotId", "x", "y"]
+      }
     } : {}),
     identity: browserStateIdentitySchema("Canonical snapshot identity that produced ref."),
     tabRef: { type: "string", description: "Controlled tab that produced ref." },
@@ -2720,11 +2775,12 @@ function browserTargetInputProperties(options: { allowRegion?: boolean } = {}): 
   };
 }
 
-function browserTargetOneOf(options: { allowRegion?: boolean } = {}): Array<{ required: string[] }> {
+function browserTargetOneOf(options: { allowRegion?: boolean; allowVisual?: boolean } = {}): Array<{ required: string[] }> {
   return [
     { required: ["locator"] },
     { required: ["ref", "identity", "tabRef"] },
-    ...(options.allowRegion === true ? [{ required: ["regionRef", "identity", "tabRef"] }] : [])
+    ...(options.allowRegion === true ? [{ required: ["regionRef", "identity", "tabRef"] }] : []),
+    ...(options.allowVisual === true ? [{ required: ["visualTarget"] }] : [])
   ];
 }
 

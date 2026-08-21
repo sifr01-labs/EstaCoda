@@ -92,6 +92,38 @@ function terminalNavigation(url: string, status: number, documentEpoch: number):
 }
 
 describe("BrowserObservationGuard", () => {
+  it("recommends bounded visual inspection for ambiguous semantics without stopping exploration", () => {
+    const guard = new BrowserObservationGuard(3);
+    const ambiguous = execution({
+      tool: "browser.find",
+      toolInput: { locator: { name: "TikTok Connect" } },
+      metadata: {
+        status: "ambiguous",
+        candidates: [{ ref: "@e1" }, { ref: "@e2" }],
+        identity: { documentEpoch: 1, actionRevision: 1, observationId: 1 },
+        tabRef: "@t1",
+        visualEscalation: { reason: "semantic-match-ambiguous" }
+      }
+    });
+
+    expect(guard.observe([ambiguous])).toMatchObject({
+      evidenceAdvanced: true,
+      shouldStop: false,
+      visualEscalationReason: "semantic-match-ambiguous"
+    });
+  });
+
+  it("suggests visual recovery after one native no-change action but still bounds its repeat", () => {
+    const guard = new BrowserObservationGuard(3);
+    const ineffective = action({ ref: "@e1" }, "action-no-change");
+
+    expect(guard.observe([ineffective])).toMatchObject({
+      actionDispatched: true,
+      shouldStop: false,
+      visualEscalationReason: "native-action-no-change"
+    });
+    expect(guard.observe([ineffective])).toMatchObject({ shouldStop: true });
+  });
   it("treats a focused find and a structural snapshot as distinct new evidence on an unchanged page", () => {
     const guard = new BrowserObservationGuard(3);
     const find = execution({

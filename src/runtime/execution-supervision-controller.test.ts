@@ -115,6 +115,7 @@ describe("ExecutionSupervisionController", () => {
     expect(supervision.consumePromptState()).toMatchObject({
       browserEvidenceNudge: true,
       browserRetargetNudge: true,
+      browserVisualEscalationReason: "target-resolution-failed",
       suppressedBrowserTools: []
     });
     expect(supervision.assessProgress([failedTarget]).terminationCause).toBe("browser_no_progress");

@@ -406,6 +406,7 @@ export class ProviderTurnLoop {
           emptyResponseNudge: pendingEmptyResponseNudge,
           browserEvidenceNudge: supervisionPrompt.browserEvidenceNudge,
           browserRetargetNudge: supervisionPrompt.browserRetargetNudge,
+          browserVisualEscalationReason: supervisionPrompt.browserVisualEscalationReason,
           toolLoopProgressNudge: supervisionPrompt.toolLoopProgressNudge,
           reasoningOnlyPrefill: pendingReasoningOnlyPrefill,
           efficiencySignals: providerEfficiencySignals({
@@ -1116,6 +1117,7 @@ export class ProviderTurnLoop {
     emptyResponseNudge?: boolean;
     browserEvidenceNudge?: boolean;
     browserRetargetNudge?: boolean;
+    browserVisualEscalationReason?: string;
     toolLoopProgressNudge?: boolean;
     reasoningOnlyPrefill?: boolean;
     efficiencySignals?: string[];
@@ -1189,6 +1191,14 @@ export class ProviderTurnLoop {
       prompt.messages.push({
         role: "user",
         content: EXECUTION_SUPERVISION_PROMPTS.browserRetarget
+      });
+    }
+    if (input.browserVisualEscalationReason !== undefined) {
+      prompt.messages.push({
+        role: "user",
+        content: input.browserVisualEscalationReason === "repeated-incidental-match"
+          ? EXECUTION_SUPERVISION_PROMPTS.browserVisualRepeatedMatch
+          : EXECUTION_SUPERVISION_PROMPTS.browserVisual
       });
     }
     if (input.toolLoopProgressNudge === true) {

@@ -89,6 +89,7 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
     formAssociated: true,
     submit: true,
   };
+  visualSurface = { cssWidth: 16, cssHeight: 16, scrollX: 0, scrollY: 0, mutationRevision: 0 };
 
   send(data: string): void {
     const message = JSON.parse(data) as {
@@ -214,6 +215,18 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
       if (message.params?.expression === "document") {
         return { result: { objectId: "protected-document-object" } };
       }
+      if (typeof message.params?.expression === "string" &&
+          message.params.expression.includes("const domRevision")) {
+        return { result: { value: JSON.stringify({
+          ...this.visualSurface,
+          ...(message.params.expression.includes("const secretHint") ? { rects: [] } : {})
+        }) } };
+      }
+      if (typeof message.params?.expression === "string" &&
+          message.params.expression.includes("document.elementFromPoint(x, y)") &&
+          message.params.expression.includes("window.__estacodaElements.indexOf(current)")) {
+        return { result: { value: { ref: "@e1" } } };
+      }
       if (
         typeof message.params?.expression === "string" &&
         /^window\.__estacodaElements\?\.\[\d+\]$/u.test(message.params.expression)
@@ -309,7 +322,7 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
       return { frameTree: { frame: { id: this.frameId, url: this.snapshot.url } } };
     }
     if (method === "Page.captureScreenshot") {
-      return { data: "png-data" };
+      return { data: "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAGklEQVQ4jWP4TyFgGDXg/2gY/B8Ng//DIgwAXXj8LuMlDaEAAAAASUVORK5CYII=" };
     }
     return { ok: true, method };
   }

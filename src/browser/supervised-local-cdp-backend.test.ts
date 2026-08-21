@@ -1061,7 +1061,9 @@ describe("supervised local CDP backend", () => {
 
     showAuthenticatedHome(socket);
     await backend.press?.({ sessionId: "session-1", key: "Enter" });
-    await expect(backend.screenshot?.({ sessionId: "session-1" })).resolves.toMatchObject({ base64: "png-data" });
+    await expect(backend.screenshot?.({ sessionId: "session-1" })).resolves.toMatchObject({
+      observation: { captureScope: "viewport", sanitized: true }
+    });
     await expect(backend.cdp?.({ sessionId: "session-1", method: "Browser.getVersion" })).resolves.toBeDefined();
     const restoredSnapshot = await backend.snapshot?.({ sessionId: "session-1" });
     await expect(backend.extract?.({
@@ -1290,7 +1292,7 @@ describe("supervised local CDP backend", () => {
     await backend.releaseProtectedField?.(email!);
     await backend.releaseProtectedField?.(password!);
     await expect(backend.screenshot?.({ sessionId: "session-transient-transition" }))
-      .resolves.toMatchObject({ base64: "png-data" });
+      .resolves.toMatchObject({ observation: { captureScope: "viewport", sanitized: true } });
   });
 
   it("binds, delivers, and submits a one-time-code challenge as one local transaction", async () => {
@@ -1413,7 +1415,9 @@ describe("supervised local CDP backend", () => {
       String(message.params?.functionDeclaration).includes("this.click();")
     )).toBe(false);
     await backend.releaseProtectedField?.(destination!);
-    await expect(backend.screenshot?.({ sessionId: "session-auto-otp" })).resolves.toMatchObject({ base64: "png-data" });
+    await expect(backend.screenshot?.({ sessionId: "session-auto-otp" })).resolves.toMatchObject({
+      observation: { captureScope: "viewport", sanitized: true }
+    });
     await expect(backend.cdp?.({ sessionId: "session-auto-otp", method: "Browser.getVersion" })).resolves.toBeDefined();
     await expect(backend.extract?.({
       sessionId: "session-auto-otp",
@@ -1459,7 +1463,9 @@ describe("supervised local CDP backend", () => {
       message.method === "Runtime.callFunctionOn" &&
       String(message.params?.functionDeclaration).includes("this.value === ''")
     )).toHaveLength(1);
-    await expect(backend.screenshot?.({ sessionId: "session-partial-clear" })).resolves.toMatchObject({ base64: "png-data" });
+    await expect(backend.screenshot?.({ sessionId: "session-partial-clear" })).resolves.toMatchObject({
+      observation: { captureScope: "viewport", sanitized: true }
+    });
     expect(socket.sent.some((message) =>
       message.method === "Runtime.callFunctionOn" && String(message.params?.functionDeclaration).includes("this.click();")
     )).toBe(false);
@@ -1563,7 +1569,9 @@ describe("supervised local CDP backend", () => {
       message.method === "Runtime.callFunctionOn" &&
       String(message.params?.functionDeclaration).includes("this.value === ''")
     )).toBe(true);
-    await expect(backend.screenshot?.({ sessionId: "session-failed-submit-clear" })).resolves.toMatchObject({ base64: "png-data" });
+    await expect(backend.screenshot?.({ sessionId: "session-failed-submit-clear" })).resolves.toMatchObject({
+      observation: { captureScope: "viewport", sanitized: true }
+    });
     await expect(backend.cdp?.({ sessionId: "session-failed-submit-clear", method: "Browser.getVersion" })).resolves.toBeDefined();
     await expect(backend.extract?.({
       sessionId: "session-failed-submit-clear",
@@ -2034,6 +2042,38 @@ describe("supervised local CDP backend", () => {
     expect(page.sent.filter((message) =>
       message.method === "Runtime.evaluate" && String(message.params?.expression).includes(".click()")
     )).toHaveLength(beforeClicks);
+  });
+
+  it("resolves a one-use screenshot coordinate only to a current grounded target and expires it on viewport change", async () => {
+    const sockets = createSocketFactory();
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: sockets.webSocketFactory,
+      resolveHostname: () => ["93.184.216.34"]
+    });
+    await backend.navigate({ url: "https://example.com/start", sessionId: "session-visual-target" });
+    const page = sockets.pageSocket()!;
+    const first = await backend.screenshot?.({ sessionId: "session-visual-target" });
+
+    await expect(backend.preflightAction?.("click", {
+      sessionId: "session-visual-target",
+      visualTarget: { screenshotId: first!.observation!.screenshotId, x: 8, y: 8 }
+    })).resolves.toMatchObject({
+      action: "click",
+      target: { ref: "@e1", kind: "button" }
+    });
+    await expect(backend.preflightAction?.("click", {
+      sessionId: "session-visual-target",
+      visualTarget: { screenshotId: first!.observation!.screenshotId, x: 8, y: 8 }
+    })).rejects.toThrow(/expired/u);
+
+    const second = await backend.screenshot?.({ sessionId: "session-visual-target" });
+    page.visualSurface.scrollY = 20;
+    await expect(backend.preflightAction?.("click", {
+      sessionId: "session-visual-target",
+      visualTarget: { screenshotId: second!.observation!.screenshotId, x: 8, y: 8 }
+    })).rejects.toThrow(/scrolling, resizing, or a DOM change/u);
   });
 
   it("rejects a target that becomes non-interactable during security preflight", async () => {

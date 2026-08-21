@@ -119,6 +119,9 @@ export type BrowserFindResult = {
   candidates: BrowserLocatorCandidate[];
   /** Structurally grounded current-document candidates; never treated as exact matches. */
   nearbyCandidates?: BrowserLocatorCandidate[];
+  visualEscalation?: {
+    reason: "semantic-match-ambiguous" | "visible-text-without-grounded-action" | "grounded-target-not-found";
+  };
 };
 
 export type BrowserActionPreflightKind = "click" | "press" | "dialog";
@@ -321,6 +324,12 @@ export type BrowserActionInput = {
   full?: boolean;
   ref?: string;
   regionRef?: string;
+  /** Screenshot-bound fallback. Coordinates are viewport image pixels, never free browser coordinates. */
+  visualTarget?: {
+    screenshotId: string;
+    x: number;
+    y: number;
+  };
   identity?: BrowserStateIdentity;
   tabRef?: string;
   locator?: BrowserLocator;
@@ -374,6 +383,21 @@ export type BrowserConsoleEntry = {
 export type BrowserScreenshotResult = {
   mimeType: "image/png" | "image/jpeg";
   base64: string;
+  observation?: {
+    screenshotId: string;
+    sessionId?: string;
+    tabRef?: string;
+    identity?: BrowserStateIdentity;
+    captureScope: "viewport";
+    sanitized: true;
+    maskedRegionCount: number;
+    viewport: {
+      cssWidth: number;
+      cssHeight: number;
+      pixelWidth: number;
+      pixelHeight: number;
+    };
+  };
 };
 
 export type BrowserProtectedFieldVerificationPhase = "before-collection" | "before-delivery";

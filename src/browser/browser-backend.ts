@@ -5,7 +5,6 @@ import type {
   BrowserConsoleEntry,
   BrowserNavigateInput,
   BrowserNavigateResult,
-  BrowserScreenshotResult,
   BrowserSnapshot,
   BrowserSwitchTabInput
 } from "../contracts/browser.js";
@@ -29,6 +28,7 @@ import {
   browserCapabilities,
   validateBrowserBackendCapabilities
 } from "./browser-capabilities.js";
+import { captureGovernedBrowserScreenshot } from "./browser-visual-observation.js";
 
 export type { CdpFetchLike, CdpWebSocketEvent, CdpWebSocketFactory, CdpWebSocketLike } from "./cdp-client.js";
 
@@ -308,18 +308,15 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
       latestSessionId,
       input,
       webSocketFactory: options.webSocketFactory,
-      action: async (client) => {
-        const result = await client.send("Page.captureScreenshot", {
-          format: "png",
-          captureBeyondViewport: true
-        }) as { data?: unknown };
-        if (typeof result.data !== "string") {
-          throw new Error("CDP screenshot did not return image data.");
-        }
-        return {
-          mimeType: "image/png",
-          base64: result.data
-        } satisfies BrowserScreenshotResult;
+      action: async (client, sessionId) => {
+        const snapshot = await observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
+        const captured = await captureGovernedBrowserScreenshot({
+          client,
+          sessionId,
+          tabRef: snapshot.tab?.ref,
+          identity: snapshot.identity
+        });
+        return captured.screenshot;
       }
     }),
     dialog: (input = {}) => runCdpSessionAction({

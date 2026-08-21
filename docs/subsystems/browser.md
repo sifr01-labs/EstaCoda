@@ -151,7 +151,7 @@ Browser tools exposed to the agent:
 | `browser.navigate` | Navigate to URL |
 | `browser.snapshot` | Get accessible page snapshot |
 | `browser.find` | Find visible, enabled elements by semantic locator |
-| `browser.click` | Click by semantic locator or identity-scoped ref |
+| `browser.click` | Click by semantic locator, identity-scoped ref/region, or one-use governed visual target |
 | `browser.type` | Type by semantic locator or identity-scoped ref; optionally bind and immediately submit a one-time-code challenge |
 | `browser.fill_protected_form` | Fill related protected fields in one verified operator flow, optionally with a prebound submit control |
 | `browser.select` | Select an option by semantic locator or identity-scoped ref |
@@ -164,9 +164,17 @@ Browser tools exposed to the agent:
 | `browser.tabs` | List safe tabs in the current isolated browser session |
 | `browser.switch_tab` | Focus and control a safe tab by opaque ref |
 | `browser.cdp` | Raw CDP command |
-| `browser.screenshot` | Capture screenshot |
-| `browser.vision` | Analyze screenshot with vision |
+| `browser.screenshot` | Capture a sanitized current-viewport screenshot |
+| `browser.vision` | Analyze a sanitized current-viewport screenshot through the governed vision route |
 | `browser.dialog` | Respond to JS dialog |
+
+## Governed Visual Escalation
+
+Semantic snapshots remain the default browser observation. Ambiguous matching, visible text without a grounded action, target-resolution failure, native action without change, or an explicit agent request can recommend one `browser.vision` fallback. Repeated visual observations are fingerprinted and bounded by the same browser supervision path; vision does not disable loop detection or restore plan-driven continuation.
+
+The screenshot boundary captures only the current controlled tab and viewport. Before bytes leave the browser backend, the runtime locates password, token, key, secret, one-time-code, and credential value regions and composites opaque masks into the image. A capture is discarded when DOM mutation, scroll, or viewport signals change between inspection and capture. Protected-input transactions continue to block visual observation completely.
+
+When vision reports a pixel candidate, `browser.click.visualTarget` accepts the screenshot ID and viewport-image coordinate only once. The runtime verifies the same session, tab, document generation, action revision, viewport, scroll offset, and DOM mutation revision; hit-tests the point; and accepts it only if it resolves to a current runtime-grounded element or visible region. Normal action preflight, approval classification, native pointer hit-testing, URL policy, and settlement still run. Navigation, scrolling, resizing, DOM change, another screenshot, or the first resolution attempt expires the visual target. Raw coordinate dispatch, page JavaScript clicking, and reconstruction of masked values are not available through this path.
 
 ## URL Safety And Website Policy
 

@@ -9,6 +9,7 @@ const BROWSER_OBSERVATION_TOOLS = new Set([
   "browser.get_images",
   "browser.console",
   "browser.screenshot",
+  "browser.vision",
   "browser.cdp",
 ]);
 
@@ -32,6 +33,7 @@ const WHOLE_STATE_OBSERVATIONS = new Set([
   "browser.get_images",
   "browser.console",
   "browser.screenshot",
+  "browser.vision",
 ]);
 
 const TARGET_FAILURE_REASONS = new Set([
@@ -54,6 +56,13 @@ export type BrowserObservationAssessment = {
   shouldRetarget: boolean;
   shouldStop: boolean;
   suppressedTools: string[];
+  visualEscalationReason?:
+    | "semantic-match-ambiguous"
+    | "visible-text-without-grounded-action"
+    | "grounded-target-not-found"
+    | "target-resolution-failed"
+    | "native-action-no-change"
+    | "repeated-incidental-match";
 } | undefined;
 
 /**
@@ -121,7 +130,8 @@ export class BrowserObservationGuard {
         shouldNudge: false,
         shouldRetarget: false,
         shouldStop: false,
-        suppressedTools: []
+        suppressedTools: [],
+        visualEscalationReason: browserVisualEscalationReason(browserExecutions)
       });
     }
 
@@ -137,7 +147,10 @@ export class BrowserObservationGuard {
       shouldNudge: this.#noProgressCount === 1,
       shouldRetarget: false,
       shouldStop: this.#noProgressCount >= this.#repeatLimit - 1,
-      suppressedTools: [...this.#suppressedTools].sort()
+      suppressedTools: [...this.#suppressedTools].sort(),
+      visualEscalationReason: browserExecutions.some((execution) => execution.tool.name === "browser.find")
+        ? "repeated-incidental-match"
+        : browserVisualEscalationReason(browserExecutions)
     });
   }
 
@@ -156,7 +169,8 @@ export class BrowserObservationGuard {
       shouldNudge: !shouldStop,
       shouldRetarget: !shouldStop,
       shouldStop,
-      suppressedTools: [...this.#suppressedTools].sort()
+      suppressedTools: [...this.#suppressedTools].sort(),
+      visualEscalationReason: shouldStop ? undefined : "target-resolution-failed"
     });
   }
 
@@ -174,7 +188,8 @@ export class BrowserObservationGuard {
       shouldNudge: !shouldStop,
       shouldRetarget: false,
       shouldStop,
-      suppressedTools: [...this.#suppressedTools].sort()
+      suppressedTools: [...this.#suppressedTools].sort(),
+      visualEscalationReason: shouldStop ? undefined : "native-action-no-change"
     });
   }
 
@@ -223,6 +238,7 @@ function assessment(input: {
   shouldRetarget: boolean;
   shouldStop: boolean;
   suppressedTools: string[];
+  visualEscalationReason?: NonNullable<BrowserObservationAssessment>["visualEscalationReason"];
 }): NonNullable<BrowserObservationAssessment> {
   return {
     tool: [...new Set(input.executions.map((execution) => execution.tool.name))].sort().join(", "),
@@ -232,8 +248,22 @@ function assessment(input: {
     shouldNudge: input.shouldNudge,
     shouldRetarget: input.shouldRetarget,
     shouldStop: input.shouldStop,
-    suppressedTools: input.suppressedTools
+    suppressedTools: input.suppressedTools,
+    ...(input.visualEscalationReason === undefined ? {} : { visualEscalationReason: input.visualEscalationReason })
   };
+}
+
+function browserVisualEscalationReason(
+  executions: readonly ToolExecutionRecord[]
+): NonNullable<BrowserObservationAssessment>["visualEscalationReason"] | undefined {
+  for (const execution of executions) {
+    const value = execution.result?.metadata?.visualEscalation;
+    if (value === null || typeof value !== "object" || Array.isArray(value)) continue;
+    const reason = (value as { reason?: unknown }).reason;
+    if (reason === "semantic-match-ambiguous" || reason === "visible-text-without-grounded-action" ||
+        reason === "grounded-target-not-found") return reason;
+  }
+  return undefined;
 }
 
 function isStateChangingBrowserAction(execution: ToolExecutionRecord): boolean {

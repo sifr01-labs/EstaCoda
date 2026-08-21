@@ -16,7 +16,6 @@ import type {
   BrowserProtectedFieldInput,
   BrowserProtectedSourceInput,
   BrowserProtectedSourceReadInput,
-  BrowserScreenshotResult,
   BrowserSnapshot,
   BrowserStateIdentity,
   BrowserSwitchTabInput,
@@ -64,6 +63,11 @@ import {
 } from "./browser-interactability.js";
 import { dispatchNativeBrowserClick, NativeBrowserInputDispatchError } from "./native-input.js";
 import { browserCapabilities, validateBrowserBackendCapabilities } from "./browser-capabilities.js";
+import {
+  captureGovernedBrowserScreenshot,
+  inspectCurrentVisualSurface,
+  type BrowserVisualLeaseState
+} from "./browser-visual-observation.js";
 
 const SUPERVISED_LOCAL_CDP_CAPABILITIES = browserCapabilities({
   snapshots: true,
@@ -149,6 +153,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
   const latestSnapshots = new Map<string, BrowserSnapshot>();
   const latestSnapshotScopes = new Map<string, boolean>();
   const latestObservedUrls = new Map<string, string>();
+  const visualLeases = new Map<string, BrowserVisualLeaseState>();
   const protectedFields = new ProtectedBrowserFormTransactionController();
   const protectedSources = new ProtectedBrowserSourceController();
   let launchedChrome: LaunchedChrome | undefined;
@@ -158,6 +163,11 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
   let closed = false;
   const websitePolicy = loadWebsiteBlocklist(options.securityConfig?.websiteBlocklist ?? {});
   lifecycle?.start();
+  const clearVisualLeasesForSession = (sessionId: string): void => {
+    for (const [id, lease] of visualLeases) {
+      if (lease.sessionId === sessionId) visualLeases.delete(id);
+    }
+  };
 
   const getSession = async (input?: BrowserActionInput): Promise<ManagedBackendSession> => {
     const sessionId = requireSessionId(input?.sessionId);
@@ -167,6 +177,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       latestSnapshots.delete(sessionId);
       latestSnapshotScopes.delete(sessionId);
       latestObservedUrls.delete(sessionId);
+      clearVisualLeasesForSession(sessionId);
       await protectedFields.clearSession(sessionId);
       throw new BrowserSessionStateError("session_missing", `Browser session not found: ${sessionId}`);
     }
@@ -460,6 +471,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       latestSnapshots.delete(sessionId);
       latestSnapshotScopes.delete(sessionId);
       latestObservedUrls.delete(sessionId);
+      clearVisualLeasesForSession(sessionId);
       lifecycle?.unregister(sessionId);
       await closeLaunchedChromeIfIdle();
       return;
@@ -477,6 +489,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       latestSnapshots.delete(sessionId);
       latestSnapshotScopes.delete(sessionId);
       latestObservedUrls.delete(sessionId);
+      clearVisualLeasesForSession(sessionId);
     }
 
     try {
@@ -518,6 +531,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         latestSnapshots.delete(sessionId);
         latestSnapshotScopes.delete(sessionId);
         latestObservedUrls.delete(sessionId);
+        clearVisualLeasesForSession(sessionId);
       }
     }
   };
@@ -708,6 +722,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     lostSessions.clear();
     latestSnapshots.clear();
     latestSnapshotScopes.clear();
+    visualLeases.clear();
     configuredStack = undefined;
     launchedStack = undefined;
     try {
@@ -922,7 +937,21 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       }
       const session = await getSession(input);
       const { snapshot } = await captureSafeTargetSnapshot(session, input);
-      return findBrowserLocator(snapshot, input.locator);
+      const result = findBrowserLocator(snapshot, input.locator);
+      if (result.status === "ambiguous") {
+        return { ...result, visualEscalation: { reason: "semantic-match-ambiguous" as const } };
+      }
+      if (result.status === "not-found") {
+        return {
+          ...result,
+          visualEscalation: {
+            reason: locatorTextAppearsInSnapshot(snapshot, input.locator)
+              ? "visible-text-without-grounded-action" as const
+              : "grounded-target-not-found" as const
+          }
+        };
+      }
+      return result;
     },
     preflightAction: async (action, input) => {
       const session = await getSession(input);
@@ -948,7 +977,10 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         return browserActionPreflight(snapshot, action, inspected);
       }
 
-      const target = resolveBrowserTarget(snapshot, input);
+      const resolvedInput = input.visualTarget === undefined
+        ? input
+        : await resolveVisualTargetInput(session, snapshot, input, visualLeases);
+      const target = resolveBrowserTarget(snapshot, resolvedInput);
       const inspected = await inspectBrowserActionTarget(session, target.ref);
       if (inspected === undefined) {
         throw new Error("Browser action target structure could not be inspected safely.");
@@ -1239,17 +1271,18 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       const session = await getSession(input);
       await protectedFields.reconcile(session);
       protectedFields.assertVisualObservationAllowed(session.key);
-      const result = await session.supervisor.send("Page.captureScreenshot", {
-        format: "png",
-        captureBeyondViewport: true
-      }) as { data?: unknown };
-      if (typeof result.data !== "string") {
-        throw new Error("CDP screenshot did not return image data.");
+      const snapshot = await captureSessionSnapshot(session);
+      const captured = await captureGovernedBrowserScreenshot({
+        client: session.supervisor,
+        sessionId: session.key,
+        tabRef: snapshot.tab?.ref,
+        identity: snapshot.identity
+      });
+      for (const [id, lease] of visualLeases) {
+        if (lease.sessionId === session.key) visualLeases.delete(id);
       }
-      return {
-        mimeType: "image/png",
-        base64: result.data
-      } satisfies BrowserScreenshotResult;
+      visualLeases.set(captured.lease.screenshotId, captured.lease);
+      return captured.screenshot;
     },
     download: async (input: BrowserDownloadInput): Promise<BrowserDownloadCaptureResult> => {
       const session = await getSession(input);
@@ -1705,6 +1738,101 @@ function assertElementOnlyBrowserTarget(
     currentIdentity: snapshot.identity,
     currentTabRef: snapshot.tab?.ref
   });
+}
+
+async function resolveVisualTargetInput(
+  session: ManagedBackendSession,
+  snapshot: BrowserSnapshot,
+  input: BrowserActionInput,
+  leases: Map<string, BrowserVisualLeaseState>
+): Promise<BrowserActionInput> {
+  const visual = input.visualTarget;
+  if (visual === undefined || input.ref !== undefined || input.regionRef !== undefined || input.locator !== undefined) {
+    throw new BrowserTargetError({
+      reason: "invalid-browser-target",
+      message: "A visual browser target must be the only target and must reference a current governed screenshot.",
+      currentSessionId: snapshot.sessionId,
+      currentIdentity: snapshot.identity,
+      currentTabRef: snapshot.tab?.ref
+    });
+  }
+  const lease = leases.get(visual.screenshotId);
+  leases.delete(visual.screenshotId);
+  const currentTabRef = snapshot.tab?.ref;
+  const stale = lease === undefined || lease.sessionId !== session.key || lease.tabRef !== currentTabRef ||
+    lease.identity?.documentEpoch !== snapshot.identity.documentEpoch ||
+    lease.identity?.actionRevision !== snapshot.identity.actionRevision;
+  if (stale) {
+    throw visualTargetError("Visual target expired because its screenshot no longer matches the controlled document or tab.", snapshot);
+  }
+  if (!Number.isFinite(visual.x) || !Number.isFinite(visual.y) || visual.x < 0 || visual.y < 0 ||
+      visual.x >= lease.pixelWidth || visual.y >= lease.pixelHeight) {
+    throw visualTargetError("Visual target coordinates fall outside the governed screenshot viewport.", snapshot, "invalid-browser-target");
+  }
+  const surface = await inspectCurrentVisualSurface(session.supervisor);
+  if (surface.cssWidth !== lease.cssWidth || surface.cssHeight !== lease.cssHeight ||
+      surface.scrollX !== lease.scrollX || surface.scrollY !== lease.scrollY ||
+      surface.mutationRevision !== lease.mutationRevision) {
+    throw visualTargetError("Visual target expired after scrolling, resizing, or a DOM change. Request fresh visual inspection.", snapshot);
+  }
+  const x = visual.x * lease.cssWidth / lease.pixelWidth;
+  const y = visual.y * lease.cssHeight / lease.pixelHeight;
+  const evaluated = await session.supervisor.send("Runtime.evaluate", {
+    expression: `(() => {
+      const x = ${JSON.stringify(x)}; const y = ${JSON.stringify(y)};
+      const hit = document.elementFromPoint(x, y);
+      if (!(hit instanceof Element)) return undefined;
+      for (let current = hit; current; current = current.parentElement) {
+        const elementIndex = Array.isArray(window.__estacodaElements) ? window.__estacodaElements.indexOf(current) : -1;
+        if (elementIndex >= 0) return { ref: '@e' + (elementIndex + 1) };
+        const regionIndex = Array.isArray(window.__estacodaRegions) ? window.__estacodaRegions.indexOf(current) : -1;
+        if (regionIndex >= 0) return { ref: '@r' + (regionIndex + 1) };
+      }
+      return undefined;
+    })()`,
+    returnByValue: true
+  }) as { result?: { value?: unknown }; exceptionDetails?: unknown };
+  const value = evaluated.result?.value;
+  const ref = value !== null && typeof value === "object" && !Array.isArray(value) && typeof (value as { ref?: unknown }).ref === "string"
+    ? (value as { ref: string }).ref
+    : undefined;
+  if (evaluated.exceptionDetails !== undefined || ref === undefined || !/^@[er]\d+$/u.test(ref)) {
+    throw visualTargetError(
+      "The visual point did not resolve to a currently grounded action. Request fresh semantic or visual inspection instead of guessing coordinates.",
+      snapshot,
+      "browser-target-not-found"
+    );
+  }
+  return {
+    ...input,
+    ref: ref.startsWith("@e") ? ref : undefined,
+    regionRef: ref.startsWith("@r") ? ref : undefined,
+    visualTarget: undefined,
+    identity: { ...snapshot.identity },
+    tabRef: currentTabRef
+  };
+}
+
+function visualTargetError(
+  message: string,
+  snapshot: BrowserSnapshot,
+  reason: "invalid-browser-target" | "stale-browser-ref" | "browser-target-not-found" = "stale-browser-ref"
+): BrowserTargetError {
+  return new BrowserTargetError({
+    reason,
+    message,
+    currentSessionId: snapshot.sessionId,
+    currentIdentity: snapshot.identity,
+    currentTabRef: snapshot.tab?.ref
+  });
+}
+
+function locatorTextAppearsInSnapshot(snapshot: BrowserSnapshot, locator: NonNullable<BrowserActionInput["locator"]>): boolean {
+  const haystack = `${snapshot.title ?? ""} ${snapshot.text ?? ""}`.normalize("NFKC").toLocaleLowerCase();
+  const needles = [locator.name, locator.text, locator.label, locator.withinText]
+    .filter((value): value is string => typeof value === "string" && value.trim().length >= 2)
+    .map((value) => value.normalize("NFKC").toLocaleLowerCase().trim());
+  return needles.length > 0 && needles.some((needle) => haystack.includes(needle));
 }
 
 function parseJsonArray(value: unknown): Array<{ src: string; alt?: string }> {

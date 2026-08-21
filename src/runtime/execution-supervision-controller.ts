@@ -16,12 +16,15 @@ import type { RunRecorder } from "./run-recorder.js";
 export const EXECUTION_SUPERVISION_PROMPTS = {
   browserEvidence: "The last browser strategy repeated evidence, produced no effective change, or reached a terminal page such as HTTP 4xx/5xx. Do not repeat the same strategy and semantic outcome even if the document revision changed. Use a genuinely different grounded strategy: inspect a visible region, dismiss a blocker, scroll or reveal content, use a different exact href, switch tabs, or use a runtime-grounded region click. If popup-blocked reports a safe destination, browser.navigate with disposition=new-tab may open it without changing Chrome permissions. If no grounded alternative exists, return the truthful incomplete result.",
   browserRetarget: "The last browser target could not be resolved, so no action was dispatched. Use this bounded retargeting opportunity with current document and tab identity and a different grounded element, visible region, blocker dismissal, scroll/reveal action, or exact href. Do not retry the same missing target.",
+  browserVisual: "Browser semantic evidence is ambiguous, missing a grounded action, conflicting with the observed result, or a native action produced no change. Use browser.vision once for a sanitized current-viewport inspection if visual layout can resolve the uncertainty. Prefer semantic labels; use a returned screenshot-bound visual target only when it resolves to a grounded current control. Do not repeat the exhausted search or infer masked values.",
+  browserVisualRepeatedMatch: "This search returned the same incidental match. Try a different visible control or request browser.vision once for sanitized current-viewport inspection. Do not repeat the same query or infer masked values.",
   toolLoopProgress: "The foreground tool loop has repeated the same calls or results without material progress. Change approach before continuing the original request. Use a different relevant action, surface a concrete runtime blocker, or return the truthful result already established."
 } as const;
 
 export type ExecutionSupervisionPromptState = {
   browserEvidenceNudge: boolean;
   browserRetargetNudge: boolean;
+  browserVisualEscalationReason?: NonNullable<BrowserObservationAssessment>["visualEscalationReason"];
   suppressedBrowserTools: string[];
   toolLoopProgressNudge: boolean;
 };
@@ -71,6 +74,7 @@ export class ExecutionSupervisionController {
   readonly #authenticationEvidenceTracker: AuthenticationEvidenceTracker;
   #pendingBrowserEvidenceNudge = false;
   #pendingBrowserRetargetNudge = false;
+  #pendingBrowserVisualEscalationReason: NonNullable<BrowserObservationAssessment>["visualEscalationReason"] | undefined;
   #suppressedBrowserTools: string[] = [];
   #pendingToolLoopProgressNudge = false;
   #runtimeUserInputBlocker: { summary: string } | undefined;
@@ -115,11 +119,15 @@ export class ExecutionSupervisionController {
     const state = {
       browserEvidenceNudge: this.#pendingBrowserEvidenceNudge,
       browserRetargetNudge: this.#pendingBrowserRetargetNudge,
+      ...(this.#pendingBrowserVisualEscalationReason === undefined
+        ? {}
+        : { browserVisualEscalationReason: this.#pendingBrowserVisualEscalationReason }),
       suppressedBrowserTools: [...this.#suppressedBrowserTools],
       toolLoopProgressNudge: this.#pendingToolLoopProgressNudge
     };
     this.#pendingBrowserEvidenceNudge = false;
     this.#pendingBrowserRetargetNudge = false;
+    this.#pendingBrowserVisualEscalationReason = undefined;
     this.#pendingToolLoopProgressNudge = false;
     return state;
   }
@@ -158,6 +166,9 @@ export class ExecutionSupervisionController {
     }
     if (browserObservation?.shouldNudge === true) this.#pendingBrowserEvidenceNudge = true;
     if (browserObservation?.shouldRetarget === true) this.#pendingBrowserRetargetNudge = true;
+    if (browserObservation?.visualEscalationReason !== undefined) {
+      this.#pendingBrowserVisualEscalationReason = browserObservation.visualEscalationReason;
+    }
     if (toolLoopProgress.shouldNudge) this.#pendingToolLoopProgressNudge = true;
 
     return {
