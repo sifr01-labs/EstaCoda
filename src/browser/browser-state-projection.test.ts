@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BrowserBackend, BrowserSnapshot, BrowserTab } from "../contracts/browser.js";
 import { BrowserSessionStateError } from "./session-state.js";
+import { browserCapabilities } from "./browser-capabilities.js";
 import {
   BROWSER_STATE_MAX_TABS,
   projectBrowserStateFromExecutions,
@@ -13,6 +14,7 @@ function activeBackend(input: {
 }): BrowserBackend {
   return {
     kind: "mock",
+    capabilities: browserCapabilities({ snapshots: true, tabs: true }),
     isAvailable: () => true,
     status: () => ({ backend: "mock", available: true }),
     navigate: async () => ({
@@ -80,6 +82,7 @@ describe("browser state projection", () => {
   it("represents a missing session explicitly", async () => {
     const backend: BrowserBackend = {
       kind: "mock",
+      capabilities: browserCapabilities(),
       isAvailable: () => true,
       status: () => ({ backend: "mock", available: true }),
       navigate: async () => { throw new Error("unused"); },
@@ -96,6 +99,7 @@ describe("browser state projection", () => {
   it("does not claim an active session when an available backend cannot inspect session state", async () => {
     const backend: BrowserBackend = {
       kind: "firecrawl",
+      capabilities: browserCapabilities(),
       isAvailable: () => true,
       status: () => ({ backend: "firecrawl", available: true }),
       navigate: async () => { throw new Error("unused"); }
@@ -115,6 +119,7 @@ describe("browser state projection", () => {
     });
     const backend: BrowserBackend = {
       kind: "mock",
+      capabilities: browserCapabilities(),
       isAvailable: () => new Promise<boolean>(() => undefined),
       status: () => ({ backend: "mock", available: true }),
       navigate: async () => { throw new Error("unused"); }
@@ -138,6 +143,7 @@ describe("browser state projection", () => {
   it("bounds a silent browser refresh with one deadline", async () => {
     const backend: BrowserBackend = {
       kind: "mock",
+      capabilities: browserCapabilities(),
       isAvailable: () => new Promise<boolean>(() => undefined),
       status: () => ({ backend: "mock", available: true }),
       navigate: async () => { throw new Error("unused"); }

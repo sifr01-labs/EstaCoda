@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { normalizeSessionCompressionConfig } from "../config/runtime-config.js";
 import type { ChannelAttachment } from "../contracts/channel.js";
 import type { BrowserBackend } from "../contracts/browser.js";
+import { browserCapabilities } from "../browser/browser-capabilities.js";
 import type { ContextExpansionResult } from "../contracts/context.js";
 import type { ModelProfile, ResolvedModelRoute, ProviderRequest, ProviderResponse, ProviderStreamDiagnostics } from "../contracts/provider.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
@@ -1904,6 +1905,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     };
     const browserBackend: BrowserBackend = {
       kind: "mock",
+      capabilities: browserCapabilities({ snapshots: true, tabs: true }),
       isAvailable: () => true,
       status: () => ({ backend: "mock", available: true }),
       navigate: async () => ({

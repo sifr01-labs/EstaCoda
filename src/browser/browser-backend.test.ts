@@ -17,6 +17,7 @@ import type {
   BrowserSnapshot,
   BrowserSwitchTabInput
 } from "../contracts/browser.js";
+import { browserCapabilities } from "./browser-capabilities.js";
 
 function createCdpFetch(input: {
   ok: boolean;
@@ -64,6 +65,7 @@ function createFakeHybridBackend(input: {
 }): FakeHybridBackend {
   const backend: FakeHybridBackend = {
     kind: input.kind,
+    capabilities: browserCapabilities({ snapshots: true, tabs: true }),
     navigations: [],
     snapshots: [],
     clicks: [],
@@ -220,6 +222,7 @@ describe("browser backend baselines", () => {
     expect(await backend.status()).toEqual({
       backend: "unconfigured",
       available: false,
+      capabilities: backend.capabilities,
       reason: "No backend in this test."
     });
     await expect(backend.navigate({ url: "https://example.com" })).rejects.toThrow("No backend in this test.");
@@ -284,6 +287,7 @@ describe("browser backend baselines", () => {
     expect(missing.status()).toEqual({
       backend: "unconfigured",
       available: false,
+      capabilities: missing.capabilities,
       reason: "No browser backend is configured."
     });
     await expect(missing.navigate({ url: "https://example.com" })).rejects.toThrow("No browser backend is configured");
@@ -300,6 +304,7 @@ describe("browser backend baselines", () => {
     expect(configured.status()).toEqual({
       backend: "unconfigured",
       available: false,
+      capabilities: configured.capabilities,
       reason: "No browser backend is configured."
     });
   });
@@ -313,6 +318,7 @@ describe("browser backend baselines", () => {
     await expect(backend.status()).resolves.toEqual({
       backend: "firecrawl",
       available: false,
+      capabilities: backend.capabilities,
       reason: "Unknown browser provider: unknown-cloud."
     });
   });
@@ -364,6 +370,7 @@ describe("browser backend baselines", () => {
     await expect(backend.status()).resolves.toEqual({
       backend: "local-cdp",
       available: true,
+      capabilities: backend.capabilities,
       endpoint: "http://127.0.0.1:9222",
       browser: "Chrome/125.0.0.0",
       version: "1.3"
@@ -385,6 +392,7 @@ describe("browser backend baselines", () => {
     await expect(backend.status()).resolves.toEqual({
       backend: "local-cdp",
       available: false,
+      capabilities: backend.capabilities,
       endpoint: "http://127.0.0.1:9222",
       reason: "CDP endpoint returned 503 Service Unavailable"
     });
@@ -407,6 +415,7 @@ describe("browser backend baselines", () => {
     await expect(backend.status()).resolves.toEqual({
       backend: "local-cdp",
       available: false,
+      capabilities: backend.capabilities,
       reason: "CDP URL is not configured."
     });
     await expect(backend.navigate({ url: "https://example.com" })).rejects.toThrow("CDP URL is not configured.");

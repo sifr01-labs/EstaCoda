@@ -941,4 +941,85 @@ describe("CDPSupervisor", () => {
       expect.objectContaining({ method: "Fetch.continueRequest", params: { requestId: "missing-url" } })
     ]));
   });
+
+  it("captures trusted browser download lifecycle events", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1");
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+    await supervisor.start();
+    await supervisor.prepareDownload("/tmp/estacoda-download-test", 1_024);
+    const waiting = supervisor.waitForDownload(1_000);
+
+    socket.emitMessage({
+      method: "Browser.downloadWillBegin",
+      params: { guid: "guid-1", url: "https://example.com/openapi.json", suggestedFilename: "openapi.json" }
+    });
+    socket.emitMessage({
+      method: "Browser.downloadProgress",
+      params: { guid: "guid-1", state: "completed", receivedBytes: 128 }
+    });
+
+    await expect(waiting).resolves.toEqual({
+      outcome: "download-completed",
+      guid: "guid-1",
+      url: "https://example.com/openapi.json",
+      suggestedFilename: "openapi.json",
+      receivedBytes: 128
+    });
+    expect(socket.sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        method: "Browser.setDownloadBehavior",
+        params: { behavior: "allowAndName", downloadPath: "/tmp/estacoda-download-test", eventsEnabled: true }
+      })
+    ]));
+  });
+
+  it("cancels a download as soon as trusted progress exceeds the size limit", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1");
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+    await supervisor.start();
+    await supervisor.prepareDownload("/tmp/estacoda-download-test", 64);
+    socket.emitMessage({
+      method: "Browser.downloadWillBegin",
+      params: { guid: "guid-large", url: "https://example.com/large.zip", suggestedFilename: "large.zip" }
+    });
+    socket.emitMessage({
+      method: "Browser.downloadProgress",
+      params: { guid: "guid-large", state: "inProgress", receivedBytes: 65 }
+    });
+    const waiting = supervisor.waitForDownload(1_000);
+
+    await expect(waiting).resolves.toMatchObject({ outcome: "download-failed", reason: "download-too-large" });
+    expect(socket.sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: "Browser.cancelDownload", params: { guid: "guid-large" } })
+    ]));
+  });
+
+  it("cancels an active partial download when the runtime request is aborted", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1");
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+    const controller = new AbortController();
+    await supervisor.start();
+    await supervisor.prepareDownload("/tmp/estacoda-download-test", 1_024, controller.signal);
+    const waiting = supervisor.waitForDownload(1_000, controller.signal);
+    socket.emitMessage({
+      method: "Browser.downloadWillBegin",
+      params: { guid: "guid-partial", url: "https://example.com/openapi.json", suggestedFilename: "openapi.json" }
+    });
+
+    controller.abort();
+
+    await expect(waiting).rejects.toMatchObject({ name: "AbortError" });
+    expect(socket.sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: "Browser.cancelDownload", params: { guid: "guid-partial" } })
+    ]));
+  });
 });

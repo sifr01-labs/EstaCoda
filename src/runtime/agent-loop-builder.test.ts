@@ -10,6 +10,7 @@ import type { SecurityPolicy } from "../contracts/security.js";
 import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
 import type { RegisteredTool, ToolDefinition } from "../contracts/tool.js";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
+import { NO_BROWSER_CAPABILITIES } from "../browser/browser-capabilities.js";
 import { normalizeMemoryConfig } from "../config/memory-config.js";
 import { normalizeExternalMemoryConfig, normalizeSessionCompressionConfig } from "../config/runtime-config.js";
 import { ContextReferenceExpander } from "../context/context-reference-expander.js";
@@ -1037,6 +1038,7 @@ async function createBuilderHarness(input: {
     externalMemoryProviders: [],
     processManager: new ProcessManager({ workspaceRoot }),
     browserBackend: {
+      capabilities: NO_BROWSER_CAPABILITIES,
       isAvailable: async () => false
     } as BrowserBackend,
     browserSessionLease,

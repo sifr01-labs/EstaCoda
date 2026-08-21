@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { CdpFetchLike } from "./cdp-client.js";
 import {
   FakeCdpAuthPortalSocket as FakeCdpSocket,
@@ -165,6 +168,67 @@ describe("supervised local CDP backend", () => {
     expect(configured.kind).toBe("local-cdp");
     expect(raw.kind).toBe("local-cdp");
     expect(configured).not.toBe(raw);
+    expect(configured.capabilities).toMatchObject({
+      nativePointer: true,
+      popupObservation: true,
+      downloads: true,
+      protectedInput: true,
+      protectedSourceRelay: true
+    });
+  });
+
+  it("captures a current identity-bound download through native input and trusted CDP events", async () => {
+    const root = await mkdtemp(join(tmpdir(), "estacoda-supervised-download-"));
+    const socket = new FakeCdpSocket();
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"]
+    });
+    try {
+      const navigation = await backend.navigate({
+        url: "https://developer.example.test/apps",
+        sessionId: "session-download"
+      });
+      socket.onNativeClick = () => {
+        void writeFile(join(root, "guid-download"), '{"openapi":"3.1.0"}').then(() => {
+          socket.emitMessage({
+            method: "Browser.downloadWillBegin",
+            params: {
+              guid: "guid-download",
+              url: "https://developer.example.test/openapi.json",
+              suggestedFilename: "openapi.json"
+            }
+          });
+          socket.emitMessage({
+            method: "Browser.downloadProgress",
+            params: { guid: "guid-download", state: "completed", receivedBytes: 19 }
+          });
+        });
+      };
+
+      await expect(backend.download?.({
+        sessionId: "session-download",
+        ref: "@e1",
+        identity: navigation.snapshot.identity,
+        tabRef: navigation.snapshot.tab!.ref,
+        destinationDirectory: root,
+        maxBytes: 1_024
+      })).resolves.toMatchObject({
+        outcome: "download-completed",
+        localPath: join(root, "guid-download"),
+        suggestedFilename: "openapi.json",
+        sourceUrl: "https://developer.example.test/openapi.json"
+      });
+      expect(socket.sent).toEqual(expect.arrayContaining([
+        expect.objectContaining({ method: "Input.dispatchMouseEvent", params: expect.objectContaining({ type: "mouseReleased" }) }),
+        expect.objectContaining({ method: "Browser.setDownloadBehavior" })
+      ]));
+    } finally {
+      await backend.close?.();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("isAvailable() follows local CDP availability", async () => {
@@ -206,6 +270,7 @@ describe("supervised local CDP backend", () => {
     await expect(backend.status()).resolves.toEqual({
       backend: "local-cdp",
       available: true,
+      capabilities: backend.capabilities,
       sessionState: "backend_available",
       reason: "Chrome/Chromium auto-launch is ready and will start on the first browser action."
     });
@@ -228,6 +293,7 @@ describe("supervised local CDP backend", () => {
     await expect(backend.status()).resolves.toEqual({
       backend: "local-cdp",
       available: false,
+      capabilities: backend.capabilities,
       sessionState: "browser_process_missing",
       reason: "CDP URL is not configured and Chrome/Chromium auto-launch is unavailable because no executable was found."
     });

@@ -23,6 +23,7 @@ const BROWSER_ACTION_TOOLS = new Set([
   "browser.back",
   "browser.switch_tab",
   "browser.dialog",
+  "browser.download",
 ]);
 
 const WHOLE_STATE_OBSERVATIONS = new Set([
@@ -237,6 +238,9 @@ function assessment(input: {
 
 function isStateChangingBrowserAction(execution: ToolExecutionRecord): boolean {
   if (!BROWSER_ACTION_TOOLS.has(execution.tool.name) || execution.result?.ok !== true) return false;
+  if (execution.tool.name === "browser.download") {
+    return execution.result.metadata?.outcome === "download-completed";
+  }
   const outcome = browserActionOutcome(execution);
   if (outcome === "changed" || outcome === "new-tab-opened" || outcome === "same-tab-navigation") return true;
   if (outcome === "dispatched-unverified") {
@@ -247,7 +251,11 @@ function isStateChangingBrowserAction(execution: ToolExecutionRecord): boolean {
 }
 
 function isIneffectiveDispatchedAction(execution: ToolExecutionRecord): boolean {
-  if (!BROWSER_ACTION_TOOLS.has(execution.tool.name) || execution.result?.ok !== true) return false;
+  if (!BROWSER_ACTION_TOOLS.has(execution.tool.name)) return false;
+  if (execution.tool.name === "browser.download") {
+    return execution.result?.metadata?.outcome !== "download-completed";
+  }
+  if (execution.result?.ok !== true) return false;
   const outcome = browserActionOutcome(execution);
   if (outcome === "no-change" || outcome === "timeout" || outcome === "action-no-change" || outcome === "popup-blocked") return true;
   if (outcome !== "dispatched-unverified") return false;
@@ -399,6 +407,14 @@ function stableBrowserIdentity(value: unknown): unknown {
 }
 
 function browserCallSignature(execution: ToolExecutionRecord): string {
+  if (execution.tool.name === "browser.download") {
+    return fingerprint({
+      kind: "browser-download",
+      input: stableBrowserCallInput(execution.input),
+      outcome: execution.result?.metadata?.outcome,
+      reason: execution.result?.metadata?.reason
+    });
+  }
   const snapshot = asRecord(execution.result?.metadata?.snapshot);
   const delta = asRecord(snapshot?.actionDelta);
   const popup = asRecord(delta?.popup);

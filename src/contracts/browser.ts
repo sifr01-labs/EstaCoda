@@ -6,6 +6,22 @@ export type BrowserBackendKind =
   | "mock"
   | "unconfigured";
 
+/** Trusted backend facts used to expose only browser behavior that is actually implemented. */
+export type BrowserBackendCapabilities = {
+  snapshots: boolean;
+  semanticActions: boolean;
+  visibleRegionActions: boolean;
+  nativePointer: boolean;
+  tabs: boolean;
+  controlledNewTabs: boolean;
+  popupObservation: boolean;
+  downloads: boolean;
+  protectedInput: boolean;
+  protectedSourceRelay: boolean;
+  screenshots: boolean;
+  rawCdp: boolean;
+};
+
 export type BrowserSessionStateReason =
   | "backend_available"
   | "session_missing"
@@ -321,6 +337,30 @@ export type BrowserActionInput = {
   signal?: AbortSignal;
 };
 
+export type BrowserDownloadOutcome =
+  | "download-started"
+  | "download-completed"
+  | "download-blocked"
+  | "download-too-large"
+  | "download-type-blocked"
+  | "download-failed";
+
+/** Runtime-only download request. Storage controls are never projected into the model tool schema. */
+export type BrowserDownloadInput = BrowserActionInput & {
+  destinationDirectory: string;
+  maxBytes: number;
+};
+
+/** Runtime-only capture result. localPath and sourceUrl must not cross the model-visible tool boundary. */
+export type BrowserDownloadCaptureResult = {
+  outcome: BrowserDownloadOutcome;
+  localPath?: string;
+  suggestedFilename?: string;
+  sourceUrl?: string;
+  sizeBytes?: number;
+  reason?: string;
+};
+
 export type BrowserConsoleEntry = {
   level: string;
   text: string;
@@ -427,6 +467,7 @@ export type BrowserNavigateResult = {
 export type BrowserBackendStatus = {
   backend: BrowserBackendKind;
   available: boolean;
+  capabilities?: BrowserBackendCapabilities;
   endpoint?: string;
   reason?: string;
   version?: string;
@@ -442,6 +483,7 @@ export type BrowserBackendStatus = {
 
 export type BrowserBackend = {
   kind: BrowserBackendKind;
+  capabilities: BrowserBackendCapabilities;
   isAvailable(): Promise<boolean> | boolean;
   status(): Promise<BrowserBackendStatus> | BrowserBackendStatus;
   navigate(input: BrowserNavigateInput): Promise<BrowserNavigateResult>;
@@ -465,6 +507,8 @@ export type BrowserBackend = {
   switchTab?(input: BrowserSwitchTabInput): Promise<BrowserSwitchTabResult>;
   cdp?(input: BrowserActionInput): Promise<unknown>;
   screenshot?(input?: BrowserActionInput): Promise<BrowserScreenshotResult>;
+  /** Captures only a current, identity-bound page target into a runtime-selected constrained directory. */
+  download?(input: BrowserDownloadInput): Promise<BrowserDownloadCaptureResult>;
   /** Resolves a current semantic target to runtime-observed destination metadata. */
   prepareProtectedField?(input: BrowserActionInput): Promise<import("./secure-input.js").BrowserFieldSecureInputDestination>;
   /** Runtime-only protected field inspection. This is never registered as a model tool. */

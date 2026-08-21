@@ -6,6 +6,8 @@ import type {
   BrowserBackend,
   BrowserConsoleEntry,
   BrowserBackendStatus,
+  BrowserDownloadCaptureResult,
+  BrowserDownloadInput,
   BrowserExtractResult,
   BrowserLocatorCandidate,
   BrowserNavigateInput,
@@ -21,6 +23,8 @@ import type {
   BrowserTab,
   BrowserTabList
 } from "../contracts/browser.js";
+import { mkdir, readdir, stat } from "node:fs/promises";
+import { basename, isAbsolute, resolve, sep } from "node:path";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { connectCdp, type CdpFetchLike, type CdpWebSocketFactory } from "./cdp-client.js";
 import { isSafeUrl, redactUrlForMetadata, scanUrlForSecrets, type ResolveHostnameFn } from "./url-safety.js";
@@ -59,6 +63,22 @@ import {
   browserInteractabilityGuardSource
 } from "./browser-interactability.js";
 import { dispatchNativeBrowserClick, NativeBrowserInputDispatchError } from "./native-input.js";
+import { browserCapabilities, validateBrowserBackendCapabilities } from "./browser-capabilities.js";
+
+const SUPERVISED_LOCAL_CDP_CAPABILITIES = browserCapabilities({
+  snapshots: true,
+  semanticActions: true,
+  visibleRegionActions: true,
+  nativePointer: true,
+  tabs: true,
+  controlledNewTabs: true,
+  popupObservation: true,
+  downloads: true,
+  protectedInput: true,
+  protectedSourceRelay: true,
+  screenshots: true,
+  rawCdp: true
+});
 
 export type SupervisedLocalCdpBackendOptions = {
   cdpUrl?: string;
@@ -111,7 +131,7 @@ type PageSupervisor = Pick<CDPSupervisor,
   | "respondToDialog"
   | "setSensitiveInputActive"
   | "close"
-> & Partial<Pick<CDPSupervisor, "popupAttempts">>;
+> & Partial<Pick<CDPSupervisor, "popupAttempts" | "prepareDownload" | "waitForDownload">>;
 
 type BackendRawSnapshot = BrowserSnapshotInput & {
   documentSignal?: BrowserDocumentSignal;
@@ -604,6 +624,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       return {
         backend: "local-cdp",
         available: false,
+        capabilities: SUPERVISED_LOCAL_CDP_CAPABILITIES,
         sessionState: "browser_process_missing",
         reason: "Browser backend is closed."
       };
@@ -632,6 +653,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     return {
       backend: "local-cdp",
       available: true,
+      capabilities: SUPERVISED_LOCAL_CDP_CAPABILITIES,
       sessionState: "backend_available",
       ...(endpoint === undefined ? {} : { endpoint }),
       reason: endpoint === undefined
@@ -753,6 +775,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     close(): Promise<void>;
   } = {
     kind: "local-cdp",
+    capabilities: SUPERVISED_LOCAL_CDP_CAPABILITIES,
     isAvailable: async () => (await resolveAvailabilityStatus()).available,
     status: resolveAvailabilityStatus,
     async navigate(input: BrowserNavigateInput): Promise<BrowserNavigateResult> {
@@ -1228,6 +1251,72 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         base64: result.data
       } satisfies BrowserScreenshotResult;
     },
+    download: async (input: BrowserDownloadInput): Promise<BrowserDownloadCaptureResult> => {
+      const session = await getSession(input);
+      await protectedFields.reconcile(session);
+      protectedFields.assertContentObservationAllowed(session.key);
+      if (!isAbsolute(input.destinationDirectory) || input.maxBytes <= 0 || !Number.isSafeInteger(input.maxBytes)) {
+        return { outcome: "download-blocked", reason: "invalid-runtime-download-controls" };
+      }
+      if (session.supervisor.prepareDownload === undefined || session.supervisor.waitForDownload === undefined) {
+        return { outcome: "download-failed", reason: "download-events-unavailable" };
+      }
+
+      const { snapshot } = await captureSafeTargetSnapshot(session, input);
+      const target = resolveBrowserTarget(snapshot, input);
+      assertElementOnlyBrowserTarget(target, snapshot, "browser.download");
+      const inspected = await inspectBrowserActionTarget(session, target.ref);
+      if (inspected === undefined || !["link", "button", "scripted-control"].includes(inspected.kind)) {
+        return { outcome: "download-blocked", reason: "target-is-not-download-capable" };
+      }
+      if (inspected.href !== undefined && !await tabUrlIsAllowed(inspected.href)) {
+        return { outcome: "download-blocked", reason: "unsafe-download-destination" };
+      }
+
+      const destinationDirectory = resolve(input.destinationDirectory);
+      await mkdir(destinationDirectory, { recursive: true, mode: 0o700 });
+      session.supervisor.popupAttempts?.({ clear: true });
+      await session.supervisor.prepareDownload(destinationDirectory, input.maxBytes, input.signal);
+      try {
+        await dispatchNativeBrowserClick(session.supervisor, target.ref);
+      } catch (error) {
+        return {
+          outcome: "download-failed",
+          reason: error instanceof NativeBrowserInputDispatchError && error.actionDispatched
+            ? "download-click-dispatched-unverified"
+            : "download-click-failed"
+        };
+      }
+
+      const event = await session.supervisor.waitForDownload(30_000, input.signal);
+      if (event.outcome !== "download-completed") {
+        return {
+          outcome: event.reason === "download-too-large" ? "download-too-large" : event.outcome,
+          ...(event.suggestedFilename === undefined ? {} : { suggestedFilename: event.suggestedFilename }),
+          ...(event.receivedBytes === undefined ? {} : { sizeBytes: event.receivedBytes }),
+          ...(event.reason === undefined ? {} : { reason: event.reason })
+        };
+      }
+      if (event.url === undefined || !await tabUrlIsAllowed(event.url)) {
+        return { outcome: "download-blocked", reason: "unsafe-download-redirect" };
+      }
+      const localPath = await locateCapturedDownload(destinationDirectory, event.guid, event.suggestedFilename);
+      if (localPath === undefined) {
+        return { outcome: "download-failed", reason: "download-file-missing" };
+      }
+      const file = await stat(localPath);
+      if (!file.isFile()) return { outcome: "download-failed", reason: "download-is-not-file" };
+      if (file.size > input.maxBytes) {
+        return { outcome: "download-too-large", sizeBytes: file.size, reason: "download-too-large" };
+      }
+      return {
+        outcome: "download-completed",
+        localPath,
+        suggestedFilename: event.suggestedFilename ?? basename(localPath),
+        sourceUrl: event.url,
+        sizeBytes: file.size
+      };
+    },
     prepareProtectedField: async (input) => {
       const session = await getSession(input);
       const { snapshot } = await captureSafeTargetSnapshot(session, input);
@@ -1376,7 +1465,28 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     close: closeBackend
   };
 
-  return backend;
+  return validateBrowserBackendCapabilities(backend);
+}
+
+async function locateCapturedDownload(
+  directory: string,
+  guid: string | undefined,
+  suggestedFilename: string | undefined
+): Promise<string | undefined> {
+  const safeNames: string[] = [];
+  if (guid !== undefined && guid.length > 0) safeNames.push(guid);
+  if (suggestedFilename !== undefined && suggestedFilename.length > 0) safeNames.push(basename(suggestedFilename));
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const names: string[] = await readdir(directory).catch((): string[] => []);
+    const match = safeNames.find((name) => names.includes(name)) ??
+      names.find((name) => !name.endsWith(".crdownload") && !name.endsWith(".tmp"));
+    if (match !== undefined) {
+      const path = resolve(directory, match);
+      if (path.startsWith(`${resolve(directory)}${sep}`)) return path;
+    }
+    await new Promise<void>((done) => setTimeout(done, 50));
+  }
+  return undefined;
 }
 
 function toBrowserTab(tab: BrowserManagedTab): BrowserTab {
@@ -1585,7 +1695,7 @@ function targetRef(ref: string): { kind: "element" | "region"; index: number } {
 function assertElementOnlyBrowserTarget(
   target: BrowserLocatorCandidate,
   snapshot: BrowserSnapshot,
-  operation: "browser.type" | "browser.select"
+  operation: "browser.type" | "browser.select" | "browser.download"
 ): void {
   if (target.kind !== "region") return;
   throw new BrowserTargetError({
@@ -1655,6 +1765,7 @@ async function checkLocalCdpStatus(endpoint: string | undefined, fetchLike: CdpF
     return {
       backend: "local-cdp",
       available: false,
+      capabilities: SUPERVISED_LOCAL_CDP_CAPABILITIES,
       sessionState: "browser_process_missing",
       reason: "CDP URL is not configured."
     };
@@ -1673,6 +1784,7 @@ async function checkLocalCdpStatus(endpoint: string | undefined, fetchLike: CdpF
       return {
         backend: "local-cdp",
         available: false,
+        capabilities: SUPERVISED_LOCAL_CDP_CAPABILITIES,
         endpoint,
         sessionState: "browser_process_missing",
         reason: `CDP endpoint returned ${response.status} ${response.statusText}`
@@ -1687,6 +1799,7 @@ async function checkLocalCdpStatus(endpoint: string | undefined, fetchLike: CdpF
     return {
       backend: "local-cdp",
       available: true,
+      capabilities: SUPERVISED_LOCAL_CDP_CAPABILITIES,
       endpoint,
       sessionState: "backend_available",
       browser: payload.Browser,
@@ -1696,6 +1809,7 @@ async function checkLocalCdpStatus(endpoint: string | undefined, fetchLike: CdpF
     return {
       backend: "local-cdp",
       available: false,
+      capabilities: SUPERVISED_LOCAL_CDP_CAPABILITIES,
       endpoint,
       sessionState: "browser_process_missing",
       reason: error instanceof Error ? error.message : "CDP status check failed."

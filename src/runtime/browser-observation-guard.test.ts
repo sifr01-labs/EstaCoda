@@ -280,6 +280,29 @@ describe("BrowserObservationGuard", () => {
     expect(guard.observe([action({ ref: "@e1" }, "same-tab-navigation")])).toBeUndefined();
   });
 
+  it("treats a completed download as progress and bounds repeated identical blocked downloads", () => {
+    const completed = new BrowserObservationGuard(3);
+    expect(completed.observe([execution({
+      tool: "browser.download",
+      toolInput: { ref: "@e1" },
+      metadata: { outcome: "download-completed", artifactId: "artifact-1" }
+    })])).toBeUndefined();
+
+    const blocked = new BrowserObservationGuard(3);
+    expect(blocked.observe([execution({
+      tool: "browser.download",
+      toolInput: { ref: "@e1" },
+      ok: false,
+      metadata: { outcome: "download-blocked", reason: "unsafe-download-redirect" }
+    })])).toMatchObject({ shouldNudge: true, shouldStop: false });
+    expect(blocked.observe([execution({
+      tool: "browser.download",
+      toolInput: { ref: "@e1" },
+      ok: false,
+      metadata: { outcome: "download-blocked", reason: "unsafe-download-redirect" }
+    })])).toMatchObject({ shouldNudge: false, shouldStop: true });
+  });
+
   it("does not expose page content, inputs, or fingerprints in assessments", () => {
     const guard = new BrowserObservationGuard(3);
     const sensitive = execution({

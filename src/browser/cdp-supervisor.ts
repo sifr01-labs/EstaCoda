@@ -45,6 +45,17 @@ export type BrowserPopupAttempt = {
   userGesture: boolean;
 };
 
+export type BrowserDownloadEventResult = {
+  outcome: "download-started" | "download-completed" | "download-failed";
+  guid?: string;
+  url?: string;
+  suggestedFilename?: string;
+  receivedBytes?: number;
+  reason?: string;
+};
+
+type BrowserDownloadAttempt = Omit<BrowserDownloadEventResult, "outcome" | "reason">;
+
 const MAX_POPUP_ATTEMPTS = 8;
 
 export type CDPSupervisorOptions = {
@@ -76,6 +87,11 @@ export class CDPSupervisor {
   #mainLoaderId: string | undefined;
   #mainExecutionContextId: number | undefined;
   #popupAttempts: BrowserPopupAttempt[] = [];
+  #downloadAttempts = new Map<string, BrowserDownloadAttempt>();
+  #downloadResults: BrowserDownloadEventResult[] = [];
+  #downloadWaiters: Array<(result: BrowserDownloadEventResult) => void> = [];
+  #downloadMaxBytes: number | undefined;
+  #activeDownloadGuid: string | undefined;
 
   constructor(options: CDPSupervisorOptions) {
     this.#webSocketUrl = options.webSocketUrl;
@@ -121,6 +137,64 @@ export class CDPSupervisor {
 
   async waitFor(method: string, timeoutMs: number): Promise<void> {
     await this.#requireClient().waitFor(method, timeoutMs);
+  }
+
+  async prepareDownload(directory: string, maxBytes: number, signal?: AbortSignal): Promise<void> {
+    this.#downloadAttempts.clear();
+    this.#downloadResults = [];
+    this.#activeDownloadGuid = undefined;
+    this.#downloadMaxBytes = maxBytes;
+    try {
+      await this.send("Browser.setDownloadBehavior", {
+        behavior: "allowAndName",
+        downloadPath: directory,
+        eventsEnabled: true
+      }, { signal });
+    } catch {
+      await this.send("Page.setDownloadBehavior", {
+        behavior: "allow",
+        downloadPath: directory
+      }, { signal });
+    }
+  }
+
+  async waitForDownload(timeoutMs: number, signal?: AbortSignal): Promise<BrowserDownloadEventResult> {
+    const queued = this.#downloadResults.shift();
+    if (queued !== undefined) return queued;
+    if (signal?.aborted === true) throw downloadAbortError();
+
+    return await new Promise<BrowserDownloadEventResult>((resolve, reject) => {
+      let settled = false;
+      const finish = (result: BrowserDownloadEventResult) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        signal?.removeEventListener("abort", onAbort);
+        this.#downloadWaiters = this.#downloadWaiters.filter((candidate) => candidate !== finish);
+        resolve(result);
+      };
+      const onAbort = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        this.#downloadWaiters = this.#downloadWaiters.filter((candidate) => candidate !== finish);
+        if (this.#activeDownloadGuid !== undefined) {
+          void this.send("Browser.cancelDownload", { guid: this.#activeDownloadGuid }).catch(() => undefined);
+        }
+        reject(downloadAbortError());
+      };
+      const timeout = setTimeout(() => {
+        const started = [...this.#downloadAttempts.values()].at(-1);
+        if (started?.guid !== undefined) {
+          void this.send("Browser.cancelDownload", { guid: started.guid }).catch(() => undefined);
+        }
+        finish(started === undefined
+          ? { outcome: "download-failed", reason: "download-event-timeout" }
+          : { outcome: "download-started", ...started, reason: "download-completion-timeout" });
+      }, timeoutMs);
+      this.#downloadWaiters.push(finish);
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
   }
 
   async getSnapshot(sessionId = "cdp-supervisor", options: BrowserSnapshotOptions = {}): Promise<SupervisorSnapshot> {
@@ -176,6 +250,11 @@ export class CDPSupervisor {
     this.#client = undefined;
     this.#socket = undefined;
     this.#popupAttempts = [];
+    this.#downloadAttempts.clear();
+    this.#downloadResults = [];
+    this.#downloadWaiters = [];
+    this.#downloadMaxBytes = undefined;
+    this.#activeDownloadGuid = undefined;
   }
 
   #requireClient(): CdpClient {
@@ -232,6 +311,14 @@ export class CDPSupervisor {
       this.#handleWindowOpen(message.params);
       return;
     }
+    if (message.method === "Browser.downloadWillBegin" || message.method === "Page.downloadWillBegin") {
+      this.#handleDownloadWillBegin(message.params);
+      return;
+    }
+    if (message.method === "Browser.downloadProgress" || message.method === "Page.downloadProgress") {
+      this.#handleDownloadProgress(message.params);
+      return;
+    }
     if (message.method === "Page.javascriptDialogClosed") {
       this.#pendingDialogs.clear();
       return;
@@ -262,6 +349,62 @@ export class CDPSupervisor {
     if (this.#popupAttempts.length > MAX_POPUP_ATTEMPTS) {
       this.#popupAttempts.splice(0, this.#popupAttempts.length - MAX_POPUP_ATTEMPTS);
     }
+  }
+
+  #handleDownloadWillBegin(params: unknown): void {
+    if (!isRecord(params) || typeof params.guid !== "string") return;
+    if (this.#activeDownloadGuid !== undefined && this.#activeDownloadGuid !== params.guid) {
+      void this.send("Browser.cancelDownload", { guid: params.guid }).catch(() => undefined);
+      return;
+    }
+    this.#activeDownloadGuid = params.guid;
+    this.#downloadAttempts.set(params.guid, {
+      guid: params.guid,
+      ...(typeof params.url === "string" ? { url: params.url } : {}),
+      ...(typeof params.suggestedFilename === "string" ? { suggestedFilename: params.suggestedFilename } : {})
+    });
+  }
+
+  #handleDownloadProgress(params: unknown): void {
+    if (!isRecord(params) || typeof params.guid !== "string" || typeof params.state !== "string") return;
+    const attempt = this.#downloadAttempts.get(params.guid) ?? { guid: params.guid };
+    if (
+      typeof params.receivedBytes === "number" &&
+      this.#downloadMaxBytes !== undefined &&
+      params.receivedBytes > this.#downloadMaxBytes
+    ) {
+      void this.send("Browser.cancelDownload", { guid: params.guid }).catch(() => undefined);
+      this.#downloadAttempts.delete(params.guid);
+      this.#activeDownloadGuid = undefined;
+      const tooLarge: BrowserDownloadEventResult = {
+        outcome: "download-failed",
+        ...attempt,
+        receivedBytes: params.receivedBytes,
+        reason: "download-too-large"
+      };
+      const waiter = this.#downloadWaiters.shift();
+      if (waiter === undefined) this.#downloadResults.push(tooLarge);
+      else waiter(tooLarge);
+      return;
+    }
+    const result: BrowserDownloadEventResult = {
+      outcome: params.state === "completed" ? "download-completed" : "download-failed",
+      ...attempt,
+      ...(typeof params.receivedBytes === "number" ? { receivedBytes: params.receivedBytes } : {}),
+      ...(params.state === "canceled" ? { reason: "download-canceled" } : {})
+    };
+    if (params.state !== "completed" && params.state !== "canceled") {
+      this.#downloadAttempts.set(params.guid, {
+        ...attempt,
+        ...(typeof params.receivedBytes === "number" ? { receivedBytes: params.receivedBytes } : {})
+      });
+      return;
+    }
+    this.#downloadAttempts.delete(params.guid);
+    this.#activeDownloadGuid = undefined;
+    const waiter = this.#downloadWaiters.shift();
+    if (waiter === undefined) this.#downloadResults.push(result);
+    else waiter(result);
   }
 
   #handleDialogOpening(params: unknown): void {
@@ -444,6 +587,12 @@ function originForUrl(url: string): string {
   } catch {
     return "null";
   }
+}
+
+function downloadAbortError(): Error {
+  const error = new Error("Browser download was cancelled.");
+  error.name = "AbortError";
+  return error;
 }
 
 export async function evaluateCdpSnapshot(client: CdpClient, sessionId: string, options: BrowserSnapshotOptions = {}): Promise<BrowserSnapshotInput> {

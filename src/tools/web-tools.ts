@@ -1,7 +1,7 @@
-import { createHash } from "node:crypto";
-import { mkdir, stat, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import type { ArtifactStore } from "../artifacts/artifact-store.js";
+import { createHash, randomUUID } from "node:crypto";
+import { chmod, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, join, resolve, sep } from "node:path";
+import { ArtifactStore } from "../artifacts/artifact-store.js";
 import type { RegisteredTool, SessionToolProvider, ToolResult, ToolSecurityResolution } from "../contracts/tool.js";
 import type {
   BrowserActionInput,
@@ -10,6 +10,7 @@ import type {
   BrowserActionDelta,
   BrowserActionDeltaElement,
   BrowserBackend,
+  BrowserDownloadInput,
   BrowserFindResult,
   BrowserLocatorCandidate,
   BrowserNavigateInput,
@@ -20,7 +21,7 @@ import type {
 } from "../contracts/browser.js";
 import type { BrowserFieldSecureInputDestination, GroupedSecureInputRequestHandler, SecureInputKind, SecureInputRetention } from "../contracts/secure-input.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
-import { resolveGlobalStateHome } from "../config/profile-home.js";
+import { resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import { createBrowserDebugSession, type BrowserDebugSession } from "../browser/browser-debug.js";
 import { createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
 import { browserSessionStateReason } from "../browser/session-state.js";
@@ -41,6 +42,7 @@ import { inheritEphemeralVisionImages } from "../vision/ephemeral-vision-content
 import { createTimeoutSignal } from "../utils/timeout-signal.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import { buildBrowserActionSecuritySummary } from "./tool-target-summary.js";
+import { enabledBrowserCapabilities } from "../browser/browser-capabilities.js";
 import {
   registerDefaultWebResearchProviders,
   selectWebResearchProvider,
@@ -74,6 +76,8 @@ export type WebToolOptions = {
   securityConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
   resolveHostname?: ResolveHostnameFn;
   artifactStore?: ArtifactStore;
+  /** Runtime-selected profile-local root; never accepted from model input. */
+  browserDownloadRoot?: string;
   visionDispatcher?: GovernedVisionArtifactDispatcher;
 };
 
@@ -263,6 +267,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       isAvailable: () => true,
       run: async () => {
         const status = await browserBackend.status();
+        const declaredCapabilities = status.capabilities ?? browserBackend.capabilities;
+        const capabilities = enabledBrowserCapabilities(declaredCapabilities);
 
         return {
           ok: true,
@@ -275,9 +281,10 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             status.sessionState === undefined ? undefined : `Session state: ${status.sessionState}`,
             status.hybridRouting === undefined ? undefined : `Hybrid routing: ${status.hybridRouting ? "enabled" : "disabled"}`,
             status.lastNavigationBackend === undefined ? undefined : `Last served backend: ${status.lastNavigationBackend}`,
+            `Capabilities: ${capabilities.length === 0 ? "none" : capabilities.join(", ")}`,
             status.reason === undefined ? undefined : `Reason: ${status.reason}`
           ].filter((line) => line !== undefined).join("\n"),
-          metadata: status
+          metadata: { ...status, capabilities: declaredCapabilities }
         };
       }
     },
@@ -291,7 +298,9 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
     createBrowserFindTool(browserBackend, deriveBrowserInput),
     createBrowserActionTool({
       name: "browser.click",
-      description: "Click by semantic locator, element ref, or a runtime-grounded visible regionRef with its source canonical identity and tabRef. Region coordinates are resolved and hit-tested by the browser; the model never supplies coordinates.",
+      description: browserBackend.capabilities.visibleRegionActions
+        ? "Click by semantic locator, element ref, or a runtime-grounded visible regionRef with its source canonical identity and tabRef. Region coordinates are resolved and hit-tested by the browser; the model never supplies coordinates."
+        : "Click by semantic locator or element ref with its source canonical identity and tabRef.",
       progressLabel: "clicking browser element",
       browserBackend,
       deriveBrowserInput,
@@ -299,11 +308,11 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       inputSchema: {
         type: "object",
         properties: {
-          ...browserTargetInputProperties({ allowRegion: true }),
+          ...browserTargetInputProperties({ allowRegion: browserBackend.capabilities.visibleRegionActions }),
           sessionId: { type: "string" },
           ...browserWaitInputProperties()
         },
-        oneOf: browserTargetOneOf({ allowRegion: true })
+        oneOf: browserTargetOneOf({ allowRegion: browserBackend.capabilities.visibleRegionActions })
       }
     }),
     createBrowserTypeTool(browserBackend, deriveBrowserInput),
@@ -389,7 +398,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       toolsets: ["browser", "web", "research"],
       progressLabel: "listing browser images",
       maxResultSizeChars: 5000,
-      isAvailable: () => browserBackend.isAvailable(),
+      isAvailable: async () => browserBackend.capabilities.snapshots && await browserBackend.isAvailable(),
       run: async (input: BrowserActionInput) => {
         if (browserBackend.getImages === undefined) {
           return unsupportedBrowserTool(browserBackend, "browser.get_images");
@@ -426,7 +435,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       toolsets: ["browser", "web", "research"],
       progressLabel: "reading browser console",
       maxResultSizeChars: 8000,
-      isAvailable: () => browserBackend.isAvailable(),
+      isAvailable: async () => browserBackend.capabilities.snapshots && await browserBackend.isAvailable(),
       run: async (input: BrowserActionInput) => {
         if (browserBackend.console === undefined) {
           return unsupportedBrowserTool(browserBackend, "browser.console");
@@ -462,7 +471,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       toolsets: ["browser", "web", "research"],
       progressLabel: "listing browser tabs",
       maxResultSizeChars: 5000,
-      isAvailable: async () => browserBackend.tabs !== undefined && await browserBackend.isAvailable(),
+      isAvailable: async () => browserBackend.capabilities.tabs && browserBackend.tabs !== undefined && await browserBackend.isAvailable(),
       run: async (input: BrowserActionInput) => {
         if (browserBackend.tabs === undefined) {
           return unsupportedBrowserTool(browserBackend, "browser.tabs");
@@ -502,7 +511,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       toolsets: ["browser", "web", "research"],
       progressLabel: "switching browser tab",
       maxResultSizeChars: 8000,
-      isAvailable: async () => browserBackend.switchTab !== undefined && await browserBackend.isAvailable(),
+      isAvailable: async () => browserBackend.capabilities.tabs && browserBackend.switchTab !== undefined && await browserBackend.isAvailable(),
       run: async (input: BrowserActionInput & { tabRef?: string }) => {
         if (browserBackend.switchTab === undefined) {
           return unsupportedBrowserTool(browserBackend, "browser.switch_tab");
@@ -549,7 +558,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       toolsets: ["dangerous"],
       progressLabel: "running browser CDP command",
       maxResultSizeChars: 8000,
-      isAvailable: () => browserBackend.isAvailable(),
+      isAvailable: async () => browserBackend.capabilities.rawCdp && await browserBackend.isAvailable(),
       run: async (input: BrowserActionInput) => {
         const debug = createBrowserDebugSession();
         if (browserBackend.cdp === undefined) {
@@ -609,7 +618,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       toolsets: ["browser", "web", "research"],
       progressLabel: "capturing browser screenshot",
       maxResultSizeChars: 3000,
-      isAvailable: () => browserBackend.isAvailable(),
+      isAvailable: async () => browserBackend.capabilities.screenshots && await browserBackend.isAvailable(),
       run: async (input: BrowserActionInput, context) => {
         if (browserBackend.screenshot === undefined) {
           return unsupportedBrowserTool(browserBackend, "browser.screenshot");
@@ -645,6 +654,10 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         };
       }
     },
+    createBrowserDownloadTool(browserBackend, deriveBrowserInput, urlGuard, {
+      artifactStore: options.artifactStore,
+      downloadRoot: options.browserDownloadRoot ?? join(options.workspaceRoot ?? process.cwd(), ".estacoda", "browser", "downloads")
+    }),
     {
       name: "browser.vision",
       description: "Capture a browser screenshot and analyze it with the configured vision route.",
@@ -659,7 +672,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       toolsets: ["browser", "web", "research", "media"],
       progressLabel: "analyzing browser screenshot",
       maxResultSizeChars: 8_000,
-      isAvailable: async () => await browserBackend.isAvailable() &&
+      isAvailable: async () => browserBackend.capabilities.screenshots && await browserBackend.isAvailable() &&
         options.visionDispatcher?.isAvailable({ mode: "screenshot" }) === true,
       resolveSecurity: (input: BrowserActionInput & { prompt?: string }, context) =>
         options.visionDispatcher?.resolveSecurity({
@@ -749,6 +762,13 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       isAvailable: () => browserBackend.isAvailable(),
       run: async (input: Omit<BrowserNavigateInput, "url"> & { url?: string; text?: string }, context) => {
         const debug = createBrowserDebugSession();
+        if (input.disposition === "new-tab" && !browserBackend.capabilities.controlledNewTabs) {
+          return withDebug({
+            ok: false,
+            content: "This browser backend does not support controlled new-tab navigation.",
+            metadata: { backend: browserBackend.kind, reason: "controlled-new-tabs-unavailable" }
+          }, debug);
+        }
         const url = normalizeUrl(input.url ?? extractFirstUrl(input.text ?? ""));
 
         if (url === undefined) {
@@ -919,6 +939,10 @@ export const webToolProvider: SessionToolProvider = {
       snapshotAuxiliaryRoute: ctx.compressionRoute,
       providerExecutor: ctx.providerExecutor,
       artifactStore: ctx.artifactStore,
+      browserDownloadRoot: join(
+        resolveProfileStateHome({ homeDir: ctx.homeDir, profileId: ctx.profileId }).tempPath,
+        "browser-downloads"
+      ),
       securityConfig: ctx.securityConfig,
       visionDispatcher
     });
@@ -1255,7 +1279,7 @@ function createBrowserSnapshotTool(
     toolsets: ["browser", "web", "research"],
     progressLabel: "snapshotting browser",
     maxResultSizeChars: 8000,
-    isAvailable: () => browserBackend.isAvailable(),
+    isAvailable: async () => browserBackend.capabilities.snapshots && await browserBackend.isAvailable(),
     run: async (input: BrowserActionInput, context) => {
       const debug = createBrowserDebugSession();
       if (browserBackend.snapshot === undefined) {
@@ -1344,7 +1368,7 @@ function createBrowserActionTool(input: {
     toolsets: ["browser", "web", "research"],
     progressLabel: input.progressLabel,
     maxResultSizeChars: 8000,
-    isAvailable: () => input.browserBackend.isAvailable(),
+    isAvailable: async () => input.browserBackend.capabilities.semanticActions && await input.browserBackend.isAvailable(),
     ...(securityAction === undefined ? {} : {
       resolveSecurity: async (toolInput: BrowserActionInput) => (
         await resolveBrowserActionSecurity(securityAction, toolInput, input.browserBackend, input.deriveBrowserInput)
@@ -1636,7 +1660,7 @@ function createBrowserTypeTool(
     toolsets: ["browser", "web", "research"],
     progressLabel: "typing in browser",
     maxResultSizeChars: 8_000,
-    isAvailable: () => browserBackend.isAvailable(),
+    isAvailable: async () => browserBackend.capabilities.semanticActions && await browserBackend.isAvailable(),
     run: async (toolInput: BrowserActionInput & { protectedInput?: BrowserProtectedInputDescriptor }, context) => {
       const browserInput = deriveBrowserInput(toolInput);
       if (toolInput.protectedInput === undefined) {
@@ -1811,7 +1835,7 @@ function createBrowserProtectedFormTool(
     toolsets: ["browser", "web", "research"],
     progressLabel: "filling protected browser form",
     maxResultSizeChars: 8_000,
-    isAvailable: () => browserBackend.isAvailable(),
+    isAvailable: async () => browserBackend.capabilities.protectedInput && await browserBackend.isAvailable(),
     run: async (input: BrowserProtectedFormInput, context) => {
       const parsed = parseBrowserProtectedForm(input);
       if (parsed === undefined) {
@@ -2004,7 +2028,7 @@ function createBrowserFindTool(
     toolsets: ["browser", "web", "research"],
     progressLabel: "finding browser element",
     maxResultSizeChars: 5000,
-    isAvailable: async () => browserBackend.find !== undefined && await browserBackend.isAvailable(),
+    isAvailable: async () => browserBackend.capabilities.semanticActions && browserBackend.find !== undefined && await browserBackend.isAvailable(),
     run: async (input: BrowserActionInput) => {
       if (browserBackend.find === undefined) return unsupportedBrowserTool(browserBackend, "browser.find");
       const result = await browserBackend.find(deriveBrowserInput(input)).catch((error: unknown) => ({ error }));
@@ -2043,7 +2067,7 @@ function createBrowserExtractTool(
     toolsets: ["browser", "web", "research"],
     progressLabel: "extracting browser element",
     maxResultSizeChars: 5000,
-    isAvailable: async () => browserBackend.extract !== undefined && await browserBackend.isAvailable(),
+    isAvailable: async () => browserBackend.capabilities.semanticActions && browserBackend.extract !== undefined && await browserBackend.isAvailable(),
     run: async (input: BrowserActionInput) => {
       if (browserBackend.extract === undefined) return unsupportedBrowserTool(browserBackend, "browser.extract");
       const result = await browserBackend.extract(deriveBrowserInput(input)).catch((error: unknown) => ({ error }));
@@ -2122,6 +2146,258 @@ function describeValueShape(value: unknown): Record<string, unknown> {
     return { type: "object", keys: Object.keys(value).slice(0, 20) };
   }
   return { type: typeof value };
+}
+
+const MAX_GOVERNED_BROWSER_DOWNLOAD_BYTES = 25 * 1024 * 1024;
+
+function createBrowserDownloadTool(
+  browserBackend: BrowserBackend,
+  deriveBrowserInput: DeriveBrowserInput,
+  guardUrl: UrlGuard,
+  options: {
+    artifactStore?: ArtifactStore;
+    downloadRoot: string;
+  }
+): RegisteredTool {
+  const artifactStore = options.artifactStore ?? new ArtifactStore();
+  return {
+    name: "browser.download",
+    description: "Capture a safe document or data download by an exact current browser element ref. The runtime chooses constrained storage; URL and destination-path input are not accepted.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ref: { type: "string" },
+        identity: browserIdentityInputSchema(),
+        tabRef: { type: "string" },
+        sessionId: { type: "string" }
+      },
+      required: ["ref", "identity", "tabRef"]
+    },
+    riskClass: "read-only-network",
+    toolsets: ["browser", "web", "research"],
+    progressLabel: "capturing browser download",
+    maxResultSizeChars: 3_000,
+    isAvailable: async () => browserBackend.capabilities.downloads &&
+      browserBackend.download !== undefined &&
+      await browserBackend.isAvailable(),
+    run: async (input: BrowserActionInput) => {
+      if (!browserBackend.capabilities.downloads || browserBackend.download === undefined) {
+        return unsupportedBrowserTool(browserBackend, "browser.download");
+      }
+      const browserInput = deriveBrowserInput(input);
+      const root = resolve(options.downloadRoot);
+      const sessionOwner = createHash("sha256").update(browserInput.sessionId).digest("hex").slice(0, 24);
+      const sessionRoot = resolve(root, sessionOwner);
+      if (!sessionRoot.startsWith(`${root}${sep}`)) {
+        return browserDownloadFailure(browserBackend, "download-blocked", "invalid-session-artifact-root");
+      }
+
+      await mkdir(sessionRoot, { recursive: true, mode: 0o700 });
+      const captureDirectory = await mkdtemp(join(sessionRoot, "capture-"));
+      const runtimeInput: BrowserDownloadInput = {
+        ...browserInput,
+        destinationDirectory: captureDirectory,
+        maxBytes: MAX_GOVERNED_BROWSER_DOWNLOAD_BYTES
+      };
+      let capture: Awaited<ReturnType<NonNullable<BrowserBackend["download"]>>>;
+      try {
+        capture = await browserBackend.download(runtimeInput);
+      } catch (error) {
+        await rm(captureDirectory, { recursive: true, force: true });
+        const targetFailure = browserTargetFailureMetadata(error);
+        if (targetFailure !== undefined) {
+          return {
+            ok: false,
+            content: "The grounded browser download target is no longer current. Use the returned current browser evidence to retarget once.",
+            metadata: {
+              backend: browserBackend.kind,
+              outcome: "download-blocked",
+              ...targetFailure
+            }
+          };
+        }
+        return browserDownloadFailure(
+          browserBackend,
+          "download-failed",
+          error instanceof Error && error.name === "AbortError" ? "download-cancelled" : "download-capture-failed"
+        );
+      }
+
+      if (capture.outcome !== "download-completed" || capture.localPath === undefined || capture.sourceUrl === undefined) {
+        await rm(captureDirectory, { recursive: true, force: true });
+        return browserDownloadFailure(browserBackend, capture.outcome, capture.reason);
+      }
+
+      if (
+        scanUrlForSecrets(capture.sourceUrl) !== undefined ||
+        await guardUrl(capture.sourceUrl, {
+          unsafeReason: "unsafe-download-redirect",
+          policyReason: "download-website-policy",
+          metadata: { backend: browserBackend.kind }
+        }) !== undefined
+      ) {
+        await rm(captureDirectory, { recursive: true, force: true });
+        return browserDownloadFailure(browserBackend, "download-blocked", "unsafe-download-redirect");
+      }
+
+      try {
+        const localPath = resolve(capture.localPath);
+        if (!localPath.startsWith(`${resolve(captureDirectory)}${sep}`)) {
+          return browserDownloadFailure(browserBackend, "download-blocked", "download-path-escaped-capture-root");
+        }
+        const file = await stat(localPath);
+        if (!file.isFile()) return browserDownloadFailure(browserBackend, "download-failed", "download-is-not-file");
+        if (file.size > MAX_GOVERNED_BROWSER_DOWNLOAD_BYTES) {
+          return browserDownloadFailure(browserBackend, "download-too-large", "download-too-large");
+        }
+
+        const bytes = await readFile(localPath);
+        const filename = sanitizeBrowserDownloadFilename(capture.suggestedFilename ?? basename(localPath));
+        const inspection = inspectBrowserDownload(filename, bytes);
+        if (inspection.allowed === false) {
+          return browserDownloadFailure(browserBackend, "download-type-blocked", inspection.reason);
+        }
+        const sha256 = createHash("sha256").update(bytes).digest("hex");
+        const artifactDirectory = join(sessionRoot, "artifacts");
+        await mkdir(artifactDirectory, { recursive: true, mode: 0o700 });
+        const artifactPath = join(artifactDirectory, `${randomUUID()}-${filename}`);
+        await rename(localPath, artifactPath);
+        await chmod(artifactPath, 0o600);
+        const sourceOrigin = new URL(capture.sourceUrl).origin;
+        const artifact = artifactStore.record({
+          path: artifactPath,
+          kind: inspection.kind,
+          bytes: bytes.byteLength,
+          mimeType: inspection.mimeType,
+          summary: "Governed browser download captured from a current grounded page target.",
+          metadata: {
+            filename,
+            sha256,
+            sourceOrigin,
+            outcome: "download-completed"
+          }
+        });
+        const receipt = {
+          artifactId: artifact.id,
+          filename,
+          mimeType: inspection.mimeType,
+          sizeBytes: bytes.byteLength,
+          sha256,
+          sourceOrigin,
+          outcome: "download-completed" as const
+        };
+        return {
+          ok: true,
+          content: [
+            `Artifact: artifact://${artifact.id}`,
+            `Filename: ${filename}`,
+            `MIME: ${inspection.mimeType}`,
+            `Bytes: ${bytes.byteLength}`,
+            `SHA-256: ${sha256}`,
+            `Source origin: ${sourceOrigin}`
+          ].join("\n"),
+          metadata: receipt
+        };
+      } finally {
+        await rm(captureDirectory, { recursive: true, force: true });
+      }
+    }
+  };
+}
+
+function browserDownloadFailure(
+  backend: BrowserBackend,
+  outcome: import("../contracts/browser.js").BrowserDownloadOutcome,
+  reason = "browser-download-failed"
+): ToolResult {
+  return {
+    ok: false,
+    content: `Browser download did not complete (${outcome}).`,
+    metadata: { backend: backend.kind, outcome, reason }
+  };
+}
+
+function sanitizeBrowserDownloadFilename(value: string): string {
+  const leaf = basename(value.replaceAll("\\", "/"));
+  const normalized = leaf.normalize("NFKC")
+    .replace(/[\u0000-\u001f\u007f]/gu, "")
+    .replace(/[^A-Za-z0-9._ -]/gu, "_")
+    .replace(/^\.+/u, "")
+    .trim()
+    .slice(0, 160);
+  return normalized.length === 0 ? "download.bin" : normalized;
+}
+
+type BrowserDownloadInspection =
+  | { allowed: true; mimeType: string; kind: "data" | "document" }
+  | { allowed: false; reason: string };
+
+function inspectBrowserDownload(filename: string, bytes: Uint8Array): BrowserDownloadInspection {
+  const extension = extname(filename).toLowerCase();
+  if (looksExecutableOrScript(bytes)) return { allowed: false, reason: "executable-or-script-content" };
+
+  if (extension === ".pdf") {
+    return startsWithAscii(bytes, "%PDF-")
+      ? { allowed: true, mimeType: "application/pdf", kind: "document" }
+      : { allowed: false, reason: "invalid-pdf-content" };
+  }
+  if (extension === ".zip") {
+    return bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && [0x03, 0x05, 0x07].includes(bytes[2] ?? -1)
+      ? { allowed: true, mimeType: "application/zip", kind: "data" }
+      : { allowed: false, reason: "invalid-zip-content" };
+  }
+  if (![".json", ".yaml", ".yml", ".txt", ".md", ".csv"].includes(extension)) {
+    return { allowed: false, reason: "unsupported-download-type" };
+  }
+  if (!isSafeTextBytes(bytes)) return { allowed: false, reason: "binary-content-in-text-download" };
+  if (extension === ".json") {
+    try {
+      JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    } catch {
+      return { allowed: false, reason: "invalid-json-content" };
+    }
+    return { allowed: true, mimeType: "application/json", kind: "data" };
+  }
+  if (extension === ".yaml" || extension === ".yml") {
+    return { allowed: true, mimeType: "application/yaml", kind: "data" };
+  }
+  if (extension === ".csv") return { allowed: true, mimeType: "text/csv", kind: "data" };
+  if (extension === ".md") return { allowed: true, mimeType: "text/markdown", kind: "document" };
+  return { allowed: true, mimeType: "text/plain", kind: "document" };
+}
+
+function looksExecutableOrScript(bytes: Uint8Array): boolean {
+  if (startsWithAscii(bytes, "MZ") || startsWithAscii(bytes, "\u007fELF") || startsWithAscii(bytes, "#!")) return true;
+  if (bytes.length < 4) return false;
+  const magic = [bytes[0], bytes[1], bytes[2], bytes[3]].map((value) => value?.toString(16).padStart(2, "0")).join("");
+  return ["feedface", "feedfacf", "cefaedfe", "cffaedfe", "cafebabe"].includes(magic);
+}
+
+function startsWithAscii(bytes: Uint8Array, value: string): boolean {
+  const prefix = Buffer.from(value, "binary");
+  return bytes.length >= prefix.length && prefix.every((byte, index) => bytes[index] === byte);
+}
+
+function isSafeTextBytes(bytes: Uint8Array): boolean {
+  if (bytes.includes(0)) return false;
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function browserIdentityInputSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      documentEpoch: { type: "number" },
+      actionRevision: { type: "number" },
+      observationId: { type: "number" }
+    },
+    required: ["documentEpoch", "actionRevision", "observationId"]
+  };
 }
 
 async function saveBrowserScreenshot(

@@ -25,6 +25,10 @@ import {
   browserInteractabilityGuardSource
 } from "./browser-interactability.js";
 import { dispatchNativeBrowserClick } from "./native-input.js";
+import {
+  browserCapabilities,
+  validateBrowserBackendCapabilities
+} from "./browser-capabilities.js";
 
 export type { CdpFetchLike, CdpWebSocketEvent, CdpWebSocketFactory, CdpWebSocketLike } from "./cdp-client.js";
 
@@ -33,18 +37,21 @@ export type UnconfiguredBrowserBackendOptions = {
 };
 
 export function createUnconfiguredBrowserBackend(options: UnconfiguredBrowserBackendOptions = {}): BrowserBackend {
-  return {
+  const capabilities = browserCapabilities();
+  return validateBrowserBackendCapabilities({
     kind: "unconfigured",
+    capabilities,
     isAvailable: () => false,
     status: () => ({
       backend: "unconfigured",
       available: false,
+      capabilities,
       reason: options.reason ?? "No browser backend is configured."
     }),
     async navigate(input: BrowserNavigateInput): Promise<BrowserNavigateResult> {
       throw new Error(options.reason ?? `No browser backend is configured for ${input.url}.`);
     }
-  };
+  });
 }
 
 export function createMockBrowserBackend(input: {
@@ -64,12 +71,20 @@ export function createMockBrowserBackend(input: {
     elements: [{ ref: "@e1", role: "button", name: "Mock Button" }]
   }, identityState);
 
-  return {
+  const capabilities = browserCapabilities({
+    snapshots: true,
+    semanticActions: true,
+    screenshots: true,
+    rawCdp: true
+  });
+  return validateBrowserBackendCapabilities({
     kind: "mock",
+    capabilities,
     isAvailable: () => true,
     status: () => ({
       backend: "mock",
       available: true,
+      capabilities,
       browser: input.title ?? "Mock Browser"
     }),
     async navigate(request) {
@@ -115,7 +130,7 @@ export function createMockBrowserBackend(input: {
       base64: "iVBORw0KGgo="
     }),
     dialog: async () => snapshot()
-  };
+  });
 }
 
 export type LocalCdpBrowserBackendOptions = {
@@ -139,10 +154,20 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
   const snapshotIdentityStates = new Map<string, BrowserSnapshotIdentityState>();
   let latestSessionId: string | undefined;
 
-  return {
+  const capabilities = browserCapabilities({
+    snapshots: true,
+    nativePointer: true,
+    screenshots: true,
+    rawCdp: true
+  });
+  return validateBrowserBackendCapabilities({
     kind: "local-cdp",
+    capabilities,
     isAvailable: async () => (await checkLocalCdpStatus(endpoint, options.fetch)).available,
-    status: () => checkLocalCdpStatus(endpoint, options.fetch),
+    status: async () => ({
+      ...await checkLocalCdpStatus(endpoint, options.fetch),
+      capabilities
+    }),
     async navigate(input) {
       if (input.disposition === "new-tab") {
         throw new Error("Controlled new-tab navigation requires the supervised local CDP backend.");
@@ -310,7 +335,7 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
         return observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
       }
     })
-  };
+  });
 }
 
 async function runCdpSessionAction<T>(input: {
@@ -542,7 +567,10 @@ async function createCdpTarget(input: {
   };
 }
 
-async function checkLocalCdpStatus(endpoint: string | undefined, fetchLike: CdpFetchLike | undefined): Promise<BrowserBackendStatus> {
+async function checkLocalCdpStatus(
+  endpoint: string | undefined,
+  fetchLike: CdpFetchLike | undefined
+): Promise<Omit<BrowserBackendStatus, "capabilities">> {
   if (endpoint === undefined) {
     return {
       backend: "local-cdp",
@@ -795,8 +823,23 @@ export function createHybridBrowserBackend(options: HybridBrowserBackendOptions)
     throw new Error(`Browser redirect safety violation: ${decision.reason}`);
   };
 
+  const capabilities = browserCapabilities({
+    snapshots: options.cloudBackend.capabilities.snapshots && options.localBackend.capabilities.snapshots,
+    semanticActions: options.cloudBackend.capabilities.semanticActions && options.localBackend.capabilities.semanticActions,
+    visibleRegionActions: options.cloudBackend.capabilities.visibleRegionActions && options.localBackend.capabilities.visibleRegionActions,
+    nativePointer: options.cloudBackend.capabilities.nativePointer && options.localBackend.capabilities.nativePointer,
+    tabs: options.cloudBackend.capabilities.tabs && options.localBackend.capabilities.tabs,
+    controlledNewTabs: options.cloudBackend.capabilities.controlledNewTabs && options.localBackend.capabilities.controlledNewTabs,
+    popupObservation: options.cloudBackend.capabilities.popupObservation && options.localBackend.capabilities.popupObservation,
+    downloads: false,
+    protectedInput: false,
+    protectedSourceRelay: false,
+    screenshots: options.cloudBackend.capabilities.screenshots && options.localBackend.capabilities.screenshots,
+    rawCdp: options.cloudBackend.capabilities.rawCdp && options.localBackend.capabilities.rawCdp
+  });
   const backend: BrowserBackend = {
     kind: "browserbase",
+    capabilities,
     isAvailable: async () => (await options.cloudBackend.isAvailable()) || (await options.localBackend.isAvailable()),
     status: async () => {
       const cloudStatus = await options.cloudBackend.status();
@@ -805,6 +848,7 @@ export function createHybridBrowserBackend(options: HybridBrowserBackendOptions)
         ...cloudStatus,
         backend: "browserbase",
         available: cloudStatus.available || localStatus.available,
+        capabilities,
         reason: cloudStatus.available || localStatus.available ? cloudStatus.reason : cloudStatus.reason ?? localStatus.reason,
         hybridRouting: options.hybridRouting,
         lastNavigationBackend,
@@ -958,7 +1002,7 @@ export function createHybridBrowserBackend(options: HybridBrowserBackendOptions)
     }
   };
 
-  return backend;
+  return validateBrowserBackendCapabilities(backend);
 }
 
 export function createBrowserBackendFromConfig(config: {
@@ -1105,6 +1149,7 @@ function createCloudProviderStatusBackend(config: {
   cloudProvider: string;
 }): BrowserBackend {
   registerDefaultBrowserProviders();
+  const capabilities = browserCapabilities();
 
   const status = async (): Promise<BrowserBackendStatus> => {
     const selection = await selectBrowserProvider({
@@ -1119,17 +1164,19 @@ function createCloudProviderStatusBackend(config: {
     return {
       backend: config.backend,
       available: false,
+      capabilities,
       reason
     };
   };
 
-  return {
+  return validateBrowserBackendCapabilities({
     kind: config.backend,
+    capabilities,
     isAvailable: async () => false,
     status,
     async navigate(input) {
       const current = await status();
       throw new Error(current.reason ?? `No cloud browser backend is configured for ${input.url}.`);
     }
-  };
+  });
 }

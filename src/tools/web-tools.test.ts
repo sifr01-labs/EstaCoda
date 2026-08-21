@@ -12,6 +12,7 @@ import { DDGS_CAPABILITY_ID } from "../python-env/capability-registry.js";
 import type { ProviderExecutor, ProviderExecutionResult } from "../providers/provider-executor.js";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
 import { createMockBrowserBackend, createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
+import { browserCapabilities } from "../browser/browser-capabilities.js";
 import { BrowserTargetError } from "../browser/browser-locator.js";
 import { BrowserSessionStateError } from "../browser/session-state.js";
 import { ephemeralVisionImages } from "../vision/ephemeral-vision-content.js";
@@ -41,6 +42,7 @@ const expectedToolNames = [
   "browser.switch_tab",
   "browser.cdp",
   "browser.screenshot",
+  "browser.download",
   "browser.vision",
   "browser.dialog",
   "browser.navigate"
@@ -281,6 +283,7 @@ function createSessionRecordingBrowserBackend(calls: Array<{ method: string; inp
 
   return {
     kind: "mock",
+    capabilities: browserCapabilities({ snapshots: true, semanticActions: true, controlledNewTabs: true }),
     isAvailable: () => true,
     status: () => ({ backend: "mock", available: true }),
     navigate: async (input) => {
@@ -2709,6 +2712,24 @@ describe("web and browser tools baselines", () => {
 
     expect(result.ok).toBe(true);
     expect(result.content).toContain("Browser backend: mock");
+    expect(result.content).toContain("Capabilities: snapshots, semanticActions, controlledNewTabs");
+    expect(result.content).not.toContain("downloads");
+  });
+
+  it("announces governed download support from the backend capability declaration", async () => {
+    const base = createSessionRecordingBrowserBackend();
+    const browserBackend: BrowserBackend = {
+      ...base,
+      capabilities: { ...base.capabilities, downloads: true },
+      download: async () => ({ outcome: "download-failed", reason: "not-used" })
+    };
+    const status = tool("browser.status", createWebTools({ browserBackend }));
+
+    const result = await status.run({});
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("Capabilities: snapshots, semanticActions, controlledNewTabs, downloads");
+    expect(result.metadata).toMatchObject({ capabilities: { downloads: true } });
   });
 
   it("surfaces structured browser session-loss reasons to the model", async () => {
@@ -3181,6 +3202,7 @@ describe("web and browser tools baselines", () => {
   it("renders browser snapshot observability sections when present", async () => {
     const browserBackend: BrowserBackend = {
       kind: "mock",
+      capabilities: browserCapabilities({ snapshots: true }),
       isAvailable: () => true,
       status: () => ({ backend: "mock", available: true }),
       navigate: async () => {

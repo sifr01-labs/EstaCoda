@@ -118,5 +118,19 @@ function localBackend(overrides: Partial<BrowserBackend> = {}): BrowserBackend {
     abortProtectedFieldGroup: async () => undefined,
     releaseProtectedField: async () => undefined,
     ...overrides,
+    capabilities: overrides.capabilities ?? {
+      snapshots: false,
+      semanticActions: false,
+      visibleRegionActions: false,
+      nativePointer: false,
+      tabs: false,
+      controlledNewTabs: false,
+      popupObservation: false,
+      downloads: false,
+      protectedInput: true,
+      protectedSourceRelay: false,
+      screenshots: false,
+      rawCdp: false
+    },
   };
 }

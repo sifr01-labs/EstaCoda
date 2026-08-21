@@ -6,7 +6,8 @@ import type {
   BrowserNavigateInput,
   BrowserNavigateResult,
   BrowserScreenshotResult,
-  BrowserSnapshot
+  BrowserSnapshot,
+  BrowserSwitchTabInput
 } from "../../contracts/browser.js";
 import type { LoadedRuntimeConfig } from "../../config/runtime-config.js";
 import type { CdpFetchLike, CdpWebSocketFactory } from "../cdp-client.js";
@@ -14,6 +15,7 @@ import type { BrowserProvider, ProviderAvailability } from "../browser-provider.
 import type { ResolveHostnameFn } from "../url-safety.js";
 import { createSupervisedLocalCdpBrowserBackend, type SupervisedLocalCdpBackendOptions } from "../supervised-local-cdp-backend.js";
 import { BrowserbaseClient, type BrowserbaseSession } from "./browserbase-client.js";
+import { browserCapabilities, validateBrowserBackendCapabilities } from "../browser-capabilities.js";
 
 export type BrowserbaseClientLike = {
   createSession(): Promise<BrowserbaseSession>;
@@ -115,6 +117,17 @@ export function createBrowserbaseBrowserBackend(options: BrowserbaseBrowserBacke
   let activeBackend: ActiveBackend | undefined;
   let latestFallbackMetadata: FallbackMetadata | undefined;
   let closed = false;
+  const capabilities = browserCapabilities({
+    snapshots: true,
+    semanticActions: true,
+    visibleRegionActions: true,
+    nativePointer: true,
+    tabs: true,
+    controlledNewTabs: true,
+    popupObservation: true,
+    screenshots: true,
+    rawCdp: true
+  });
 
   const createLocalFallbackBackend = (): ClosableBrowserBackend => {
     fallbackBackend ??= createSupervisedBackend({
@@ -268,6 +281,7 @@ export function createBrowserbaseBrowserBackend(options: BrowserbaseBrowserBacke
     closeSession(sessionId: string): Promise<void>;
   } = {
     kind: "browserbase",
+    capabilities,
     isAvailable: async () => getBrowserbaseAvailability({
       apiKey: options.apiKey,
       projectId: options.projectId
@@ -280,6 +294,7 @@ export function createBrowserbaseBrowserBackend(options: BrowserbaseBrowserBacke
       return {
         backend: "browserbase",
         available: availability.available && options.cloudSpendApproved === true,
+        capabilities,
         reason: availability.available
           ? options.cloudSpendApproved === true ? undefined : CLOUD_SPEND_APPROVAL_ERROR
           : availability.reason,
@@ -301,6 +316,8 @@ export function createBrowserbaseBrowserBackend(options: BrowserbaseBrowserBacke
     back: (input = {}) => runWithBackend((delegate) => requiredMethod(delegate.back, "back")(input)),
     getImages: (input = {}) => runWithBackend((delegate) => requiredMethod(delegate.getImages, "getImages")(input)),
     console: (input = {}): Promise<BrowserConsoleEntry[]> => runWithBackend((delegate) => requiredMethod(delegate.console, "console")(input)),
+    tabs: (input = {}) => runWithBackend((delegate) => requiredMethod(delegate.tabs, "tabs")(input)),
+    switchTab: (input: BrowserSwitchTabInput) => runWithBackend((delegate) => requiredMethod(delegate.switchTab, "switchTab")(input)),
     cdp: (input) => runWithBackend((delegate) => requiredMethod(delegate.cdp, "cdp")(input)),
     screenshot: (input = {}): Promise<BrowserScreenshotResult> => runWithBackend((delegate) => requiredMethod(delegate.screenshot, "screenshot")(input)),
     dialog: (input = {}): Promise<BrowserSnapshot> => runWithBackend((delegate) => requiredMethod(delegate.dialog, "dialog")(input)),
@@ -333,7 +350,7 @@ export function createBrowserbaseBrowserBackend(options: BrowserbaseBrowserBacke
     }
   };
 
-  return backend;
+  return validateBrowserBackendCapabilities(backend);
 }
 
 function requiredMethod<T extends (...args: never[]) => Promise<unknown>>(method: T | undefined, name: string): T {

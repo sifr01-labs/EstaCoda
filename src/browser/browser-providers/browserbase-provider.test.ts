@@ -7,6 +7,7 @@ import type {
 } from "../../contracts/browser.js";
 import { createBrowserBackendFromConfig } from "../browser-backend.js";
 import { browserbaseProvider, createBrowserbaseBrowserBackend, getBrowserbaseAvailability, type BrowserbaseClientLike } from "./browserbase-provider.js";
+import { browserCapabilities } from "../browser-capabilities.js";
 
 type FakeBackend = BrowserBackend & {
   close: ReturnType<typeof vi.fn<() => Promise<void>>>;
@@ -33,6 +34,7 @@ function createFakeBackend(input: {
   const navigations = input.navigations ?? [];
   const backend: FakeBackend = {
     kind: input.kind ?? "local-cdp",
+    capabilities: browserCapabilities(),
     isAvailable: () => true,
     status: () => ({ backend: input.kind ?? "local-cdp", available: true }),
     async navigate(request): Promise<BrowserNavigateResult> {
