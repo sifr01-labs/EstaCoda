@@ -833,9 +833,24 @@ function renderTopBorder(
   const right = rightLabel === undefined ? "" : ` ${rightLabel} `;
   const remaining = Math.max(0, width - 2 - stringWidth(label) - stringWidth(right));
   const rendered = truncateVisibleCells(`╭${label}${"─".repeat(remaining)}${right}╮`, width);
-  return subtle && style !== undefined
-    ? styleColor(style, rendered, style.tokens.contract.surface.borderSubtle)
-    : rendered;
+  if (!subtle || style === undefined) return rendered;
+
+  const borderColor = style.tokens.contract.surface.borderSubtle;
+  const secondaryText = style.tokens.contract.text.secondary;
+  const styled = rightLabel === undefined
+    ? [
+      styleColor(style, "╭─ ", borderColor),
+      styleColor(style, title, secondaryText),
+      styleColor(style, ` ${"─".repeat(remaining)}╮`, borderColor),
+    ].join("")
+    : [
+      styleColor(style, "╭─ ", borderColor),
+      styleColor(style, title, secondaryText),
+      styleColor(style, ` ${"─".repeat(remaining)} `, borderColor),
+      styleColor(style, rightLabel, secondaryText),
+      styleColor(style, " ╮", borderColor),
+    ].join("");
+  return truncateVisibleCells(styled, width);
 }
 
 function renderBottomBorder(width: number, style?: OperatorConsoleStyle, subtle = false): string {

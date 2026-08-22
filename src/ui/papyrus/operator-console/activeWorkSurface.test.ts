@@ -584,6 +584,25 @@ describe("Papyrus operator console active work surface", () => {
     expect(output.every((line) => stringWidth(line) <= 96)).toBe(true);
   });
 
+  it("renders completed header text brighter than its subtle frame", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const style = createOperatorConsoleStyle({
+      tokens,
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const output = renderCompletedActiveWorkSurface(createState({
+      startedAtMs: 0,
+      completedAtMs: 200_000,
+      items: [item("read", "succeeded", { toolName: "read_file", target: "src/app.ts" })],
+    }), { width: 80, style });
+    const header = output[0] ?? "";
+
+    expect(header).toContain(`${ansiFg(tokens.contract.text.secondary)}Tools completed\x1b[0m`);
+    expect(header).toContain(`${ansiFg(tokens.contract.text.secondary)}1 succeeded · 3m 20s\x1b[0m`);
+    expect(header).toContain(`${ansiFg(tokens.contract.surface.borderSubtle)}╭─ \x1b[0m`);
+    expect(stringWidth(header)).toBe(80);
+  });
+
   it("keeps response accounting out of the completed tool header", () => {
     const state = createState({
       items: [item("read", "succeeded", { toolName: "read_file", target: "src/app.ts" })],
@@ -1050,4 +1069,12 @@ function item(
 
 function stripBidiIsolates(value: string): string {
   return value.replace(/[\u2068\u2069]/gu, "");
+}
+
+function ansiFg(hex: string): string {
+  const clean = hex.replace("#", "");
+  const r = Number.parseInt(clean.slice(0, 2), 16);
+  const g = Number.parseInt(clean.slice(2, 4), 16);
+  const b = Number.parseInt(clean.slice(4, 6), 16);
+  return `\x1b[38;2;${r};${g};${b}m`;
 }
