@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-21T18:35:15.969Z",
+  "generatedAt": "2026-08-23T15:21:37.815Z",
   "skills": [
     {
       "id": "official.api-integration",
@@ -13,13 +13,8 @@
         "api.import"
       ],
       "triggerPatterns": [
-        "connect api",
-        "import api",
-        "api integration",
-        "import openapi",
-        "connect openapi",
-        "import swagger",
-        "connect swagger"
+        "\\b(?:connect|import|add|create|generate|transfer|configure|set\\s+up)\\b.{0,120}\\b(?:apis?|products?|openapi|swagger|specifications?|specs?|collections?)\\b.{0,120}\\b(?:postman(?:\\s+(?:workspaces?|collections?))?|api\\s+clients?|developer\\s+portals?|credentials?|keys?|openapi|swagger|specifications?|specs?)\\b",
+        "\\b(?:postman(?:\\s+(?:workspaces?|collections?))?|api\\s+clients?|developer\\s+portals?)\\b.{0,120}\\b(?:connect|import|add|create|generate|transfer|configure|set\\s+up)\\b.{0,120}\\b(?:apis?|products?|openapi|swagger|specifications?|specs?|collections?|credentials?|keys?)\\b"
       ],
       "requiredToolsets": [
         "browser",
@@ -30,7 +25,7 @@
         "files"
       ],
       "playbookSteps": 4,
-      "evaluationCount": 1,
+      "evaluationCount": 11,
       "routing": {
         "confirmation": "policy"
       },

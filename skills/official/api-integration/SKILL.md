@@ -7,17 +7,16 @@
   "routing": {
     "labels": ["api.integration", "api.import"],
     "triggerPatterns": [
-      { "type": "contains", "value": "connect api" },
-      { "type": "contains", "value": "import api" },
-      { "type": "contains", "value": "api integration" },
-      { "type": "contains", "value": "import openapi" },
-      { "type": "contains", "value": "connect openapi" },
-      { "type": "contains", "value": "import swagger" },
-      { "type": "contains", "value": "connect swagger" }
+      { "type": "regex", "value": "\\b(?:connect|import|add|create|generate|transfer|configure|set\\s+up)\\b.{0,120}\\b(?:apis?|products?|openapi|swagger|specifications?|specs?|collections?)\\b.{0,120}\\b(?:postman(?:\\s+(?:workspaces?|collections?))?|api\\s+clients?|developer\\s+portals?|credentials?|keys?|openapi|swagger|specifications?|specs?)\\b" },
+      { "type": "regex", "value": "\\b(?:postman(?:\\s+(?:workspaces?|collections?))?|api\\s+clients?|developer\\s+portals?)\\b.{0,120}\\b(?:connect|import|add|create|generate|transfer|configure|set\\s+up)\\b.{0,120}\\b(?:apis?|products?|openapi|swagger|specifications?|specs?|collections?|credentials?|keys?)\\b" }
     ],
     "negativePatterns": [
       { "type": "contains", "value": "build an api" },
-      { "type": "contains", "value": "implement api endpoint" }
+      { "type": "contains", "value": "implement api endpoint" },
+      { "type": "regex", "value": "\\b(?:build|implement|create|add|write)\\b.{0,80}\\bapi\\s+(?:endpoint|service|backend)\\b" },
+      { "type": "regex", "value": "^(?!.*\\b(?:connect|import|add|create|generate|transfer|configure|set\\s+up)\\b).*\\b(?:what(?:'s|\\s+is)\\s+wrong|why|diagnose|debug|troubleshoot|error|issue|problem|failing|failed)\\b.{0,160}\\b(?:postman|collections?|workspaces?|api\\s+integration)\\b" },
+      { "type": "regex", "value": "^(?:how\\s+(?:do|can|would|should)\\s+i|explain|describe|teach|tell\\s+me\\s+how|show\\s+me\\s+how|write\\s+documentation|document)\\b.{0,240}\\b(?:postman|apis?|openapi|swagger|collections?|workspaces?|api\\s+integration)\\b" },
+      { "type": "regex", "value": "^(?!.*\\b(?:connect|import|add|create|generate|transfer|configure|set\\s+up)\\b).*\\b(?:explain|how\\s+(?:does|do)|what\\s+is|tell\\s+me\\s+about|review|write\\s+documentation|document)\\b.{0,160}\\b(?:postman|collections?|workspaces?|environments?|requests?)\\b" }
     ],
     "requiredToolsets": ["browser", "mcp"],
     "confirmation": "policy",
@@ -50,10 +49,65 @@
   ],
   "evaluations": [
     {
-      "input": "Connect the APIs shown in this developer portal to my configured API client and add the credentials.",
+      "input": "Set up these products in our Postman collection.",
       "expected": { "selectedSkill": "api-integration" },
       "shouldUseToolsets": ["browser", "mcp"],
-      "expectedOutcome": "The agent prefers visible machine-readable exports, uses governed artifact import when reviewed, transfers credentials separately, and verifies destination state."
+      "expectedOutcome": "The API integration workflow is selected from the requested operation and Postman destination."
+    },
+    {
+      "input": "Add these APIs to my Postman workspace.",
+      "expected": { "selectedSkill": "api-integration" },
+      "shouldUseToolsets": ["browser", "mcp"],
+      "expectedOutcome": "The API integration workflow is selected from the requested operation and Postman destination."
+    },
+    {
+      "input": "Import these products and configure their credentials.",
+      "expected": { "selectedSkill": "api-integration" },
+      "shouldUseToolsets": ["browser", "mcp"],
+      "expectedOutcome": "The paired import and protected-credential configuration operation selects the integration workflow."
+    },
+    {
+      "input": "Create Postman collections from the developer portal.",
+      "expected": { "selectedSkill": "api-integration" },
+      "shouldUseToolsets": ["browser", "mcp"],
+      "expectedOutcome": "The API integration workflow is selected from the requested collection creation and source portal."
+    },
+    {
+      "input": "Generate a collection from these Swagger files.",
+      "expected": { "selectedSkill": "api-integration" },
+      "shouldUseToolsets": ["browser", "mcp"],
+      "expectedOutcome": "The API integration workflow is selected from collection generation and machine-readable API artifacts."
+    },
+    {
+      "input": "Transfer these API specifications and keys into Postman.",
+      "expected": { "selectedSkill": "api-integration" },
+      "shouldUseToolsets": ["browser", "mcp"],
+      "expectedOutcome": "The API integration workflow is selected while artifact and protected-value transfers remain separate."
+    },
+    {
+      "input": "What is wrong with my Postman collection?",
+      "expected": { "selectedSkill": null },
+      "expectedOutcome": "A diagnostic question does not select the API transfer workflow merely because Postman is named."
+    },
+    {
+      "input": "Explain how Postman environments work.",
+      "expected": { "selectedSkill": null },
+      "expectedOutcome": "An educational question does not select the API transfer workflow."
+    },
+    {
+      "input": "Review this Postman request.",
+      "expected": { "selectedSkill": null },
+      "expectedOutcome": "A read-only review does not select the API transfer workflow."
+    },
+    {
+      "input": "Build an API endpoint.",
+      "expected": { "selectedSkill": null },
+      "expectedOutcome": "API implementation remains outside the API transfer workflow."
+    },
+    {
+      "input": "Write documentation about Postman.",
+      "expected": { "selectedSkill": null },
+      "expectedOutcome": "Documentation writing does not select the API transfer workflow."
     }
   ]
 }
