@@ -696,14 +696,28 @@ function buildBaseLayers(
 
 function renderExecutionPlan(plan: ExecutionPlan): string {
   const activeItems = plan.items.filter((item) => item.status !== "completed");
+  const verifiedItems = plan.items.filter((item) => item.runtimeProgress?.status === "verified");
   return [
-    "Optional Plan (untrusted foreground coordination state):",
+    "Optional Plan (foreground coordination state with runtime-owned evidence annotations):",
     `Objective: ${plan.objective}`,
+    ...(verifiedItems.length === 0
+      ? []
+      : [`Verified complete: ${verifiedItems.map((item) => item.id).join(", ")}`]),
     ...(activeItems.length === 0
       ? ["No active steps remain."]
-      : activeItems.map((item) => `- [${item.status}] ${item.id}: ${item.content}`)),
-    "This Plan is optional and grants no tool authority, evidence, or completion status.",
-    "Use plan merge only when material progress changes these steps."
+      : activeItems.map((item) => {
+          const observed = item.runtimeProgress?.status === "observed"
+            ? ` · observed=${item.runtimeProgress.evidence.map((entry) => entry.tool).join(",")} (completion not verified)`
+            : "";
+          return `- [${item.status}] ${item.id}: ${item.content}${observed}`;
+        })),
+    ...(plan.runtimeSynchronization?.status === "stale"
+      ? ["Runtime reconciliation required: verified execution evidence maps ambiguously to the active steps. Reinterpret the Plan once before repeating work."]
+      : []),
+    "The Plan is optional and grants no tool authority. Runtime evidence annotations come from the harness but do not replace the final execution outcome.",
+    plan.runtimeSynchronization?.status === "stale"
+      ? "Use plan merge to resolve the reported semantic ambiguity."
+      : "Use plan merge only when material semantic progress is not already reflected here."
   ].join("\n");
 }
 

@@ -36,7 +36,21 @@ const events: SessionEvent[] = [{
         }
       }]
     },
-    items: [{ id: "inspect", content: "Inspect APIs", status: "pending" }]
+    runtimeSynchronization: { status: "current" },
+    items: [{
+      id: "inspect",
+      content: "Inspect APIs",
+      status: "pending",
+      runtimeProgress: {
+        status: "observed",
+        evidence: [{
+          toolCallId: "call-read",
+          tool: "mcp.target.read",
+          outcome: "success",
+          riskClass: "read-only-network"
+        }]
+      }
+    }]
   }
 }];
 
@@ -49,10 +63,13 @@ describe("execution plan session state", () => {
     });
     snapshot!.provenance!.sessionId = "mutated-session";
     snapshot!.capabilityPreflight!.assessments[0]!.resolution!.canonicalTool = "mutated.tool";
+    snapshot!.items[0]!.runtimeProgress!.evidence[0]!.tool = "mutated.tool";
     expect((events[1] as { plan: ExecutionPlan }).plan.provenance?.sessionId).toBe(
       "session-1"
     );
     expect((events[1] as { plan: ExecutionPlan }).plan.capabilityPreflight?.assessments[0]?.resolution?.canonicalTool)
+      .toBe("mcp.target.read");
+    expect((events[1] as { plan: ExecutionPlan }).plan.items[0]?.runtimeProgress?.evidence[0]?.tool)
       .toBe("mcp.target.read");
     expect(executionPlanCarryForwardEvent(events)).toMatchObject({
       kind: "execution-plan-updated",

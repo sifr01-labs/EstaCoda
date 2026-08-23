@@ -149,6 +149,19 @@ export type ExecutionPlanEvidence = {
   targetSummary?: string;
 };
 
+/** Runtime-owned progress derived from indexed execution receipts. */
+export type ExecutionPlanRuntimeProgress = {
+  status: "observed" | "verified";
+  evidence: ExecutionPlanEvidence[];
+};
+
+/** Runtime-owned signal that the lightweight Plan needs semantic reinterpretation. */
+export type ExecutionPlanRuntimeSynchronization = {
+  status: "current" | "stale";
+  reason?: "ambiguous_execution_evidence";
+  evidenceCallIds?: string[];
+};
+
 /** Safe, bounded current-turn choice offered after a missing-evidence update. */
 export type ExecutionEvidenceCandidate = {
   toolCallId: string;
@@ -248,6 +261,8 @@ export type ExecutionPlanItem = {
   /** Explicit exception for genuinely reasoning-only work. */
   completionKind?: ExecutionPlanCompletionKind;
   blocker?: ExecutionPlanBlocker;
+  /** Provider input cannot populate this field. */
+  runtimeProgress?: ExecutionPlanRuntimeProgress;
 };
 
 export type ExecutionPlan = {
@@ -259,6 +274,8 @@ export type ExecutionPlan = {
   provenance?: ExecutionPlanProvenance;
   requirements?: ExecutionPlanCapabilityRequirement[];
   capabilityPreflight?: ExecutionPlanCapabilityPreflight;
+  /** Provider input cannot populate this field. */
+  runtimeSynchronization?: ExecutionPlanRuntimeSynchronization;
 };
 
 export const EXECUTION_PLAN_EVENT_KINDS = [
@@ -333,4 +350,9 @@ export type ExecutionPlanControllerApi = ExecutionPlanReader & {
     context?: ExecutionPlanWriteContext
   ): Promise<ExecutionPlan>;
   merge(input: ExecutionPlanMergeInput, sink?: ExecutionPlanEventSink): Promise<ExecutionPlan>;
+  /** Associates already-indexed runtime receipts with active Plan items. */
+  synchronizeEvidence(
+    toolCallIds: readonly string[],
+    sink?: ExecutionPlanEventSink
+  ): Promise<ExecutionPlan | undefined>;
 };

@@ -32,7 +32,25 @@ const plan: ExecutionPlan = {
       }
     }]
   },
-  items: [{ id: "inspect", content: "Inspect the collection", status: "in_progress" }]
+  runtimeSynchronization: {
+    status: "stale",
+    reason: "ambiguous_execution_evidence",
+    evidenceCallIds: ["call-1"]
+  },
+  items: [{
+    id: "inspect",
+    content: "Inspect the collection",
+    status: "in_progress",
+    runtimeProgress: {
+      status: "observed",
+      evidence: [{
+        toolCallId: "call-1",
+        tool: "mcp.target.read",
+        outcome: "success",
+        riskClass: "read-only-network"
+      }]
+    }
+  }]
 };
 
 describe("ExecutionPlanStore", () => {
@@ -42,6 +60,8 @@ describe("ExecutionPlanStore", () => {
     written.items[0]!.content = "mutated outside";
     written.provenance!.provisional = false;
     written.capabilityPreflight!.assessments[0]!.resolution!.protectedInput!.paths[0] = "/mutated";
+    written.runtimeSynchronization!.evidenceCallIds![0] = "mutated-call";
+    written.items[0]!.runtimeProgress!.evidence[0]!.tool = "mutated.tool";
     const firstRead = store.current()!;
     firstRead.items[0]!.status = "completed";
     firstRead.provenance!.sessionId = "another-session";

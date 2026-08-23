@@ -156,6 +156,15 @@ export class ExecutionEvidenceIndex {
     });
   }
 
+  recordsForCallIds(toolCallIds: readonly string[]): ExecutionEvidenceRecord[] {
+    return [...new Set(toolCallIds)].flatMap((toolCallId) => {
+      const entry = this.#byCallId.get(toolCallId);
+      if (entry === undefined) return [];
+      const safe = normalizeExecutionEvidenceRecord(entry.record);
+      return safe === undefined ? [] : [safe];
+    });
+  }
+
   #set(toolCallId: string, evidence: IndexedExecutionEvidence): void {
     this.#byCallId.delete(toolCallId);
     this.#byCallId.set(toolCallId, evidence);

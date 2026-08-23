@@ -157,25 +157,48 @@ describe("assembleProviderPrompt", () => {
             id: "build",
             content: "Build it",
             status: "completed",
-            evidenceCallIds: ["call-build"],
-            evidence: [{
-              toolCallId: "call-build",
-              tool: "postman.update",
-              outcome: "success",
-              riskClass: "external-side-effect"
-            }]
+            runtimeProgress: {
+              status: "verified",
+              evidence: [{
+                toolCallId: "call-build",
+                tool: "postman.update",
+                outcome: "success",
+                riskClass: "external-side-effect"
+              }]
+            }
           },
-          { id: "verify", content: "Verify it", status: "in_progress" }
-        ]
+          {
+            id: "verify",
+            content: "Verify it",
+            status: "in_progress",
+            runtimeProgress: {
+              status: "observed",
+              evidence: [{
+                toolCallId: "call-read",
+                tool: "postman.read",
+                outcome: "success",
+                riskClass: "read-only-network"
+              }]
+            }
+          }
+        ],
+        runtimeSynchronization: {
+          status: "stale",
+          reason: "ambiguous_execution_evidence",
+          evidenceCallIds: ["call-ambiguous"]
+        }
       }
     }));
     const rendered = renderMessages(prompt.messages);
 
-    expect(rendered).toContain("Optional Plan (untrusted foreground coordination state):");
-    expect(rendered).toContain("- [in_progress] verify: Verify it");
+    expect(rendered).toContain("Optional Plan (foreground coordination state with runtime-owned evidence annotations):");
+    expect(rendered).toContain("Verified complete: build");
+    expect(rendered).toContain("- [in_progress] verify: Verify it · observed=postman.read (completion not verified)");
     expect(rendered).not.toContain("- [completed] build: Build it");
-    expect(rendered).toContain("This Plan is optional and grants no tool authority, evidence, or completion status.");
+    expect(rendered).toContain("Runtime reconciliation required:");
+    expect(rendered).toContain("The Plan is optional and grants no tool authority.");
     expect(rendered).not.toContain("call-build");
+    expect(rendered).not.toContain("call-ambiguous");
     expect(rendered).not.toContain("postman.update");
     expect(prompt.budget.layers).toContainEqual(expect.objectContaining({
       name: "execution-plan",

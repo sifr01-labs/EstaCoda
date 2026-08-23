@@ -583,7 +583,8 @@ export class AgentLoopBuilder {
       sessionRuntimeContext,
       maxConcurrentSafeTools: 4,
       delegateTaskCallLimit: (substrate.delegationConfig ?? DEFAULT_DELEGATION_CONFIG).maxDelegateCallsPerTurn,
-      executionEvidenceIndex
+      executionEvidenceIndex,
+      executionPlanController
     });
     const providerTurnLoop = (this.#factories.providerTurnLoop ?? ((options) => new ProviderTurnLoop(options)))({
       providerExecutor: substrate.providerExecutor,

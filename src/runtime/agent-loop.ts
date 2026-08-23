@@ -772,6 +772,11 @@ export class AgentLoop {
       const evidenceRecord = this.#executionEvidenceIndex.record(execution, visibleTurn.id);
       if (evidenceRecord !== undefined) {
         await this.#runRecorder.recordExecutionEvidence(evidenceRecord);
+        try {
+          await this.#executionPlanController?.synchronizeEvidence([evidenceRecord.toolCallId], input.onEvent);
+        } catch {
+          // Optional Plan projection must never change the authoritative tool receipt.
+        }
       }
     }
     await this.#emitLiveContextUsageEstimate({

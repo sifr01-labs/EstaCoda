@@ -41,6 +41,7 @@ import {
   formatExecutionCapabilityBlocker
 } from "./execution-capability-preflight.js";
 import { ExecutionPlanStore } from "./execution-plan-store.js";
+import { synchronizeExecutionPlanEvidence } from "./execution-plan-evidence-synchronizer.js";
 
 const ITEM_STATUSES = new Set<ExecutionPlanItemStatus>([
   "pending",
@@ -198,12 +199,21 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
       }
 
       const existing = items[index]!;
-      items[index] = validateLightweightItem({
+      const lightweight = validateLightweightItem({
         id,
         ...(rawPatch.content === undefined ? {} : { content: rawPatch.content }),
         content: rawPatch.content ?? existing.content,
         status: normalizeLegacyItemStatus(rawPatch.status ?? existing.status)
       });
+      const preserveVerifiedCompletion = existing.runtimeProgress?.status === "verified";
+      const contentChanged = !preserveVerifiedCompletion && lightweight.content !== existing.content;
+      items[index] = {
+        ...lightweight,
+        ...(preserveVerifiedCompletion ? { content: existing.content, status: "completed" as const } : {}),
+        ...(!contentChanged && existing.runtimeProgress !== undefined
+          ? { runtimeProgress: cloneRuntimeProgress(existing.runtimeProgress) }
+          : {})
+      };
     }
 
     const plan = validatePlan({
@@ -213,8 +223,27 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
         : boundedText(input.objective, "objective", EXECUTION_PLAN_MAX_OBJECTIVE_CHARS),
       revision: current.revision + 1,
       status: "active",
-      items
+      items,
+      runtimeSynchronization: { status: "current" }
     });
+    await this.#recordTransition({ kind: eventKindForPlan(plan), plan }, sink);
+    return this.#store.replace(plan);
+  }
+
+  async synchronizeEvidence(
+    toolCallIds: readonly string[],
+    sink?: ExecutionPlanEventSink
+  ): Promise<ExecutionPlan | undefined> {
+    const current = this.#store.current();
+    if (current === undefined || current.status !== "active" || toolCallIds.length === 0) return current;
+    const records = this.#evidenceIndex.recordsForCallIds(toolCallIds);
+    const synchronized = synchronizeExecutionPlanEvidence({
+      plan: current,
+      records,
+      resolveEvidence: (callIds) => this.#evidenceIndex.resolve(callIds)
+    });
+    if (!synchronized.changed) return current;
+    const plan = validatePlan(synchronized.plan);
     await this.#recordTransition({ kind: eventKindForPlan(plan), plan }, sink);
     return this.#store.replace(plan);
   }
@@ -255,7 +284,7 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
   }
 
   hydrate(plan: ExecutionPlan): ExecutionPlan {
-    const hydrated = this.#store.hydrate(validateHydratedPlan(plan));
+    const hydrated = this.#store.hydrate(validateHydratedPlan(plan, this.#evidenceIndex));
     this.#awaitingResumeDecision = true;
     return hydrated;
   }
@@ -412,7 +441,10 @@ function lifecyclePlan(plan: ExecutionPlan, status: "transferred" | "abandoned")
   return { ...plan, revision: plan.revision + 1, status };
 }
 
-function validateHydratedPlan(input: ExecutionPlan): ExecutionPlan {
+function validateHydratedPlan(
+  input: ExecutionPlan,
+  evidenceIndex: ExecutionEvidenceIndex
+): ExecutionPlan {
   if (!isRecord(input) || !Array.isArray(input.items)) {
     throw new ExecutionPlanValidationError("Persisted execution plan is malformed.");
   }
@@ -424,18 +456,25 @@ function validateHydratedPlan(input: ExecutionPlan): ExecutionPlan {
   }
   const items = input.items.map((item) => {
     if (!isRecord(item)) throw new ExecutionPlanValidationError("Persisted execution plan item is malformed.");
-    return validateLightweightItem({
+    const lightweight = validateLightweightItem({
       id: item.id,
       content: item.content,
       status: normalizeLegacyItemStatus(item.status)
     });
+    const runtimeProgress = validateRuntimeProgress(item.runtimeProgress, lightweight.id, evidenceIndex);
+    return {
+      ...lightweight,
+      ...(runtimeProgress === undefined ? {} : { runtimeProgress })
+    };
   });
+  const runtimeSynchronization = validateRuntimeSynchronization(input.runtimeSynchronization);
   const validated = validatePlan({
     objective: boundedText(input.objective, "objective", EXECUTION_PLAN_MAX_OBJECTIVE_CHARS),
     originTurnId: stableId(input.originTurnId, "originTurnId", 256),
     revision: input.revision,
     status: "active",
-    items
+    items,
+    ...(runtimeSynchronization === undefined ? {} : { runtimeSynchronization })
   });
   const plan = input.status === "transferred" || input.status === "abandoned"
     ? { ...validated, status: input.status }
@@ -444,6 +483,58 @@ function validateHydratedPlan(input: ExecutionPlan): ExecutionPlan {
     throw new ExecutionPlanValidationError(`Execution plan exceeds ${EXECUTION_PLAN_MAX_SERIALIZED_BYTES} serialized bytes.`);
   }
   return plan;
+}
+
+function validateRuntimeProgress(
+  input: unknown,
+  itemId: string,
+  evidenceIndex: ExecutionEvidenceIndex
+): ExecutionPlanItem["runtimeProgress"] {
+  if (input === undefined) return undefined;
+  if (!isRecord(input) || (input.status !== "observed" && input.status !== "verified")) {
+    throw new ExecutionPlanValidationError(`Persisted runtime progress for ${itemId} is malformed.`);
+  }
+  const evidence = validatePersistedEvidence(input.evidence, itemId);
+  if (evidence === undefined || evidence.length === 0 || evidence.length > 4) {
+    throw new ExecutionPlanValidationError(`Persisted runtime progress for ${itemId} has no bounded evidence.`);
+  }
+  let indexedEvidence: ExecutionPlanEvidence[];
+  try {
+    indexedEvidence = evidenceIndex.resolve(evidence.map((entry) => entry.toolCallId));
+  } catch {
+    throw new ExecutionPlanValidationError(`Persisted runtime progress for ${itemId} has no indexed execution receipts.`);
+  }
+  if (JSON.stringify(indexedEvidence) !== JSON.stringify(evidence)) {
+    throw new ExecutionPlanValidationError(`Persisted runtime progress for ${itemId} does not match indexed execution receipts.`);
+  }
+  return { status: input.status, evidence };
+}
+
+function validateRuntimeSynchronization(
+  input: unknown
+): ExecutionPlan["runtimeSynchronization"] {
+  if (input === undefined) return undefined;
+  if (!isRecord(input) || (input.status !== "current" && input.status !== "stale")) {
+    throw new ExecutionPlanValidationError("Persisted Plan synchronization state is malformed.");
+  }
+  if (input.status === "current") return { status: "current" };
+  if (input.reason !== "ambiguous_execution_evidence") {
+    throw new ExecutionPlanValidationError("Persisted stale Plan synchronization reason is malformed.");
+  }
+  const evidenceCallIds = validateEvidenceCallIds(input.evidenceCallIds, "runtime synchronization");
+  if (evidenceCallIds === undefined || evidenceCallIds.length === 0 || evidenceCallIds.length > 4) {
+    throw new ExecutionPlanValidationError("Persisted stale Plan synchronization evidence is malformed.");
+  }
+  return { status: "stale", reason: input.reason, evidenceCallIds };
+}
+
+function cloneRuntimeProgress(
+  progress: NonNullable<ExecutionPlanItem["runtimeProgress"]>
+): NonNullable<ExecutionPlanItem["runtimeProgress"]> {
+  return {
+    status: progress.status,
+    evidence: progress.evidence.map((entry) => ({ ...entry }))
+  };
 }
 
 export function isRuntimeProvisionalExecutionPlan(plan: ExecutionPlan): boolean {

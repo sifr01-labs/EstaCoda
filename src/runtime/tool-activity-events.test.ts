@@ -401,6 +401,7 @@ describe("runtime tool activity events", () => {
     const events: RuntimeEvent[] = [];
     const recorder = runRecorder();
     const evidenceIndex = new ExecutionEvidenceIndex();
+    const synchronizeEvidence = vi.fn().mockRejectedValue(new Error("optional plan unavailable"));
     const runner = new ToolPlanRunner({
       toolCallPlanner: {
         planFromProviderDelta: () => ({
@@ -419,6 +420,7 @@ describe("runtime tool activity events", () => {
       sessionId: "s1",
       maxConcurrentSafeTools: 1,
       executionEvidenceIndex: evidenceIndex,
+      executionPlanController: { synchronizeEvidence },
     });
 
     await runner.executePlans({
@@ -464,6 +466,8 @@ describe("runtime tool activity events", () => {
       expect.objectContaining({ toolCallId: "tc1", tool: "file.read" })
     ]);
     expect(evidenceIndex.candidatesForTurn({ visibleTurnId: "turn-earlier" })).toEqual([]);
+    expect(synchronizeEvidence).toHaveBeenCalledTimes(1);
+    expect(synchronizeEvidence).toHaveBeenCalledWith(["tc1"], expect.any(Function));
   });
 
   it("keeps security summaries separate from compact display previews", async () => {
