@@ -955,6 +955,10 @@ describe("ToolExecutor tool-call metadata persistence", () => {
       toolsets: ["mcp"],
       connector: { kind: "mcp", id: "postman" },
       capabilityMetadata: { verification: { verifies: [mutation.name] } },
+      executionConcurrency: {
+        mode: "exclusive",
+        resourceKey: (_input, context) => `postman:${context.sessionId}`
+      },
       resolveSecurity: () => ({
         riskClass: "read-only-network",
         targetKey: "collection:alpha",
@@ -995,6 +999,29 @@ describe("ToolExecutor tool-call metadata persistence", () => {
       }
     });
     expect(executor.getToolDefinition(verifier.name)).not.toHaveProperty("capabilityMetadata");
+    expect(executor.getToolDefinition(verifier.name)).not.toHaveProperty("executionConcurrency");
+    expect(executor.getToolExecutionConcurrency(verifier.name, {}, "test-session")).toEqual({
+      mode: "exclusive",
+      resourceKey: "postman:test-session"
+    });
+  });
+
+  it("fails closed when a trusted execution resource resolver cannot produce a key", async () => {
+    const tool: RegisteredTool = {
+      ...createEchoTool("browser.snapshot"),
+      executionConcurrency: {
+        mode: "exclusive",
+        resourceKey: () => {
+          throw new Error("unresolved browser session");
+        }
+      }
+    };
+    const { executor } = await setupExecutor({ tools: [tool] });
+
+    expect(executor.getToolExecutionConcurrency(tool.name, {}, "test-session")).toEqual({
+      mode: "exclusive",
+      resourceKey: "runtime:unresolved-exclusive-resource"
+    });
   });
 
   it("injects one declared protected argument immediately before dispatch and scrubs tool echoes", async () => {

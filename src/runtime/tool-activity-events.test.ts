@@ -99,6 +99,123 @@ describe("runtime tool activity events", () => {
     ]);
   });
 
+  it("separates concurrent-safe plans that share an exclusive execution resource", () => {
+    const browserTool = { ...fileReadTool, name: "browser.download", toolsets: ["browser"] };
+    const entries = [
+      {
+        plan: { id: "download", tool: "browser.download" } as never,
+        definition: browserTool,
+        concurrency: { mode: "exclusive" as const, resourceKey: "browser:session-1" }
+      },
+      {
+        plan: { id: "switch", tool: "browser.switch_tab" } as never,
+        definition: { ...browserTool, name: "browser.switch_tab" },
+        concurrency: { mode: "exclusive" as const, resourceKey: "browser:session-1" }
+      }
+    ];
+
+    expect(groupProviderToolPlans(entries, 4).map((group) =>
+      group.entries.map((entry) => entry.plan.tool)
+    )).toEqual([
+      ["browser.download"],
+      ["browser.switch_tab"]
+    ]);
+  });
+
+  it("keeps concurrent-safe plans for independent execution resources in one batch", () => {
+    const browserTool = { ...fileReadTool, name: "browser.snapshot", toolsets: ["browser"] };
+    const entries = [
+      {
+        plan: { id: "snapshot-1", tool: "browser.snapshot" } as never,
+        definition: browserTool,
+        concurrency: { mode: "exclusive" as const, resourceKey: "browser:session-1" }
+      },
+      {
+        plan: { id: "snapshot-2", tool: "browser.snapshot" } as never,
+        definition: browserTool,
+        concurrency: { mode: "exclusive" as const, resourceKey: "browser:session-2" }
+      }
+    ];
+
+    expect(groupProviderToolPlans(entries, 4).map((group) =>
+      group.entries.map((entry) => entry.plan.id)
+    )).toEqual([["snapshot-1", "snapshot-2"]]);
+  });
+
+  it("preserves the configured cap for independent concurrent-safe plans", () => {
+    const entries = ["one", "two", "three"].map((id) => ({
+      plan: { id, tool: "file.read" } as never,
+      definition: fileReadTool
+    }));
+
+    expect(groupProviderToolPlans(entries, 2).map((group) =>
+      group.entries.map((entry) => entry.plan.id)
+    )).toEqual([
+      ["one", "two"],
+      ["three"]
+    ]);
+  });
+
+  it("uses resolved execution resources when running provider tool plans", async () => {
+    const observedMaximums: number[] = [];
+
+    for (const resourceKeys of [
+      ["browser:session-1", "browser:session-1"],
+      ["browser:session-1", "browser:session-2"]
+    ]) {
+      let planIndex = 0;
+      let active = 0;
+      let maxActive = 0;
+      const executeTool = vi.fn(async (request: { tool: string; toolCallId?: string }) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await Promise.resolve();
+        active -= 1;
+        return execution({
+          tool: { ...fileReadTool, name: request.tool, toolsets: ["browser"] },
+          toolCallId: request.toolCallId,
+          input: {}
+        });
+      });
+      const runner = new ToolPlanRunner({
+        toolCallPlanner: {
+          planFromProviderDelta: () => {
+            const index = planIndex++;
+            return {
+              id: `browser-${index}`,
+              tool: index === 0 ? "browser.download" : "browser.switch_tab",
+              input: {},
+              source: "provider-tool-call",
+              status: "planned"
+            };
+          }
+        } as never,
+        toolExecutor: {
+          getToolDefinition: (name: string) => ({ ...fileReadTool, name, toolsets: ["browser"] }),
+          getToolExecutionConcurrency: (_name: string, _input: unknown, _sessionId: string) => ({
+            mode: "exclusive",
+            resourceKey: resourceKeys[planIndex - 1]!
+          }),
+          executeTool
+        } as never,
+        runRecorder: runRecorder() as never,
+        sessionId: "s1",
+        maxConcurrentSafeTools: 4
+      });
+
+      await runner.executePlans({
+        providerExecution: { ...providerExecution(), toolCalls: [{}, {}] },
+        toolPlans: [],
+        trustedWorkspace: true,
+        remainingToolCalls: 2,
+        riskBaseline: "read-only-local"
+      });
+      observedMaximums.push(maxActive);
+    }
+
+    expect(observedMaximums).toEqual([1, 2]);
+  });
+
   it("forwards target summaries from provider tool plans", async () => {
     const events: RuntimeEvent[] = [];
     const recorder = runRecorder();

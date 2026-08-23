@@ -20,6 +20,10 @@ describe("ToolRegistry connector provenance", () => {
       capabilityMetadata: {
         protectedInput: { groupedDelivery: false, sources: ["browser"] }
       },
+      executionConcurrency: {
+        mode: "exclusive",
+        resourceKey: (_input, context) => `connector:${context.sessionId}`
+      },
       progressLabel: "reading collection",
       maxResultSizeChars: 1_000,
       isAvailable: () => true,
@@ -32,5 +36,6 @@ describe("ToolRegistry connector provenance", () => {
     expect(snapshot.available[0]?.connector).not.toBe(connector);
     expect(snapshot.available[0]).not.toHaveProperty("protectedArguments");
     expect(snapshot.available[0]).not.toHaveProperty("capabilityMetadata");
+    expect(snapshot.available[0]).not.toHaveProperty("executionConcurrency");
   });
 });

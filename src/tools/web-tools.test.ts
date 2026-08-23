@@ -76,6 +76,23 @@ function createTestWebTools(options: WebToolOptions = {}) {
   });
 }
 
+describe("browser tool execution resources", () => {
+  it("declares exclusive runtime-only scheduling per derived browser session", () => {
+    const tools = createTestWebTools();
+    const download = tool("browser.download", tools);
+    const switchTab = tool("browser.switch_tab", tools);
+    const webExtract = tool("web.extract", tools);
+
+    expect(download.executionConcurrency?.resourceKey({}, { sessionId: "runtime-session" })).toBe(
+      "browser:runtime-session:main"
+    );
+    expect(switchTab.executionConcurrency?.resourceKey({ sessionId: "shared-session" }, { sessionId: "runtime-session" })).toBe(
+      "browser:shared-session"
+    );
+    expect(webExtract.executionConcurrency).toBeUndefined();
+  });
+});
+
 function createFetchResponse(input: {
   ok?: boolean;
   status?: number;

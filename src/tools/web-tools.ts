@@ -135,7 +135,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
   const deriveBrowserInput = <TInput extends { sessionId?: string }>(input: TInput): TInput & { sessionId: string } =>
     withDerivedBrowserSessionId(input, options.currentSessionId);
 
-  return [
+  const tools: RegisteredTool[] = [
     createWebSearchTool(options.webConfig, options),
     {
       name: "web.extract",
@@ -920,6 +920,28 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       }
     }
   ];
+  return tools.map(withBrowserSessionExecutionConcurrency);
+}
+
+function withBrowserSessionExecutionConcurrency(tool: RegisteredTool): RegisteredTool {
+  if (!tool.toolsets.includes("browser")) return tool;
+
+  return {
+    ...tool,
+    executionConcurrency: {
+      mode: "exclusive",
+      resourceKey: (input, context) => {
+        const explicitSessionId = typeof input === "object" && input !== null &&
+          "sessionId" in input && typeof input.sessionId === "string"
+          ? input.sessionId
+          : undefined;
+        const sessionId = deriveBrowserSessionKey({
+          currentSessionId: () => context.sessionId
+        }, explicitSessionId);
+        return `browser:${sessionId}`;
+      }
+    }
+  };
 }
 
 export const webToolProvider: SessionToolProvider = {

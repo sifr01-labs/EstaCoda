@@ -8,7 +8,7 @@ import {
   type SecurityPolicy
 } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
-import type { ToolApprovalHandler, ToolDefinition, ToolExecutionContext, ToolExecutionEffect, ToolResult, ToolRiskClass, ToolSecurityResolution, ToolsetName } from "../contracts/tool.js";
+import type { ToolApprovalHandler, ToolDefinition, ToolExecutionConcurrency, ToolExecutionContext, ToolExecutionEffect, ToolResult, ToolRiskClass, ToolSecurityResolution, ToolsetName } from "../contracts/tool.js";
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
 import type { VisionDispatchPhase, VisionInputProvenanceContext } from "../contracts/vision.js";
@@ -440,6 +440,29 @@ export class ToolExecutor {
     const tool = this.#registry.get(name);
 
     return tool === undefined ? undefined : toDefinition(tool);
+  }
+
+  getToolExecutionConcurrency(
+    name: string,
+    input: Record<string, unknown>,
+    sessionId: string
+  ): ToolExecutionConcurrency | undefined {
+    const declaration = this.#registry.get(name)?.executionConcurrency;
+    if (declaration === undefined) return undefined;
+
+    try {
+      const resourceKey = declaration.resourceKey(input, { sessionId }).trim();
+      return {
+        mode: declaration.mode,
+        resourceKey: resourceKey.length === 0 ? "runtime:unresolved-exclusive-resource" : resourceKey
+      };
+    } catch {
+      // A trusted resolver failure must reduce concurrency rather than expose shared state to a race.
+      return {
+        mode: declaration.mode,
+        resourceKey: "runtime:unresolved-exclusive-resource"
+      };
+    }
   }
 
   async #recordSecurityAssessment(

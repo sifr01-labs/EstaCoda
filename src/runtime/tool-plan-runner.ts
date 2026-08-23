@@ -1,5 +1,5 @@
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
-import type { ToolApprovalHandler, ToolRiskClass } from "../contracts/tool.js";
+import type { ToolApprovalHandler, ToolDefinition, ToolExecutionConcurrency, ToolRiskClass } from "../contracts/tool.js";
 import type { SecureInputRequestHandler } from "../contracts/secure-input.js";
 import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
 import type { VisionInputProvenanceContext } from "../contracts/vision.js";
@@ -90,7 +90,8 @@ export class ToolPlanRunner {
     const executions: ToolExecutionRecord[] = [];
     const pending: Array<{
       plan: ToolCallPlan;
-      definition: import("../contracts/tool.js").ToolDefinition | undefined;
+      definition: ToolDefinition | undefined;
+      concurrency: ToolExecutionConcurrency | undefined;
     }> = [];
 
     for (const toolCall of input.providerExecution.toolCalls.slice(0, input.remainingToolCalls)) {
@@ -118,9 +119,15 @@ export class ToolPlanRunner {
         continue;
       }
 
+      const definition = this.#toolExecutor.getToolDefinition(plan.tool);
       pending.push({
         plan,
-        definition: this.#toolExecutor.getToolDefinition(plan.tool)
+        definition,
+        concurrency: this.#toolExecutor.getToolExecutionConcurrency?.(
+          plan.tool,
+          plan.input,
+          this.#currentSessionId()
+        )
       });
     }
 
@@ -382,7 +389,7 @@ function riskRank(value: ToolRiskClass): number {
   }
 }
 
-function isConcurrentSafeTool(tool: import("../contracts/tool.js").ToolDefinition | undefined): boolean {
+function isConcurrentSafeTool(tool: ToolDefinition | undefined): boolean {
   if (tool === undefined) {
     return false;
   }
@@ -395,7 +402,8 @@ function isConcurrentSafeTool(tool: import("../contracts/tool.js").ToolDefinitio
 
 type ProviderToolPlanEntry = {
   plan: ToolCallPlan;
-  definition: import("../contracts/tool.js").ToolDefinition | undefined;
+  definition: ToolDefinition | undefined;
+  concurrency?: ToolExecutionConcurrency;
 };
 
 export function groupProviderToolPlans(
@@ -405,20 +413,32 @@ export function groupProviderToolPlans(
   const groups: Array<{ concurrent: boolean; entries: ProviderToolPlanEntry[] }> = [];
   const safeSize = Math.max(1, maxConcurrentSafeTools);
   let safeBatch: ProviderToolPlanEntry[] = [];
+  let exclusiveResourceKeys = new Set<string>();
 
   const flushSafeBatch = () => {
-    for (let index = 0; index < safeBatch.length; index += safeSize) {
+    if (safeBatch.length > 0) {
       groups.push({
         concurrent: true,
-        entries: safeBatch.slice(index, index + safeSize)
+        entries: safeBatch
       });
     }
     safeBatch = [];
+    exclusiveResourceKeys = new Set<string>();
   };
 
   for (const entry of entries) {
     if (isConcurrentSafeTool(entry.definition)) {
+      const resourceKey = entry.concurrency?.mode === "exclusive"
+        ? entry.concurrency.resourceKey
+        : undefined;
+      if (
+        safeBatch.length >= safeSize ||
+        (resourceKey !== undefined && exclusiveResourceKeys.has(resourceKey))
+      ) {
+        flushSafeBatch();
+      }
       safeBatch.push(entry);
+      if (resourceKey !== undefined) exclusiveResourceKeys.add(resourceKey);
       continue;
     }
 

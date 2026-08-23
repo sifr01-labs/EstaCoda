@@ -137,6 +137,23 @@ export type RegisteredToolCapabilityMetadata = {
   };
 };
 
+export type ToolExecutionConcurrencyContext = {
+  /** Current EstaCoda runtime session used to derive default scoped resources. */
+  sessionId: string;
+};
+
+/** Trusted runtime-only scheduling policy; never projected into provider tool definitions. */
+export type RegisteredToolExecutionConcurrency<TInput = any> = {
+  mode: "exclusive";
+  resourceKey(input: TInput, context: ToolExecutionConcurrencyContext): string;
+};
+
+/** Resolved runtime-only scheduling fact for one concrete tool call. */
+export type ToolExecutionConcurrency = {
+  mode: "exclusive";
+  resourceKey: string;
+};
+
 /** Trusted runtime-only effect metadata derived from a registered tool. */
 export type ToolExecutionEffect =
   | {
@@ -158,6 +175,8 @@ export type RegisteredTool<TInput = any> = ToolDefinition & {
   protectedArguments?: readonly ProtectedToolArgumentDeclaration[];
   /** Runtime-only execution capability metadata; never projected into provider schemas. */
   capabilityMetadata?: RegisteredToolCapabilityMetadata;
+  /** Runtime-only resource scheduling policy; never projected into provider schemas. */
+  executionConcurrency?: RegisteredToolExecutionConcurrency<TInput>;
   isAvailable(): Promise<boolean> | boolean;
   resolveSecurity?(input: TInput, context: ToolSecurityResolverContext): Promise<ToolSecurityResolution | undefined> | ToolSecurityResolution | undefined;
   run: ToolHandler<TInput>;
