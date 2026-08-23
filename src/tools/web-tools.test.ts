@@ -89,7 +89,10 @@ describe("browser tool execution resources", () => {
     expect(switchTab.executionConcurrency?.resourceKey({ sessionId: "shared-session" }, { sessionId: "runtime-session" })).toBe(
       "browser:shared-session"
     );
+    expect(download.executionTimeoutMs).toBe(60_000);
+    expect(switchTab.executionTimeoutMs).toBe(60_000);
     expect(webExtract.executionConcurrency).toBeUndefined();
+    expect(webExtract.executionTimeoutMs).toBeUndefined();
   });
 });
 

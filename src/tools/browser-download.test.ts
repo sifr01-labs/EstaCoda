@@ -59,6 +59,23 @@ describe("browser.download", () => {
     expect((await stat(artifact!.localPath!)).mode & 0o777).toBe(0o600);
   });
 
+  it("propagates runtime cancellation to the browser backend", async () => {
+    const root = await temporaryRoot();
+    const controller = new AbortController();
+    const captured: BrowserDownloadInput[] = [];
+    const backend = downloadBackend(async (input) => {
+      captured.push(input);
+      return { outcome: "download-failed", reason: "cancelled" };
+    });
+
+    await browserDownloadTool(backend, root, new ArtifactStore()).run(
+      groundedInput(),
+      { signal: controller.signal }
+    );
+
+    expect(captured[0]?.signal).toBe(controller.signal);
+  });
+
   it("retains YAML Swagger content and records its authoritative hash", async () => {
     const root = await temporaryRoot();
     const artifactStore = new ArtifactStore({ id: () => "artifact-yaml" });

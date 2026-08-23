@@ -190,6 +190,10 @@ function isReceiptEligiblePlan(plan: ToolCallPlan): boolean {
 }
 
 function hasNoAuthoritativeResult(execution: ToolExecutionRecord): boolean {
+  if (execution.settlement !== undefined) {
+    return execution.settlement.sideEffectState === "possible" ||
+      execution.settlement.dispatchState === "unknown";
+  }
   return execution.result === undefined || (
     execution.result.ok === false && execution.result.metadata?.reason === "cancelled"
   );

@@ -1097,6 +1097,42 @@ describe("ProviderTurnLoop streaming callbacks", () => {
     expect(order.filter((entry) => entry === "segment:provider-tool-call")).toHaveLength(1);
   });
 
+  it("continues to a truthful final response after a tool timeout", async () => {
+    const timedOut = toolExecution("call-timeout");
+    timedOut.settlement = {
+      terminalStatus: "timed_out",
+      dispatchState: "started",
+      sideEffectState: "none",
+      timeoutMs: 10
+    };
+    timedOut.result = {
+      ok: false,
+      content: "Tool execution timed out without a side effect. The call may be retried if it is still needed.",
+      metadata: {
+        reason: "timeout",
+        terminalStatus: "timed_out",
+        dispatchState: "started",
+        sideEffectState: "none",
+        timeoutMs: 10
+      }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-timeout")]),
+        providerExecution("The read timed out, so I could not confirm the requested state.")
+      ],
+      toolSteps: [{ executions: [timedOut] }]
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    expect(result.providerExecution?.response?.content).toBe(
+      "The read timed out, so I could not confirm the requested state."
+    );
+    expect(JSON.stringify(harness.completeSpy.mock.calls[1]?.[0])).toContain("timed out without a side effect");
+  });
+
   it("does not fail the provider turn when onSegmentBreak throws", async () => {
     const harness = await createPostToolNudgeHarness({
       responses: [

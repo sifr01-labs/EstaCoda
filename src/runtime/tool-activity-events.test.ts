@@ -216,6 +216,187 @@ describe("runtime tool activity events", () => {
     expect(observedMaximums).toEqual([1, 2]);
   });
 
+  it("does not start another browser operation on a resource with a timed-out call", async () => {
+    let planIndex = 0;
+    const plans: import("../contracts/tool-plan.js").ToolCallPlan[] = [];
+    const executeTool = vi.fn(async (request: { tool: string; toolCallId: string }) => execution({
+      tool: { ...fileReadTool, name: request.tool, toolsets: ["browser"] },
+      toolCallId: request.toolCallId,
+      settlement: {
+        terminalStatus: "timed_out",
+        dispatchState: "started",
+        sideEffectState: "none",
+        timeoutMs: 10
+      },
+      result: { ok: false, content: "Timed out.", metadata: { reason: "timeout" } }
+    }));
+    const runner = new ToolPlanRunner({
+      toolCallPlanner: {
+        planFromProviderDelta: () => {
+          const index = planIndex++;
+          return {
+            id: index === 0 ? "download" : "switch-tab",
+            tool: index === 0 ? "browser.download" : "browser.switch_tab",
+            input: { sessionId: "shared-session" },
+            source: "provider-tool-call",
+            status: "planned"
+          };
+        }
+      } as never,
+      toolExecutor: {
+        getToolDefinition: (name: string) => ({ ...fileReadTool, name, toolsets: ["browser"] }),
+        getToolExecutionConcurrency: () => ({
+          mode: "exclusive",
+          resourceKey: "browser:shared-session"
+        }),
+        executeTool
+      } as never,
+      runRecorder: runRecorder() as never,
+      sessionId: "s1",
+      maxConcurrentSafeTools: 4
+    });
+
+    const result = await runner.executePlans({
+      providerExecution: { ...providerExecution(), toolCalls: [{}, {}] },
+      toolPlans: plans,
+      trustedWorkspace: true,
+      remainingToolCalls: 2,
+      riskBaseline: "read-only-local"
+    });
+
+    expect(executeTool).toHaveBeenCalledOnce();
+    expect(result.executions.map((item) => item.toolCallId)).toEqual(["download"]);
+    expect(plans.map((plan) => ({ id: plan.id, status: plan.status, reason: plan.result?.metadata?.reason }))).toEqual([
+      { id: "download", status: "executed", reason: "timeout" },
+      { id: "switch-tab", status: "blocked", reason: "execution-resource-unsettled" }
+    ]);
+
+    runner.resetPerTurnBudgets();
+    await runner.executePlans({
+      providerExecution: providerExecution(),
+      toolPlans: [],
+      trustedWorkspace: true,
+      remainingToolCalls: 1,
+      riskBaseline: "read-only-local"
+    });
+    expect(executeTool).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves successful sibling receipts when one concurrent execution rejects", async () => {
+    let planIndex = 0;
+    const recorder = runRecorder();
+    const plans: import("../contracts/tool-plan.js").ToolCallPlan[] = [];
+    const runner = new ToolPlanRunner({
+      toolCallPlanner: {
+        planFromProviderDelta: () => {
+          const index = planIndex++;
+          return {
+            id: index === 0 ? "rejected-read" : "successful-read",
+            tool: "file.read",
+            input: { path: index === 0 ? "missing.ts" : "present.ts" },
+            source: "provider-tool-call",
+            status: "planned"
+          };
+        }
+      } as never,
+      toolExecutor: {
+        getToolDefinition: () => fileReadTool,
+        executeTool: vi.fn(async (request: { toolCallId: string }) => {
+          if (request.toolCallId === "rejected-read") throw new Error("unexpected runtime failure");
+          return execution({
+            toolCallId: request.toolCallId,
+            input: { path: "present.ts" },
+            result: { ok: true, content: "confirmed sibling" }
+          });
+        })
+      } as never,
+      runRecorder: recorder as never,
+      sessionId: "s1",
+      maxConcurrentSafeTools: 2
+    });
+
+    const result = await runner.executePlans({
+      providerExecution: { ...providerExecution(), toolCalls: [{}, {}] },
+      toolPlans: plans,
+      trustedWorkspace: true,
+      remainingToolCalls: 2,
+      riskBaseline: "read-only-local"
+    });
+
+    expect(result.executions).toEqual([
+      expect.objectContaining({
+        toolCallId: "rejected-read",
+        settlement: expect.objectContaining({ dispatchState: "unknown", sideEffectState: "none" }),
+        result: expect.objectContaining({ ok: false, metadata: expect.objectContaining({ reason: "tool-execution-unknown" }) })
+      }),
+      expect.objectContaining({ toolCallId: "successful-read", result: { ok: true, content: "confirmed sibling" } })
+    ]);
+    expect(plans.map((plan) => ({ id: plan.id, status: plan.status }))).toEqual([
+      { id: "rejected-read", status: "executed" },
+      { id: "successful-read", status: "executed" }
+    ]);
+    expect(plans[0]?.error).toContain("did not produce an authoritative result");
+    expect(recorder.recordClassifiedFailure).toHaveBeenCalledWith(
+      { kind: "tool-execution", execution: result.executions[0] },
+      "tool-execution"
+    );
+  });
+
+  it("keeps a timed-out read beside a successful concurrent receipt", async () => {
+    let planIndex = 0;
+    const plans: import("../contracts/tool-plan.js").ToolCallPlan[] = [];
+    const runner = new ToolPlanRunner({
+      toolCallPlanner: {
+        planFromProviderDelta: () => {
+          const index = planIndex++;
+          return {
+            id: index === 0 ? "timed-out-read" : "successful-read",
+            tool: "file.read",
+            input: { path: `${index}.ts` },
+            source: "provider-tool-call",
+            status: "planned"
+          };
+        }
+      } as never,
+      toolExecutor: {
+        getToolDefinition: () => fileReadTool,
+        executeTool: vi.fn(async (request: { toolCallId: string }) => execution({
+          toolCallId: request.toolCallId,
+          settlement: request.toolCallId === "timed-out-read" ? {
+            terminalStatus: "timed_out",
+            dispatchState: "started",
+            sideEffectState: "none",
+            timeoutMs: 10
+          } : {
+            terminalStatus: "completed",
+            dispatchState: "finished",
+            sideEffectState: "none"
+          },
+          result: request.toolCallId === "timed-out-read"
+            ? { ok: false, content: "Timed out.", metadata: { reason: "timeout" } }
+            : { ok: true, content: "confirmed sibling" }
+        }))
+      } as never,
+      runRecorder: runRecorder() as never,
+      sessionId: "s1",
+      maxConcurrentSafeTools: 2
+    });
+
+    const result = await runner.executePlans({
+      providerExecution: { ...providerExecution(), toolCalls: [{}, {}] },
+      toolPlans: plans,
+      trustedWorkspace: true,
+      remainingToolCalls: 2,
+      riskBaseline: "read-only-local"
+    });
+
+    expect(result.executions.map((item) => item.toolCallId)).toEqual(["timed-out-read", "successful-read"]);
+    expect(plans.map((plan) => ({ status: plan.status, ok: plan.result?.ok }))).toEqual([
+      { status: "executed", ok: false },
+      { status: "executed", ok: true }
+    ]);
+  });
+
   it("forwards target summaries from provider tool plans", async () => {
     const events: RuntimeEvent[] = [];
     const recorder = runRecorder();

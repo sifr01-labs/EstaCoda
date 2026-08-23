@@ -625,6 +625,61 @@ describe("execution outcome receipts", () => {
     ]);
   });
 
+  it("does not mark a pre-dispatch cancellation as an uncertain mutation", () => {
+    const outcome = deriveExecutionFinalOutcome({
+      cancelled: true,
+      toolExecutions: [execution({
+        settlement: {
+          terminalStatus: "cancelled",
+          dispatchState: "not_started",
+          sideEffectState: "none"
+        },
+        result: {
+          ok: false,
+          content: "Tool execution cancelled.",
+          metadata: { reason: "cancelled" }
+        }
+      })],
+      executionReceipts: [unsuccessfulReceipt("failed")]
+    });
+
+    expect(outcome.uncertainActions).toEqual([]);
+  });
+
+  it("marks only a dispatched timed-out mutation as uncertain", () => {
+    const safeTimeout = execution({
+      toolCallId: "call-safe-timeout",
+      settlement: {
+        terminalStatus: "timed_out",
+        dispatchState: "not_started",
+        sideEffectState: "none",
+        timeoutMs: 10
+      },
+      result: { ok: false, content: "Timed out before dispatch.", metadata: { reason: "timeout" } }
+    });
+    const uncertainTimeout = execution({
+      toolCallId: "call-uncertain-timeout",
+      settlement: {
+        terminalStatus: "timed_out",
+        dispatchState: "started",
+        sideEffectState: "possible",
+        timeoutMs: 10
+      },
+      result: { ok: false, content: "Timed out after dispatch.", metadata: { reason: "timeout" } }
+    });
+    const outcome = deriveExecutionFinalOutcome({
+      toolExecutions: [safeTimeout, uncertainTimeout],
+      executionReceipts: [
+        unsuccessfulReceipt("failed", { toolCallId: "call-safe-timeout" }),
+        unsuccessfulReceipt("failed", { toolCallId: "call-uncertain-timeout" })
+      ]
+    });
+
+    expect(outcome.uncertainActions).toEqual([
+      expect.objectContaining({ toolCallId: "call-uncertain-timeout", status: "uncertain" })
+    ]);
+  });
+
   it("renders Arabic receipt labels with isolated technical tokens", () => {
     const outcome = deriveExecutionFinalOutcome({
       providerExecution: { ok: false, fallbackUsed: false, attempts: [], toolCalls: [] },

@@ -154,6 +154,20 @@ export type ToolExecutionConcurrency = {
   resourceKey: string;
 };
 
+export type ToolExecutionTerminalStatus = "completed" | "failed" | "cancelled" | "timed_out";
+
+export type ToolExecutionDispatchState = "not_started" | "started" | "finished" | "unknown";
+
+export type ToolExecutionSideEffectState = "none" | "possible" | "confirmed";
+
+/** Runtime-owned execution outcome facts; provider output cannot set these values. */
+export type ToolExecutionSettlement = {
+  terminalStatus: ToolExecutionTerminalStatus;
+  dispatchState: ToolExecutionDispatchState;
+  sideEffectState: ToolExecutionSideEffectState;
+  timeoutMs?: number;
+};
+
 /** Trusted runtime-only effect metadata derived from a registered tool. */
 export type ToolExecutionEffect =
   | {
@@ -177,6 +191,8 @@ export type RegisteredTool<TInput = any> = ToolDefinition & {
   capabilityMetadata?: RegisteredToolCapabilityMetadata;
   /** Runtime-only resource scheduling policy; never projected into provider schemas. */
   executionConcurrency?: RegisteredToolExecutionConcurrency<TInput>;
+  /** Runtime-only handler deadline override; never projected into provider schemas. */
+  executionTimeoutMs?: number;
   isAvailable(): Promise<boolean> | boolean;
   resolveSecurity?(input: TInput, context: ToolSecurityResolverContext): Promise<ToolSecurityResolution | undefined> | ToolSecurityResolution | undefined;
   run: ToolHandler<TInput>;

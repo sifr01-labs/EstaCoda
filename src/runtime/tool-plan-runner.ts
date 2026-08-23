@@ -42,6 +42,7 @@ export class ToolPlanRunner {
   readonly #maxConcurrentSafeTools: number;
   readonly #delegateCallBudget: DelegateCallBudget | undefined;
   readonly #executionEvidenceIndex: ExecutionEvidenceIndex | undefined;
+  readonly #unsettledExecutionResources = new Set<string>();
 
   constructor(options: ToolPlanRunnerOptions) {
     this.#toolCallPlanner = options.toolCallPlanner;
@@ -58,6 +59,7 @@ export class ToolPlanRunner {
 
   resetPerTurnBudgets(): void {
     this.#delegateCallBudget?.reset();
+    this.#unsettledExecutionResources.clear();
     this.#toolExecutor.resetPerTurnBudgets?.();
   }
 
@@ -144,9 +146,13 @@ export class ToolPlanRunner {
       }
 
       if (group.concurrent && !group.entries.some((entry) => entry.definition?.toolsets.includes("mcp") === true)) {
-        const groupExecutions = await Promise.all(group.entries.map(async ({ plan }) =>
-          this.#executeProviderToolPlan({
-            plan,
+        const groupSettlements = await Promise.allSettled(group.entries.map(async (entry) => {
+          if (this.#isExecutionResourceUnsettled(entry.concurrency)) {
+            await this.#settleUnsettledExecutionResourcePlan(entry.plan, input.onEvent);
+            return undefined;
+          }
+          return this.#executeProviderToolPlan({
+            plan: entry.plan,
             trustedWorkspace: input.trustedWorkspace,
             visibleTurnId: input.visibleTurnId,
             providerUsageLineage: input.providerUsageLineage,
@@ -157,10 +163,26 @@ export class ToolPlanRunner {
             onSecureInputRequest: input.onSecureInputRequest,
             readLedger: input.readLedger,
             readLedgerScope: input.readLedgerScope
-          })
-        ));
+          });
+        }));
 
-        const completed = groupExecutions.filter((execution) => execution !== undefined);
+        const completed: ToolExecutionRecord[] = [];
+        for (const [index, settled] of groupSettlements.entries()) {
+          if (settled.status === "fulfilled") {
+            if (settled.value !== undefined) {
+              completed.push(settled.value);
+              this.#observeExecutionResourceSettlement(
+                group.entries[index]!.concurrency,
+                settled.value
+              );
+            }
+            continue;
+          }
+          const entry = group.entries[index]!;
+          const execution = await this.#settleRejectedProviderToolPlan(entry, input.onEvent);
+          completed.push(execution);
+          this.#observeExecutionResourceSettlement(entry.concurrency, execution);
+        }
         executions.push(...completed);
         const dynamicRisk = maxRiskClass(completed.map((execution) => execution.riskClass));
         if (riskRank(dynamicRisk) > riskRank(maxObservedRisk)) {
@@ -174,21 +196,34 @@ export class ToolPlanRunner {
         continue;
       }
 
-      for (const { plan } of group.entries) {
-        const execution = await this.#executeProviderToolPlan({
-          plan,
-          trustedWorkspace: input.trustedWorkspace,
-          visibleTurnId: input.visibleTurnId,
-          providerUsageLineage: input.providerUsageLineage,
-          visionInputProvenance: input.visionInputProvenance,
-          signal: input.signal,
-          onEvent: input.onEvent,
-          onApprovalRequest: input.onApprovalRequest,
-          onSecureInputRequest: input.onSecureInputRequest,
-          readLedger: input.readLedger,
-          readLedgerScope: input.readLedgerScope
-        });
+      for (const { plan, concurrency } of group.entries) {
+        if (this.#isExecutionResourceUnsettled(concurrency)) {
+          await this.#settleUnsettledExecutionResourcePlan(plan, input.onEvent);
+          continue;
+        }
+        let execution: ToolExecutionRecord | undefined;
+        try {
+          execution = await this.#executeProviderToolPlan({
+            plan,
+            trustedWorkspace: input.trustedWorkspace,
+            visibleTurnId: input.visibleTurnId,
+            providerUsageLineage: input.providerUsageLineage,
+            visionInputProvenance: input.visionInputProvenance,
+            signal: input.signal,
+            onEvent: input.onEvent,
+            onApprovalRequest: input.onApprovalRequest,
+            onSecureInputRequest: input.onSecureInputRequest,
+            readLedger: input.readLedger,
+            readLedgerScope: input.readLedgerScope
+          });
+        } catch {
+          execution = await this.#settleRejectedProviderToolPlan(
+            { plan, definition: this.#toolExecutor.getToolDefinition(plan.tool), concurrency },
+            input.onEvent
+          );
+        }
         if (execution !== undefined) {
+          this.#observeExecutionResourceSettlement(concurrency, execution);
           executions.push(execution);
           if (riskRank(execution.riskClass) > riskRank(maxObservedRisk)) {
             await this.#runRecorder.recordSecurityRiskEscalation({
@@ -308,6 +343,131 @@ export class ToolPlanRunner {
     }
 
     return execution;
+  }
+
+  async #settleRejectedProviderToolPlan(
+    entry: ProviderToolPlanEntry,
+    onEvent: RuntimeEventSink | undefined
+  ): Promise<ToolExecutionRecord> {
+    const { plan } = entry;
+    const tool = entry.definition ?? {
+      name: plan.tool,
+      description: "Tool execution ended without a settled runtime receipt.",
+      inputSchema: {},
+      riskClass: plan.riskClass ?? "external-side-effect",
+      toolsets: [],
+      progressLabel: plan.tool,
+      maxResultSizeChars: 1_400
+    };
+    const consequential = tool.riskClass !== "read-only-local" && tool.riskClass !== "read-only-network";
+    const sideEffectState = consequential ? "possible" : "none";
+    const result = {
+      ok: false,
+      content: consequential
+        ? "Tool execution ended without a settled runtime receipt. Its outcome is unknown; do not retry it automatically. Verify the destination state first."
+        : "Tool execution ended without a settled runtime receipt. The read did not produce an authoritative result and may be retried if it is still needed.",
+      metadata: {
+        reason: "tool-execution-unknown",
+        terminalStatus: "failed",
+        dispatchState: "unknown",
+        sideEffectState
+      }
+    } as const;
+    const execution: ToolExecutionRecord = {
+      tool,
+      executionEffect: {
+        kind: consequential ? "mutation" : "read",
+        ...(tool.connector === undefined ? {} : { connector: { ...tool.connector } })
+      },
+      settlement: {
+        terminalStatus: "failed",
+        dispatchState: "unknown",
+        sideEffectState
+      },
+      input: plan.input,
+      decision: "allow",
+      riskClass: tool.riskClass,
+      targetSummary: summarizeSecurityTarget(plan.tool, plan.input),
+      result,
+      toolCallId: plan.id,
+      toolCallName: plan.tool,
+      providerNativeToolCall: plan.raw
+    };
+    if (consequential) {
+      this.#toolExecutor.markMutationOutcomeUncertain?.(plan.tool, plan.input);
+    }
+    plan.status = "executed";
+    plan.error = result.content;
+    plan.result = result;
+    await Promise.allSettled([
+      this.#runRecorder.recordToolPlan(plan),
+      this.#runRecorder.recordClassifiedFailure(
+        { kind: "tool-execution", execution },
+        "tool-execution"
+      ),
+      emit(onEvent, {
+        kind: "tool-result",
+        tool: plan.tool,
+        ok: false,
+        targetSummary: summarizeSecurityTarget(plan.tool, plan.input),
+        displayPreview: buildToolDisplayPreview(plan.tool, plan.input),
+        activityId: plan.id
+      })
+    ]);
+    return execution;
+  }
+
+  async #settleUnsettledExecutionResourcePlan(
+    plan: ToolCallPlan,
+    onEvent: RuntimeEventSink | undefined
+  ): Promise<void> {
+    plan.status = "blocked";
+    plan.error = "A prior call on this exclusive execution resource has not settled. Retry only after the resource is re-established.";
+    plan.result = {
+      ok: false,
+      content: plan.error,
+      metadata: {
+        reason: "execution-resource-unsettled",
+        terminalStatus: "failed",
+        dispatchState: "not_started",
+        sideEffectState: "none"
+      }
+    };
+    await Promise.allSettled([
+      this.#runRecorder.recordToolPlan(plan),
+      this.#runRecorder.recordClassifiedFailure(
+        { kind: "tool-plan", plan },
+        "tool-execution"
+      ),
+      emit(onEvent, {
+        kind: "tool-result",
+        tool: plan.tool,
+        ok: false,
+        targetSummary: summarizeSecurityTarget(plan.tool, plan.input),
+        displayPreview: buildToolDisplayPreview(plan.tool, plan.input),
+        activityId: plan.id
+      })
+    ]);
+  }
+
+  #isExecutionResourceUnsettled(concurrency: ToolExecutionConcurrency | undefined): boolean {
+    return concurrency?.mode === "exclusive" &&
+      this.#unsettledExecutionResources.has(concurrency.resourceKey);
+  }
+
+  #observeExecutionResourceSettlement(
+    concurrency: ToolExecutionConcurrency | undefined,
+    execution: ToolExecutionRecord
+  ): void {
+    if (
+      concurrency?.mode !== "exclusive" ||
+      (execution.settlement?.dispatchState !== "unknown" && (
+        (execution.settlement?.terminalStatus !== "timed_out" &&
+          execution.settlement?.terminalStatus !== "cancelled") ||
+        execution.settlement.dispatchState !== "started"
+      ))
+    ) return;
+    this.#unsettledExecutionResources.add(concurrency.resourceKey);
   }
 
   #currentSessionId(): string {

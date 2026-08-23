@@ -928,6 +928,7 @@ function withBrowserSessionExecutionConcurrency(tool: RegisteredTool): Registere
 
   return {
     ...tool,
+    executionTimeoutMs: 60_000,
     executionConcurrency: {
       mode: "exclusive",
       resourceKey: (input, context) => {
@@ -2218,7 +2219,7 @@ function createBrowserDownloadTool(
     isAvailable: async () => browserBackend.capabilities.downloads &&
       browserBackend.download !== undefined &&
       await browserBackend.isAvailable(),
-    run: async (input: BrowserActionInput) => {
+    run: async (input: BrowserActionInput, context) => {
       if (!browserBackend.capabilities.downloads || browserBackend.download === undefined) {
         return unsupportedBrowserTool(browserBackend, "browser.download");
       }
@@ -2234,6 +2235,7 @@ function createBrowserDownloadTool(
       const captureDirectory = await mkdtemp(join(sessionRoot, "capture-"));
       const runtimeInput: BrowserDownloadInput = {
         ...browserInput,
+        signal: context?.signal,
         destinationDirectory: captureDirectory,
         maxBytes: MAX_GOVERNED_BROWSER_DOWNLOAD_BYTES
       };

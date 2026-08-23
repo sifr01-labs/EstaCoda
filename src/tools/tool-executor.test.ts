@@ -124,6 +124,7 @@ function createTerminalEchoTool(): RegisteredTool {
 async function setupExecutor(options: {
   policy?: SecurityPolicy;
   tools?: RegisteredTool[];
+  defaultExecutionTimeoutMs?: number;
 }) {
   const registry = new ToolRegistry();
   for (const tool of options.tools ?? []) {
@@ -140,7 +141,8 @@ async function setupExecutor(options: {
     securityPolicy: options.policy ?? createMockPolicy("allow"),
     sessionDb,
     trajectoryRecorder,
-    workspaceRoot: process.cwd()
+    workspaceRoot: process.cwd(),
+    defaultExecutionTimeoutMs: options.defaultExecutionTimeoutMs
   });
   await sessionDb.createSession({ profileId: "test", id: "test-session" });
   return { executor, sessionDb, trajectoryRecorder };
@@ -221,9 +223,18 @@ describe("ToolExecutor exception containment", () => {
     expect(record?.result?.ok).toBe(false);
     expect(record?.result?.content).toBe("Tool execution cancelled.");
     expect(record?.result?.metadata).toMatchObject({ reason: "cancelled" });
+    expect(record?.settlement).toEqual({
+      terminalStatus: "cancelled",
+      dispatchState: "not_started",
+      sideEffectState: "none"
+    });
   });
 
   it("returns structured cancellation result when signal aborts during execution", async () => {
+    let confirmDispatch!: () => void;
+    const dispatched = new Promise<void>((resolvePromise) => {
+      confirmDispatch = resolvePromise;
+    });
     const { executor } = await setupExecutor({
       tools: [
         {
@@ -236,6 +247,7 @@ describe("ToolExecutor exception containment", () => {
           maxResultSizeChars: 1000,
           isAvailable: () => true,
           run: async (_input, context): Promise<ToolResult> => {
+            confirmDispatch();
             await new Promise((resolve) => setTimeout(resolve, 50));
             if (context?.signal?.aborted === true) {
               throw new Error("AbortError");
@@ -255,6 +267,7 @@ describe("ToolExecutor exception containment", () => {
       signal: controller.signal
     });
 
+    await dispatched;
     controller.abort();
     const record = await promise;
 
@@ -262,6 +275,160 @@ describe("ToolExecutor exception containment", () => {
     expect(record?.result?.ok).toBe(false);
     expect(record?.result?.content).toBe("Tool execution cancelled.");
     expect(record?.result?.metadata).toMatchObject({ reason: "cancelled" });
+    expect(record?.settlement).toEqual({
+      terminalStatus: "cancelled",
+      dispatchState: "started",
+      sideEffectState: "none"
+    });
+  });
+
+  it("settles a permanently hanging read at its runtime deadline", async () => {
+    const run = vi.fn(async (): Promise<ToolResult> => await new Promise<ToolResult>(() => undefined));
+    const tool: RegisteredTool = {
+      ...createEchoTool("hanging.read"),
+      executionTimeoutMs: 10,
+      run
+    };
+    const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({ tools: [tool] });
+
+    const record = await executor.executeTool({
+      tool: tool.name,
+      input: { apiKey: "timeout-secret" },
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    expect(run).toHaveBeenCalledOnce();
+    expect(record?.settlement).toEqual({
+      terminalStatus: "timed_out",
+      dispatchState: "started",
+      sideEffectState: "none",
+      timeoutMs: 10
+    });
+    expect(record?.result).toMatchObject({
+      ok: false,
+      metadata: {
+        reason: "timeout",
+        terminalStatus: "timed_out",
+        dispatchState: "started",
+        sideEffectState: "none",
+        timeoutMs: 10
+      }
+    });
+    expect(JSON.stringify(record?.result)).not.toContain("timeout-secret");
+    expect(await persistedExecutionState(sessionDb, trajectoryRecorder)).not.toContain("timeout-secret");
+  });
+
+  it("marks a timed-out mutation uncertain and blocks an identical replay", async () => {
+    const run = vi.fn(async (): Promise<ToolResult> => await new Promise<ToolResult>(() => undefined));
+    const tool: RegisteredTool = {
+      ...createEchoTool("mcp.postman.updateCollection"),
+      riskClass: "external-side-effect",
+      toolsets: ["mcp"],
+      executionTimeoutMs: 10,
+      run
+    };
+    const { executor } = await setupExecutor({ tools: [tool] });
+    const request = {
+      tool: tool.name,
+      input: { collectionId: "alpha" },
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    } as const;
+
+    const timedOut = await executor.executeTool(request);
+    const replay = await executor.executeTool(request);
+
+    expect(timedOut?.settlement).toEqual({
+      terminalStatus: "timed_out",
+      dispatchState: "started",
+      sideEffectState: "possible",
+      timeoutMs: 10
+    });
+    expect(timedOut?.result?.content).toContain("outcome is uncertain");
+    expect(replay).toMatchObject({
+      decision: "deny",
+      settlement: {
+        terminalStatus: "failed",
+        dispatchState: "not_started",
+        sideEffectState: "none"
+      },
+      result: {
+        ok: false,
+        metadata: { reason: "uncertain-mutation-replay" }
+      }
+    });
+    expect(run).toHaveBeenCalledOnce();
+
+    executor.resetPerTurnBudgets();
+    const nextTurn = await executor.executeTool(request);
+    expect(nextTurn?.settlement?.terminalStatus).toBe("timed_out");
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it("blocks an identical mutation after the runner reports an unknown outcome", async () => {
+    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "mutated" }));
+    const tool: RegisteredTool = {
+      ...createEchoTool("mcp.postman.updateCollection"),
+      riskClass: "external-side-effect",
+      toolsets: ["mcp"],
+      run
+    };
+    const { executor } = await setupExecutor({ tools: [tool] });
+    const input = { collectionId: "alpha" };
+
+    executor.markMutationOutcomeUncertain(tool.name, input);
+    const replay = await executor.executeTool({
+      tool: tool.name,
+      input,
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    expect(replay).toMatchObject({
+      decision: "deny",
+      result: { metadata: { reason: "uncertain-mutation-replay" } }
+    });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("does not dispatch protected input after its call times out before delivery", async () => {
+    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "unexpected" }));
+    const tool: RegisteredTool = {
+      ...createEchoTool("mcp.postman.createEnvironment"),
+      riskClass: "external-side-effect",
+      toolsets: ["mcp"],
+      protectedArguments: [{ path: "/token", handling: { persistence: "none", sharing: "private" } }],
+      capabilityMetadata: { protectedInput: { groupedDelivery: false, sources: ["browser"] } },
+      executionTimeoutMs: 5,
+      run
+    };
+    const { executor } = await setupExecutor({ tools: [tool] });
+    const execution = await executor.executeTool({
+      tool: tool.name,
+      input: { token: { protectedInput: { kind: "api-key" } } },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      onSecureInputRequest: async (request, consume) => {
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+        await consume(new TextEncoder().encode("late-secret"), {
+          requestId: "late",
+          scope: { profileId: "test", sessionId: "test-session" },
+          request,
+          signal: new AbortController().signal
+        });
+        return { status: "delivered", destinationLabel: "late", persisted: false };
+      }
+    });
+
+    expect(execution?.settlement).toEqual({
+      terminalStatus: "timed_out",
+      dispatchState: "not_started",
+      sideEffectState: "none",
+      timeoutMs: 5
+    });
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 30));
+    expect(run).not.toHaveBeenCalled();
   });
 });
 
@@ -959,6 +1126,7 @@ describe("ToolExecutor tool-call metadata persistence", () => {
         mode: "exclusive",
         resourceKey: (_input, context) => `postman:${context.sessionId}`
       },
+      executionTimeoutMs: 1_234,
       resolveSecurity: () => ({
         riskClass: "read-only-network",
         targetKey: "collection:alpha",
@@ -1000,6 +1168,7 @@ describe("ToolExecutor tool-call metadata persistence", () => {
     });
     expect(executor.getToolDefinition(verifier.name)).not.toHaveProperty("capabilityMetadata");
     expect(executor.getToolDefinition(verifier.name)).not.toHaveProperty("executionConcurrency");
+    expect(executor.getToolDefinition(verifier.name)).not.toHaveProperty("executionTimeoutMs");
     expect(executor.getToolExecutionConcurrency(verifier.name, {}, "test-session")).toEqual({
       mode: "exclusive",
       resourceKey: "postman:test-session"

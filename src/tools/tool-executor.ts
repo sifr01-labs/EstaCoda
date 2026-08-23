@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import {
@@ -8,7 +9,7 @@ import {
   type SecurityPolicy
 } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
-import type { ToolApprovalHandler, ToolDefinition, ToolExecutionConcurrency, ToolExecutionContext, ToolExecutionEffect, ToolResult, ToolRiskClass, ToolSecurityResolution, ToolsetName } from "../contracts/tool.js";
+import type { ToolApprovalHandler, ToolDefinition, ToolExecutionConcurrency, ToolExecutionContext, ToolExecutionEffect, ToolExecutionSettlement, ToolResult, ToolRiskClass, ToolSecurityResolution, ToolsetName } from "../contracts/tool.js";
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
 import type { VisionDispatchPhase, VisionInputProvenanceContext } from "../contracts/vision.js";
@@ -29,9 +30,11 @@ import {
   matchesProtectedArgumentPattern,
   setAtProtectedArgumentPointer,
 } from "../security/protected-argument-path.js";
+import { createTimeoutSignal } from "../utils/timeout-signal.js";
 
 const MAX_STORED_TOOL_RESULT_CHARS = 12_000;
 const MAX_CONTEXT_SUMMARY_CHARS = 500;
+const DEFAULT_TOOL_EXECUTION_TIMEOUT_MS = 5 * 60_000;
 const SENSITIVE_KEY_RE = /apiKey|api[_-]?key|password|passwd|token|secret|credential|authorization|(?:^|[_-])auth(?:$|[_-])/i;
 const REDACTED_SECRET_VALUE = "[REDACTED]";
 const REDACTED_CDP_EXPRESSION = "[REDACTED_CDP_EXPRESSION]";
@@ -103,6 +106,8 @@ export type ToolExecutionRecord = {
   tool: ToolDefinition;
   /** Runtime-derived from trusted registration metadata; never provider input. */
   executionEffect?: ToolExecutionEffect;
+  /** Runtime-owned terminal, dispatch, and side-effect classification. */
+  settlement?: ToolExecutionSettlement;
   input?: Record<string, unknown>;
   decision: SecurityDecision;
   riskClass: ToolRiskClass;
@@ -120,6 +125,7 @@ export type ToolExecutorOptions = {
   sessionDb: SessionDB;
   trajectoryRecorder: TrajectoryRecorder;
   workspaceRoot?: string;
+  defaultExecutionTimeoutMs?: number;
 };
 
 export class ToolExecutor {
@@ -128,6 +134,8 @@ export class ToolExecutor {
   readonly #sessionDb: SessionDB;
   readonly #trajectoryRecorder: TrajectoryRecorder;
   readonly #workspaceRoot: string;
+  readonly #defaultExecutionTimeoutMs: number;
+  readonly #uncertainMutationKeys = new Set<string>();
 
   constructor(options: ToolExecutorOptions) {
     this.#registry = options.registry;
@@ -135,10 +143,18 @@ export class ToolExecutor {
     this.#sessionDb = options.sessionDb;
     this.#trajectoryRecorder = options.trajectoryRecorder;
     this.#workspaceRoot = resolve(options.workspaceRoot ?? process.cwd());
+    this.#defaultExecutionTimeoutMs = positiveExecutionTimeout(
+      options.defaultExecutionTimeoutMs,
+      DEFAULT_TOOL_EXECUTION_TIMEOUT_MS
+    );
   }
 
   resetPerTurnBudgets(): void {
-    // Kept as a no-op compatibility hook. Provider-turn budgets are owned by ToolPlanRunner.
+    this.#uncertainMutationKeys.clear();
+  }
+
+  markMutationOutcomeUncertain(tool: string, input: Record<string, unknown>): void {
+    this.#uncertainMutationKeys.add(uncertainMutationKey(tool, input));
   }
 
   async executeFirstAvailable(request: ToolExecutionRequest): Promise<ToolExecutionRecord | undefined> {
@@ -195,6 +211,7 @@ export class ToolExecutor {
       return {
         tool: toDefinition(tool),
         ...(baseExecutionEffect === undefined ? {} : { executionEffect: baseExecutionEffect }),
+        settlement: notStartedSettlement("failed"),
         input: request.input,
         decision: "deny",
         riskClass: baseRiskClass,
@@ -233,6 +250,23 @@ export class ToolExecutor {
 
     const targetKey = securityResolution?.targetKey ?? await this.#buildSecurityTargetKey(tool.name, request.input);
     const targetSummary = securityResolution?.targetSummary ?? summarizeSecurityTarget(tool.name, request.input);
+    const mutationReplayKey = executionEffect?.kind === "mutation"
+      ? uncertainMutationKey(tool.name, request.input)
+      : undefined;
+    if (
+      mutationReplayKey !== undefined &&
+      executionEffect !== undefined &&
+      this.#uncertainMutationKeys.has(mutationReplayKey)
+    ) {
+      return await this.#blockedUncertainMutationReplay(
+        request,
+        tool,
+        riskClass,
+        executionEffect,
+        targetKey,
+        targetSummary
+      );
+    }
     const persistedTargetKey = redactPersistedString(targetKey);
     const persistedTargetSummary = redactPersistedString(targetSummary);
     const securityRequest = {
@@ -309,6 +343,7 @@ export class ToolExecutor {
       return {
         tool: toDefinition(tool),
         ...(executionEffect === undefined ? {} : { executionEffect }),
+        settlement: notStartedSettlement("failed"),
         input: request.input,
         decision,
         riskClass,
@@ -334,6 +369,7 @@ export class ToolExecutor {
     });
 
     let result: ToolResult;
+    let settlement: ToolExecutionSettlement;
     const definition = toDefinition(tool);
     const reusableResult = request.readLedger === undefined || request.readLedgerScope === undefined
       ? undefined
@@ -348,42 +384,92 @@ export class ToolExecutor {
       result = {
         ok: false,
         content: "Tool execution cancelled.",
-        metadata: { reason: "cancelled" }
+        metadata: settlementMetadata("cancelled", "not_started", "none")
       };
+      settlement = notStartedSettlement("cancelled");
     } else if (reusableResult !== undefined) {
       result = reusableResult;
+      settlement = {
+        terminalStatus: reusableResult.ok ? "completed" : "failed",
+        dispatchState: "not_started",
+        sideEffectState: "none"
+      };
     } else {
+      const timeoutMs = positiveExecutionTimeout(tool.executionTimeoutMs, this.#defaultExecutionTimeoutMs);
+      const timeout = createTimeoutSignal({
+        timeoutMs,
+        parentSignal: request.signal,
+        timeoutMessage: `Tool execution timed out after ${timeoutMs}ms.`
+      });
+      let dispatchState: ToolExecutionSettlement["dispatchState"] = "not_started";
+      const executionContext = {
+        toolCallId: request.toolCallId,
+        visibleTurnId: request.visibleTurnId,
+        providerUsageLineage: request.providerUsageLineage,
+        visionInputProvenance: request.visionInputProvenance,
+        visionDispatchPhase: request.visionDispatchPhase,
+        securityResolution,
+        signal: timeout.signal,
+        environmentType,
+        onEvent: request.onEvent,
+        onApprovalRequest: tool.name === "execute_code" ? request.onApprovalRequest : undefined,
+        onSecureInputRequest: request.onSecureInputRequest
+      };
       try {
-        const executionContext = {
-          toolCallId: request.toolCallId,
-          visibleTurnId: request.visibleTurnId,
-          providerUsageLineage: request.providerUsageLineage,
-          visionInputProvenance: request.visionInputProvenance,
-          visionDispatchPhase: request.visionDispatchPhase,
-          securityResolution,
-          signal: request.signal,
-          environmentType,
-          onEvent: request.onEvent,
-          onApprovalRequest: tool.name === "execute_code" ? request.onApprovalRequest : undefined,
-          onSecureInputRequest: request.onSecureInputRequest
+        result = await awaitWithAbort(
+          runToolWithProtectedArguments(tool, request.input, executionContext, {
+            beforeDispatch: () => {
+              dispatchState = "started";
+            },
+            afterDispatch: () => {
+              dispatchState = "finished";
+            }
+          }),
+          timeout.signal
+        );
+        settlement = {
+          terminalStatus: result.ok ? "completed" : "failed",
+          dispatchState,
+          sideEffectState: executionEffect?.kind !== "mutation"
+            ? "none"
+            : result.ok ? "confirmed" : dispatchState === "not_started" ? "none" : "possible"
         };
-        result = await runToolWithProtectedArguments(tool, request.input, executionContext);
       } catch (error) {
-        if (request.signal?.aborted) {
+        const terminalStatus = timeout.timedOut()
+          ? "timed_out"
+          : timeout.signal.aborted ? "cancelled" : "failed";
+        const sideEffectState = executionEffect?.kind === "mutation" && dispatchState !== "not_started"
+          ? "possible"
+          : "none";
+        settlement = {
+          terminalStatus,
+          dispatchState,
+          sideEffectState,
+          ...(terminalStatus === "timed_out" ? { timeoutMs } : {})
+        };
+        if (terminalStatus === "timed_out") {
+          result = timeoutToolResult(settlement);
+        } else if (terminalStatus === "cancelled") {
           result = {
             ok: false,
             content: "Tool execution cancelled.",
-            metadata: { reason: "cancelled" }
+            metadata: settlementMetadata("cancelled", dispatchState, sideEffectState)
           };
         } else {
           const message = error instanceof Error ? error.message : "Unknown error";
           result = {
             ok: false,
             content: `Tool execution failed: ${message}`,
-            metadata: { reason: "error" }
+            metadata: settlementMetadata("error", dispatchState, sideEffectState)
           };
         }
+      } finally {
+        timeout.cleanup();
       }
+    }
+
+    if (mutationReplayKey !== undefined && settlement.sideEffectState === "possible") {
+      this.#uncertainMutationKeys.add(mutationReplayKey);
     }
 
     const storedResult = redactToolResultForPersistence(truncateToolResultForStorage(result));
@@ -417,6 +503,7 @@ export class ToolExecutor {
     const execution: ToolExecutionRecord = {
       tool: definition,
       ...(executionEffect === undefined ? {} : { executionEffect }),
+      settlement,
       input: request.input,
       decision,
       riskClass,
@@ -594,9 +681,77 @@ export class ToolExecutor {
     return {
       tool: toDefinition(tool),
       ...executionEffectProperty(tool, riskClass),
+      settlement: notStartedSettlement("failed"),
       input: request.input,
       decision: "deny",
       riskClass,
+      result,
+      toolCallId: request.toolCallId,
+      toolCallName: request.toolCallName,
+      providerNativeToolCall: request.providerNativeToolCall
+    };
+  }
+
+  async #blockedUncertainMutationReplay(
+    request: NamedToolExecutionRequest,
+    tool: import("../contracts/tool.js").RegisteredTool,
+    riskClass: ToolRiskClass,
+    executionEffect: ToolExecutionEffect,
+    targetKey: string | undefined,
+    targetSummary: string | undefined
+  ): Promise<ToolExecutionRecord> {
+    const result: ToolResult = {
+      ok: false,
+      content: [
+        `Tool execution blocked: ${tool.name} matches a mutation whose outcome is uncertain in this turn.`,
+        "Verify the destination state before attempting another mutation."
+      ].join("\n"),
+      metadata: settlementMetadata("uncertain-mutation-replay", "not_started", "none")
+    };
+    const persistedCall = redactToolCallForPersistence(tool.name, request.input, request.providerNativeToolCall);
+    const storedResult = redactToolResultForPersistence(result);
+    await this.#sessionDb.appendEvent(request.sessionId, {
+      kind: "tool-gated",
+      tool: tool.name,
+      decision: "deny",
+      riskClass
+    });
+    await this.#sessionDb.appendEvent(request.sessionId, {
+      kind: "tool-result",
+      tool: tool.name,
+      result: storedResult,
+      toolCallId: request.toolCallId,
+      toolCallName: request.toolCallName,
+      providerNativeToolCall: persistedCall.providerNativeToolCall
+    });
+    await this.#sessionDb.appendMessage({
+      sessionId: request.sessionId,
+      role: "tool",
+      content: storedResult.content,
+      metadata: {
+        tool: tool.name,
+        tool_call_id: request.toolCallId,
+        tool_call_name: request.toolCallName,
+        provider_native_tool_call: persistedCall.providerNativeToolCall,
+        ok: false,
+        reason: "uncertain-mutation-replay"
+      }
+    });
+    this.#trajectoryRecorder.record("tool-gated", {
+      tool: tool.name,
+      decision: "deny",
+      riskClass,
+      reason: "uncertain-mutation-replay"
+    });
+    return {
+      tool: toDefinition(tool),
+      executionEffect,
+      settlement: notStartedSettlement("failed"),
+      input: request.input,
+      decision: "deny",
+      riskClass,
+      targetKey,
+      targetSummary,
       result,
       toolCallId: request.toolCallId,
       toolCallName: request.toolCallName,
@@ -639,6 +794,7 @@ export class ToolExecutor {
     return {
       tool: toDefinition(tool),
       ...executionEffectProperty(tool, riskClass),
+      settlement: notStartedSettlement("failed"),
       input: request.input,
       decision: "deny",
       riskClass,
@@ -653,12 +809,16 @@ export class ToolExecutor {
 async function runToolWithProtectedArguments(
   tool: import("../contracts/tool.js").RegisteredTool,
   input: Record<string, unknown>,
-  context: ToolExecutionContext
+  context: ToolExecutionContext,
+  lifecycle: {
+    beforeDispatch(): void;
+    afterDispatch(): void;
+  }
 ): Promise<ToolResult> {
   const declarations = tool.protectedArguments ?? [];
   // Some trusted core tools own their protected-input collection internally.
   // Declaration matching applies only to the generic argument-injection path.
-  if (declarations.length === 0) return await tool.run(input, context);
+  if (declarations.length === 0) return await dispatchTool(tool, input, context, lifecycle);
   const envelopes = findProtectedArgumentEnvelopes(input);
   const protectedArguments: Array<{
     declaration: (typeof declarations)[number];
@@ -676,7 +836,7 @@ async function runToolWithProtectedArguments(
     }
     protectedArguments.push({ declaration: matches[0]!, pointer: candidate.pointer, envelope: candidate.envelope });
   }
-  if (protectedArguments.length === 0) return await tool.run(input, context);
+  if (protectedArguments.length === 0) return await dispatchTool(tool, input, context, lifecycle);
   if (context.onSecureInputRequest === undefined) {
     return protectedArgumentFailure("Protected tool arguments are unavailable on this runtime.");
   }
@@ -735,10 +895,10 @@ async function runToolWithProtectedArguments(
           decoded.push(secret);
           setAtProtectedArgumentPointer(dispatchedInput, entry.pointer, secret);
         }
-        dispatchedResult = redactExactSecrets(await tool.run(dispatchedInput, {
+        dispatchedResult = redactExactSecrets(await dispatchTool(tool, dispatchedInput, {
           ...context,
           onSecureInputRequest: undefined,
-        }), decoded);
+        }, lifecycle), decoded);
       } catch {
         throw new Error("Protected tool argument dispatch failed.");
       }
@@ -772,10 +932,10 @@ async function runToolWithProtectedArguments(
     const dispatchedInput = structuredClone(input);
     setAtProtectedArgumentPointer(dispatchedInput, pointer, decoded);
     try {
-      dispatchedResult = redactExactSecret(await tool.run(dispatchedInput, {
+      dispatchedResult = redactExactSecret(await dispatchTool(tool, dispatchedInput, {
         ...context,
         onSecureInputRequest: undefined
-      }), decoded);
+      }, lifecycle), decoded);
     } catch {
       throw new Error("Protected tool argument dispatch failed.");
     }
@@ -803,6 +963,24 @@ async function runToolWithProtectedArguments(
     };
   }
   return dispatchedResult;
+}
+
+async function dispatchTool(
+  tool: import("../contracts/tool.js").RegisteredTool,
+  input: Record<string, unknown>,
+  context: ToolExecutionContext,
+  lifecycle: {
+    beforeDispatch(): void;
+    afterDispatch(): void;
+  }
+): Promise<ToolResult> {
+  throwIfAborted(context.signal);
+  lifecycle.beforeDispatch();
+  try {
+    return await tool.run(input, context);
+  } finally {
+    lifecycle.afterDispatch();
+  }
 }
 
 function protectedArgumentDestination(
@@ -905,6 +1083,106 @@ const SECURE_INPUT_KINDS = new Set<SecureInputKind>([
 
 function isAbortSignalAborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
+}
+
+function positiveExecutionTimeout(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.min(2_147_483_647, Math.floor(value))
+    : fallback;
+}
+
+function notStartedSettlement(
+  terminalStatus: ToolExecutionSettlement["terminalStatus"]
+): ToolExecutionSettlement {
+  return {
+    terminalStatus,
+    dispatchState: "not_started",
+    sideEffectState: "none"
+  };
+}
+
+function settlementMetadata(
+  reason: string,
+  dispatchState: ToolExecutionSettlement["dispatchState"],
+  sideEffectState: ToolExecutionSettlement["sideEffectState"],
+  timeoutMs?: number
+): NonNullable<ToolResult["metadata"]> {
+  return {
+    reason,
+    terminalStatus: reason === "timeout" ? "timed_out" : reason === "cancelled" ? "cancelled" : "failed",
+    dispatchState,
+    sideEffectState,
+    ...(timeoutMs === undefined ? {} : { timeoutMs })
+  };
+}
+
+function timeoutToolResult(settlement: ToolExecutionSettlement): ToolResult {
+  const possibleSideEffect = settlement.sideEffectState === "possible";
+  return {
+    ok: false,
+    content: possibleSideEffect
+      ? "Tool execution timed out after the mutation started. Its outcome is uncertain; do not retry it automatically. Verify the destination state first."
+      : settlement.dispatchState === "not_started"
+        ? "Tool execution timed out before dispatch. No side effect was started; the call may be retried."
+        : "Tool execution timed out without a side effect. The call may be retried if it is still needed.",
+    metadata: settlementMetadata(
+      "timeout",
+      settlement.dispatchState,
+      settlement.sideEffectState,
+      settlement.timeoutMs
+    )
+  };
+}
+
+async function awaitWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw abortReason(signal);
+  return await new Promise<T>((resolvePromise, rejectPromise) => {
+    const onAbort = () => rejectPromise(abortReason(signal));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(resolvePromise, rejectPromise).finally(() => {
+      signal.removeEventListener("abort", onAbort);
+    }).catch(() => undefined);
+  });
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) throw abortReason(signal);
+}
+
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new Error("Tool execution aborted.");
+}
+
+function uncertainMutationKey(
+  tool: string,
+  input: Record<string, unknown>
+): string {
+  return createHash("sha256").update(stableExecutionValue({
+    tool,
+    input
+  })).digest("hex");
+}
+
+function stableExecutionValue(value: unknown): string {
+  const seen = new WeakSet<object>();
+  let visited = 0;
+  const visit = (entry: unknown, depth: number): string => {
+    if (visited >= 256 || depth > 6) return JSON.stringify("[TRUNCATED]");
+    visited += 1;
+    if (typeof entry === "string") return JSON.stringify([...entry].slice(0, 2_000).join(""));
+    if (entry === null || typeof entry !== "object") return JSON.stringify(entry) ?? "undefined";
+    if (seen.has(entry)) return JSON.stringify("[CIRCULAR]");
+    seen.add(entry);
+    if (Array.isArray(entry)) {
+      return `[${entry.slice(0, 64).map((item) => visit(item, depth + 1)).join(",")}]`;
+    }
+    return `{${Object.entries(entry as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .slice(0, 64)
+      .map(([key, item]) => `${JSON.stringify(key)}:${visit(item, depth + 1)}`)
+      .join(",")}}`;
+  };
+  return visit(value, 0);
 }
 
 function classifyEffectiveRisk(
