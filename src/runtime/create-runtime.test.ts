@@ -1991,6 +1991,8 @@ describe("createRuntime MCP trust gating", () => {
             "schemaAliasOrder": [],
             "toolsets": [
               "core",
+              "provider",
+              "diagnostics",
             ],
           },
           {
@@ -2004,6 +2006,8 @@ describe("createRuntime MCP trust gating", () => {
             "schemaAliasOrder": [],
             "toolsets": [
               "core",
+              "provider",
+              "diagnostics",
             ],
           },
           {
@@ -2030,6 +2034,7 @@ describe("createRuntime MCP trust gating", () => {
             "schemaAliasOrder": [],
             "toolsets": [
               "core",
+              "diagnostics",
             ],
           },
           {
@@ -2216,6 +2221,8 @@ describe("createRuntime MCP trust gating", () => {
             ],
             "toolsets": [
               "core",
+              "provider",
+              "configuration",
             ],
           },
           {
@@ -2407,6 +2414,7 @@ describe("createRuntime MCP trust gating", () => {
             ],
             "toolsets": [
               "core",
+              "diagnostics",
             ],
           },
           {

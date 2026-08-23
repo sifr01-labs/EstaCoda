@@ -368,6 +368,7 @@ async function createAgentLoop(input: {
   agentEvolutionPolicy?: ReturnType<typeof deriveAgentEvolutionPolicy>;
   onProviderTurnRun?: () => void;
   routeIntent?: IntentRoute;
+  selectedSkill?: SkillDefinition | null;
   routeAttachments?: ChannelAttachment[];
   providerToolDefinitions?: ToolDefinition[];
   executionCompletionCapabilities?: readonly ExecutionCompletionCapability[];
@@ -424,7 +425,7 @@ async function createAgentLoop(input: {
   const runtimeRouter = {
     route: vi.fn(() => ({
       intent: input.routeIntent ?? intent,
-      selectedSkill,
+      selectedSkill: input.selectedSkill === null ? undefined : input.selectedSkill ?? selectedSkill,
       selectedSkillInstructions: undefined,
       selectedSkillResources: undefined,
       selectedSkillSetup: undefined,
@@ -583,7 +584,7 @@ describe("AgentLoop provider availability gating", () => {
     }));
   });
 
-  it("fixes one narrowed provider inventory for a high-confidence routed turn", async () => {
+  it("uses the selected skill's bounded provider inventory", async () => {
     const providerToolDefinitions: ToolDefinition[] = [
       { ...tool, name: "plan", toolsets: ["core"] },
       tool,
@@ -603,12 +604,11 @@ describe("AgentLoop provider availability gating", () => {
       providerTools: Array<{ function: { name: string } }>;
     };
     expect(runInput.providerTools.map((entry) => entry.function.name)).toEqual([
-      "plan",
       "files_read"
     ]);
   });
 
-  it("keeps the wide provider inventory when routing confidence is low", async () => {
+  it("exposes zero provider tools for low-confidence conversation", async () => {
     const providerToolDefinitions: ToolDefinition[] = [
       { ...tool, name: "plan", toolsets: ["core"] },
       tool,
@@ -619,7 +619,8 @@ describe("AgentLoop provider availability gating", () => {
       runSkillPlaybook: vi.fn(async () => []),
       providerExecution: successfulProviderExecution("done"),
       providerToolDefinitions,
-      routeIntent: { ...intent, confidence: 0.35, suggestedToolsets: [] }
+      routeIntent: { ...intent, taskClass: "conversation", confidence: 0.35, suggestedToolsets: [] },
+      selectedSkill: null
     });
 
     await loop.handle({ text: "hello", channel: "cli", trustedWorkspace: true });
@@ -627,11 +628,7 @@ describe("AgentLoop provider availability gating", () => {
     const runInput = vi.mocked(providerTurnLoop.run).mock.calls[0]?.[0] as {
       providerTools: Array<{ function: { name: string } }>;
     };
-    expect(runInput.providerTools.map((entry) => entry.function.name)).toEqual([
-      "plan",
-      "files_read",
-      "browser_snapshot"
-    ]);
+    expect(runInput.providerTools).toEqual([]);
   });
 
   it("narrows a low-confidence turn when the user explicitly names a configured connector", async () => {
@@ -657,7 +654,8 @@ describe("AgentLoop provider availability gating", () => {
       runSkillPlaybook: vi.fn(async () => []),
       providerExecution: successfulProviderExecution("done"),
       providerToolDefinitions,
-      routeIntent: { ...intent, confidence: 0.35, suggestedToolsets: [] }
+      routeIntent: { ...intent, confidence: 0.35, suggestedToolsets: [] },
+      selectedSkill: null
     });
 
     await loop.handle({
@@ -671,7 +669,6 @@ describe("AgentLoop provider availability gating", () => {
     };
     expect(runInput.providerTools.map((entry) => entry.function.name)).toEqual([
       "plan",
-      "files_read",
       "collections_get"
     ]);
   });
@@ -708,7 +705,8 @@ describe("AgentLoop provider availability gating", () => {
       runSkillPlaybook: vi.fn(async () => []),
       providerExecution: successfulProviderExecution("done"),
       providerToolDefinitions,
-      routeIntent: { ...intent, confidence: 0.35, suggestedToolsets: [] }
+      routeIntent: { ...intent, confidence: 0.35, suggestedToolsets: [] },
+      selectedSkill: null
     });
     sessionRuntimeContext.setBrowserState({
       sessionStatus: "active",
@@ -1175,7 +1173,8 @@ describe("AgentLoop provider availability gating", () => {
       providerExecution: successfulProviderExecution("I'll finish the protected Postman update next."),
       providerLoopToolExecutions: [browserExecution, postmanExecution],
       providerToolDefinitions,
-      routeIntent: { ...intent, confidence: 0.35, suggestedToolsets: [] }
+      routeIntent: { ...intent, confidence: 0.35, suggestedToolsets: [] },
+      selectedSkill: null
     });
     sessionRuntimeContext.setBrowserState({
       sessionStatus: "active",

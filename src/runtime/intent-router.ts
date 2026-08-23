@@ -375,6 +375,9 @@ function detectTaskClass(normalized: string, nativeIntent: NativeIntent): {
 }
 
 function taskClassFromPrompt(normalized: string): IntentTaskClass {
+  if (matchesProviderDiagnostics(normalized)) {
+    return "provider-diagnostics";
+  }
   if (matchesReleaseValidation(normalized)) {
     return "release-validation";
   }
@@ -390,8 +393,14 @@ function taskClassFromPrompt(normalized: string): IntentTaskClass {
   if (matchesResearch(normalized)) {
     return "research";
   }
+  if (matchesRepoInspection(normalized)) {
+    return "repo-inspection";
+  }
   if (matchesRepoChange(normalized)) {
     return "repo-change";
+  }
+  if (matchesConversation(normalized)) {
+    return "conversation";
   }
 
   return "general";
@@ -654,7 +663,35 @@ function matchesCodeReview(normalized: string): boolean {
 
 function matchesRepoChange(normalized: string): boolean {
   return /\b(implement|fix|change|update|modify|refactor|add|remove)\b.{0,80}\b(code|repo|repository|file|files|test|tests|feature|bug|command|cli)\b/iu.test(normalized) ||
-    /\b(can you|please|let'?s)\b.{0,40}\b(implement|fix|change|update|modify|refactor|add|remove)\b/iu.test(normalized);
+    /(?:نف[ّ]?ذ|أصلح|اصلح|غي[ّ]?ر|حد[ّ]?ث|عد[ّ]?ل|أضف|اضف|احذف|أعد\s+هيكلة).{0,80}(?:الكود|الشفرة|المستودع|ملف|ملفات|اختبار|اختبارات|ميزة|خلل|أمر)/iu.test(normalized);
+}
+
+function matchesRepoInspection(normalized: string): boolean {
+  const action = /\b(review|audit|inspect|examine|read|search|find|trace|understand|explain|investigate|debug|diagnose)\b/iu;
+  const subject = /\b(codebase|code|repo|repository|source|implementation|file|files|tests?|function|class|module|package)\b/iu;
+  const arabicAction = /(?:راجع|دق[ّ]?ق|افحص|اقرأ|ابحث|تتب[ّ]?ع|افهم|اشرح|حل[ّ]?ل|حق[ّ]?ق|صح[ّ]?ح)/u;
+  const arabicSubject = /(?:الكود|الشفرة|المستودع|المصدر|التنفيذ|ملف|ملفات|اختبار|اختبارات|دالة|صنف|وحدة|حزمة)/u;
+  return (action.test(normalized) && subject.test(normalized)) ||
+    (arabicAction.test(normalized) && arabicSubject.test(normalized));
+}
+
+function matchesProviderDiagnostics(normalized: string): boolean {
+  const action = /\b(diagnose|debug|investigate|inspect|check)\b/iu;
+  const problem = /\b(why|failure|failing|failed|error|mismatch|wrong|broken|status)\b/iu;
+  const subject = /\b(provider|model route|model routing|kimi|openai|anthropic|rate limit|429|token accounting|context window|max output|provider config(?:uration)?)\b/iu;
+  const arabicAction = /(?:شخ[ّ]?ص|صح[ّ]?ح|حق[ّ]?ق|افحص|تحق[ّ]?ق)/u;
+  const arabicProblem = /(?:لماذا|فشل|يفشل|خطأ|مشكلة|عدم\s+تطابق|حالة)/u;
+  const arabicSubject = /(?:مزو[ّ]?د|مسار\s+النموذج|توجيه\s+النموذج|كيمي|Kimi|حد\s+المعدل|محاسبة\s+الرموز|نافذة\s+السياق|حد\s+الإخراج|إعدادات\s+المزو[ّ]?د)/iu;
+  return ((action.test(normalized) || problem.test(normalized)) && subject.test(normalized)) ||
+    ((arabicAction.test(normalized) || arabicProblem.test(normalized)) && arabicSubject.test(normalized));
+}
+
+function matchesConversation(normalized: string): boolean {
+  if (/^(?:(?:hi|hello|hey)(?:\s+there)?|thanks(?:\s+(?:a lot|so much|for your help))?|thank you(?:\s+(?:very much|for your help))?|good (?:morning|afternoon|evening)|bye|goodbye|مرحبا|مرحباً|أهلا|اهلا|شكرا|شكراً|مع السلامة)[\s!?.،؟]*$/iu.test(normalized)) {
+    return true;
+  }
+  return /^(?:how are you|what(?:'s| is) your name|who are you|tell me a joke|let'?s chat)[\s!?.]*$/iu.test(normalized) ||
+    /^(?:كيف حالك|ما اسمك|من أنت|من انت|قل لي نكتة|دعنا نتحدث)[\s!?.،؟]*$/u.test(normalized);
 }
 
 function matchesDocsWriting(normalized: string): boolean {
@@ -907,6 +944,7 @@ function taskClassFromNativeIntent(nativeIntent: NativeIntent): IntentTaskClass 
     case "voice-transcription":
       return "attachment-analysis";
     case "browser-control":
+      return "browser-operation";
     case "general":
       return "general";
   }

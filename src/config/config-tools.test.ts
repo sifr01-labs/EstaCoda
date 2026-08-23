@@ -81,6 +81,31 @@ type ProviderStatusMetadata = {
   providerExecution?: ProviderExecutionSummary;
 };
 
+describe("provider diagnostics tool policy metadata", () => {
+  it("marks provider, configuration, and diagnostic surfaces for bounded selection", () => {
+    const tools = createConfigTools({
+      workspaceRoot: process.cwd(),
+      homeDir: process.cwd(),
+      profileId: "default"
+    });
+    const providerNames = tools.filter((tool) => tool.toolsets.includes("provider")).map((tool) => tool.name);
+    const diagnosticNames = tools.filter((tool) => tool.toolsets.includes("diagnostics")).map((tool) => tool.name);
+
+    expect(providerNames).toEqual([
+      "config.provider.status",
+      "config.provider.execution_status",
+      "config.provider.setup"
+    ]);
+    expect(diagnosticNames).toEqual([
+      "config.provider.status",
+      "config.provider.execution_status",
+      "config.compression.status"
+    ]);
+    expect(tools.find((tool) => tool.name === "config.provider.setup")?.toolsets)
+      .toContain("configuration");
+  });
+});
+
 describe("config.provider.status", () => {
   it("reports profile config when no session override exists", async () => {
     const homeDir = await configHome(localModelConfig({

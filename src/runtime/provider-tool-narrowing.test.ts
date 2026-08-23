@@ -9,13 +9,14 @@ import { narrowProviderToolsForTurn } from "./provider-tool-narrowing.js";
 function tool(
   name: string,
   toolsets: ToolsetName[],
-  connector?: ToolDefinition["connector"]
+  connector?: ToolDefinition["connector"],
+  riskClass: ToolDefinition["riskClass"] = "read-only-local"
 ): ToolDefinition {
   return {
     name,
     description: name,
     inputSchema: { type: "object", properties: {} },
-    riskClass: "read-only-local",
+    riskClass,
     toolsets,
     ...(connector === undefined ? {} : { connector }),
     progressLabel: name,
@@ -39,9 +40,14 @@ const tools = [
   tool("terminal.inspect", ["shell-readonly"])
 ];
 
-function intent(confidence: number, suggestedToolsets: ToolsetName[] = []): IntentRoute {
+function intent(
+  confidence: number,
+  suggestedToolsets: ToolsetName[] = [],
+  taskClass?: IntentRoute["taskClass"]
+): IntentRoute {
   return {
     nativeIntent: "general",
+    taskClass,
     labels: ["test"],
     confidence,
     suggestedToolsets,
@@ -57,10 +63,22 @@ function names(result: ReturnType<typeof narrowProviderToolsForTurn>): string[] 
 }
 
 describe("narrowProviderToolsForTurn", () => {
-  it("keeps the wider resolved inventory for low-confidence routing", () => {
+  it("uses a small bounded policy for low-confidence routing", () => {
     const catalog = buildProviderToolSchemaCatalog({ tools });
 
-    expect(narrowProviderToolsForTurn({ catalog, intent: intent(0.69) })).toBe(catalog.tools);
+    const selected = narrowProviderToolsForTurn({ catalog, intent: intent(0.35) });
+    expect(names(selected)).toEqual(["file_read", "web_extract"]);
+    expect(selected.length).toBeLessThan(catalog.tools.length);
+  });
+
+  it("exposes zero tools for a clearly conversational turn", () => {
+    const catalog = buildProviderToolSchemaCatalog({ tools });
+
+    expect(narrowProviderToolsForTurn({
+      catalog,
+      intent: intent(0.35, [], "conversation"),
+      userText: "hello"
+    })).toEqual([]);
   });
 
   it("narrows low-confidence turns to an explicitly named configured connector", () => {
@@ -72,7 +90,6 @@ describe("narrowProviderToolsForTurn", () => {
       userText: "Add these requests to Postman."
     }))).toEqual([
       "plan",
-      "task_status",
       "mcp_postman_getCollection",
       "mcp_postman_updateCollection"
     ]);
@@ -164,12 +181,11 @@ describe("narrowProviderToolsForTurn", () => {
       userText: "Use Linear Cloud to inspect the workspaces."
     }))).toEqual([
       "plan",
-      "task_status",
       "workspaces_list"
     ]);
   });
 
-  it("retains the broad catalog for negated or weak connector references", () => {
+  it("keeps negated or weak connector references on the bounded general policy", () => {
     const catalog = buildProviderToolSchemaCatalog({
       tools: [
         ...tools,
@@ -177,19 +193,19 @@ describe("narrowProviderToolsForTurn", () => {
       ]
     });
 
-    expect(narrowProviderToolsForTurn({
+    expect(names(narrowProviderToolsForTurn({
       catalog,
       intent: intent(0.35),
       userText: "Do not use Postman for this API request."
-    })).toBe(catalog.tools);
-    expect(narrowProviderToolsForTurn({
+    }))).toEqual(["file_read", "web_extract"]);
+    expect(names(narrowProviderToolsForTurn({
       catalog,
       intent: intent(0.35),
       userText: "Call the API and summarize the response."
-    })).toBe(catalog.tools);
+    }))).toEqual(["file_read", "web_extract"]);
   });
 
-  it("retains the broad catalog when configured connector identities normalize ambiguously", () => {
+  it("keeps ambiguous connector identities on the bounded general policy", () => {
     const catalog = buildProviderToolSchemaCatalog({
       tools: [
         ...tools,
@@ -198,11 +214,11 @@ describe("narrowProviderToolsForTurn", () => {
       ]
     });
 
-    expect(narrowProviderToolsForTurn({
+    expect(names(narrowProviderToolsForTurn({
       catalog,
       intent: intent(0.35),
       userText: "Use Sales Force for this."
-    })).toBe(catalog.tools);
+    }))).toEqual(["file_read", "web_extract"]);
   });
 
   it("includes every distinctly named connector in a cross-connector request", () => {
@@ -243,13 +259,13 @@ describe("narrowProviderToolsForTurn", () => {
     expect(selected).not.toContain("workspaces_list");
   });
 
-  it("narrows at the deterministic high-confidence routing threshold", () => {
+  it("does not let confidence control catalog breadth", () => {
     const catalog = buildProviderToolSchemaCatalog({ tools });
 
-    expect(names(narrowProviderToolsForTurn({ catalog, intent: intent(0.7) }))).toEqual([
-      "plan",
-      "task_status"
-    ]);
+    const low = names(narrowProviderToolsForTurn({ catalog, intent: intent(0.35) }));
+    const high = names(narrowProviderToolsForTurn({ catalog, intent: intent(0.95) }));
+    expect(low).toEqual(["file_read", "web_extract"]);
+    expect(high).toEqual(low);
   });
 
   it("exposes only core and browser tools for high-confidence browser control", () => {
@@ -262,7 +278,6 @@ describe("narrowProviderToolsForTurn", () => {
 
     expect(names(narrowProviderToolsForTurn({ catalog, intent: browserIntent }))).toEqual([
       "plan",
-      "task_status",
       "browser_snapshot",
       "browser_click",
       "browser_tabs",
@@ -270,7 +285,7 @@ describe("narrowProviderToolsForTurn", () => {
     ]);
   });
 
-  it("includes core, plan, routed, required, and available optional toolsets", () => {
+  it("includes routed, required, and available optional toolsets without implicit core tools", () => {
     const catalog = buildProviderToolSchemaCatalog({ tools });
     const skill: SkillDefinition = {
       name: "Postman",
@@ -290,8 +305,6 @@ describe("narrowProviderToolsForTurn", () => {
       intent: intent(0.9, ["files"]),
       selectedSkill: skill
     }))).toEqual([
-      "plan",
-      "task_status",
       "file_read",
       "browser_snapshot",
       "browser_click",
@@ -321,6 +334,79 @@ describe("narrowProviderToolsForTurn", () => {
     expect(selected).toContain("file_read");
     expect(selected).not.toContain("web_extract");
     expect(selected).not.toContain("mcp_postman_getCollection");
+  });
+
+  it("selects a bounded read-only repository policy for repo inspection", () => {
+    const catalog = buildProviderToolSchemaCatalog({
+      tools: [
+        tool("plan", ["core"]),
+        tool("file.read", ["files"]),
+        tool("file.write", ["files"], undefined, "workspace-write"),
+        tool("file.grep", ["files"]),
+        tool("terminal.inspect", ["shell-readonly"]),
+        tool("terminal.run", ["shell-write"], undefined, "workspace-write"),
+        tool("web.extract", ["web"])
+      ]
+    });
+
+    expect(names(narrowProviderToolsForTurn({
+      catalog,
+      intent: intent(0.35, [], "repo-inspection"),
+      userText: "Inspect the router implementation."
+    }))).toEqual(["file_read", "file_grep", "terminal_inspect"]);
+  });
+
+  it("selects bounded repository read, write, and validation tools for modification", () => {
+    const catalog = buildProviderToolSchemaCatalog({
+      tools: [
+        tool("plan", ["core"]),
+        tool("file.read", ["files"]),
+        tool("file.write", ["files"], undefined, "workspace-write"),
+        tool("terminal.run", ["shell-write"], undefined, "workspace-write"),
+        tool("browser.click", ["browser"], undefined, "external-side-effect"),
+        tool("mcp.postman.updateCollection", ["mcp"], { kind: "mcp", id: "postman" }, "external-side-effect")
+      ]
+    });
+
+    expect(names(narrowProviderToolsForTurn({
+      catalog,
+      intent: intent(0.35, [], "repo-change"),
+      userText: "Implement the router change and run validation."
+    }))).toEqual(["plan", "file_read", "file_write", "terminal_run"]);
+  });
+
+  it("selects only registered provider, configuration, and diagnostic tools for provider failures", () => {
+    const catalog = buildProviderToolSchemaCatalog({
+      tools: [
+        tool("plan", ["core"]),
+        tool("config.provider.status", ["core", "provider", "diagnostics"]),
+        tool("config.provider.execution_status", ["core", "provider", "diagnostics"]),
+        tool("config.provider.setup", ["core", "provider", "configuration"], undefined, "shared-state-mutation"),
+        tool("file.read", ["files"]),
+        tool("workspaces.list", ["mcp"], { kind: "mcp", id: "linear-cloud" })
+      ]
+    });
+
+    expect(names(narrowProviderToolsForTurn({
+      catalog,
+      intent: intent(0.35, [], "provider-diagnostics"),
+      userText: "Diagnose why Kimi keeps failing."
+    }))).toEqual([
+      "config_provider_status",
+      "config_provider_execution_status",
+      "config_provider_setup"
+    ]);
+  });
+
+  it("does not activate a named connector for educational mention alone", () => {
+    const catalog = buildProviderToolSchemaCatalog({ tools });
+
+    const selected = names(narrowProviderToolsForTurn({
+      catalog,
+      intent: intent(0.35, [], "conversation"),
+      userText: "Explain how Postman environments work."
+    }));
+    expect(selected).toEqual([]);
   });
 
   it("cannot reintroduce tools excluded from the resolved catalog", () => {

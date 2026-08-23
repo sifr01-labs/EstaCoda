@@ -6,9 +6,12 @@ import type {
   OpenAICompatibleToolSchema,
   ProviderToolSchemaCatalog
 } from "../tools/tool-schema.js";
+import {
+  isActionableToolRequest,
+  selectToolSelectionPolicy,
+  shouldIncludePlan
+} from "./tool-selection-policies.js";
 
-/** Matches the deterministic router's minimum primary-skill score. */
-export const PROVIDER_TOOL_NARROWING_MIN_CONFIDENCE = 0.7;
 const CONTINUITY_TOOLSETS = new Set<ToolsetName>(["browser"]);
 
 export type ProviderToolContinuityContext = {
@@ -32,31 +35,44 @@ export function narrowProviderToolsForTurn(input: {
 }): OpenAICompatibleToolSchema[] {
   const namedConnectors = selectNamedConnectors(input);
   const continuityToolsets = selectContinuityToolsets(input);
-  if (
-    input.intent.confidence < PROVIDER_TOOL_NARROWING_MIN_CONFIDENCE &&
-    namedConnectors.size === 0 &&
-    continuityToolsets.size === 0
-  ) {
-    return input.catalog.tools;
-  }
-
-  const includedToolsets = new Set<ToolsetName>([
-    "core",
+  const policy = selectToolSelectionPolicy({
+    intent: input.intent,
+    userText: input.userText,
+    namedConnectorOperation: namedConnectors.size > 0,
+    selectedSkill: input.selectedSkill !== undefined,
+    readyAttachments: (input.attachments ?? []).some((attachment) => (attachment.status ?? "ready") === "ready")
+  });
+  const policyToolsets = new Set(policy.toolsets);
+  const policyRiskClasses = new Set(policy.allowedRiskClasses);
+  const routedToolsets = new Set<ToolsetName>([
     ...input.intent.suggestedToolsets,
     ...continuityToolsets,
     ...(input.selectedSkill?.requiredToolsets ?? []),
-    ...(input.selectedSkill?.optionalToolsets ?? []),
-    ...attachmentToolsets(input.attachments)
+    ...(input.selectedSkill?.optionalToolsets ?? [])
   ]);
-  const includedTools = new Set<string>(["plan"]);
+  const attachedToolsets = new Set(attachmentToolsets(input.attachments));
+  const includePlan = shouldIncludePlan({
+    policy,
+    userText: input.userText,
+    selectedSkillPlaybookSteps: input.selectedSkill?.playbook.length
+  });
 
   return input.catalog.entries
-    .filter((entry) =>
-      includedTools.has(entry.tool.name) ||
-      (entry.tool.connector !== undefined && namedConnectors.size > 0
-        ? namedConnectors.has(connectorKey(entry.tool.connector))
-        : entry.tool.toolsets.some((toolset) => includedToolsets.has(toolset)))
-    )
+    .filter((entry) => {
+      if (entry.tool.name === "plan") return includePlan;
+      if (entry.tool.connector !== undefined) {
+        return namedConnectors.size > 0
+          ? namedConnectors.has(connectorKey(entry.tool.connector))
+          : entry.tool.toolsets.some((toolset) => routedToolsets.has(toolset));
+      }
+      if (entry.tool.toolsets.some((toolset) => routedToolsets.has(toolset))) return true;
+      if (
+        entry.tool.toolsets.some((toolset) => attachedToolsets.has(toolset)) &&
+        (entry.tool.riskClass === "read-only-local" || entry.tool.riskClass === "read-only-network")
+      ) return true;
+      return policyRiskClasses.has(entry.tool.riskClass) &&
+        entry.tool.toolsets.some((toolset) => policyToolsets.has(toolset));
+    })
     .map((entry) => entry.schema);
 }
 
@@ -67,6 +83,7 @@ function selectNamedConnectors(input: {
 }): Set<string> {
   const normalizedUserText = normalizeConnectorSearchText(input.userText ?? "");
   const normalizedContinuationText = normalizeConnectorSearchText(input.continuity?.userRequest ?? "");
+  const currentRequestIsActionable = isActionableToolRequest(input.userText ?? "");
   const continuedConnectorKeys = new Set((input.continuity?.connectors ?? []).map(connectorKey));
   const identities = new Map<string, { key: string; phrase: string; sourceId: string }>();
   const ambiguousKeys = new Set<string>();
@@ -88,15 +105,15 @@ function selectNamedConnectors(input: {
   for (const identity of identities.values()) {
     if (ambiguousKeys.has(identity.key)) continue;
     const currentTurnReference = connectorReferenceState(normalizedUserText, identity.phrase);
-    if (currentTurnReference === "positive") {
+    if (currentTurnReference === "positive" && currentRequestIsActionable) {
       matched.add(identity.key);
       continue;
     }
     if (currentTurnReference === "negative") continue;
-    if (
+    if (currentRequestIsActionable && (
       connectorReferenceState(normalizedContinuationText, identity.phrase) === "positive" ||
       continuedConnectorKeys.has(identity.key)
-    ) {
+    )) {
       matched.add(identity.key);
     }
   }

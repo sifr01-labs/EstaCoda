@@ -15,6 +15,7 @@ describe("session.usage", () => {
       currentSessionId: () => "session-1"
     });
 
+    expect(tool?.toolsets).toContain("diagnostics");
     const result = await tool!.run({ scope: "session" });
     expect(inspectSession).toHaveBeenCalledWith("session-1");
     expect(result.ok).toBe(true);

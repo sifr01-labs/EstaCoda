@@ -50,7 +50,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
         properties: {}
       },
       riskClass: "read-only-local",
-      toolsets: ["core"],
+      toolsets: ["core", "provider", "diagnostics"],
       progressLabel: "checking provider config",
       maxResultSizeChars: 4000,
       isAvailable: () => true,
@@ -153,7 +153,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
         properties: {}
       },
       riskClass: "read-only-local",
-      toolsets: ["core"],
+      toolsets: ["core", "provider", "diagnostics"],
       progressLabel: "checking provider execution status",
       maxResultSizeChars: 4000,
       isAvailable: () => true,
@@ -240,7 +240,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
         properties: {}
       },
       riskClass: "read-only-local",
-      toolsets: ["core"],
+      toolsets: ["core", "diagnostics"],
       progressLabel: "checking compression config",
       maxResultSizeChars: 5000,
       isAvailable: () => true,
@@ -732,7 +732,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
         required: ["provider", "model"]
       },
       riskClass: "shared-state-mutation",
-      toolsets: ["core"],
+      toolsets: ["core", "provider", "configuration"],
       progressLabel: "configuring provider",
       maxResultSizeChars: 6000,
       isAvailable: () => true,

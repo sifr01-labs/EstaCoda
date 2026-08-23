@@ -26,7 +26,7 @@ export function createSessionUsageTool(options: {
       required: ["scope"]
     },
     riskClass: "read-only-local",
-    toolsets: ["core"],
+    toolsets: ["core", "diagnostics"],
     progressLabel: "checking usage",
     maxResultSizeChars: 8_000,
     isAvailable: () => true,

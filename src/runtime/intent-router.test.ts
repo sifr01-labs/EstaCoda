@@ -243,6 +243,7 @@ describe("IntentRouter governed route contract", () => {
     const route = routerWith().route(prompt);
 
     expect(route.nativeIntent).toBe("browser-control");
+    expect(route.taskClass).toBe("browser-operation");
     expect(route.confidence).toBeGreaterThanOrEqual(0.9);
     expect(route.suggestedToolsets).toEqual(["browser"]);
     expect(route.labels).toContain("browser-control");
@@ -296,8 +297,30 @@ describe("IntentRouter governed route contract", () => {
     );
   });
 
-  it("leaves unrelated prompts as general without task-class evidence", () => {
-    const route = routerWith().route("hello there");
+  it.each([
+    ["Trace the intent router through this codebase.", "repo-inspection"],
+    ["افحص تنفيذ intent router في الكود.", "repo-inspection"],
+    ["Diagnose why the Kimi provider keeps failing.", "provider-diagnostics"],
+    ["حقق في سبب فشل مزوّد Kimi.", "provider-diagnostics"],
+    ["hello", "conversation"],
+    ["كيف حالك؟", "conversation"]
+  ] as const)("classifies bounded policy case %s as %s", (prompt, taskClass) => {
+    expect(routerWith().route(prompt).taskClass).toBe(taskClass);
+  });
+
+  it.each([
+    "Explain how Postman environments work.",
+    "Review this Postman request.",
+    "Tell me about provider design patterns.",
+    "Explain provider architecture patterns."
+  ])("does not false-positive provider or repository diagnostics for %s", (prompt) => {
+    const route = routerWith().route(prompt);
+    expect(route.taskClass).not.toBe("provider-diagnostics");
+    expect(route.taskClass).not.toBe("repo-inspection");
+  });
+
+  it("leaves unrelated non-conversational prompts as general without task-class evidence", () => {
+    const route = routerWith().route("please continue");
 
     expect(route.taskClass).toBe("general");
     expect(route.evidence.some((entry) => entry.kind === "task-class")).toBe(false);
