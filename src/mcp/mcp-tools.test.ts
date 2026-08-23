@@ -431,6 +431,9 @@ describe("MCP protected argument declarations", () => {
         verification: {
           verifies: ["mcp.postman.createEnvironment", "mcp.postman.putEnvironment"],
         },
+        resultRedaction: {
+          paths: ["/environment/values/*/value"],
+        },
       });
     expect(server?.tools.find((tool) => tool.name === "mcp.postman.getCollection")?.capabilityMetadata)
       .toEqual({
@@ -440,6 +443,9 @@ describe("MCP protected argument declarations", () => {
       });
     const createSpec = server?.tools.find((tool) => tool.name === "mcp.postman.createSpec");
     expect(createSpec?.riskClass).toBe("external-side-effect");
+    expect(createSpec?.capabilityMetadata).toEqual({
+      artifactInput: { paths: ["/files/*/content"] },
+    });
     expect(JSON.stringify(createSpec?.inputSchema)).toContain("artifactInput");
     expect(server?.tools.find((tool) => tool.name === "mcp.postman.getSpec")?.capabilityMetadata)
       .toEqual({ verification: { verifies: ["mcp.postman.createSpec"] } });

@@ -21,6 +21,35 @@ export type ProviderToolContinuityContext = {
   activeBrowser?: boolean;
 };
 
+/** Returns only connectors explicitly named in an actionable current request. */
+export function namedConnectorIdsForRequest(input: {
+  tools: readonly ToolDefinition[];
+  userText: string;
+}): string[] {
+  if (!isActionableToolRequest(input.userText)) return [];
+  const normalizedUserText = normalizeConnectorSearchText(input.userText);
+  const identities = new Map<string, { key: string; phrase: string; sourceId: string; id: string }>();
+  const ambiguousKeys = new Set<string>();
+  for (const tool of input.tools) {
+    const connector = tool.connector;
+    if (connector === undefined) continue;
+    const key = connectorKey(connector);
+    const phrase = normalizeConnectorText(connector.id);
+    const sourceId = connector.id.normalize("NFKC").toLocaleLowerCase("en-US").trim();
+    if (!isDistinctiveConnectorPhrase(phrase)) continue;
+    const existing = identities.get(key);
+    if (existing !== undefined && existing.sourceId !== sourceId) ambiguousKeys.add(key);
+    identities.set(key, { key, phrase, sourceId, id: connector.id });
+  }
+  return [...identities.values()]
+    .filter((identity) =>
+      !ambiguousKeys.has(identity.key) &&
+      connectorReferenceState(normalizedUserText, identity.phrase) === "positive"
+    )
+    .map((identity) => identity.id)
+    .sort((left, right) => left.localeCompare(right));
+}
+
 /**
  * Narrows an already availability-filtered foreground catalog. It never adds a
  * tool that is absent from the catalog.

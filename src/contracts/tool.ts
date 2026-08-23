@@ -138,6 +138,14 @@ export type RegisteredToolCapabilityMetadata = {
     /** Canonical mutation tool names whose resulting state this tool can verify. */
     verifies: readonly string[];
   };
+  artifactInput?: {
+    /** Reviewed artifact-envelope argument paths accepted by this tool. */
+    paths: readonly string[];
+  };
+  resultRedaction?: {
+    /** Reviewed result paths redacted before connector output reaches the model. */
+    paths: readonly string[];
+  };
 };
 
 export type ToolExecutionConcurrencyContext = {

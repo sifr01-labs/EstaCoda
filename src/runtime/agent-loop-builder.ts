@@ -321,6 +321,10 @@ export class AgentLoopBuilder {
       ? await input.sessionDb.listEvents(input.sessionId)
       : [];
     executionEvidenceIndex.hydrate(persistedSessionEvents);
+    const executionCapabilityPreflight = new ExecutionCapabilityPreflight({
+      registry: toolRegistry,
+      browserSourceAvailable: () => substrate.browserBackend.isAvailable()
+    });
     const executionPlanController = ownsExecutionPlan
       ? new ExecutionPlanController(
           new ExecutionPlanStore(),
@@ -329,10 +333,7 @@ export class AgentLoopBuilder {
             sink === undefined ? undefined : (runtimeEvent) => sink(runtimeEvent as typeof event)
           ),
           executionEvidenceIndex,
-          new ExecutionCapabilityPreflight({
-            registry: toolRegistry,
-            browserSourceAvailable: () => substrate.browserBackend.isAvailable()
-          }),
+          executionCapabilityPreflight,
           (record) => runRecorder.recordExecutionEvidence(record)
         )
       : undefined;
@@ -680,6 +681,7 @@ export class AgentLoopBuilder {
       taskExecution: input.taskExecution,
       executionPlanReader: executionPlanController,
       executionPlanController,
+      executionCapabilityPreflight,
       executionEvidenceIndex,
       ui: input.ui,
       agentProfile: input.agentProfile

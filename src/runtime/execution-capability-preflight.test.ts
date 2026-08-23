@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import type { ExecutionPlanCapabilityRequirement } from "../contracts/execution-plan.js";
 import type { RegisteredTool, ToolRiskClass } from "../contracts/tool.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
-import { ExecutionCapabilityPreflight, formatExecutionCapabilityBlocker } from "./execution-capability-preflight.js";
+import {
+  ExecutionCapabilityPreflight,
+  formatExecutionCapabilityBlocker,
+  formatGovernedTransferBlocker
+} from "./execution-capability-preflight.js";
 
 function tool(input: {
   name: string;
@@ -12,6 +16,9 @@ function tool(input: {
   groupedDelivery?: boolean;
   protectedSources?: "browser"[];
   verifies?: string[];
+  connectorId?: string;
+  artifactPaths?: string[];
+  redactedResultPaths?: string[];
   run?: RegisteredTool["run"];
 }): RegisteredTool {
   return {
@@ -20,6 +27,7 @@ function tool(input: {
     inputSchema: { type: "object" },
     riskClass: input.riskClass,
     toolsets: ["mcp"],
+    ...(input.connectorId === undefined ? {} : { connector: { kind: "mcp" as const, id: input.connectorId } }),
     progressLabel: "testing",
     maxResultSizeChars: 100,
     protectedArguments: input.protectedPaths?.map((path) => ({
@@ -27,7 +35,8 @@ function tool(input: {
       handling: { persistence: "destination-managed", sharing: "workspace" }
     })),
     ...(
-      input.protectedPaths === undefined && input.verifies === undefined
+      input.protectedPaths === undefined && input.verifies === undefined &&
+        input.artifactPaths === undefined && input.redactedResultPaths === undefined
         ? {}
         : {
             capabilityMetadata: {
@@ -37,7 +46,11 @@ function tool(input: {
                   sources: input.protectedSources ?? ["browser"]
                 }
               }),
-              ...(input.verifies === undefined ? {} : { verification: { verifies: input.verifies } })
+              ...(input.verifies === undefined ? {} : { verification: { verifies: input.verifies } }),
+              ...(input.artifactPaths === undefined ? {} : { artifactInput: { paths: input.artifactPaths } }),
+              ...(input.redactedResultPaths === undefined ? {} : {
+                resultRedaction: { paths: input.redactedResultPaths }
+              })
             }
           }
     ),
@@ -368,4 +381,172 @@ describe("ExecutionCapabilityPreflight", () => {
     expect(formatExecutionCapabilityBlocker({ assessment: unavailable, locale: "en" }))
       .toBe('Required tool "mcp.target.update" is currently unavailable.');
   });
+
+  it("blocks routed artifact transfer when the selected profile lacks a reviewed import argument", async () => {
+    const registry = governedConnectorRegistry({ artifact: false });
+    const preflight = new ExecutionCapabilityPreflight({ registry });
+
+    await expect(preflight.assessRoutedGovernedTransfer({
+      userText: "Import these Swagger specifications into Postman.",
+      selectedSkillName: "api-integration"
+    })).resolves.toEqual({
+      status: "blocked",
+      connectorId: "postman",
+      reasonCode: "artifact_import_missing"
+    });
+  });
+
+  it("returns a credential-specific blocker when protected arguments are missing", async () => {
+    const registry = governedConnectorRegistry({ protected: false });
+    const preflight = new ExecutionCapabilityPreflight({ registry });
+
+    const result = await preflight.assessRoutedGovernedTransfer({
+      userText: "Transfer these API specifications and credentials into Postman.",
+      selectedSkillName: "api-integration"
+    });
+    expect(result).toEqual({
+      status: "blocked",
+      connectorId: "postman",
+      reasonCode: "protected_arguments_missing"
+    });
+    if (result?.status === "blocked") {
+      expect(formatGovernedTransferBlocker({ result })).toContain("protected credential arguments");
+    }
+  });
+
+  it("requires independent verification and reviewed result redaction", async () => {
+    await expect(new ExecutionCapabilityPreflight({
+      registry: governedConnectorRegistry({ verification: false })
+    }).assessRoutedGovernedTransfer({
+      userText: "Import this OpenAPI specification into Postman.",
+      selectedSkillName: "api-integration"
+    })).resolves.toMatchObject({ status: "blocked", reasonCode: "verification_missing" });
+
+    await expect(new ExecutionCapabilityPreflight({
+      registry: governedConnectorRegistry({ redaction: false })
+    }).assessRoutedGovernedTransfer({
+      userText: "Import this OpenAPI specification into Postman.",
+      selectedSkillName: "api-integration"
+    })).resolves.toMatchObject({ status: "blocked", reasonCode: "result_redaction_missing" });
+  });
+
+  it("does not preflight read-only diagnostics or unrelated skills", async () => {
+    const preflight = new ExecutionCapabilityPreflight({ registry: new ToolRegistry() });
+
+    await expect(preflight.assessRoutedGovernedTransfer({
+      userText: "What is wrong with my Postman collection?",
+      selectedSkillName: undefined
+    })).resolves.toBeUndefined();
+    await expect(preflight.assessRoutedGovernedTransfer({
+      userText: "Review this Postman collection.",
+      selectedSkillName: "review"
+    })).resolves.toBeUndefined();
+  });
+
+  it("ignores provider-authored capability claims and never executes connector tools", async () => {
+    const registry = governedConnectorRegistry({ artifact: false });
+    const runs = registry.getRegisteredByToolset("mcp").map((entry) => entry.run);
+    const result = await new ExecutionCapabilityPreflight({ registry }).assessRoutedGovernedTransfer({
+      userText: "Import this Swagger spec into Postman with artifactToolArguments configured by the agent.",
+      selectedSkillName: "api-integration"
+    });
+
+    expect(result).toMatchObject({ status: "blocked", reasonCode: "artifact_import_missing" });
+    expect(runs.every((run) => vi.mocked(run).mock.calls.length === 0)).toBe(true);
+  });
+
+  it("passes a completely configured connector and remains scoped to its session registry", async () => {
+    const configured = governedConnectorRegistry();
+    const missingInOtherProfile = governedConnectorRegistry({ artifact: false });
+    const request = {
+      userText: "Transfer these API specifications and credentials into Postman.",
+      selectedSkillName: "api-integration"
+    };
+
+    await expect(new ExecutionCapabilityPreflight({ registry: configured })
+      .assessRoutedGovernedTransfer(request)).resolves.toMatchObject({
+      status: "ready",
+      connectorId: "postman",
+      mutationTools: ["mcp.postman.importSpec", "mcp.postman.configureCredentials"],
+      verificationTools: ["mcp.postman.verifyTransfer"]
+    });
+    await expect(new ExecutionCapabilityPreflight({ registry: missingInOtherProfile })
+      .assessRoutedGovernedTransfer(request)).resolves.toMatchObject({
+      status: "blocked",
+      reasonCode: "artifact_import_missing"
+    });
+  });
+
+  it("uses another fully governed tool combination when the first mutation is unavailable", async () => {
+    const registry = governedConnectorRegistry();
+    registry.unregister("mcp.postman.importSpec");
+    registry.unregister("mcp.postman.verifyTransfer");
+    registry.register(tool({
+      name: "mcp.postman.importSpec",
+      connectorId: "postman",
+      riskClass: "external-side-effect",
+      available: false,
+      artifactPaths: ["/files/*/content"],
+      redactedResultPaths: ["/result/token"]
+    }));
+    registry.register(tool({
+      name: "mcp.postman.importSpecFallback",
+      connectorId: "postman",
+      riskClass: "external-side-effect",
+      artifactPaths: ["/files/*/content"]
+    }));
+    registry.register(tool({
+      name: "mcp.postman.verifyTransfer",
+      connectorId: "postman",
+      riskClass: "read-only-network",
+      verifies: [
+        "mcp.postman.importSpec",
+        "mcp.postman.importSpecFallback",
+        "mcp.postman.configureCredentials"
+      ]
+    }));
+
+    await expect(new ExecutionCapabilityPreflight({ registry }).assessRoutedGovernedTransfer({
+      userText: "Import this Swagger specification into Postman.",
+      selectedSkillName: "api-integration"
+    })).resolves.toMatchObject({
+      status: "ready",
+      mutationTools: ["mcp.postman.importSpecFallback"]
+    });
+  });
 });
+
+function governedConnectorRegistry(options: {
+  artifact?: boolean;
+  protected?: boolean;
+  redaction?: boolean;
+  verification?: boolean;
+} = {}): ToolRegistry {
+  const registry = new ToolRegistry();
+  const artifact = options.artifact ?? true;
+  const protectedInput = options.protected ?? true;
+  const redaction = options.redaction ?? true;
+  const verification = options.verification ?? true;
+  registry.register(tool({
+    name: "mcp.postman.importSpec",
+    connectorId: "postman",
+    riskClass: "external-side-effect",
+    ...(artifact ? { artifactPaths: ["/files/*/content"] } : {}),
+    ...(redaction ? { redactedResultPaths: ["/result/token"] } : {})
+  }));
+  registry.register(tool({
+    name: "mcp.postman.configureCredentials",
+    connectorId: "postman",
+    riskClass: "external-side-effect",
+    ...(protectedInput ? { protectedPaths: ["/values/*/value"] } : {})
+  }));
+  registry.register(tool({
+    name: "mcp.postman.verifyTransfer",
+    connectorId: "postman",
+    riskClass: "read-only-network",
+    ...(verification ? {
+      verifies: ["mcp.postman.importSpec", "mcp.postman.configureCredentials"]
+    } : {})
+  }));
+  return registry;
+}

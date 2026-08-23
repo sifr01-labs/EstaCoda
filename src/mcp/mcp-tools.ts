@@ -185,6 +185,7 @@ function createMcpTool(
   const riskClass = resolveMcpToolRiskClass(config, client.transport, tool.name);
   const protectedConfig = config.protectedToolArguments?.[tool.name];
   const artifactConfig = config.artifactToolArguments?.[tool.name];
+  const redactedResultPaths = config.redactedToolResultPaths?.[tool.name];
   const verificationTargets = config.toolVerificationRelationships?.[tool.name]?.map((target) =>
     prefixTool(serverName, config, target)
   );
@@ -207,19 +208,32 @@ function createMcpTool(
       handling: protectedConfig?.handling ?? { persistence: "unknown", sharing: "unknown" },
       destination: { type: "mcp-argument" as const, serverId: serverName, toolName: tool.name }
     })),
-    ...(protectedProjection.paths.length === 0 && verificationTargets === undefined ? {} : {
-      capabilityMetadata: {
-        ...(protectedProjection.paths.length === 0 ? {} : {
-          protectedInput: {
-            groupedDelivery: protectedConfig?.groupedDelivery ?? true,
-            sources: protectedConfig?.browserRelay === false ? [] : ["browser" as const]
+    ...(
+      protectedProjection.paths.length === 0 &&
+      artifactProjection.paths.length === 0 &&
+      redactedResultPaths === undefined &&
+      verificationTargets === undefined
+        ? {}
+        : {
+            capabilityMetadata: {
+              ...(protectedProjection.paths.length === 0 ? {} : {
+                protectedInput: {
+                  groupedDelivery: protectedConfig?.groupedDelivery ?? true,
+                  sources: protectedConfig?.browserRelay === false ? [] : ["browser" as const]
+                }
+              }),
+              ...(verificationTargets === undefined ? {} : {
+                verification: { verifies: verificationTargets }
+              }),
+              ...(artifactProjection.paths.length === 0 ? {} : {
+                artifactInput: { paths: artifactProjection.paths }
+              }),
+              ...(redactedResultPaths === undefined ? {} : {
+                resultRedaction: { paths: [...redactedResultPaths] }
+              })
+            }
           }
-        }),
-        ...(verificationTargets === undefined ? {} : {
-          verification: { verifies: verificationTargets }
-        })
-      }
-    }),
+    ),
     isAvailable: () => true,
     run: async (input: Record<string, unknown>) => {
       const relay = await resolveArtifactArguments(input, artifactConfig, artifactStore);
@@ -238,7 +252,7 @@ function createMcpTool(
       const relayedContents = relay.artifacts.map((artifact) => artifact.content);
       const normalized = normalizeMcpResult(
         redactRelayedArtifactValue(result, relayedContents),
-        config.redactedToolResultPaths?.[tool.name]
+        redactedResultPaths
       );
       if (relay.artifacts.length === 0) return normalized;
       const redacted = redactRelayedArtifactContent(normalized, relayedContents);

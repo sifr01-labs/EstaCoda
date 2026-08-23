@@ -47,6 +47,7 @@ import { createSessionRuntimeContext } from "./session-runtime-context.js";
 import { normalizeSessionCompressionConfig, type SessionCompressionConfig } from "../config/runtime-config.js";
 import type { MemoryCurationService } from "../memory/memory-curation-service.js";
 import { MemoryCurationBusyError } from "../memory/memory-curation-coordinator.js";
+import type { ExecutionCapabilityPreflight } from "./execution-capability-preflight.js";
 
 const memoryPromotionMocks = vi.hoisted(() => ({
   resolveUserPreferencePromotion: vi.fn(),
@@ -375,6 +376,7 @@ async function createAgentLoop(input: {
   nativeToolExecutions?: ToolExecutionRecord[];
   executionPlanReader?: ExecutionPlanReader;
   executionPlanController?: ExecutionPlanController;
+  executionCapabilityPreflight?: ExecutionCapabilityPreflight;
 }) {
   const sessionDb = new InMemorySessionDB();
   const sessionId = `agent-loop-test-${Date.now()}-${Math.random()}`;
@@ -542,6 +544,7 @@ async function createAgentLoop(input: {
     agentEvolutionPolicy: input.agentEvolutionPolicy ?? deriveAgentEvolutionPolicy("suggest"),
     executionPlanReader: input.executionPlanController ?? input.executionPlanReader,
     executionPlanController: input.executionPlanController,
+    executionCapabilityPreflight: input.executionCapabilityPreflight,
     executionEvidenceIndex
   });
 
@@ -552,11 +555,57 @@ async function createAgentLoop(input: {
     sessionDb,
     sessionId,
     sessionRuntimeContext,
-    trajectoryRecorder
+    trajectoryRecorder,
+    nativeToolExecutor
   };
 }
 
 describe("AgentLoop provider availability gating", () => {
+  it("returns a routed governed-transfer blocker before browser, playbook, or provider work", async () => {
+    const apiSkill: SkillDefinition = {
+      ...selectedSkill,
+      name: "api-integration",
+      requiredToolsets: ["browser", "mcp"]
+    };
+    const apiIntent: IntentRoute = {
+      ...intent,
+      labels: ["api.integration"],
+      suggestedToolsets: ["browser", "mcp"],
+      suggestedSkills: [apiSkill],
+      primarySkill: apiSkill
+    };
+    const assessRoutedGovernedTransfer = vi.fn(async () => ({
+      status: "blocked" as const,
+      connectorId: "postman",
+      reasonCode: "artifact_import_missing" as const
+    }));
+    const runSkillPlaybook = vi.fn(async () => []);
+    const { loop, providerTurnLoop, nativeToolExecutor } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook,
+      providerExecution: successfulProviderExecution("should not run"),
+      routeIntent: apiIntent,
+      selectedSkill: apiSkill,
+      executionCapabilityPreflight: {
+        assessRoutedGovernedTransfer
+      } as unknown as ExecutionCapabilityPreflight
+    });
+
+    const response = await loop.handle({
+      text: "Import this Swagger specification into Postman.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(response.finalOutcome?.status).toBe("blocked");
+    expect(response.text).toContain("artifactToolArguments");
+    expect(response.text).toContain("No browser or destination action was performed.");
+    expect(assessRoutedGovernedTransfer).toHaveBeenCalledOnce();
+    expect(nativeToolExecutor.executeDeterministicNativeTools).not.toHaveBeenCalled();
+    expect(runSkillPlaybook).not.toHaveBeenCalled();
+    expect(providerTurnLoop.run).not.toHaveBeenCalled();
+  });
+
   it("propagates approval and secure-input handlers into the provider tool loop independently", async () => {
     const { loop, providerTurnLoop } = await createAgentLoop({
       canRunProvider: true,

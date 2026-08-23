@@ -80,6 +80,10 @@ import {
   type ExecutionCompletionCapability
 } from "./execution-outcome.js";
 import { narrowProviderToolsForTurn } from "./provider-tool-narrowing.js";
+import {
+  ExecutionCapabilityPreflight,
+  formatGovernedTransferBlocker
+} from "./execution-capability-preflight.js";
 
 export type AgentLoopInput = {
   text: string;
@@ -181,6 +185,7 @@ export type AgentLoopOptions = {
   taskExecution?: ProviderUsageTaskAttribution;
   executionPlanReader?: ExecutionPlanReader;
   executionPlanController?: ExecutionPlanController;
+  executionCapabilityPreflight?: ExecutionCapabilityPreflight;
   executionEvidenceIndex: ExecutionEvidenceIndex;
 };
 
@@ -266,6 +271,7 @@ export class AgentLoop {
   readonly #taskExecution: ProviderUsageTaskAttribution | undefined;
   readonly #executionPlanReader: ExecutionPlanReader | undefined;
   readonly #executionPlanController: ExecutionPlanController | undefined;
+  readonly #executionCapabilityPreflight: ExecutionCapabilityPreflight | undefined;
   readonly #executionEvidenceIndex: ExecutionEvidenceIndex;
 
   constructor(options: AgentLoopOptions) {
@@ -283,6 +289,7 @@ export class AgentLoop {
     this.#taskExecution = options.taskExecution;
     this.#executionPlanReader = options.executionPlanReader;
     this.#executionPlanController = options.executionPlanController;
+    this.#executionCapabilityPreflight = options.executionCapabilityPreflight;
     this.#executionEvidenceIndex = options.executionEvidenceIndex;
     this.#toolExecutor = options.toolExecutor;
     this.#toolCallPlanner = options.toolCallPlanner;
@@ -615,6 +622,87 @@ export class AgentLoop {
         selectedSkillSetup,
         stage: "skill"
       });
+    }
+
+    const governedTransferPreflight = await this.#executionCapabilityPreflight?.assessRoutedGovernedTransfer({
+      userText: routedText,
+      selectedSkillName: selectedSkill?.name
+    });
+    if (governedTransferPreflight?.status === "blocked") {
+      const matchedSkills = selectedSkill === undefined ? [] : [selectedSkill.name];
+      const locale = this.#ui?.language === "ar" ? "ar" : "en";
+      const blocker = formatGovernedTransferBlocker({
+        result: governedTransferPreflight,
+        locale
+      });
+      const text = locale === "ar"
+        ? `${blocker} لم يُنفذ أي إجراء في المتصفح أو نظام الوجهة.`
+        : `${blocker} No browser or destination action was performed.`;
+      const blockerSecurityAssessment = await assessSecurityPolicy(capabilityFirstDefaults, {
+        riskClass: "read-only-local",
+        description: "respond to governed transfer preflight failure",
+        context: {
+          trustedWorkspace,
+          activeChannel: input.channel,
+          targetChannel: input.channel,
+          targetConversationIsActive: true
+        }
+      }, "strict");
+      await this.#sessionDb.appendEvent(this.#currentSessionId(), {
+        kind: "security-decided",
+        decision: blockerSecurityAssessment.decision,
+        description: "respond to governed transfer preflight failure",
+        mode: blockerSecurityAssessment.mode,
+        reason: blockerSecurityAssessment.reason
+      });
+      this.#trajectoryRecorder.record("progress", {
+        message: "governed transfer preflight blocked",
+        connectorId: governedTransferPreflight.connectorId,
+        reasonCode: governedTransferPreflight.reasonCode
+      });
+      this.#trajectoryRecorder.record("assistant-output", {
+        text,
+        matchedSkills,
+        intentLabels: intent.labels,
+        securityDecision: blockerSecurityAssessment.decision,
+        contextReferences: context?.references.map((reference) => reference.raw) ?? [],
+        toolExecutions: [],
+        artifacts: []
+      });
+      await this.#sessionDb.appendMessage({
+        sessionId: this.#currentSessionId(),
+        role: "agent",
+        content: text,
+        channel: input.channel,
+        metadata: {
+          respondingToTurnId: visibleTurn.id,
+          matchedSkills,
+          intentLabels: intent.labels,
+          governedTransferPreflight: {
+            connectorId: governedTransferPreflight.connectorId,
+            reasonCode: governedTransferPreflight.reasonCode
+          }
+        }
+      });
+      await emit(input.onEvent, { kind: "agent-final", text });
+      return await this.#completeAndReturn({
+        label: this.#responseLabel,
+        text,
+        matchedSkills,
+        intent,
+        securityDecision: blockerSecurityAssessment.decision,
+        toolExecutions: [],
+        toolPlans: [],
+        skillOutcomes: [],
+        artifacts: [],
+        context,
+        projectContext: this.#projectContext,
+        progress: ["governed transfer preflight blocked"]
+      }, {
+        success: false,
+        status: "blocked",
+        summary: "Governed transfer preflight blocked the workflow before execution."
+      }, visibleTurn.id);
     }
 
     const initialRiskClass = inferInitialRiskClass(selectedSkill);

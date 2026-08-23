@@ -42,6 +42,12 @@ export type ResolvedRegisteredToolCapability = {
   verification?: {
     verifies: string[];
   };
+  artifactInput?: {
+    paths: string[];
+  };
+  resultRedaction?: {
+    paths: string[];
+  };
 };
 
 export type RegisteredToolCapabilityResolution =
@@ -89,6 +95,29 @@ export function resolveRegisteredToolCapability(
     (verifies !== undefined && classification !== "read")) {
     return { ok: false, reason: "capability_metadata_invalid" };
   }
+  const artifactPaths = tool.capabilityMetadata?.artifactInput?.paths;
+  if (
+    artifactPaths !== undefined &&
+    (classification !== "mutate" ||
+      !Array.isArray(artifactPaths) ||
+      artifactPaths.length === 0 ||
+      artifactPaths.length > 8 ||
+      artifactPaths.some((path) => !isProtectedArgumentPattern(path)) ||
+      new Set(artifactPaths).size !== artifactPaths.length)
+  ) {
+    return { ok: false, reason: "capability_metadata_invalid" };
+  }
+  const redactedResultPaths = tool.capabilityMetadata?.resultRedaction?.paths;
+  if (
+    redactedResultPaths !== undefined &&
+    (!Array.isArray(redactedResultPaths) ||
+      redactedResultPaths.length === 0 ||
+      redactedResultPaths.length > 8 ||
+      redactedResultPaths.some((path) => !isProtectedArgumentPattern(path)) ||
+      new Set(redactedResultPaths).size !== redactedResultPaths.length)
+  ) {
+    return { ok: false, reason: "capability_metadata_invalid" };
+  }
 
   return {
     ok: true,
@@ -104,7 +133,9 @@ export function resolveRegisteredToolCapability(
           sources: [...protectedMetadata.sources]
         }
       }),
-      ...(verifies === undefined ? {} : { verification: { verifies: [...verifies] } })
+      ...(verifies === undefined ? {} : { verification: { verifies: [...verifies] } }),
+      ...(artifactPaths === undefined ? {} : { artifactInput: { paths: [...artifactPaths] } }),
+      ...(redactedResultPaths === undefined ? {} : { resultRedaction: { paths: [...redactedResultPaths] } })
     }
   };
 }

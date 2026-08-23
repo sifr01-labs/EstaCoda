@@ -84,6 +84,16 @@ describe("resolveRegisteredToolCapability", () => {
       ok: false,
       reason: "capability_metadata_invalid"
     });
+    expect(resolveRegisteredToolCapability(registered({
+      capabilityMetadata: { artifactInput: { paths: [] } }
+    }))).toEqual({ ok: false, reason: "capability_metadata_invalid" });
+    expect(resolveRegisteredToolCapability(registered({
+      riskClass: "read-only-network",
+      capabilityMetadata: { artifactInput: { paths: ["/spec/content"] } }
+    }))).toEqual({ ok: false, reason: "capability_metadata_invalid" });
+    expect(resolveRegisteredToolCapability(registered({
+      capabilityMetadata: { resultRedaction: { paths: ["invalid"] } }
+    }))).toEqual({ ok: false, reason: "capability_metadata_invalid" });
   });
 
   it("does not infer protected capability from secret-looking tool names", () => {
