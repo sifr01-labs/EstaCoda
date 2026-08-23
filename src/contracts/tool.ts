@@ -54,6 +54,14 @@ export type ToolDefinition = {
 
 export type ToolResultMetadata = Record<string, unknown> & {
   _estacoda_context_summary?: string;
+  /** Runtime-owned, reviewed scalar facts retained for foreground-turn continuity. */
+  _estacoda_continuity_facts?: RuntimeContinuityFact[];
+};
+
+export type RuntimeContinuityFact = {
+  field: string;
+  value: string;
+  kind: "identifier" | "label";
 };
 
 export type ToolResult = {

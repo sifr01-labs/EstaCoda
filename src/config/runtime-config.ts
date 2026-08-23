@@ -376,6 +376,8 @@ export type MCPServerConfig = {
   artifactToolArguments?: Record<string, MCPArtifactToolArgumentsConfig>;
   /** Tool name -> reviewed JSON Pointer patterns removed from returned JSON. */
   redactedToolResultPaths?: Record<string, string[]>;
+  /** Tool name -> reviewed non-secret scalar result paths retained for turn continuity. */
+  continuityToolResultPaths?: Record<string, string[]>;
   /** Verification tool name -> mutation tool names, all unprefixed MCP names. */
   toolVerificationRelationships?: Record<string, string[]>;
   resourceReadRiskClass?: ToolRiskClass;
@@ -826,6 +828,7 @@ export type MCPSetupInput = {
   protectedToolArguments?: Record<string, MCPProtectedToolArgumentsConfig>;
   artifactToolArguments?: Record<string, MCPArtifactToolArgumentsConfig>;
   redactedToolResultPaths?: Record<string, string[]>;
+  continuityToolResultPaths?: Record<string, string[]>;
   toolVerificationRelationships?: Record<string, string[]>;
   resourceReadRiskClass?: ToolRiskClass;
   promptGetRiskClass?: ToolRiskClass;
@@ -2390,6 +2393,7 @@ function normalizeMcpServers(
       protectedToolArguments: normalizeProtectedToolArguments(record.protectedToolArguments),
       artifactToolArguments: normalizeArtifactToolArguments(record.artifactToolArguments),
       redactedToolResultPaths: normalizeToolResultRedactionPaths(record.redactedToolResultPaths),
+      continuityToolResultPaths: normalizeToolResultContinuityPaths(record.continuityToolResultPaths),
       toolVerificationRelationships: normalizeToolVerificationRelationships(record.toolVerificationRelationships),
       resourceReadRiskClass: isToolRiskClass(record.resourceReadRiskClass) ? record.resourceReadRiskClass : undefined,
       promptGetRiskClass: isToolRiskClass(record.promptGetRiskClass) ? record.promptGetRiskClass : undefined
@@ -2486,6 +2490,18 @@ function normalizeToolResultRedactionPaths(value: unknown): Record<string, strin
     if (toolName.trim().length === 0 || !Array.isArray(paths) || paths.length === 0 ||
       paths.some((path) => typeof path !== "string")) {
       throw new Error(`Invalid MCP result redaction configuration for tool ${toolName.slice(0, 160)}`);
+    }
+    return [[toolName, paths as string[]] as [string, string[]]];
+  });
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
+}
+
+function normalizeToolResultContinuityPaths(value: unknown): Record<string, string[]> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value).flatMap(([toolName, paths]) => {
+    if (toolName.trim().length === 0 || !Array.isArray(paths) || paths.length === 0 ||
+      paths.some((path) => typeof path !== "string")) {
+      throw new Error(`Invalid MCP continuity configuration for tool ${toolName.slice(0, 160)}`);
     }
     return [[toolName, paths as string[]] as [string, string[]]];
   });
@@ -3211,6 +3227,7 @@ export async function setupMcpConfig(options: {
     protectedToolArguments: options.input.protectedToolArguments ?? previous.protectedToolArguments,
     artifactToolArguments: options.input.artifactToolArguments ?? previous.artifactToolArguments,
     redactedToolResultPaths: options.input.redactedToolResultPaths ?? previous.redactedToolResultPaths,
+    continuityToolResultPaths: options.input.continuityToolResultPaths ?? previous.continuityToolResultPaths,
     toolVerificationRelationships: options.input.toolVerificationRelationships ?? previous.toolVerificationRelationships,
     resourceReadRiskClass: options.input.resourceReadRiskClass ?? previous.resourceReadRiskClass,
     promptGetRiskClass: options.input.promptGetRiskClass ?? previous.promptGetRiskClass
@@ -3946,6 +3963,14 @@ function validateMcpSetupInput(input: MCPSetupInput): void {
       throw new Error(`Invalid result redaction declaration for MCP tool ${toolName}`);
     }
   }
+  for (const [toolName, paths] of Object.entries(input.continuityToolResultPaths ?? {})) {
+    requireNonEmpty(toolName, "MCP continuity tool name");
+    if (!Array.isArray(paths) || paths.length === 0 || paths.length > 8 ||
+        paths.some((path) => !isContinuityResultPattern(path)) ||
+        new Set(paths).size !== paths.length || hasOverlappingProtectedArgumentPatterns(paths)) {
+      throw new Error(`Invalid continuity declaration for MCP tool ${toolName}`);
+    }
+  }
   for (const [verificationTool, mutationTools] of Object.entries(input.toolVerificationRelationships ?? {})) {
     requireNonEmpty(verificationTool, "MCP verification tool name");
     if (!Array.isArray(mutationTools) || mutationTools.length === 0 || mutationTools.length > 16 ||
@@ -3990,6 +4015,20 @@ function isReadRiskClass(value: ToolRiskClass): boolean {
 function isMutationRiskClass(value: ToolRiskClass): boolean {
   return value === "workspace-write" || value === "external-side-effect" || value === "destructive-local" ||
     value === "shared-state-mutation" || value === "spend-money";
+}
+
+function isContinuityResultPattern(path: string): boolean {
+  const segments = parseProtectedArgumentPattern(path);
+  if (segments === undefined) return false;
+  const namedSegments = segments.filter((segment) => segment !== "*");
+  if (namedSegments.some((segment) => /(?:api.?key|auth|cookie|credential|otp|pass(?:word|code)?|secret|token)/iu.test(segment))) {
+    return false;
+  }
+  const leaf = namedSegments.at(-1)?.replace(/[_-]+/gu, "").toLocaleLowerCase();
+  return leaf !== undefined && (
+    /(?:^id$|id$|identifier$|uid$|uuid$|hash$|sha256$|ref$|reference$)/u.test(leaf) ||
+    /(?:^name$|name$|label$|title$)/u.test(leaf)
+  );
 }
 
 function hasOverlappingProtectedArgumentPatterns(paths: readonly string[]): boolean {

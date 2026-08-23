@@ -621,9 +621,11 @@ When one tool call contains two to eight protected browser sources, EstaCoda bin
 
 `groupedDelivery` and `browserRelay` default to `true` for an existing protected declaration and are enforced by the secure dispatcher. Set either to `false` when the integration does not support that capability. `toolVerificationRelationships` maps a read-only verification tool to one or more mutation tools using their unprefixed MCP names.
 
-On MCP discovery or reload, EstaCoda validates configured tool names and JSON Pointer patterns against the discovered tools and actual MCP input schemas. Unknown tools, missing or incompatible paths, duplicates, overlapping paths, and risk conflicts leave that server unavailable. Diagnostics report only whether protected delivery, grouped delivery, browser relay, result redaction, and verification are configured; they do not print protected paths or values.
+On MCP discovery or reload, EstaCoda validates configured tool names and JSON Pointer patterns against the discovered tools and actual MCP input schemas. Unknown tools, missing or incompatible paths, duplicates, overlapping paths, and risk conflicts leave that server unavailable. Diagnostics report only whether protected delivery, grouped delivery, browser relay, result redaction, continuity, and verification are configured; they do not print protected paths or values.
 
 `redactedToolResultPaths` declares structured JSON result fields that must be replaced before an MCP result reaches the model or persistence. If the reviewed structure is absent or the response is not structured JSON, EstaCoda withholds the complete result. The reviewed `config.mcp.setup` tool accepts these structured fields. The CLI accepts the equivalent JSON objects through `--protected-tool-arguments-json`, `--redacted-tool-result-paths-json`, and `--tool-verification-relationships-json`.
+
+`continuityToolResultPaths` declares reviewed non-secret scalar identifiers and names that may be retained in the runtime-owned working set after result redaction. Undeclared MCP fields, connector-supplied continuity metadata, free-form result text, and credential-like paths or values are excluded. Retained facts are bounded and scoped to the current profile, session, and visible turn. Use `--continuity-tool-result-paths-json` for the CLI equivalent.
 
 `artifactToolArguments` declares exact string destinations that may receive a current-session governed browser download. The model supplies an artifact reference and receipt hash, while the runtime validates ownership, browser-download provenance, MIME type, size, origin, file state, and SHA-256 before injecting UTF-8 content immediately before the approved MCP call. Use `--artifact-tool-arguments-json` for the CLI equivalent. Artifact contents never become model-authored or persisted tool arguments.
 
@@ -693,6 +695,12 @@ This is a reviewed configuration recipe over generic MCP behavior, not a Postman
       },
       "redactedToolResultPaths": {
         "getEnvironment": ["/environment/values/*/value"]
+      },
+      "continuityToolResultPaths": {
+        "getWorkspaces": ["/workspaces/*/id", "/workspaces/*/name"],
+        "getCollection": ["/collection/id", "/collection/name"],
+        "getEnvironment": ["/environment/id", "/environment/name"],
+        "getSpec": ["/spec/id"]
       },
       "toolVerificationRelationships": {
         "getEnvironment": ["createEnvironment", "putEnvironment"],

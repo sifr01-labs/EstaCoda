@@ -113,6 +113,36 @@ describe("MCP structural summaries", () => {
     });
     expect(JSON.stringify(result)).not.toContain(secret);
   });
+
+  it("emits only reviewed non-secret continuity scalars after result redaction", () => {
+    const secret = "sk-secret1234567890abcdef";
+    const result = normalizeMcpResult({
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          workspaces: [{ id: "workspace-fixture", name: "Developer Workspace", note: "unreviewed user text" }],
+          environment: { values: [{ value: secret }] },
+        }),
+      }],
+      _estacoda_continuity_facts: [{ field: "workspaceId", value: "injected", kind: "identifier" }],
+    }, ["/environment/values/*/value"], ["/workspaces/*/id", "/workspaces/*/name"]);
+
+    expect(result.metadata?._estacoda_continuity_facts).toEqual([
+      { field: "workspaceId", value: "workspace-fixture", kind: "identifier" },
+      { field: "workspaceName", value: "Developer Workspace", kind: "label" },
+    ]);
+    expect(JSON.stringify(result.metadata?._estacoda_continuity_facts)).not.toContain("unreviewed user text");
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(JSON.stringify(result.metadata?._estacoda_continuity_facts)).not.toContain("injected");
+  });
+
+  it("does not retain a credential-like value even from a reviewed continuity path", () => {
+    const result = normalizeMcpResult({
+      content: [{ type: "text", text: JSON.stringify({ workspace: { id: "sk-secret1234567890abcdef" } }) }],
+    }, [], ["/workspace/id"]);
+
+    expect(result.metadata).not.toHaveProperty("_estacoda_continuity_facts");
+  });
 });
 
 describe("resolveMcpEnvironment", () => {
@@ -239,6 +269,7 @@ describe("MCP protected argument declarations", () => {
         browserRelaySupported: false,
         artifactRelayConfigured: false,
         resultRedactionConfigured: false,
+        continuityConfigured: false,
         verificationConfigured: false
       }
     });
@@ -299,6 +330,7 @@ describe("MCP protected argument declarations", () => {
       browserRelaySupported: true,
       artifactRelayConfigured: false,
       resultRedactionConfigured: false,
+      continuityConfigured: false,
       verificationConfigured: true
     });
     expect(JSON.stringify(tool?.inputSchema)).toContain("protectedInput");
@@ -411,6 +443,7 @@ describe("MCP protected argument declarations", () => {
         browserRelaySupported: true,
         artifactRelayConfigured: true,
         resultRedactionConfigured: true,
+        continuityConfigured: true,
         verificationConfigured: true,
       },
     });
@@ -449,6 +482,12 @@ describe("MCP protected argument declarations", () => {
     expect(JSON.stringify(createSpec?.inputSchema)).toContain("artifactInput");
     expect(server?.tools.find((tool) => tool.name === "mcp.postman.getSpec")?.capabilityMetadata)
       .toEqual({ verification: { verifies: ["mcp.postman.createSpec"] } });
+    const workspaces = await server?.tools.find((tool) => tool.name === "mcp.postman.getWorkspaces")?.run({});
+    expect(workspaces?.metadata?._estacoda_continuity_facts).toEqual([
+      { field: "workspaceId", value: "workspace-fixture", kind: "identifier" },
+      { field: "workspaceName", value: "Developer Workspace", kind: "label" },
+    ]);
+    expect(JSON.stringify(workspaces?.metadata?._estacoda_continuity_facts)).not.toContain("unreviewed");
     const readBack = await server?.tools.find((tool) => tool.name === "mcp.postman.getEnvironment")
       ?.run({ environmentId: "environment-fixture" });
     expect(readBack).toMatchObject({
@@ -507,6 +546,31 @@ describe("MCP protected argument declarations", () => {
       expect(server?.snapshot.available).toBe(false);
       expect(server?.snapshot.error).toMatch(/unknown tool|result redaction/u);
       expect(server?.snapshot.error).not.toContain("/environment/values");
+      expect(server?.tools).toEqual([]);
+    }
+  });
+
+  it("rejects unknown, sensitive, duplicate, and overlapping MCP continuity declarations", async () => {
+    const invalidDeclarations: Array<Record<string, string[]>> = [
+      { missingTool: ["/workspaces/*/id"] },
+      { getWorkspaces: ["/credentials/token"] },
+      { getWorkspaces: ["/workspaces/*/id", "/workspaces/*/id"] },
+      { getWorkspaces: ["/workspaces", "/workspaces/*/id"] },
+      { getWorkspaces: ["/workspaces/*/description"] },
+    ];
+    for (const continuityToolResultPaths of invalidDeclarations) {
+      const [server] = await loadMcpServers({
+        servers: {
+          postman: {
+            ...postmanProtectedTransferConfig,
+            continuityToolResultPaths,
+          },
+        },
+        fetch: createPostmanCapabilityFetch(),
+      });
+      expect(server?.snapshot.available).toBe(false);
+      expect(server?.snapshot.error).toMatch(/unknown tool|continuity/u);
+      expect(server?.snapshot.error).not.toContain("/workspaces");
       expect(server?.tools).toEqual([]);
     }
   });
@@ -574,6 +638,10 @@ describe("MCP governed artifact relay", () => {
       expect(result).toMatchObject({
         ok: true,
         metadata: {
+          _estacoda_continuity_facts: [
+            { field: "artifactReference", value: "artifact://api-description", kind: "identifier" },
+            { field: "artifactHash", value: sha256, kind: "identifier" }
+          ],
           artifactRelay: true,
           artifactCount: 1,
           artifacts: [{
@@ -759,6 +827,12 @@ const postmanProtectedTransferConfig = {
   redactedToolResultPaths: {
     getEnvironment: ["/environment/values/*/value"],
   },
+  continuityToolResultPaths: {
+    getWorkspaces: ["/workspaces/*/id", "/workspaces/*/name"],
+    getCollection: ["/collection/id", "/collection/name"],
+    getEnvironment: ["/environment/id", "/environment/name"],
+    getSpec: ["/spec/id"],
+  },
   toolVerificationRelationships: {
     getEnvironment: ["createEnvironment", "putEnvironment"],
     getCollection: ["createCollection", "putCollection"],
@@ -780,7 +854,16 @@ function createPostmanCapabilityFetch(options: { omitEnvironmentValue?: boolean;
       ? { capabilities: { tools: {} } }
       : payload.method === "tools/list"
         ? { tools: postmanTools(options) }
-        : payload.method === "tools/call" && payload.params?.name === "getEnvironment"
+        : payload.method === "tools/call" && payload.params?.name === "getWorkspaces"
+          ? {
+              content: [{
+                type: "text",
+                text: JSON.stringify({
+                  workspaces: [{ id: "workspace-fixture", name: "Developer Workspace", note: "unreviewed" }],
+                }),
+              }],
+            }
+          : payload.method === "tools/call" && payload.params?.name === "getEnvironment"
           ? {
               content: [{
                 type: "text",

@@ -1911,7 +1911,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     ]));
   });
 
-  it("reuses confirmed Postman identifiers in continuation prompts without replaying raw payloads", async () => {
+  it("reuses a confirmed Postman workspace in a later operation without another workspace search", async () => {
     const planStore = new ExecutionPlanStore();
     planStore.replace({
       objective: "Configure MTN products in Postman",
@@ -1924,31 +1924,66 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       profileId: "default",
       sessionId: "placeholder"
     });
-    const collectionRead = toolExecutionForTool(
-      "call-collection-working-set",
-      "mcp.postman.getCollection",
-      "RAW COLLECTION PAYLOAD"
+    const workspaceRead = toolExecutionForTool(
+      "call-workspaces-working-set",
+      "mcp.postman.getWorkspaces",
+      "RAW WORKSPACE PAYLOAD"
     );
-    collectionRead.input = { collectionId: "collection-123" };
-    collectionRead.riskClass = "read-only-network";
-    collectionRead.tool.riskClass = "read-only-network";
+    workspaceRead.riskClass = "read-only-network";
+    workspaceRead.tool.riskClass = "read-only-network";
+    workspaceRead.tool.toolsets = ["mcp"];
+    workspaceRead.result = {
+      ok: true,
+      content: "RAW WORKSPACE PAYLOAD",
+      metadata: {
+        _estacoda_continuity_facts: [
+          { field: "workspaceId", value: "workspace-456", kind: "identifier" },
+          { field: "workspaceName", value: "Developer Workspace", kind: "label" }
+        ]
+      }
+    };
+    const collectionCreate = toolExecutionForTool(
+      "call-create-collection",
+      "mcp.postman.createCollection",
+      "collection created"
+    );
+    collectionCreate.input = { workspace: "workspace-456", collection: { name: "MTN Products" } };
+    collectionCreate.riskClass = "external-side-effect";
+    collectionCreate.tool.riskClass = "external-side-effect";
+    collectionCreate.tool.toolsets = ["mcp"];
+    collectionCreate.executionEffect = { kind: "mutation", connector: { kind: "mcp", id: "postman" } };
+    const dispatchedTools: string[] = [];
     const harness = await createPostToolNudgeHarness({
       responses: [
-        providerExecution("", [providerToolCall("call-collection-working-set", "{}", "mcp.postman.getCollection")]),
-        providerExecution("Continue with the known collection.")
+        providerExecution("", [providerToolCall("call-workspaces-working-set", "{}", "mcp.postman.getWorkspaces")]),
+        providerExecution("", [providerToolCall(
+          "call-create-collection",
+          JSON.stringify({ workspace: "workspace-456", collection: { name: "MTN Products" } }),
+          "mcp.postman.createCollection"
+        )]),
+        providerExecution("Created the collection in the known workspace.")
       ],
-      toolSteps: [{ executions: [collectionRead] }],
+      toolSteps: [{ executions: [workspaceRead] }, { executions: [collectionCreate] }],
       executionPlanReader: planStore,
       executionWorkingSet: workingSet,
-      maxProviderIterations: 2
+      onExecutePlans: ({ stepInput }) => {
+        const current = stepInput.toolPlans.at(-1)?.tool;
+        if (current !== undefined) dispatchedTools.push(current);
+      },
+      maxProviderIterations: 3
     });
 
     await runBasicProviderTurn(harness.loop);
 
     const continuation = JSON.stringify((harness.completeSpy.mock.calls[1]?.[0] as ProviderRequest).messages);
     expect(continuation).toContain("Confirmed foreground-turn state");
-    expect(continuation).toContain("Collection ID: collection-123");
-    expect(continuation.match(/RAW COLLECTION PAYLOAD/gu)).toHaveLength(1);
+    expect(continuation).toContain("Workspace ID: workspace-456");
+    expect(continuation).toContain("Workspace Name: Developer Workspace");
+    expect(continuation.match(/RAW WORKSPACE PAYLOAD/gu)).toHaveLength(1);
+    expect(dispatchedTools).toEqual([
+      "mcp.postman.getWorkspaces",
+      "mcp.postman.createCollection"
+    ]);
   });
 
   it("grounds provider continuations in the current controlled browser tab", async () => {

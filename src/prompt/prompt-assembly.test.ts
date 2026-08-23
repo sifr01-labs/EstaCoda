@@ -189,10 +189,10 @@ describe("assembleProviderPrompt", () => {
       executionWorkingSet: {
         visibleTurnId: "turn-3",
         facts: [{
-          key: "collection-id",
-          summary: "Collection ID: collection-123",
-          sourceCallId: "call-collection",
-          targetKey: "mcp.postman:collectionId:collection-123",
+          key: "workspace-id",
+          summary: "Workspace ID: workspace-456",
+          sourceCallId: "call-workspaces",
+          targetKey: "mcp.postman:workspaceId:workspace-456",
           observedAt: "2026-08-13T00:00:00.000Z",
           freshness: "historical"
         }],
@@ -208,7 +208,7 @@ describe("assembleProviderPrompt", () => {
     expect(rendered).toContain("Confirmed foreground-turn state");
     expect(rendered).toContain("Scope: current visible turn");
     expect(rendered).not.toContain("turn-3");
-    expect(rendered).toContain("Collection ID: collection-123");
+    expect(rendered).toContain("Workspace ID: workspace-456");
     expect(rendered).toContain("freshness=historical");
     expect(rendered).toContain("reuse these instead of rediscovering them");
     expect(prompt.budget.layers).toContainEqual(expect.objectContaining({

@@ -3101,6 +3101,7 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
         "  --protected-tool-arguments-json JSON configures reviewed JSON Pointer mappings without credential values",
         "  --artifact-tool-arguments-json JSON configures reviewed session-artifact content mappings",
         "  --redacted-tool-result-paths-json JSON removes reviewed fields from structured MCP results",
+        "  --continuity-tool-result-paths-json JSON retains reviewed non-secret scalar result fields for the current turn",
         "  --tool-verification-relationships-json JSON maps read-only verification tools to mutation tools"
       ].join("\n")
     };
@@ -3145,6 +3146,7 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
                 `  browser relay supported: ${capabilities.browserRelaySupported ? "yes" : "no"}`,
                 `  artifact relay configured: ${capabilities.artifactRelayConfigured ? "yes" : "no"}`,
                 `  result redaction configured: ${capabilities.resultRedactionConfigured ? "yes" : "no"}`,
+                `  continuity configured: ${capabilities.continuityConfigured ? "yes" : "no"}`,
                 `  verification configured: ${capabilities.verificationConfigured ? "yes" : "no"}`
               ].filter((line) => line !== undefined).join("\n");
             }),
@@ -3180,7 +3182,7 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
     return {
       handled: true,
       exitCode: 1,
-      output: "Usage: estacoda mcp setup --name <server> --command <cmd> [--args a,b,c] [--env-ref CHILD_KEY=PROFILE_ENV_KEY] [--protected-tool-arguments-json JSON] [--artifact-tool-arguments-json JSON] [--redacted-tool-result-paths-json JSON]"
+      output: "Usage: estacoda mcp setup --name <server> --command <cmd> [--args a,b,c] [--env-ref CHILD_KEY=PROFILE_ENV_KEY] [--protected-tool-arguments-json JSON] [--artifact-tool-arguments-json JSON] [--redacted-tool-result-paths-json JSON] [--continuity-tool-result-paths-json JSON]"
     };
   }
   const result = await setupMcpConfig({
@@ -3916,6 +3918,9 @@ function parseMcpArgs(args: string[]): Partial<MCPSetupInput> {
       index += 1;
     } else if (arg === "--redacted-tool-result-paths-json") {
       parsed.redactedToolResultPaths = parseJsonRecord(next ?? "", "redacted tool result paths") as MCPSetupInput["redactedToolResultPaths"];
+      index += 1;
+    } else if (arg === "--continuity-tool-result-paths-json") {
+      parsed.continuityToolResultPaths = parseJsonRecord(next ?? "", "continuity tool result paths") as MCPSetupInput["continuityToolResultPaths"];
       index += 1;
     } else if (arg === "--tool-verification-relationships-json") {
       parsed.toolVerificationRelationships = parseJsonRecord(next ?? "", "tool verification relationships") as MCPSetupInput["toolVerificationRelationships"];

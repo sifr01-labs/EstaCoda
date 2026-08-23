@@ -2126,6 +2126,7 @@ describe("createRuntime MCP trust gating", () => {
               "artifactToolArguments",
               "command",
               "connectTimeoutMs",
+              "continuityToolResultPaths",
               "cwd",
               "enabled",
               "env",

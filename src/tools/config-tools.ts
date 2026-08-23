@@ -441,6 +441,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
                     `  browser relay supported: ${capabilities.browserRelaySupported ? "yes" : "no"}`,
                     `  artifact relay configured: ${capabilities.artifactRelayConfigured ? "yes" : "no"}`,
                     `  result redaction configured: ${capabilities.resultRedactionConfigured ? "yes" : "no"}`,
+                    `  continuity configured: ${capabilities.continuityConfigured ? "yes" : "no"}`,
                     `  verification configured: ${capabilities.verificationConfigured ? "yes" : "no"}`
                     ].filter((line) => line !== undefined).join("\n");
                   })()
@@ -529,6 +530,15 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             }
           },
           redactedToolResultPaths: {
+            type: "object",
+            additionalProperties: {
+              type: "array",
+              minItems: 1,
+              maxItems: 8,
+              items: { type: "string" }
+            }
+          },
+          continuityToolResultPaths: {
             type: "object",
             additionalProperties: {
               type: "array",

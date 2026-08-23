@@ -78,6 +78,8 @@ The CLI accepts the same map with `--tool-risk-classes TOOL=RISK,...`. When a pe
 
 `redactedToolResultPaths` is the corresponding reviewed output boundary for structured JSON results. Matching values are replaced before the result reaches the model, tool history, or persistence. If configured redaction cannot be applied to a returned structure, the entire result is withheld. The MCP server remains unavailable when a configured result-redaction tool is missing or its pointer declarations are invalid.
 
+`continuityToolResultPaths` declares the small set of non-secret scalar identifiers and names that may enter the runtime-owned foreground-turn working set after result redaction. Undeclared MCP fields, connector-supplied continuity metadata, free-form result text, and credential-like paths or values are ignored. Facts are bounded and scoped to the current profile, session, and visible turn. Configure the equivalent CLI input with `--continuity-tool-result-paths-json`.
+
 `artifactToolArguments` reviews a different boundary: exact string arguments that may receive a current-session governed browser download. The model supplies only the `artifact://` reference, download hash, and optional origin. Immediately before the already-approved MCP call, the runtime rechecks session ownership, source receipt, MIME type, size, file state, origin, and SHA-256, then injects UTF-8 text at the reviewed path. Artifact bytes do not enter model input or persisted tool arguments. Unknown tools, changed schemas, non-text files, changed files, and stale or cross-session references fail closed.
 
 ## Reviewed Postman protected-transfer recipe
@@ -157,6 +159,12 @@ Postman is configured through the same generic MCP entry as any other connector.
       },
       "redactedToolResultPaths": {
         "getEnvironment": ["/environment/values/*/value"]
+      },
+      "continuityToolResultPaths": {
+        "getWorkspaces": ["/workspaces/*/id", "/workspaces/*/name"],
+        "getCollection": ["/collection/id", "/collection/name"],
+        "getEnvironment": ["/environment/id", "/environment/name"],
+        "getSpec": ["/spec/id"]
       },
       "toolVerificationRelationships": {
         "getEnvironment": ["createEnvironment", "putEnvironment"],

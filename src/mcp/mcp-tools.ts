@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import type { MCPServerConfig } from "../config/runtime-config.js";
-import type { RegisteredTool, ToolResult, ToolRiskClass } from "../contracts/tool.js";
+import type { RegisteredTool, RuntimeContinuityFact, ToolResult, ToolRiskClass } from "../contracts/tool.js";
 import { parseProtectedArgumentPattern } from "../security/protected-argument-path.js";
-import { redactObject } from "../utils/redaction.js";
+import { redactObject, redactSensitiveText } from "../utils/redaction.js";
 import { MCPClient, type MCPFetchLike, type MCPPromptDescriptor, type MCPResourceDescriptor, type MCPToolDescriptor } from "./mcp-client.js";
 
 export type MCPServerSnapshot = {
@@ -25,6 +25,7 @@ export type MCPServerCapabilitySummary = {
   browserRelaySupported: boolean;
   artifactRelayConfigured: boolean;
   resultRedactionConfigured: boolean;
+  continuityConfigured: boolean;
   verificationConfigured: boolean;
 };
 
@@ -186,6 +187,7 @@ function createMcpTool(
   const protectedConfig = config.protectedToolArguments?.[tool.name];
   const artifactConfig = config.artifactToolArguments?.[tool.name];
   const redactedResultPaths = config.redactedToolResultPaths?.[tool.name];
+  const continuityResultPaths = config.continuityToolResultPaths?.[tool.name];
   const verificationTargets = config.toolVerificationRelationships?.[tool.name]?.map((target) =>
     prefixTool(serverName, config, target)
   );
@@ -252,14 +254,23 @@ function createMcpTool(
       const relayedContents = relay.artifacts.map((artifact) => artifact.content);
       const normalized = normalizeMcpResult(
         redactRelayedArtifactValue(result, relayedContents),
-        redactedResultPaths
+        redactedResultPaths,
+        continuityResultPaths
       );
       if (relay.artifacts.length === 0) return normalized;
       const redacted = redactRelayedArtifactContent(normalized, relayedContents);
+      const artifactContinuityFacts = relay.artifacts.flatMap(({ id, sha256 }) => [
+        { field: "artifactReference", value: `artifact://${id}`, kind: "identifier" as const },
+        { field: "artifactHash", value: sha256, kind: "identifier" as const }
+      ]);
       return {
         ...redacted,
         metadata: {
           ...redacted.metadata,
+          _estacoda_continuity_facts: mergeContinuityFacts(
+            redacted.metadata?._estacoda_continuity_facts,
+            artifactContinuityFacts
+          ),
           artifactRelay: true,
           artifactCount: relay.artifacts.length,
           artifacts: relay.artifacts.map(({ id, sha256, sourceOrigin, mimeType, bytes }) => ({
@@ -276,7 +287,7 @@ function createMcpTool(
 }
 
 export function summarizeMcpCapabilityConfig(
-  config: Pick<MCPServerConfig, "protectedToolArguments" | "artifactToolArguments" | "redactedToolResultPaths" | "toolVerificationRelationships">
+  config: Pick<MCPServerConfig, "protectedToolArguments" | "artifactToolArguments" | "redactedToolResultPaths" | "continuityToolResultPaths" | "toolVerificationRelationships">
 ): MCPServerCapabilitySummary {
   const protectedDeclarations = Object.values(config.protectedToolArguments ?? {});
   return {
@@ -287,6 +298,7 @@ export function summarizeMcpCapabilityConfig(
       protectedDeclarations.every((declaration) => declaration.browserRelay !== false),
     artifactRelayConfigured: Object.keys(config.artifactToolArguments ?? {}).length > 0,
     resultRedactionConfigured: Object.keys(config.redactedToolResultPaths ?? {}).length > 0,
+    continuityConfigured: Object.keys(config.continuityToolResultPaths ?? {}).length > 0,
     verificationConfigured: Object.keys(config.toolVerificationRelationships ?? {}).length > 0
   };
 }
@@ -346,6 +358,14 @@ export function validateMcpCapabilityConfiguration(
       paths.some((path) => parseProtectedArgumentPattern(path) === undefined) ||
       new Set(paths).size !== paths.length || protectedPatternsOverlap(paths)) {
       return `MCP result redaction configuration is invalid for tool ${boundedToolName(toolName)}.`;
+    }
+  }
+  for (const [toolName, paths] of Object.entries(config.continuityToolResultPaths ?? {})) {
+    if (!byName.has(toolName)) return unknownCapabilityTool(toolName);
+    if (paths.length === 0 || paths.length > 8 ||
+      paths.some((path) => !isContinuityResultPattern(path)) ||
+      new Set(paths).size !== paths.length || protectedPatternsOverlap(paths)) {
+      return `MCP continuity configuration is invalid for tool ${boundedToolName(toolName)}.`;
     }
   }
   for (const [verificationTool, mutationTools] of Object.entries(config.toolVerificationRelationships ?? {})) {
@@ -997,7 +1017,11 @@ function promptsEnabled(config: MCPServerConfig): boolean {
   return config.exposePrompts ?? config.tools?.prompts ?? false;
 }
 
-export function normalizeMcpResult(result: unknown, redactedPaths: readonly string[] = []): ToolResult {
+export function normalizeMcpResult(
+  result: unknown,
+  redactedPaths: readonly string[] = [],
+  continuityPaths: readonly string[] = []
+): ToolResult {
   const protectedResult = redactedPaths.length === 0
     ? result
     : redactStructuredMcpResult(result, redactedPaths);
@@ -1009,11 +1033,17 @@ export function normalizeMcpResult(result: unknown, redactedPaths: readonly stri
     };
   }
   result = protectedResult;
+  const continuityFacts = extractReviewedContinuityFacts(result, continuityPaths);
   if (typeof result === "string") {
     return {
       ok: true,
       content: result,
-      ...(redactedPaths.length === 0 ? {} : { metadata: { resultRedactionApplied: true } })
+      ...(redactedPaths.length === 0 && continuityFacts.length === 0 ? {} : {
+        metadata: {
+          ...(redactedPaths.length === 0 ? {} : { resultRedactionApplied: true }),
+          ...(continuityFacts.length === 0 ? {} : { _estacoda_continuity_facts: continuityFacts })
+        }
+      })
     };
   }
 
@@ -1034,6 +1064,7 @@ export function normalizeMcpResult(result: unknown, redactedPaths: readonly stri
   const {
     content: _rawContent,
     _estacoda_context_summary: _untrustedContextSummary,
+    _estacoda_continuity_facts: _untrustedContinuityFacts,
     ...boundedMetadata
   } = record;
 
@@ -1051,9 +1082,136 @@ export function normalizeMcpResult(result: unknown, redactedPaths: readonly stri
     metadata: {
       ...boundedMetadata,
       ...(redactedPaths.length === 0 ? {} : { resultRedactionApplied: true }),
+      ...(continuityFacts.length === 0 ? {} : { _estacoda_continuity_facts: continuityFacts }),
       ...(structuralSummary === undefined ? {} : { _estacoda_context_summary: structuralSummary })
     }
   };
+}
+
+const MAX_MCP_CONTINUITY_FACTS = 24;
+const MAX_MCP_CONTINUITY_SCALAR_CHARS = 160;
+
+function mergeContinuityFacts(
+  left: readonly RuntimeContinuityFact[] | undefined,
+  right: readonly RuntimeContinuityFact[]
+): RuntimeContinuityFact[] {
+  return [...new Map([...(left ?? []), ...right].map((fact) => [`${fact.field}\0${fact.value}`, fact])).values()]
+    .slice(0, MAX_MCP_CONTINUITY_FACTS);
+}
+
+function extractReviewedContinuityFacts(
+  result: unknown,
+  paths: readonly string[]
+): RuntimeContinuityFact[] {
+  if (paths.length === 0) return [];
+  const facts: RuntimeContinuityFact[] = [];
+  const seen = new Set<string>();
+  for (const payload of structuredMcpContinuityPayloads(result)) {
+    for (const path of paths) {
+      const segments = parseProtectedArgumentPattern(path);
+      if (segments === undefined) continue;
+      const field = continuityField(segments);
+      const kind = continuityKind(field);
+      for (const candidate of valuesAtContinuityPath(payload, segments, 0)) {
+        const value = safeContinuityScalar(candidate);
+        if (value === undefined) continue;
+        const key = `${field}\0${value}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        facts.push({ field, value, kind });
+        if (facts.length >= MAX_MCP_CONTINUITY_FACTS) return facts;
+      }
+    }
+  }
+  return facts;
+}
+
+function structuredMcpContinuityPayloads(result: unknown): unknown[] {
+  if (typeof result === "string") {
+    const parsed = parseStructuredMcpText(result);
+    return parsed === undefined ? [] : [parsed];
+  }
+  if (!isRecord(result)) return [];
+  if (result.structuredContent !== undefined) return [result.structuredContent];
+  const payloads: unknown[] = [];
+  if (Array.isArray(result.content)) {
+    for (const part of result.content) {
+      if (!isRecord(part) || part.type !== "text" || typeof part.text !== "string") continue;
+      const parsed = parseStructuredMcpText(part.text);
+      if (parsed !== undefined) payloads.push(parsed);
+    }
+  }
+  if (payloads.length === 0) payloads.push(result);
+  return payloads;
+}
+
+function parseStructuredMcpText(text: string): unknown | undefined {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+function valuesAtContinuityPath(current: unknown, segments: readonly string[], index: number): unknown[] {
+  const segment = segments[index];
+  if (segment === undefined) return [];
+  const leaf = index === segments.length - 1;
+  if (segment === "*") {
+    if (!Array.isArray(current)) return [];
+    return leaf
+      ? [...current]
+      : current.flatMap((entry) => valuesAtContinuityPath(entry, segments, index + 1));
+  }
+  if (!isRecord(current) || !Object.hasOwn(current, segment)) return [];
+  return leaf ? [current[segment]] : valuesAtContinuityPath(current[segment], segments, index + 1);
+}
+
+function safeContinuityScalar(value: unknown): string | undefined {
+  const scalar = typeof value === "number" && Number.isFinite(value)
+    ? String(value)
+    : typeof value === "string" ? value : undefined;
+  if (scalar === undefined) return undefined;
+  const normalized = scalar.replace(/\s+/gu, " ").trim();
+  if (normalized.length === 0 || normalized.length > MAX_MCP_CONTINUITY_SCALAR_CHARS ||
+    normalized === "[PROTECTED_VALUE]" || normalized === "[REDACTED]") {
+    return undefined;
+  }
+  const redacted = redactSensitiveText(normalized).trim();
+  return redacted === normalized ? normalized : undefined;
+}
+
+function continuityField(segments: readonly string[]): string {
+  const named = segments.filter((segment) => segment !== "*");
+  const leaf = named.at(-1) ?? "value";
+  const normalizedLeaf = leaf.replace(/[_-]+/gu, "").toLocaleLowerCase();
+  const parent = named.at(-2);
+  if (parent === undefined || !/^(?:id|identifier|uid|uuid|name|label|title|hash|sha256|ref|reference)$/u.test(normalizedLeaf)) {
+    return leaf;
+  }
+  const singularParent = parent.endsWith("ies")
+    ? `${parent.slice(0, -3)}y`
+    : parent.endsWith("s") ? parent.slice(0, -1) : parent;
+  return `${singularParent}${leaf.slice(0, 1).toLocaleUpperCase()}${leaf.slice(1)}`;
+}
+
+function continuityKind(field: string): RuntimeContinuityFact["kind"] {
+  const normalized = field.replace(/[_-]+/gu, "").toLocaleLowerCase();
+  return /(?:^name$|name$|label$|title$)/u.test(normalized) ? "label" : "identifier";
+}
+
+function isContinuityResultPattern(path: string): boolean {
+  const segments = parseProtectedArgumentPattern(path);
+  if (segments === undefined) return false;
+  const namedSegments = segments.filter((segment) => segment !== "*");
+  if (namedSegments.some((segment) => /(?:api.?key|auth|cookie|credential|otp|pass(?:word|code)?|secret|token)/iu.test(segment))) {
+    return false;
+  }
+  const leaf = namedSegments.at(-1)?.replace(/[_-]+/gu, "").toLocaleLowerCase();
+  return leaf !== undefined && (
+    /(?:^id$|id$|identifier$|uid$|uuid$|hash$|sha256$|ref$|reference$)/u.test(leaf) ||
+    /(?:^name$|name$|label$|title$)/u.test(leaf)
+  );
 }
 
 function redactStructuredMcpResult(result: unknown, paths: readonly string[]): unknown | undefined {

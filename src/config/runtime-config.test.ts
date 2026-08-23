@@ -200,6 +200,16 @@ describe("setupMcpConfig capability validation", () => {
         input: {
           name: "records",
           command: "records-mcp",
+          continuityToolResultPaths: {
+            read: ["/records/*/credential"]
+          }
+        }
+      })).rejects.toThrow(/Invalid continuity declaration/u);
+      await expect(setupMcpConfig({
+        ...base,
+        input: {
+          name: "records",
+          command: "records-mcp",
           artifactToolArguments: {
             importSpec: {
               paths: ["/files/*/content"],
@@ -268,6 +278,18 @@ describe("setupMcpConfig capability validation", () => {
       }));
       await expect(loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace }))
         .rejects.toThrow(/Invalid MCP result redaction configuration/u);
+
+      await writeFile(profileConfigPath(workspace), JSON.stringify({
+        model: { provider: "openai", id: "gpt-4o" },
+        mcpServers: {
+          records: {
+            command: "records-mcp",
+            continuityToolResultPaths: { read: [] }
+          }
+        }
+      }));
+      await expect(loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace }))
+        .rejects.toThrow(/Invalid MCP continuity configuration/u);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -3432,6 +3454,9 @@ describe("loadRuntimeConfig profile loading", () => {
           redactedToolResultPaths: {
             verifyRecords: ["/values/*/value"]
           },
+          continuityToolResultPaths: {
+            verifyRecords: ["/records/*/id", "/records/*/name"]
+          },
           artifactToolArguments: {
             importSpec: {
               paths: ["/files/*/content"],
@@ -3461,6 +3486,9 @@ describe("loadRuntimeConfig profile loading", () => {
     });
     expect(loaded.mcp.servers.trusted?.redactedToolResultPaths).toEqual({
       verifyRecords: ["/values/*/value"]
+    });
+    expect(loaded.mcp.servers.trusted?.continuityToolResultPaths).toEqual({
+      verifyRecords: ["/records/*/id", "/records/*/name"]
     });
     expect(loaded.mcp.servers.trusted?.artifactToolArguments).toEqual({
       importSpec: {

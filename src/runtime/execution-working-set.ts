@@ -82,13 +82,14 @@ export class ExecutionWorkingSetController {
       }
       const namespace = toolNamespace(execution.tool.name);
       const identities = executionIdentities(execution);
-      if (isMutationExecution(execution)) {
+      const mutation = isMutationExecution(execution);
+      if (mutation) {
         this.#invalidate(namespace, identities);
-        continue;
+        if (!execution.tool.toolsets.includes("mcp")) continue;
       }
       const sourceCallId = safeSourceCallId(execution.toolCallId);
       if (sourceCallId === undefined) continue;
-      for (const candidate of factCandidates(execution, namespace)) {
+      for (const candidate of factCandidates(execution, namespace, !mutation)) {
         this.#upsert({
           key: candidate.key,
           summary: candidate.summary,
@@ -186,11 +187,19 @@ type FactCandidate = {
   identities: Set<string>;
 };
 
-function factCandidates(execution: ToolExecutionRecord, namespace: string): FactCandidate[] {
+function factCandidates(
+  execution: ToolExecutionRecord,
+  namespace: string,
+  includeInputScalars: boolean
+): FactCandidate[] {
   const candidates: FactCandidate[] = [];
-  const inputScalars = collectSafeScalars(execution.input)
-    .filter((entry) => entry.kind === "identifier");
-  const structuredScalars = collectSafeScalars(execution.result?.metadata?.structuredContent);
+  const isMcpExecution = execution.tool.toolsets.includes("mcp");
+  const inputScalars = includeInputScalars
+    ? collectSafeScalars(execution.input).filter((entry) => entry.kind === "identifier")
+    : [];
+  const structuredScalars = isMcpExecution
+    ? collectReviewedContinuityScalars(execution.result?.metadata?._estacoda_continuity_facts)
+    : collectSafeScalars(execution.result?.metadata?.structuredContent);
   const allScalars = [...inputScalars, ...structuredScalars];
   const identities = new Set(
     allScalars
@@ -209,7 +218,7 @@ function factCandidates(execution: ToolExecutionRecord, namespace: string): Fact
     });
   }
 
-  const contextSummary = execution.tool.toolsets.includes("mcp")
+  const contextSummary = isMcpExecution
     ? undefined
     : execution.result?.metadata?._estacoda_context_summary;
   if (typeof contextSummary === "string" && contextSummary.trim().length > 0) {
@@ -219,7 +228,7 @@ function factCandidates(execution: ToolExecutionRecord, namespace: string): Fact
       ...(execution.targetKey === undefined ? {} : { targetKey: execution.targetKey }),
       identities: new Set(identities)
     });
-  } else if (execution.targetSummary !== undefined && execution.targetSummary.trim().length > 0) {
+  } else if (!isMcpExecution && execution.targetSummary !== undefined && execution.targetSummary.trim().length > 0) {
     candidates.push({
       key: factKey(namespace, "target", execution.targetSummary),
       summary: `${execution.tool.name}: ${execution.targetSummary}`,
@@ -228,6 +237,38 @@ function factCandidates(execution: ToolExecutionRecord, namespace: string): Fact
     });
   }
   return dedupeCandidates(candidates);
+}
+
+function collectReviewedContinuityScalars(value: unknown): SafeScalar[] {
+  if (!Array.isArray(value)) return [];
+  const output: SafeScalar[] = [];
+  for (const entry of value.slice(0, MAX_FACTS)) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
+    const record = entry as Record<string, unknown>;
+    if (typeof record.field !== "string" || SENSITIVE_FIELD.test(record.field)) continue;
+    const kind = reviewedContinuityKind(record.field);
+    if (kind === undefined || record.kind !== kind) continue;
+    const scalar = safeReviewedContinuityValue(record.value);
+    if (scalar !== undefined) output.push({ field: record.field, value: scalar, kind });
+  }
+  return output;
+}
+
+function reviewedContinuityKind(field: string): "identifier" | "label" | undefined {
+  const normalized = field.replace(/[_-]+/gu, "").toLocaleLowerCase();
+  if (INELIGIBLE_IDENTIFIER_FIELDS.has(normalized)) return undefined;
+  if (/(?:^id$|id$|identifier$|uid$|uuid$|hash$|sha256$|ref$|reference$)/u.test(normalized)) return "identifier";
+  if (/(?:^name$|name$|label$|title$)/u.test(normalized)) return "label";
+  return undefined;
+}
+
+function safeReviewedContinuityValue(value: unknown): string | undefined {
+  const scalar = safeScalarValue(value);
+  if (scalar === undefined) return undefined;
+  const original = typeof value === "number" && Number.isFinite(value)
+    ? String(value)
+    : typeof value === "string" ? value.replace(/\s+/gu, " ").trim() : undefined;
+  return original === scalar ? scalar : undefined;
 }
 
 type SafeScalar = {

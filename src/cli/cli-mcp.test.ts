@@ -127,6 +127,9 @@ describe("cli mcp setup", () => {
       const resultRedactions = {
         readRecords: ["/records/*/value"]
       };
+      const continuityPaths = {
+        readRecords: ["/records/*/id", "/records/*/name"]
+      };
       const artifactConfig = {
         importSpec: {
           paths: ["/files/*/content"],
@@ -150,6 +153,7 @@ describe("cli mcp setup", () => {
           "--protected-tool-arguments-json", JSON.stringify(protectedConfig),
           "--artifact-tool-arguments-json", JSON.stringify(artifactConfig),
           "--redacted-tool-result-paths-json", JSON.stringify(resultRedactions),
+          "--continuity-tool-result-paths-json", JSON.stringify(continuityPaths),
           "--tool-verification-relationships-json", JSON.stringify({ readRecords: ["updateRecords"] })
         ],
         workspaceRoot: tmpDir,
@@ -165,6 +169,7 @@ describe("cli mcp setup", () => {
           protectedToolArguments?: unknown;
           artifactToolArguments?: unknown;
           redactedToolResultPaths?: unknown;
+          continuityToolResultPaths?: unknown;
           toolVerificationRelationships?: unknown;
         }>;
       };
@@ -173,6 +178,7 @@ describe("cli mcp setup", () => {
       expect(config.mcpServers?.records?.protectedToolArguments).toEqual(protectedConfig);
       expect(config.mcpServers?.records?.artifactToolArguments).toEqual(artifactConfig);
       expect(config.mcpServers?.records?.redactedToolResultPaths).toEqual(resultRedactions);
+      expect(config.mcpServers?.records?.continuityToolResultPaths).toEqual(continuityPaths);
       expect(config.mcpServers?.records?.toolVerificationRelationships).toEqual({
         readRecords: ["updateRecords"]
       });
@@ -188,6 +194,7 @@ describe("cli mcp setup", () => {
       expect(status.output).toContain("browser relay supported: yes");
       expect(status.output).toContain("artifact relay configured: yes");
       expect(status.output).toContain("result redaction configured: yes");
+      expect(status.output).toContain("continuity configured: yes");
       expect(status.output).toContain("verification configured: yes");
       expect(status.output).not.toContain("/values/*/value");
       expect(status.output).not.toContain("/records/*/value");
