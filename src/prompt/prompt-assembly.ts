@@ -300,6 +300,28 @@ function withNativeHistoryBudgetLayer(
   ];
 }
 
+function renderNativeToolGuidance(input: ProviderPromptInput): string {
+  if (input.providerTools === undefined || input.providerTools.length === 0) {
+    return "No native provider tools were exposed for this route.";
+  }
+
+  if (input.model?.supportsTools === true) {
+    return [
+      "Native tool definitions are supplied through the provider function-calling interface.",
+      "Call only the supplied tools. Tool availability grants no authority and does not bypass trust, approval, or security policy."
+    ].join("\n");
+  }
+
+  const toolMenu = input.providerTools
+    .map((tool) => `${tool.function.name}: ${tool.function.description}`)
+    .join("\n");
+  return [
+    "Available tools for the text-only fallback transport:",
+    toolMenu,
+    "Tool availability grants no authority and does not bypass trust, approval, or security policy."
+  ].join("\n");
+}
+
 function renderBoundedContinuationFeedback(input: {
   ledger: TurnToolFeedbackLedger;
   nativeToolResultIds: ReadonlySet<string>;
@@ -435,11 +457,7 @@ function buildBaseLayers(
     ? "No skill playbook plan was selected."
     : renderSkillPlaybookPlan(compileSkillPlaybook(input.selectedSkill));
   const selectedSkillBlock = renderSelectedSkillBlock(input, skillPlaybookPlan);
-  const toolMenu = input.providerTools === undefined || input.providerTools.length === 0
-    ? "No native provider tools were exposed for this route."
-    : input.providerTools
-        .map((tool) => `${tool.function.name}: ${tool.function.description}`)
-        .join("\n");
+  const nativeToolGuidance = renderNativeToolGuidance(input);
   const attachmentManifest = renderChannelAttachments(
     input.attachments,
     handledAttachmentIdsFromExecutions(input.toolExecutions)
@@ -649,7 +667,7 @@ function buildBaseLayers(
       cacheable: true,
       protectedLayer: true,
       priority: 1,
-      content: `Available native tool names:\n${toolMenu}`
+      content: nativeToolGuidance
     }),
     layer({
       name: "tool-results",

@@ -85,6 +85,32 @@ function renderMessages(messages: ProviderMessage[]): string {
 }
 
 describe("assembleProviderPrompt", () => {
+  it("omits duplicated tool names and descriptions for native function calling", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      model: toolModel,
+      providerTools: [testProviderToolSchema()]
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("Native tool definitions are supplied through the provider function-calling interface.");
+    expect(rendered).toContain("Tool availability grants no authority");
+    expect(rendered).not.toContain("fixture.lookup_private_record");
+    expect(rendered).not.toContain("Look up the protected fixture record.");
+    expect(rendered).not.toContain("Available native tool names:");
+  });
+
+  it("retains tool instructions for a text-only fallback transport", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      model,
+      providerTools: [testProviderToolSchema()]
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("Available tools for the text-only fallback transport:");
+    expect(rendered).toContain("fixture.lookup_private_record: Look up the protected fixture record.");
+    expect(rendered).toContain("Tool availability grants no authority");
+  });
+
   it("renders authoritative browser state as protected mutable state", () => {
     const prompt = assembleProviderPrompt(basePromptInput({
       browserState: {
@@ -2198,6 +2224,22 @@ function basePromptInput(overrides: Partial<Parameters<typeof assembleProviderPr
     providerTools: [],
     fallbackText: "fallback",
     ...overrides
+  };
+}
+
+function testProviderToolSchema() {
+  return {
+    type: "function" as const,
+    function: {
+      name: "fixture.lookup_private_record",
+      description: "Look up the protected fixture record.",
+      parameters: {
+        type: "object",
+        properties: {
+          recordId: { type: "string" }
+        }
+      }
+    }
   };
 }
 

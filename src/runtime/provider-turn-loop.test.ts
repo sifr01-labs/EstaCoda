@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { Buffer } from "node:buffer";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1332,6 +1333,42 @@ describe("ProviderTurnLoop provider availability", () => {
 });
 
 describe("ProviderTurnLoop request defaults", () => {
+  it("accounts for the exact native schemas sent in the provider request", async () => {
+    const harness = await createCompressionHarness();
+    const providerTools = [
+      toolProviderSchema("fixture.first"),
+      toolProviderSchema("fixture.second")
+    ];
+    const loop = harness.loop();
+
+    await runBasicProviderTurn(loop, { providerTools });
+
+    const request = harness.completeSpy.mock.calls[0]?.[0] as ProviderRequest;
+    const promptEvent = (await harness.sessionDb.listEvents(harness.sessionId)).find(
+      (event): event is Extract<SessionEvent, { kind: "prompt-assembled" }> => event.kind === "prompt-assembled"
+    );
+    const accounting = promptEvent?.budget.requestAccounting;
+    const serializedSchemas = JSON.stringify(request.tools);
+
+    expect(request.tools).toEqual(providerTools);
+    expect(JSON.stringify(request.messages)).not.toContain("fixture.first test schema");
+    expect(JSON.stringify(request.messages)).not.toContain("fixture.second test schema");
+    expect(accounting).toMatchObject({
+      selectedToolCount: request.tools?.length,
+      serializedSchemaBytes: Buffer.byteLength(serializedSchemas, "utf8"),
+      outputReservationTokens: mockModel.contextWindowTokens
+    });
+    expect(accounting?.estimatedSchemaTokens).toBeGreaterThan(0);
+    expect(accounting?.estimatedMessageTokens).toBeGreaterThan(0);
+    expect(accounting?.estimatedInputTokens).toBe(
+      (accounting?.estimatedMessageTokens ?? 0) + (accounting?.estimatedSchemaTokens ?? 0)
+    );
+    expect(accounting?.totalEstimatedRequestTokens).toBe(
+      (accounting?.estimatedInputTokens ?? 0) + mockModel.contextWindowTokens
+    );
+    expect(loop.lastPromptTokens()).toBe(accounting?.estimatedInputTokens);
+  });
+
   it("uses the normal default provider temperature", async () => {
     const harness = await createCompressionHarness();
 

@@ -31,6 +31,7 @@ import type { ToolRiskClass } from "../contracts/tool.js";
 import type { GroupedSecureInputRequestHandler, SecureInputRequestHandler, SecureInputTransferRequestHandler } from "../contracts/secure-input.js";
 import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import { PromptCache } from "../prompt/prompt-cache.js";
+import { estimateProviderRequestAccounting } from "../prompt/provider-request-accounting.js";
 import { estimateTextTokensRough } from "../prompt/token-estimator.js";
 import {
   assembleProviderContinuationPrompt,
@@ -1027,11 +1028,6 @@ export class ProviderTurnLoop {
     if (input.toolLoopProgressNudge === true) {
       prompt.messages.push({ role: "user", content: EXECUTION_SUPERVISION_PROMPTS.toolLoopProgress });
     }
-    this.#lastPromptTokens = prompt.budget.estimatedTokens;
-    await this.#runRecorder.recordPromptAssembly(prompt.budget);
-    await this.#recordNativeHistoryDiagnostics(prompt, "primary");
-    await emitAssembledPromptEstimate(input.onEvent, prompt.budget);
-
     const providerRequest = normalizeProviderRequest({
       provider: this.#model.provider,
       model: this.#model.id,
@@ -1041,6 +1037,11 @@ export class ProviderTurnLoop {
         ? input.providerTools
         : undefined
     });
+    const promptBudget = this.#accountProviderRequest(prompt.budget, providerRequest);
+    this.#lastPromptTokens = promptBudget.requestAccounting?.estimatedInputTokens ?? promptBudget.estimatedTokens;
+    await this.#runRecorder.recordPromptAssembly(promptBudget);
+    await this.#recordNativeHistoryDiagnostics(prompt, "primary");
+    await emitAssembledPromptEstimate(input.onEvent, promptBudget);
     const providerPreferences = {
       requireTools: input.providerTools.length > 0,
       requireVision: providerRequestContainsImageParts(providerRequest),
@@ -1063,7 +1064,7 @@ export class ProviderTurnLoop {
       visibleTurnId: input.visibleTurnId
     });
     if (execution.response?.usage?.inputTokens !== undefined) {
-      await this.#recordContextWindowUsage(execution, prompt.budget, input.onEvent);
+      await this.#recordContextWindowUsage(execution, promptBudget, input.onEvent);
     }
 
     await this.#sessionDb.appendEvent(this.#currentSessionId(), {
@@ -1213,11 +1214,6 @@ export class ProviderTurnLoop {
     if (input.reasoningOnlyPrefill === true) {
       prompt.messages.push(reasoningOnlyPrefillMessage());
     }
-    this.#lastPromptTokens = prompt.budget.estimatedTokens;
-    await this.#runRecorder.recordPromptAssembly(prompt.budget);
-    await this.#recordNativeHistoryDiagnostics(prompt, "primary");
-    await emitAssembledPromptEstimate(input.onEvent, prompt.budget);
-
     const providerRequest = normalizeProviderRequest({
       provider: this.#model.provider,
       model: this.#model.id,
@@ -1227,6 +1223,11 @@ export class ProviderTurnLoop {
         ? input.providerTools
         : undefined
     });
+    const promptBudget = this.#accountProviderRequest(prompt.budget, providerRequest);
+    this.#lastPromptTokens = promptBudget.requestAccounting?.estimatedInputTokens ?? promptBudget.estimatedTokens;
+    await this.#runRecorder.recordPromptAssembly(promptBudget);
+    await this.#recordNativeHistoryDiagnostics(prompt, "primary");
+    await emitAssembledPromptEstimate(input.onEvent, promptBudget);
     const providerPreferences = {
       requireTools: input.providerTools.length > 0,
       requireVision: providerRequestContainsImageParts(providerRequest),
@@ -1249,7 +1250,7 @@ export class ProviderTurnLoop {
       visibleTurnId: input.visibleTurnId
     });
     if (execution.response?.usage?.inputTokens !== undefined) {
-      await this.#recordContextWindowUsage(execution, prompt.budget, input.onEvent);
+      await this.#recordContextWindowUsage(execution, promptBudget, input.onEvent);
     }
 
     const continuationEvent = {
@@ -1297,6 +1298,23 @@ export class ProviderTurnLoop {
       ...(this.#providerRequestDefaults.maxTokens === undefined
         ? {}
         : { maxTokens: this.#providerRequestDefaults.maxTokens })
+    };
+  }
+
+  #accountProviderRequest(
+    budget: PromptBudgetReport,
+    request: Pick<ProviderRequest, "messages" | "tools" | "maxTokens">
+  ): PromptBudgetReport {
+    const outputReservationTokens = [
+      request.maxTokens,
+      this.#primaryModelRoute?.maxTokens,
+      this.#primaryModelRoute?.contextWindowTokens,
+      this.#model?.contextWindowTokens
+    ].find((value): value is number => Number.isFinite(value) && (value ?? 0) > 0) ?? 0;
+
+    return {
+      ...budget,
+      requestAccounting: estimateProviderRequestAccounting(request, outputReservationTokens)
     };
   }
 
@@ -2024,7 +2042,9 @@ async function emitAssembledPromptEstimate(
   budget: PromptBudgetReport
 ): Promise<void> {
   await emitContextEstimate(sink, {
-    filled: normalizeTokenCount(budget.estimatedTokens),
+    filled: normalizeTokenCount(
+      budget.requestAccounting?.estimatedInputTokens ?? budget.estimatedTokens
+    ),
     total: normalizeTokenCount(budget.contextWindowTokens),
     source: "assembled-prompt",
     stage: "assembled-prompt"

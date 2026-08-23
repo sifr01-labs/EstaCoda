@@ -59,6 +59,16 @@ export type PromptLayerReport = {
   cacheStatus?: "hit" | "miss" | "uncacheable";
 };
 
+export type ProviderRequestAccounting = {
+  selectedToolCount: number;
+  serializedSchemaBytes: number;
+  estimatedSchemaTokens: number;
+  estimatedMessageTokens: number;
+  estimatedInputTokens: number;
+  outputReservationTokens: number;
+  totalEstimatedRequestTokens: number;
+};
+
 export type PromptBudgetReport = {
   model: string;
   contextWindowTokens: number;
@@ -74,4 +84,5 @@ export type PromptBudgetReport = {
   };
   warnings: string[];
   compression?: PromptSemanticCompressionReport;
+  requestAccounting?: ProviderRequestAccounting;
 };
