@@ -11,6 +11,7 @@ import type {
 } from "../contracts/provider-spend.js";
 import { estimateMessagesTokensRough, estimateTextTokensRough } from "../prompt/token-estimator.js";
 import { estimateProviderImageInputTokens } from "./provider-image-token-estimator.js";
+import { resolveProviderOutputTokenBound } from "./provider-output-limit.js";
 import { providerPricingSnapshot, providerUsageRequestKey } from "./provider-usage-ledger.js";
 
 export type ProviderSpendPreparation = {
@@ -32,7 +33,7 @@ export function prepareProviderSpend(input: {
   const pricing = providerPricingSnapshot(input.route.provider, input.route.id, input.route);
   const inputEstimate = estimateProviderRequestInputTokens(input.request, input.route, input.usage);
   const estimatedInputTokens = inputEstimate?.tokens;
-  const outputBound = providerOutputBound(input.request, input.route);
+  const outputBound = resolveProviderOutputTokenBound(input.request, input.route);
   const inputRate = pricing.inputPerMillionTokens;
   const outputRate = pricing.outputPerMillionTokens;
   const reasoningRate = pricing.reasoningPerMillionTokens ?? outputRate;
@@ -236,13 +237,6 @@ function isProviderContentPart(part: unknown): part is
   return candidate.type === "text"
     ? typeof candidate.text === "string"
     : candidate.type === "image_url" && typeof candidate.image_url?.url === "string";
-}
-
-function providerOutputBound(request: ProviderRequest, route: ResolvedModelRoute): number | undefined {
-  for (const candidate of [request.maxTokens, route.maxTokens, route.contextWindowTokens, route.profile.contextWindowTokens]) {
-    if (typeof candidate === "number" && Number.isSafeInteger(candidate) && candidate > 0) return candidate;
-  }
-  return undefined;
 }
 
 function maximumEstimatedProviderCost(input: {

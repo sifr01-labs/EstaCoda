@@ -86,6 +86,49 @@ describe("prepareProviderSpend multimodal bounds", () => {
   });
 });
 
+describe("prepareProviderSpend output bounds", () => {
+  it("reserves the registry output limit instead of the entire context window", () => {
+    const kimiRoute = route("kimi", "kimi-k3");
+    kimiRoute.maxTokens = undefined;
+    kimiRoute.contextWindowTokens = 1_048_576;
+    kimiRoute.profile.contextWindowTokens = 1_048_576;
+    kimiRoute.profile.maxOutputTokens = 131_072;
+
+    const prepared = prepareProviderSpend({
+      profileId: "profile-1",
+      request: { model: "kimi-k3", messages: [{ role: "user", content: "Inspect this." }] },
+      route: kimiRoute,
+      routeIndex: 0,
+      routeRole: "primary",
+      providerAttemptIndex: 0,
+      usage: usage()
+    });
+
+    expect(prepared).toMatchObject({ pricingAvailable: true, safelyBounded: true });
+    expect(prepared.request.boundedMaximumOutputTokens).toBe(131_072);
+  });
+
+  it("falls back to the context window when registry output metadata is invalid", () => {
+    const fallbackRoute = route("kimi", "kimi-invalid-output");
+    fallbackRoute.maxTokens = undefined;
+    fallbackRoute.contextWindowTokens = 262_144;
+    fallbackRoute.profile.contextWindowTokens = 262_144;
+    fallbackRoute.profile.maxOutputTokens = 0;
+
+    const prepared = prepareProviderSpend({
+      profileId: "profile-1",
+      request: { model: fallbackRoute.id, messages: [{ role: "user", content: "Inspect this." }] },
+      route: fallbackRoute,
+      routeIndex: 0,
+      routeRole: "primary",
+      providerAttemptIndex: 0,
+      usage: usage()
+    });
+
+    expect(prepared.request.boundedMaximumOutputTokens).toBe(262_144);
+  });
+});
+
 function imageRequest(): ProviderRequest {
   return {
     model: "ignored",

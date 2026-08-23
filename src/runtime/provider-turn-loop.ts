@@ -43,6 +43,7 @@ import type { CompactResult } from "../prompt/session-compression-service.js";
 import { SUMMARY_FORMAT_VERSION } from "../prompt/semantic-compressor.js";
 import type { ConversationContinuationState } from "./conversation-continuation-state.js";
 import { normalizeProviderMessagesStrict } from "../providers/provider-message-normalizer.js";
+import { resolveProviderOutputTokenBound } from "../providers/provider-output-limit.js";
 import type { PromptBudgetReport, PromptSemanticCompressionReport } from "../contracts/prompt.js";
 import {
   assertProviderAttemptState,
@@ -1305,12 +1306,11 @@ export class ProviderTurnLoop {
     budget: PromptBudgetReport,
     request: Pick<ProviderRequest, "messages" | "tools" | "maxTokens">
   ): PromptBudgetReport {
-    const outputReservationTokens = [
-      request.maxTokens,
-      this.#primaryModelRoute?.maxTokens,
-      this.#primaryModelRoute?.contextWindowTokens,
-      this.#model?.contextWindowTokens
-    ].find((value): value is number => Number.isFinite(value) && (value ?? 0) > 0) ?? 0;
+    const outputReservationTokens = resolveProviderOutputTokenBound(
+      request,
+      this.#primaryModelRoute,
+      this.#model
+    ) ?? 0;
 
     return {
       ...budget,

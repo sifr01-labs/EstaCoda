@@ -1333,6 +1333,27 @@ describe("ProviderTurnLoop provider availability", () => {
 });
 
 describe("ProviderTurnLoop request defaults", () => {
+  it("uses registry max output metadata for request accounting", async () => {
+    const harness = await createCompressionHarness();
+    const modelWithOutputLimit: ModelProfile = {
+      ...mockModel,
+      maxOutputTokens: 16_384
+    };
+
+    await runBasicProviderTurn(harness.loop({
+      model: modelWithOutputLimit,
+      primaryModelRoute: {
+        ...primaryRoute,
+        profile: modelWithOutputLimit
+      }
+    }));
+
+    const promptEvent = (await harness.sessionDb.listEvents(harness.sessionId)).find(
+      (event): event is Extract<SessionEvent, { kind: "prompt-assembled" }> => event.kind === "prompt-assembled"
+    );
+    expect(promptEvent?.budget.requestAccounting?.outputReservationTokens).toBe(16_384);
+  });
+
   it("accounts for the exact native schemas sent in the provider request", async () => {
     const harness = await createCompressionHarness();
     const providerTools = [

@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveHomeDir } from "../config/home-dir.js";
 import type { ModelProfile, ProviderId } from "../contracts/provider.js";
+import { normalizePositiveTokenLimit } from "../providers/provider-output-limit.js";
 import { estimateTokenUsageCost } from "../providers/provider-usage-estimator.js";
 
 export type ModelModality = "text" | "image" | "pdf" | "audio" | "video";
@@ -218,10 +219,12 @@ export function modelsDevSnapshotToProfiles(snapshot: ModelsDevSnapshot, options
 }
 
 export function modelInfoToProfile(model: ModelInfo): ModelProfile {
+  const maxOutputTokens = normalizePositiveTokenLimit(model.maxOutput);
   return {
     id: model.id,
     provider: normalizeProviderIdForEstaCoda(model.providerId),
     contextWindowTokens: model.contextWindow,
+    ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
     status: profileStatus(model.status),
     supportsTools: model.toolCall,
     supportsVision: model.inputModalities.includes("image"),
