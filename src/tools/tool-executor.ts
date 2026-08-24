@@ -415,16 +415,17 @@ export class ToolExecutor {
         onApprovalRequest: tool.name === "execute_code" ? request.onApprovalRequest : undefined,
         onSecureInputRequest: request.onSecureInputRequest
       };
+      const running = runToolWithProtectedArguments(tool, request.input, executionContext, {
+        beforeDispatch: () => {
+          dispatchState = "started";
+        },
+        afterDispatch: () => {
+          dispatchState = "finished";
+        }
+      });
       try {
         result = await awaitWithAbort(
-          runToolWithProtectedArguments(tool, request.input, executionContext, {
-            beforeDispatch: () => {
-              dispatchState = "started";
-            },
-            afterDispatch: () => {
-              dispatchState = "finished";
-            }
-          }),
+          running,
           timeout.signal
         );
         settlement = {
@@ -438,6 +439,12 @@ export class ToolExecutor {
         const terminalStatus = timeout.timedOut()
           ? "timed_out"
           : timeout.signal.aborted ? "cancelled" : "failed";
+        if (
+          (terminalStatus === "timed_out" || terminalStatus === "cancelled") &&
+          tool.executionAbortSettlementGraceMs !== undefined
+        ) {
+          await waitForExecutionSettlement(running, tool.executionAbortSettlementGraceMs);
+        }
         const sideEffectState = executionEffect?.kind === "mutation" && dispatchState !== "not_started"
           ? "possible"
           : "none";
@@ -1143,6 +1150,17 @@ async function awaitWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Prom
       signal.removeEventListener("abort", onAbort);
     }).catch(() => undefined);
   });
+}
+
+async function waitForExecutionSettlement(promise: Promise<unknown>, graceMs: number): Promise<void> {
+  const boundedGraceMs = Math.min(10_000, Math.max(0, Math.floor(graceMs)));
+  if (boundedGraceMs === 0) return;
+  await Promise.race([
+    promise.then(() => undefined, () => undefined),
+    new Promise<void>((resolvePromise) => {
+      setTimeout(resolvePromise, boundedGraceMs);
+    })
+  ]);
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {

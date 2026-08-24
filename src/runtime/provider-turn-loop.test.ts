@@ -2031,6 +2031,159 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(continuation).toContain("supersedes browser state found in conversation history");
   });
 
+  it("corrects a provider stop on a visible OTP challenge before it reaches ordinary chat", async () => {
+    const challengeSnapshot = toolExecutionForTool(
+      "call-otp-snapshot",
+      "browser.snapshot",
+      "Current browser snapshot"
+    );
+    challengeSnapshot.tool.toolsets = ["browser"];
+    challengeSnapshot.result = {
+      ok: true,
+      content: "Current browser snapshot",
+      metadata: {
+        snapshot: {
+          sessionId: "browser-session",
+          url: "https://portal.example.com/challenge",
+          title: "Verify account",
+          identity: { documentEpoch: 4, actionRevision: 12, observationId: 15 },
+          observedAt: "2026-08-13T00:00:00.000Z",
+          readiness: "complete",
+          tab: {
+            ref: "@t3",
+            url: "https://portal.example.com/challenge",
+            title: "Verify account",
+            controlled: true
+          },
+          elements: [
+            { ref: "@e19", role: "textbox", name: "Verification code", label: "One-time code" },
+            { ref: "@e20", role: "button", name: "Verify", withinText: "Two-factor authentication" }
+          ]
+        }
+      }
+    };
+    const protectedInput = toolExecutionForTool(
+      "call-otp-input",
+      "browser.type",
+      "Protected input delivered and submitted."
+    );
+    protectedInput.tool.toolsets = ["browser"];
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-otp-snapshot", "{}", "browser.snapshot")]),
+        providerExecution("Please paste the verification code here."),
+        providerExecution("", [providerToolCall(
+          "call-otp-input",
+          JSON.stringify({
+            ref: "@e19",
+            identity: { documentEpoch: 4, actionRevision: 12, observationId: 15 },
+            tabRef: "@t3",
+            protectedInput: { kind: "one-time-code", purpose: "Verify account" },
+            submitRef: "@e20"
+          }),
+          "browser.type"
+        )]),
+        providerExecution("Authentication continued securely.")
+      ],
+      toolSteps: [
+        { executions: [challengeSnapshot] },
+        {},
+        { executions: [protectedInput] },
+        {}
+      ],
+      maxProviderIterations: 4
+    });
+
+    const result = await runBasicProviderTurn(harness.loop, {
+      providerTools: [toolProviderSchema("browser.snapshot"), toolProviderSchema("browser.type")]
+    });
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(4);
+    const correctionRequest = harness.completeSpy.mock.calls[2]?.[0] as ProviderRequest;
+    expect(JSON.stringify(correctionRequest.messages)).toContain(
+      "Do not ask the user to send the code in ordinary chat."
+    );
+    expect(harness.executePlans.mock.calls[2]?.[0].providerExecution?.toolCalls).toEqual([
+      expect.objectContaining({ id: "call-otp-input", name: "browser.type" })
+    ]);
+    expect(result.providerExecution?.response?.content).toBe("Authentication continued securely.");
+    expect(result.providerExecution?.response?.content).not.toContain("paste the verification code");
+  });
+
+  it("does not retry an older OTP challenge after protected input was cancelled", async () => {
+    const challengeSnapshot = toolExecutionForTool(
+      "call-cancelled-otp-snapshot",
+      "browser.snapshot",
+      "Current browser snapshot"
+    );
+    challengeSnapshot.tool.toolsets = ["browser"];
+    challengeSnapshot.result = {
+      ok: true,
+      content: "Current browser snapshot",
+      metadata: {
+        snapshot: {
+          sessionId: "browser-session",
+          url: "https://portal.example.com/challenge",
+          title: "Verify account",
+          identity: { documentEpoch: 4, actionRevision: 12, observationId: 15 },
+          observedAt: "2026-08-13T00:00:00.000Z",
+          readiness: "complete",
+          tab: {
+            ref: "@t3",
+            url: "https://portal.example.com/challenge",
+            title: "Verify account",
+            controlled: true
+          },
+          elements: [
+            { ref: "@e19", role: "textbox", name: "Verification code", label: "One-time code" },
+            { ref: "@e20", role: "button", name: "Verify", withinText: "Two-factor authentication" }
+          ]
+        }
+      }
+    };
+    const cancelledInput = toolExecutionForTool(
+      "call-cancelled-otp-input",
+      "browser.type",
+      "Protected input collection was cancelled."
+    );
+    cancelledInput.tool.toolsets = ["browser"];
+    cancelledInput.result = {
+      ok: false,
+      content: "Protected input collection was cancelled.",
+      metadata: { reason: "cancelled" }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-cancelled-otp-snapshot", "{}", "browser.snapshot")]),
+        providerExecution("", [providerToolCall(
+          "call-cancelled-otp-input",
+          JSON.stringify({
+            ref: "@e19",
+            identity: { documentEpoch: 4, actionRevision: 12, observationId: 15 },
+            tabRef: "@t3",
+            protectedInput: { kind: "one-time-code", purpose: "Verify account" },
+            submitRef: "@e20"
+          }),
+          "browser.type"
+        )]),
+        providerExecution("The protected verification prompt was cancelled.")
+      ],
+      toolSteps: [
+        { executions: [challengeSnapshot] },
+        { executions: [cancelledInput] },
+        {}
+      ],
+      maxProviderIterations: 4
+    });
+
+    const result = await runBasicProviderTurn(harness.loop, {
+      providerTools: [toolProviderSchema("browser.snapshot"), toolProviderSchema("browser.type")]
+    });
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
+    expect(result.providerExecution?.response?.content).toBe("The protected verification prompt was cancelled.");
+  });
+
   it("refreshes persisted browser state when manual browser changes occur between turns", async () => {
     const sessionRuntimeContext = createSessionRuntimeContext("runtime-session");
     sessionRuntimeContext.setBrowserState({

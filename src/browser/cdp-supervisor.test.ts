@@ -1049,6 +1049,57 @@ describe("CDPSupervisor", () => {
     ]));
   });
 
+  it("applies download behavior and cancellation to the owning isolated browser context", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1");
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      browserContextId: "context-1",
+      webSocketFactory: () => socket
+    });
+    const controller = new AbortController();
+    await supervisor.start();
+    await supervisor.prepareDownload("/tmp/estacoda-download-test", 1_024, controller.signal);
+    const waiting = supervisor.waitForDownload(1_000, controller.signal);
+    socket.emitMessage({
+      method: "Browser.downloadWillBegin",
+      params: { guid: "guid-context", url: "https://example.com/openapi.json", suggestedFilename: "openapi.json" }
+    });
+
+    controller.abort();
+
+    await expect(waiting).rejects.toMatchObject({ name: "AbortError" });
+    expect(socket.sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        method: "Browser.setDownloadBehavior",
+        params: {
+          behavior: "allowAndName",
+          downloadPath: "/tmp/estacoda-download-test",
+          eventsEnabled: true,
+          browserContextId: "context-1"
+        }
+      }),
+      expect.objectContaining({
+        method: "Browser.cancelDownload",
+        params: { guid: "guid-context", browserContextId: "context-1" }
+      })
+    ]));
+  });
+
+  it("diagnoses a download that never starts as a suspected native save dialog", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1");
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+    await supervisor.start();
+    await supervisor.prepareDownload("/tmp/estacoda-download-test", 1_024);
+
+    await expect(supervisor.waitForDownload(5)).resolves.toEqual({
+      outcome: "download-failed",
+      reason: "native-save-dialog-suspected"
+    });
+  });
+
   it("cancels a download as soon as trusted progress exceeds the size limit", async () => {
     const socket = new FakeCdpSocket("ws://cdp/page-1");
     const supervisor = new CDPSupervisor({

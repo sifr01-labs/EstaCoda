@@ -282,6 +282,65 @@ describe("runtime tool activity events", () => {
     expect(executeTool).toHaveBeenCalledTimes(2);
   });
 
+  it("continues on an exclusive browser resource after aborted input cleanup settles", async () => {
+    let planIndex = 0;
+    const executeTool = vi.fn(async (request: { tool: string; toolCallId: string }) => execution({
+      tool: { ...fileReadTool, name: request.tool, toolsets: ["browser"] },
+      toolCallId: request.toolCallId,
+      settlement: request.toolCallId === "protected-input"
+        ? {
+            terminalStatus: "timed_out",
+            dispatchState: "finished",
+            sideEffectState: "none",
+            timeoutMs: 60_000
+          }
+        : {
+            terminalStatus: "completed",
+            dispatchState: "finished",
+            sideEffectState: "none"
+          },
+      result: request.toolCallId === "protected-input"
+        ? { ok: false, content: "Protected input timed out.", metadata: { reason: "timeout" } }
+        : { ok: true, content: "Browser recovered." }
+    }));
+    const runner = new ToolPlanRunner({
+      toolCallPlanner: {
+        planFromProviderDelta: () => {
+          const index = planIndex++;
+          return {
+            id: index === 0 ? "protected-input" : "snapshot",
+            tool: index === 0 ? "browser.type" : "browser.snapshot",
+            input: { sessionId: "shared-session" },
+            source: "provider-tool-call",
+            status: "planned"
+          };
+        }
+      } as never,
+      toolExecutor: {
+        getToolDefinition: (name: string) => ({ ...fileReadTool, name, toolsets: ["browser"] }),
+        getToolExecutionConcurrency: () => ({
+          mode: "exclusive",
+          resourceKey: "browser:shared-session"
+        }),
+        executeTool
+      } as never,
+      runRecorder: runRecorder() as never,
+      sessionId: "s1",
+      maxConcurrentSafeTools: 4
+    });
+
+    const result = await runner.executePlans({
+      providerExecution: { ...providerExecution(), toolCalls: [{}, {}] },
+      toolPlans: [],
+      trustedWorkspace: true,
+      remainingToolCalls: 2,
+      riskBaseline: "read-only-local"
+    });
+
+    expect(executeTool).toHaveBeenCalledTimes(2);
+    expect(result.executions.map((item) => item.toolCallId)).toEqual(["protected-input", "snapshot"]);
+  });
+
   it("preserves successful sibling receipts when one concurrent execution rejects", async () => {
     let planIndex = 0;
     const recorder = runRecorder();

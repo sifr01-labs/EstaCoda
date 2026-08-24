@@ -91,6 +91,9 @@ describe("browser tool execution resources", () => {
     );
     expect(download.executionTimeoutMs).toBe(60_000);
     expect(switchTab.executionTimeoutMs).toBe(60_000);
+    expect(tool("browser.type", tools).executionAbortSettlementGraceMs).toBe(2_000);
+    expect(tool("browser.fill_protected_form", tools).executionAbortSettlementGraceMs).toBe(2_000);
+    expect(download.executionAbortSettlementGraceMs).toBeUndefined();
     expect(webExtract.executionConcurrency).toBeUndefined();
     expect(webExtract.executionTimeoutMs).toBeUndefined();
   });

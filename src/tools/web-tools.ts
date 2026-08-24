@@ -929,6 +929,11 @@ function withBrowserSessionExecutionConcurrency(tool: RegisteredTool): Registere
   return {
     ...tool,
     executionTimeoutMs: 60_000,
+    ...(
+      tool.name === "browser.type" || tool.name === "browser.fill_protected_form"
+        ? { executionAbortSettlementGraceMs: 2_000 }
+        : {}
+    ),
     executionConcurrency: {
       mode: "exclusive",
       resourceKey: (input, context) => {
@@ -2355,9 +2360,12 @@ function browserDownloadFailure(
   outcome: import("../contracts/browser.js").BrowserDownloadOutcome,
   reason = "browser-download-failed"
 ): ToolResult {
+  const content = reason === "native-save-dialog-suspected"
+    ? "The managed browser download did not begin. A native Save dialog may be open; do not click the page download control again. The browser runtime must suppress the native prompt before retrying."
+    : `Browser download did not complete (${outcome}).`;
   return {
     ok: false,
-    content: `Browser download did not complete (${outcome}).`,
+    content,
     metadata: { backend: backend.kind, outcome, reason }
   };
 }

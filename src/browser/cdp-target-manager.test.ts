@@ -171,7 +171,8 @@ describe("CdpTargetManager", () => {
       pageWebSocketDebuggerUrl: "ws://page/target-1"
     });
     expect(harness.supervisorFactory).toHaveBeenCalledWith({
-      webSocketUrl: "ws://page/target-1"
+      webSocketUrl: "ws://page/target-1",
+      browserContextId: "context-1"
     });
     expect(target.supervisor).toBe(harness.supervisors[0]);
   });
@@ -348,6 +349,10 @@ describe("CdpTargetManager", () => {
       pageWebSocketDebuggerUrl: "ws://page/target-2"
     });
     expect(harness.supervisors).toHaveLength(1);
+    expect(harness.supervisorFactory).toHaveBeenCalledWith({
+      webSocketUrl: "ws://page/target-2",
+      browserContextId: "context-1"
+    });
     expect(harness.supervisors[0]?.closed).toBe(true);
     expect(harness.client.calls).toContainEqual({ method: "Target.activateTarget", params: { targetId: "target-2" } });
     expect(harness.client.calls.some((call) => call.method === "Target.closeTarget")).toBe(false);

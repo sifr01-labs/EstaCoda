@@ -47,6 +47,7 @@ function createHarness(overrides: {
   } as Response));
   const rm = vi.fn(async () => undefined);
   const mkdir = vi.fn(async () => undefined);
+  const writeFile = vi.fn(async () => undefined);
   const mkdtemp = vi.fn(overrides.mkdtemp ?? (async () => "/tmp/estacoda-chrome-test"));
 
   return {
@@ -56,6 +57,7 @@ function createHarness(overrides: {
     fetch,
     rm,
     mkdir,
+    writeFile,
     mkdtemp,
     options: {
       launchExecutable: "/usr/bin/chromium",
@@ -65,6 +67,7 @@ function createHarness(overrides: {
       fetch,
       rm: rm as never,
       mkdir: mkdir as never,
+      writeFile: writeFile as never,
       mkdtemp: mkdtemp as never,
       tmpdir: () => "/tmp",
       getuid: () => 1000,
@@ -149,6 +152,32 @@ describe("launchChrome", () => {
     expect(launched.userDataDir).toBe("/tmp/estacoda-chrome-test");
   });
 
+  it("disables native save prompts in the isolated managed profile", async () => {
+    const harness = createHarness();
+
+    await launchChrome(harness.options);
+
+    expect(harness.mkdir).toHaveBeenCalledWith(
+      "/tmp/estacoda-chrome-test/Default",
+      { recursive: true, mode: 0o700 }
+    );
+    expect(harness.mkdir).toHaveBeenCalledWith(
+      "/tmp/estacoda-chrome-test/Downloads",
+      { recursive: true, mode: 0o700 }
+    );
+    expect(harness.writeFile).toHaveBeenCalledWith(
+      "/tmp/estacoda-chrome-test/Default/Preferences",
+      JSON.stringify({
+        download: {
+          default_directory: "/tmp/estacoda-chrome-test/Downloads",
+          directory_upgrade: true,
+          prompt_for_download: false
+        }
+      }),
+      { encoding: "utf8", mode: 0o600 }
+    );
+  });
+
   it("uses a supplied userDataDir and does not delete it on cleanup", async () => {
     const harness = createHarness({ userDataDir: "/profile/chrome" });
 
@@ -158,6 +187,7 @@ describe("launchChrome", () => {
 
     expect(harness.mkdtemp).not.toHaveBeenCalled();
     expect(harness.mkdir).toHaveBeenCalledWith("/profile/chrome", { recursive: true });
+    expect(harness.writeFile).not.toHaveBeenCalled();
     expect(args).toContain("--user-data-dir=/profile/chrome");
     expect(harness.rm).not.toHaveBeenCalled();
   });

@@ -66,6 +66,7 @@ const MAX_POPUP_ATTEMPTS = 8;
 
 export type CDPSupervisorOptions = {
   webSocketUrl: string;
+  browserContextId?: string;
   webSocketFactory?: CdpWebSocketFactory;
   requestTimeoutMs?: number;
   requestInterception?: {
@@ -77,6 +78,7 @@ export type CDPSupervisorOptions = {
 
 export class CDPSupervisor {
   readonly #webSocketUrl: string;
+  readonly #browserContextId: string | undefined;
   readonly #webSocketFactory: CdpWebSocketFactory | undefined;
   readonly #requestTimeoutMs: number | undefined;
   readonly #interception: CDPSupervisorOptions["requestInterception"];
@@ -101,6 +103,7 @@ export class CDPSupervisor {
 
   constructor(options: CDPSupervisorOptions) {
     this.#webSocketUrl = options.webSocketUrl;
+    this.#browserContextId = options.browserContextId;
     this.#webSocketFactory = options.webSocketFactory;
     this.#requestTimeoutMs = options.requestTimeoutMs;
     this.#interception = options.requestInterception;
@@ -154,7 +157,8 @@ export class CDPSupervisor {
       await this.send("Browser.setDownloadBehavior", {
         behavior: "allowAndName",
         downloadPath: directory,
-        eventsEnabled: true
+        eventsEnabled: true,
+        ...(this.#browserContextId === undefined ? {} : { browserContextId: this.#browserContextId })
       }, { signal });
     } catch {
       await this.send("Page.setDownloadBehavior", {
@@ -185,18 +189,24 @@ export class CDPSupervisor {
         clearTimeout(timeout);
         this.#downloadWaiters = this.#downloadWaiters.filter((candidate) => candidate !== finish);
         if (this.#activeDownloadGuid !== undefined) {
-          void this.send("Browser.cancelDownload", { guid: this.#activeDownloadGuid }).catch(() => undefined);
+          void this.#cancelDownload(this.#activeDownloadGuid);
         }
         reject(downloadAbortError());
       };
       const timeout = setTimeout(() => {
         const started = [...this.#downloadAttempts.values()].at(-1);
         if (started?.guid !== undefined) {
-          void this.send("Browser.cancelDownload", { guid: started.guid }).catch(() => undefined);
+          void this.#cancelDownload(started.guid);
         }
         finish(started === undefined
-          ? { outcome: "download-failed", reason: "download-event-timeout" }
-          : { outcome: "download-started", ...started, reason: "download-completion-timeout" });
+          ? { outcome: "download-failed", reason: "native-save-dialog-suspected" }
+          : {
+              outcome: "download-started",
+              ...started,
+              reason: (started.receivedBytes ?? 0) === 0
+                ? "native-save-dialog-suspected"
+                : "download-completion-timeout"
+            });
       }, timeoutMs);
       this.#downloadWaiters.push(finish);
       signal?.addEventListener("abort", onAbort, { once: true });
@@ -360,7 +370,7 @@ export class CDPSupervisor {
   #handleDownloadWillBegin(params: unknown): void {
     if (!isRecord(params) || typeof params.guid !== "string") return;
     if (this.#activeDownloadGuid !== undefined && this.#activeDownloadGuid !== params.guid) {
-      void this.send("Browser.cancelDownload", { guid: params.guid }).catch(() => undefined);
+      void this.#cancelDownload(params.guid);
       return;
     }
     this.#activeDownloadGuid = params.guid;
@@ -379,7 +389,7 @@ export class CDPSupervisor {
       this.#downloadMaxBytes !== undefined &&
       params.receivedBytes > this.#downloadMaxBytes
     ) {
-      void this.send("Browser.cancelDownload", { guid: params.guid }).catch(() => undefined);
+      void this.#cancelDownload(params.guid);
       this.#downloadAttempts.delete(params.guid);
       this.#activeDownloadGuid = undefined;
       const tooLarge: BrowserDownloadEventResult = {
@@ -411,6 +421,13 @@ export class CDPSupervisor {
     const waiter = this.#downloadWaiters.shift();
     if (waiter === undefined) this.#downloadResults.push(result);
     else waiter(result);
+  }
+
+  async #cancelDownload(guid: string): Promise<void> {
+    await this.send("Browser.cancelDownload", {
+      guid,
+      ...(this.#browserContextId === undefined ? {} : { browserContextId: this.#browserContextId })
+    }).catch(() => undefined);
   }
 
   #handleDialogOpening(params: unknown): void {

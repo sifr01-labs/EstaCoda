@@ -78,7 +78,7 @@ import {
 import { ExecutionWorkingSetController } from "./execution-working-set.js";
 import type { BrowserSessionLease } from "../browser/session-lifecycle.js";
 import { deriveBrowserSessionKey } from "../browser/session-key.js";
-import type { BrowserBackend, BrowserStateProjection } from "../contracts/browser.js";
+import type { BrowserBackend, BrowserSnapshot, BrowserStateProjection } from "../contracts/browser.js";
 import {
   projectBrowserStateFromExecutions,
   refreshBrowserStateProjection
@@ -90,6 +90,11 @@ import {
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
 const PROVIDER_TOKEN_EFFICIENCY_WARNING_THRESHOLD = 500_000;
+const PROTECTED_OTP_CONTINUATION_PROMPT = [
+  "A trusted current browser snapshot shows one one-time-code field and one submit control.",
+  "Do not ask the user to send the code in ordinary chat.",
+  "Call browser.type now with the exact ref, identity, tabRef, protectedInput.kind=one-time-code, and submitRef from the newest browser snapshot so the protected prompt opens and submits locally in this same turn."
+].join(" ");
 
 export type ProviderTurnLoopBudgets = {
   maxProviderIterations: number;
@@ -286,6 +291,8 @@ export class ProviderTurnLoop {
     let retryEmptyInitialResponse = false;
     let reasoningOnlyPrefillRetries = 0;
     let pendingReasoningOnlyPrefill = false;
+    let pendingProtectedOtpNudge = false;
+    let protectedOtpCorrectionUsed = false;
     let retryReasoningOnlyInitialResponse = false;
     let delegatedAnswerOwnership: PendingDelegatedAnswerOwnership | undefined;
     let emergencyDeadlineReached = false;
@@ -405,6 +412,7 @@ export class ProviderTurnLoop {
           iteration,
           loopStartedAt,
           emptyResponseNudge: pendingEmptyResponseNudge,
+          protectedOtpNudge: pendingProtectedOtpNudge,
           browserEvidenceNudge: supervisionPrompt.browserEvidenceNudge,
           browserRetargetNudge: supervisionPrompt.browserRetargetNudge,
           browserVisualEscalationReason: supervisionPrompt.browserVisualEscalationReason,
@@ -424,6 +432,7 @@ export class ProviderTurnLoop {
           })
         });
       pendingEmptyResponseNudge = false;
+      pendingProtectedOtpNudge = false;
       pendingReasoningOnlyPrefill = false;
 
       if (execution === undefined) {
@@ -810,6 +819,25 @@ export class ProviderTurnLoop {
         }
       }
 
+      const shouldCorrectProtectedOtpStop =
+        !protectedOtpCorrectionUsed &&
+        phase === "continuation" &&
+        execution.ok === true &&
+        execution.toolCalls.length === 0 &&
+        execution.response?.content.trim().length !== 0 &&
+        activeProviderTools.some((tool) => tool.function.name === "browser.type") &&
+        hasVisibleOneTimeCodeChallenge(providerToolExecutions) &&
+        iteration + consumedProviderIterations < this.#budgets.maxProviderIterations;
+      if (shouldCorrectProtectedOtpStop) {
+        protectedOtpCorrectionUsed = true;
+        pendingProtectedOtpNudge = true;
+        previousProviderExecution = execution;
+        if (consumedProviderIterations > 1) {
+          iteration += consumedProviderIterations - 1;
+        }
+        continue;
+      }
+
       effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
       previousProviderExecution = execution;
 
@@ -1123,6 +1151,7 @@ export class ProviderTurnLoop {
     iteration: number;
     loopStartedAt: number;
     emptyResponseNudge?: boolean;
+    protectedOtpNudge?: boolean;
     browserEvidenceNudge?: boolean;
     browserRetargetNudge?: boolean;
     browserVisualEscalationReason?: string;
@@ -1139,6 +1168,7 @@ export class ProviderTurnLoop {
       (
         input.providerExecution.toolCalls.length === 0 &&
         input.emptyResponseNudge !== true &&
+        input.protectedOtpNudge !== true &&
         input.toolLoopProgressNudge !== true
       ) ||
       (
@@ -1187,6 +1217,12 @@ export class ProviderTurnLoop {
       prompt.messages.push({
         role: "user",
         content: "You just executed tool calls but returned an empty response. Please process the tool results above and continue with the task."
+      });
+    }
+    if (input.protectedOtpNudge === true) {
+      prompt.messages.push({
+        role: "user",
+        content: PROTECTED_OTP_CONTINUATION_PROMPT
       });
     }
     if (input.browserEvidenceNudge === true) {
@@ -1266,6 +1302,7 @@ export class ProviderTurnLoop {
       })),
       ...providerExecutionEventMetadata(execution),
       nudge: input.emptyResponseNudge === true ||
+        input.protectedOtpNudge === true ||
         input.toolLoopProgressNudge === true
     };
     await this.#sessionDb.appendEvent(this.#currentSessionId(), continuationEvent);
@@ -1280,6 +1317,7 @@ export class ProviderTurnLoop {
       })),
       ...providerExecutionEventMetadata(execution),
       nudge: input.emptyResponseNudge === true ||
+        input.protectedOtpNudge === true ||
         input.toolLoopProgressNudge === true
     });
 
@@ -2349,6 +2387,45 @@ function providerExecutionTokenUse(execution: ProviderExecutionResult): number {
   return attemptTokens > 0
     ? attemptTokens
     : providerUsageTokenTotal(execution.response?.usage);
+}
+
+function hasVisibleOneTimeCodeChallenge(executions: readonly ToolExecutionRecord[]): boolean {
+  for (let index = executions.length - 1; index >= 0; index -= 1) {
+    const execution = executions[index]!;
+    if (!execution.tool.toolsets.includes("browser")) continue;
+    const snapshot = browserSnapshotMetadata(execution.result?.metadata?.snapshot);
+    // Only the latest browser execution may authorize this correction. A later
+    // browser result without a snapshot can represent cancellation, failure, or
+    // a state transition that makes an older challenge unsafe to retry.
+    if (snapshot === undefined) return false;
+    if (snapshot.sensitiveInputActive === true) return false;
+    const elements = snapshot.elements ?? [];
+    const codeFields = elements.filter((element) =>
+      (element.role === "textbox" || element.role === "searchbox" || element.role === "combobox") &&
+      /one[-\s]?time|otp|mfa|verification\s+code|security\s+code|authentication\s+code|رمز التحقق|رمز الأمان/iu
+        .test([element.name, element.label, element.withinText].filter(Boolean).join(" "))
+    );
+    const submitControls = elements.filter((element) =>
+      element.role === "button" &&
+      /verify|submit|continue|confirm|next|sign\s*in|log\s*in|تحقق|تأكيد|متابعة|دخول/iu
+        .test([element.name, element.label, element.withinText].filter(Boolean).join(" "))
+    );
+    return codeFields.length === 1 && submitControls.length === 1;
+  }
+  return false;
+}
+
+function browserSnapshotMetadata(value: unknown): BrowserSnapshot | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const candidate = value as Partial<BrowserSnapshot>;
+  if (
+    typeof candidate.sessionId !== "string" ||
+    typeof candidate.url !== "string" ||
+    typeof candidate.observedAt !== "string" ||
+    typeof candidate.identity !== "object" ||
+    candidate.identity === null
+  ) return undefined;
+  return candidate as BrowserSnapshot;
 }
 
 function providerUsageTokenTotal(usage: ProviderUsage | undefined): number {

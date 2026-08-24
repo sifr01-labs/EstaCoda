@@ -348,6 +348,25 @@ function protectedFormGuidance(
   const fields = elements.filter((element) =>
     element.role === "textbox" || element.role === "searchbox" || element.role === "combobox"
   );
+  const oneTimeCode = fields.filter((element) =>
+    /one[-\s]?time|otp|mfa|verification\s+code|security\s+code|authentication\s+code|رمز التحقق|رمز الأمان/iu
+      .test([element.name, element.label, element.withinText].filter(Boolean).join(" "))
+  );
+  const challengeSubmit = elements.filter((element) =>
+    element.role === "button" &&
+    /verify|submit|continue|confirm|next|sign\s*in|log\s*in|تحقق|تأكيد|متابعة|دخول/iu
+      .test([element.name, element.label, element.withinText].filter(Boolean).join(" "))
+  );
+  if (
+    oneTimeCode.length === 1 &&
+    challengeSubmit.length === 1 &&
+    oneTimeCode[0]!.ref !== challengeSubmit[0]!.ref
+  ) {
+    return [
+      "Protected one-time-code challenge detected. Do not ask the user to send the code in ordinary chat.",
+      `Call browser.type now with ref=${safeText(oneTimeCode[0]!.ref)}, identity=${JSON.stringify(snapshot.identity)}, tabRef=${safeText(snapshot.tab.ref)}, protectedInput.kind=one-time-code, and submitRef=${safeText(challengeSubmit[0]!.ref)} so collection and submission complete without another model turn.`
+    ].join("\n");
+  }
   const account = fields.filter((element) =>
     /email|e-mail|user\s*name|account(?:\s*id)?|login\s*id/iu.test([element.name, element.label].filter(Boolean).join(" "))
   );

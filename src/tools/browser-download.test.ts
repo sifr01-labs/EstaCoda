@@ -76,6 +76,26 @@ describe("browser.download", () => {
     expect(captured[0]?.signal).toBe(controller.signal);
   });
 
+  it("tells the agent not to repeat the page click when a native save dialog is suspected", async () => {
+    const root = await temporaryRoot();
+    const backend = downloadBackend(async () => ({
+      outcome: "download-failed",
+      reason: "native-save-dialog-suspected"
+    }));
+
+    const result = await browserDownloadTool(backend, root, new ArtifactStore()).run(groundedInput());
+
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: {
+        outcome: "download-failed",
+        reason: "native-save-dialog-suspected"
+      }
+    });
+    expect(result.content).toContain("do not click the page download control again");
+    expect(result.content).toContain("runtime must suppress the native prompt");
+  });
+
   it("retains YAML Swagger content and records its authoritative hash", async () => {
     const root = await temporaryRoot();
     const artifactStore = new ArtifactStore({ id: () => "artifact-yaml" });

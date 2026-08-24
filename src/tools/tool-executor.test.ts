@@ -319,6 +319,46 @@ describe("ToolExecutor exception containment", () => {
     expect(await persistedExecutionState(sessionDb, trajectoryRecorder)).not.toContain("timeout-secret");
   });
 
+  it("waits briefly for trusted abort cleanup before classifying an exclusive resource as unsettled", async () => {
+    const tool: RegisteredTool = {
+      ...createEchoTool("browser.type"),
+      toolsets: ["browser"],
+      executionTimeoutMs: 10,
+      executionAbortSettlementGraceMs: 100,
+      executionConcurrency: {
+        mode: "exclusive",
+        resourceKey: () => "browser:test-session"
+      },
+      run: async (_input, context): Promise<ToolResult> => {
+        await new Promise<void>((resolvePromise) => {
+          context?.signal?.addEventListener("abort", () => {
+            setTimeout(resolvePromise, 5);
+          }, { once: true });
+        });
+        return { ok: false, content: "Protected input collection was cancelled." };
+      }
+    };
+    const { executor } = await setupExecutor({ tools: [tool] });
+
+    const record = await executor.executeTool({
+      tool: tool.name,
+      input: { ref: "@e1", protectedInput: { kind: "one-time-code", purpose: "Sign in" } },
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    expect(record?.settlement).toEqual({
+      terminalStatus: "timed_out",
+      dispatchState: "finished",
+      sideEffectState: "none",
+      timeoutMs: 10
+    });
+    expect(record?.result?.metadata).toMatchObject({
+      reason: "timeout",
+      dispatchState: "finished"
+    });
+  });
+
   it("marks a timed-out mutation uncertain and blocks an identical replay", async () => {
     const run = vi.fn(async (): Promise<ToolResult> => await new Promise<ToolResult>(() => undefined));
     const tool: RegisteredTool = {

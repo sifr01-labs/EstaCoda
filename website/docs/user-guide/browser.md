@@ -75,6 +75,10 @@ When one page requests several related protected values, such as an email and pa
 
 EstaCoda keeps the overall sign-in pending whenever the resulting page still asks for a challenge—even if that page also contains account-looking controls. Challenges are generic: they may be a 2FA code, passkey, security key, biometric step, CAPTCHA, push approval, device confirmation, or another verification method. Retry and resend actions continue the same Mission step. EstaCoda reports success only after the challenge departs through a causal browser transition and the destination provides authenticated-only evidence; submitting credentials or a challenge is not success by itself. Waiting for you to enter protected values does not consume the autonomous provider wall-clock budget.
 
+When a page shows one one-time-code field and one verification button, EstaCoda prompts for and submits the code through protected input in the same user turn. The code stays out of model context and ordinary chat. If collection times out, the runtime cancels the prompt, allows a short cleanup window, and keeps the browser session usable once that cleanup finishes.
+
+Governed page downloads are captured into runtime-managed storage. Supervised isolated sessions apply download behavior to the correct browser context, and auto-launched temporary Chrome profiles disable native Save prompts. EstaCoda cannot click an operating-system Save dialog. If one still appears, the download fails with a specific diagnostic instead of repeatedly clicking the page control.
+
 Snapshot summarization is controlled by:
 
 - `browser.summarizeSnapshots`: `false`, `true`, or `"auto"`

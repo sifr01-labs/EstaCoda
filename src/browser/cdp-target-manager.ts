@@ -109,7 +109,7 @@ export class CdpTargetManager {
       );
 
       const pageWebSocketDebuggerUrl = await this.#findPageWebSocketDebuggerUrl(targetId);
-      supervisor = await this.#createPageSupervisor(pageWebSocketDebuggerUrl);
+      supervisor = await this.#createPageSupervisor(pageWebSocketDebuggerUrl, browserContextId);
       const handle = new ManagedTargetHandle({
         browserContextId,
         targetId,
@@ -255,7 +255,7 @@ export class CdpTargetManager {
     if (target === undefined) {
       throw new Error(`CDP page target ${requestedTargetId} is not available in browser context ${contextId}.`);
     }
-    const supervisor = await this.#createPageSupervisor(target.pageWebSocketDebuggerUrl);
+    const supervisor = await this.#createPageSupervisor(target.pageWebSocketDebuggerUrl, contextId);
     let closed = false;
     return {
       ...target,
@@ -373,10 +373,14 @@ export class CdpTargetManager {
     return payload.targetInfos as TargetInfo[];
   }
 
-  async #createPageSupervisor(pageWebSocketDebuggerUrl: string): Promise<CdpTargetSupervisor> {
+  async #createPageSupervisor(
+    pageWebSocketDebuggerUrl: string,
+    browserContextId: string
+  ): Promise<CdpTargetSupervisor> {
     try {
       return await this.#supervisorFactory({
-        webSocketUrl: pageWebSocketDebuggerUrl
+        webSocketUrl: pageWebSocketDebuggerUrl,
+        browserContextId
       });
     } catch (error) {
       throw new Error(`Failed to create CDP page supervisor for target websocket ${pageWebSocketDebuggerUrl}: ${errorMessage(error)}`, {

@@ -212,6 +212,11 @@ export type RegisteredTool<TInput = any> = ToolDefinition & {
   executionConcurrency?: RegisteredToolExecutionConcurrency<TInput>;
   /** Runtime-only handler deadline override; never projected into provider schemas. */
   executionTimeoutMs?: number;
+  /**
+   * Bounded time to let an aborted handler finish trusted cleanup before its
+   * exclusive execution resource is treated as unsettled.
+   */
+  executionAbortSettlementGraceMs?: number;
   isAvailable(): Promise<boolean> | boolean;
   resolveSecurity?(input: TInput, context: ToolSecurityResolverContext): Promise<ToolSecurityResolution | undefined> | ToolSecurityResolution | undefined;
   run: ToolHandler<TInput>;

@@ -155,6 +155,25 @@ describe("compactBrowserSnapshot", () => {
     expect(result.content).toContain("identity={\"documentEpoch\":2,\"actionRevision\":4,\"observationId\":7}");
   });
 
+  it("directs a visible one-time-code challenge into immediate protected submission", () => {
+    const result = compactBrowserSnapshot(snapshot({
+      url: "https://portal.example.com/challenge",
+      title: "Verify account",
+      text: "Enter the verification code from your authenticator app.",
+      elements: [
+        { ref: "@e19", role: "textbox", name: "Verification code", label: "One-time code" },
+        { ref: "@e20", role: "button", name: "Verify", withinText: "Two-factor authentication" }
+      ]
+    }), { maxChars: 2_000 });
+
+    expect(result.content).toContain("Protected one-time-code challenge detected.");
+    expect(result.content).toContain("Do not ask the user to send the code in ordinary chat.");
+    expect(result.content).toContain("Call browser.type now with ref=@e19");
+    expect(result.content).toContain("protectedInput.kind=one-time-code");
+    expect(result.content).toContain("submitRef=@e20");
+    expect(result.content).not.toContain("browser.fill_protected_form");
+  });
+
   it("soft-hints a grounded API description export without forcing a workflow", () => {
     const result = compactBrowserSnapshot(snapshot({
       text: "OAuth V1 documentation",
