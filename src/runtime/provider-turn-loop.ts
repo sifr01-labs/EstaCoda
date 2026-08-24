@@ -15,7 +15,7 @@ import type {
   ProviderUsage,
   ResolvedModelRoute
 } from "../contracts/provider.js";
-import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
+import type { ProviderToolInventoryEvent, RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision } from "../contracts/security.js";
 import type { ProviderImageInput, ProviderUsageContext, ProviderUsageLineage } from "../contracts/provider-usage.js";
 import type {
@@ -60,6 +60,7 @@ import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { RunRecorder } from "./run-recorder.js";
 import type { ToolPlanRunner } from "./tool-plan-runner.js";
 import type { SkillSetupContext } from "./agent-loop.js";
+import type { ProviderToolExpansionCandidate } from "./provider-tool-narrowing.js";
 import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { emit, isAborted } from "../utils/runtime-helpers.js";
 import { visionInputProvenanceForTurn } from "../vision/vision-egress-policy.js";
@@ -254,6 +255,8 @@ export class ProviderTurnLoop {
     attachments: ChannelAttachment[] | undefined;
     memoryPromptContext: MemoryPromptContext | undefined;
     providerTools: OpenAICompatibleToolSchema[];
+    toolExpansionCandidates?: readonly ProviderToolExpansionCandidate[];
+    connectorInventory?: ProviderToolInventoryEvent["connectors"];
     preflightCompression?: PromptSemanticCompressionReport;
     conversationContinuationState?: ConversationContinuationState;
     fallbackText: string;
@@ -300,7 +303,8 @@ export class ProviderTurnLoop {
     let toolFeedbackLedger = createTurnToolFeedbackLedger();
     let providerCallsThisTurn = 0;
     let providerTokensThisTurn = 0;
-    const activeProviderTools = input.providerTools;
+    let activeProviderTools = [...input.providerTools];
+    let toolExpansionUsed = false;
     const workingSessionId = this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
     const foregroundTurnId = runtimeForegroundTurnId(
       input.visibleTurnId,
@@ -659,6 +663,36 @@ export class ProviderTurnLoop {
       const repeatedFailureBudgetExceeded = this.#recordRepeatedToolFailures(loopToolExecutions, repeatedFailures);
       const supervisionAssessment = executionSupervision.assessProgress(loopToolExecutions);
       const { browserObservation, toolLoopProgress, runtimeUserInputBlocker } = supervisionAssessment;
+      const canContinueWithExpandedInventory =
+        runtimeUserInputBlocker === undefined &&
+        supervisionAssessment.terminationCause === undefined &&
+        repeatedFailureBudgetExceeded === undefined &&
+        browserObservation?.shouldStop !== true &&
+        !toolLoopProgress.shouldStop &&
+        iteration + consumedProviderIterations < this.#budgets.maxProviderIterations &&
+        providerToolExecutions.length < this.#budgets.maxProviderToolCalls;
+      if (
+        !toolExpansionUsed &&
+        canContinueWithExpandedInventory &&
+        browserObservation?.visualEscalationReason !== undefined
+      ) {
+        const additions = (input.toolExpansionCandidates ?? [])
+          .filter((candidate) => candidate.source === "active-browser")
+          .filter((candidate) => !activeProviderTools.some((tool) => tool.function.name === candidate.schema.function.name));
+        if (additions.length > 0) {
+          activeProviderTools = [...activeProviderTools, ...additions.map((candidate) => candidate.schema)];
+          toolExpansionUsed = true;
+          await this.#runRecorder.recordProviderToolInventory({
+            kind: "provider-tool-inventory",
+            phase: "expanded",
+            tools: activeProviderTools.map((tool) => tool.function.name),
+            addedTools: additions.map((candidate) => candidate.schema.function.name),
+            expansionReason: `browser:${browserObservation.visualEscalationReason}`,
+            nativeSchemaTokens: estimateTextTokensRough(JSON.stringify(activeProviderTools)),
+            connectors: input.connectorInventory ?? []
+          }, input.onEvent);
+        }
+      }
       if (supervisionAssessment.terminationCause !== undefined) {
         terminationCause = supervisionAssessment.terminationCause;
       }

@@ -28,6 +28,10 @@ description: "MCP client transport, discovery, and trust metadata."
 5. Discovered tools registered into normal tool registry
 6. Optional wrappers for `resource.list`, `resource.read`, `prompt.list`, `prompt.get`
 
+Configured server descriptors survive independently of callable tool registration. Runtime and status surfaces distinguish `configured`, `connected`, `schemas registered`, `available`, and `exposed this turn`. A disabled server, missing environment reference, startup failure, schema-validation failure, or connected server with no callable schemas therefore remains discoverable by name and reports its bounded failure stage instead of disappearing from routing. `available` means callable schemas survived registration and normal availability checks; `exposed this turn` means at least one of those registered tools entered the current bounded provider inventory.
+
+Naming a configured but unavailable connector does not expose tools. It lets routing and governed-transfer preflight diagnose the connector outage together with all missing reviewed artifact, protected-input, result-redaction, and verification configuration. Reload or repair remains explicit.
+
 ## Credentials
 
 - `env` supplies literal, non-secret values to stdio servers.
@@ -183,7 +187,7 @@ When the source portal exposes OpenAPI or Swagger, capture it with `browser.down
 
 Read back the environment with `getEnvironment` and the collection with `getCollection`. The output rule removes every environment variable value while preserving the environment name, variable keys, enabled state, and type for verification. `putEnvironment` replaces environment state; read the existing dedicated environment first and preserve all intended fields rather than using it as a partial patch.
 
-After applying the recipe, reload MCP discovery and inspect `mcp status`. Protected delivery, grouped delivery, browser relay, artifact relay, result redaction, and verification should all report `yes`. A missing tool, changed input schema, invalid pointer, or non-JSON result that cannot be safely redacted fails closed without dispatching or returning the unreviewed data.
+After applying the recipe, reload MCP discovery and inspect `mcp status`. It should report configured, enabled, connected, schemas registered, and available as `yes`; the in-session `config.mcp.status` tool also reports whether the connector was exposed in the current turn. Protected delivery, grouped delivery, browser relay, artifact relay, result redaction, and verification should all report `yes`. A missing tool, changed input schema, invalid pointer, or non-JSON result that cannot be safely redacted fails closed without dispatching or returning the unreviewed data.
 
 At execution time, the runtime copies only the validated connector and verification relationship into its bounded effect receipt. A successful verifier is associated with the most recent compatible successful mutation from the same visible turn, using target identity when both calls provide one. MCP results and model-authored plan text cannot create or override that relationship.
 

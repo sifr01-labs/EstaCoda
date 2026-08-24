@@ -35,6 +35,7 @@ export type SessionToolContext = {
   imageCacheRoot?: string;
   browserBackend?: import("./browser.js").BrowserBackend;
   browserConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["browser"], "summarizeSnapshots" | "snapshotSummarizeThreshold">;
+  mcpServerSnapshots?: readonly import("../mcp/mcp-tools.js").MCPServerSnapshot[];
   mainRoute?: import("./provider.js").ResolvedModelRoute;
   mainFallbackRoutes?: import("./provider.js").ResolvedModelRoute[];
   visionRoute?: import("./provider.js").ResolvedAuxiliaryRoute;

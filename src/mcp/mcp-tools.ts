@@ -10,12 +10,17 @@ import { MCPClient, type MCPFetchLike, type MCPPromptDescriptor, type MCPResourc
 export type MCPServerSnapshot = {
   name: string;
   transport: string;
+  configured: true;
+  enabled: boolean;
+  connected: boolean;
+  schemasRegistered: boolean;
   toolCount: number;
   resourceCount: number;
   promptCount: number;
   tools: string[];
   capabilities: MCPServerCapabilitySummary;
   available: boolean;
+  failureStage?: "configuration" | "connection" | "schema-registration" | "availability";
   error?: string;
 };
 
@@ -47,20 +52,29 @@ export async function loadMcpServers(input: {
 
   for (const [name, config] of Object.entries(input.servers)) {
     if (config.enabled === false) {
+      loaded.push(unavailableServer(name, config, "MCP server is disabled.", {
+        failureStage: "configuration"
+      }));
       continue;
     }
     const transport = config.transport ?? "stdio";
     if (transport === "stdio" && (typeof config.command !== "string" || config.command.trim().length === 0)) {
-      loaded.push(unavailableServer(name, config, "MCP stdio server requires a command."));
+      loaded.push(unavailableServer(name, config, "MCP stdio server requires a command.", {
+        failureStage: "configuration"
+      }));
       continue;
     }
     if (transport === "http" && (typeof config.url !== "string" || config.url.trim().length === 0)) {
-      loaded.push(unavailableServer(name, config, "MCP HTTP server requires a url."));
+      loaded.push(unavailableServer(name, config, "MCP HTTP server requires a url.", {
+        failureStage: "configuration"
+      }));
       continue;
     }
     const resolvedEnvironment = resolveMcpEnvironment(config, input.environment ?? process.env);
     if (!resolvedEnvironment.ok) {
-      loaded.push(unavailableServer(name, config, resolvedEnvironment.error));
+      loaded.push(unavailableServer(name, config, resolvedEnvironment.error, {
+        failureStage: "configuration"
+      }));
       continue;
     }
 
@@ -78,8 +92,10 @@ export async function loadMcpServers(input: {
       fetch: input.fetch
     });
 
+    let connected = false;
     try {
       await client.start();
+      connected = true;
       const allTools = await client.listTools();
       const capabilityConfigError = validateMcpCapabilityConfiguration(config, allTools);
       if (capabilityConfigError !== undefined) throw new Error(capabilityConfigError);
@@ -103,18 +119,34 @@ export async function loadMcpServers(input: {
         snapshot: {
           name,
           transport,
+          configured: true,
+          enabled: true,
+          connected: true,
+          schemasRegistered: tools.length > 0,
           toolCount: filteredTools.length,
           resourceCount: resources.length,
           promptCount: prompts.length,
           tools: tools.map((tool) => tool.name),
           capabilities: summarizeMcpCapabilityConfig(config),
-          available: true
+          available: tools.length > 0,
+          ...(tools.length > 0 ? {} : {
+            failureStage: "availability" as const,
+            error: "MCP server registered no callable tool schemas."
+          })
         },
         stop: () => client.stop()
       });
     } catch (error) {
       await client.stop().catch(() => undefined);
-      loaded.push(unavailableServer(name, config, error instanceof Error ? error.message : String(error)));
+      loaded.push(unavailableServer(
+        name,
+        config,
+        error instanceof Error ? error.message : String(error),
+        {
+          connected,
+          failureStage: connected ? "schema-registration" : "connection"
+        }
+      ));
     }
   }
 
@@ -153,7 +185,15 @@ function isEnvironmentVariableName(value: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*$/u.test(value);
 }
 
-function unavailableServer(name: string, config: MCPServerConfig, error: string): LoadedMCPServer {
+function unavailableServer(
+  name: string,
+  config: MCPServerConfig,
+  error: string,
+  state: {
+    connected?: boolean;
+    failureStage: NonNullable<MCPServerSnapshot["failureStage"]>;
+  }
+): LoadedMCPServer {
   return {
     name,
     client: {
@@ -163,13 +203,18 @@ function unavailableServer(name: string, config: MCPServerConfig, error: string)
     snapshot: {
       name,
       transport: config.transport ?? "stdio",
+      configured: true,
+      enabled: config.enabled !== false,
+      connected: state.connected === true,
+      schemasRegistered: false,
       toolCount: 0,
       resourceCount: 0,
       promptCount: 0,
       tools: [],
       capabilities: summarizeMcpCapabilityConfig(config),
       available: false,
-      error
+      failureStage: state.failureStage,
+      error: redactSensitiveText(error)
     },
     stop: async () => undefined
   };

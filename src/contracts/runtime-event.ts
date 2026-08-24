@@ -24,8 +24,27 @@ export type ContextEstimateStage =
   | "provider-tool-feedback"
   | "assembled-prompt";
 
+export type ProviderToolInventoryEvent = {
+  kind: "provider-tool-inventory";
+  phase: "initial" | "expanded";
+  tools: string[];
+  addedTools: string[];
+  expansionReason?: string;
+  nativeSchemaTokens: number;
+  connectors: Array<{
+    kind: "mcp";
+    id: string;
+    configured: boolean;
+    connected: boolean;
+    schemasRegistered: boolean;
+    available: boolean;
+    exposedThisTurn: boolean;
+  }>;
+};
+
 export type RuntimeEvent =
   | ExecutionPlanLifecycleEvent
+  | ProviderToolInventoryEvent
   | {
       kind: "authentication-lifecycle";
       stage:

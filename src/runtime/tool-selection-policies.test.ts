@@ -53,7 +53,7 @@ describe("tool selection policies", () => {
     }
   });
 
-  it("includes plan only for actionable or long-running policies", () => {
+  it("includes plan only for genuinely multi-step eligible policies", () => {
     expect(shouldIncludePlan({
       policy: TOOL_SELECTION_POLICIES.conversation,
       userText: "hello"
@@ -61,6 +61,10 @@ describe("tool selection policies", () => {
     expect(shouldIncludePlan({
       policy: TOOL_SELECTION_POLICIES["repo-modification"],
       userText: "change one file"
+    })).toBe(false);
+    expect(shouldIncludePlan({
+      policy: TOOL_SELECTION_POLICIES["repo-modification"],
+      userText: "change the file and run validation"
     })).toBe(true);
     expect(shouldIncludePlan({
       policy: TOOL_SELECTION_POLICIES["repo-inspection"],
@@ -69,6 +73,11 @@ describe("tool selection policies", () => {
     expect(shouldIncludePlan({
       policy: TOOL_SELECTION_POLICIES["repo-inspection"],
       userText: "inspect all modules across the repository"
+    })).toBe(true);
+    expect(shouldIncludePlan({
+      policy: TOOL_SELECTION_POLICIES.conversation,
+      userText: "run the selected skill",
+      selectedSkillPlaybookSteps: 3
     })).toBe(true);
   });
 });

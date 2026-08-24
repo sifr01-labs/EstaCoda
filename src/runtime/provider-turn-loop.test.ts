@@ -368,6 +368,7 @@ async function runBasicProviderTurn(
     visibleTurnId?: string;
     userText?: string;
     providerTools?: OpenAICompatibleToolSchema[];
+    toolExpansionCandidates?: Parameters<ProviderTurnLoop["run"]>[0]["toolExpansionCandidates"];
     providerToolSchemaCatalog?: ProviderToolSchemaCatalog;
     signal?: AbortSignal;
     onSecureInputRequest?: SecureInputRequestHandler;
@@ -390,6 +391,7 @@ async function runBasicProviderTurn(
     attachments: callbacks.attachments,
     memoryPromptContext: undefined,
     providerTools: callbacks.providerTools ?? [],
+    toolExpansionCandidates: callbacks.toolExpansionCandidates,
     fallbackText: "",
     toolPlans: callbacks.toolPlans ?? [],
     trustedWorkspace: false,
@@ -3462,6 +3464,102 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(harness.executePlans.mock.calls[4]?.[0].providerExecution?.toolCalls[0]?.argumentsText).toBe(
       JSON.stringify({ ref: "@e7", tabRef: "@t1" })
     );
+  });
+
+  it("expands the active browser toolbox once after authoritative visual-escalation evidence", async () => {
+    const noChangeClick: ToolExecutionRecord = {
+      ...toolExecutionForTool("call-click", "browser.click", "The action was dispatched but the page did not change."),
+      input: { ref: "@e6", tabRef: "@t1" },
+      targetKey: "browser:browser-session:@t1:@e6",
+      result: {
+        ok: true,
+        content: "The action was dispatched but the page did not change.",
+        metadata: {
+          snapshot: {
+            sessionId: "browser-session",
+            url: "https://example.com/apps",
+            actionDelta: { outcome: "no-change", actionDispatched: true }
+          }
+        }
+      }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-click", JSON.stringify({ ref: "@e6", tabRef: "@t1" }), "browser.click")]),
+        providerExecution("Recovered with visual inspection.")
+      ],
+      toolSteps: [{ executions: [noChangeClick] }],
+      maxProviderIterations: 3
+    });
+    const events: RuntimeEvent[] = [];
+    await runBasicProviderTurn(harness.loop, {
+      providerTools: [toolProviderSchema("browser_click")],
+      toolExpansionCandidates: [{
+        toolName: "browser.vision",
+        source: "active-browser",
+        schema: toolProviderSchema("browser_vision")
+      }],
+      onEvent: (event) => events.push(event)
+    });
+
+    const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
+    expect((requests[0]?.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name))
+      .toEqual(["browser_click"]);
+    expect((requests[1]?.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name))
+      .toEqual(["browser_click", "browser_vision"]);
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "provider-tool-inventory",
+      phase: "expanded",
+      addedTools: ["browser_vision"],
+      expansionReason: "browser:native-action-no-change"
+    }));
+    const persisted = await harness.sessionDb.listEvents(harness.sessionId);
+    expect(persisted.filter((event) => event.kind === "provider-tool-inventory")).toHaveLength(1);
+  });
+
+  it("does not record an expansion when no provider iteration remains to receive it", async () => {
+    const noChangeClick: ToolExecutionRecord = {
+      ...toolExecutionForTool("call-click", "browser.click", "The action was dispatched but the page did not change."),
+      input: { ref: "@e6", tabRef: "@t1" },
+      targetKey: "browser:browser-session:@t1:@e6",
+      result: {
+        ok: true,
+        content: "The action was dispatched but the page did not change.",
+        metadata: {
+          snapshot: {
+            sessionId: "browser-session",
+            url: "https://example.com/apps",
+            actionDelta: { outcome: "no-change", actionDispatched: true }
+          }
+        }
+      }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-click", JSON.stringify({ ref: "@e6", tabRef: "@t1" }), "browser.click")])
+      ],
+      toolSteps: [{ executions: [noChangeClick] }],
+      maxProviderIterations: 1
+    });
+    const events: RuntimeEvent[] = [];
+
+    await runBasicProviderTurn(harness.loop, {
+      providerTools: [toolProviderSchema("browser_click")],
+      toolExpansionCandidates: [{
+        toolName: "browser.vision",
+        source: "active-browser",
+        schema: toolProviderSchema("browser_vision")
+      }],
+      onEvent: (event) => events.push(event)
+    });
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(1);
+    expect(events).not.toContainEqual(expect.objectContaining({
+      kind: "provider-tool-inventory",
+      phase: "expanded"
+    }));
+    const persisted = await harness.sessionDb.listEvents(harness.sessionId);
+    expect(persisted.filter((event) => event.kind === "provider-tool-inventory")).toHaveLength(0);
   });
 
   it("stops a repeated unresolved target after one bounded retargeting opportunity", async () => {

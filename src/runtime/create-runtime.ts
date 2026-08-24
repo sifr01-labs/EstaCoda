@@ -893,6 +893,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       providerExecutor,
       routes: agentLoopRoutes,
       mcpTools,
+      mcpServerSnapshots: loadedMcpServers.map((server) => server.snapshot),
       skillRegistry,
       localSkillsRoot,
       bundledSkillsRoot: bundledSkillsDir,
@@ -1425,7 +1426,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         `security: ${activeSecurityMode}${activeSecurityMode === "open" ? " (YOLO)" : ""}`,
         `skills: ${sessionSkillCatalog.length} (${options.skillAutonomy ?? "suggest"})`,
         `tools: ${toolRegistry.list().length}`,
-        `mcp: ${loadedMcpServers.filter((server) => server.snapshot.available).length}/${loadedMcpServers.length}`,
+        `mcp: ${loadedMcpServers.filter((server) => server.snapshot.available).length}/${loadedMcpServers.filter((server) => server.snapshot.enabled).length}`,
         skillLoadWarnings.length === 0 ? undefined : `skill load warnings: ${skillLoadWarnings.length}`,
         "status: ready"
       ].filter((line) => line !== undefined).join("\n");
@@ -1484,7 +1485,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         skillAutonomy: options.skillAutonomy ?? "suggest",
         toolCount: toolRegistry.list().length,
         mcpActive: loadedMcpServers.filter((server) => server.snapshot.available).length,
-        mcpTotal: loadedMcpServers.length,
+        mcpTotal: loadedMcpServers.filter((server) => server.snapshot.enabled).length,
         warnings: skillLoadWarnings.map((message) =>
           buildWarningErrorViewModel({ severity: "warn", title: "Skill load", message })
         ),
@@ -1512,7 +1513,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           runtimeBranding.taglineSecondary,
         ].filter((t) => t.length > 0),
         model: { provider: options.model.provider, id: options.model.id },
-        readiness: skillLoadWarnings.length > 0 || loadedMcpServers.some((s) => !s.snapshot.available)
+        readiness: skillLoadWarnings.length > 0 || loadedMcpServers.some((s) => s.snapshot.enabled && !s.snapshot.available)
           ? "degraded"
           : "ready",
         warnings: skillLoadWarnings.map((message) =>

@@ -54,6 +54,7 @@ import type { FetchLike as WebFetchLike } from "../tools/web-tools.js";
 import type { ImageGenerationFetchLike } from "../tools/image-generation-tools.js";
 import type { VoiceFetchLike } from "../tools/voice-tools.js";
 import type { FasterWhisperWorker } from "../tools/stt-local-whisper.js";
+import type { MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import type { ProcessManager } from "../process/process-manager.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { AgentLoop, type AgentLoopOptions } from "./agent-loop.js";
@@ -150,6 +151,7 @@ export type AgentLoopRuntimeSubstrate = {
   providerExecutor: ProviderExecutor;
   routes: AgentLoopRouteInput;
   mcpTools: readonly RegisteredTool[];
+  mcpServerSnapshots?: readonly MCPServerSnapshot[];
   skillRegistry: SkillRegistry;
   localSkillsRoot: string;
   bundledSkillsRoot: string;
@@ -323,7 +325,8 @@ export class AgentLoopBuilder {
     executionEvidenceIndex.hydrate(persistedSessionEvents);
     const executionCapabilityPreflight = new ExecutionCapabilityPreflight({
       registry: toolRegistry,
-      browserSourceAvailable: () => substrate.browserBackend.isAvailable()
+      browserSourceAvailable: () => substrate.browserBackend.isAvailable(),
+      configuredConnectors: substrate.mcpServerSnapshots
     });
     const executionPlanController = ownsExecutionPlan
       ? new ExecutionPlanController(
@@ -404,6 +407,7 @@ export class AgentLoopBuilder {
         imageCacheRoot: substrate.imageCacheRoot,
         browserBackend: substrate.browserBackend,
         browserConfig: substrate.browserConfig,
+        mcpServerSnapshots: substrate.mcpServerSnapshots,
         mainRoute: routes.mainRoute,
         mainFallbackRoutes: routes.modelFallbackRoutes,
         visionRoute: routes.visionRoute,
@@ -665,6 +669,7 @@ export class AgentLoopBuilder {
       projectContext: input.projectContext ?? substrate.projectContext,
       providerTools: providerToolSchemaCatalog.tools,
       providerToolSchemaCatalog: ownsExecutionPlan ? providerToolSchemaCatalog : undefined,
+      mcpServerSnapshots: substrate.mcpServerSnapshots,
       executionCompletionCapabilities,
       soul: undefined,
       skillsIndex: sessionSkillCatalog,
@@ -822,6 +827,7 @@ function buildPreSkillVisibilityToolContext(input: SessionToolContext): SessionT
     imageCacheRoot: input.imageCacheRoot,
     browserBackend: input.browserBackend,
     browserConfig: input.browserConfig,
+    mcpServerSnapshots: input.mcpServerSnapshots,
     mainRoute: input.mainRoute,
     mainFallbackRoutes: input.mainFallbackRoutes,
     visionRoute: input.visionRoute,

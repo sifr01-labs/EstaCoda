@@ -26,6 +26,7 @@ import {
 } from "../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import { summarizeMcpCapabilityConfig } from "../mcp/mcp-tools.js";
+import type { MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import {
   diagnoseProviderConfig,
   formatProviderTruthStatus,
@@ -38,6 +39,7 @@ export type ConfigToolsOptions = {
   profileId?: string;
   sessionId?: string | (() => string);
   sessionDb?: Pick<SessionDB, "listEvents"> & Partial<Pick<SessionDB, "getSessionModelOverride" | "listMessages">>;
+  mcpServerSnapshots?: readonly MCPServerSnapshot[];
 };
 
 export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[] {
@@ -401,7 +403,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
     },
     {
       name: "config.mcp.status",
-      description: "Show configured MCP servers and config sources.",
+      description: "Show configured MCP connector lifecycle, current-turn exposure, capabilities, and config sources.",
       inputSchema: {
         type: "object",
         properties: {}
@@ -414,6 +416,12 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
       run: async () => {
         const loaded = await loadRuntimeConfig(options);
         const servers = Object.entries(loaded.mcp.servers);
+        const snapshots = options.mcpServerSnapshots ?? [];
+        const sessionId = typeof options.sessionId === "function" ? options.sessionId() : options.sessionId;
+        const events = sessionId === undefined || options.sessionDb === undefined
+          ? []
+          : await options.sessionDb.listEvents(sessionId).catch(() => []);
+        const latestInventory = [...events].reverse().find((event) => event.kind === "provider-tool-inventory");
         return {
           ok: true,
           content: servers.length === 0
@@ -426,10 +434,19 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
                 "MCP servers",
                 ...servers.map(([name, server]) =>
                   (() => {
+                    const snapshot = snapshots.find((candidate) => candidate.name === name);
+                    const exposure = latestInventory?.connectors.find((candidate) => candidate.id === name);
                     const capabilities = summarizeMcpCapabilityConfig(server);
                     return [
                     `${name}`,
+                    `  configured: yes`,
                     `  enabled: ${server.enabled === false ? "no" : "yes"}`,
+                    `  connected: ${snapshot === undefined ? "unknown" : snapshot.connected ? "yes" : "no"}`,
+                    `  schemas registered: ${snapshot === undefined ? "unknown" : snapshot.schemasRegistered ? "yes" : "no"}`,
+                    `  available: ${snapshot === undefined ? "unknown" : snapshot.available ? "yes" : "no"}`,
+                    `  exposed this turn: ${exposure === undefined ? "unknown" : exposure.exposedThisTurn ? "yes" : "no"}`,
+                    snapshot?.failureStage === undefined ? undefined : `  failure stage: ${snapshot.failureStage}`,
+                    snapshot?.error === undefined ? undefined : `  error: ${snapshot.error}`,
                     `  transport: ${server.transport ?? "stdio"}`,
                     `  trust: ${server.trust ?? "conservative"}`,
                     server.command === undefined ? undefined : `  command: ${server.command}`,
@@ -450,7 +467,10 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
               ].join("\n"),
           metadata: {
             servers: servers.map(([name, server]) => ({
+              ...(snapshots.find((candidate) => candidate.name === name) ?? {}),
+              exposedThisTurn: latestInventory?.connectors.find((candidate) => candidate.id === name)?.exposedThisTurn,
               name,
+              configured: true,
               enabled: server.enabled !== false,
               transport: server.transport ?? "stdio",
               trust: server.trust ?? "conservative",
@@ -835,7 +855,8 @@ export const configToolProvider: SessionToolProvider = {
       homeDir: ctx.homeDir,
       profileId: ctx.profileId,
       sessionId: ctx.currentSessionId,
-      sessionDb: requireProviderDependency("config", "sessionDb", ctx.sessionDb)
+      sessionDb: requireProviderDependency("config", "sessionDb", ctx.sessionDb),
+      mcpServerSnapshots: ctx.mcpServerSnapshots
     });
   }
 };

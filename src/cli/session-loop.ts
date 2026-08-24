@@ -1816,7 +1816,7 @@ export async function handleSlashCommand(input: {
         runtime: await input.refreshRuntime({ preserveSession: true }),
         notice: (runtime) => {
           const snapshots = runtime.inspectMcpServers();
-          const configured = snapshots.length;
+          const configured = snapshots.filter((snapshot) => snapshot.enabled).length;
           const ready = snapshots.filter((snapshot) => snapshot.available).length;
           return [
             "Reloaded MCP configuration for this session.",

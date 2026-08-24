@@ -577,7 +577,8 @@ describe("AgentLoop provider availability gating", () => {
     const assessRoutedGovernedTransfer = vi.fn(async () => ({
       status: "blocked" as const,
       connectorId: "postman",
-      reasonCode: "artifact_import_missing" as const
+      reasonCode: "artifact_import_missing" as const,
+      reasonCodes: ["artifact_import_missing"] as const
     }));
     const runSkillPlaybook = vi.fn(async () => []);
     const { loop, providerTurnLoop, nativeToolExecutor } = await createAgentLoop({
@@ -698,7 +699,7 @@ describe("AgentLoop provider availability gating", () => {
         connector: { kind: "mcp", id: "linear" }
       }
     ];
-    const { loop, providerTurnLoop } = await createAgentLoop({
+    const { loop, providerTurnLoop, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: true,
       runSkillPlaybook: vi.fn(async () => []),
       providerExecution: successfulProviderExecution("done"),
@@ -716,10 +717,14 @@ describe("AgentLoop provider availability gating", () => {
     const runInput = vi.mocked(providerTurnLoop.run).mock.calls[0]?.[0] as {
       providerTools: Array<{ function: { name: string } }>;
     };
-    expect(runInput.providerTools.map((entry) => entry.function.name)).toEqual([
-      "plan",
-      "collections_get"
-    ]);
+    expect(runInput.providerTools.map((entry) => entry.function.name)).toEqual(["collections_get"]);
+    expect(await sessionDb.listEvents(sessionId)).toContainEqual(expect.objectContaining({
+      kind: "provider-tool-inventory",
+      phase: "initial",
+      tools: ["collections_get"],
+      addedTools: ["collections_get"],
+      nativeSchemaTokens: expect.any(Number)
+    }));
   });
 
   it("keeps browser actions beside Postman for the active-session wording from the MTN journey", async () => {

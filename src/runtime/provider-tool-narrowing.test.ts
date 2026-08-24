@@ -4,7 +4,7 @@ import type { IntentRoute } from "../contracts/intent.js";
 import type { SkillDefinition } from "../contracts/skill.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import { buildProviderToolSchemaCatalog } from "../tools/tool-schema.js";
-import { narrowProviderToolsForTurn } from "./provider-tool-narrowing.js";
+import { narrowProviderToolsForTurn, selectProviderToolsForTurn } from "./provider-tool-narrowing.js";
 
 function tool(
   name: string,
@@ -89,7 +89,6 @@ describe("narrowProviderToolsForTurn", () => {
       intent: intent(0.35),
       userText: "Add these requests to Postman."
     }))).toEqual([
-      "plan",
       "mcp_postman_getCollection",
       "mcp_postman_updateCollection"
     ]);
@@ -180,7 +179,6 @@ describe("narrowProviderToolsForTurn", () => {
       intent: intent(0.4),
       userText: "Use Linear Cloud to inspect the workspaces."
     }))).toEqual([
-      "plan",
       "workspaces_list"
     ]);
   });
@@ -277,7 +275,6 @@ describe("narrowProviderToolsForTurn", () => {
     };
 
     expect(names(narrowProviderToolsForTurn({ catalog, intent: browserIntent }))).toEqual([
-      "plan",
       "browser_snapshot",
       "browser_click",
       "browser_tabs",
@@ -285,7 +282,7 @@ describe("narrowProviderToolsForTurn", () => {
     ]);
   });
 
-  it("includes routed, required, and available optional toolsets without implicit core tools", () => {
+  it("includes routed and available non-connector skill toolsets without unrelated MCP connectors", () => {
     const catalog = buildProviderToolSchemaCatalog({ tools });
     const skill: SkillDefinition = {
       name: "Postman",
@@ -309,11 +306,75 @@ describe("narrowProviderToolsForTurn", () => {
       "browser_snapshot",
       "browser_click",
       "browser_tabs",
-      "browser_switch_tab",
-      "mcp_postman_getCollection",
-      "mcp_postman_updateCollection",
-      "workspaces_list"
+      "browser_switch_tab"
     ]);
+  });
+
+  it("recognizes configured connectors even when they registered no callable schemas", () => {
+    const catalog = buildProviderToolSchemaCatalog({ tools: tools.filter((entry) => entry.connector === undefined) });
+    const selected = selectProviderToolsForTurn({
+      catalog,
+      intent: intent(0.4),
+      userText: "Import this Swagger spec into Postman.",
+      configuredConnectors: [{
+        name: "postman",
+        transport: "http",
+        configured: true,
+        enabled: true,
+        connected: false,
+        schemasRegistered: false,
+        toolCount: 0,
+        resourceCount: 0,
+        promptCount: 0,
+        tools: [],
+        capabilities: {
+          protectedDeliveryConfigured: false,
+          groupedDeliverySupported: false,
+          browserRelaySupported: false,
+          artifactRelayConfigured: false,
+          resultRedactionConfigured: false,
+          continuityConfigured: false,
+          verificationConfigured: false
+        },
+        available: false,
+        failureStage: "connection"
+      }]
+    });
+
+    expect(selected.namedConnectorIds).toEqual(["postman"]);
+    expect(selected.initialTools).toEqual([]);
+  });
+
+  it("adds the active browser and compact recovery tools for actionable work", () => {
+    const catalog = buildProviderToolSchemaCatalog({
+      tools: [
+        ...tools,
+        tool("browser.status", ["browser", "core"]),
+        tool("browser.vision", ["browser"]),
+        tool("config.mcp.status", ["core", "mcp"]),
+        tool("config.provider.status", ["core", "provider", "diagnostics"]),
+        tool("config.provider.execution_status", ["core", "provider", "diagnostics"])
+      ]
+    });
+    const selected = selectProviderToolsForTurn({
+      catalog,
+      intent: intent(0.7, [], "repo-inspection"),
+      userText: "Inspect the current implementation.",
+      continuity: { activeBrowser: true }
+    });
+
+    expect(names(selected.initialTools)).toEqual(expect.arrayContaining([
+      "file_read",
+      "terminal_inspect",
+      "browser_snapshot",
+      "browser_status",
+      "config_mcp_status",
+      "config_provider_status",
+      "config_provider_execution_status"
+    ]));
+    expect(names(selected.initialTools)).not.toContain("browser_vision");
+    expect(selected.expansionCandidates.map((candidate) => candidate.schema.function.name)).toEqual(["browser_vision"]);
+    expect(names(selected.initialTools)).not.toContain("workspaces_list");
   });
 
   it("keeps attachment-required tools without exposing unrelated toolsets", () => {

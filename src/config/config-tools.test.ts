@@ -742,6 +742,72 @@ describe("config.compression.status", () => {
 });
 
 describe("MCP capability configuration tools", () => {
+  it("reports connector lifecycle and current-turn exposure independently", async () => {
+    const homeDir = await configHome({
+      mcpServers: { postman: { transport: "http", url: "https://mcp.example.test" } }
+    });
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "session-1", profileId: "default" });
+    await sessionDb.appendEvent("session-1", {
+      kind: "provider-tool-inventory",
+      phase: "initial",
+      tools: ["config_mcp_status"],
+      addedTools: ["config_mcp_status"],
+      nativeSchemaTokens: 123,
+      connectors: [{
+        kind: "mcp",
+        id: "postman",
+        configured: true,
+        connected: false,
+        schemasRegistered: false,
+        available: false,
+        exposedThisTurn: false
+      }]
+    });
+    try {
+      const tools = createConfigTools({
+        workspaceRoot: homeDir,
+        homeDir,
+        profileId: "default",
+        sessionId: "session-1",
+        sessionDb,
+        mcpServerSnapshots: [{
+          name: "postman",
+          transport: "http",
+          configured: true,
+          enabled: true,
+          connected: false,
+          schemasRegistered: false,
+          toolCount: 0,
+          resourceCount: 0,
+          promptCount: 0,
+          tools: [],
+          capabilities: {
+            protectedDeliveryConfigured: false,
+            groupedDeliverySupported: false,
+            browserRelaySupported: false,
+            artifactRelayConfigured: false,
+            resultRedactionConfigured: false,
+            continuityConfigured: false,
+            verificationConfigured: false
+          },
+          available: false,
+          failureStage: "connection",
+          error: "connection failed"
+        }]
+      });
+      const status = await tools.find((tool) => tool.name === "config.mcp.status")?.run({});
+      expect(status?.content).toContain("configured: yes");
+      expect(status?.content).toContain("connected: no");
+      expect(status?.content).toContain("schemas registered: no");
+      expect(status?.content).toContain("available: no");
+      expect(status?.content).toContain("exposed this turn: no");
+      expect(status?.content).toContain("failure stage: connection");
+    } finally {
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it("exposes reviewed capability fields while keeping status metadata free of secrets and protected paths", async () => {
     const secret = "mcp-config-secret-sentinel";
     const homeDir = await configHome({

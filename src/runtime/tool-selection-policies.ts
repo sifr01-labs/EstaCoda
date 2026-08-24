@@ -107,9 +107,9 @@ export function shouldIncludePlan(input: {
   userText?: string;
   selectedSkillPlaybookSteps?: number;
 }): boolean {
+  if ((input.selectedSkillPlaybookSteps ?? 0) >= 3) return true;
   if (input.policy.plan === "never") return false;
-  if (input.policy.plan === "actionable") return true;
-  return looksLongRunning(input.userText ?? "") || (input.selectedSkillPlaybookSteps ?? 0) >= 3;
+  return looksLongRunning(input.userText ?? "");
 }
 
 export function isActionableToolRequest(userText: string): boolean {
@@ -151,5 +151,6 @@ function policyNameForTaskClass(
 function looksLongRunning(userText: string): boolean {
   const normalized = userText.normalize("NFKC").toLocaleLowerCase("en-US");
   return /\b(?:all|every|multiple|several|end[- ]to[- ]end|across|migrate|set\s+up|then|after that|step by step)\b/iu.test(normalized) ||
+    /\b(?:and|then)\s+(?:run|test|verify|validate|check|import|configure|connect|transfer|download|upload)\b/iu.test(normalized) ||
     /(?:كل|جميع|متعدد|عد[ّ]?ة|شامل|عبر|رح[ّ]?ل|إعداد|اعداد|ثم|بعد ذلك|خطوة بخطوة)/u.test(normalized);
 }

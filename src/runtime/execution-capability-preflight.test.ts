@@ -392,7 +392,8 @@ describe("ExecutionCapabilityPreflight", () => {
     })).resolves.toEqual({
       status: "blocked",
       connectorId: "postman",
-      reasonCode: "artifact_import_missing"
+      reasonCode: "artifact_import_missing",
+      reasonCodes: ["artifact_import_missing"]
     });
   });
 
@@ -407,10 +408,98 @@ describe("ExecutionCapabilityPreflight", () => {
     expect(result).toEqual({
       status: "blocked",
       connectorId: "postman",
-      reasonCode: "protected_arguments_missing"
+      reasonCode: "protected_arguments_missing",
+      reasonCodes: ["protected_arguments_missing"]
     });
     if (result?.status === "blocked") {
       expect(formatGovernedTransferBlocker({ result })).toContain("protected credential arguments");
+    }
+  });
+
+  it("reports every missing governed-transfer safeguard together", async () => {
+    const result = await new ExecutionCapabilityPreflight({
+      registry: governedConnectorRegistry({
+        artifact: false,
+        protected: false,
+        redaction: false,
+        verification: false
+      })
+    }).assessRoutedGovernedTransfer({
+      userText: "Transfer these API specifications and credentials into Postman.",
+      selectedSkillName: "api-integration"
+    });
+
+    expect(result).toEqual({
+      status: "blocked",
+      connectorId: "postman",
+      reasonCode: "artifact_import_missing",
+      reasonCodes: [
+        "artifact_import_missing",
+        "protected_arguments_missing",
+        "result_redaction_missing",
+        "verification_missing"
+      ]
+    });
+    if (result?.status === "blocked") {
+      const blocker = formatGovernedTransferBlocker({ result });
+      expect(blocker).toContain("artifactToolArguments");
+      expect(blocker).toContain("protectedToolArguments");
+      expect(blocker).toContain("redactedToolResultPaths");
+      expect(blocker).toContain("toolVerificationRelationships");
+    }
+  });
+
+  it("diagnoses a named configured connector even when startup registered no tools", async () => {
+    const result = await new ExecutionCapabilityPreflight({
+      registry: new ToolRegistry(),
+      configuredConnectors: [{
+        name: "postman",
+        transport: "http",
+        configured: true,
+        enabled: true,
+        connected: false,
+        schemasRegistered: false,
+        toolCount: 0,
+        resourceCount: 0,
+        promptCount: 0,
+        tools: [],
+        capabilities: {
+          protectedDeliveryConfigured: false,
+          groupedDeliverySupported: false,
+          browserRelaySupported: false,
+          artifactRelayConfigured: false,
+          resultRedactionConfigured: false,
+          continuityConfigured: false,
+          verificationConfigured: false
+        },
+        available: false,
+        failureStage: "connection",
+        error: "connection failed"
+      }]
+    }).assessRoutedGovernedTransfer({
+      userText: "Transfer these API specifications and credentials into Postman.",
+      selectedSkillName: "api-integration"
+    });
+
+    expect(result).toEqual({
+      status: "blocked",
+      connectorId: "postman",
+      reasonCode: "connector_unavailable",
+      reasonCodes: [
+        "connector_unavailable",
+        "artifact_import_missing",
+        "protected_arguments_missing",
+        "result_redaction_missing",
+        "verification_missing"
+      ]
+    });
+    if (result?.status === "blocked") {
+      const message = formatGovernedTransferBlocker({ result });
+      expect(message).toContain("available destination connector");
+      expect(message).toContain("artifactToolArguments");
+      expect(message).toContain("protectedToolArguments");
+      expect(message).toContain("toolVerificationRelationships");
+      expect(message).not.toContain("connection failed");
     }
   });
 

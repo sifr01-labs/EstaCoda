@@ -107,6 +107,8 @@ Tool registration happens in phases so tools receive the right runtime and sessi
 
 MCP-discovered tools are added to the session-visible tool registry during session construction, alongside built-in tool registration phases.
 
+Foreground provider turns do not receive that whole registry. A bounded selector gives ordinary conversation no tools and builds actionable inventories from task policy, selected skill toolsets, user-named connectors, an active browser, attachment needs, and compact recovery tools. Configured connector descriptors remain routable for diagnostics even when they registered no schemas. One runtime-owned expansion may add an eligible active-browser fallback after authoritative browser evidence; provider text and Plan state cannot widen the set. Inventory telemetry includes the native-schema token estimate so reliability gains can be compared with provider cost.
+
 ### Phase C: durable Task foundation
 
 `SQLiteSessionDB` installs the profile-owned Task schema and `SQLiteTaskStore` provides transactional graph storage. SQLite runtimes also create a profile-local `TaskResultService`: result bodies remain outside SQLite, carry verified hashes and opaque handles, and are available to linked sessions through bounded `task.result.read` pages. Binary results are never injected through that text tool. `createRuntime()` now exposes a production `AgentStepExecutor` for profile-backed SQLite runtimes. The executor rechecks profile, exact workspace binding and trust, narrows the child to read-only capabilities, checkpoints worker ownership under the Attempt fence, captures complete results, and accounts for every provider attempt.

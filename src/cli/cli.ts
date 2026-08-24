@@ -3125,14 +3125,23 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
             ...lines.map(([name, server]) => {
               const snapshot = snapshots.find((entry) => entry.name === name);
               const capabilities = snapshot?.capabilities ?? summarizeMcpCapabilityConfig(server);
-              const status = snapshot === undefined
-                ? (server.enabled === false ? "disabled" : "configured")
+              const status = server.enabled === false
+                ? "disabled"
+                : snapshot === undefined
+                  ? "configured"
                 : snapshot.available
                   ? "ready"
-                  : `unavailable (${snapshot.error})`;
+                  : "unavailable";
               return [
                 `${name}`,
                 `  status: ${status}`,
+                `  configured: yes`,
+                `  enabled: ${server.enabled === false ? "no" : "yes"}`,
+                `  connected: ${snapshot === undefined ? "unknown" : snapshot.connected ? "yes" : "no"}`,
+                `  schemas registered: ${snapshot === undefined ? "unknown" : snapshot.schemasRegistered ? "yes" : "no"}`,
+                `  available: ${snapshot === undefined ? "unknown" : snapshot.available ? "yes" : "no"}`,
+                snapshot?.failureStage === undefined ? undefined : `  failure stage: ${snapshot.failureStage}`,
+                snapshot?.error === undefined ? undefined : `  error: ${snapshot.error}`,
                 `  transport: ${server.transport ?? "stdio"}`,
                 `  trust: ${server.trust ?? "conservative"}`,
                 server.command === undefined ? undefined : `  command: ${server.command}`,

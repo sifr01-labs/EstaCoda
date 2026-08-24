@@ -21,7 +21,7 @@ import type {
 } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolsetName, ToolRiskClass } from "../contracts/tool.js";
-import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
+import type { ProviderToolInventoryEvent, RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ExecutionEvidenceRecord, ExecutionFinalOutcome, ExecutionPlanLifecycleEvent } from "../contracts/execution-plan.js";
 import type { Trajectory } from "../contracts/trajectory.js";
 import type { TrajectoryStore } from "../contracts/trajectory-store.js";
@@ -265,6 +265,15 @@ export class RunRecorder {
       ...input
     });
     this.#trajectoryRecorder.record("provider-iteration", input);
+  }
+
+  async recordProviderToolInventory(
+    event: ProviderToolInventoryEvent,
+    sink?: RuntimeEventSink
+  ): Promise<void> {
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), event);
+    this.#trajectoryRecorder.record(event.kind, event);
+    await emit(sink, event);
   }
 
   async recordStructuredToolHistoryDiagnostic(input: StructuredToolHistoryDiagnosticEvent): Promise<void> {

@@ -7,6 +7,7 @@ import type {
 } from "../contracts/execution-plan.js";
 import { EXECUTION_PLAN_MAX_PROTECTED_PATHS } from "../contracts/execution-plan.js";
 import type { RegisteredTool } from "../contracts/tool.js";
+import type { MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import type { ToolRegistry } from "../tools/tool-registry.js";
 import {
   resolveRegisteredToolCapability,
@@ -22,6 +23,7 @@ export type GovernedTransferPreflightRequest = {
 
 export type GovernedTransferPreflightReason =
   | "destination_connector_missing"
+  | "connector_unavailable"
   | "artifact_import_missing"
   | "protected_arguments_missing"
   | "protected_source_unsupported"
@@ -41,6 +43,7 @@ export type GovernedTransferPreflightResult =
       status: "blocked";
       connectorId: string;
       reasonCode: GovernedTransferPreflightReason;
+      reasonCodes: readonly GovernedTransferPreflightReason[];
     };
 
 /**
@@ -51,13 +54,16 @@ export type GovernedTransferPreflightResult =
 export class ExecutionCapabilityPreflight {
   readonly #registry: Pick<ToolRegistry, "get" | "getRegisteredByToolset" | "list">;
   readonly #browserSourceAvailable: (() => boolean | Promise<boolean>) | undefined;
+  readonly #configuredConnectors: readonly MCPServerSnapshot[];
 
   constructor(options: {
     registry: Pick<ToolRegistry, "get" | "getRegisteredByToolset" | "list">;
     browserSourceAvailable?: () => boolean | Promise<boolean>;
+    configuredConnectors?: readonly MCPServerSnapshot[];
   }) {
     this.#registry = options.registry;
     this.#browserSourceAvailable = options.browserSourceAvailable;
+    this.#configuredConnectors = options.configuredConnectors ?? [];
   }
 
   async assessRoutedGovernedTransfer(input: {
@@ -68,6 +74,7 @@ export class ExecutionCapabilityPreflight {
       ...input,
       namedConnectorIds: namedConnectorIdsForRequest({
         tools: this.#registry.list(),
+        configuredConnectors: this.#configuredConnectors,
         userText: input.userText
       })
     });
@@ -86,8 +93,12 @@ export class ExecutionCapabilityPreflight {
     const registered = this.#registry.getRegisteredByToolset("mcp")
       .filter((tool) => tool.connector?.kind === "mcp" && tool.connector.id === connectorId)
       .sort((left, right) => left.name.localeCompare(right.name));
+    const descriptor = this.#configuredConnectors.find((candidate) => candidate.name === connectorId);
     if (registered.length === 0) {
-      return blockedTransfer(connectorId, "destination_connector_missing");
+      if (descriptor === undefined) {
+        return blockedTransfer(connectorId, "destination_connector_missing");
+      }
+      return blockedTransfer(connectorId, descriptorBlockers(descriptor, request));
     }
 
     const resolved = registered.map((tool) => ({ tool, capability: resolveRegisteredToolCapability(tool) }));
@@ -105,29 +116,33 @@ export class ExecutionCapabilityPreflight {
     const artifactCandidates = request.requiresArtifactTransfer
       ? capabilities.filter((entry) => entry.capability.artifactInput !== undefined)
       : [undefined];
-    if (artifactCandidates.length === 0) {
-      return blockedTransfer(connectorId, "artifact_import_missing");
-    }
-
     const protectedCandidates = request.requiresCredentialTransfer
       ? capabilities.filter((entry) => entry.capability.protectedInput !== undefined)
       : [undefined];
-    if (protectedCandidates.length === 0) {
-      return blockedTransfer(connectorId, "protected_arguments_missing");
-    }
-    if (request.requiresCredentialTransfer && protectedCandidates.every((entry) =>
+    const protectedSourceUnsupported = request.requiresCredentialTransfer && protectedCandidates.length > 0 &&
+      protectedCandidates.every((entry) =>
       entry === undefined || !entry.capability.protectedInput?.sources.includes("browser")
-    )) {
-      return blockedTransfer(connectorId, "protected_source_unsupported");
-    }
-    if (!capabilities.some((entry) => entry.capability.resultRedaction !== undefined)) {
-      return blockedTransfer(connectorId, "result_redaction_missing");
+    );
+    const verificationCandidates = capabilities.filter(
+      (entry) => entry.capability.verification !== undefined
+    );
+    const missingConfiguration: GovernedTransferPreflightReason[] = [
+      ...(artifactCandidates.length === 0 ? ["artifact_import_missing" as const] : []),
+      ...(protectedCandidates.length === 0 ? ["protected_arguments_missing" as const] : []),
+      ...(protectedSourceUnsupported ? ["protected_source_unsupported" as const] : []),
+      ...(!capabilities.some((entry) => entry.capability.resultRedaction !== undefined)
+        ? ["result_redaction_missing" as const]
+        : []),
+      ...(verificationCandidates.length === 0 ? ["verification_missing" as const] : [])
+    ];
+    if (missingConfiguration.length > 0) {
+      return blockedTransfer(connectorId, missingConfiguration);
     }
 
     const selections = selectGovernedMutationAndVerificationTools({
       artifactCandidates,
       protectedCandidates,
-      verificationCandidates: capabilities.filter((entry) => entry.capability.verification !== undefined)
+      verificationCandidates
     });
     if (selections.length === 0) {
       return blockedTransfer(connectorId, "verification_missing");
@@ -343,9 +358,14 @@ function selectGovernedMutationAndVerificationTools(input: {
 
 function blockedTransfer(
   connectorId: string,
-  reasonCode: GovernedTransferPreflightReason
+  reasonCodeOrCodes: GovernedTransferPreflightReason | readonly GovernedTransferPreflightReason[]
 ): GovernedTransferPreflightResult {
-  return { status: "blocked", connectorId, reasonCode };
+  const reasonCodes = typeof reasonCodeOrCodes === "string" ? [reasonCodeOrCodes] : [...reasonCodeOrCodes];
+  const reasonCode = reasonCodes[0];
+  if (reasonCode === undefined) {
+    throw new Error("Governed transfer blocker requires at least one reason.");
+  }
+  return { status: "blocked", connectorId, reasonCode, reasonCodes };
 }
 
 export function formatGovernedTransferBlocker(input: {
@@ -353,10 +373,43 @@ export function formatGovernedTransferBlocker(input: {
   locale?: "en" | "ar";
 }): string {
   const connector = `"${input.result.connectorId}"`;
+  if (input.result.reasonCodes.length > 1) {
+    const settings = input.result.reasonCodes.map((reasonCode) => {
+      if (input.locale === "ar") {
+        switch (reasonCode) {
+          case "artifact_import_missing": return "استيراد الملفات المُراجع (artifactToolArguments)";
+          case "protected_arguments_missing": return "نقل بيانات الاعتماد المحمي (protectedToolArguments)";
+          case "protected_source_unsupported": return "ترحيل البيانات المحمية من المتصفح";
+          case "result_redaction_missing": return "تنقيح نتائج الموصل (redactedToolResultPaths)";
+          case "verification_missing": return "علاقات التحقق المستقل (toolVerificationRelationships)";
+          case "destination_connector_missing": return "موصل الوجهة";
+          case "connector_unavailable": return "موصل وجهة متصلًا ومتاحًا";
+          case "capability_metadata_invalid": return "بيانات تعريف قدرة الموصل الصالحة";
+          case "tool_unavailable": return "أداة نقل متاحة";
+        }
+      }
+      switch (reasonCode) {
+        case "artifact_import_missing": return "reviewed artifact import (artifactToolArguments)";
+        case "protected_arguments_missing": return "protected credential delivery (protectedToolArguments)";
+        case "protected_source_unsupported": return "protected browser relay";
+        case "result_redaction_missing": return "connector result redaction (redactedToolResultPaths)";
+        case "verification_missing": return "independent verification relationships (toolVerificationRelationships)";
+        case "destination_connector_missing": return "the destination connector";
+        case "connector_unavailable": return "an available destination connector";
+        case "capability_metadata_invalid": return "valid connector capability metadata";
+        case "tool_unavailable": return "an available transfer tool";
+      }
+    });
+    return input.locale === "ar"
+      ? `لا يمكن بدء النقل إلى ${connector} لأن الملف الشخصي المحدد يفتقد الإعدادات المُراجعة التالية: ${settings.join("؛ ")}. هيّئ جميع الإعدادات المذكورة ثم أعد المحاولة.`
+      : `Governed transfer to ${connector} cannot start because the selected profile is missing: ${settings.join("; ")}. Configure all listed settings and retry.`;
+  }
   if (input.locale === "ar") {
     switch (input.result.reasonCode) {
       case "destination_connector_missing":
         return `لا يمكن بدء النقل: موصل الوجهة ${connector} غير مهيأ في الملف الشخصي المحدد.`;
+      case "connector_unavailable":
+        return `لا يمكن بدء النقل: موصل الوجهة ${connector} مهيأ لكنه غير متصل أو لم يسجل مخططات أدوات قابلة للاستدعاء.`;
       case "artifact_import_missing":
         return `لا يمكن بدء النقل إلى ${connector}: وسيطة استيراد الملفات المُراجعة غير مهيأة. هيّئ artifactToolArguments ثم أعد المحاولة.`;
       case "protected_arguments_missing":
@@ -376,6 +429,8 @@ export function formatGovernedTransferBlocker(input: {
   switch (input.result.reasonCode) {
     case "destination_connector_missing":
       return `Governed transfer cannot start: destination connector ${connector} is not configured in the selected profile.`;
+    case "connector_unavailable":
+      return `Governed transfer cannot start: destination connector ${connector} is configured but is not connected or has not registered callable tool schemas.`;
     case "artifact_import_missing":
       return `Governed transfer to ${connector} cannot start: no reviewed artifact-import argument is configured. Configure artifactToolArguments and retry.`;
     case "protected_arguments_missing":
@@ -391,6 +446,29 @@ export function formatGovernedTransferBlocker(input: {
     case "tool_unavailable":
       return `Governed transfer to ${connector} cannot start: a reviewed transfer tool is currently unavailable.`;
   }
+}
+
+function descriptorBlockers(
+  descriptor: MCPServerSnapshot,
+  request: GovernedTransferPreflightRequest
+): GovernedTransferPreflightReason[] {
+  const capabilities = descriptor.capabilities;
+  return [
+    ...(!descriptor.enabled || !descriptor.connected || !descriptor.schemasRegistered || !descriptor.available
+      ? ["connector_unavailable" as const]
+      : ["tool_unavailable" as const]),
+    ...(request.requiresArtifactTransfer && !capabilities.artifactRelayConfigured
+      ? ["artifact_import_missing" as const]
+      : []),
+    ...(request.requiresCredentialTransfer && !capabilities.protectedDeliveryConfigured
+      ? ["protected_arguments_missing" as const]
+      : []),
+    ...(request.requiresCredentialTransfer && capabilities.protectedDeliveryConfigured && !capabilities.browserRelaySupported
+      ? ["protected_source_unsupported" as const]
+      : []),
+    ...(!capabilities.resultRedactionConfigured ? ["result_redaction_missing" as const] : []),
+    ...(!capabilities.verificationConfigured ? ["verification_missing" as const] : [])
+  ];
 }
 
 export function detectRoutedGovernedTransfer(input: {

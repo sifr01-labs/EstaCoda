@@ -33,6 +33,7 @@ import type { ProviderUsageTaskAttribution } from "../providers/provider-usage-l
 import { providerSpendDenialMessage } from "../providers/provider-spend-policy.js";
 import type { ToolCallPlanner } from "../tools/tool-call-planner.js";
 import type { OpenAICompatibleToolSchema, ProviderToolSchemaCatalog } from "../tools/tool-schema.js";
+import type { MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { resolveProjectFactPromotion, resolveUserPreferencePromotion } from "../memory/memory-promotion.js";
@@ -79,7 +80,10 @@ import {
   learningOutcomeStatus,
   type ExecutionCompletionCapability
 } from "./execution-outcome.js";
-import { narrowProviderToolsForTurn } from "./provider-tool-narrowing.js";
+import {
+  selectProviderToolsForTurn,
+  type ProviderToolSelection
+} from "./provider-tool-narrowing.js";
 import {
   ExecutionCapabilityPreflight,
   formatGovernedTransferBlocker
@@ -163,6 +167,7 @@ export type AgentLoopOptions = {
   projectContext?: ProjectContextSnapshot;
   providerTools?: OpenAICompatibleToolSchema[];
   providerToolSchemaCatalog?: ProviderToolSchemaCatalog;
+  mcpServerSnapshots?: readonly MCPServerSnapshot[];
   executionCompletionCapabilities?: readonly ExecutionCompletionCapability[];
   soul?: string;
   skillsIndex?: SkillCatalogEntry[];
@@ -254,6 +259,7 @@ export class AgentLoop {
   readonly #projectContext: ProjectContextSnapshot | undefined;
   readonly #providerTools: OpenAICompatibleToolSchema[];
   readonly #providerToolSchemaCatalog: ProviderToolSchemaCatalog | undefined;
+  readonly #mcpServerSnapshots: readonly MCPServerSnapshot[];
   readonly #executionCompletionCapabilities: readonly ExecutionCompletionCapability[];
   readonly #providerTurnLoop: ProviderTurnLoop;
   readonly #skillPlaybookRunner: SkillPlaybookRunner;
@@ -305,6 +311,7 @@ export class AgentLoop {
     this.#projectContext = options.projectContext;
     this.#providerTools = options.providerTools ?? [];
     this.#providerToolSchemaCatalog = options.providerToolSchemaCatalog;
+    this.#mcpServerSnapshots = options.mcpServerSnapshots ?? [];
     this.#executionCompletionCapabilities = options.executionCompletionCapabilities ?? [];
     this.#providerTurnLoop = options.providerTurnLoop;
     this.#skillPlaybookRunner = options.skillPlaybookRunner;
@@ -658,7 +665,8 @@ export class AgentLoop {
       this.#trajectoryRecorder.record("progress", {
         message: "governed transfer preflight blocked",
         connectorId: governedTransferPreflight.connectorId,
-        reasonCode: governedTransferPreflight.reasonCode
+        reasonCode: governedTransferPreflight.reasonCode,
+        reasonCodes: governedTransferPreflight.reasonCodes
       });
       this.#trajectoryRecorder.record("assistant-output", {
         text,
@@ -680,7 +688,8 @@ export class AgentLoop {
           intentLabels: intent.labels,
           governedTransferPreflight: {
             connectorId: governedTransferPreflight.connectorId,
-            reasonCode: governedTransferPreflight.reasonCode
+            reasonCode: governedTransferPreflight.reasonCode,
+            reasonCodes: governedTransferPreflight.reasonCodes
           }
         }
       });
@@ -818,7 +827,7 @@ export class AgentLoop {
     )
       ? previousConversationContinuationState
       : undefined;
-    const narrowedProviderTools = this.#model?.supportsTools === true
+    const providerToolSelection = this.#model?.supportsTools === true
       ? this.#providerToolsForTurn({
           intent,
           userText: routedText,
@@ -826,10 +835,19 @@ export class AgentLoop {
           attachments,
           conversationContinuationState: continuedConversationState
         })
-      : [];
+      : { initialTools: [], expansionCandidates: [], namedConnectorIds: [] };
+    const narrowedProviderTools = providerToolSelection.initialTools;
     const providerTools = deterministicImageGenerationRan
       ? suppressImageGenerationTools(narrowedProviderTools)
       : narrowedProviderTools;
+    await this.#runRecorder.recordProviderToolInventory({
+      kind: "provider-tool-inventory",
+      phase: "initial",
+      tools: providerTools.map((tool) => tool.function.name),
+      addedTools: providerTools.map((tool) => tool.function.name),
+      nativeSchemaTokens: estimateTextTokensRough(JSON.stringify(providerTools)),
+      connectors: this.#connectorInventory(providerTools)
+    }, input.onEvent);
     const preflightCompression = await this.#compactBeforeProviderTurn(input.signal, input.onEvent);
     await this.#emitLiveContextUsageEstimate({
       onEvent: input.onEvent,
@@ -864,6 +882,8 @@ export class AgentLoop {
       attachments,
       memoryPromptContext: turnMemoryPromptContext,
       providerTools,
+      toolExpansionCandidates: providerToolSelection.expansionCandidates,
+      connectorInventory: this.#connectorInventory(providerTools),
       preflightCompression,
       fallbackText: fallbackResponse.text,
       onEvent: input.onEvent,
@@ -1236,16 +1256,21 @@ export class AgentLoop {
     selectedSkill?: LoadedSkill | SkillDefinition;
     attachments?: readonly ChannelAttachment[];
     conversationContinuationState?: ConversationContinuationState;
-  }): OpenAICompatibleToolSchema[] {
+  }): ProviderToolSelection {
     if (this.#providerToolSchemaCatalog === undefined || this.#taskExecution !== undefined) {
-      return this.#providerTools;
+      return {
+        initialTools: this.#providerTools,
+        expansionCandidates: [],
+        namedConnectorIds: []
+      };
     }
-    return narrowProviderToolsForTurn({
+    return selectProviderToolsForTurn({
       catalog: this.#providerToolSchemaCatalog,
       intent: input.intent,
       userText: input.userText,
       selectedSkill: input.selectedSkill,
       attachments: input.attachments,
+      configuredConnectors: this.#mcpServerSnapshots,
       continuity: {
         activeBrowser: this.#sessionRuntimeContext?.browserState()?.sessionStatus === "active",
         ...(input.conversationContinuationState === undefined ? {} : {
@@ -1255,6 +1280,31 @@ export class AgentLoop {
         })
       }
     });
+  }
+
+  #connectorInventory(providerTools: readonly OpenAICompatibleToolSchema[]): Array<{
+    kind: "mcp";
+    id: string;
+    configured: boolean;
+    connected: boolean;
+    schemasRegistered: boolean;
+    available: boolean;
+    exposedThisTurn: boolean;
+  }> {
+    const exposedSchemaNames = new Set(providerTools.map((tool) => tool.function.name));
+    return this.#mcpServerSnapshots.map((snapshot) => ({
+      kind: "mcp" as const,
+      id: snapshot.name,
+      configured: snapshot.configured,
+      connected: snapshot.connected,
+      schemasRegistered: snapshot.schemasRegistered,
+      available: snapshot.available,
+      exposedThisTurn: this.#providerToolSchemaCatalog?.entries.some((entry) =>
+        entry.tool.connector?.kind === "mcp" &&
+        entry.tool.connector.id === snapshot.name &&
+        exposedSchemaNames.has(entry.schema.function.name)
+      ) ?? false
+    }));
   }
 
   async #emitLiveContextUsageEstimate(input: {

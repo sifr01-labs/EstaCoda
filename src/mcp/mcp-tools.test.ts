@@ -202,8 +202,60 @@ describe("loadMcpServers environment references", () => {
 
     expect(loaded?.snapshot).toMatchObject({
       name: "postman",
+      configured: true,
+      enabled: true,
+      connected: false,
+      schemasRegistered: false,
       available: false,
+      failureStage: "configuration",
       error: "MCP environment variable POSTMAN_API_KEY is not set.",
+    });
+  });
+
+  it("keeps disabled connectors discoverable without attempting startup", async () => {
+    const [loaded] = await loadMcpServers({
+      servers: { postman: { enabled: false, command: "must-not-run" } }
+    });
+
+    expect(loaded?.snapshot).toMatchObject({
+      name: "postman",
+      configured: true,
+      enabled: false,
+      connected: false,
+      schemasRegistered: false,
+      available: false,
+      failureStage: "configuration"
+    });
+  });
+
+  it("distinguishes a connected server that registered no callable schemas", async () => {
+    const [loaded] = await loadMcpServers({
+      servers: { postman: { transport: "http", url: "https://mcp.example.test" } },
+      fetch: async (_url, init) => {
+        const payload = JSON.parse(init?.body ?? "{}") as { id?: number; method?: string };
+        const result = payload.method === "initialize"
+          ? { capabilities: { tools: {} } }
+          : payload.method === "tools/list"
+            ? { tools: [] }
+            : {};
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({ jsonrpc: "2.0", id: payload.id, result }),
+          text: async () => ""
+        };
+      }
+    });
+
+    expect(loaded?.snapshot).toMatchObject({
+      configured: true,
+      enabled: true,
+      connected: true,
+      schemasRegistered: false,
+      available: false,
+      failureStage: "availability",
+      error: "MCP server registered no callable tool schemas."
     });
   });
 });
@@ -383,7 +435,12 @@ describe("MCP protected argument declarations", () => {
         },
         fetch: capabilityFetch
       });
-      expect(server?.snapshot).toMatchObject({ available: false });
+      expect(server?.snapshot).toMatchObject({
+        connected: true,
+        schemasRegistered: false,
+        available: false,
+        failureStage: "schema-registration"
+      });
       expect(server?.snapshot.error).toMatch(/unknown tool|invalid|does not match the input schema/u);
       expect(server?.snapshot.error).not.toContain("/");
       expect(server?.tools).toEqual([]);

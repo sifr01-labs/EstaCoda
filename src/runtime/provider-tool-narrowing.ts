@@ -2,6 +2,7 @@ import type { ChannelAttachment } from "../contracts/channel.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
+import type { MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import type {
   OpenAICompatibleToolSchema,
   ProviderToolSchemaCatalog
@@ -13,6 +14,25 @@ import {
 } from "./tool-selection-policies.js";
 
 const CONTINUITY_TOOLSETS = new Set<ToolsetName>(["browser"]);
+const RECOVERY_TOOL_NAMES = new Set([
+  "browser.status",
+  "config.mcp.status",
+  "config.provider.status",
+  "config.provider.execution_status"
+]);
+const EVIDENCE_GATED_TOOL_NAMES = new Set(["browser.vision"]);
+
+export type ProviderToolExpansionCandidate = {
+  toolName: string;
+  source: "active-browser";
+  schema: OpenAICompatibleToolSchema;
+};
+
+export type ProviderToolSelection = {
+  initialTools: OpenAICompatibleToolSchema[];
+  expansionCandidates: ProviderToolExpansionCandidate[];
+  namedConnectorIds: string[];
+};
 
 export type ProviderToolContinuityContext = {
   userRequest?: string;
@@ -24,15 +44,18 @@ export type ProviderToolContinuityContext = {
 /** Returns only connectors explicitly named in an actionable current request. */
 export function namedConnectorIdsForRequest(input: {
   tools: readonly ToolDefinition[];
+  configuredConnectors?: readonly Pick<MCPServerSnapshot, "name">[];
   userText: string;
 }): string[] {
   if (!isActionableToolRequest(input.userText)) return [];
   const normalizedUserText = normalizeConnectorSearchText(input.userText);
   const identities = new Map<string, { key: string; phrase: string; sourceId: string; id: string }>();
   const ambiguousKeys = new Set<string>();
-  for (const tool of input.tools) {
-    const connector = tool.connector;
-    if (connector === undefined) continue;
+  const connectors: NonNullable<ToolDefinition["connector"]>[] = [
+    ...input.tools.flatMap((tool) => tool.connector === undefined ? [] : [tool.connector]),
+    ...(input.configuredConnectors ?? []).map((connector) => ({ kind: "mcp" as const, id: connector.name }))
+  ];
+  for (const connector of connectors) {
     const key = connectorKey(connector);
     const phrase = normalizeConnectorText(connector.id);
     const sourceId = connector.id.normalize("NFKC").toLocaleLowerCase("en-US").trim();
@@ -61,7 +84,20 @@ export function narrowProviderToolsForTurn(input: {
   selectedSkill?: LoadedSkill | SkillDefinition;
   attachments?: readonly ChannelAttachment[];
   continuity?: ProviderToolContinuityContext;
+  configuredConnectors?: readonly MCPServerSnapshot[];
 }): OpenAICompatibleToolSchema[] {
+  return selectProviderToolsForTurn(input).initialTools;
+}
+
+export function selectProviderToolsForTurn(input: {
+  catalog: ProviderToolSchemaCatalog;
+  intent: IntentRoute;
+  userText?: string;
+  selectedSkill?: LoadedSkill | SkillDefinition;
+  attachments?: readonly ChannelAttachment[];
+  continuity?: ProviderToolContinuityContext;
+  configuredConnectors?: readonly MCPServerSnapshot[];
+}): ProviderToolSelection {
   const namedConnectors = selectNamedConnectors(input);
   const continuityToolsets = selectContinuityToolsets(input);
   const policy = selectToolSelectionPolicy({
@@ -85,15 +121,21 @@ export function narrowProviderToolsForTurn(input: {
     userText: input.userText,
     selectedSkillPlaybookSteps: input.selectedSkill?.playbook.length
   });
+  const actionable = isActionableToolRequest(input.userText ?? "") && (
+    policy.name !== "conversation" ||
+    input.selectedSkill !== undefined ||
+    (input.attachments ?? []).some((attachment) => (attachment.status ?? "ready") === "ready")
+  );
+  const initialTools: OpenAICompatibleToolSchema[] = [];
+  const expansionCandidates: ProviderToolExpansionCandidate[] = [];
 
-  return input.catalog.entries
-    .filter((entry) => {
+  for (const entry of input.catalog.entries) {
+    const selected = (() => {
       if (entry.tool.name === "plan") return includePlan;
       if (entry.tool.connector !== undefined) {
-        return namedConnectors.size > 0
-          ? namedConnectors.has(connectorKey(entry.tool.connector))
-          : entry.tool.toolsets.some((toolset) => routedToolsets.has(toolset));
+        return namedConnectors.has(connectorKey(entry.tool.connector));
       }
+      if (actionable && RECOVERY_TOOL_NAMES.has(entry.tool.name)) return true;
       if (entry.tool.toolsets.some((toolset) => routedToolsets.has(toolset))) return true;
       if (
         entry.tool.toolsets.some((toolset) => attachedToolsets.has(toolset)) &&
@@ -101,14 +143,39 @@ export function narrowProviderToolsForTurn(input: {
       ) return true;
       return policyRiskClasses.has(entry.tool.riskClass) &&
         entry.tool.toolsets.some((toolset) => policyToolsets.has(toolset));
-    })
-    .map((entry) => entry.schema);
+    })();
+    if (!selected) continue;
+    if (
+      actionable &&
+      continuityToolsets.has("browser") &&
+      EVIDENCE_GATED_TOOL_NAMES.has(entry.tool.name)
+    ) {
+      expansionCandidates.push({
+        toolName: entry.tool.name,
+        source: "active-browser",
+        schema: entry.schema
+      });
+      continue;
+    }
+    initialTools.push(entry.schema);
+  }
+
+  return {
+    initialTools,
+    expansionCandidates,
+    namedConnectorIds: [...namedConnectors]
+      .map((key) => input.configuredConnectors?.find((connector) => connectorKey({ kind: "mcp", id: connector.name }) === key)?.name ??
+        input.catalog.entries.find((entry) => entry.tool.connector !== undefined && connectorKey(entry.tool.connector) === key)?.tool.connector?.id)
+      .filter((id): id is string => id !== undefined)
+      .sort((left, right) => left.localeCompare(right))
+  };
 }
 
 function selectNamedConnectors(input: {
   catalog: ProviderToolSchemaCatalog;
   userText?: string;
   continuity?: ProviderToolContinuityContext;
+  configuredConnectors?: readonly MCPServerSnapshot[];
 }): Set<string> {
   const normalizedUserText = normalizeConnectorSearchText(input.userText ?? "");
   const normalizedContinuationText = normalizeConnectorSearchText(input.continuity?.userRequest ?? "");
@@ -116,9 +183,11 @@ function selectNamedConnectors(input: {
   const continuedConnectorKeys = new Set((input.continuity?.connectors ?? []).map(connectorKey));
   const identities = new Map<string, { key: string; phrase: string; sourceId: string }>();
   const ambiguousKeys = new Set<string>();
-  for (const entry of input.catalog.entries) {
-    const connector = entry.tool.connector;
-    if (connector === undefined) continue;
+  const connectors: NonNullable<ToolDefinition["connector"]>[] = [
+    ...input.catalog.entries.flatMap((entry) => entry.tool.connector === undefined ? [] : [entry.tool.connector]),
+    ...(input.configuredConnectors ?? []).map((connector) => ({ kind: "mcp" as const, id: connector.name }))
+  ];
+  for (const connector of connectors) {
     const key = connectorKey(connector);
     const phrase = normalizeConnectorText(connector.id);
     const sourceId = connector.id.normalize("NFKC").toLocaleLowerCase("en-US").trim();
@@ -157,21 +226,11 @@ function selectContinuityToolsets(input: {
     .filter((toolset) => CONTINUITY_TOOLSETS.has(toolset)));
   if (
     input.continuity?.activeBrowser === true &&
-    matchesActiveBrowserContinuation(input.userText ?? "")
+    isActionableToolRequest(input.userText ?? "")
   ) {
     selected.add("browser");
   }
   return selected;
-}
-
-function matchesActiveBrowserContinuation(userText: string): boolean {
-  const normalized = userText.normalize("NFKC").toLocaleLowerCase("en-US");
-  const action = /\b(?:click|press|open|select|scroll|switch|type|enter|fill|inspect|show|use)\b/iu;
-  const surface = /\b(?:it|that|this|there|shown|above|page|screen|site|portal|app|button|link|tab|form)\b/iu;
-  const arabicAction = /(?:انقر|اضغط|افتح|اختر|مرر|بد[ّ]?ل|اكتب|أدخل|افحص|استخدم)/u;
-  const arabicSurface = /(?:هذا|هذه|ذلك|تلك|هناك|الموضح|المعروض|صفحة|شاشة|موقع|بوابة|تطبيق|زر|رابط|تبويب|نموذج)/u;
-  return (action.test(normalized) && surface.test(normalized)) ||
-    (arabicAction.test(normalized) && arabicSurface.test(normalized));
 }
 
 function connectorKey(connector: NonNullable<ProviderToolSchemaCatalog["entries"][number]["tool"]["connector"]>): string {

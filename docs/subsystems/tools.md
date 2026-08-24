@@ -7,6 +7,12 @@ description: "Tool system: registry, schemas, execution, and builtin tools."
 
 Tools are functions that extend the agent's capabilities. They are organized into a registry with risk-based gating.
 
+## Provider-visible inventory
+
+Registration, visibility, and execution authority are separate states. The runtime registers the tools that are available to the selected profile and session, then builds a bounded inventory for each foreground turn. Ordinary conversation receives zero tools. Actionable work receives task-policy tools, selected-skill toolsets, explicitly named connector tools, the active browser, attachment-required reads, and a compact status/recovery set. Unrelated MCP connectors and the full catalog are never added as a low-confidence fallback. `plan` is reserved for work that is genuinely multi-step.
+
+One evidence-owned expansion is permitted between normal provider iterations. Today the runtime may add the already-registered `browser.vision` schema after trusted browser results show that semantic/native targeting did not work. Model prose and Plan text cannot widen the inventory. Telemetry stores the initial or expanded tool names, bounded reason, connector exposure flags, and estimated native-schema tokens. It does not store schema bodies, arguments, results, or secrets. Every exposed tool still passes the same execution-time security, approval, trust, and hard-block checks.
+
 ## Files
 
 | File | Role |

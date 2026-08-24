@@ -60,6 +60,10 @@ Tool providers are registered in named phases:
 
 MCP tools are registered before the planned tool-registration phases. After registration, the runtime snapshots available tools and builds the provider tool schemas that can be exposed to the model.
 
+Configured MCP descriptors are retained even when startup or schema registration fails. Connector status distinguishes configuration, connection, schema registration, callable availability, and current-turn exposure. The per-turn provider inventory is then selected from the final available catalog: conversation gets zero tools; actionable work gets its bounded task policy, selected skill toolsets, explicitly named connectors, active browser, attachment reads, and compact recovery tools. Generic MCP routing and low confidence never mean “all connectors” or “all tools.”
+
+The runtime may expand once during a foreground provider loop, but only from precomputed eligible candidates and authoritative tool-result evidence. The current expansion adds `browser.vision` after browser supervision proves native/semantic targeting failed. Provider prose and Plan text cannot widen the inventory. `provider-tool-inventory` telemetry records names, reason, connector exposure, and estimated native-schema tokens without recording schema bodies, arguments, results, or secrets. Visibility does not bypass execution-time approvals, trust, secret handling, or hard blocks.
+
 ---
 
 ## Execution flow
