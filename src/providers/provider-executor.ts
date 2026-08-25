@@ -144,6 +144,8 @@ export type ProviderExecutionOptions = {
   usage?: ProviderUsageContext;
   /** Absolute emergency ceiling for the complete route chain, including fallbacks and retries. */
   deadlineAtMs?: number;
+  /** Foreground-only opt-in for one same-route retry before normal fallback. */
+  retryRateLimits?: boolean;
 };
 
 export type ProviderExecutorOptions = {
@@ -160,6 +162,8 @@ export type ProviderExecutorOptions = {
   allowUnenforcedAttributedSpend?: boolean;
   /** Prevent credential refresh writes during diagnostic or evaluation execution. */
   readOnlyCredentials?: boolean;
+  /** Test seam for the bounded rate-limit backoff. */
+  retrySleep?: (milliseconds: number, signal?: AbortSignal) => Promise<boolean>;
 };
 
 export type ProviderSpendController = {
@@ -196,6 +200,7 @@ export class ProviderExecutor {
   readonly #spendController: ProviderSpendController | undefined;
   readonly #allowUnenforcedAttributedSpend: boolean;
   readonly #readOnlyCredentials: boolean;
+  readonly #retrySleep: NonNullable<ProviderExecutorOptions["retrySleep"]>;
 
   constructor(options: ProviderExecutorOptions) {
     this.#registry = options.registry;
@@ -205,6 +210,7 @@ export class ProviderExecutor {
     this.#spendController = options.spendController;
     this.#allowUnenforcedAttributedSpend = options.allowUnenforcedAttributedSpend === true;
     this.#readOnlyCredentials = options.readOnlyCredentials === true;
+    this.#retrySleep = options.retrySleep ?? waitForProviderRetry;
   }
 
   async dispose(): Promise<void> {
@@ -267,7 +273,7 @@ export class ProviderExecutor {
         const partialContent = lastPartialContent(attempts);
         return {
           ok: false,
-          fallbackUsed: attempts.length > 1,
+          fallbackUsed: attempts.some((attempt) => attempt.routeRole === "fallback"),
           attempts,
           ...(partialContent === undefined ? {} : { partialContent }),
           toolCalls
@@ -536,10 +542,23 @@ export class ProviderExecutor {
         const callResponse = callResult.response;
 
         const nextRoute = chain[index + 1];
-        const callWillFallback =
+        const retryBackoffMs = 1_000;
+        const remainingRetryWindowMs = remainingDeadlineMs(options.deadlineAtMs, options.now);
+        const canRetryRateLimit =
+          options.retryRateLimits === true &&
           !isSignalAborted(options.signal) &&
-          !callResponse.ok &&
-          shouldFallback(callResponse, route, nextRoute);
+          callResponse.ok === false &&
+          callResponse.errorClass === "rate-limit" &&
+          routeAttemptCount < maxRouteAttempts &&
+          (remainingRetryWindowMs === undefined || remainingRetryWindowMs > retryBackoffMs);
+        // Live consumers use this legacy flag to decide whether provider work is still
+        // continuing. A bounded same-route retry must therefore keep the turn open too.
+        const callWillFallback =
+          canRetryRateLimit || (
+            !isSignalAborted(options.signal) &&
+            !callResponse.ok &&
+            shouldFallback(callResponse, route, nextRoute)
+          );
 
         const dispatchedAttempt: ProviderAttempt & { state: "dispatched"; dispatchedAt: string } = {
           provider: route.provider,
@@ -605,6 +624,13 @@ export class ProviderExecutor {
         if (callResponse.ok) {
           response = callResponse;
           finalizedStreamToolCalls = callResult.toolCalls;
+          break;
+        }
+
+        if (canRetryRateLimit) {
+          const retryReady = await this.#retrySleep(retryBackoffMs, options.signal);
+          if (retryReady) continue;
+          response = callResponse;
           break;
         }
 
@@ -762,7 +788,7 @@ export class ProviderExecutor {
     const partialContent = lastPartialContent(attempts);
     return {
       ok: false,
-      fallbackUsed: attempts.length > 1,
+      fallbackUsed: attempts.some((attempt) => attempt.routeRole === "fallback"),
       attempts,
       ...(partialContent === undefined ? {} : { partialContent }),
       toolCalls
@@ -911,6 +937,23 @@ export class ProviderExecutor {
     const providerLabel = providerId === "codex" ? "Codex" : providerId;
     return `${providerLabel} authentication failed after ${attempts} attempt(s). Token may be expired or revoked. Run "estacoda model setup ${providerId}" to re-authenticate.`;
   }
+}
+
+async function waitForProviderRetry(milliseconds: number, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted === true) return false;
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (ready: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(ready);
+    };
+    const onAbort = () => finish(false);
+    const timer = setTimeout(() => finish(true), milliseconds);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function attemptMetadataFromResponse(response: ProviderResponse): Pick<
@@ -1234,6 +1277,7 @@ function shouldFallback(
   currentRoute: ResolvedModelRoute,
   nextRoute: ResolvedModelRoute | undefined
 ): boolean {
+  if (nextRoute === undefined) return false;
   if (response.errorClass === undefined ||
       response.errorClass === "unknown" ||
       response.errorClass === "rate-limit" ||
@@ -1247,9 +1291,6 @@ function shouldFallback(
   }
 
   if (response.errorClass === "auth") {
-    if (nextRoute === undefined) {
-      return false;
-    }
     return isCredentialIndependent(currentRoute, nextRoute);
   }
 

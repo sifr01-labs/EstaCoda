@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import type {
   ModelProfile,
   ProviderAdapter,
@@ -599,6 +599,97 @@ describe("ProviderExecutor fallback behavior", () => {
     expect(result.fallbackUsed).toBe(false);
     expect(result.attempts.length).toBe(1);
     expect(primary.calls.length).toBe(1);
+  });
+
+  it("retries one foreground rate limit after bounded backoff", async () => {
+    const primary = createMockAdapter({
+      id: "test-primary",
+      completeHandler: () => primary.calls.length === 1
+        ? { ok: false, content: "rate limited", model: "m1", provider: "test-primary", errorClass: "rate-limit" }
+        : { ok: true, content: "recovered", model: "m1", provider: "test-primary" }
+    });
+    registry.register(primary);
+    const retrySleep = vi.fn(async () => true);
+    const executor = new ProviderExecutor({ registry, retrySleep });
+    const events: ProviderRuntimeEvent[] = [];
+
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("test-primary", "m1"),
+        retryRateLimits: true,
+        onEvent: (event) => { events.push(event); }
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.fallbackUsed).toBe(false);
+    expect(result.response?.content).toBe("recovered");
+    expect(result.attempts).toHaveLength(2);
+    expect(primary.calls).toHaveLength(2);
+    expect(retrySleep).toHaveBeenCalledWith(1_000, undefined);
+    expect(events.find((event) => event.kind === "provider-attempt-end" && !event.ok))
+      .toEqual(expect.objectContaining({ willFallback: true }));
+  });
+
+  it("uses the independent fallback after the bounded rate-limit retry is exhausted", async () => {
+    const primary = createMockAdapter({
+      id: "test-primary",
+      completeResponse: { ok: false, content: "rate limited", model: "m1", provider: "test-primary", errorClass: "rate-limit" }
+    });
+    const fallback = createMockAdapter({
+      id: "test-fallback",
+      completeResponse: { ok: true, content: "fallback recovered", model: "m2", provider: "test-fallback" }
+    });
+    registry.register(primary);
+    registry.register(fallback);
+    const executor = new ProviderExecutor({ registry, retrySleep: async () => true });
+
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("test-primary", "m1"),
+        fallbackChain: [createRoute("test-fallback", "m2")],
+        retryRateLimits: true
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.fallbackUsed).toBe(true);
+    expect(primary.calls).toHaveLength(2);
+    expect(fallback.calls).toHaveLength(1);
+    expect(result.attempts).toHaveLength(3);
+  });
+
+  it("stops after the bounded rate-limit retry when no fallback is configured", async () => {
+    const primary = createMockAdapter({
+      id: "test-primary",
+      completeResponse: { ok: false, content: "rate limited", model: "m1", provider: "test-primary", errorClass: "rate-limit" }
+    });
+    registry.register(primary);
+    const executor = new ProviderExecutor({ registry, retrySleep: async () => true });
+    const events: ProviderRuntimeEvent[] = [];
+
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("test-primary", "m1"),
+        retryRateLimits: true,
+        onEvent: (event) => { events.push(event); }
+      }
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.fallbackUsed).toBe(false);
+    expect(primary.calls).toHaveLength(2);
+    expect(result.attempts).toHaveLength(2);
+    expect(events.flatMap((event) =>
+      event.kind === "provider-attempt-end" && !event.ok ? [event.willFallback] : []
+    ))
+      .toEqual([true, false]);
   });
 
   it("does not use arbitrary registered models as fallbacks", async () => {

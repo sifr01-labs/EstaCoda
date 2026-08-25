@@ -55,8 +55,39 @@ export function detectPromisedAction(agentText: string): string | undefined {
 
 export function isAcknowledgementContinuation(userText: string): boolean {
   const text = normalizeUserText(userText);
-  return /^(?:ok|okay|yes|go on|continue|do that|carry on)$/u.test(text) ||
-    /^(?:let'?s do (?:it|this)|please continue)(?:\b|$)/u.test(text);
+  return /^(?:ok|okay|yes|go on|continue|do that|carry on|retry|try again)$/u.test(text) ||
+    /^(?:let'?s do (?:it|this)|please continue|why not try again)(?:\b|$)/u.test(text) ||
+    /^(?:أعد المحاولة|حاول مرة أخرى)$/u.test(text);
+}
+
+export function blockedConnectorContinuationState(input: {
+  userText: string;
+  connectorId: string;
+  reasonCodes: readonly string[];
+  updatedAt?: string;
+}): ConversationContinuationState | undefined {
+  const userRequest = sanitizeStateText(input.userText);
+  const connectorId = safeConnectorId(input.connectorId);
+  if (userRequest === undefined || connectorId === undefined) return undefined;
+  const promisedAction = `retry the governed transfer to ${connectorId} after the connector blocker is resolved`;
+  const reasonCodes = input.reasonCodes
+    .filter((reason) => /^[a-z0-9_-]{1,64}$/u.test(reason))
+    .slice(0, 8);
+  return {
+    id: continuationId(userRequest, promisedAction),
+    status: "open",
+    userRequest,
+    promisedAction,
+    ...(reasonCodes.length === 0 ? {} : {
+      lastProgress: `Blocked by: ${reasonCodes.join(", ")}.`
+    }),
+    updatedAt: input.updatedAt ?? new Date().toISOString(),
+    source: "explicit",
+    capabilityContext: {
+      toolsets: ["browser"],
+      connectors: [{ kind: "mcp", id: connectorId }]
+    }
+  };
 }
 
 export function continuesConversationCommitment(

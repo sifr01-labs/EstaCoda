@@ -115,8 +115,8 @@ export function shouldIncludePlan(input: {
 export function isActionableToolRequest(userText: string): boolean {
   const normalized = userText.normalize("NFKC").toLocaleLowerCase("en-US");
   return /\b(?:use|add|update|create|import|configure|connect|transfer|generate|sync|read|get|list|find|search|inspect|review|delete|remove|send|open|fetch|download|upload|run|check|diagnose|debug|fix|click|press|select|fill|set\s+up|continue)\b/iu.test(normalized) ||
-    /\b(?:let'?s\s+do\s+(?:it|this)|go\s+ahead|carry\s+on|proceed)\b/iu.test(normalized) ||
-    /(?:استخدم|أضف|اضف|حد[ّ]?ث|أنشئ|انشئ|استورد|اضبط|اربط|انقل|ول[ّ]?د|زامن|اقرأ|اجلب|اعرض|ابحث|افحص|راجع|احذف|أرسل|ارسل|افتح|نز[ّ]?ل|ارفع|شغ[ّ]?ل|تحق[ّ]?ق|شخ[ّ]?ص|صح[ّ]?ح|انقر|اضغط|اختر|املأ|تابع)/u.test(normalized);
+    /\b(?:let'?s\s+do\s+(?:it|this)|go\s+ahead|carry\s+on|proceed|retry|try\s+(?:it\s+)?again|attempt\s+again|resume)\b/iu.test(normalized) ||
+    /(?:استخدم|أضف|اضف|حد[ّ]?ث|أنشئ|انشئ|استورد|اضبط|اربط|انقل|ول[ّ]?د|زامن|اقرأ|اجلب|اعرض|ابحث|افحص|راجع|احذف|أرسل|ارسل|افتح|نز[ّ]?ل|ارفع|شغ[ّ]?ل|تحق[ّ]?ق|شخ[ّ]?ص|صح[ّ]?ح|انقر|اضغط|اختر|املأ|تابع|أعد المحاولة|حاول مرة أخرى)/u.test(normalized);
 }
 
 function policyNameForTaskClass(

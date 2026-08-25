@@ -48,6 +48,7 @@ import { normalizeSessionCompressionConfig, type SessionCompressionConfig } from
 import type { MemoryCurationService } from "../memory/memory-curation-service.js";
 import { MemoryCurationBusyError } from "../memory/memory-curation-coordinator.js";
 import type { ExecutionCapabilityPreflight } from "./execution-capability-preflight.js";
+import type { ConversationContinuationState } from "./conversation-continuation-state.js";
 
 const memoryPromotionMocks = vi.hoisted(() => ({
   resolveUserPreferencePromotion: vi.fn(),
@@ -550,6 +551,7 @@ async function createAgentLoop(input: {
 
   return {
     loop,
+    runtimeRouter,
     providerTurnLoop,
     runSkillPlaybook: input.runSkillPlaybook,
     sessionDb,
@@ -581,7 +583,7 @@ describe("AgentLoop provider availability gating", () => {
       reasonCodes: ["artifact_import_missing"] as const
     }));
     const runSkillPlaybook = vi.fn(async () => []);
-    const { loop, providerTurnLoop, nativeToolExecutor } = await createAgentLoop({
+    const { loop, providerTurnLoop, nativeToolExecutor, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: true,
       runSkillPlaybook,
       providerExecution: successfulProviderExecution("should not run"),
@@ -605,6 +607,94 @@ describe("AgentLoop provider availability gating", () => {
     expect(nativeToolExecutor.executeDeterministicNativeTools).not.toHaveBeenCalled();
     expect(runSkillPlaybook).not.toHaveBeenCalled();
     expect(providerTurnLoop.run).not.toHaveBeenCalled();
+    const blockerMessage = [...await sessionDb.listMessages(sessionId)].reverse()
+      .find((message) => message.role === "agent");
+    expect(blockerMessage?.metadata?.conversationContinuationState).toEqual(expect.objectContaining({
+      status: "open",
+      source: "explicit",
+      capabilityContext: {
+        toolsets: ["browser"],
+        connectors: [{ kind: "mcp", id: "postman" }]
+      }
+    }));
+  });
+
+  it("routes an explicit retry with the blocked request and preserves connector recovery tools", async () => {
+    const apiSkill: SkillDefinition = {
+      ...selectedSkill,
+      name: "api-integration",
+      requiredToolsets: ["browser", "mcp"]
+    };
+    const apiIntent: IntentRoute = {
+      ...intent,
+      labels: ["api.integration"],
+      suggestedToolsets: ["browser", "mcp"],
+      suggestedSkills: [apiSkill],
+      primarySkill: apiSkill
+    };
+    const assessRoutedGovernedTransfer = vi.fn()
+      .mockResolvedValueOnce({
+        status: "blocked" as const,
+        connectorId: "postman",
+        reasonCode: "connector_unavailable" as const,
+        reasonCodes: ["connector_unavailable"] as const
+      })
+      .mockResolvedValueOnce(undefined);
+    const providerToolDefinitions: ToolDefinition[] = [
+      { ...tool, name: "browser.snapshot", toolsets: ["browser"] },
+      { ...tool, name: "config.mcp.status", toolsets: ["configuration"] },
+      {
+        ...tool,
+        name: "mcp.postman.getCollection",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "postman" }
+      },
+      {
+        ...tool,
+        name: "mcp.linear.getIssues",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "linear" }
+      }
+    ];
+    const { loop, runtimeRouter, providerTurnLoop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      routeIntent: apiIntent,
+      selectedSkill: apiSkill,
+      providerToolDefinitions,
+      executionCapabilityPreflight: {
+        assessRoutedGovernedTransfer
+      } as unknown as ExecutionCapabilityPreflight
+    });
+
+    await loop.handle({
+      text: "Set up these API products in Postman.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+    await loop.handle({
+      text: "why not try again",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(vi.mocked(runtimeRouter.route).mock.calls[1]?.[0].text).toContain(
+      "Set up these API products in Postman.\nFollow-up: why not try again"
+    );
+    const retryInput = vi.mocked(providerTurnLoop.run).mock.calls[0]?.[0] as {
+      providerTools: Array<{ function: { name: string } }>;
+      conversationContinuationState?: ConversationContinuationState;
+    };
+    expect(retryInput.providerTools.map((entry) => entry.function.name)).toEqual([
+      "browser_snapshot",
+      "config_mcp_status",
+      "mcp_postman_getCollection"
+    ]);
+    expect(retryInput.conversationContinuationState?.capabilityContext).toEqual({
+      toolsets: ["browser"],
+      connectors: [{ kind: "mcp", id: "postman" }]
+    });
   });
 
   it("propagates approval and secure-input handlers into the provider tool loop independently", async () => {

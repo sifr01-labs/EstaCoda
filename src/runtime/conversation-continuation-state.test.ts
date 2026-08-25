@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  blockedConnectorContinuationState,
   continuesConversationCommitment,
   detectPromisedAction,
   isAcknowledgementContinuation,
@@ -31,7 +32,26 @@ describe("conversation continuation state", () => {
     expect(isAcknowledgementContinuation("continue")).toBe(true);
     expect(isAcknowledgementContinuation("go on")).toBe(true);
     expect(isAcknowledgementContinuation("let's do this [pasted text]")).toBe(true);
+    expect(isAcknowledgementContinuation("why not try again")).toBe(true);
     expect(isAcknowledgementContinuation("okay thanks")).toBe(false);
+  });
+
+  it("creates bounded continuation for a governed connector blocker", () => {
+    expect(blockedConnectorContinuationState({
+      userText: "Set up these API products in Postman.",
+      connectorId: "postman",
+      reasonCodes: ["connector_unavailable", "verification_missing"],
+      updatedAt: "2026-08-25T00:00:00.000Z"
+    })).toEqual(expect.objectContaining({
+      status: "open",
+      source: "explicit",
+      userRequest: "Set up these API products in Postman.",
+      lastProgress: "Blocked by: connector_unavailable, verification_missing.",
+      capabilityContext: {
+        toolsets: ["browser"],
+        connectors: [{ kind: "mcp", id: "postman" }]
+      }
+    }));
   });
 
   it("continues open work through acknowledgement and deictic action language", () => {

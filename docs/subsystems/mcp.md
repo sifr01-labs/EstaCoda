@@ -30,6 +30,8 @@ description: "MCP client transport, discovery, and trust metadata."
 
 Configured server descriptors survive independently of callable tool registration. Runtime and status surfaces distinguish `configured`, `connected`, `schemas registered`, `available`, and `exposed this turn`. A disabled server, missing environment reference, startup failure, schema-validation failure, or connected server with no callable schemas therefore remains discoverable by name and reports its bounded failure stage instead of disappearing from routing. `available` means callable schemas survived registration and normal availability checks; `exposed this turn` means at least one of those registered tools entered the current bounded provider inventory.
 
+Normal MCP requests retain the 10-second default timeout. Package-runner-backed stdio startup (`npx`, `pnpx`, `bunx`, `uvx`, or `pnpm dlx`) receives a separate 30-second default initialization window so cold module loading does not make an otherwise valid connector disappear. An explicit per-server `connectTimeoutMs` still overrides this default.
+
 Naming a configured but unavailable connector does not expose tools. It lets routing and governed-transfer preflight diagnose the connector outage together with all missing reviewed artifact, protected-input, result-redaction, and verification configuration. Reload or repair remains explicit.
 
 ## Credentials

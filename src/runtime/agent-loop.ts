@@ -57,6 +57,7 @@ import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { buildFallbackResponse, cancelledResponse, buildResumeNote, renderToolPlanProgress } from "./response-builders.js";
 import { renderProviderExecutionSummary, summarizeProviderExecution } from "./provider-execution-summary.js";
 import {
+  blockedConnectorContinuationState,
   continuesConversationCommitment,
   sanitizeConversationContinuationState,
   updateConversationContinuationState,
@@ -379,9 +380,19 @@ export class AgentLoop {
       ? expandedContext
       : undefined;
     const routedText = context?.expandedText ?? effectiveText;
+    const previousConversationContinuationState = await this.#latestConversationContinuationState();
+    const continuedConversationState = continuesConversationCommitment(
+      routedText,
+      previousConversationContinuationState
+    )
+      ? previousConversationContinuationState
+      : undefined;
+    const routingText = continuedConversationState === undefined
+      ? routedText
+      : `${continuedConversationState.userRequest}\nFollow-up: ${routedText}`;
     const trustedWorkspace = input.trustedWorkspace ?? false;
     const route = this.#runtimeRouter.route({
-      text: routedText,
+      text: routingText,
       attachments: input.attachments,
       channel: input.channel,
       model: this.#model,
@@ -637,6 +648,11 @@ export class AgentLoop {
     });
     if (governedTransferPreflight?.status === "blocked") {
       const matchedSkills = selectedSkill === undefined ? [] : [selectedSkill.name];
+      const conversationContinuationState = blockedConnectorContinuationState({
+        userText: effectiveText,
+        connectorId: governedTransferPreflight.connectorId,
+        reasonCodes: governedTransferPreflight.reasonCodes
+      });
       const locale = this.#ui?.language === "ar" ? "ar" : "en";
       const blocker = formatGovernedTransferBlocker({
         result: governedTransferPreflight,
@@ -690,7 +706,8 @@ export class AgentLoop {
             connectorId: governedTransferPreflight.connectorId,
             reasonCode: governedTransferPreflight.reasonCode,
             reasonCodes: governedTransferPreflight.reasonCodes
-          }
+          },
+          ...(conversationContinuationState === undefined ? {} : { conversationContinuationState })
         }
       });
       await emit(input.onEvent, { kind: "agent-final", text });
@@ -820,13 +837,6 @@ export class AgentLoop {
     });
     const setupApprovals = buildSetupApprovalRequests(selectedSkillSetup, selectedSkill?.name);
     const deterministicImageGenerationRan = deterministicNativeTools.executions.some((execution) => execution.tool.name === "image.generate");
-    const previousConversationContinuationState = await this.#latestConversationContinuationState();
-    const continuedConversationState = continuesConversationCommitment(
-      routedText,
-      previousConversationContinuationState
-    )
-      ? previousConversationContinuationState
-      : undefined;
     const providerToolSelection = this.#model?.supportsTools === true
       ? this.#providerToolsForTurn({
           intent,

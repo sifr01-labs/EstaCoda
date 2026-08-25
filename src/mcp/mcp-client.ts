@@ -117,7 +117,12 @@ export class MCPClient {
     this.#url = options.url;
     this.#headers = options.headers ?? {};
     this.#timeoutMs = options.timeoutMs ?? 10_000;
-    this.#connectTimeoutMs = options.connectTimeoutMs ?? this.#timeoutMs;
+    this.#connectTimeoutMs = options.connectTimeoutMs ?? defaultMcpConnectTimeoutMs(
+      this.#transport,
+      this.#timeoutMs,
+      this.#command,
+      this.#args
+    );
     this.#fetch = options.fetch ?? defaultFetch;
   }
 
@@ -478,6 +483,26 @@ export class MCPClient {
     pending.resolve(message.result);
   }
 }
+
+function defaultMcpConnectTimeoutMs(
+  transport: "stdio" | "http",
+  requestTimeoutMs: number,
+  command?: string,
+  args: readonly string[] = []
+): number {
+  // Package-runner-backed stdio connectors commonly need more than one normal
+  // request window for cold process startup and module loading. Operators can
+  // still override this explicitly per connector.
+  const executable = command?.split(/[\\/]/u).at(-1)?.toLocaleLowerCase("en-US");
+  const packageRunner = executable === "npx" || executable === "npx.cmd" ||
+    executable === "pnpx" || executable === "bunx" || executable === "uvx" ||
+    (executable === "pnpm" && args[0] === "dlx");
+  return transport === "stdio" && packageRunner
+    ? Math.max(requestTimeoutMs, 30_000)
+    : requestTimeoutMs;
+}
+
+export const __defaultMcpConnectTimeoutMsForTest = defaultMcpConnectTimeoutMs;
 
 function buildStdioEnv(customEnv: Record<string, string> | undefined): Record<string, string> {
   return buildSafeChildEnv({

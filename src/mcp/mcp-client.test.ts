@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { MCPClient, __resolveNpxCachedBinaryForTest } from "./mcp-client.js";
+import {
+  MCPClient,
+  __defaultMcpConnectTimeoutMsForTest,
+  __resolveNpxCachedBinaryForTest
+} from "./mcp-client.js";
 
 async function withHomeEnv<T>(
   env: { HOME?: string; ESTACODA_HOME?: string },
@@ -41,6 +45,14 @@ async function withHomeEnv<T>(
 }
 
 describe("MCPClient stdio lifecycle", () => {
+  it("allows cold stdio connector startup without widening normal request timeouts", () => {
+    expect(__defaultMcpConnectTimeoutMsForTest("stdio", 10_000, "npx")).toBe(30_000);
+    expect(__defaultMcpConnectTimeoutMsForTest("stdio", 45_000, "npx")).toBe(45_000);
+    expect(__defaultMcpConnectTimeoutMsForTest("stdio", 10_000, "node")).toBe(10_000);
+    expect(__defaultMcpConnectTimeoutMsForTest("stdio", 10_000, "pnpm", ["dlx"])).toBe(30_000);
+    expect(__defaultMcpConnectTimeoutMsForTest("http", 10_000)).toBe(10_000);
+  });
+
   it("rejects startup when a stdio child exits before initialize can complete", async () => {
     const client = new MCPClient({
       name: "exits-immediately",

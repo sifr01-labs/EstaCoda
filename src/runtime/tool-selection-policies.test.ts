@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { IntentRoute } from "../contracts/intent.js";
 import {
+  isActionableToolRequest,
   selectToolSelectionPolicy,
   shouldIncludePlan,
   TOOL_SELECTION_POLICIES
@@ -79,5 +80,11 @@ describe("tool selection policies", () => {
       userText: "run the selected skill",
       selectedSkillPlaybookSteps: 3
     })).toBe(true);
+  });
+
+  it("treats bounded retry language as actionable", () => {
+    expect(isActionableToolRequest("why not try again")).toBe(true);
+    expect(isActionableToolRequest("retry")).toBe(true);
+    expect(isActionableToolRequest("أعد المحاولة")).toBe(true);
   });
 });

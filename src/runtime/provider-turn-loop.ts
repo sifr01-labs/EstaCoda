@@ -1438,6 +1438,7 @@ export class ProviderTurnLoop {
       signal: input.signal,
       primaryRoute,
       fallbackChain,
+      retryRateLimits: true,
       deadlineAtMs: providerWorkDeadlineAt(input.loopStartedAt, this.#budgets),
       usage: await this.#nextProviderUsageContext(input.visibleTurnId, input.imageInputs),
       onEvent: initialEvents.onEvent
@@ -1501,6 +1502,7 @@ export class ProviderTurnLoop {
       signal: input.signal,
       primaryRoute: retryPrimaryRoute,
       fallbackChain: retryChain.slice(1),
+      retryRateLimits: true,
       deadlineAtMs: providerWorkDeadlineAt(input.loopStartedAt, this.#budgets),
       usage: await this.#nextProviderUsageContext(input.visibleTurnId, input.imageInputs),
       onEvent: retryEvents.onEvent
@@ -2436,12 +2438,12 @@ function hasVisibleOneTimeCodeChallenge(executions: readonly ToolExecutionRecord
     const elements = snapshot.elements ?? [];
     const codeFields = elements.filter((element) =>
       (element.role === "textbox" || element.role === "searchbox" || element.role === "combobox") &&
-      /one[-\s]?time|otp|mfa|verification\s+code|security\s+code|authentication\s+code|رمز التحقق|رمز الأمان/iu
+      /one[-\s]?time|otp|mfa|verification\s+code|security\s+code|authenticat(?:ion|or)\s+code|رمز التحقق|رمز الأمان/iu
         .test([element.name, element.label, element.withinText].filter(Boolean).join(" "))
     );
     const submitControls = elements.filter((element) =>
       element.role === "button" &&
-      /verify|submit|continue|confirm|next|sign\s*in|log\s*in|تحقق|تأكيد|متابعة|دخول/iu
+      /verify|authenticate|submit|continue|confirm|next|sign\s*in|log\s*in|تحقق|تأكيد|متابعة|دخول/iu
         .test([element.name, element.label, element.withinText].filter(Boolean).join(" "))
     );
     return codeFields.length === 1 && submitControls.length === 1;

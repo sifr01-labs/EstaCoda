@@ -115,6 +115,32 @@ describe("narrowProviderToolsForTurn", () => {
     expect(selected).not.toContain("workspaces_list");
   });
 
+  it("keeps the blocked connector and recovery status available on an explicit retry", () => {
+    const catalog = buildProviderToolSchemaCatalog({
+      tools: [
+        tool("browser.snapshot", ["browser"]),
+        tool("config.mcp.status", ["configuration"]),
+        tool("mcp.postman.getCollection", ["mcp"], { kind: "mcp", id: "postman" }),
+        tool("workspaces.list", ["mcp"], { kind: "mcp", id: "linear-cloud" })
+      ]
+    });
+
+    expect(names(narrowProviderToolsForTurn({
+      catalog,
+      intent: intent(0.35),
+      userText: "why not try again",
+      continuity: {
+        userRequest: "Set up these products in Postman.",
+        toolsets: ["browser"],
+        connectors: [{ kind: "mcp", id: "postman" }]
+      }
+    }))).toEqual([
+      "browser_snapshot",
+      "config_mcp_status",
+      "mcp_postman_getCollection"
+    ]);
+  });
+
   it("does not infer browser continuity without an active browser", () => {
     const catalog = buildProviderToolSchemaCatalog({ tools });
 
