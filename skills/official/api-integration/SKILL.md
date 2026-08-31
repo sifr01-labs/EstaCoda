@@ -28,12 +28,12 @@
   "playbook": [
     {
       "id": "discover-api-source",
-      "description": "Inspect the current visible API product or documentation region. When a grounded OpenAPI, Swagger, AsyncAPI, RAML, GraphQL, protobuf, Smithy, or equivalent export is available and comprehensive structure is needed, prefer browser.download over manually collecting endpoint pages. This is a preference, not a forced action.",
+      "description": "Inspect the current visible API product or documentation region. When a grounded OpenAPI, Swagger, AsyncAPI, RAML, GraphQL, protobuf, Smithy, or equivalent export is available and comprehensive structure is needed, prefer browser.download over manually collecting endpoint pages. For a multi-product request, first retain the bounded product list and, when a Plan would help, use one item per product so partial completion remains explicit. This is a preference, not a forced action.",
       "toolsets": ["browser", "web"]
     },
     {
       "id": "import-description",
-      "description": "Use the governed download receipt and a destination connector's reviewed artifact argument to import the machine-readable description without copying its full content through model context. Prefer the destination's native spec-import or collection-generation operation. If no machine-readable description or reviewed import exists, extract only the documentation needed for the requested integration.",
+      "description": "Use the governed download receipt and a destination connector's reviewed artifact argument to import the machine-readable description without copying its full content through model context. Prefer the destination's native spec-import or collection-generation operation. For multiple products, finish the download, destination import, and read-back verification for one product before downloading the next; do not accumulate unimported downloads. Reuse a retained complete receipt on retry, and download again only when the runtime reports that the artifact is stale, invalid, or unavailable. If no machine-readable description or reviewed import exists, extract only the documentation needed for the requested integration.",
       "toolsets": ["browser", "mcp"]
     },
     {
@@ -43,7 +43,7 @@
     },
     {
       "id": "verify-destination",
-      "description": "Read back the destination's imported API resource and protected-value metadata using configured verification tools. Confirm names, references, and structure without requesting protected values again.",
+      "description": "Read back the destination's imported API resource and protected-value metadata using configured verification tools. Confirm names, references, and structure without requesting protected values again. In a multi-product request, treat only that verified product as complete and continue from the first unfinished product after interruption.",
       "toolsets": ["mcp"]
     }
   ],
@@ -123,5 +123,7 @@ Keep the two data paths separate:
 
 - API descriptions travel as session-owned governed artifacts through reviewed connector arguments.
 - Credentials travel through protected input and must not enter the API artifact, model context, or ordinary connector arguments.
+
+For a multi-product transfer, keep progress monotonic: retain the discovered product list, then download, import, and verify one product before starting the next. A complete governed receipt already contains the reference, filename, hash, and source origin needed for relay; reuse it unless the runtime rejects it. If work stops partway through, report the verified products and resume from the first unfinished product rather than repeating completed discovery or downloads.
 
 After import or generation, use the destination connector's read tools to verify the resulting API resource, collection, environment, or equivalent state. Reuse fresh action receipts and confirmed reads instead of taking redundant snapshots or repeating unchanged connector queries.
