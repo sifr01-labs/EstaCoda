@@ -336,6 +336,93 @@ describe("narrowProviderToolsForTurn", () => {
     ]);
   });
 
+  it("uses a complete but bounded browser and Postman profile for API integration", () => {
+    const browserTools = [
+      "status", "snapshot", "find", "click", "type", "fill_protected_form", "select",
+      "extract", "scroll", "press", "back", "tabs", "switch_tab", "download", "vision",
+      "dialog", "navigate"
+    ].map((name) => tool(`browser.${name}`, ["browser"], undefined, "read-only-network"));
+    const postmanTools = Array.from({ length: 14 }, (_, index) => tool(
+      `mcp.postman.operation${index + 1}`,
+      ["mcp"],
+      { kind: "mcp", id: "postman" },
+      index < 7 ? "read-only-network" : "external-side-effect"
+    ));
+    const catalog = buildProviderToolSchemaCatalog({
+      tools: [
+        tool("plan", ["core"]),
+        ...browserTools,
+        tool("config.mcp.status", ["configuration"]),
+        tool("config.provider.status", ["provider", "diagnostics"]),
+        tool("config.provider.execution_status", ["provider", "diagnostics"]),
+        ...postmanTools,
+        tool("browser.console", ["browser"], undefined, "read-only-network"),
+        tool("browser.screenshot", ["browser"], undefined, "read-only-network"),
+        tool("browser.get_images", ["browser"], undefined, "read-only-network"),
+        tool("file.read", ["files"]),
+        tool("file.write", ["files"], undefined, "workspace-write"),
+        tool("web.extract", ["web"], undefined, "read-only-network"),
+        tool("config.mcp.setup", ["configuration"], undefined, "shared-state-mutation"),
+        tool("skills.propose", ["skills"], undefined, "shared-state-mutation"),
+        tool("workspaces.list", ["mcp"], { kind: "mcp", id: "linear-cloud" })
+      ]
+    });
+    const skill: SkillDefinition = {
+      name: "api-integration",
+      description: "test",
+      version: "1",
+      whenToUse: [],
+      requiredToolsets: ["browser", "mcp"],
+      optionalToolsets: ["web", "files"],
+      playbook: Array.from({ length: 4 }, (_, index) => ({
+        id: `step-${index + 1}`,
+        description: `Step ${index + 1}`
+      })),
+      permissionExpectations: [],
+      examples: [],
+      evaluations: []
+    };
+
+    const selected = selectProviderToolsForTurn({
+      catalog,
+      intent: intent(0.7),
+      userText: "Import these Swagger products into Postman and configure their credentials.",
+      selectedSkill: skill
+    });
+    const initialNames = names(selected.initialTools);
+
+    expect(initialNames).toHaveLength(34);
+    expect(initialNames).toEqual(expect.arrayContaining([
+      "plan",
+      "browser_status",
+      "browser_download",
+      "browser_fill_protected_form",
+      "browser_dialog",
+      "config_mcp_status",
+      "config_provider_status",
+      "config_provider_execution_status",
+      ...postmanTools.map((entry) => entry.name.replaceAll(".", "_"))
+    ]));
+    for (const excluded of [
+      "browser_console",
+      "browser_screenshot",
+      "browser_get_images",
+      "file_read",
+      "file_write",
+      "web_extract",
+      "config_mcp_setup",
+      "skills_propose",
+      "workspaces_list",
+      "browser_vision"
+    ]) {
+      expect(initialNames).not.toContain(excluded);
+    }
+    expect(selected.expansionCandidates.map((candidate) => candidate.schema.function.name)).toEqual([
+      "browser_vision"
+    ]);
+    expect(selected.namedConnectorIds).toEqual(["postman"]);
+  });
+
   it("recognizes configured connectors even when they registered no callable schemas", () => {
     const catalog = buildProviderToolSchemaCatalog({ tools: tools.filter((entry) => entry.connector === undefined) });
     const selected = selectProviderToolsForTurn({

@@ -74,7 +74,7 @@ describe("ExecutionWorkingSetController", () => {
     ]);
   });
 
-  it("invalidates matching reads after a relevant mutation and retains unrelated identities", () => {
+  it("refreshes a mutation target and retains unrelated identities", () => {
     const controller = new ExecutionWorkingSetController({ profileId: "profile-a", sessionId: "session-a" });
     controller.beginTurn(TURN);
     controller.observe([
@@ -96,16 +96,22 @@ describe("ExecutionWorkingSetController", () => {
     })], TURN);
 
     const summaries = controller.snapshot(TURN)?.facts.map((fact) => fact.summary) ?? [];
-    expect(summaries).not.toContain("Collection ID: collection-123");
+    expect(summaries).toContain("Collection ID: collection-123");
     expect(summaries).toContain("Workspace ID: workspace-456");
+    expect(controller.snapshot(TURN)?.facts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        summary: "Collection ID: collection-123",
+        sourceCallId: "call-update"
+      })
+    ]));
   });
 
-  it("retains reviewed identifiers returned by a successful MCP mutation without trusting its input", () => {
+  it("retains successful MCP mutation targets alongside reviewed returned identifiers", () => {
     const controller = new ExecutionWorkingSetController({ profileId: "profile-a", sessionId: "session-a" });
     controller.beginTurn(TURN);
     controller.observe([execution({
       tool: { ...execution().tool, name: "mcp.postman.createCollection", riskClass: "external-side-effect" },
-      input: { workspaceId: "model-authored-workspace", collectionId: "model-authored-collection" },
+      input: { workspace: "workspace-456" },
       riskClass: "external-side-effect",
       toolCallId: "call-create",
       executionEffect: { kind: "mutation", connector: { kind: "mcp", id: "postman" } },
@@ -122,8 +128,35 @@ describe("ExecutionWorkingSetController", () => {
     })], TURN);
 
     const summaries = controller.snapshot(TURN)?.facts.map((fact) => fact.summary) ?? [];
-    expect(summaries).toEqual(["Collection ID: confirmed-collection", "Collection Name: MTN Products"]);
-    expect(summaries.join(" ")).not.toContain("model-authored");
+    expect(summaries).toEqual([
+      "Workspace: workspace-456",
+      "Collection ID: confirmed-collection",
+      "Collection Name: MTN Products"
+    ]);
+  });
+
+  it("retains schema-valid connector target references after successful reads", () => {
+    const controller = new ExecutionWorkingSetController({ profileId: "profile-a", sessionId: "session-a" });
+    controller.beginTurn(TURN);
+    controller.observe([execution({
+      tool: { ...execution().tool, name: "mcp.postman.getCollections" },
+      input: {
+        workspace: "workspace-456",
+        collection: "collection-123",
+        sessionId: "session-must-not-survive",
+        apiKey: "sk-secret1234567890abcdef"
+      },
+      toolCallId: "call-collections",
+      result: { ok: true, content: "markdown table with no continuity metadata" }
+    })], TURN);
+
+    const summaries = controller.snapshot(TURN)?.facts.map((fact) => fact.summary) ?? [];
+    expect(summaries).toEqual([
+      "Workspace: workspace-456",
+      "Collection: collection-123"
+    ]);
+    expect(JSON.stringify(controller.snapshot(TURN))).not.toContain("session-must-not-survive");
+    expect(JSON.stringify(controller.snapshot(TURN))).not.toContain("sk-secret");
   });
 
   it("rejects credential-like values, undeclared MCP fields, and untrusted MCP summaries", () => {

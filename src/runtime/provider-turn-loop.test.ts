@@ -1913,7 +1913,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     ]));
   });
 
-  it("reuses a confirmed Postman workspace in a later operation without another workspace search", async () => {
+  it("reuses a successful Postman workspace argument without parsing connector prose", async () => {
     const planStore = new ExecutionPlanStore();
     planStore.replace({
       objective: "Configure MTN products in Postman",
@@ -1928,21 +1928,16 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     });
     const workspaceRead = toolExecutionForTool(
       "call-workspaces-working-set",
-      "mcp.postman.getWorkspaces",
-      "RAW WORKSPACE PAYLOAD"
+      "mcp.postman.getCollections",
+      "| Collection | ID |\n| MTN Products | collection-123 |"
     );
+    workspaceRead.input = { workspace: "workspace-456" };
     workspaceRead.riskClass = "read-only-network";
     workspaceRead.tool.riskClass = "read-only-network";
     workspaceRead.tool.toolsets = ["mcp"];
     workspaceRead.result = {
       ok: true,
-      content: "RAW WORKSPACE PAYLOAD",
-      metadata: {
-        _estacoda_continuity_facts: [
-          { field: "workspaceId", value: "workspace-456", kind: "identifier" },
-          { field: "workspaceName", value: "Developer Workspace", kind: "label" }
-        ]
-      }
+      content: "| Collection | ID |\n| MTN Products | collection-123 |"
     };
     const collectionCreate = toolExecutionForTool(
       "call-create-collection",
@@ -1957,7 +1952,11 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     const dispatchedTools: string[] = [];
     const harness = await createPostToolNudgeHarness({
       responses: [
-        providerExecution("", [providerToolCall("call-workspaces-working-set", "{}", "mcp.postman.getWorkspaces")]),
+        providerExecution("", [providerToolCall(
+          "call-workspaces-working-set",
+          JSON.stringify({ workspace: "workspace-456" }),
+          "mcp.postman.getCollections"
+        )]),
         providerExecution("", [providerToolCall(
           "call-create-collection",
           JSON.stringify({ workspace: "workspace-456", collection: { name: "MTN Products" } }),
@@ -1979,11 +1978,10 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
     const continuation = JSON.stringify((harness.completeSpy.mock.calls[1]?.[0] as ProviderRequest).messages);
     expect(continuation).toContain("Confirmed foreground-turn state");
-    expect(continuation).toContain("Workspace ID: workspace-456");
-    expect(continuation).toContain("Workspace Name: Developer Workspace");
-    expect(continuation.match(/RAW WORKSPACE PAYLOAD/gu)).toHaveLength(1);
+    expect(continuation).toContain("Workspace: workspace-456");
+    expect(continuation.match(/MTN Products/gu)).toHaveLength(1);
     expect(dispatchedTools).toEqual([
-      "mcp.postman.getWorkspaces",
+      "mcp.postman.getCollections",
       "mcp.postman.createCollection"
     ]);
   });

@@ -1309,6 +1309,46 @@ describe("assembleProviderContinuationPrompt", () => {
     expect(rendered).not.toContain("older raw artifact body");
   });
 
+  it("keeps a nested browser-download artifact after raw feedback is consumed", () => {
+    const artifact = {
+      id: "artifact-swagger",
+      path: "artifact://artifact-swagger",
+      kind: "data" as const,
+      bytes: 8_782,
+      createdAt: "2030-01-01T00:00:00.000Z",
+      summary: "Governed browser download captured from a current grounded page target.",
+      mimeType: "application/yaml"
+    };
+    const latestPlan = baseContinuationInput().toolPlans[0]!;
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      toolExecutions: [toolExecution({
+        content: "Artifact: artifact://artifact-swagger\nFilename: loans-v2.yaml",
+        metadata: {
+          artifactId: artifact.id,
+          filename: "loans-v2.yaml",
+          artifact
+        }
+      })],
+      toolFeedbackLedger: {
+        latest: [{ plan: latestPlan }],
+        consumed: [{
+          callId: "call-browser-download",
+          tool: "browser.download",
+          status: "executed",
+          ok: true,
+          riskClass: "read-only-network",
+          resultChars: 72
+        }],
+        omittedCount: 0
+      }
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("artifact://artifact-swagger");
+    expect(rendered).toContain("application/yaml");
+    expect(rendered).not.toContain("Filename: loans-v2.yaml");
+  });
+
   it("uses structured native history for supported continuation prompts", () => {
     const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
       model: toolModel,

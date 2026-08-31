@@ -2323,6 +2323,16 @@ function createBrowserDownloadTool(
             outcome: "download-completed"
           }
         });
+        const promptSafeArtifact = {
+          id: artifact.id,
+          path: artifact.path,
+          kind: artifact.kind,
+          bytes: artifact.bytes,
+          createdAt: artifact.createdAt,
+          ...(artifact.summary === undefined ? {} : { summary: artifact.summary }),
+          ...(artifact.mimeType === undefined ? {} : { mimeType: artifact.mimeType }),
+          ...(artifact.metadata === undefined ? {} : { metadata: artifact.metadata })
+        };
         const receipt = {
           artifactId: artifact.id,
           filename,
@@ -2331,7 +2341,8 @@ function createBrowserDownloadTool(
           sha256,
           sourceOrigin,
           ...(inspection.apiDescription === undefined ? {} : { apiDescription: inspection.apiDescription }),
-          outcome: "download-completed" as const
+          outcome: "download-completed" as const,
+          artifact: promptSafeArtifact
         };
         return {
           ok: true,

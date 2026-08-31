@@ -2031,11 +2031,8 @@ function artifactsFromExecutions(executions: ToolExecutionRecord[]): ArtifactRec
 function artifactFromExecution(execution: ToolExecutionRecord): ArtifactRecord | undefined {
   const metadata = execution.result?.metadata;
 
-  if (!isArtifactRecord(metadata)) {
-    return undefined;
-  }
-
-  return metadata;
+  if (isArtifactRecord(metadata)) return metadata;
+  return isArtifactRecord(metadata?.artifact) ? metadata.artifact : undefined;
 }
 
 function isArtifactRecord(value: unknown): value is ArtifactRecord {

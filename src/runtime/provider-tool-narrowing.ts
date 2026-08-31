@@ -21,6 +21,26 @@ const RECOVERY_TOOL_NAMES = new Set([
   "config.provider.execution_status"
 ]);
 const EVIDENCE_GATED_TOOL_NAMES = new Set(["browser.vision"]);
+const API_INTEGRATION_SKILL_NAME = "api-integration";
+const API_INTEGRATION_NON_CONNECTOR_TOOL_NAMES = new Set([
+  "browser.status",
+  "browser.snapshot",
+  "browser.find",
+  "browser.click",
+  "browser.type",
+  "browser.fill_protected_form",
+  "browser.select",
+  "browser.extract",
+  "browser.scroll",
+  "browser.press",
+  "browser.back",
+  "browser.tabs",
+  "browser.switch_tab",
+  "browser.download",
+  "browser.vision",
+  "browser.dialog",
+  "browser.navigate"
+]);
 
 export type ProviderToolExpansionCandidate = {
   toolName: string;
@@ -116,6 +136,7 @@ export function selectProviderToolsForTurn(input: {
     ...(input.selectedSkill?.optionalToolsets ?? [])
   ]);
   const attachedToolsets = new Set(attachmentToolsets(input.attachments));
+  const apiIntegrationProfile = input.selectedSkill?.name === API_INTEGRATION_SKILL_NAME;
   const includePlan = shouldIncludePlan({
     policy,
     userText: input.userText,
@@ -136,18 +157,21 @@ export function selectProviderToolsForTurn(input: {
         return namedConnectors.has(connectorKey(entry.tool.connector));
       }
       if (actionable && RECOVERY_TOOL_NAMES.has(entry.tool.name)) return true;
-      if (entry.tool.toolsets.some((toolset) => routedToolsets.has(toolset))) return true;
       if (
         entry.tool.toolsets.some((toolset) => attachedToolsets.has(toolset)) &&
         (entry.tool.riskClass === "read-only-local" || entry.tool.riskClass === "read-only-network")
       ) return true;
+      if (apiIntegrationProfile) {
+        return API_INTEGRATION_NON_CONNECTOR_TOOL_NAMES.has(entry.tool.name);
+      }
+      if (entry.tool.toolsets.some((toolset) => routedToolsets.has(toolset))) return true;
       return policyRiskClasses.has(entry.tool.riskClass) &&
         entry.tool.toolsets.some((toolset) => policyToolsets.has(toolset));
     })();
     if (!selected) continue;
     if (
       actionable &&
-      continuityToolsets.has("browser") &&
+      (apiIntegrationProfile || continuityToolsets.has("browser")) &&
       EVIDENCE_GATED_TOOL_NAMES.has(entry.tool.name)
     ) {
       expansionCandidates.push({

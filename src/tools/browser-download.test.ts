@@ -45,8 +45,25 @@ describe("browser.download", () => {
       sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
       sourceOrigin: "https://developer.example.test",
       apiDescription: { format: "OpenAPI", version: "3.1.0" },
-      outcome: "download-completed"
+      outcome: "download-completed",
+      artifact: {
+        id: "artifact-1",
+        path: "artifact://artifact-1",
+        kind: "data",
+        bytes: 30,
+        createdAt: expect.any(String),
+        summary: "Governed browser download captured from a current grounded page target.",
+        mimeType: "application/json",
+        metadata: {
+          filename: "openapi.json",
+          sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          sourceOrigin: "https://developer.example.test",
+          source: "browser.download",
+          outcome: "download-completed"
+        }
+      }
     });
+    expect(result.metadata?.artifact).not.toHaveProperty("localPath");
     expect(result.content).not.toContain(root);
     expect(captured).toHaveLength(1);
     expect(captured[0]).toMatchObject({ sessionId: "browser-session:main", ref: "@e1", tabRef: "@t1" });

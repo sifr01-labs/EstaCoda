@@ -27,6 +27,7 @@ const INELIGIBLE_TOOLS = new Set(["plan", "delegate_task"]);
 const INELIGIBLE_IDENTIFIER_FIELDS = new Set(["callid", "profileid", "sessionid", "toolcallid", "turnid"]);
 const SENSITIVE_FIELD = /(?:api.?key|auth|authorization|cookie|credential|otp|pass(?:word|code)?|secret|token)/iu;
 const IDENTIFIER_FIELD = /(?:^id$|id$|ids$|identifier$|uid$|uuid$)/iu;
+const CONNECTOR_TARGET_REFERENCE_FIELD = /^(?:collection|environment|organization|project|repository|spec|team|workspace)$/iu;
 const LABEL_FIELD = /(?:^name$|displayname$|label$|title$)/iu;
 const COUNT_FIELD = /(?:^count$|count$|total$)/iu;
 
@@ -89,7 +90,7 @@ export class ExecutionWorkingSetController {
       }
       const sourceCallId = safeSourceCallId(execution.toolCallId);
       if (sourceCallId === undefined) continue;
-      for (const candidate of factCandidates(execution, namespace, !mutation)) {
+      for (const candidate of factCandidates(execution, namespace)) {
         this.#upsert({
           key: candidate.key,
           summary: candidate.summary,
@@ -189,14 +190,12 @@ type FactCandidate = {
 
 function factCandidates(
   execution: ToolExecutionRecord,
-  namespace: string,
-  includeInputScalars: boolean
+  namespace: string
 ): FactCandidate[] {
   const candidates: FactCandidate[] = [];
   const isMcpExecution = execution.tool.toolsets.includes("mcp");
-  const inputScalars = includeInputScalars
-    ? collectSafeScalars(execution.input).filter((entry) => entry.kind === "identifier")
-    : [];
+  const inputScalars = collectSafeScalars(execution.input, isMcpExecution)
+    .filter((entry) => entry.kind === "identifier");
   const structuredScalars = isMcpExecution
     ? collectReviewedContinuityScalars(execution.result?.metadata?._estacoda_continuity_facts)
     : collectSafeScalars(execution.result?.metadata?.structuredContent);
@@ -277,7 +276,7 @@ type SafeScalar = {
   kind: "identifier" | "label" | "count";
 };
 
-function collectSafeScalars(input: unknown): SafeScalar[] {
+function collectSafeScalars(input: unknown, includeConnectorTargetReferences = false): SafeScalar[] {
   const output: SafeScalar[] = [];
   let visited = 0;
   const visit = (value: unknown, depth: number): void => {
@@ -290,7 +289,7 @@ function collectSafeScalars(input: unknown): SafeScalar[] {
     if (typeof value !== "object") return;
     for (const [field, entry] of Object.entries(value as Record<string, unknown>)) {
       if (SENSITIVE_FIELD.test(field)) continue;
-      const kind = scalarKind(field);
+      const kind = scalarKind(field, includeConnectorTargetReferences);
       if (kind !== undefined) {
         const scalar = safeScalarValue(entry);
         if (scalar !== undefined) output.push({ field, value: scalar, kind });
@@ -303,7 +302,7 @@ function collectSafeScalars(input: unknown): SafeScalar[] {
 }
 
 function executionIdentities(execution: ToolExecutionRecord): Set<string> {
-  return new Set(collectSafeScalars(execution.input)
+  return new Set(collectSafeScalars(execution.input, execution.tool.toolsets.includes("mcp"))
     .filter((entry) => entry.kind === "identifier")
     .map((entry) => normalizeIdentity(entry.value)));
 }
@@ -325,9 +324,13 @@ function toolHasVerb(toolName: string, verbs: ReadonlySet<string>): boolean {
     .some((part) => verbs.has(part.toLocaleLowerCase()));
 }
 
-function scalarKind(field: string): SafeScalar["kind"] | undefined {
+function scalarKind(
+  field: string,
+  includeConnectorTargetReferences = false
+): SafeScalar["kind"] | undefined {
   if (INELIGIBLE_IDENTIFIER_FIELDS.has(field.replace(/[_-]+/gu, "").toLocaleLowerCase())) return undefined;
   if (IDENTIFIER_FIELD.test(field)) return "identifier";
+  if (includeConnectorTargetReferences && CONNECTOR_TARGET_REFERENCE_FIELD.test(field)) return "identifier";
   if (LABEL_FIELD.test(field)) return "label";
   if (COUNT_FIELD.test(field)) return "count";
   return undefined;

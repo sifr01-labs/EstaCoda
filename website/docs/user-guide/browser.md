@@ -77,7 +77,7 @@ EstaCoda keeps the overall sign-in pending whenever the resulting page still ask
 
 When a page shows one one-time-code field and one verification button, EstaCoda prompts for and submits the code through protected input in the same user turn. The code stays out of model context and ordinary chat. If collection times out, the runtime cancels the prompt, allows a short cleanup window, and keeps the browser session usable once that cleanup finishes.
 
-Governed page downloads are captured into runtime-managed storage. Supervised isolated sessions apply download behavior to the correct browser context, and auto-launched temporary Chrome profiles disable native Save prompts. EstaCoda cannot click an operating-system Save dialog. If one still appears, the download fails with a specific diagnostic instead of repeatedly clicking the page control.
+Governed page downloads are captured into runtime-managed storage. A successful download keeps its governed artifact reference available to the agent after older raw tool results are compacted, without exposing the local backing path. Supervised isolated sessions apply download behavior to the correct browser context, and auto-launched temporary Chrome profiles disable native Save prompts. EstaCoda cannot click an operating-system Save dialog. If one still appears, the download fails with a specific diagnostic instead of repeatedly clicking the page control.
 
 Snapshot summarization is controlled by:
 
