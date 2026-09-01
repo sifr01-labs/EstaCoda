@@ -22,7 +22,7 @@ import { SessionCompressionService, type CompactResult } from "../prompt/session
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
-import { stableToolCallId, ToolCallPlanner } from "../tools/tool-call-planner.js";
+import { ToolCallPlanner } from "../tools/tool-call-planner.js";
 import {
   buildProviderToolSchemaCatalog,
   type OpenAICompatibleToolSchema,
@@ -723,10 +723,13 @@ async function createPostToolNudgeHarness(input: {
     await input.onExecutePlans?.({ sessionDb, sessionId, stepInput });
     const step = input.toolSteps[toolStepIndex] ?? {};
     toolStepIndex += 1;
-    for (const plan of step.plans ?? []) {
+    const runtimeCalls = stepInput.providerExecution?.toolCalls ?? [];
+    for (const [index, plan] of (step.plans ?? []).entries()) {
+      if (runtimeCalls[index]?.id !== undefined) plan.id = runtimeCalls[index].id;
       stepInput.toolPlans.push(plan);
     }
-    for (const execution of step.executions ?? []) {
+    for (const [index, execution] of (step.executions ?? []).entries()) {
+      if (runtimeCalls[index]?.id !== undefined) execution.toolCallId = runtimeCalls[index].id;
       const plan = toolPlan(execution.toolCallId ?? execution.tool.name);
       plan.tool = execution.tool.name;
       plan.result = execution.result;
@@ -1824,6 +1827,8 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
   it("replays only the newest raw tool batch in flat continuation feedback", async () => {
     const firstRawResult = "FIRST_RAW_TOOL_RESULT";
     const secondRawResult = "SECOND_RAW_TOOL_RESULT";
+    const firstExecution = toolExecution("call-first", firstRawResult);
+    const secondExecution = toolExecution("call-second", secondRawResult);
     const harness = await createPostToolNudgeHarness({
       responses: [
         providerExecution("", [providerToolCall("call-first")]),
@@ -1831,8 +1836,8 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
         providerExecution("Completed after both tool batches.")
       ],
       toolSteps: [
-        { executions: [toolExecution("call-first", firstRawResult)] },
-        { executions: [toolExecution("call-second", secondRawResult)] },
+        { executions: [firstExecution] },
+        { executions: [secondExecution] },
         {}
       ],
       maxProviderIterations: 3
@@ -1843,7 +1848,8 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     const thirdRequest = harness.completeSpy.mock.calls[2]?.[0] as ProviderRequest;
     const continuation = JSON.stringify(thirdRequest.messages.at(-1)?.content);
     expect(continuation).toContain(secondRawResult);
-    expect(continuation).toContain("call-first");
+    expect(firstExecution.toolCallId).toMatch(/^tool-call-[a-f0-9]{24}$/u);
+    expect(continuation).toContain(firstExecution.toolCallId!);
     expect(continuation).not.toContain(firstRawResult);
   });
 
@@ -2104,7 +2110,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       "Do not ask the user to send the code in ordinary chat."
     );
     expect(harness.executePlans.mock.calls[2]?.[0].providerExecution?.toolCalls).toEqual([
-      expect.objectContaining({ id: "call-otp-input", name: "browser.type" })
+      expect.objectContaining({ id: expect.stringMatching(/^tool-call-[a-f0-9]{24}$/u), name: "browser.type" })
     ]);
     expect(result.providerExecution?.response?.content).toBe("Authentication continued securely.");
     expect(result.providerExecution?.response?.content).not.toContain("paste the verification code");
@@ -2624,15 +2630,18 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
         id: "locate-collection",
         content: "Locate the destination collection",
         status: "completed" as const,
-        evidenceCallIds: ["call-read"]
+        evidenceCallIds: [] as string[]
       }]
     };
+    const repairedPlanCall = providerToolCall("call-plan-retry", JSON.stringify(repairedMerge), "plan");
     let stateAfterLightweightUpdate: string | undefined;
+    let runtimeReadId: string | undefined;
+    let executionBatch = 0;
     const harness = await createPostToolNudgeHarness({
       responses: [
         providerExecution("", [providerToolCall("call-read", "{}", "mcp.target.read")]),
         providerExecution("", [providerToolCall("call-plan-missing", JSON.stringify(missingEvidenceMerge), "plan")]),
-        providerExecution("", [providerToolCall("call-plan-retry", JSON.stringify(repairedMerge), "plan")]),
+        providerExecution("", [repairedPlanCall]),
         providerExecution("Mission complete.")
       ],
       toolSteps: [
@@ -2644,13 +2653,18 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       executionPlanController: controller,
       maxProviderIterations: 4,
       onExecutePlans: async ({ stepInput }) => {
+        executionBatch += 1;
         const call = stepInput.providerExecution?.toolCalls[0];
-        if (call?.id === "call-read") {
+        if (executionBatch === 1 && call?.id !== undefined) {
+          runtimeReadId = call.id;
+          readExecution.toolCallId = call.id;
+          repairedMerge.items[0]!.evidenceCallIds = [call.id];
+          repairedPlanCall.argumentsText = JSON.stringify(repairedMerge);
           evidence.record(readExecution, "visible-turn");
-        } else if (call?.id === "call-plan-missing") {
+        } else if (executionBatch === 2) {
           rejectedPlanExecution.result = await planTool.run(missingEvidenceMerge, { visibleTurnId: "visible-turn" });
           stateAfterLightweightUpdate = controller.current()?.items[0]?.status;
-        } else if (call?.id === "call-plan-retry") {
+        } else if (executionBatch === 3) {
           acceptedPlanExecution.result = await planTool.run(repairedMerge, { visibleTurnId: "visible-turn" });
         }
       }
@@ -2665,7 +2679,8 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     const continuationRequest = harness.completeSpy.mock.calls[2]?.[0] as ProviderRequest;
     const continuationContext = JSON.stringify(continuationRequest.messages);
     expect(continuationContext).not.toContain("completion-evidence-required");
-    expect(continuationContext).toContain("call-read");
+    expect(runtimeReadId).toMatch(/^tool-call-[a-f0-9]{24}$/u);
+    expect(continuationContext).toContain(runtimeReadId!);
     expect(stateAfterLightweightUpdate).toBe("completed");
     expect(controller.current()).toMatchObject({
       status: "completed",
@@ -3053,7 +3068,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       expect(harness.executePlans).toHaveBeenCalledTimes(1);
       expect(harness.completeSpy).toHaveBeenCalledTimes(1);
       expect(result.toolExecutions).toEqual([expect.objectContaining({
-        toolCallId: "call-running-mutation",
+        toolCallId: expect.stringMatching(/^tool-call-[a-f0-9]{24}$/u),
         result: expect.objectContaining({ ok: true })
       })]);
       expect(result.providerExecution?.response?.content).toContain("emergency deadline reserve");
@@ -3161,10 +3176,10 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
     expect(harness.completeSpy).toHaveBeenCalledTimes(3);
     expect(harness.executePlans).toHaveBeenCalledTimes(3);
-    expect(result.toolExecutions.map((execution) => execution.toolCallId)).toEqual([
-      "call-plan-repair",
-      "call-correct-navigation"
-    ]);
+    expect(result.toolExecutions.map((execution) => execution.toolCallId)).toHaveLength(2);
+    expect(result.toolExecutions.every((execution) =>
+      /^tool-call-[a-f0-9]{24}$/u.test(execution.toolCallId ?? "")
+    )).toBe(true);
     expect(result.providerExecution?.response?.content).toContain("Recovered on the correct fictional portal.");
     expect(result.providerExecution?.response?.content).not.toContain("Mission needs your input");
   });
@@ -3722,7 +3737,8 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
         {}
       ],
       maxProviderIterations: 1,
-      onExecutePlans: async ({ sessionDb, sessionId }) => {
+      onExecutePlans: async ({ sessionDb, sessionId, stepInput }) => {
+        const runtimeId = stepInput.providerExecution?.toolCalls[0]?.id;
         const messages = await sessionDb.listMessages(sessionId);
         expect(messages).toContainEqual(expect.objectContaining({
           role: "agent",
@@ -3731,7 +3747,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
             nativeReplaySafe: true,
             providerToolCalls: [
               {
-                id: "call-before-exec",
+                id: runtimeId,
                 name: testTool.name,
                 argumentsText: "{}"
               }
@@ -3760,6 +3776,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     await runBasicProviderTurn(harness.loop);
 
     const messages = await harness.sessionDb.listMessages(harness.sessionId);
+    const runtimeId = harness.executePlans.mock.calls[0]?.[0].providerExecution?.toolCalls[0]?.id;
     expect(messages).toContainEqual(expect.objectContaining({
       role: "agent",
       content: "I'll look that up.",
@@ -3767,7 +3784,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
         kind: "provider-tool-call-turn",
         providerToolCalls: [
           {
-            id: "call-content",
+            id: runtimeId,
             name: testTool.name,
             argumentsText: "{\"query\":\"docs\"}"
           }
@@ -3828,6 +3845,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
   });
 
   it("uses structured native history for supported post-tool continuation", async () => {
+    let liveRuntimeId: string | undefined;
     const harness = await createPostToolNudgeHarness({
       primaryModelRoute: nativeHistoryRoute,
       responses: [
@@ -3839,13 +3857,15 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
           executions: [toolExecution("call-live", "live tool result")]
         }
       ],
-      onExecutePlans: async ({ sessionDb, sessionId }) => {
+      onExecutePlans: async ({ sessionDb, sessionId, stepInput }) => {
+        const runtimeId = stepInput.providerExecution?.toolCalls[0]?.id;
+        if (runtimeId !== undefined) liveRuntimeId = runtimeId;
         await sessionDb.appendMessage({
           sessionId,
           role: "tool",
           content: "live tool result",
           metadata: {
-            tool_call_id: "call-live",
+            tool_call_id: liveRuntimeId,
             tool_call_name: testTool.name
           }
         });
@@ -3854,6 +3874,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
     await runBasicProviderTurn(harness.loop);
 
+    expect(liveRuntimeId).toMatch(/^tool-call-[a-f0-9]{24}$/u);
     const continuationRequest = harness.completeSpy.mock.calls[1]?.[0] as ProviderRequest;
     expect(continuationRequest.messages.at(-1)?.role).toBe("user");
     expect(JSON.stringify(continuationRequest.messages.at(-1)?.content)).toContain("EstaCoda executed the requested tools.");
@@ -3862,7 +3883,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
         role: "assistant",
         toolCalls: [
           {
-            id: "call-live",
+            id: liveRuntimeId,
             name: testTool.name,
             argumentsText: "{}"
           }
@@ -3870,12 +3891,12 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       }),
       expect.objectContaining({
         role: "tool",
-        toolCallId: "call-live",
+        toolCallId: liveRuntimeId,
         content: expect.stringContaining("live tool result")
       })
     ]));
     const liveReplayToolMessage = continuationRequest.messages.find((message) =>
-      message.role === "tool" && message.toolCallId === "call-live"
+      message.role === "tool" && message.toolCallId === liveRuntimeId
     );
     expect(String(liveReplayToolMessage?.content)).toContain("[Historical tool result from ");
     expect(String(liveReplayToolMessage?.content)).toContain("via test.tool; reference only.");
@@ -3910,13 +3931,13 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
           executions: [toolExecution("call-flat", "flat tool result")]
         }
       ],
-      onExecutePlans: async ({ sessionDb, sessionId }) => {
+      onExecutePlans: async ({ sessionDb, sessionId, stepInput }) => {
         await sessionDb.appendMessage({
           sessionId,
           role: "tool",
           content: "flat tool result",
           metadata: {
-            tool_call_id: "call-flat",
+            tool_call_id: stepInput.providerExecution?.toolCalls[0]?.id,
             tool_call_name: testTool.name
           }
         });
@@ -3938,13 +3959,12 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     ]));
   });
 
-  it("normalizes missing stable tool-call IDs before persistence and planning", async () => {
+  it("assigns a runtime-owned tool-call ID before persistence and planning", async () => {
     const toolCall = {
       index: 0,
       name: testTool.name,
       argumentsText: "{\"path\":\"src/index.ts\"}"
     };
-    const expectedId = stableToolCallId(toolCall);
     const harness = await createPostToolNudgeHarness({
       responses: [
         providerExecution("", [toolCall])
@@ -3959,16 +3979,79 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
     const messages = await harness.sessionDb.listMessages(harness.sessionId);
     const persistedTurn = messages.find((message) => message.metadata?.kind === "provider-tool-call-turn");
+    const persistedId = (persistedTurn?.metadata?.providerToolCalls as Array<{ id?: string }> | undefined)?.[0]?.id;
+    expect(persistedId).toMatch(/^tool-call-[a-f0-9]{24}$/u);
     expect(persistedTurn?.metadata?.providerToolCalls).toEqual([
-      {
-        id: expectedId,
+      expect.objectContaining({
+        id: persistedId,
         name: testTool.name,
         argumentsText: "{\"path\":\"src/index.ts\"}"
-      }
+      })
     ]);
     expect(harness.executePlans.mock.calls[0]?.[0].providerExecution?.toolCalls).toEqual([
-      expect.objectContaining({ id: expectedId })
+      expect.objectContaining({ id: persistedId })
     ]);
+  });
+
+  it("namespaces repeated provider IDs across iterations and preserves both calls", async () => {
+    const firstExecution = toolExecution("browser_download_1", "first download");
+    const secondExecution = toolExecution("browser_download_1", "second download");
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("browser_download_1")]),
+        providerExecution("", [providerToolCall("browser_download_1")]),
+        providerExecution("done")
+      ],
+      toolSteps: [
+        { executions: [firstExecution] },
+        { executions: [secondExecution] }
+      ],
+      maxProviderIterations: 3
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+    const runtimeIds = harness.executePlans.mock.calls
+      .slice(0, 2)
+      .map(([stepInput]) => stepInput.providerExecution?.toolCalls[0]?.id);
+    const persistedTurns = (await harness.sessionDb.listMessages(harness.sessionId))
+      .filter((message) => message.metadata?.kind === "provider-tool-call-turn");
+
+    expect(runtimeIds).toHaveLength(2);
+    expect(runtimeIds.every((id) => /^tool-call-[a-f0-9]{24}$/u.test(id ?? ""))).toBe(true);
+    expect(new Set(runtimeIds).size).toBe(2);
+    expect(JSON.stringify(runtimeIds)).not.toContain("browser_download_1");
+    expect(result.toolExecutions.map((execution) => execution.toolCallId)).toEqual(runtimeIds);
+    expect(persistedTurns.map((message) =>
+      (message.metadata?.providerToolCalls as Array<{ id: string }>)[0]?.id
+    )).toEqual(runtimeIds);
+  });
+
+  it("namespaces identical calls without provider IDs across iterations", async () => {
+    const anonymousCall = {
+      index: 0,
+      name: testTool.name,
+      argumentsText: "{}"
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [{ ...anonymousCall }]),
+        providerExecution("", [{ ...anonymousCall }]),
+        providerExecution("done")
+      ],
+      toolSteps: [
+        { executions: [toolExecution("anonymous-one")] },
+        { executions: [toolExecution("anonymous-two")] }
+      ],
+      maxProviderIterations: 3
+    });
+
+    await runBasicProviderTurn(harness.loop);
+    const runtimeIds = harness.executePlans.mock.calls
+      .slice(0, 2)
+      .map(([stepInput]) => stepInput.providerExecution?.toolCalls[0]?.id);
+
+    expect(runtimeIds.every((id) => /^tool-call-[a-f0-9]{24}$/u.test(id ?? ""))).toBe(true);
+    expect(new Set(runtimeIds).size).toBe(2);
   });
 
   it("marks secret-bearing arguments unsafe and omits faithful arguments", async () => {
@@ -3986,11 +4069,13 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
     const messages = await harness.sessionDb.listMessages(harness.sessionId);
     const persisted = messages.find((message) => message.metadata?.kind === "provider-tool-call-turn");
+    const persistedId = (persisted?.metadata?.providerToolCalls as Array<{ id?: string }> | undefined)?.[0]?.id;
+    expect(persistedId).toMatch(/^tool-call-[a-f0-9]{24}$/u);
     expect(persisted?.metadata).toEqual(expect.objectContaining({
       nativeReplaySafe: false,
       providerToolCalls: [
         {
-          id: "call-secret",
+          id: persistedId,
           name: testTool.name,
           argumentsRedacted: true
         }
@@ -4040,6 +4125,8 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
     const messages = await harness.sessionDb.listMessages(harness.sessionId);
     const persisted = messages.find((message) => message.metadata?.kind === "provider-tool-call-turn");
+    const runtimeId = (persisted?.metadata?.providerToolCalls as Array<{ id?: string }> | undefined)?.[0]?.id;
+    expect(runtimeId).toMatch(/^tool-call-[a-f0-9]{24}$/u);
     expect(persisted?.metadata).toEqual(expect.objectContaining({
       nativeReplaySafe: true,
       providerReplayEcho: {
@@ -4085,6 +4172,8 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
     const messages = await harness.sessionDb.listMessages(harness.sessionId);
     const persisted = messages.find((message) => message.metadata?.kind === "provider-tool-call-turn");
+    const runtimeId = (persisted?.metadata?.providerToolCalls as Array<{ id?: string }> | undefined)?.[0]?.id;
+    expect(runtimeId).toMatch(/^tool-call-[a-f0-9]{24}$/u);
     expect(persisted?.metadata).toEqual(expect.objectContaining({
       nativeReplaySafe: true,
       provider: "deepseek",
@@ -4093,7 +4182,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       attemptedRouteIndex: 0,
       providerToolCalls: [
         {
-          id: "call-protocol-echo",
+          id: runtimeId,
           name: testTool.name,
           argumentsText: "{}"
         }
@@ -4616,7 +4705,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     const nudgeToolRunInput = harness.executePlans.mock.calls[2]?.[0];
     expect(nudgeToolRunInput).toBeDefined();
     expect(nudgeToolRunInput?.providerExecution?.toolCalls).toEqual([
-      expect.objectContaining({ id: "call-nudge" })
+      expect.objectContaining({ id: expect.stringMatching(/^tool-call-[a-f0-9]{24}$/u) })
     ]);
     expect(result.toolExecutions).toContain(nudgeToolExecution);
   });
@@ -5574,11 +5663,13 @@ describe("ProviderTurnLoop truncated tool-call safety", () => {
     } });
 
     expect(result.iterations).toBe(2);
-    expect(result.toolExecutions.map((execution) => execution.toolCallId)).toEqual(["retry-call"]);
+    expect(result.toolExecutions.map((execution) => execution.toolCallId)).toEqual([
+      expect.stringMatching(/^tool-call-[a-f0-9]{24}$/u)
+    ]);
     expect(harness.completeSpy).toHaveBeenCalledTimes(2);
     expect(harness.executePlans).toHaveBeenCalledTimes(1);
     expect(harness.executePlans.mock.calls[0]![0].providerExecution!.toolCalls).toEqual([
-      expect.objectContaining({ id: "retry-call" })
+      expect.objectContaining({ id: expect.stringMatching(/^tool-call-[a-f0-9]{24}$/u) })
     ]);
     expect(harness.completeSpy.mock.calls[1]![0].maxTokens).toBe(8192);
     expect(harness.completeSpy.mock.calls[1]![0].messages).toEqual(harness.completeSpy.mock.calls[0]![0].messages);
@@ -5586,7 +5677,7 @@ describe("ProviderTurnLoop truncated tool-call safety", () => {
     expect(retryOptions.primaryRoute).toEqual(primaryRoute);
     expect(retryOptions.fallbackChain).toEqual([fallbackRoute]);
     expect(result.providerExecution?.toolCalls).toEqual([
-      expect.objectContaining({ id: "retry-call" })
+      expect.objectContaining({ id: expect.stringMatching(/^tool-call-[a-f0-9]{24}$/u) })
     ]);
     expect(result.providerExecution?.attempts).toHaveLength(2);
     expect(result.providerExecution?.runtimeMetadata?.truncation).toEqual({
@@ -5597,7 +5688,7 @@ describe("ProviderTurnLoop truncated tool-call safety", () => {
     const toolCallEvents = events.filter((event) => event.kind === "provider-tool-call");
     expect(toolCallEvents).toEqual([
       expect.objectContaining({
-        id: "retry-call",
+        id: expect.stringMatching(/^tool-call-[a-f0-9]{24}$/u),
         argumentsText: "{\"safe\":\"retry\"}"
       })
     ]);
@@ -5650,7 +5741,9 @@ describe("ProviderTurnLoop truncated tool-call safety", () => {
     const result = await runBasicProviderTurn(harness.loop);
 
     expect(result.iterations).toBe(2);
-    expect(result.toolExecutions.map((execution) => execution.toolCallId)).toEqual(["fallback-retry-call"]);
+    expect(result.toolExecutions.map((execution) => execution.toolCallId)).toEqual([
+      expect.stringMatching(/^tool-call-[a-f0-9]{24}$/u)
+    ]);
     expect(harness.completeSpy).toHaveBeenCalledTimes(2);
     const retryOptions = harness.completeSpy.mock.calls[1]?.[2] as { primaryRoute?: ResolvedModelRoute; fallbackChain?: ResolvedModelRoute[] };
     expect(retryOptions.primaryRoute).toEqual(fallbackRoute);
@@ -5838,14 +5931,14 @@ describe("ProviderTurnLoop truncated tool-call safety", () => {
     expect(result.providerExecution?.response?.finishReason).toBe("tool_calls");
     expect(result.providerExecution?.toolCalls).toEqual([
       expect.objectContaining({
-        id: "bad-json",
+        id: expect.stringMatching(/^tool-call-[a-f0-9]{24}$/u),
         argumentsText: "{\"path\""
       })
     ]);
     expect(result.toolExecutions).toEqual([]);
     expect(toolPlans).toEqual([
       expect.objectContaining({
-        id: "bad-json",
+        id: expect.stringMatching(/^tool-call-[a-f0-9]{24}$/u),
         status: "invalid",
         source: "provider-tool-call"
       })

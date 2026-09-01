@@ -211,6 +211,8 @@ The provider loop treats a provider response as usable only after finalization. 
 
 This invariant exists because streamed provider output can be partial, reordered by provider protocol details, or terminated before the provider has supplied a complete finish state. Live tokens are progress. They are not permission to execute tools, write memory, or preserve internal reasoning.
 
+Finalized provider tool calls receive runtime-owned opaque identities before they cross into persistence, planning, execution evidence, runtime events, or native tool-history replay. The identity is scoped to the provider-loop invocation, iteration, and call ordinal; provider-supplied IDs, tool names, arguments, and raw payloads do not participate. Reused or missing provider IDs therefore cannot collapse separate calls, and secret-bearing arguments cannot influence an identifier.
+
 Stream finalization rules are intentionally conservative:
 
 - streamed tool-call fragments are collected locally while the stream is open

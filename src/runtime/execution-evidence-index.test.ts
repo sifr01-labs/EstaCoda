@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { ExecutionEvidenceIndex, executionEvidenceStatus } from "./execution-evidence-index.js";
 import type { SessionEvent } from "../contracts/session.js";
+import { runtimeProviderToolCallId } from "./provider-tool-call-identity.js";
 
 function execution(overrides: Partial<ToolExecutionRecord> = {}): ToolExecutionRecord {
   return {
@@ -46,6 +47,22 @@ describe("ExecutionEvidenceIndex", () => {
     })]);
     expect(JSON.stringify(evidence)).not.toContain("raw-secret");
     expect(JSON.stringify(evidence)).not.toContain("raw collection body");
+  });
+
+  it("retains identical provider actions from separate iterations under distinct runtime identities", () => {
+    const index = new ExecutionEvidenceIndex();
+    const namespace = "00000000-0000-4000-8000-000000000002";
+    const firstId = runtimeProviderToolCallId({ namespace, providerIteration: 0, callOrdinal: 0 });
+    const secondId = runtimeProviderToolCallId({ namespace, providerIteration: 1, callOrdinal: 0 });
+
+    index.record(execution({ toolCallId: firstId }), "turn-current");
+    index.record(execution({ toolCallId: secondId }), "turn-current");
+
+    expect(index.recordsForTurn("turn-current").map((record) => record.toolCallId)).toEqual([
+      firstId,
+      secondId
+    ]);
+    expect(index.resolve([firstId, secondId])).toHaveLength(2);
   });
 
   it("records trusted read, mutation, and verification effects and links the latest compatible target", () => {

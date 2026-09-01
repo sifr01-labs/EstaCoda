@@ -259,9 +259,13 @@ describe("protected authentication journey acceptance", () => {
       if (scenario.authenticated) {
         expect(response!.text).toContain("Authentication confirmed from the authenticated account page.");
         expect(response!.text).not.toContain("The Mission is incomplete.");
-        const expectedVerificationCallId = scenario.expectedOtpPrompts === 0
-          ? "acceptance-call-2"
-          : "acceptance-call-3";
+        const verificationTool = scenario.expectedOtpPrompts === 0
+          ? "browser.fill_protected_form"
+          : "browser.type";
+        const expectedVerificationCallId = response!.toolExecutions.find((execution) =>
+          execution.tool.name === verificationTool
+        )?.toolCallId;
+        expect(expectedVerificationCallId).toMatch(/^tool-call-[a-f0-9]{24}$/u);
         expect(authenticationAssessments).toContainEqual(expect.objectContaining({
           outcome: "verified",
           reason: "authenticated-evidence-observed",

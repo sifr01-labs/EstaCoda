@@ -55,7 +55,6 @@ import {
 import type { ProviderUsageTaskAttribution } from "../providers/provider-usage-ledger.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
-import { stableToolCallId } from "../tools/tool-call-planner.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { RunRecorder } from "./run-recorder.js";
 import type { ToolPlanRunner } from "./tool-plan-runner.js";
@@ -88,6 +87,10 @@ import {
   ExecutionSupervisionController,
   EXECUTION_SUPERVISION_PROMPTS
 } from "./execution-supervision-controller.js";
+import {
+  createProviderToolCallNamespace,
+  namespaceProviderToolCalls
+} from "./provider-tool-call-identity.js";
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
 const PROVIDER_TOKEN_EFFICIENCY_WARNING_THRESHOLD = 500_000;
@@ -311,6 +314,7 @@ export class ProviderTurnLoop {
       workingSessionId,
       ++this.#foregroundTurnSequence
     );
+    const providerToolCallNamespace = createProviderToolCallNamespace();
     const mcpReadLedger = new TurnMcpReadLedger({
       profileId: this.#profileId,
       sessionId: workingSessionId
@@ -397,6 +401,7 @@ export class ProviderTurnLoop {
         ? await this.#completeWithProvider({
             ...input,
             foregroundTurnId,
+            providerToolCallNamespace,
             providerTools: providerToolsForIteration,
             iteration,
             loopStartedAt,
@@ -406,6 +411,7 @@ export class ProviderTurnLoop {
         : await this.#continueProviderAfterTools({
           ...input,
           foregroundTurnId,
+          providerToolCallNamespace,
           providerTools: providerToolsForIteration,
           toolExecutions: [
             ...input.toolExecutions,
@@ -1020,6 +1026,7 @@ export class ProviderTurnLoop {
 
   async #completeWithProvider(input: {
     foregroundTurnId: string;
+    providerToolCallNamespace: string;
     visibleTurnId?: string;
     userText: string;
     routedText: string;
@@ -1124,7 +1131,8 @@ export class ProviderTurnLoop {
       onEvent: input.onEvent,
       onDelta: input.onDelta,
       onSegmentBreak: input.onSegmentBreak,
-      visibleTurnId: input.visibleTurnId
+      visibleTurnId: input.visibleTurnId,
+      providerToolCallNamespace: input.providerToolCallNamespace
     });
     if (execution.response?.usage?.inputTokens !== undefined) {
       await this.#recordContextWindowUsage(execution, promptBudget, input.onEvent);
@@ -1158,6 +1166,7 @@ export class ProviderTurnLoop {
 
   async #continueProviderAfterTools(input: {
     foregroundTurnId: string;
+    providerToolCallNamespace: string;
     visibleTurnId?: string;
     userText: string;
     routedText: string;
@@ -1318,7 +1327,8 @@ export class ProviderTurnLoop {
       onEvent: input.onEvent,
       onDelta: input.onDelta,
       onSegmentBreak: input.onSegmentBreak,
-      visibleTurnId: input.visibleTurnId
+      visibleTurnId: input.visibleTurnId,
+      providerToolCallNamespace: input.providerToolCallNamespace
     });
     if (execution.response?.usage?.inputTokens !== undefined) {
       await this.#recordContextWindowUsage(execution, promptBudget, input.onEvent);
@@ -1402,6 +1412,7 @@ export class ProviderTurnLoop {
     onDelta?: (text: string) => void;
     onSegmentBreak?: (reason?: string) => void | Promise<void>;
     visibleTurnId?: string;
+    providerToolCallNamespace: string;
   }): Promise<ProviderExecutionResult> {
     const initial = await this.#completeProviderRequestWithTruncatedToolRetry(input);
     return await this.#continueLengthTruncatedTextResponse({
@@ -1424,6 +1435,7 @@ export class ProviderTurnLoop {
     onDelta?: (text: string) => void;
     onSegmentBreak?: (reason?: string) => void | Promise<void>;
     visibleTurnId?: string;
+    providerToolCallNamespace: string;
   }): Promise<ProviderExecutionResult> {
     const primaryRoute = input.primaryRoute ?? this.#primaryModelRoute;
     const fallbackChain = input.fallbackChain ?? this.#modelFallbackRoutes;
@@ -1445,8 +1457,13 @@ export class ProviderTurnLoop {
     });
 
     if (!isLengthTruncatedToolCallExecution(execution)) {
-      await initialEvents.flushToolCalls();
-      return execution;
+      const normalizedExecution = namespaceProviderToolCalls({
+        execution,
+        namespace: input.providerToolCallNamespace,
+        providerIteration: input.iteration
+      });
+      await initialEvents.flushToolCalls(normalizedExecution.toolCalls);
+      return normalizedExecution;
     }
     initialEvents.discardToolCalls();
 
@@ -1520,8 +1537,13 @@ export class ProviderTurnLoop {
       });
     }
 
-    await retryEvents.flushToolCalls();
-    return mergeTruncatedToolRetryExecutions(execution, retryExecution);
+    const normalizedRetryExecution = namespaceProviderToolCalls({
+      execution: retryExecution,
+      namespace: input.providerToolCallNamespace,
+      providerIteration: input.iteration
+    });
+    await retryEvents.flushToolCalls(normalizedRetryExecution.toolCalls);
+    return mergeTruncatedToolRetryExecutions(execution, normalizedRetryExecution);
   }
 
   async #continueLengthTruncatedTextResponse(input: {
@@ -1537,6 +1559,7 @@ export class ProviderTurnLoop {
     onDelta?: (text: string) => void;
     onSegmentBreak?: (reason?: string) => void | Promise<void>;
     visibleTurnId?: string;
+    providerToolCallNamespace: string;
   }): Promise<ProviderExecutionResult> {
     if (!isLengthTruncatedTextExecution(input.initial)) {
       return input.initial;
@@ -1783,10 +1806,10 @@ export class ProviderTurnLoop {
       return execution;
     }
 
-    const normalizedToolCalls = execution.toolCalls.map((toolCall) => ({
-      ...toolCall,
-      id: toolCall.id ?? stableToolCallId(toolCall)
-    }));
+    if (execution.toolCalls.some((toolCall) => toolCall.id === undefined)) {
+      throw new Error("Provider tool calls must have runtime-owned identities before persistence.");
+    }
+    const normalizedToolCalls = execution.toolCalls.map((toolCall) => ({ ...toolCall, id: toolCall.id! }));
     const containsDelegationRequest = normalizedToolCalls.some((toolCall) => toolCall.name === "delegate_task");
     const secretIndexes = new Set<number>();
     normalizedToolCalls.forEach((toolCall, index) => {
@@ -2499,7 +2522,7 @@ function createProviderToolCallEventBuffer(input: {
   onSegmentBreak?: (reason?: string) => void | Promise<void>;
 }): {
   onEvent: (event: ProviderRuntimeEvent) => Promise<void>;
-  flushToolCalls: () => Promise<void>;
+  flushToolCalls: (toolCalls: ProviderExecutionResult["toolCalls"]) => Promise<void>;
   discardToolCalls: () => void;
 } {
   const toolCallEvents: Extract<ProviderRuntimeEvent, { kind: "provider-tool-call" }>[] = [];
@@ -2515,12 +2538,15 @@ function createProviderToolCallEventBuffer(input: {
         safeProviderDelta(input.onDelta, event.text);
       }
     },
-    async flushToolCalls() {
+    async flushToolCalls(toolCalls) {
       if (toolCallEvents.length > 0) {
         await safeProviderSegmentBreak(input.onSegmentBreak, "provider-tool-call");
       }
-      for (const event of toolCallEvents) {
-        await emit(input.sink, mapProviderRuntimeEvent(event));
+      for (const [index, event] of toolCallEvents.entries()) {
+        await emit(input.sink, mapProviderRuntimeEvent({
+          ...event,
+          id: toolCalls[index]?.id
+        }));
       }
       toolCallEvents.length = 0;
     },

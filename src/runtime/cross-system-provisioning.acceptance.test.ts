@@ -217,8 +217,10 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
       } else {
         expect(toolNames.indexOf(READ_TOOL)).toBeLessThan(toolNames.indexOf("browser.navigate"));
         expect(harness.mcp.readInputs).toHaveLength(1);
+        const readToolCallId = response!.toolExecutions.find((execution) => execution.tool.name === READ_TOOL)?.toolCallId;
+        expect(readToolCallId).toMatch(/^tool-call-[a-f0-9]{24}$/u);
         expect(evidenceEvents).toContainEqual(expect.objectContaining({
-          toolCallId: "journey-call-1",
+          toolCallId: readToolCallId,
           tool: READ_TOOL,
           status: "success",
           executionEffect: {
@@ -263,8 +265,13 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
           ],
         });
         expect(harness.mcp.state().settings).toEqual(harness.mcp.initialSettings);
+        const mutationToolCallId = response!.toolExecutions.find((execution) => execution.tool.name === MUTATION_TOOL)?.toolCallId;
+        const verificationToolCallId = response!.toolExecutions.find((execution) => execution.tool.name === VERIFY_TOOL)?.toolCallId;
+        expect(mutationToolCallId).toMatch(/^tool-call-[a-f0-9]{24}$/u);
+        expect(verificationToolCallId).toMatch(/^tool-call-[a-f0-9]{24}$/u);
+        expect(verificationToolCallId).not.toBe(mutationToolCallId);
         expect(evidenceEvents).toContainEqual(expect.objectContaining({
-          toolCallId: "journey-call-3",
+          toolCallId: mutationToolCallId,
           tool: MUTATION_TOOL,
           status: "success",
           executionEffect: {
@@ -274,12 +281,12 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
         }));
         if (scenario.failVerification === true) {
           const failedVerification = evidenceEvents.find((event) =>
-            event.kind === "execution-evidence-recorded" && event.toolCallId === "journey-call-4"
+            event.kind === "execution-evidence-recorded" && event.toolCallId === verificationToolCallId
           );
           expect(failedVerification).not.toHaveProperty("verifiedMutation");
         }
         expect(evidenceEvents).toContainEqual(expect.objectContaining({
-          toolCallId: "journey-call-4",
+          toolCallId: verificationToolCallId,
           tool: VERIFY_TOOL,
           status: scenario.failVerification === true ? "failed" : "success",
           executionEffect: {
@@ -291,7 +298,7 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
             ? {}
             : {
                 verifiedMutation: {
-                  toolCallId: "journey-call-3",
+                  toolCallId: mutationToolCallId,
                   tool: MUTATION_TOOL,
                 },
               }),
