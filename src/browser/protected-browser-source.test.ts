@@ -33,10 +33,12 @@ describe("ProtectedBrowserSourceController", () => {
       kind: "client-secret",
       phase: "before-delivery",
     })).resolves.toMatchObject({ status: "verified" });
-    const bytes = await controller.read(harness.session, { source, kind: "client-secret" });
+    const read = await controller.read(harness.session, { source, kind: "client-secret" });
 
-    expect(new TextDecoder().decode(bytes)).toBe("source-sentinel");
-    bytes.fill(0);
+    expect(read.status).toBe("read");
+    if (read.status !== "read") throw new Error("Expected a protected source value.");
+    expect(new TextDecoder().decode(read.value)).toBe("source-sentinel");
+    read.value.fill(0);
     await controller.release(source);
     expect(harness.release).toHaveBeenCalledWith("source-object");
     expect(harness.release).toHaveBeenCalledWith("document-object");
@@ -58,7 +60,7 @@ describe("ProtectedBrowserSourceController", () => {
       phase: "before-delivery",
     })).resolves.toEqual({ status: "rejected", reason: "source-replaced" });
     await expect(controller.read(harness.session, { source, kind: "api-key" }))
-      .rejects.toThrow("changed before delivery");
+      .resolves.toEqual({ status: "rejected", reason: "source-replaced" });
     await controller.release(source);
   });
 

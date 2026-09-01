@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import type {
   BrowserProtectedSourceInput,
   BrowserProtectedSourceReadInput,
+  BrowserProtectedSourceReadResult,
   BrowserProtectedSourceVerification,
   BrowserSnapshot,
 } from "../contracts/browser.js";
@@ -109,17 +110,17 @@ export class ProtectedBrowserSourceController {
   async read(
     session: ProtectedBrowserSourceSession,
     input: BrowserProtectedSourceReadInput,
-  ): Promise<Uint8Array> {
+  ): Promise<BrowserProtectedSourceReadResult> {
     const verified = await this.verify(session, { ...input, phase: "before-delivery" });
-    if (verified.status !== "verified") throw new Error("Protected browser source changed before delivery.");
+    if (verified.status !== "verified") return verified;
     const binding = this.#bindings.get(sourceBindingKey(input.source));
-    if (binding === undefined) throw new Error("Protected browser source is not active.");
+    if (binding === undefined) return { status: "rejected", reason: "request-not-active" };
     const inspection = await inspectSource(session.supervisor, binding.objectId, binding.elementIndex, true);
     const rejection = sourceRejection(inspection, true);
-    if (rejection !== undefined || inspection?.fingerprint !== binding.fingerprint || inspection.value === undefined) {
-      throw new Error("Protected browser source changed before delivery.");
-    }
-    return new TextEncoder().encode(inspection.value);
+    if (rejection !== undefined) return rejection;
+    if (inspection?.fingerprint !== binding.fingerprint) return { status: "rejected", reason: "source-replaced" };
+    if (inspection.value === undefined) return { status: "rejected", reason: "source-empty" };
+    return { status: "read", value: new TextEncoder().encode(inspection.value) };
   }
 
   async release(source: BrowserFieldSecureInputSource): Promise<void> {
@@ -134,7 +135,7 @@ export class ProtectedBrowserSourceController {
 function sourceRejection(
   inspection: SourceInspection | undefined,
   existing: boolean,
-): BrowserProtectedSourceVerification | undefined {
+): Extract<BrowserProtectedSourceVerification, { status: "rejected" }> | undefined {
   if (inspection === undefined || !inspection.connected || !inspection.current) {
     return { status: "rejected", reason: existing ? "source-replaced" : "source-missing" };
   }

@@ -617,6 +617,8 @@ Reviewed MCP tools may accept protected browser values without exposing those va
 
 When one tool call contains two to eight protected browser sources, EstaCoda binds and verifies every source and destination, presents one grouped protected-transfer approval, and invokes the MCP tool once only after every value is ready. Any failure before invocation prevents the remote mutation. This is dispatch atomicity; the remote service remains responsible for its own transaction and rollback behavior.
 
+Source validation is complete and bounded rather than one-at-a-time: EstaCoda checks every source before authorization and checks every source again before reading any value. A failed group reports all affected argument IDs with safe reason codes such as `source-empty`, `source-replaced`, or `tab-mismatch`. It never includes browser text, protected values, element refs, URLs, or raw exception text. Initial validation failure performs no authorization, source read, or connector dispatch, and all acquired bindings and temporary bytes are cleaned before the result is returned.
+
 `persistence` is `none`, `destination-managed`, or `unknown`. `sharing` is `private`, `workspace`, `account`, `external`, or `unknown`. These declarations describe destination behavior for approval copy; they do not grant additional access.
 
 `groupedDelivery` and `browserRelay` default to `true` for an existing protected declaration and are enforced by the secure dispatcher. Set either to `false` when the integration does not support that capability. `toolVerificationRelationships` maps a read-only verification tool to one or more mutation tools using their unprefixed MCP names.

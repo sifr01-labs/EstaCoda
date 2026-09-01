@@ -16,6 +16,7 @@ import type { VisionDispatchPhase, VisionInputProvenanceContext } from "../contr
 import type {
   BrowserFieldSecureInputSource,
   SecureInputKind,
+  SecureInputProtectedSourceFailure,
   SecureInputRequestHandler,
   SecureInputTransferRequestHandler,
 } from "../contracts/secure-input.js";
@@ -913,7 +914,10 @@ async function runToolWithProtectedArguments(
     if (receipt?.status !== "delivered" || dispatchedResult === undefined) {
       return protectedArgumentFailure(receipt === undefined
         ? "Protected tool argument group delivery failed."
-        : `Protected tool argument group ${receipt.status}: ${receipt.reason ?? "delivery did not complete."}`);
+        : receipt.failure?.code === "protected-source-validation"
+          ? receipt.reason ?? "Protected source validation failed."
+          : `Protected tool argument group ${receipt.status}: ${receipt.reason ?? "delivery did not complete."}`,
+      receipt?.failure);
     }
     return {
       ok: dispatchedResult.ok,
@@ -958,7 +962,10 @@ async function runToolWithProtectedArguments(
   if (receipt?.status !== "delivered" || dispatchedResult === undefined) {
     return protectedArgumentFailure(receipt === undefined
       ? "Protected tool argument delivery failed."
-      : `Protected tool argument ${receipt.status}: ${receipt.reason ?? "delivery did not complete."}`);
+      : receipt.failure?.code === "protected-source-validation"
+        ? receipt.reason ?? "Protected source validation failed."
+        : `Protected tool argument ${receipt.status}: ${receipt.reason ?? "delivery did not complete."}`,
+    receipt?.failure);
   }
   if (descriptor.source !== undefined) {
     return {
@@ -1079,8 +1086,18 @@ function replaceExactSecret(value: unknown, secret: string): unknown {
   return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, replaceExactSecret(entry, secret)]));
 }
 
-function protectedArgumentFailure(content: string): ToolResult {
-  return { ok: false, content, metadata: { reason: "protected-tool-argument-unavailable" } };
+function protectedArgumentFailure(
+  content: string,
+  sourceFailure?: SecureInputProtectedSourceFailure
+): ToolResult {
+  return {
+    ok: false,
+    content,
+    metadata: {
+      reason: "protected-tool-argument-unavailable",
+      ...(sourceFailure === undefined ? {} : { protectedSourceFailure: structuredClone(sourceFailure) })
+    }
+  };
 }
 
 const SECURE_INPUT_KINDS = new Set<SecureInputKind>([

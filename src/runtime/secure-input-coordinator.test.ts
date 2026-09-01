@@ -10,7 +10,10 @@ import {
   SecureInputTransportRegistry,
   type SecureInputTransport
 } from "../security/secure-input-transport-registry.js";
-import type { ProtectedBrowserValueSource } from "../security/protected-browser-value-source.js";
+import {
+  ProtectedBrowserValueSourceError,
+  type ProtectedBrowserValueSource
+} from "../security/protected-browser-value-source.js";
 import { SecureInputCoordinator } from "./secure-input-coordinator.js";
 
 const scope: SecureInputScope = {
@@ -426,6 +429,55 @@ describe("SecureInputCoordinator", () => {
     broker.dispose();
   });
 
+  it("returns a bounded source reason when a single protected transfer cannot start", async () => {
+    const broker = brokerWithStableIds();
+    const registry = new SecureInputTransportRegistry();
+    const deliver = vi.fn();
+    registry.register(browserTransport({
+      destinationTypes: ["tool-argument"],
+      verificationStrength: "declared-target",
+      deliver,
+    }));
+    const source = browserValueSource({
+      prepare: vi.fn(async () => {
+        throw new ProtectedBrowserValueSourceError("source-empty", "before-authorization");
+      }),
+    });
+    const authorize = vi.fn(async () => "approved" as const);
+    const consume = vi.fn();
+    const coordinator = new SecureInputCoordinator({
+      broker,
+      transports: registry,
+      collect: vi.fn(),
+      browserSource: source,
+      authorize,
+    });
+
+    const result = await coordinator.createRequestHandler(scope).transfer({
+      source: browserSource,
+      request: toolRequest,
+    }, consume);
+
+    expect(result).toEqual({
+      status: "failed",
+      destinationLabel: "/values/0/value for trusted.updateRecords",
+      persisted: false,
+      reason: "Protected transfer could not start:\n- source: source-empty",
+      failure: {
+        code: "protected-source-validation",
+        phase: "before-authorization",
+        sources: [{ id: "source", reason: "source-empty" }],
+      },
+    });
+    expect(authorize).not.toHaveBeenCalled();
+    expect(source.reverify).not.toHaveBeenCalled();
+    expect(source.read).not.toHaveBeenCalled();
+    expect(consume).not.toHaveBeenCalled();
+    expect(deliver).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain("portal.example.com");
+    broker.dispose();
+  });
+
   it("authorizes once and exposes every grouped browser value only during one atomic consumer", async () => {
     const broker = brokerWithStableIds();
     const registry = new SecureInputTransportRegistry();
@@ -515,6 +567,253 @@ describe("SecureInputCoordinator", () => {
     expect(sourceBytes.every((value) => value.every((byte) => byte === 0))).toBe(true);
     expect(source.release).toHaveBeenCalledTimes(2);
     expect(broker.stats().consumed).toBe(2);
+    broker.dispose();
+  });
+
+  it("reports every grouped source rejection before authorization, reading, or dispatch", async () => {
+    const broker = brokerWithStableIds();
+    const registry = new SecureInputTransportRegistry();
+    const deliver = vi.fn();
+    registry.register(browserTransport({
+      destinationTypes: ["tool-argument"],
+      verificationStrength: "declared-target",
+      deliver,
+    }));
+    const source = browserValueSource({
+      prepare: vi.fn(async ({ source: candidate }) => {
+        throw new ProtectedBrowserValueSourceError(
+          candidate.ref === "@e2" ? "source-empty" : "source-replaced",
+          "before-authorization"
+        );
+      })
+    });
+    const authorize = vi.fn(async () => "approved" as const);
+    const consume = vi.fn();
+    const coordinator = new SecureInputCoordinator({
+      broker,
+      transports: registry,
+      collect: vi.fn(),
+      browserSource: source,
+      authorize,
+    });
+
+    const result = await coordinator.createRequestHandler(scope).transferGroup({
+      purpose: "Validate both protected values",
+      items: [
+        { id: "argument-1", source: browserSource, request: toolRequest },
+        {
+          id: "argument-2",
+          source: { ...browserSource, ref: "@e3" },
+          request: {
+            ...toolRequest,
+            destination: { type: "tool-argument", toolName: "trusted.updateRecords", argumentPath: "/values/1/value" },
+          },
+        },
+      ],
+    }, consume);
+
+    expect(result).toEqual({
+      status: "failed",
+      items: [
+        expect.objectContaining({ id: "argument-1", receipt: expect.objectContaining({ status: "failed" }) }),
+        expect.objectContaining({ id: "argument-2", receipt: expect.objectContaining({ status: "failed" }) }),
+      ],
+      reason: "Protected transfer could not start:\n- argument-1: source-empty\n- argument-2: source-replaced",
+      failure: {
+        code: "protected-source-validation",
+        phase: "before-authorization",
+        sources: [
+          { id: "argument-1", reason: "source-empty" },
+          { id: "argument-2", reason: "source-replaced" },
+        ],
+      },
+    });
+    expect(source.prepare).toHaveBeenCalledTimes(2);
+    expect(authorize).not.toHaveBeenCalled();
+    expect(source.reverify).not.toHaveBeenCalled();
+    expect(source.read).not.toHaveBeenCalled();
+    expect(consume).not.toHaveBeenCalled();
+    expect(deliver).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain("portal.example.com");
+    broker.dispose();
+  });
+
+  it("releases an acquired binding when another grouped source fails initial validation", async () => {
+    const broker = brokerWithStableIds();
+    const registry = new SecureInputTransportRegistry();
+    const deliver = vi.fn();
+    registry.register(browserTransport({
+      destinationTypes: ["tool-argument"],
+      verificationStrength: "declared-target",
+      deliver,
+    }));
+    const source = browserValueSource({
+      prepare: vi.fn(async ({ source: candidate }) => {
+        if (candidate.ref === "@e3") {
+          throw new ProtectedBrowserValueSourceError("source-empty", "before-authorization");
+        }
+        return { source: structuredClone(candidate), label: "Bound browser value" };
+      }),
+    });
+    const authorize = vi.fn(async () => "approved" as const);
+    const coordinator = new SecureInputCoordinator({
+      broker,
+      transports: registry,
+      collect: vi.fn(),
+      browserSource: source,
+      authorize,
+    });
+
+    const result = await coordinator.createRequestHandler(scope).transferGroup({
+      purpose: "Validate two protected values",
+      items: [
+        { id: "argument-1", source: browserSource, request: toolRequest },
+        {
+          id: "argument-2",
+          source: { ...browserSource, ref: "@e3" },
+          request: {
+            ...toolRequest,
+            destination: { type: "tool-argument", toolName: "trusted.updateRecords", argumentPath: "/values/1/value" },
+          },
+        },
+      ],
+    }, vi.fn());
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: {
+        code: "protected-source-validation",
+        phase: "before-authorization",
+        sources: [{ id: "argument-2", reason: "source-empty" }],
+      },
+    });
+    expect(authorize).not.toHaveBeenCalled();
+    expect(source.read).not.toHaveBeenCalled();
+    expect(source.release).toHaveBeenCalledOnce();
+    expect(source.release).toHaveBeenCalledWith(browserSource);
+    expect(deliver).not.toHaveBeenCalled();
+    broker.dispose();
+  });
+
+  it("re-verifies every grouped source before reading any value and releases acquired bindings", async () => {
+    const broker = brokerWithStableIds();
+    const registry = new SecureInputTransportRegistry();
+    const deliver = vi.fn();
+    registry.register(browserTransport({
+      destinationTypes: ["tool-argument"],
+      verificationStrength: "declared-target",
+      deliver,
+    }));
+    const source = browserValueSource({
+      reverify: vi.fn(async ({ verified }) => {
+        throw new ProtectedBrowserValueSourceError(
+          verified.source.ref === "@e2" ? "tab-mismatch" : "source-replaced",
+          "before-delivery"
+        );
+      })
+    });
+    const authorize = vi.fn(async () => "approved" as const);
+    const consume = vi.fn();
+    const coordinator = new SecureInputCoordinator({
+      broker,
+      transports: registry,
+      collect: vi.fn(),
+      browserSource: source,
+      authorize,
+    });
+
+    const result = await coordinator.createRequestHandler(scope).transferGroup({
+      purpose: "Reverify both protected values",
+      items: [
+        { id: "argument-1", source: browserSource, request: toolRequest },
+        {
+          id: "argument-2",
+          source: { ...browserSource, ref: "@e3" },
+          request: {
+            ...toolRequest,
+            destination: { type: "tool-argument", toolName: "trusted.updateRecords", argumentPath: "/values/1/value" },
+          },
+        },
+      ],
+    }, consume);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      reason: "Protected transfer could not continue:\n- argument-1: tab-mismatch\n- argument-2: source-replaced",
+      failure: {
+        code: "protected-source-validation",
+        phase: "before-delivery",
+        sources: [
+          { id: "argument-1", reason: "tab-mismatch" },
+          { id: "argument-2", reason: "source-replaced" },
+        ],
+      },
+    });
+    expect(authorize).toHaveBeenCalledOnce();
+    expect(source.reverify).toHaveBeenCalledTimes(2);
+    expect(source.read).not.toHaveBeenCalled();
+    expect(consume).not.toHaveBeenCalled();
+    expect(deliver).not.toHaveBeenCalled();
+    expect(source.release).toHaveBeenCalledTimes(2);
+    expect(broker.stats().ready).toBe(0);
+    broker.dispose();
+  });
+
+  it("clears earlier temporary bytes when a final grouped source read check is rejected", async () => {
+    const broker = brokerWithStableIds();
+    const registry = new SecureInputTransportRegistry();
+    const deliver = vi.fn();
+    registry.register(browserTransport({
+      destinationTypes: ["tool-argument"],
+      verificationStrength: "declared-target",
+      deliver,
+    }));
+    const firstBytes = new TextEncoder().encode("temporary-source-sentinel");
+    const source = browserValueSource({
+      read: vi.fn(async ({ verified }) => {
+        if (verified.source.ref === "@e2") return firstBytes;
+        throw new ProtectedBrowserValueSourceError("source-replaced", "before-delivery");
+      })
+    });
+    const consume = vi.fn();
+    const coordinator = new SecureInputCoordinator({
+      broker,
+      transports: registry,
+      collect: vi.fn(),
+      browserSource: source,
+      authorize: async () => "approved",
+    });
+
+    const result = await coordinator.createRequestHandler(scope).transferGroup({
+      purpose: "Read two protected values atomically",
+      items: [
+        { id: "argument-1", source: browserSource, request: toolRequest },
+        {
+          id: "argument-2",
+          source: { ...browserSource, ref: "@e3" },
+          request: {
+            ...toolRequest,
+            destination: { type: "tool-argument", toolName: "trusted.updateRecords", argumentPath: "/values/1/value" },
+          },
+        },
+      ],
+    }, consume);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      reason: "Protected transfer could not continue:\n- argument-2: source-replaced",
+      failure: {
+        code: "protected-source-validation",
+        phase: "before-delivery",
+        sources: [{ id: "argument-2", reason: "source-replaced" }],
+      },
+    });
+    expect(firstBytes.every((byte) => byte === 0)).toBe(true);
+    expect(broker.stats().cancelled).toBe(1);
+    expect(consume).not.toHaveBeenCalled();
+    expect(deliver).not.toHaveBeenCalled();
+    expect(source.release).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(result)).not.toContain("temporary-source-sentinel");
     broker.dispose();
   });
 
@@ -677,6 +976,7 @@ function browserValueSource(overrides: Partial<ProtectedBrowserValueSource> = {}
       source: structuredClone(source),
       label: "Browser value at https://portal.example.com",
     })),
+    reverify: vi.fn(async () => undefined),
     read: vi.fn(async () => new TextEncoder().encode("source-value")),
     release: vi.fn(async () => undefined),
     ...overrides,

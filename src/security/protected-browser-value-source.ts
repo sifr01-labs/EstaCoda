@@ -1,4 +1,8 @@
-import type { BrowserBackend } from "../contracts/browser.js";
+import type {
+  BrowserBackend,
+  BrowserProtectedSourceRejectionReason,
+  BrowserProtectedSourceVerificationPhase
+} from "../contracts/browser.js";
 import type {
   BrowserFieldSecureInputSource,
   SecureInputKind,
@@ -15,6 +19,11 @@ export type ProtectedBrowserValueSource = {
     kind: SecureInputKind;
     signal: AbortSignal;
   }): Promise<VerifiedSecureInputSource>;
+  reverify(input: {
+    verified: VerifiedSecureInputSource;
+    kind: SecureInputKind;
+    signal: AbortSignal;
+  }): Promise<void>;
   read(input: {
     verified: VerifiedSecureInputSource;
     kind: SecureInputKind;
@@ -22,6 +31,19 @@ export type ProtectedBrowserValueSource = {
   }): Promise<Uint8Array>;
   release(source: BrowserFieldSecureInputSource): Promise<void>;
 };
+
+/** Safe typed rejection propagated without browser text, values, or raw exceptions. */
+export class ProtectedBrowserValueSourceError extends Error {
+  readonly code = "protected-browser-source-rejected" as const;
+
+  constructor(
+    readonly reason: BrowserProtectedSourceRejectionReason,
+    readonly phase: BrowserProtectedSourceVerificationPhase
+  ) {
+    super(`Protected browser source rejected: ${reason}.`);
+    this.name = "ProtectedBrowserValueSourceError";
+  }
+}
 
 /** Runtime-only browser source. It returns bytes only to the protected coordinator. */
 export function createProtectedBrowserValueSource(backend: BrowserBackend): ProtectedBrowserValueSource {
@@ -38,10 +60,12 @@ export function createProtectedBrowserValueSource(backend: BrowserBackend): Prot
         phase: "before-authorization",
         signal,
       });
-      if (result.status !== "verified") throw new Error("Protected browser source could not be verified.");
+      if (result.status !== "verified") {
+        throw new ProtectedBrowserValueSourceError(result.reason, "before-authorization");
+      }
       return { source: structuredClone(source), label: result.sourceLabel };
     },
-    read: async ({ verified, kind, signal }) => {
+    reverify: async ({ verified, kind, signal }) => {
       if (backend.verifyProtectedSource === undefined || backend.readProtectedSource === undefined) {
         throw new Error("Protected browser source is unavailable.");
       }
@@ -51,14 +75,24 @@ export function createProtectedBrowserValueSource(backend: BrowserBackend): Prot
         phase: "before-delivery",
         signal,
       });
-      if (verification.status !== "verified" || verification.sourceLabel !== verified.label) {
-        throw new Error("Protected browser source changed before delivery.");
+      if (verification.status !== "verified") {
+        throw new ProtectedBrowserValueSourceError(verification.reason, "before-delivery");
       }
-      return await backend.readProtectedSource({
+      if (verification.sourceLabel !== verified.label) {
+        throw new ProtectedBrowserValueSourceError("source-replaced", "before-delivery");
+      }
+    },
+    read: async ({ verified, kind, signal }) => {
+      if (backend.readProtectedSource === undefined) throw new Error("Protected browser source is unavailable.");
+      const result = await backend.readProtectedSource({
         source: structuredClone(verified.source),
         kind,
         signal,
       });
+      if (result.status === "rejected") {
+        throw new ProtectedBrowserValueSourceError(result.reason, "before-delivery");
+      }
+      return result.value;
     },
     release: async (source) => {
       await backend.releaseProtectedSource?.(structuredClone(source));

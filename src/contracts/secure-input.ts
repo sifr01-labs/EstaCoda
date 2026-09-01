@@ -1,4 +1,8 @@
-import type { BrowserStateIdentity } from "./browser.js";
+import type {
+  BrowserProtectedSourceRejectionReason,
+  BrowserProtectedSourceVerificationPhase,
+  BrowserStateIdentity
+} from "./browser.js";
 
 /** Sensitive value categories supported by the protected-input boundary. */
 export type SecureInputKind =
@@ -138,6 +142,17 @@ export type SecureInputReceipt = {
   destinationLabel: string;
   persisted: boolean;
   reason?: string;
+  failure?: SecureInputProtectedSourceFailure;
+};
+
+/** Bounded metadata for source validation failures. Browser content never belongs here. */
+export type SecureInputProtectedSourceFailure = {
+  code: "protected-source-validation";
+  phase: BrowserProtectedSourceVerificationPhase;
+  sources: readonly {
+    id: string;
+    reason: BrowserProtectedSourceRejectionReason;
+  }[];
 };
 
 /** One independently verified destination within a single operator input flow. */
@@ -161,6 +176,7 @@ export type SecureInputGroupReceipt = {
   status: SecureInputReceipt["status"];
   items: readonly { id: string; receipt: SecureInputReceipt }[];
   reason?: string;
+  failure?: SecureInputProtectedSourceFailure;
 };
 
 export type SecureInputConsumptionContext = {

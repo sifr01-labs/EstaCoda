@@ -448,20 +448,22 @@ export type BrowserProtectedFieldDeliveryResult = {
 
 export type BrowserProtectedSourceVerificationPhase = "before-authorization" | "before-delivery";
 
+export type BrowserProtectedSourceRejectionReason =
+  | "session-mismatch"
+  | "tab-mismatch"
+  | "origin-mismatch"
+  | "frame-mismatch"
+  | "source-missing"
+  | "source-replaced"
+  | "source-hidden"
+  | "source-empty"
+  | "request-not-active";
+
 export type BrowserProtectedSourceVerification =
   | { status: "verified"; sourceLabel: string }
   | {
       status: "rejected";
-      reason:
-        | "session-mismatch"
-        | "tab-mismatch"
-        | "origin-mismatch"
-        | "frame-mismatch"
-        | "source-missing"
-        | "source-replaced"
-        | "source-hidden"
-        | "source-empty"
-        | "request-not-active";
+      reason: BrowserProtectedSourceRejectionReason;
     };
 
 export type BrowserProtectedSourceInput = {
@@ -476,6 +478,10 @@ export type BrowserProtectedSourceReadInput = {
   kind: import("./secure-input.js").SecureInputKind;
   signal?: AbortSignal;
 };
+
+export type BrowserProtectedSourceReadResult =
+  | { status: "read"; value: Uint8Array }
+  | { status: "rejected"; reason: BrowserProtectedSourceRejectionReason };
 
 export type BrowserNavigateInput = {
   url: string;
@@ -551,7 +557,7 @@ export type BrowserBackend = {
   /** Binds and re-verifies an exact browser value without disclosing it to a model-visible surface. */
   verifyProtectedSource?(input: BrowserProtectedSourceInput): Promise<BrowserProtectedSourceVerification>;
   /** Reads a previously verified browser value into an ephemeral byte buffer. */
-  readProtectedSource?(input: BrowserProtectedSourceReadInput): Promise<Uint8Array>;
+  readProtectedSource?(input: BrowserProtectedSourceReadInput): Promise<BrowserProtectedSourceReadResult>;
   /** Releases runtime-only source bindings after every terminal transfer outcome. */
   releaseProtectedSource?(source: import("./secure-input.js").BrowserFieldSecureInputSource): Promise<void> | void;
   isSensitiveInputActive?(sessionId: string): boolean;

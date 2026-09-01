@@ -4,6 +4,7 @@ import type {
   SecureInputGroupReceipt,
   SecureInputGroupRequest,
   GroupedSecureInputRequestHandler,
+  SecureInputProtectedSourceFailure,
   SecureInputReceipt,
   SecureInputRequest,
   SecureInputRequestSnapshot,
@@ -25,7 +26,10 @@ import {
   SecureInputTransportRegistry,
   type SelectedSecureInputTransport
 } from "../security/secure-input-transport-registry.js";
-import type { ProtectedBrowserValueSource } from "../security/protected-browser-value-source.js";
+import {
+  ProtectedBrowserValueSourceError,
+  type ProtectedBrowserValueSource
+} from "../security/protected-browser-value-source.js";
 import type {
   SecureInputDisclosureBoundary,
   SecureInputPersistenceBehavior,
@@ -137,8 +141,10 @@ export class SecureInputCoordinator {
       handling: NonNullable<SecureInputTransferGroupRequest["items"][number]["handling"]>;
       receipt?: SecureInputReceipt;
     }> = [];
+    let terminalSourceFailure: SecureInputProtectedSourceFailure | undefined;
     try {
       if (this.#browserSource === undefined) throw new Error("Protected browser transfer is unavailable.");
+      const initialSourceFailures: SecureInputProtectedSourceFailure["sources"][number][] = [];
       for (const item of input.transfer.items) {
         const selection = await this.#transports.select({ request: item.request, signal: controller.signal });
         const assessment = assessSecureInputPolicy(item.request, selection.policy);
@@ -150,11 +156,26 @@ export class SecureInputCoordinator {
           handling: item.handling ?? { persistence: "unknown", sharing: "unknown" },
         };
         entries.push(entry);
-        entry.source = await this.#browserSource.prepare({
-          source: item.source,
-          kind: item.request.kind,
-          signal: controller.signal,
-        });
+        try {
+          entry.source = await this.#browserSource.prepare({
+            source: item.source,
+            kind: item.request.kind,
+            signal: controller.signal,
+          });
+        } catch (error) {
+          const failure = protectedSourceFailureItem(item.id, error, "before-authorization");
+          if (failure === undefined) throw error;
+          initialSourceFailures.push(failure);
+        }
+      }
+      if (initialSourceFailures.length > 0) {
+        terminalSourceFailure = protectedSourceFailure("before-authorization", initialSourceFailures);
+        return groupReceipt(
+          entries,
+          "failed",
+          renderProtectedSourceFailure(terminalSourceFailure),
+          terminalSourceFailure
+        );
       }
 
       const first = entries[0]!;
@@ -183,12 +204,44 @@ export class SecureInputCoordinator {
       for (const entry of entries) {
         await this.#transports.reverify({ selection: entry.selection, request: entry.request, signal: controller.signal });
       }
+      const deliverySourceFailures: SecureInputProtectedSourceFailure["sources"][number][] = [];
       for (const entry of entries) {
-        const value = await this.#browserSource.read({
-          verified: entry.source!,
-          kind: entry.request.kind,
-          signal: controller.signal,
-        });
+        try {
+          await this.#browserSource.reverify({
+            verified: entry.source!,
+            kind: entry.request.kind,
+            signal: controller.signal,
+          });
+        } catch (error) {
+          const failure = protectedSourceFailureItem(entry.id, error, "before-delivery");
+          if (failure === undefined) throw error;
+          deliverySourceFailures.push(failure);
+        }
+      }
+      if (deliverySourceFailures.length > 0) {
+        terminalSourceFailure = protectedSourceFailure("before-delivery", deliverySourceFailures);
+        return groupReceipt(
+          entries,
+          "failed",
+          renderProtectedSourceFailure(terminalSourceFailure),
+          terminalSourceFailure
+        );
+      }
+      for (const entry of entries) {
+        let value: Uint8Array;
+        try {
+          value = await this.#browserSource.read({
+            verified: entry.source!,
+            kind: entry.request.kind,
+            signal: controller.signal,
+          });
+        } catch (error) {
+          const failure = protectedSourceFailureItem(entry.id, error, "before-delivery");
+          if (failure !== undefined) {
+            terminalSourceFailure = protectedSourceFailure("before-delivery", [failure]);
+          }
+          throw error;
+        }
         try {
           entry.snapshot = this.#broker.createRequest({ scope: input.scope, request: entry.request, signal: controller.signal });
           this.#broker.provideSecret({ requestId: entry.snapshot.id, scope: input.scope, value });
@@ -214,7 +267,16 @@ export class SecureInputCoordinator {
         if (entry.snapshot !== undefined) cancelPending(this.#broker, entry.snapshot.id, input.scope);
       }
       const cleared = await this.#abort(entries.map((entry) => ({ request: entry.request, selection: entry.selection })));
-      return groupReceipt(entries, "failed", cleared ? "Protected group transfer failed before dispatch." : protectedInputClearBlocker());
+      return groupReceipt(
+        entries,
+        "failed",
+        !cleared
+          ? protectedInputClearBlocker()
+          : terminalSourceFailure === undefined
+            ? "Protected group transfer failed before dispatch."
+            : renderProtectedSourceFailure(terminalSourceFailure),
+        cleared ? terminalSourceFailure : undefined
+      );
     } finally {
       for (const entry of entries) {
         if (entry.source !== undefined) {
@@ -279,6 +341,11 @@ export class SecureInputCoordinator {
         request: input.transfer.request,
         signal: controller.signal,
       });
+      await this.#browserSource.reverify({
+        verified: source,
+        kind: input.transfer.request.kind,
+        signal: controller.signal,
+      });
       const value = await this.#browserSource.read({
         verified: source,
         kind: input.transfer.request.kind,
@@ -316,10 +383,20 @@ export class SecureInputCoordinator {
         "delivered",
         input.transfer.handling?.persistence === "destination-managed" || selection.policy.persistence !== "none"
       );
-    } catch {
+    } catch (error) {
       if (snapshot !== undefined) cancelPending(this.#broker, snapshot.id, input.scope);
       if (selection !== undefined) await this.#abort([{ request: input.transfer.request, selection }]);
-      return receipt(selection, "failed", false, "Protected transfer failed.");
+      const sourceFailureItem = protectedSourceFailureItem("source", error);
+      const sourceFailure = sourceFailureItem === undefined || !(error instanceof ProtectedBrowserValueSourceError)
+        ? undefined
+        : protectedSourceFailure(error.phase, [sourceFailureItem]);
+      return receipt(
+        selection,
+        "failed",
+        false,
+        sourceFailure === undefined ? "Protected transfer failed." : renderProtectedSourceFailure(sourceFailure),
+        sourceFailure
+      );
     } finally {
       if (source !== undefined) {
         await this.#browserSource?.release(source.source).catch(() => undefined);
@@ -806,7 +883,8 @@ function groupReceipt(
     receipt?: SecureInputReceipt;
   }[],
   status: SecureInputReceipt["status"],
-  reason?: string
+  reason?: string,
+  failure?: SecureInputProtectedSourceFailure
 ): SecureInputGroupReceipt {
   return {
     status,
@@ -814,21 +892,52 @@ function groupReceipt(
       id: entry.id,
       receipt: entry.receipt ?? receipt(entry.selection, status, false, reason)
     })),
-    ...(reason === undefined ? {} : { reason })
+    ...(reason === undefined ? {} : { reason }),
+    ...(failure === undefined ? {} : { failure: structuredClone(failure) })
   };
+}
+
+function protectedSourceFailureItem(
+  id: string,
+  error: unknown,
+  phase?: SecureInputProtectedSourceFailure["phase"]
+): SecureInputProtectedSourceFailure["sources"][number] | undefined {
+  if (!(error instanceof ProtectedBrowserValueSourceError)) return undefined;
+  if (phase !== undefined && error.phase !== phase) return undefined;
+  return { id, reason: error.reason };
+}
+
+function protectedSourceFailure(
+  phase: SecureInputProtectedSourceFailure["phase"],
+  sources: SecureInputProtectedSourceFailure["sources"]
+): SecureInputProtectedSourceFailure {
+  return {
+    code: "protected-source-validation",
+    phase,
+    sources: sources.map((source) => ({ ...source }))
+  };
+}
+
+function renderProtectedSourceFailure(failure: SecureInputProtectedSourceFailure): string {
+  const heading = failure.phase === "before-authorization"
+    ? "Protected transfer could not start:"
+    : "Protected transfer could not continue:";
+  return [heading, ...failure.sources.map((source) => `- ${source.id}: ${source.reason}`)].join("\n");
 }
 
 function receipt(
   selection: SelectedSecureInputTransport | undefined,
   status: SecureInputReceipt["status"],
   persisted: boolean,
-  reason?: string
+  reason?: string,
+  failure?: SecureInputProtectedSourceFailure
 ): SecureInputReceipt {
   return {
     status,
     destinationLabel: selection?.verifiedDestination.label ?? "Protected destination",
     persisted,
-    ...(reason === undefined ? {} : { reason })
+    ...(reason === undefined ? {} : { reason }),
+    ...(failure === undefined ? {} : { failure: structuredClone(failure) })
   };
 }
 

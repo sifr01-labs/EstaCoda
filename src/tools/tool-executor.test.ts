@@ -1462,6 +1462,77 @@ describe("ToolExecutor tool-call metadata persistence", () => {
     expect(await persistedExecutionState(sessionDb, trajectoryRecorder)).not.toContain(secrets[1]);
   });
 
+  it("surfaces all grouped protected-source failures with safe structured metadata", async () => {
+    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "unexpected" }));
+    const tool: RegisteredTool = {
+      ...createEchoTool("mcp.postman.createEnvironment"),
+      protectedArguments: [{
+        path: "/environment/values/*/value",
+        handling: { persistence: "destination-managed", sharing: "workspace" },
+      }],
+      capabilityMetadata: { protectedInput: { groupedDelivery: true, sources: ["browser"] } },
+      run,
+    };
+    const handler = vi.fn() as unknown as SecureInputTransferRequestHandler;
+    handler.requestGroup = vi.fn();
+    handler.transfer = vi.fn();
+    handler.transferGroup = vi.fn(async () => ({
+      status: "failed" as const,
+      items: [],
+      reason: "Protected transfer could not start:\n- argument-1: source-empty\n- argument-2: tab-mismatch",
+      failure: {
+        code: "protected-source-validation" as const,
+        phase: "before-authorization" as const,
+        sources: [
+          { id: "argument-1", reason: "source-empty" as const },
+          { id: "argument-2", reason: "tab-mismatch" as const },
+        ],
+      },
+    }));
+    const source = (ref: string) => ({
+      type: "browser-field" as const,
+      sessionId: "browser-1",
+      ref,
+      identity: { documentEpoch: 2, actionRevision: 3, observationId: 4 },
+      expectedOrigin: "https://portal.example.com",
+      tabRef: "@t1",
+    });
+    const { executor } = await setupExecutor({ tools: [tool] });
+
+    const execution = await executor.executeTool({
+      tool: tool.name,
+      input: {
+        environment: {
+          values: [
+            { value: { protectedInput: { kind: "api-key", source: source("@e1") } } },
+            { value: { protectedInput: { kind: "client-secret", source: source("@e2") } } },
+          ],
+        },
+      },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      onSecureInputRequest: handler,
+    });
+
+    expect(run).not.toHaveBeenCalled();
+    expect(execution?.result).toEqual({
+      ok: false,
+      content: "Protected transfer could not start:\n- argument-1: source-empty\n- argument-2: tab-mismatch",
+      metadata: {
+        reason: "protected-tool-argument-unavailable",
+        protectedSourceFailure: {
+          code: "protected-source-validation",
+          phase: "before-authorization",
+          sources: [
+            { id: "argument-1", reason: "source-empty" },
+            { id: "argument-2", reason: "tab-mismatch" },
+          ],
+        },
+      },
+    });
+    expect(JSON.stringify(execution?.result)).not.toContain("portal.example.com");
+  });
+
   it("enforces registered grouped-delivery and browser-relay capabilities before collection", async () => {
     const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "unexpected" }));
     const browserSource = (ref: string) => ({
