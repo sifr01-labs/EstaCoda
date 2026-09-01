@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import {
@@ -32,6 +31,7 @@ import {
   setAtProtectedArgumentPointer,
 } from "../security/protected-argument-path.js";
 import { createTimeoutSignal } from "../utils/timeout-signal.js";
+import { ExecutionOperationLedger, semanticMutationKey } from "./execution-operation-ledger.js";
 
 const MAX_STORED_TOOL_RESULT_CHARS = 12_000;
 const MAX_CONTEXT_SUMMARY_CHARS = 500;
@@ -137,6 +137,7 @@ export class ToolExecutor {
   readonly #workspaceRoot: string;
   readonly #defaultExecutionTimeoutMs: number;
   readonly #uncertainMutationKeys = new Set<string>();
+  readonly #operationLedger = new ExecutionOperationLedger();
 
   constructor(options: ToolExecutorOptions) {
     this.#registry = options.registry;
@@ -152,6 +153,7 @@ export class ToolExecutor {
 
   resetPerTurnBudgets(): void {
     this.#uncertainMutationKeys.clear();
+    this.#operationLedger.reset();
   }
 
   markMutationOutcomeUncertain(tool: string, input: Record<string, unknown>): void {
@@ -266,6 +268,28 @@ export class ToolExecutor {
         executionEffect,
         targetKey,
         targetSummary
+      );
+    }
+    const completedMutation = (
+      executionEffect?.kind === "mutation" &&
+      executionEffect.connector !== undefined &&
+      request.visibleTurnId !== undefined
+    )
+      ? this.#operationLedger.admission({
+          tool: tool.name,
+          value: request.input,
+          scope: request.visibleTurnId
+        })
+      : undefined;
+    if (completedMutation !== undefined && executionEffect !== undefined) {
+      return await this.#blockedCompletedMutationReplay(
+        request,
+        tool,
+        riskClass,
+        executionEffect,
+        targetKey,
+        targetSummary,
+        completedMutation.status
       );
     }
     const persistedTargetKey = redactPersistedString(targetKey);
@@ -522,6 +546,9 @@ export class ToolExecutor {
       toolCallName: request.toolCallName,
       providerNativeToolCall: request.providerNativeToolCall
     };
+    if (request.visibleTurnId !== undefined) {
+      this.#operationLedger.observe(execution, request.visibleTurnId);
+    }
     if (request.readLedger !== undefined && request.readLedgerScope !== undefined) {
       request.readLedger.observe({
         scope: request.readLedgerScope,
@@ -750,6 +777,82 @@ export class ToolExecutor {
       decision: "deny",
       riskClass,
       reason: "uncertain-mutation-replay"
+    });
+    return {
+      tool: toDefinition(tool),
+      executionEffect,
+      settlement: notStartedSettlement("failed"),
+      input: request.input,
+      decision: "deny",
+      riskClass,
+      targetKey,
+      targetSummary,
+      result,
+      toolCallId: request.toolCallId,
+      toolCallName: request.toolCallName,
+      providerNativeToolCall: request.providerNativeToolCall
+    };
+  }
+
+  async #blockedCompletedMutationReplay(
+    request: NamedToolExecutionRequest,
+    tool: import("../contracts/tool.js").RegisteredTool,
+    riskClass: ToolRiskClass,
+    executionEffect: ToolExecutionEffect,
+    targetKey: string | undefined,
+    targetSummary: string | undefined,
+    operationStatus: "verification-required" | "verified"
+  ): Promise<ToolExecutionRecord> {
+    const nextAction = operationStatus === "verified"
+      ? "Continue from the verified result instead of repeating the mutation."
+      : "Use a registered independent verification tool before deciding whether any corrective mutation is needed.";
+    const result: ToolResult = {
+      ok: false,
+      content: [
+        `Tool execution skipped: the equivalent ${tool.name} mutation already succeeded in this turn (${operationStatus}).`,
+        nextAction
+      ].join("\n"),
+      metadata: {
+        ...settlementMetadata("completed-mutation-replay", "not_started", "none"),
+        operationStatus
+      }
+    };
+    const persistedCall = redactToolCallForPersistence(tool.name, request.input, request.providerNativeToolCall);
+    const storedResult = redactToolResultForPersistence(result);
+    await this.#sessionDb.appendEvent(request.sessionId, {
+      kind: "tool-gated",
+      tool: tool.name,
+      decision: "deny",
+      riskClass
+    });
+    await this.#sessionDb.appendEvent(request.sessionId, {
+      kind: "tool-result",
+      tool: tool.name,
+      result: storedResult,
+      toolCallId: request.toolCallId,
+      toolCallName: request.toolCallName,
+      providerNativeToolCall: persistedCall.providerNativeToolCall
+    });
+    await this.#sessionDb.appendMessage({
+      sessionId: request.sessionId,
+      role: "tool",
+      content: storedResult.content,
+      metadata: {
+        tool: tool.name,
+        tool_call_id: request.toolCallId,
+        tool_call_name: request.toolCallName,
+        provider_native_tool_call: persistedCall.providerNativeToolCall,
+        ok: false,
+        reason: "completed-mutation-replay",
+        operation_status: operationStatus
+      }
+    });
+    this.#trajectoryRecorder.record("tool-gated", {
+      tool: tool.name,
+      decision: "deny",
+      riskClass,
+      reason: "completed-mutation-replay",
+      operationStatus
     });
     return {
       tool: toDefinition(tool),
@@ -1192,32 +1295,7 @@ function uncertainMutationKey(
   tool: string,
   input: Record<string, unknown>
 ): string {
-  return createHash("sha256").update(stableExecutionValue({
-    tool,
-    input
-  })).digest("hex");
-}
-
-function stableExecutionValue(value: unknown): string {
-  const seen = new WeakSet<object>();
-  let visited = 0;
-  const visit = (entry: unknown, depth: number): string => {
-    if (visited >= 256 || depth > 6) return JSON.stringify("[TRUNCATED]");
-    visited += 1;
-    if (typeof entry === "string") return JSON.stringify([...entry].slice(0, 2_000).join(""));
-    if (entry === null || typeof entry !== "object") return JSON.stringify(entry) ?? "undefined";
-    if (seen.has(entry)) return JSON.stringify("[CIRCULAR]");
-    seen.add(entry);
-    if (Array.isArray(entry)) {
-      return `[${entry.slice(0, 64).map((item) => visit(item, depth + 1)).join(",")}]`;
-    }
-    return `{${Object.entries(entry as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .slice(0, 64)
-      .map(([key, item]) => `${JSON.stringify(key)}:${visit(item, depth + 1)}`)
-      .join(",")}}`;
-  };
-  return visit(value, 0);
+  return semanticMutationKey(tool, input);
 }
 
 function classifyEffectiveRisk(

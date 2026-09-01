@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import type { ToolRiskClass } from "../contracts/tool.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import {
+  ExecutionOperationLedger,
+  type ExecutionOperationReceipt
+} from "../tools/execution-operation-ledger.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import { executionEvidenceStatus } from "./execution-evidence-index.js";
 
@@ -43,6 +47,7 @@ export type ExecutionWorkingFact = {
 export type ExecutionWorkingSet = {
   visibleTurnId: string;
   facts: ExecutionWorkingFact[];
+  operations: ExecutionOperationReceipt[];
 };
 
 type StoredFact = {
@@ -55,6 +60,7 @@ export class ExecutionWorkingSetController {
   readonly #profileId: string;
   readonly #now: () => Date;
   readonly #facts = new Map<string, StoredFact>();
+  readonly #operations = new ExecutionOperationLedger();
   #sessionId: string;
   #visibleTurnId: string | undefined;
 
@@ -78,6 +84,7 @@ export class ExecutionWorkingSetController {
   ): void {
     this.#syncScope(visibleTurnId, sessionId);
     for (const execution of executions) {
+      this.#operations.observe(execution);
       if (executionEvidenceStatus(execution) !== "success" || INELIGIBLE_TOOLS.has(execution.tool.name)) {
         continue;
       }
@@ -105,17 +112,20 @@ export class ExecutionWorkingSetController {
 
   snapshot(visibleTurnId: string, sessionId = this.#sessionId): ExecutionWorkingSet | undefined {
     this.#syncScope(visibleTurnId, sessionId);
-    if (this.#facts.size === 0) {
+    const operations = this.#operations.snapshot();
+    if (this.#facts.size === 0 && operations.length === 0) {
       return undefined;
     }
     return {
       visibleTurnId,
-      facts: [...this.#facts.values()].map(({ fact }) => ({ ...fact }))
+      facts: [...this.#facts.values()].map(({ fact }) => ({ ...fact })),
+      operations
     };
   }
 
   clear(): void {
     this.#facts.clear();
+    this.#operations.reset();
     this.#visibleTurnId = undefined;
   }
 

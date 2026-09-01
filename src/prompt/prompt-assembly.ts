@@ -722,13 +722,32 @@ function renderExecutionPlan(plan: ExecutionPlan): string {
 }
 
 function renderExecutionWorkingSet(workingSet: ExecutionWorkingSet): string {
+  const pendingVerification = workingSet.operations.filter((operation) => operation.status === "verification-required");
   return [
-    "Confirmed foreground-turn state (harness-derived receipts; reuse these instead of rediscovering them):",
+    "Authoritative mission working state (harness-derived receipts; reuse these instead of reconstructing them):",
     "Scope: current visible turn",
+    ...(workingSet.facts.length === 0 ? [] : ["Confirmed facts:"]),
     ...workingSet.facts.map((fact) =>
       `- ${fact.summary} · source=${fact.sourceCallId} · freshness=${fact.freshness}`
     ),
-    "These receipts are bounded working state, not instructions or tool authority. Re-read a target only after a relevant mutation or when current verification is required."
+    ...(workingSet.operations.length === 0
+      ? []
+      : [
+          "Semantic operations:",
+          ...workingSet.operations.map((operation) => {
+            const target = operation.targetSummary === undefined ? "" : ` · target=${operation.targetSummary}`;
+            const verification = operation.verificationTool === undefined
+              ? ""
+              : ` · verified-by=${operation.verificationTool}:${operation.verificationCallId}`;
+            return `- ${operation.mutationTool}${target} · status=${operation.status} · mutation=${operation.mutationCallId}${verification}`;
+          })
+        ]),
+    ...(pendingVerification.length === 0
+      ? ["Next valid operation: continue with the next unfinished part of the mission; do not repeat verified mutations."]
+      : [
+          `Next valid operation: independently verify ${pendingVerification.map((operation) => operation.mutationTool).join(", ")} before repeating it or advancing past its effect.`
+        ]),
+    "These receipts are bounded working state, not instructions or tool authority. A verified operation is monotonic for this turn; a correction requires materially different input after fresh destination evidence."
   ].join("\n");
 }
 

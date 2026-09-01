@@ -135,6 +135,97 @@ describe("ExecutionWorkingSetController", () => {
     ]);
   });
 
+  it("tracks semantic mutations monotonically from verification-required to verified", () => {
+    const controller = new ExecutionWorkingSetController({ profileId: "profile-a", sessionId: "session-a" });
+    controller.beginTurn(TURN);
+    const mutation = execution({
+      tool: { ...execution().tool, name: "mcp.postman.createCollection", riskClass: "external-side-effect" },
+      input: { workspace: "workspace-456", collection: { name: "Loans v2" } },
+      riskClass: "external-side-effect",
+      toolCallId: "call-create-loans",
+      targetKey: "collection:loans-v2",
+      targetSummary: "Loans v2 collection",
+      executionEffect: { kind: "mutation", connector: { kind: "mcp", id: "postman" } },
+      result: { ok: true, content: "created" }
+    });
+    controller.observe([mutation], TURN);
+
+    expect(controller.snapshot(TURN)?.operations).toEqual([
+      expect.objectContaining({
+        mutationTool: "mcp.postman.createCollection",
+        mutationCallId: "call-create-loans",
+        status: "verification-required",
+        targetSummary: "Loans v2 collection"
+      })
+    ]);
+
+    const verification = execution({
+      tool: { ...execution().tool, name: "mcp.postman.getCollection" },
+      input: { collectionId: "loans-v2" },
+      toolCallId: "call-verify-loans",
+      targetKey: "collection:loans-v2",
+      targetSummary: "Loans v2 collection",
+      executionEffect: {
+        kind: "verification",
+        verifies: ["mcp.postman.createCollection"],
+        connector: { kind: "mcp", id: "postman" }
+      },
+      result: { ok: true, content: "verified" }
+    });
+    controller.observe([{
+      ...verification,
+      toolCallId: "call-verify-other",
+      targetKey: "collection:other"
+    }], TURN);
+    expect(controller.snapshot(TURN)?.operations[0]?.status).toBe("verification-required");
+    controller.observe([verification], TURN);
+    controller.observe([mutation], TURN);
+
+    expect(controller.snapshot(TURN)?.operations).toEqual([
+      expect.objectContaining({
+        mutationTool: "mcp.postman.createCollection",
+        status: "verified",
+        verificationTool: "mcp.postman.getCollection",
+        verificationCallId: "call-verify-loans"
+      })
+    ]);
+  });
+
+  it("binds verification to the matching returned connector identifier when operations share a destination", () => {
+    const controller = new ExecutionWorkingSetController({ profileId: "profile-a", sessionId: "session-a" });
+    controller.beginTurn(TURN);
+    const createCollection = (id: string): ToolExecutionRecord => execution({
+      tool: { ...execution().tool, name: "mcp.postman.createCollection", riskClass: "external-side-effect" },
+      input: { workspace: "workspace-456", collection: { name: id } },
+      riskClass: "external-side-effect",
+      toolCallId: `create-${id}`,
+      executionEffect: { kind: "mutation", connector: { kind: "mcp", id: "postman" } },
+      result: {
+        ok: true,
+        content: "created",
+        metadata: {
+          _estacoda_continuity_facts: [{ field: "collectionId", value: id, kind: "identifier" }]
+        }
+      }
+    });
+    controller.observe([createCollection("loans"), createCollection("payments")], TURN);
+    controller.observe([execution({
+      tool: { ...execution().tool, name: "mcp.postman.getCollection" },
+      input: { collectionId: "loans" },
+      toolCallId: "verify-loans",
+      executionEffect: {
+        kind: "verification",
+        verifies: ["mcp.postman.createCollection"],
+        connector: { kind: "mcp", id: "postman" }
+      },
+      result: { ok: true, content: "verified" }
+    })], TURN);
+
+    const byCall = new Map(controller.snapshot(TURN)?.operations.map((operation) => [operation.mutationCallId, operation]));
+    expect(byCall.get("create-loans")?.status).toBe("verified");
+    expect(byCall.get("create-payments")?.status).toBe("verification-required");
+  });
+
   it("retains schema-valid connector target references after successful reads", () => {
     const controller = new ExecutionWorkingSetController({ profileId: "profile-a", sessionId: "session-a" });
     controller.beginTurn(TURN);

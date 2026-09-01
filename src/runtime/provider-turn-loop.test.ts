@@ -1983,7 +1983,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     await runBasicProviderTurn(harness.loop);
 
     const continuation = JSON.stringify((harness.completeSpy.mock.calls[1]?.[0] as ProviderRequest).messages);
-    expect(continuation).toContain("Confirmed foreground-turn state");
+    expect(continuation).toContain("Authoritative mission working state");
     expect(continuation).toContain("Workspace: workspace-456");
     expect(continuation.match(/MTN Products/gu)).toHaveLength(1);
     expect(dispatchedTools).toEqual([

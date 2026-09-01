@@ -1144,6 +1144,98 @@ describe("ToolExecutor input redaction", () => {
 });
 
 describe("ToolExecutor tool-call metadata persistence", () => {
+  it("blocks equivalent successful mutations until verification and after verified completion", async () => {
+    const runMutation = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "created" }));
+    const mutation: RegisteredTool = {
+      ...createEchoTool("mcp.postman.createCollection"),
+      riskClass: "external-side-effect",
+      toolsets: ["mcp"],
+      connector: { kind: "mcp", id: "postman" },
+      resolveSecurity: (input) => ({
+        riskClass: "external-side-effect",
+        targetKey: `collection:${String(input.collectionId)}`,
+        targetSummary: `Collection ${String(input.collectionId)}`
+      }),
+      run: runMutation
+    };
+    const verifier: RegisteredTool = {
+      ...createEchoTool("mcp.postman.getCollection"),
+      riskClass: "read-only-network",
+      toolsets: ["mcp"],
+      connector: { kind: "mcp", id: "postman" },
+      capabilityMetadata: { verification: { verifies: [mutation.name] } },
+      resolveSecurity: (input) => ({
+        riskClass: "read-only-network",
+        targetKey: `collection:${String(input.collectionId)}`,
+        targetSummary: `Collection ${String(input.collectionId)}`
+      })
+    };
+    const { executor } = await setupExecutor({ tools: [mutation, verifier] });
+    const request = {
+      tool: mutation.name,
+      input: { collectionId: "loans-v2", collection: { name: "Loans v2" } },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      visibleTurnId: "turn-one"
+    };
+
+    const created = await executor.executeTool({ ...request, toolCallId: "call-create" });
+    const pendingReplay = await executor.executeTool({ ...request, toolCallId: "call-replay-pending" });
+    const verified = await executor.executeTool({
+      tool: verifier.name,
+      input: { collectionId: "loans-v2" },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      visibleTurnId: "turn-one",
+      toolCallId: "call-verify"
+    });
+    const verifiedReplay = await executor.executeTool({ ...request, toolCallId: "call-replay-verified" });
+
+    expect(created).toMatchObject({ decision: "allow", result: { ok: true } });
+    expect(pendingReplay).toMatchObject({
+      decision: "deny",
+      result: { metadata: { reason: "completed-mutation-replay", operationStatus: "verification-required" } }
+    });
+    expect(verified).toMatchObject({ decision: "allow", result: { ok: true } });
+    expect(verifiedReplay).toMatchObject({
+      decision: "deny",
+      result: { metadata: { reason: "completed-mutation-replay", operationStatus: "verified" } }
+    });
+    expect(runMutation).toHaveBeenCalledTimes(1);
+
+    await executor.executeTool({
+      ...request,
+      visibleTurnId: "turn-two",
+      toolCallId: "call-next-turn"
+    });
+    expect(runMutation).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not apply connector operation replay policy to ordinary local mutations", async () => {
+    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "done" }));
+    const tool: RegisteredTool = {
+      ...createEchoTool("local.update"),
+      riskClass: "workspace-write",
+      toolsets: ["files"],
+      run
+    };
+    const { executor } = await setupExecutor({ tools: [tool] });
+    const request = {
+      tool: tool.name,
+      input: { path: "notes.txt", content: "same" },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      visibleTurnId: "turn-one"
+    };
+
+    const first = await executor.executeTool({ ...request, toolCallId: "local-first" });
+    const second = await executor.executeTool({ ...request, toolCallId: "local-second" });
+
+    expect(first?.decision).toBe("allow");
+    expect(second?.decision).toBe("allow");
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
   it("preserves trusted execution effects without projecting capability metadata into tool definitions", async () => {
     const mutation: RegisteredTool = {
       ...createEchoTool("mcp.postman.updateCollection"),

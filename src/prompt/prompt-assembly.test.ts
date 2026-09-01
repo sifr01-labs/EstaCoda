@@ -219,6 +219,13 @@ describe("assembleProviderPrompt", () => {
           observedAt: "2026-08-13T00:00:00.000Z",
           freshness: "historical"
         }],
+        operations: [{
+          operationId: "operation-create",
+          mutationTool: "mcp.postman.createCollection",
+          mutationCallId: "call-create",
+          status: "verification-required",
+          targetSummary: "MTN Products"
+        }]
       },
       sessionHistory: Array.from({ length: 50 }, (_, index) => ({
         id: `history-${index}`,
@@ -228,12 +235,14 @@ describe("assembleProviderPrompt", () => {
     }));
     const rendered = renderMessages(prompt.messages);
 
-    expect(rendered).toContain("Confirmed foreground-turn state");
+    expect(rendered).toContain("Authoritative mission working state");
     expect(rendered).toContain("Scope: current visible turn");
     expect(rendered).not.toContain("turn-3");
     expect(rendered).toContain("Workspace ID: workspace-456");
     expect(rendered).toContain("freshness=historical");
-    expect(rendered).toContain("reuse these instead of rediscovering them");
+    expect(rendered).toContain("reuse these instead of reconstructing them");
+    expect(rendered).toContain("mcp.postman.createCollection · target=MTN Products · status=verification-required");
+    expect(rendered).toContain("Next valid operation: independently verify mcp.postman.createCollection");
     expect(prompt.budget.layers).toContainEqual(expect.objectContaining({
       name: "execution-working-set",
       cacheable: false,
