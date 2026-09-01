@@ -71,6 +71,41 @@ describe("authentication execution effects", () => {
     ]);
   });
 
+  it("stops for corrected credentials after a rejected or incompatible protected submission", () => {
+    const rejectedCredentials = protectedExecution("browser.fill_protected_form", "rejected-credentials", {
+      secureInputGroupReceipt: { status: "delivered" },
+      protectedDelivery: { ...settledDelivery(), challengeState: "still-present" },
+      snapshot: { title: "Sign in", text: "The email or password is incorrect." },
+    }, false);
+    const incompatibleValue = protectedExecution("browser.fill_protected_form", "incompatible-value", {
+      secureInputGroupReceipt: {
+        status: "failed",
+        reason: "Protected input delivery failed: destination-value-incompatible.",
+      },
+    }, false);
+
+    expect(deriveAuthenticationExecutionEffects([rejectedCredentials, incompatibleValue])).toEqual([
+      {
+        effect: "credentials-required",
+        stage: "credentials",
+        toolCallId: "rejected-credentials",
+        blocker: {
+          kind: "user_input_required",
+          summary: "The authentication service rejected the supplied credentials.",
+        },
+      },
+      {
+        effect: "credentials-required",
+        stage: "credentials",
+        toolCallId: "incompatible-value",
+        blocker: {
+          kind: "user_input_required",
+          summary: "The supplied protected value did not match the verified credential field.",
+        },
+      },
+    ]);
+  });
+
   it("gives an active challenge precedence over authenticated-looking evidence from the same receipt", () => {
     expect(prioritizeAuthenticationExecutionEffects([
       { effect: "credentials-submitted", stage: "credentials", toolCallId: "submit" },

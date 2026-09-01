@@ -60,6 +60,7 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
     disabled: false,
     editable: true,
     semanticsMatch: true,
+    explicitEmail: false,
     conflictCount: 1,
   };
   protectedSubmitInspection = {
@@ -73,6 +74,8 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
   };
   protectedClearSucceeds = true;
   protectedClearVerification = true;
+  currentChallengeClearSucceeds = true;
+  currentChallengeClearVerification = true;
   documentCurrent = true;
   frameId = "main-frame";
   onProtectedDelivery?: () => void;
@@ -260,7 +263,15 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
         message.params.functionDeclaration.includes("const field = this") &&
         message.params.functionDeclaration.includes("conflictCount")
       ) {
-        return { result: { value: this.protectedFieldInspection } };
+        const args = message.params.arguments as Array<{ value?: unknown }> | undefined;
+        return {
+          result: {
+            value: {
+              ...this.protectedFieldInspection,
+              explicitEmail: args?.[1]?.value === "account-identifier",
+            },
+          },
+        };
       }
       if (
         typeof message.params?.functionDeclaration === "string" &&
@@ -289,6 +300,20 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
             },
           },
         };
+      }
+      if (
+        typeof message.params?.functionDeclaration === "string" &&
+        message.params.functionDeclaration.includes("currentProtectedKinds")
+      ) {
+        const args = message.params.arguments as Array<{ value?: unknown }> | undefined;
+        const clearValues = args?.[1]?.value === true;
+        const succeeded = clearValues
+          ? this.currentChallengeClearSucceeds
+          : this.currentChallengeClearVerification;
+        if (clearValues && succeeded) {
+          this.snapshot.elements = this.snapshot.elements.map((element) => ({ ...element, value: "" }));
+        }
+        return { result: { value: succeeded } };
       }
       if (
         typeof message.params?.functionDeclaration === "string" &&
@@ -407,6 +432,7 @@ function resetProtectedInspections(socket: FakeCdpAuthPortalSocket): void {
     disabled: false,
     editable: true,
     semanticsMatch: true,
+    explicitEmail: false,
     conflictCount: 1,
   });
   Object.assign(socket.protectedSubmitInspection, {
@@ -420,6 +446,8 @@ function resetProtectedInspections(socket: FakeCdpAuthPortalSocket): void {
   });
   socket.protectedClearSucceeds = true;
   socket.protectedClearVerification = true;
+  socket.currentChallengeClearSucceeds = true;
+  socket.currentChallengeClearVerification = true;
 }
 
 export function createFakeCdpFetch(overrides?: {

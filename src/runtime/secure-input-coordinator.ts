@@ -567,7 +567,7 @@ export class SecureInputCoordinator {
           ? "Protected input expired before delivery."
           : status === "cancelled"
             ? "Protected input delivery was cancelled."
-            : "Protected input delivery failed."
+            : protectedInputFailureReason(error)
       );
     } finally {
       for (const entry of entries) {
@@ -696,7 +696,7 @@ export class SecureInputCoordinator {
           return receipt(selection, "cancelled", false, "Protected input delivery was cancelled.");
         }
       }
-      return receipt(selection, "failed", false, "Protected input delivery failed.");
+      return receipt(selection, "failed", false, protectedInputFailureReason(error));
     } finally {
       if (selection !== undefined) {
         try {
@@ -958,6 +958,12 @@ function cancelPending(broker: EphemeralSecretBroker, requestId: string, scope: 
 
 function protectedInputClearBlocker(): string {
   return "Protected input delivery failed and clearing could not be verified. The destination remains protected; review it locally before retrying.";
+}
+
+function protectedInputFailureReason(error: unknown): string {
+  return error instanceof SecureInputBrokerError && error.code === "consumer_value_incompatible"
+    ? "Protected input delivery failed: destination-value-incompatible."
+    : "Protected input delivery failed.";
 }
 
 function linkedAbortController(signal: AbortSignal | undefined): AbortController & { dispose(): void } {

@@ -14,6 +14,7 @@ import {
   ProtectedBrowserValueSourceError,
   type ProtectedBrowserValueSource
 } from "../security/protected-browser-value-source.js";
+import { ProtectedBrowserFieldError } from "../browser/protected-browser-field.js";
 import { SecureInputCoordinator } from "./secure-input-coordinator.js";
 
 const scope: SecureInputScope = {
@@ -186,6 +187,42 @@ describe("SecureInputCoordinator", () => {
     expect(passwordConsumer).toHaveBeenCalledOnce();
     expect(collected.every((value) => value.every((byte) => byte === 0))).toBe(true);
     expect(JSON.stringify(result)).not.toContain("group-password-sentinel");
+    broker.dispose();
+  });
+
+  it("returns a bounded incompatibility reason without exposing the rejected value", async () => {
+    const broker = brokerWithStableIds();
+    const registry = new SecureInputTransportRegistry();
+    const collected = new TextEncoder().encode("731942");
+    registry.register(browserTransport({
+      deliver: async () => {
+        throw new ProtectedBrowserFieldError(
+          "protected-field-value-incompatible",
+          "Protected value is incompatible with the verified browser destination."
+        );
+      },
+    }));
+    const coordinator = new SecureInputCoordinator({
+      broker,
+      transports: registry,
+      collect: async () => ({ status: "provided", value: collected }),
+    });
+
+    const result = await coordinator.createRequestHandler(scope).requestGroup({
+      purpose: "Sign in",
+      items: [{
+        id: "account",
+        request: { ...request, kind: "account-identifier" },
+        consume: vi.fn(),
+      }],
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      reason: "Protected input delivery failed: destination-value-incompatible.",
+    });
+    expect(JSON.stringify(result)).not.toContain("731942");
+    expect([...collected]).toEqual(new Array(collected.length).fill(0));
     broker.dispose();
   });
 

@@ -1581,6 +1581,142 @@ describe("supervised local CDP backend", () => {
     })).resolves.toMatchObject({ target: expect.objectContaining({ ref: "@e1" }) });
   });
 
+  it("keeps a reloaded rejected login challenge unconfirmed and clears its current fields", async () => {
+    const socket = new FakeCdpSocket();
+    showCredentialLoginPage(socket);
+    socket.onProtectedSubmit = () => {
+      showCredentialLoginPage(socket);
+      socket.documentCurrent = false;
+      socket.snapshot.text = "The email or password is incorrect.";
+      socket.snapshot.elements = socket.snapshot.elements.map((element) => ({
+        ...element,
+        ...(element.ref === "@e1" ? { value: "person@example.com" } : {}),
+        ...(element.ref === "@e2" ? { value: "password-sentinel" } : {}),
+      }));
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"],
+      settling: { pollIntervalMs: 5, stableWindowMs: 10, minimumObservationMs: 10 },
+    });
+    const navigation = await backend.navigate({ url: socket.snapshot.url, sessionId: "session-rejected-reload" });
+    const common = {
+      sessionId: "session-rejected-reload",
+      identity: navigation.snapshot.identity,
+      tabRef: navigation.snapshot.tab!.ref,
+      submitRef: "@e3",
+    };
+    const email = await backend.prepareProtectedField?.({ ...common, ref: "@e1" });
+    const password = await backend.prepareProtectedField?.({ ...common, ref: "@e2" });
+    await backend.verifyProtectedField?.({ destination: email!, kind: "account-identifier", phase: "before-collection" });
+    await backend.verifyProtectedField?.({ destination: password!, kind: "password", phase: "before-collection" });
+
+    await backend.deliverProtectedField?.({
+      destination: email!, kind: "account-identifier", value: new TextEncoder().encode("person@example.com"),
+    });
+    await backend.deliverProtectedField?.({
+      destination: password!, kind: "password", value: new TextEncoder().encode("password-sentinel"),
+    });
+    const result = backend.takeProtectedFieldDeliveryResult?.(password!);
+
+    expect(result).toMatchObject({
+      submission: "clicked",
+      documentChanged: true,
+      challengeState: "still-present",
+      sensitiveInputActive: false,
+      snapshot: {
+        title: "Sign in",
+        text: "The email or password is incorrect.",
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain("person@example.com");
+    expect(JSON.stringify(result)).not.toContain("password-sentinel");
+    expect(socket.snapshot.elements.filter((element) => element.value !== undefined))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ ref: "@e1", value: "" }),
+        expect.objectContaining({ ref: "@e2", value: "" }),
+      ]));
+    expect(socket.sent.filter((message) =>
+      message.method === "Runtime.callFunctionOn" &&
+      String(message.params?.functionDeclaration).includes("currentProtectedKinds")
+    )).toHaveLength(2);
+    await backend.releaseProtectedField?.(email!);
+    await backend.releaseProtectedField?.(password!);
+    await expect(backend.screenshot?.({ sessionId: "session-rejected-reload" })).resolves.toBeDefined();
+  });
+
+  it("keeps reload protection active when current challenge clearing cannot be verified", async () => {
+    const socket = new FakeCdpSocket();
+    showOtpChallengePage(socket);
+    socket.onProtectedSubmit = () => {
+      showOtpChallengePage(socket);
+      socket.documentCurrent = false;
+      socket.currentChallengeClearVerification = false;
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"],
+      settling: { pollIntervalMs: 5, stableWindowMs: 10, minimumObservationMs: 10 },
+    });
+    const navigation = await backend.navigate({ url: socket.snapshot.url, sessionId: "session-reload-clear-blocked" });
+    const destination = await backend.prepareProtectedField?.({
+      sessionId: "session-reload-clear-blocked",
+      identity: navigation.snapshot.identity,
+      tabRef: navigation.snapshot.tab!.ref,
+      ref: "@e1",
+      submitRef: "@e2",
+    });
+    await backend.verifyProtectedField?.({
+      destination: destination!, kind: "one-time-code", phase: "before-collection",
+    });
+
+    await expect(backend.deliverProtectedField?.({
+      destination: destination!, kind: "one-time-code", value: new TextEncoder().encode("123456"),
+    })).rejects.toMatchObject({ code: "protected-field-clear-unverified" });
+    await expect(backend.screenshot?.({ sessionId: "session-reload-clear-blocked" }))
+      .rejects.toMatchObject({ code: "sensitive-input-active" });
+    await backend.closeSession?.("session-reload-clear-blocked");
+  });
+
+  it("rejects a six-digit challenge code for an explicitly email-shaped destination", async () => {
+    const socket = new FakeCdpSocket();
+    showCredentialLoginPage(socket);
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"],
+    });
+    const navigation = await backend.navigate({ url: socket.snapshot.url, sessionId: "session-incompatible-code" });
+    const destination = await backend.prepareProtectedField?.({
+      sessionId: "session-incompatible-code",
+      identity: navigation.snapshot.identity,
+      tabRef: navigation.snapshot.tab!.ref,
+      ref: "@e1",
+    });
+    await backend.verifyProtectedField?.({
+      destination: destination!, kind: "account-identifier", phase: "before-collection",
+    });
+
+    await expect(backend.deliverProtectedField?.({
+      destination: destination!, kind: "account-identifier", value: new TextEncoder().encode("731942"),
+    })).rejects.toMatchObject({
+      code: "protected-field-value-incompatible",
+      message: "Protected value is incompatible with the verified browser destination.",
+    });
+    expect(socket.sent.some((message) =>
+      message.method === "Runtime.callFunctionOn" &&
+      String(message.params?.functionDeclaration).includes("protectedValue")
+    )).toBe(false);
+    await backend.abortProtectedFieldGroup?.([destination!]);
+    await backend.releaseProtectedField?.(destination!);
+    await expect(backend.screenshot?.({ sessionId: "session-incompatible-code" })).resolves.toBeDefined();
+  });
+
   it("reverifies the prebound submit control and blocks delivery when it detaches", async () => {
     const socket = new FakeCdpSocket();
     showOtpChallengePage(socket);

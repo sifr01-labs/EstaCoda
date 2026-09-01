@@ -419,8 +419,9 @@ describe("authentication evidence tracker", () => {
       }),
     ]);
     expect(challenge.effects).toEqual([expect.objectContaining({
-      effect: "authentication-blocked",
+      effect: "credentials-required",
       toolCallId: "challenge-submit",
+      blocker: expect.objectContaining({ kind: "user_input_required" }),
     })]);
     expect(challenge.assessments).toEqual([
       expect.objectContaining({ outcome: "blocked", reason: "challenge-still-present" }),

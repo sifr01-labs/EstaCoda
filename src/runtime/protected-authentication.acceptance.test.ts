@@ -58,6 +58,7 @@ type AcceptanceScenario = {
   name: string;
   credentialMode?: SubmissionMode;
   credentialOutcome?: CredentialOutcome;
+  credentialReloadOnFailure?: boolean;
   otpMode?: SubmissionMode;
   otpOutcome?: OtpOutcome;
   otpSameDocument?: boolean;
@@ -107,6 +108,7 @@ const scenarios: AcceptanceScenario[] = [
   {
     name: "incorrect password keeps authentication unconfirmed",
     credentialOutcome: "incorrect",
+    credentialReloadOnFailure: true,
     authenticated: false,
     expectedCredentialSubmits: 1,
     expectedOtpPrompts: 0,
@@ -287,7 +289,12 @@ describe("protected authentication journey acceptance", () => {
       } else {
         expect(response!.text).not.toContain("Authentication confirmed from the authenticated account page.");
         expect(authenticationAssessments.some((event) => event.outcome === "verified")).toBe(false);
-        if (scenario.cancelCollection || scenario.otpOutcome === "rejected") {
+        if (
+          scenario.cancelCollection ||
+          scenario.otpOutcome === "rejected" ||
+          scenario.credentialOutcome === "incorrect" ||
+          scenario.credentialOutcome === "remains"
+        ) {
           expect(response!.text).toContain("Authentication needs your input before the runtime can continue");
         } else {
           expect(response!.text).toContain("Authentication could not be confirmed from the settled browser state.");
@@ -563,6 +570,16 @@ async function createAcceptanceHarness(scenario: AcceptanceScenario) {
         activateOtpChallenge();
         break;
       case "incorrect":
+        if (scenario.credentialReloadOnFailure) {
+          showCredentialLoginPage(socket);
+          socket.documentCurrent = false;
+          socket.snapshot.url = `${PORTAL_ORIGIN}/login`;
+          socket.snapshot.elements = socket.snapshot.elements.map((element) => ({
+            ...element,
+            ...(element.ref === "@e1" ? { value: ACCOUNT_SECRET } : {}),
+            ...(element.ref === "@e2" ? { value: PASSWORD_SECRET } : {}),
+          }));
+        }
         socket.snapshot.text = "The email or password is incorrect.";
         break;
       case "error":

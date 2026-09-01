@@ -307,6 +307,28 @@ describe("EphemeralSecretBroker", () => {
     expect([...retainedView!]).toEqual(new Array(retainedView!.byteLength).fill(0));
   });
 
+  it("preserves only the bounded incompatible-value classification from a consumer", async () => {
+    const sentinel = "incompatible-value-secret";
+    const broker = new EphemeralSecretBroker({ idFactory: () => "secure_input_incompatible" });
+    const created = broker.createRequest({ scope, request: request() });
+    broker.provideSecret({ requestId: created.id, scope, value: sentinel });
+
+    let observedError: unknown;
+    try {
+      await broker.consume({ requestId: created.id, scope, destination }, () => {
+        throw Object.assign(new Error(`Rejected ${sentinel}`), {
+          code: "protected-field-value-incompatible",
+        });
+      });
+    } catch (error) {
+      observedError = error;
+    }
+
+    expectBrokerError(observedError, "consumer_value_incompatible");
+    expect(String(observedError)).not.toContain(sentinel);
+    expect(broker.getRequest(created.id, scope)?.status).toBe("consumed");
+  });
+
   it("enforces pending-request and value-size bounds", () => {
     let id = 0;
     const broker = new EphemeralSecretBroker({

@@ -38,6 +38,7 @@ type ProtectedFieldBinding = {
   kind: SecureInputKind;
   objectId: string;
   elementIndex: number;
+  explicitEmail: boolean;
   deliveryAttempted: boolean;
   delivered: boolean;
   released: boolean;
@@ -73,6 +74,7 @@ type FieldInspection = {
   disabled: boolean;
   editable: boolean;
   semanticsMatch: boolean;
+  explicitEmail: boolean;
   conflictCount: number;
 };
 
@@ -92,7 +94,11 @@ export type ProtectedFieldDeliveryOutcome = {
 
 export class ProtectedBrowserFieldError extends Error {
   constructor(
-    public readonly code: "sensitive-input-active" | "protected-field-delivery-failed" | "protected-field-clear-unverified",
+    public readonly code:
+      | "sensitive-input-active"
+      | "protected-field-delivery-failed"
+      | "protected-field-value-incompatible"
+      | "protected-field-clear-unverified",
     message: string,
     options?: ErrorOptions
   ) {
@@ -203,6 +209,7 @@ export class ProtectedBrowserFormTransactionController {
         kind: input.kind,
         objectId,
         elementIndex,
+        explicitEmail: inspection!.explicitEmail,
         deliveryAttempted: false,
         delivered: false,
         released: false,
@@ -271,6 +278,12 @@ export class ProtectedBrowserFormTransactionController {
     const transaction = this.#findTransaction(input.destination)!;
     const active = transaction.fields.get(destinationBindingKey(input.destination))!;
     const value = new TextDecoder("utf-8", { fatal: true }).decode(input.value);
+    if (active.kind === "account-identifier" && active.explicitEmail && /^\d{6}$/u.test(value.trim())) {
+      throw new ProtectedBrowserFieldError(
+        "protected-field-value-incompatible",
+        "Protected value is incompatible with the verified browser destination."
+      );
+    }
     try {
       transaction.state = "delivering";
       active.deliveryAttempted = true;
@@ -375,8 +388,9 @@ export class ProtectedBrowserFormTransactionController {
     }));
     for (const transaction of transactions) {
       if (await this.#hasDeparted(transaction, currentIdentity)) {
-        transaction.state = "departed";
-        await this.#releaseTransaction(transaction);
+        if ([...transaction.fields.values()].some((field) => field.deliveryAttempted)) {
+          await this.#clearCurrentChallengeValues(transaction);
+        }
         continue;
       }
       if ([...transaction.fields.values()].some((field) => field.deliveryAttempted)) {
@@ -413,6 +427,13 @@ export class ProtectedBrowserFormTransactionController {
     if (transaction !== undefined && ["submitted", "automatic", "blocked"].includes(transaction.state)) {
       transaction.state = "settling";
     }
+  }
+
+  kindsFor(destination: BrowserFieldSecureInputDestination): readonly SecureInputKind[] {
+    const transaction = this.#findTransaction(destination);
+    return transaction === undefined
+      ? []
+      : [...new Set([...transaction.fields.values()].map((field) => field.kind))];
   }
 
   async reconcile(session: ProtectedFieldPageSession): Promise<void> {
@@ -452,11 +473,12 @@ export class ProtectedBrowserFormTransactionController {
       transaction,
       settlement.snapshot.identity
     );
-    const challengeCurrent = documentChanged
-      ? false
-      : transaction === undefined
-        ? settlement.fallbackChallengeCurrent
-        : await this.#isTransactionChallengeCurrent(transaction) ?? settlement.fallbackChallengeCurrent;
+    const boundChallengeCurrent = transaction === undefined || documentChanged
+      ? undefined
+      : await this.#isTransactionChallengeCurrent(transaction);
+    // The fresh post-submit snapshot is authoritative even when the original
+    // document was replaced. A reload can render the same rejected challenge.
+    const challengeCurrent = settlement.fallbackChallengeCurrent ?? boundChallengeCurrent;
     const conditionMet = settlement.snapshot.actionDelta?.conditionMet ?? challengeCurrent === false;
     let snapshot = settlement.snapshot;
     if (challengeCurrent === false) {
@@ -470,7 +492,11 @@ export class ProtectedBrowserFormTransactionController {
     } else if (transaction !== undefined) {
       transaction.state = challengeCurrent === true ? "still-present" : "blocked";
       if (transaction.submit !== undefined && submission !== "not-requested") {
-        await this.#clearDeliveredValues(transaction);
+        if (documentChanged) {
+          await this.#clearCurrentChallengeValues(transaction);
+        } else {
+          await this.#clearDeliveredValues(transaction);
+        }
         snapshot = await settlement.captureAfterDeparture();
       }
     }
@@ -630,8 +656,7 @@ export class ProtectedBrowserFormTransactionController {
     const fields = [...transaction.fields.values()].filter((field) => field.deliveryAttempted);
     if (fields.length === 0) return;
     if (await this.#hasDeparted(transaction)) {
-      transaction.state = "departed";
-      await this.#releaseTransaction(transaction);
+      await this.#clearCurrentChallengeValues(transaction);
       return;
     }
     let verified = true;
@@ -664,6 +689,50 @@ export class ProtectedBrowserFormTransactionController {
       } catch {
         verified = false;
       }
+    }
+    if (!verified) {
+      transaction.state = "blocked";
+      throw new ProtectedBrowserFieldError(
+        "protected-field-clear-unverified",
+        "Protected browser values could not be verified as cleared. The browser remains protected; review it locally before retrying."
+      );
+    }
+    for (const field of fields) {
+      field.deliveryAttempted = false;
+      field.delivered = false;
+    }
+    this.#syncSensitiveState(transaction.sessionId, transaction.supervisor);
+  }
+
+  async #clearCurrentChallengeValues(transaction: ActiveProtectedFormTransaction): Promise<void> {
+    const fields = [...transaction.fields.values()].filter((field) => field.deliveryAttempted);
+    if (fields.length === 0) return;
+    const documentObjectId = await resolveDocumentObjectId(transaction.supervisor);
+    let verified = documentObjectId !== undefined;
+    try {
+      if (documentObjectId !== undefined) {
+        const kinds = [...new Set(fields.map((field) => field.kind))];
+        const cleared = await transaction.supervisor.send("Runtime.callFunctionOn", {
+          objectId: documentObjectId,
+          functionDeclaration: PROTECTED_CURRENT_CHALLENGE_CLEAR_FUNCTION,
+          arguments: [{ value: kinds }, { value: true }],
+          returnByValue: true,
+          awaitPromise: true,
+        }) as { result?: { value?: unknown } };
+        verified = cleared.result?.value === true;
+        await shortDelay(25, undefined);
+        const inspected = await transaction.supervisor.send("Runtime.callFunctionOn", {
+          objectId: documentObjectId,
+          functionDeclaration: PROTECTED_CURRENT_CHALLENGE_CLEAR_FUNCTION,
+          arguments: [{ value: kinds }, { value: false }],
+          returnByValue: true,
+        }) as { result?: { value?: unknown } };
+        verified = inspected.result?.value === true && verified;
+      }
+    } catch {
+      verified = false;
+    } finally {
+      if (documentObjectId !== undefined) await releaseObject(transaction.supervisor, documentObjectId);
     }
     if (!verified) {
       transaction.state = "blocked";
@@ -916,7 +985,7 @@ async function inspectField(
 
 function parseInspection(value: unknown): FieldInspection | undefined {
   if (!isRecord(value)) return undefined;
-  if (!["connected", "current", "visible", "disabled", "editable", "semanticsMatch"].every((key) =>
+  if (!["connected", "current", "visible", "disabled", "editable", "semanticsMatch", "explicitEmail"].every((key) =>
     typeof value[key] === "boolean"
   )) return undefined;
   if (typeof value.conflictCount !== "number" || !Number.isSafeInteger(value.conflictCount)) return undefined;
@@ -1045,8 +1114,68 @@ const PROTECTED_FIELD_INSPECTION_FUNCTION = `function(index, kind) {
     disabled: field?.matches?.(':disabled,[aria-disabled="true"]') === true,
     editable: editable(field),
     semanticsMatch: semantics(field),
+    explicitEmail: field instanceof HTMLInputElement && (
+      field.type.toLowerCase() === 'email' ||
+      String(field.getAttribute('autocomplete') || '').toLowerCase().split(/\\s+/).includes('email') ||
+      /email|e-mail/.test(descriptor(field))
+    ),
     conflictCount: candidates.length
   };
+}`;
+
+const PROTECTED_CURRENT_CHALLENGE_CLEAR_FUNCTION = `function(currentProtectedKinds, clearValues) {
+  const visible = (element) => {
+    if (!element?.isConnected) return false;
+    const style = getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden' && style.visibility !== 'collapse' && element.getClientRects().length > 0;
+  };
+  const editable = (element) => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element.isContentEditable === true;
+  const descriptor = (element) => [
+    element.getAttribute?.('aria-label'),
+    element.getAttribute?.('name'),
+    element.getAttribute?.('id'),
+    element.getAttribute?.('placeholder'),
+    Array.from(element.labels || []).map((label) => label.innerText || label.textContent || '').join(' ')
+  ].filter(Boolean).join(' ').toLowerCase().slice(0, 500);
+  const semantics = (element, kind) => {
+    const type = element instanceof HTMLInputElement ? element.type.toLowerCase() : '';
+    const autocomplete = String(element.getAttribute?.('autocomplete') || '').toLowerCase().split(/\\s+/);
+    const hint = descriptor(element);
+    if (kind === 'account-identifier') return element instanceof HTMLInputElement && (
+      type === 'email' || autocomplete.includes('email') || autocomplete.includes('username') ||
+      /email|e-mail|user[ _-]?name|account|login/.test(hint)
+    );
+    if (kind === 'password') return element instanceof HTMLInputElement && type === 'password';
+    if (kind === 'one-time-code') return element instanceof HTMLInputElement && (
+      autocomplete.includes('one-time-code') || /one[ _-]?time|otp|verification[ _-]?code|security[ _-]?code/.test(hint)
+    );
+    if (kind === 'private-key') return editable(element) && /private[ _-]?key|pem/.test(hint);
+    if (kind === 'recovery-code') return editable(element) && /recovery|backup[ _-]?code/.test(hint);
+    if (kind === 'api-key') return editable(element) && /api[ _-]?key/.test(hint);
+    if (kind === 'client-secret') return editable(element) && /client[ _-]?secret/.test(hint);
+    if (kind === 'access-token') return editable(element) && /access[ _-]?token|bearer[ _-]?token/.test(hint);
+    return editable(element) && /secret|credential|token|key|password/.test(hint);
+  };
+  const all = Array.from(document.querySelectorAll('input,textarea,[contenteditable="true"]'));
+  const fields = [];
+  for (const kind of currentProtectedKinds) {
+    const candidates = all.filter((element) => visible(element) &&
+      !element.matches(':disabled,[aria-disabled="true"]') && semantics(element, kind));
+    if (candidates.length !== 1) return false;
+    fields.push(candidates[0]);
+  }
+  if (clearValues) {
+    for (const field of fields) {
+      if (field.isContentEditable) {
+        field.textContent = '';
+      } else {
+        const prototype = field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+        if (setter) setter.call(field, ''); else field.value = '';
+      }
+    }
+  }
+  return fields.every((field) => field.isContentEditable ? (field.textContent || '') === '' : field.value === '');
 }`;
 
 const PROTECTED_FIELD_DELIVERY_FUNCTION = `function(index, protectedValue) {

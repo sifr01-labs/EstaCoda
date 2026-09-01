@@ -31,7 +31,7 @@ const VERIFY_TERMS = /\b(?:verify|confirm|check).{0,40}\b(?:authenticat(?:e|ed|i
 const GENERAL_VERIFY_TERMS = /\b(?:verify|confirm|check|validation)\b|(?:تحقق|تأكد|تأكيد)/iu;
 const POST_LOGIN_SEQUENCE = /\b(?:and then|then|after(?:wards)?|once)\b|(?:ثم|بعد ذلك|بعد تسجيل الدخول)/iu;
 const POST_LOGIN_CONJUNCTIVE_ACTION = /\band\b.{0,160}\b(?:add|apply|build|change|configure|create|delete|deploy|edit|inspect|publish|remove|send|set[ -]?up|test|update|upload|verify|write)\b|(?:و|،\s*و).{0,160}(?:أنشئ|انشئ|غيّر|غير|حدّث|حدث|عدّل|عدل|احذف|تحقق|راجع|هيّئ|هيئ)/iu;
-const AUTHENTICATION_ERROR_TERMS = /\b(?:access denied|account locked|auth(?:entication)? (?:error|failed)|authentication service unavailable|incorrect (?:code|credentials?|password)|invalid (?:code|credentials?|password)|login failed|sign[ -]?in failed|unauthorized)\b|(?:بيانات الاعتماد غير صحيحة|رمز غير صحيح|فشل تسجيل الدخول|فشلت المصادقة|خطأ في المصادقة|خدمة المصادقة غير متاحة|غير مصرح|تم قفل الحساب)/iu;
+const AUTHENTICATION_ERROR_TERMS = /\b(?:access denied|account locked|auth(?:entication)? (?:error|failed)|authentication service unavailable|incorrect (?:code|credentials?|password)|(?:code|credentials?|password) (?:is|are) incorrect|invalid (?:code|credentials?|password)|login failed|sign[ -]?in failed|unauthorized)\b|(?:بيانات الاعتماد غير صحيحة|رمز غير صحيح|فشل تسجيل الدخول|فشلت المصادقة|خطأ في المصادقة|خدمة المصادقة غير متاحة|غير مصرح|تم قفل الحساب)/iu;
 
 export type AuthenticationExecutionStage = "credentials" | "challenge" | "verification";
 
@@ -128,6 +128,17 @@ function credentialEffects(
     }];
   }
   if (receiptStatus === "failed") {
+    if (receipt?.reason === "Protected input delivery failed: destination-value-incompatible.") {
+      return [{
+        effect: "credentials-required",
+        stage: "credentials",
+        toolCallId,
+        blocker: {
+          kind: "user_input_required",
+          summary: "The supplied protected value did not match the verified credential field.",
+        },
+      }];
+    }
     return [blockedEffect(toolCallId, "credentials", "Protected credential delivery failed before authentication could continue.")];
   }
 
@@ -137,7 +148,17 @@ function credentialEffects(
     return [blockedEffect(toolCallId, "credentials", "The verified authentication control could not be submitted.")];
   }
   if (delivery.challengeState === "still-present") {
-    return [blockedEffect(toolCallId, "credentials", "The credential challenge remained after the protected submission.")];
+    return [{
+      effect: "credentials-required",
+      stage: "credentials",
+      toolCallId,
+      blocker: {
+        kind: "user_input_required",
+        summary: snapshotReportsAuthenticationError(metadata.snapshot)
+          ? "The authentication service rejected the supplied credentials."
+          : "The credential challenge remained after submission; provide corrected credentials or resolve the page locally.",
+      },
+    }];
   }
   if (delivery.sensitiveInputActive || delivery.challengeState === "unknown") {
     return [blockedEffect(toolCallId, "credentials", "The protected credential transaction could not be safely settled.")];

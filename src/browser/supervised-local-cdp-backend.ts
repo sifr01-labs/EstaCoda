@@ -1408,12 +1408,9 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         capture: async () => await captureProtectedSettlementSnapshot(session, input.signal),
       });
       let challengeCurrent: boolean | undefined;
-      if (
-        protectedFields.isSensitive(session.key) &&
-        snapshot.identity.documentEpoch <= input.destination.identity!.documentEpoch
-      ) {
+      if (protectedFields.isSensitive(session.key)) {
         const raw = withSessionTab(session, await session.supervisor.getSnapshot(session.key));
-        challengeCurrent = protectedChallengePresent(raw, input.kind);
+        challengeCurrent = protectedChallengePresent(raw, protectedFields.kindsFor(input.destination));
       }
       await protectedFields.settle(session, input, {
         before,
@@ -1544,19 +1541,36 @@ function isPostDispatchObservation(
 
 function protectedChallengePresent(
   snapshot: BrowserSnapshotInput,
-  kind: BrowserProtectedFieldDeliveryInput["kind"]
+  kinds: readonly BrowserProtectedFieldDeliveryInput["kind"][]
 ): boolean | undefined {
   if (snapshot.elements === undefined) return undefined;
-  if (kind !== "one-time-code") return undefined;
-  return snapshot.elements.some((element) => {
-    if (element.hidden === true || element.disabled === true) return false;
+  if (kinds.length === 0) return undefined;
+  const visibleHints = snapshot.elements.flatMap((element) => {
+    if (element.hidden === true || element.disabled === true) return [];
+    const role = element.role?.normalize("NFKC").toLocaleLowerCase("en-US");
+    if (role !== "textbox" && role !== "searchbox" && role !== "combobox") return [];
     const hint = [element.name, element.label, element.text]
       .filter((value): value is string => typeof value === "string")
       .join(" ")
       .normalize("NFKC")
       .toLocaleLowerCase("en-US");
-    return /one[ _-]?time|otp|authenticator|verification[ _-]?code|security[ _-]?code/iu.test(hint);
+    return hint.length === 0 ? [] : [hint];
   });
+  return kinds.some((kind) => visibleHints.some((hint) => {
+    if (kind === "account-identifier") {
+      return /email|e-mail|user[ _-]?name|account|login/iu.test(hint);
+    }
+    if (kind === "password") return /password|passcode/iu.test(hint);
+    if (kind === "one-time-code") {
+      return /one[ _-]?time|otp|authenticator|verification[ _-]?code|security[ _-]?code/iu.test(hint);
+    }
+    if (kind === "private-key") return /private[ _-]?key|pem/iu.test(hint);
+    if (kind === "recovery-code") return /recovery|backup[ _-]?code/iu.test(hint);
+    if (kind === "api-key") return /api[ _-]?key/iu.test(hint);
+    if (kind === "client-secret") return /client[ _-]?secret/iu.test(hint);
+    if (kind === "access-token") return /access[ _-]?token|bearer[ _-]?token/iu.test(hint);
+    return /secret|credential|token|key|password/iu.test(hint);
+  }));
 }
 
 function withSessionTab(

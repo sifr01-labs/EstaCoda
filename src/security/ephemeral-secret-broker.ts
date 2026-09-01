@@ -62,6 +62,7 @@ export type SecureInputBrokerErrorCode =
   | "destination_mismatch"
   | "cancelled"
   | "expired"
+  | "consumer_value_incompatible"
   | "consumer_failed";
 
 export class SecureInputBrokerError extends Error {
@@ -256,7 +257,11 @@ export class EphemeralSecretBroker {
       }
       if (entry.controller.signal.aborted) throw this.#interruptionError(entry);
       this.#finishEntry(entry, "consumed");
-      throw new SecureInputBrokerError("consumer_failed", "Protected input delivery failed.");
+      const code = typeof error === "object" && error !== null &&
+        "code" in error && error.code === "protected-field-value-incompatible"
+        ? "consumer_value_incompatible"
+        : "consumer_failed";
+      throw new SecureInputBrokerError(code, "Protected input delivery failed.");
     } finally {
       detachConsumeAbort?.();
       clearBytes(secret);
