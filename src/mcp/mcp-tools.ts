@@ -282,8 +282,11 @@ function createMcpTool(
           }
     ),
     isAvailable: () => true,
-    run: async (input: Record<string, unknown>) => {
-      const relay = await resolveArtifactArguments(input, artifactConfig, artifactStore);
+    run: async (input: Record<string, unknown>, context) => {
+      const scope = context?.sessionId === undefined || context.profileId === undefined
+        ? undefined
+        : { sessionId: context.sessionId, profileId: context.profileId };
+      const relay = await resolveArtifactArguments(input, artifactConfig, artifactStore, scope);
       if (!relay.ok) return relay.result;
       let result: unknown;
       try {
@@ -627,7 +630,8 @@ type ResolvedArtifactRelay = {
 async function resolveArtifactArguments(
   input: Record<string, unknown>,
   declaration: NonNullable<MCPServerConfig["artifactToolArguments"]>[string] | undefined,
-  artifactStore: ArtifactStore | undefined
+  artifactStore: ArtifactStore | undefined,
+  scope?: { sessionId: string; profileId: string }
 ): Promise<
   | { ok: true; input: Record<string, unknown>; artifacts: ResolvedArtifactRelay[] }
   | { ok: false; result: ToolResult }
@@ -645,7 +649,7 @@ async function resolveArtifactArguments(
     if (matches.length !== 1) return artifactRelayFailure("artifact-destination-not-reviewed");
     const descriptor = parseArtifactInputDescriptor(candidate.envelope);
     if (descriptor === undefined) return artifactRelayFailure("artifact-reference-invalid");
-    const artifact = artifactStore.get(descriptor.reference);
+    const artifact = artifactStore.get(descriptor.reference, scope);
     if (artifact === undefined || artifact.localPath === undefined || artifact.mimeType === undefined) {
       return artifactRelayFailure("artifact-not-owned-by-current-session");
     }

@@ -277,6 +277,7 @@ describe("AgentLoopBuilder", () => {
         intentLabels: ["api.integration"],
         requiredOperations: ["read", "mutation", "verification"],
         connectorIds: ["postman"],
+        artifactReferences: [],
         completionFloor: "mutation_with_verification",
         lastTerminationCause: "provider_failed",
         lastProviderFailureClass: "rate-limit",

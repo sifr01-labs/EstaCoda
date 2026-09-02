@@ -71,6 +71,9 @@ export type ToolResult = {
 };
 
 export type ToolExecutionContext = {
+  /** Runtime-owned artifact scope. Provider input cannot set these values. */
+  sessionId?: string;
+  profileId?: string;
   /** Stable provider/native call identity for idempotent stateful tools. */
   toolCallId?: string;
   /** Persisted visible user-message identity; never substitute the provider tool-call ID. */

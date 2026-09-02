@@ -725,6 +725,7 @@ function checkpoint(): ForegroundExecutionCheckpoint {
     intentLabels: ["api.integration"],
     requiredOperations: ["read", "mutation", "verification", "artifact_relay"],
     connectorIds: ["postman"],
+    artifactReferences: [],
     completionFloor: "mutation_with_verification",
     lastTerminationCause: "provider_failed",
     createdAt: "2030-01-01T00:00:00.000Z",

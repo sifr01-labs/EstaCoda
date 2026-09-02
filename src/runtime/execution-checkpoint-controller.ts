@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type {
   ExecutionCheckpointAttemptSettlement,
   ExecutionCheckpointBlocker,
+  ExecutionCheckpointArtifactReference,
   ExecutionCheckpointCreationInput,
   ExecutionCheckpointLifecycleEvent,
   ExecutionCheckpointReader,
@@ -96,6 +97,7 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
         intentLabels: input.intentLabels,
         requiredOperations: input.requiredOperations,
         connectorIds: input.connectorIds,
+        artifactReferences: [],
         completionFloor: input.completionFloor,
         createdAt: now,
         updatedAt: now
@@ -146,6 +148,22 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
       },
       updatedAt: this.#now()
     }));
+  }
+
+  async attachArtifact(
+    expectedRevision: number,
+    reference: ExecutionCheckpointArtifactReference
+  ): Promise<ForegroundExecutionCheckpoint | undefined> {
+    return await this.#transition(expectedRevision, "artifact_attached", (current) => {
+      if (current.artifactReferences.some((candidate) => candidate.id === reference.id)) return current;
+      return {
+        ...current,
+        revision: current.revision + 1,
+        progressRevision: current.progressRevision + 1,
+        artifactReferences: [...current.artifactReferences, { ...reference }],
+        updatedAt: this.#now()
+      };
+    });
   }
 
   async prepareForTurn(userText: string): Promise<ExecutionCheckpointTurnPreparation> {

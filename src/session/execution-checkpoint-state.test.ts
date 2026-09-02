@@ -160,6 +160,37 @@ describe("execution checkpoint state", () => {
       profileId: "profile-1"
     })).toMatchObject({ revision: 1, status: "active" });
   });
+
+  it("hydrates a coherent artifact attachment but rejects replacement or fabricated progress", () => {
+    const active = checkpoint();
+    const attached = {
+      ...active,
+      revision: 2,
+      progressRevision: 1,
+      artifactReferences: [{ id: "artifact-1", sha256: "a".repeat(64) }]
+    };
+    const replaced = {
+      ...attached,
+      revision: 3,
+      progressRevision: 2,
+      artifactReferences: [{ id: "artifact-2", sha256: "b".repeat(64) }]
+    };
+
+    expect(hydratableExecutionCheckpoint({
+      events: [checkpointEvent("created", active), checkpointEvent("artifact_attached", attached)],
+      sessionId: "session-1",
+      profileId: "profile-1"
+    })).toMatchObject({ revision: 2, progressRevision: 1, artifactReferences: [{ id: "artifact-1" }] });
+    expect(hydratableExecutionCheckpoint({
+      events: [
+        checkpointEvent("created", active),
+        checkpointEvent("artifact_attached", attached),
+        checkpointEvent("artifact_attached", replaced)
+      ],
+      sessionId: "session-1",
+      profileId: "profile-1"
+    })).toMatchObject({ revision: 2, artifactReferences: [{ id: "artifact-1" }] });
+  });
 });
 
 function checkpoint(): ForegroundExecutionCheckpoint {
@@ -179,6 +210,7 @@ function checkpoint(): ForegroundExecutionCheckpoint {
     intentLabels: ["api.integration"],
     requiredOperations: ["read", "mutation", "verification"],
     connectorIds: ["postman"],
+    artifactReferences: [],
     completionFloor: "mutation_with_verification",
     createdAt: "2030-01-01T00:00:00.000Z",
     updatedAt: "2030-01-01T00:00:00.000Z"

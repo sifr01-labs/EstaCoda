@@ -362,9 +362,57 @@ describe("SessionCompressionService", () => {
         intentLabels: ["api.integration"],
         requiredOperations: ["read", "mutation", "verification"],
         connectorIds: ["postman"],
+        artifactReferences: [],
         completionFloor: "mutation_with_verification",
         createdAt: "2030-01-01T00:00:00.000Z",
         updatedAt: "2030-01-01T00:00:00.000Z"
+      }
+    });
+    const artifactReference = { id: "artifact-compact", sha256: "a".repeat(64) };
+    await db.appendEvent(sessionId, {
+      kind: "session-artifact-registered",
+      artifact: {
+        version: 1,
+        id: artifactReference.id,
+        sessionId,
+        profileId: "profile",
+        storageKey: "objects/opaque-object",
+        kind: "data",
+        bytes: 30,
+        mimeType: "application/json",
+        sha256: artifactReference.sha256,
+        createdAt: "2030-01-01T00:01:00.000Z",
+        source: {
+          kind: "browser.download",
+          description: "Governed browser download.",
+          filename: "openapi.json",
+          origin: "https://developer.example.test"
+        }
+      }
+    });
+    await db.appendEvent(sessionId, {
+      kind: "execution-checkpoint-updated",
+      transition: "artifact_attached",
+      checkpoint: {
+        version: 1,
+        id: "checkpoint:compact",
+        sessionId,
+        profileId: "profile",
+        originTurnId: "turn-origin",
+        revision: 2,
+        progressRevision: 1,
+        originalObjective: "Import and verify APIs in Postman",
+        status: "active",
+        qualificationReasons: ["cross_system"],
+        selectedSkillName: "api-integration",
+        taskClass: "general",
+        intentLabels: ["api.integration"],
+        requiredOperations: ["read", "mutation", "verification"],
+        connectorIds: ["postman"],
+        artifactReferences: [artifactReference],
+        completionFloor: "mutation_with_verification",
+        createdAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:01:00.000Z"
       }
     });
     await db.appendEvent(sessionId, {
@@ -376,8 +424,8 @@ describe("SessionCompressionService", () => {
         sessionId,
         profileId: "profile",
         originTurnId: "turn-origin",
-        revision: 2,
-        progressRevision: 0,
+        revision: 3,
+        progressRevision: 1,
         originalObjective: "Import and verify APIs in Postman",
         status: "retryable",
         qualificationReasons: ["cross_system"],
@@ -386,6 +434,7 @@ describe("SessionCompressionService", () => {
         intentLabels: ["api.integration"],
         requiredOperations: ["read", "mutation", "verification"],
         connectorIds: ["postman"],
+        artifactReferences: [artifactReference],
         completionFloor: "mutation_with_verification",
         lastTerminationCause: "provider_failed",
         createdAt: "2030-01-01T00:00:00.000Z",
@@ -413,8 +462,19 @@ describe("SessionCompressionService", () => {
       checkpoint: {
         id: "checkpoint:compact",
         sessionId: result.activeSessionId,
-        revision: 2,
+        revision: 3,
         status: "retryable"
+      }
+    });
+    const carriedArtifact = (await db.listEvents(result.activeSessionId)).find((event) =>
+      event.kind === "session-artifact-registered"
+    );
+    expect(carriedArtifact).toMatchObject({
+      artifact: {
+        id: "artifact-compact",
+        sessionId: result.activeSessionId,
+        profileId: "profile",
+        storageKey: "objects/opaque-object"
       }
     });
   });

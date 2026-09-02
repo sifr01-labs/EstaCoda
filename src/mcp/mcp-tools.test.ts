@@ -634,6 +634,80 @@ describe("MCP protected argument declarations", () => {
 });
 
 describe("MCP governed artifact relay", () => {
+  it("reuses a hydrated session artifact after runtime recreation without another download", async () => {
+    const root = await mkdtemp(join(tmpdir(), "estacoda-mcp-artifact-resume-"));
+    try {
+      const content = JSON.stringify({ openapi: "3.1.0", paths: {} });
+      const sha256 = createHash("sha256").update(content).digest("hex");
+      const capturePath = join(root, "capture.json");
+      await writeFile(capturePath, content, { mode: 0o600 });
+      const events: unknown[] = [];
+      const firstStore = new ArtifactStore({
+        storageRoot: join(root, "artifacts"),
+        id: () => "resumed-api-description",
+        storageId: () => "retained-object"
+      });
+      await firstStore.retainSessionArtifact({
+        sessionId: "session-1",
+        profileId: "profile-1",
+        capturePath,
+        kind: "data",
+        bytes: Buffer.byteLength(content),
+        mimeType: "application/json",
+        sha256,
+        source: {
+          kind: "browser.download",
+          description: "Governed browser download.",
+          filename: "openapi.json",
+          origin: "https://developer.example.test"
+        },
+        persist: async (artifact) => { events.push({ kind: "session-artifact-registered", artifact }); }
+      });
+
+      const recreatedStore = new ArtifactStore({ storageRoot: join(root, "artifacts") });
+      await recreatedStore.hydrateSessionArtifacts({
+        events,
+        sessionId: "session-1",
+        profileId: "profile-1"
+      });
+      let dispatched: Record<string, unknown> | undefined;
+      const [server] = await loadMcpServers({
+        servers: {
+          destination: {
+            transport: "http",
+            url: "https://mcp.example.test",
+            toolRiskClasses: { importSpec: "external-side-effect" },
+            artifactToolArguments: {
+              importSpec: {
+                paths: ["/files/*/content"],
+                allowedMimeTypes: ["application/json"],
+                maxBytes: 1024
+              }
+            }
+          }
+        },
+        artifactStore: recreatedStore,
+        fetch: artifactRelayFetch((args) => { dispatched = args; })
+      });
+      const tool = server?.tools.find((candidate) => candidate.name === "mcp.destination.importSpec");
+      const result = await tool?.run({ files: [{ path: "openapi.json", content: {
+        artifactInput: { reference: "artifact://resumed-api-description", sha256 }
+      } }] }, { sessionId: "session-1", profileId: "profile-1" });
+
+      expect(result).toMatchObject({ ok: true, metadata: { artifactRelay: true } });
+      expect((dispatched?.files as Array<{ content: string }>)[0]?.content).toBe(content);
+      expect(JSON.stringify(result)).not.toContain(root);
+
+      const wrongOwner = await tool?.run({ files: [{ path: "openapi.json", content: {
+        artifactInput: { reference: "artifact://resumed-api-description", sha256 }
+      } }] }, { sessionId: "session-2", profileId: "profile-1" });
+      expect(wrongOwner).toMatchObject({ ok: false, metadata: { reason: "artifact-not-owned-by-current-session" } });
+      await server?.stop();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("injects a current-session browser artifact only at a reviewed string path", async () => {
     const root = await mkdtemp(join(tmpdir(), "estacoda-mcp-artifact-"));
     try {

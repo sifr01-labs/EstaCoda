@@ -126,6 +126,7 @@ export type ToolExecutorOptions = {
   sessionDb: SessionDB;
   trajectoryRecorder: TrajectoryRecorder;
   workspaceRoot?: string;
+  profileId?: string;
   defaultExecutionTimeoutMs?: number;
 };
 
@@ -135,6 +136,7 @@ export class ToolExecutor {
   readonly #sessionDb: SessionDB;
   readonly #trajectoryRecorder: TrajectoryRecorder;
   readonly #workspaceRoot: string;
+  readonly #profileId: string | undefined;
   readonly #defaultExecutionTimeoutMs: number;
   readonly #uncertainMutationKeys = new Set<string>();
   readonly #operationLedger = new ExecutionOperationLedger();
@@ -145,6 +147,7 @@ export class ToolExecutor {
     this.#sessionDb = options.sessionDb;
     this.#trajectoryRecorder = options.trajectoryRecorder;
     this.#workspaceRoot = resolve(options.workspaceRoot ?? process.cwd());
+    this.#profileId = options.profileId;
     this.#defaultExecutionTimeoutMs = positiveExecutionTimeout(
       options.defaultExecutionTimeoutMs,
       DEFAULT_TOOL_EXECUTION_TIMEOUT_MS
@@ -428,6 +431,8 @@ export class ToolExecutor {
       });
       let dispatchState: ToolExecutionSettlement["dispatchState"] = "not_started";
       const executionContext = {
+        sessionId: request.sessionId,
+        profileId: this.#profileId,
         toolCallId: request.toolCallId,
         visibleTurnId: request.visibleTurnId,
         providerUsageLineage: request.providerUsageLineage,

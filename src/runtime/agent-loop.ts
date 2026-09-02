@@ -899,6 +899,7 @@ export class AgentLoop {
     });
     const recordedArtifactIds = new Set<string>();
     const artifacts = await this.#runRecorder.recordArtifactsFromExecutions(toolExecutions, recordedArtifactIds);
+    await this.#attachCheckpointArtifacts(artifacts);
     const toolPlans: ToolCallPlan[] = [...deterministicNativeTools.plans];
 
     const fallbackResponse = buildFallbackResponse({
@@ -989,7 +990,9 @@ export class AgentLoop {
     const effectiveProviderExecution = providerLoop.providerExecution;
 
     toolExecutions.push(...providerLoop.toolExecutions);
-    artifacts.push(...(await this.#runRecorder.recordArtifactsFromExecutions(providerLoop.toolExecutions, recordedArtifactIds)));
+    const providerArtifacts = await this.#runRecorder.recordArtifactsFromExecutions(providerLoop.toolExecutions, recordedArtifactIds);
+    artifacts.push(...providerArtifacts);
+    await this.#attachCheckpointArtifacts(providerArtifacts);
     if (isAborted(input.signal)) {
       await this.#runRecorder.markPlannedToolPlansCancelled(toolPlans, "Cancelled by user before the turn completed.");
       const resumeNote = buildResumeNote({
@@ -1793,6 +1796,24 @@ export class AgentLoop {
 
   #currentSessionId(): string {
     return this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
+  }
+
+  async #attachCheckpointArtifacts(artifacts: readonly ArtifactRecord[]): Promise<void> {
+    for (const artifact of artifacts) {
+      const sha256 = artifact.metadata?.sha256;
+      if (
+        artifact.metadata?.source !== "browser.download" ||
+        artifact.metadata?.outcome !== "download-completed" ||
+        typeof sha256 !== "string" ||
+        !/^[a-f0-9]{64}$/u.test(sha256)
+      ) continue;
+      const checkpoint = this.#executionCheckpointController?.current();
+      if (checkpoint === undefined) return;
+      await this.#executionCheckpointController?.attachArtifact(checkpoint.revision, {
+        id: artifact.id,
+        sha256
+      }).catch(() => undefined);
+    }
   }
 
   async #completeAndReturn(response: AgentLoopResponse, outcome: {

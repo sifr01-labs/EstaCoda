@@ -8,6 +8,7 @@ import type {
 } from "../contracts/execution-checkpoint.js";
 import {
   EXECUTION_CHECKPOINT_MAX_BLOCKER_CHARS,
+  EXECUTION_CHECKPOINT_MAX_ARTIFACTS,
   EXECUTION_CHECKPOINT_MAX_CONNECTORS,
   EXECUTION_CHECKPOINT_MAX_LABELS,
   EXECUTION_CHECKPOINT_MAX_OBJECTIVE_CHARS,
@@ -49,10 +50,11 @@ const CHECKPOINT_KEYS = new Set([
   "version", "id", "sessionId", "profileId", "originTurnId", "revision", "progressRevision",
   "originalObjective", "latestUserCorrection", "status", "qualificationReasons", "selectedSkillName", "taskClass",
   "intentLabels", "requiredOperations", "connectorIds", "completionFloor", "blocker",
+  "artifactReferences",
   "lastTerminationCause", "lastProviderFailureClass", "createdAt", "updatedAt"
 ]);
 const TRANSITIONS = new Set<ExecutionCheckpointLifecycleEvent["transition"]>([
-  "created", "carried_forward", "corrected", "attempt_settled", "blocked", "cancelled", "superseded"
+  "created", "carried_forward", "corrected", "artifact_attached", "attempt_settled", "blocked", "cancelled", "superseded"
 ]);
 
 export class ExecutionCheckpointValidationError extends Error {
@@ -71,6 +73,7 @@ export function cloneExecutionCheckpoint(
     intentLabels: [...checkpoint.intentLabels],
     requiredOperations: [...checkpoint.requiredOperations],
     connectorIds: [...checkpoint.connectorIds],
+    artifactReferences: checkpoint.artifactReferences.map((reference) => ({ ...reference })),
     ...(checkpoint.blocker === undefined ? {} : { blocker: { ...checkpoint.blocker } })
   };
 }
@@ -205,7 +208,15 @@ function isCoherentTransition(
     return candidate.status === "active" && progressDelta === 0 &&
       candidate.latestUserCorrection !== undefined && !correctionUnchanged;
   }
+  if (transition === "artifact_attached") {
+    return candidate.status === current.status && correctionUnchanged && progressDelta === 1 &&
+      candidate.artifactReferences.length === current.artifactReferences.length + 1 &&
+      current.artifactReferences.every((reference, index) =>
+        sameArtifactReference(reference, candidate.artifactReferences[index])
+      );
+  }
   if (!correctionUnchanged) return false;
+  if (!sameArtifactReferences(current.artifactReferences, candidate.artifactReferences)) return false;
   if (transition === "attempt_settled") {
     const statusAllowed = candidate.status === "awaiting_user" || candidate.status === "retryable" ||
       candidate.status === "blocked" || candidate.status === "completed";
@@ -304,6 +315,7 @@ export function validateExecutionCheckpoint(input: unknown): ForegroundExecution
       true
     ),
     connectorIds: boundedTextArray(input.connectorIds, "connectorIds", EXECUTION_CHECKPOINT_MAX_CONNECTORS, 128),
+    artifactReferences: artifactReferences(input.artifactReferences),
     completionFloor: enumValue(input.completionFloor, COMPLETION_FLOORS, "completionFloor"),
     ...(input.blocker === undefined ? {} : { blocker: validateBlocker(input.blocker) }),
     ...(input.lastTerminationCause === undefined
@@ -331,6 +343,47 @@ export function validateExecutionCheckpoint(input: unknown): ForegroundExecution
     throw new ExecutionCheckpointValidationError("Checkpoint exceeds its serialized size limit.");
   }
   return checkpoint;
+}
+
+function artifactReferences(input: unknown): ForegroundExecutionCheckpoint["artifactReferences"] {
+  if (input === undefined) return [];
+  if (!Array.isArray(input) || input.length > EXECUTION_CHECKPOINT_MAX_ARTIFACTS) {
+    throw new ExecutionCheckpointValidationError("artifactReferences is not a bounded array.");
+  }
+  const references = input.map((value) => {
+    if (!isRecord(value) || Object.keys(value).some((key) => key !== "id" && key !== "sha256")) {
+      throw new ExecutionCheckpointValidationError("artifactReferences contains malformed state.");
+    }
+    return {
+      id: token(value.id, "artifactReferences.id", 200),
+      sha256: sha256(value.sha256)
+    };
+  });
+  if (new Set(references.map((reference) => reference.id)).size !== references.length) {
+    throw new ExecutionCheckpointValidationError("artifactReferences contains duplicates.");
+  }
+  return references;
+}
+
+function sha256(value: unknown): string {
+  if (typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value)) {
+    throw new ExecutionCheckpointValidationError("artifactReferences.sha256 is invalid.");
+  }
+  return value;
+}
+
+function sameArtifactReferences(
+  left: ForegroundExecutionCheckpoint["artifactReferences"],
+  right: ForegroundExecutionCheckpoint["artifactReferences"]
+): boolean {
+  return left.length === right.length && left.every((reference, index) => sameArtifactReference(reference, right[index]));
+}
+
+function sameArtifactReference(
+  left: ForegroundExecutionCheckpoint["artifactReferences"][number],
+  right: ForegroundExecutionCheckpoint["artifactReferences"][number] | undefined
+): boolean {
+  return right !== undefined && left.id === right.id && left.sha256 === right.sha256;
 }
 
 export function sanitizeCheckpointText(value: string, maxChars: number): string {

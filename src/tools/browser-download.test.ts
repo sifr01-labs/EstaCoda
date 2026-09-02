@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -6,7 +6,10 @@ import { ArtifactStore } from "../artifacts/artifact-store.js";
 import { createMockBrowserBackend } from "../browser/browser-backend.js";
 import { BrowserTargetError } from "../browser/browser-locator.js";
 import type { BrowserBackend, BrowserDownloadInput } from "../contracts/browser.js";
-import { createWebTools } from "./web-tools.js";
+import type { SessionArtifactRegistration } from "../contracts/artifact.js";
+import { ExecutionCheckpointController } from "../runtime/execution-checkpoint-controller.js";
+import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
+import { createWebTools, webToolProvider } from "./web-tools.js";
 
 const roots: string[] = [];
 
@@ -18,7 +21,12 @@ afterEach(async () => {
 describe("browser.download", () => {
   it("captures a grounded Swagger artifact into constrained storage with a metadata-only receipt", async () => {
     const root = await temporaryRoot();
-    const artifactStore = new ArtifactStore({ id: () => "artifact-1" });
+    const artifactStore = new ArtifactStore({
+      id: () => "artifact-1",
+      storageId: () => "object-1",
+      storageRoot: join(root, "durable-artifacts")
+    });
+    const registrations: SessionArtifactRegistration[] = [];
     const captured: BrowserDownloadInput[] = [];
     const backend = downloadBackend(async (input) => {
       captured.push(input);
@@ -32,7 +40,9 @@ describe("browser.download", () => {
         sizeBytes: (await stat(localPath)).size
       };
     });
-    const download = browserDownloadTool(backend, root, artifactStore);
+    const download = browserDownloadTool(backend, root, artifactStore, async (artifact) => {
+      registrations.push(artifact);
+    });
 
     const result = await download.run(groundedInput());
 
@@ -66,14 +76,95 @@ describe("browser.download", () => {
     expect(result.metadata?.artifact).not.toHaveProperty("localPath");
     expect(result.content).not.toContain(root);
     expect(captured).toHaveLength(1);
-    expect(captured[0]).toMatchObject({ sessionId: "browser-session:main", ref: "@e1", tabRef: "@t1" });
+    expect(captured[0]).toMatchObject({ sessionId: "browser-session", ref: "@e1", tabRef: "@t1" });
     expect(captured[0]?.destinationDirectory).toContain(root);
     expect(captured[0]?.maxBytes).toBe(25 * 1024 * 1024);
-    const [artifact] = artifactStore.list();
+    const [artifact] = artifactStore.list({ sessionId: "runtime-session", profileId: "profile-1" });
     expect(artifact?.path).toBe("artifact://artifact-1");
     expect(artifact?.metadata).toMatchObject({ source: "browser.download", outcome: "download-completed" });
     expect(await readFile(artifact!.localPath!, "utf8")).toContain('"openapi":"3.1.0"');
     expect((await stat(artifact!.localPath!)).mode & 0o777).toBe(0o600);
+    expect(artifact?.localPath).toBe(
+      await realpath(join(root, "durable-artifacts", "objects", "object-1"))
+    );
+    expect(registrations).toEqual([expect.objectContaining({
+      id: "artifact-1",
+      sessionId: "runtime-session",
+      profileId: "profile-1",
+      storageKey: "objects/object-1"
+    })]);
+    expect(JSON.stringify(registrations)).not.toContain(root);
+  });
+
+  it("attaches a durable download before returning control to the provider loop", async () => {
+    const root = await temporaryRoot();
+    const db = new SQLiteSessionDB({ path: join(root, "sessions.sqlite") });
+    try {
+      await db.createSession({ id: "runtime-session", profileId: "profile-1" });
+      const checkpoint = new ExecutionCheckpointController({
+        sessionId: "runtime-session",
+        profileId: "profile-1",
+        createId: () => "checkpoint-1",
+        now: () => "2030-01-01T00:00:00.000Z",
+        record: (event) => db.appendEvent("runtime-session", event)
+      });
+      await checkpoint.ensure({
+        originTurnId: "turn-1",
+        originalObjective: "Import the downloaded API description.",
+        qualificationReasons: ["cross_system"],
+        selectedSkillName: "api-integration",
+        taskClass: "browser-operation",
+        intentLabels: ["api-integration"],
+        requiredOperations: ["artifact_relay"],
+        connectorIds: ["postman"],
+        completionFloor: "mutation_with_verification"
+      });
+      const backend = downloadBackend(async (input) => {
+        const localPath = join(input.destinationDirectory, "openapi.json");
+        await writeFile(localPath, JSON.stringify({ openapi: "3.1.0", paths: {} }), { mode: 0o600 });
+        return {
+          outcome: "download-completed",
+          localPath,
+          suggestedFilename: "openapi.json",
+          sourceUrl: "https://93.184.216.34/export",
+          sizeBytes: (await stat(localPath)).size
+        };
+      });
+      const artifactStore = new ArtifactStore({
+        storageRoot: join(root, "artifacts"),
+        id: () => "artifact-before-continuation",
+        storageId: () => "object-before-continuation"
+      });
+      const download = webToolProvider.createTools({
+        workspaceRoot: root,
+        homeDir: root,
+        profileId: "profile-1",
+        sessionId: "runtime-session",
+        currentSessionId: () => "runtime-session",
+        channelMediaRoot: join(root, "channel-media"),
+        browserBackend: backend,
+        artifactStore,
+        sessionDb: db,
+        executionCheckpointController: checkpoint
+      }).find((candidate) => candidate.name === "browser.download");
+      if (download === undefined) throw new Error("browser.download was not registered");
+
+      await expect(download.run(groundedInput())).resolves.toMatchObject({ ok: true });
+
+      expect(checkpoint.current()?.artifactReferences).toEqual([{
+        id: "artifact-before-continuation",
+        sha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
+      }]);
+      const events = await db.listEvents("runtime-session");
+      const registrationIndex = events.findIndex((event) => event.kind === "session-artifact-registered");
+      const attachmentIndex = events.findIndex((event) =>
+        event.kind === "execution-checkpoint-updated" && event.transition === "artifact_attached"
+      );
+      expect(registrationIndex).toBeGreaterThanOrEqual(0);
+      expect(attachmentIndex).toBeGreaterThan(registrationIndex);
+    } finally {
+      db.close();
+    }
   });
 
   it("propagates runtime cancellation to the browser backend", async () => {
@@ -266,12 +357,21 @@ function downloadBackend(
   };
 }
 
-function browserDownloadTool(backend: BrowserBackend, root: string, artifactStore: ArtifactStore) {
+function browserDownloadTool(
+  backend: BrowserBackend,
+  root: string,
+  artifactStore: ArtifactStore,
+  persistSessionArtifact?: (artifact: SessionArtifactRegistration) => Promise<void>
+) {
   const tool = createWebTools({
     browserBackend: backend,
     browserDownloadRoot: root,
     artifactStore,
-    currentSessionId: () => "browser-session",
+    currentSessionId: () => persistSessionArtifact === undefined ? "browser-session" : "runtime-session",
+    ...(persistSessionArtifact === undefined ? {} : {
+      profileId: "profile-1",
+      persistSessionArtifact: async (_sessionId: string, artifact: SessionArtifactRegistration) => persistSessionArtifact(artifact)
+    }),
     resolveHostname: async () => ["93.184.216.34"]
   }).find((candidate) => candidate.name === "browser.download");
   if (tool === undefined) throw new Error("browser.download was not registered");

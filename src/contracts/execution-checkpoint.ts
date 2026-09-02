@@ -7,6 +7,7 @@ export const EXECUTION_CHECKPOINT_MAX_SERIALIZED_BYTES = 16 * 1024;
 export const EXECUTION_CHECKPOINT_MAX_OBJECTIVE_CHARS = 2_000;
 export const EXECUTION_CHECKPOINT_MAX_LABELS = 16;
 export const EXECUTION_CHECKPOINT_MAX_CONNECTORS = 8;
+export const EXECUTION_CHECKPOINT_MAX_ARTIFACTS = 16;
 export const EXECUTION_CHECKPOINT_MAX_BLOCKER_CHARS = 500;
 
 export type ExecutionCheckpointStatus =
@@ -38,6 +39,11 @@ export type ExecutionCheckpointBlocker = {
   summary: string;
 };
 
+export type ExecutionCheckpointArtifactReference = {
+  id: string;
+  sha256: string;
+};
+
 /**
  * Runtime-owned foreground continuity. It is not model-writable and grants no
  * tool, connector, authentication, approval, or completion authority.
@@ -61,6 +67,8 @@ export type ForegroundExecutionCheckpoint = {
   intentLabels: string[];
   requiredOperations: ExecutionCheckpointOperationRequirement[];
   connectorIds: string[];
+  /** Session-owned references only. Local paths never enter checkpoint state. */
+  artifactReferences: ExecutionCheckpointArtifactReference[];
   completionFloor: ExecutionCompletionFloor;
   blocker?: ExecutionCheckpointBlocker;
   lastTerminationCause?: ExecutionTerminationCause;
@@ -73,6 +81,7 @@ export type ExecutionCheckpointTransition =
   | "created"
   | "carried_forward"
   | "corrected"
+  | "artifact_attached"
   | "attempt_settled"
   | "blocked"
   | "cancelled"
@@ -103,4 +112,12 @@ export type ExecutionCheckpointAttemptSettlement = {
 
 export type ExecutionCheckpointReader = {
   current(): ForegroundExecutionCheckpoint | undefined;
+};
+
+/** Narrow runtime API used to retain artifacts before provider-loop continuation. */
+export type ExecutionCheckpointArtifactController = ExecutionCheckpointReader & {
+  attachArtifact(
+    expectedRevision: number,
+    reference: ExecutionCheckpointArtifactReference
+  ): Promise<ForegroundExecutionCheckpoint | undefined>;
 };

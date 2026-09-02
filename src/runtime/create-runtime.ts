@@ -358,10 +358,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const runtimeUiIdentity = resolveRuntimeUiIdentity(options);
   const skillRegistry = new SkillRegistry();
   const memoryStore = new MemoryStore();
-  const artifactStore = new ArtifactStore();
   const profileId = options.profileId ?? "default";
   const globalPaths = resolveGlobalStateHome({ homeDir: options.homeDir });
   const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
+  const artifactStore = new ArtifactStore({ storageRoot: join(profilePaths.profileRoot, "artifacts") });
   const sessionId = options.sessionId ?? createSessionId();
   const sessionRuntimeContext = createSessionRuntimeContext(sessionId);
   const defaultTaskCreationOrigin = normalizeTaskCreationOrigin(options.taskCreationOrigin);
@@ -767,7 +767,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     config: compressionConfig,
     route: compressionRoute,
     mainRoute,
-    providerExecutor
+    providerExecutor,
+    artifactStore
   });
   const contextReferenceExpander = new ContextReferenceExpander({ workspaceRoot });
   const projectContext = await new ProjectContextLoader({ workspaceRoot }).load();

@@ -104,6 +104,7 @@ export class RunRecorder {
         intentLabels: [...event.checkpoint.intentLabels],
         requiredOperations: [...event.checkpoint.requiredOperations],
         connectorIds: [...event.checkpoint.connectorIds],
+        artifactReferences: event.checkpoint.artifactReferences.map((reference) => ({ ...reference })),
         ...(event.checkpoint.blocker === undefined ? {} : { blocker: { ...event.checkpoint.blocker } })
       }
     };

@@ -4,7 +4,7 @@ import type { ContextReference } from "./context.js";
 import type { IntentRoute } from "./intent.js";
 import type { ProviderErrorClass } from "./provider.js";
 import type { PromptBudgetReport } from "./prompt.js";
-import type { ArtifactRecord } from "./artifact.js";
+import type { ArtifactRecord, SessionArtifactRegistration } from "./artifact.js";
 import type { MemoryConclusion, SkillOutcome } from "./memory.js";
 import type { SecurityAssessment, SecurityDecision } from "./security.js";
 import type { ToolResult, ToolRiskClass } from "./tool.js";
@@ -361,6 +361,10 @@ export type SessionEvent =
       kind: "artifact-created";
       artifact: ArtifactRecord;
       tool?: string;
+    }
+  | {
+      kind: "session-artifact-registered";
+      artifact: SessionArtifactRegistration;
     }
   | SessionContextWindowUsageEvent
   | SessionContextWindowUsageInvalidatedEvent

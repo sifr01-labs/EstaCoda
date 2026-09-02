@@ -325,6 +325,13 @@ export class AgentLoopBuilder {
     const persistedSessionEvents = ownsExecutionPlan
       ? await input.sessionDb.listEvents(input.sessionId)
       : [];
+    if (ownsForegroundSupervision) {
+      await substrate.artifactStore.hydrateSessionArtifacts({
+        events: persistedSessionEvents,
+        sessionId: input.sessionId,
+        profileId: substrate.profileId
+      });
+    }
     executionEvidenceIndex.hydrate(persistedSessionEvents);
     const executionCapabilityPreflight = new ExecutionCapabilityPreflight({
       registry: toolRegistry,
@@ -422,6 +429,7 @@ export class AgentLoopBuilder {
         childSessionId: input.parentSessionId === undefined ? undefined : input.sessionId,
         currentSessionId: () => sessionRuntimeContext.currentSessionId(),
         executionPlanController,
+        executionCheckpointController,
         homeDir: substrate.homeDir,
         childProcessEnv: substrate.executionControls?.childProcessEnv,
         pythonStateRoot: substrate.pythonStateRoot,
@@ -526,7 +534,8 @@ export class AgentLoopBuilder {
       securityPolicy: input.securityPolicy,
       sessionDb: input.sessionDb,
       trajectoryRecorder: input.trajectoryRecorder,
-      workspaceRoot: substrate.workspaceRoot
+      workspaceRoot: substrate.workspaceRoot,
+      profileId: substrate.profileId
     });
     let delegationVisibleTools: readonly ToolDefinition[] = [];
     const delegationService = input.delegationServiceFactory?.({
@@ -843,6 +852,7 @@ function buildPreSkillVisibilityToolContext(input: SessionToolContext): SessionT
     childSessionId: input.childSessionId,
     currentSessionId: input.currentSessionId,
     executionPlanController: input.executionPlanController,
+    executionCheckpointController: input.executionCheckpointController,
     homeDir: input.homeDir,
     childProcessEnv: input.childProcessEnv,
     pythonStateRoot: input.pythonStateRoot,

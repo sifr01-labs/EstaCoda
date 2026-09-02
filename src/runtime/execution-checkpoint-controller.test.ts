@@ -63,6 +63,27 @@ describe("ExecutionCheckpointController", () => {
     expect(completed).toMatchObject({ status: "completed", progressRevision: 1 });
   });
 
+  it("attaches a bounded artifact reference as semantic progress without exposing a path", async () => {
+    const controller = target();
+    const created = await controller.ensure(creation());
+    const attached = await controller.attachArtifact(created.revision, {
+      id: "artifact-1",
+      sha256: "a".repeat(64)
+    });
+    const duplicate = await controller.attachArtifact(attached!.revision, {
+      id: "artifact-1",
+      sha256: "a".repeat(64)
+    });
+
+    expect(attached).toMatchObject({
+      revision: 2,
+      progressRevision: 1,
+      artifactReferences: [{ id: "artifact-1", sha256: "a".repeat(64) }]
+    });
+    expect(duplicate).toEqual(attached);
+    expect(JSON.stringify(attached)).not.toContain("/");
+  });
+
   it("serializes writes and rejects a stale expected revision", async () => {
     const releaseFirst = deferred<void>();
     let writes = 0;
