@@ -93,24 +93,39 @@ describe("ExecutionCheckpointController", () => {
   it("distinguishes explicit cancellation from supersession", async () => {
     const cancelled = target();
     await cancelled.ensure(creation());
-    await cancelled.prepareForTurn("cancel");
+    await expect(cancelled.prepareForTurn("cancel")).resolves.toMatchObject({
+      disposition: "cancelled",
+      checkpoint: { status: "cancelled" }
+    });
     expect(cancelled.current()).toMatchObject({ status: "cancelled", lastTerminationCause: "cancelled" });
 
     const superseded = target();
     await superseded.ensure(creation());
-    await superseded.prepareForTurn("Forget that. Check this repository for a bug.");
+    await expect(superseded.prepareForTurn("Forget that. Check this repository for a bug."))
+      .resolves.toMatchObject({ disposition: "superseded", checkpoint: { status: "superseded" } });
     expect(superseded.current()).toMatchObject({ status: "superseded" });
 
     const terminalRevision = superseded.current()!.revision;
     await superseded.block(terminalRevision, { kind: "external_state", summary: "Late blocker" });
     expect(superseded.current()).toMatchObject({ status: "superseded", revision: terminalRevision });
+
+    const acknowledgedReplacement = target();
+    await acknowledgedReplacement.ensure(creation());
+    await expect(acknowledgedReplacement.prepareForTurn("Okay, now explain the weather forecast."))
+      .resolves.toMatchObject({ disposition: "superseded" });
+
+    const slashReplacement = target();
+    await slashReplacement.ensure(creation());
+    await expect(slashReplacement.prepareForTurn("/review inspect this repository"))
+      .resolves.toMatchObject({ disposition: "superseded" });
   });
 
   it("records an in-mission correction without superseding the checkpoint", async () => {
     const controller = target();
     await controller.ensure(creation());
 
-    await controller.prepareForTurn("Please use the other Postman workspace instead.");
+    await expect(controller.prepareForTurn("Please use the other Postman workspace instead."))
+      .resolves.toMatchObject({ disposition: "correction", checkpoint: { status: "active" } });
 
     expect(controller.current()).toMatchObject({
       revision: 2,
@@ -123,6 +138,25 @@ describe("ExecutionCheckpointController", () => {
     await arabic.ensure(creation());
     await arabic.prepareForTurn("استخدم مساحة العمل الأخرى بدلاً من الحالية.");
     expect(arabic.current()).toMatchObject({ status: "active", revision: 2 });
+  });
+
+  it("classifies acknowledgement and blocker-response turns as checkpoint continuations", async () => {
+    const controller = target();
+    const checkpoint = await controller.ensure(creation());
+
+    await expect(controller.prepareForTurn("try again")).resolves.toEqual({
+      disposition: "continuation",
+      checkpoint
+    });
+
+    const waiting = await controller.settleAttempt(checkpoint.revision, {
+      outcome: outcome("failed", "user_input_required")
+    });
+    await expect(controller.prepareForTurn("I entered the code."))
+      .resolves.toMatchObject({ disposition: "continuation", checkpoint: { status: "awaiting_user" } });
+    await expect(controller.prepareForTurn("Please continue; I entered the code."))
+      .resolves.toMatchObject({ disposition: "continuation", checkpoint: { status: "awaiting_user" } });
+    expect(controller.current()?.revision).toBe(waiting?.revision);
   });
 
   it("does not allow a model-facing Plan update to mutate checkpoint state", async () => {

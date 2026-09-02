@@ -160,6 +160,47 @@ describe("RuntimeRouter", () => {
     expect(result.selectedSkillInstructions).toBe(primary.instructions);
   });
 
+  it("restores a checkpoint skill only through the current session registry", () => {
+    const resumed = loadedSkill({
+      name: "api-integration",
+      instructions: "# API integration\n\nResume the bounded workflow."
+    });
+    const emptyRoute: IntentRoute = {
+      nativeIntent: "general",
+      taskClass: "general",
+      labels: ["general"],
+      confidence: 0.2,
+      suggestedToolsets: [],
+      supportingSkills: [],
+      suggestedSkills: [],
+      confirmationRequired: false,
+      evidence: [],
+      rationale: "short acknowledgement"
+    };
+    const currentIntentRouter = {
+      route: () => emptyRoute,
+      resolveSkill: (name: string) => name === resumed.name ? resumed : undefined
+    } as unknown as IntentRouter;
+    const current = new RuntimeRouter({ intentRouter: currentIntentRouter, skillConfig: {} });
+
+    expect(current.route({
+      text: "try again",
+      channel: "cli",
+      checkpointSkillName: "api-integration"
+    }).selectedSkill).toBe(resumed);
+
+    const removedIntentRouter = {
+      route: () => emptyRoute,
+      resolveSkill: () => undefined
+    } as unknown as IntentRouter;
+    const removed = new RuntimeRouter({ intentRouter: removedIntentRouter, skillConfig: {} });
+    expect(removed.route({
+      text: "try again",
+      channel: "cli",
+      checkpointSkillName: "api-integration"
+    }).selectedSkill).toBeUndefined();
+  });
+
   it("resolves setup context only for the primary skill", () => {
     const primary: SkillDefinition = {
       name: "primary-setup",

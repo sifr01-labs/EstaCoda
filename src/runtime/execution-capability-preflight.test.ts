@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ForegroundExecutionCheckpoint } from "../contracts/execution-checkpoint.js";
 import type { ExecutionPlanCapabilityRequirement } from "../contracts/execution-plan.js";
-import type { RegisteredTool, ToolRiskClass } from "../contracts/tool.js";
+import type { SkillDefinition } from "../contracts/skill.js";
+import type { RegisteredTool, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
 import {
   ExecutionCapabilityPreflight,
+  formatCheckpointResumeBlocker,
   formatExecutionCapabilityBlocker,
   formatGovernedTransferBlocker
 } from "./execution-capability-preflight.js";
@@ -19,6 +22,7 @@ function tool(input: {
   connectorId?: string;
   artifactPaths?: string[];
   redactedResultPaths?: string[];
+  toolsets?: ToolsetName[];
   run?: RegisteredTool["run"];
 }): RegisteredTool {
   return {
@@ -26,7 +30,7 @@ function tool(input: {
     description: "test tool",
     inputSchema: { type: "object" },
     riskClass: input.riskClass,
-    toolsets: ["mcp"],
+    toolsets: input.toolsets ?? ["mcp"],
     ...(input.connectorId === undefined ? {} : { connector: { kind: "mcp" as const, id: input.connectorId } }),
     progressLabel: "testing",
     maxResultSizeChars: 100,
@@ -382,6 +386,105 @@ describe("ExecutionCapabilityPreflight", () => {
       .toBe('Required tool "mcp.target.update" is currently unavailable.');
   });
 
+  it("reports all unavailable checkpoint requirements in one bounded blocker", async () => {
+    const skill: SkillDefinition = {
+      name: "api-integration",
+      description: "Integrate APIs.",
+      version: "1",
+      whenToUse: [],
+      requiredToolsets: ["browser", "mcp"],
+      playbook: [],
+      permissionExpectations: [],
+      examples: [],
+      evaluations: []
+    };
+    const preflight = new ExecutionCapabilityPreflight({
+      registry: new ToolRegistry(),
+      configuredConnectors: [{
+        name: "postman",
+        transport: "http",
+        configured: true,
+        enabled: true,
+        connected: false,
+        schemasRegistered: false,
+        toolCount: 0,
+        resourceCount: 0,
+        promptCount: 0,
+        tools: [],
+        capabilities: {
+          protectedDeliveryConfigured: true,
+          groupedDeliverySupported: true,
+          browserRelaySupported: true,
+          artifactRelayConfigured: true,
+          resultRedactionConfigured: true,
+          continuityConfigured: true,
+          verificationConfigured: true
+        },
+        available: false,
+        failureStage: "connection"
+      }]
+    });
+
+    const result = await preflight.assessCheckpointResume({
+      checkpoint: checkpoint(),
+      selectedSkill: skill
+    });
+
+    expect(result).toEqual({
+      status: "blocked",
+      issues: [
+        { kind: "toolset_unavailable", subject: "browser" },
+        { kind: "toolset_unavailable", subject: "mcp" },
+        { kind: "connector_unavailable", subject: "postman" }
+      ]
+    });
+    if (result.status === "blocked") {
+      const message = formatCheckpointResumeBlocker({ result });
+      expect(message).toContain('required toolset "browser" is unavailable');
+      expect(message).toContain('required toolset "mcp" is unavailable');
+      expect(message).toContain('connector "postman" is disconnected or unavailable');
+      expect(message).not.toContain("connection failed");
+    }
+  });
+
+  it("does not accept a removed checkpoint skill as current capability", async () => {
+    const result = await new ExecutionCapabilityPreflight({ registry: new ToolRegistry() })
+      .assessCheckpointResume({ checkpoint: checkpoint(), selectedSkill: undefined });
+
+    expect(result).toMatchObject({
+      status: "blocked",
+      issues: expect.arrayContaining([
+        { kind: "skill_unavailable", subject: "api-integration" },
+        { kind: "connector_missing", subject: "postman" }
+      ])
+    });
+  });
+
+  it("accepts checkpoint hints only when current skill toolsets and connector metadata satisfy them", async () => {
+    const registry = governedConnectorRegistry();
+    registry.register(tool({
+      name: "browser.navigate",
+      riskClass: "read-only-network",
+      toolsets: ["browser"]
+    }));
+    const skill: SkillDefinition = {
+      name: "api-integration",
+      description: "Integrate APIs.",
+      version: "1",
+      whenToUse: [],
+      requiredToolsets: ["browser", "mcp"],
+      playbook: [],
+      permissionExpectations: [],
+      examples: [],
+      evaluations: []
+    };
+
+    await expect(new ExecutionCapabilityPreflight({ registry }).assessCheckpointResume({
+      checkpoint: checkpoint(),
+      selectedSkill: skill
+    })).resolves.toEqual({ status: "ready" });
+  });
+
   it("blocks routed artifact transfer when the selected profile lacks a reviewed import argument", async () => {
     const registry = governedConnectorRegistry({ artifact: false });
     const preflight = new ExecutionCapabilityPreflight({ registry });
@@ -604,6 +707,30 @@ describe("ExecutionCapabilityPreflight", () => {
     });
   });
 });
+
+function checkpoint(): ForegroundExecutionCheckpoint {
+  return {
+    version: 1,
+    id: "checkpoint:test",
+    sessionId: "session-1",
+    profileId: "default",
+    originTurnId: "turn-1",
+    revision: 2,
+    progressRevision: 0,
+    originalObjective: "Import and verify the API in Postman.",
+    status: "retryable",
+    qualificationReasons: ["cross_system", "verified_mutation"],
+    selectedSkillName: "api-integration",
+    taskClass: "general",
+    intentLabels: ["api.integration"],
+    requiredOperations: ["read", "mutation", "verification", "artifact_relay"],
+    connectorIds: ["postman"],
+    completionFloor: "mutation_with_verification",
+    lastTerminationCause: "provider_failed",
+    createdAt: "2030-01-01T00:00:00.000Z",
+    updatedAt: "2030-01-01T00:00:01.000Z"
+  };
+}
 
 function governedConnectorRegistry(options: {
   artifact?: boolean;

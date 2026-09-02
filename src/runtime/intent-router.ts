@@ -90,6 +90,11 @@ export class IntentRouter {
     this.#model = options.model;
   }
 
+  /** Resolves only from the current session-filtered skill registry. */
+  resolveSkill(name: string): LoadedSkill | SkillDefinition | undefined {
+    return this.#skillRegistry.resolve(name);
+  }
+
   route(prompt: string, options: IntentRouteOptions = {}): IntentRoute {
     const model = options.model ?? this.#model;
     const normalized = normalize(prompt);

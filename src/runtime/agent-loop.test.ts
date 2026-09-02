@@ -654,6 +654,259 @@ describe("AgentLoop execution checkpoints", () => {
     )).toHaveLength(2);
   });
 
+  it("resumes a failed API integration with its bounded toolbox and original completion floor", async () => {
+    const apiSkill: SkillDefinition = {
+      ...selectedSkill,
+      name: "api-integration",
+      requiredToolsets: ["browser", "mcp"],
+      optionalToolsets: ["files", "web"],
+      playbook: [
+        { id: "inspect", description: "Inspect the products." },
+        { id: "download", description: "Download the specifications." },
+        { id: "import", description: "Import and verify the specifications." }
+      ]
+    };
+    const apiIntent: IntentRoute = {
+      ...intent,
+      taskClass: "browser-operation",
+      labels: ["api.integration"],
+      suggestedToolsets: ["browser", "mcp"],
+      suggestedSkills: [apiSkill],
+      primarySkill: apiSkill
+    };
+    const providerToolDefinitions: ToolDefinition[] = [
+      { ...tool, name: "browser.snapshot", toolsets: ["browser"], riskClass: "read-only-network" },
+      { ...tool, name: "browser.click", toolsets: ["browser"], riskClass: "read-only-network" },
+      { ...tool, name: "browser.download", toolsets: ["browser"], riskClass: "read-only-network" },
+      {
+        ...tool,
+        name: "mcp.postman.getCollection",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "postman" },
+        riskClass: "read-only-network"
+      },
+      {
+        ...tool,
+        name: "mcp.postman.updateCollection",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "postman" },
+        riskClass: "external-side-effect"
+      },
+      {
+        ...tool,
+        name: "mcp.linear.getIssues",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "linear" },
+        riskClass: "read-only-network"
+      },
+      { ...tool, name: "file.write", toolsets: ["files"], riskClass: "workspace-write" }
+    ];
+    const { loop, runtimeRouter, providerTurnLoop, executionCheckpointController } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: failedProviderExecution(),
+      routeIntent: apiIntent,
+      selectedSkill: apiSkill,
+      providerToolDefinitions,
+      executionCompletionCapabilities: [{
+        tool: "mcp.postman.updateCollection",
+        kind: "mutation",
+        connector: { kind: "mcp", id: "postman" }
+      }, {
+        tool: "mcp.postman.getCollection",
+        kind: "verification",
+        verifies: ["mcp.postman.updateCollection"],
+        connector: { kind: "mcp", id: "postman" }
+      }],
+      enableExecutionCheckpoint: true
+    });
+
+    const objective = "Import all six Swagger APIs into Postman and verify the update.";
+    await loop.handle({ text: objective, channel: "cli", trustedWorkspace: true });
+    const retry = await loop.handle({ text: "try again", channel: "cli", trustedWorkspace: true });
+
+    expect(vi.mocked(runtimeRouter.route).mock.calls[1]?.[0]).toMatchObject({
+      text: `${objective}\nFollow-up: try again`,
+      checkpointSkillName: "api-integration"
+    });
+    const resumedProviderInput = vi.mocked(providerTurnLoop.run).mock.calls[1]?.[0];
+    expect(resumedProviderInput.routedText).toBe(`${objective}\nFollow-up: try again`);
+    expect(resumedProviderInput.providerTools.map((entry) => entry.function.name)).toEqual([
+      "browser_snapshot",
+      "browser_click",
+      "browser_download",
+      "mcp_postman_getCollection",
+      "mcp_postman_updateCollection"
+    ]);
+    expect(resumedProviderInput.providerTools.map((entry) => entry.function.name)).not.toContain("mcp_linear_getIssues");
+    expect(resumedProviderInput.providerTools.map((entry) => entry.function.name)).not.toContain("file_write");
+    expect(retry.finalOutcome?.completionFloor).toBe("mutation_with_verification");
+    expect(executionCheckpointController?.current()).toMatchObject({
+      status: "retryable",
+      completionFloor: "mutation_with_verification"
+    });
+
+    await loop.handle({
+      text: "Use the other Postman workspace instead.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+    expect(vi.mocked(runtimeRouter.route).mock.calls[2]?.[0]).toMatchObject({
+      text: `${objective}\nFollow-up: Use the other Postman workspace instead.`,
+      checkpointSkillName: "api-integration"
+    });
+    expect(executionCheckpointController?.current()).toMatchObject({
+      status: "retryable",
+      latestUserCorrection: "Use the other Postman workspace instead.",
+      completionFloor: "mutation_with_verification"
+    });
+  });
+
+  it("does not inherit a checkpoint toolbox after explicit replacement work", async () => {
+    const apiSkill: SkillDefinition = {
+      ...selectedSkill,
+      name: "api-integration",
+      requiredToolsets: ["browser", "mcp"],
+      playbook: [
+        { id: "inspect", description: "Inspect." },
+        { id: "import", description: "Import." },
+        { id: "verify", description: "Verify." }
+      ]
+    };
+    const apiIntent: IntentRoute = {
+      ...intent,
+      taskClass: "browser-operation",
+      suggestedToolsets: ["browser", "mcp"],
+      suggestedSkills: [apiSkill],
+      primarySkill: apiSkill
+    };
+    const postmanTool: ToolDefinition = {
+      ...tool,
+      name: "mcp.postman.getCollection",
+      toolsets: ["mcp"],
+      connector: { kind: "mcp", id: "postman" },
+      riskClass: "read-only-network"
+    };
+    const { loop, runtimeRouter, providerTurnLoop, executionCheckpointController } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: failedProviderExecution(),
+      routeIntent: apiIntent,
+      selectedSkill: apiSkill,
+      providerToolDefinitions: [postmanTool],
+      executionCompletionCapabilities: [{
+        tool: "mcp.postman.updateCollection",
+        kind: "mutation",
+        connector: { kind: "mcp", id: "postman" }
+      }, {
+        tool: "mcp.postman.getCollection",
+        kind: "verification",
+        verifies: ["mcp.postman.updateCollection"],
+        connector: { kind: "mcp", id: "postman" }
+      }],
+      enableExecutionCheckpoint: true
+    });
+    await loop.handle({
+      text: "Import all six APIs into Postman and verify the update.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+    const conversationIntent: IntentRoute = {
+      ...intent,
+      taskClass: "conversation",
+      labels: ["conversation"],
+      suggestedToolsets: [],
+      suggestedSkills: [],
+      primarySkill: undefined
+    };
+    vi.mocked(runtimeRouter.route).mockReturnValue({
+      intent: conversationIntent,
+      selectedSkill: undefined,
+      selectedSkillPromptContent: undefined,
+      selectedSkillInstructions: undefined,
+      selectedSkillResources: undefined,
+      selectedSkillSetup: undefined,
+      attachments: undefined
+    });
+
+    await loop.handle({ text: "Explain what a rain jacket is?", channel: "cli", trustedWorkspace: true });
+
+    expect(vi.mocked(runtimeRouter.route).mock.calls[1]?.[0]).not.toHaveProperty("checkpointSkillName");
+    expect(vi.mocked(runtimeRouter.route).mock.calls[1]?.[0].text).toBe("Explain what a rain jacket is?");
+    expect(vi.mocked(providerTurnLoop.run).mock.calls[1]?.[0].providerTools).toEqual([]);
+    expect(executionCheckpointController?.current()).toMatchObject({ status: "superseded" });
+  });
+
+  it("returns one aggregated blocker when current checkpoint requirements are unavailable", async () => {
+    const apiSkill: SkillDefinition = {
+      ...selectedSkill,
+      name: "api-integration",
+      requiredToolsets: ["browser", "mcp"],
+      playbook: [
+        { id: "inspect", description: "Inspect." },
+        { id: "import", description: "Import." },
+        { id: "verify", description: "Verify." }
+      ]
+    };
+    const apiIntent: IntentRoute = {
+      ...intent,
+      taskClass: "browser-operation",
+      suggestedToolsets: ["browser", "mcp"],
+      suggestedSkills: [apiSkill],
+      primarySkill: apiSkill
+    };
+    const assessCheckpointResume = vi.fn(async () => ({
+      status: "blocked" as const,
+      issues: [
+        { kind: "toolset_unavailable" as const, subject: "browser" },
+        { kind: "connector_unavailable" as const, subject: "postman" }
+      ]
+    }));
+    const { loop, providerTurnLoop, nativeToolExecutor } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: failedProviderExecution(),
+      routeIntent: apiIntent,
+      selectedSkill: apiSkill,
+      providerToolDefinitions: [{
+        ...tool,
+        name: "mcp.postman.getCollection",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "postman" },
+        riskClass: "read-only-network"
+      }],
+      executionCompletionCapabilities: [{
+        tool: "mcp.postman.updateCollection",
+        kind: "mutation",
+        connector: { kind: "mcp", id: "postman" }
+      }, {
+        tool: "mcp.postman.getCollection",
+        kind: "verification",
+        verifies: ["mcp.postman.updateCollection"],
+        connector: { kind: "mcp", id: "postman" }
+      }],
+      enableExecutionCheckpoint: true,
+      executionCapabilityPreflight: {
+        assessCheckpointResume,
+        assessRoutedGovernedTransfer: vi.fn(async () => undefined)
+      } as unknown as ExecutionCapabilityPreflight
+    });
+    await loop.handle({
+      text: "Import all six APIs into Postman and verify the update.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    const response = await loop.handle({ text: "try again", channel: "cli", trustedWorkspace: true });
+
+    expect(response.text).toContain('required toolset "browser" is unavailable');
+    expect(response.text).toContain('connector "postman" is disconnected or unavailable');
+    expect(response.finalOutcome?.completionFloor).toBe("mutation_with_verification");
+    expect(providerTurnLoop.run).toHaveBeenCalledOnce();
+    expect(nativeToolExecutor.executeDeterministicNativeTools).toHaveBeenCalledOnce();
+    expect(assessCheckpointResume).toHaveBeenCalledOnce();
+  });
+
   it("closes a checkpoint only from a receipt-derived completed outcome", async () => {
     const apiSkill: SkillDefinition = {
       ...selectedSkill,

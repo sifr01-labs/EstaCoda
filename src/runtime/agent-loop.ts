@@ -3,6 +3,7 @@ import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { ExecutionFinalOutcome, ExecutionPlan, ExecutionPlanReader } from "../contracts/execution-plan.js";
+import type { ForegroundExecutionCheckpoint } from "../contracts/execution-checkpoint.js";
 import type { ExecutionPlanController } from "./execution-plan-controller.js";
 import type { ExecutionCheckpointController } from "./execution-checkpoint-controller.js";
 import type { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
@@ -89,6 +90,7 @@ import {
 } from "./provider-tool-narrowing.js";
 import {
   ExecutionCapabilityPreflight,
+  formatCheckpointResumeBlocker,
   formatGovernedTransferBlocker
 } from "./execution-capability-preflight.js";
 import { qualifyForegroundExecution } from "./execution-checkpoint-qualification.js";
@@ -346,7 +348,13 @@ export class AgentLoop {
 
   async handle(input: AgentLoopInput): Promise<AgentLoopResponse> {
     await this.#runRecorder.beginTurn();
-    await this.#executionCheckpointController?.prepareForTurn(input.text).catch(() => undefined);
+    const checkpointPreparation = await this.#executionCheckpointController
+      ?.prepareForTurn(input.text)
+      .catch(() => undefined);
+    const resumedCheckpoint = checkpointPreparation?.disposition === "continuation" ||
+      checkpointPreparation?.disposition === "correction"
+      ? checkpointPreparation.checkpoint
+      : undefined;
     await this.#executionPlanController?.prepareForTurn(input.text, input.onEvent);
     const latestResumeNote = await this.#runRecorder.latestResumeNote();
     const effectiveText = isResumeRequest(input.text) && latestResumeNote !== undefined
@@ -387,23 +395,31 @@ export class AgentLoop {
       ? expandedContext
       : undefined;
     const routedText = context?.expandedText ?? effectiveText;
-    const previousConversationContinuationState = await this.#latestConversationContinuationState();
-    const continuedConversationState = continuesConversationCommitment(
+    const previousConversationContinuationState = resumedCheckpoint === undefined
+      ? await this.#latestConversationContinuationState()
+      : undefined;
+    const continuedConversationState = resumedCheckpoint === undefined && continuesConversationCommitment(
       routedText,
       previousConversationContinuationState
     )
       ? previousConversationContinuationState
       : undefined;
-    const routingText = continuedConversationState === undefined
-      ? routedText
-      : `${continuedConversationState.userRequest}\nFollow-up: ${routedText}`;
+    const routingText = resumedCheckpoint !== undefined
+      ? checkpointRoutingText(resumedCheckpoint, routedText)
+      : continuedConversationState === undefined
+        ? routedText
+        : `${continuedConversationState.userRequest}\nFollow-up: ${routedText}`;
+    const executionText = resumedCheckpoint === undefined ? routedText : routingText;
     const trustedWorkspace = input.trustedWorkspace ?? false;
     const route = this.#runtimeRouter.route({
       text: routingText,
       attachments: input.attachments,
       channel: input.channel,
       model: this.#model,
-      trustedWorkspace
+      trustedWorkspace,
+      ...(resumedCheckpoint?.selectedSkillName === undefined
+        ? {}
+        : { checkpointSkillName: resumedCheckpoint.selectedSkillName })
     });
     const attachments = route.attachments;
 
@@ -571,7 +587,7 @@ export class AgentLoop {
     const selectedSkillInstructions = route.selectedSkillInstructions;
     const selectedSkillResources = route.selectedSkillResources;
     const selectedSkillSetup = route.selectedSkillSetup;
-    const turnCompletionFloor = deriveExecutionCompletionFloor({
+    const turnCompletionFloor = resumedCheckpoint?.completionFloor ?? deriveExecutionCompletionFloor({
       userText: effectiveText,
       capabilities: this.#executionCompletionCapabilities
     });
@@ -591,7 +607,7 @@ export class AgentLoop {
     });
     const shadowLlmRerank = await this.#shadowLlmRerank({
       intent,
-      userText: routedText,
+      userText: executionText,
       executionSessionId: this.#currentSessionId(),
       visibleTurnId: visibleTurn.id,
       ...(input.signal === undefined ? {} : { signal: input.signal })
@@ -605,14 +621,14 @@ export class AgentLoop {
       onEvent: input.onEvent
     });
     const turnMemoryPromptContext = await this.#memoryPromptContextForTurn({
-      text: routedText,
+      text: executionText,
       currentSessionId: this.#currentSessionId(),
       currentMessageId: visibleTurn.id,
       onEvent: input.onEvent
     });
     await this.#emitLiveContextUsageEstimate({
       onEvent: input.onEvent,
-      routedText,
+      routedText: executionText,
       context,
       projectContext: this.#projectContext,
       attachments,
@@ -640,7 +656,7 @@ export class AgentLoop {
       });
       await this.#emitLiveContextUsageEstimate({
         onEvent: input.onEvent,
-        routedText,
+        routedText: executionText,
         context,
         projectContext: this.#projectContext,
         attachments,
@@ -664,29 +680,40 @@ export class AgentLoop {
         : namedConnectorIdsForRequest({
             tools: this.#providerToolSchemaCatalog.entries.map((entry) => entry.tool),
             configuredConnectors: this.#mcpServerSnapshots,
-            userText: routedText
+            userText: executionText
           })
     });
     if (checkpointInput !== undefined) {
       await this.#executionCheckpointController?.ensure(checkpointInput).catch(() => undefined);
     }
 
-    const governedTransferPreflight = await this.#executionCapabilityPreflight?.assessRoutedGovernedTransfer({
-      userText: routedText,
-      selectedSkillName: selectedSkill?.name
-    });
-    if (governedTransferPreflight?.status === "blocked") {
+    const checkpointResumePreflight = resumedCheckpoint === undefined
+      ? undefined
+      : await this.#executionCapabilityPreflight?.assessCheckpointResume?.({
+          checkpoint: resumedCheckpoint,
+          selectedSkill
+        });
+    const governedTransferPreflight = checkpointResumePreflight?.status === "blocked"
+      ? undefined
+      : await this.#executionCapabilityPreflight?.assessRoutedGovernedTransfer({
+          userText: executionText,
+          selectedSkillName: selectedSkill?.name
+        });
+    if (checkpointResumePreflight?.status === "blocked" || governedTransferPreflight?.status === "blocked") {
       const matchedSkills = selectedSkill === undefined ? [] : [selectedSkill.name];
-      const conversationContinuationState = blockedConnectorContinuationState({
-        userText: effectiveText,
-        connectorId: governedTransferPreflight.connectorId,
-        reasonCodes: governedTransferPreflight.reasonCodes
-      });
+      const conversationContinuationState = governedTransferPreflight?.status === "blocked"
+        ? blockedConnectorContinuationState({
+            userText: effectiveText,
+            connectorId: governedTransferPreflight.connectorId,
+            reasonCodes: governedTransferPreflight.reasonCodes
+          })
+        : undefined;
       const locale = this.#ui?.language === "ar" ? "ar" : "en";
-      const blocker = formatGovernedTransferBlocker({
-        result: governedTransferPreflight,
-        locale
-      });
+      const blocker = checkpointResumePreflight?.status === "blocked"
+        ? formatCheckpointResumeBlocker({ result: checkpointResumePreflight, locale })
+        : governedTransferPreflight?.status === "blocked"
+          ? formatGovernedTransferBlocker({ result: governedTransferPreflight, locale })
+          : "Execution cannot continue because a required capability is unavailable.";
       const activeCheckpoint = this.#executionCheckpointController?.current();
       if (activeCheckpoint !== undefined) {
         await this.#executionCheckpointController?.block(activeCheckpoint.revision, {
@@ -715,10 +742,14 @@ export class AgentLoop {
         reason: blockerSecurityAssessment.reason
       });
       this.#trajectoryRecorder.record("progress", {
-        message: "governed transfer preflight blocked",
-        connectorId: governedTransferPreflight.connectorId,
-        reasonCode: governedTransferPreflight.reasonCode,
-        reasonCodes: governedTransferPreflight.reasonCodes
+        message: checkpointResumePreflight?.status === "blocked"
+          ? "checkpoint resume preflight blocked"
+          : "governed transfer preflight blocked",
+        ...(governedTransferPreflight?.status !== "blocked" ? {} : {
+          connectorId: governedTransferPreflight.connectorId,
+          reasonCode: governedTransferPreflight.reasonCode,
+          reasonCodes: governedTransferPreflight.reasonCodes
+        })
       });
       this.#trajectoryRecorder.record("assistant-output", {
         text,
@@ -738,11 +769,16 @@ export class AgentLoop {
           respondingToTurnId: visibleTurn.id,
           matchedSkills,
           intentLabels: intent.labels,
-          governedTransferPreflight: {
-            connectorId: governedTransferPreflight.connectorId,
-            reasonCode: governedTransferPreflight.reasonCode,
-            reasonCodes: governedTransferPreflight.reasonCodes
-          },
+          ...(checkpointResumePreflight?.status !== "blocked" ? {} : {
+            checkpointResumePreflight: { issues: checkpointResumePreflight.issues }
+          }),
+          ...(governedTransferPreflight?.status !== "blocked" ? {} : {
+            governedTransferPreflight: {
+              connectorId: governedTransferPreflight.connectorId,
+              reasonCode: governedTransferPreflight.reasonCode,
+              reasonCodes: governedTransferPreflight.reasonCodes
+            }
+          }),
           ...(conversationContinuationState === undefined ? {} : { conversationContinuationState })
         }
       });
@@ -759,11 +795,22 @@ export class AgentLoop {
         artifacts: [],
         context,
         projectContext: this.#projectContext,
-        progress: ["governed transfer preflight blocked"]
+        progress: [checkpointResumePreflight?.status === "blocked"
+          ? "checkpoint resume preflight blocked"
+          : "governed transfer preflight blocked"],
+        finalOutcome: {
+          status: "blocked",
+          terminationCause: "normal",
+          completionFloor: turnCompletionFloor,
+          confirmedActions: [],
+          uncertainActions: []
+        }
       }, {
         success: false,
         status: "blocked",
-        summary: "Governed transfer preflight blocked the workflow before execution."
+        summary: checkpointResumePreflight?.status === "blocked"
+          ? "Checkpoint resume preflight blocked the workflow before execution."
+          : "Governed transfer preflight blocked the workflow before execution."
       }, visibleTurn.id);
     }
 
@@ -820,7 +867,7 @@ export class AgentLoop {
       intent,
       trustedWorkspace,
       signal: input.signal,
-      text: routedText,
+      text: executionText,
       onEvent: input.onEvent,
       onApprovalRequest: input.onApprovalRequest,
       onSecureInputRequest: input.onSecureInputRequest
@@ -838,7 +885,7 @@ export class AgentLoop {
     }
     await this.#emitLiveContextUsageEstimate({
       onEvent: input.onEvent,
-      routedText,
+      routedText: executionText,
       context,
       projectContext: this.#projectContext,
       attachments,
@@ -871,10 +918,11 @@ export class AgentLoop {
     const providerToolSelection = this.#model?.supportsTools === true
       ? this.#providerToolsForTurn({
           intent,
-          userText: routedText,
+          userText: executionText,
           selectedSkill,
           attachments,
-          conversationContinuationState: continuedConversationState
+          conversationContinuationState: continuedConversationState,
+          executionCheckpoint: resumedCheckpoint
         })
       : { initialTools: [], expansionCandidates: [], namedConnectorIds: [] };
     const narrowedProviderTools = providerToolSelection.initialTools;
@@ -892,7 +940,7 @@ export class AgentLoop {
     const preflightCompression = await this.#compactBeforeProviderTurn(input.signal, input.onEvent);
     await this.#emitLiveContextUsageEstimate({
       onEvent: input.onEvent,
-      routedText,
+      routedText: executionText,
       context,
       projectContext: this.#projectContext,
       attachments,
@@ -909,7 +957,7 @@ export class AgentLoop {
     const providerLoop = await this.#providerTurnLoop.run({
       visibleTurnId: visibleTurn.id,
       userText: effectiveText,
-      routedText,
+      routedText: executionText,
       selectedSkill,
       selectedSkillPromptContent,
       selectedSkillInstructions,
@@ -1294,6 +1342,7 @@ export class AgentLoop {
     selectedSkill?: LoadedSkill | SkillDefinition;
     attachments?: readonly ChannelAttachment[];
     conversationContinuationState?: ConversationContinuationState;
+    executionCheckpoint?: ForegroundExecutionCheckpoint;
   }): ProviderToolSelection {
     if (this.#providerToolSchemaCatalog === undefined || this.#taskExecution !== undefined) {
       return {
@@ -1311,7 +1360,11 @@ export class AgentLoop {
       configuredConnectors: this.#mcpServerSnapshots,
       continuity: {
         activeBrowser: this.#sessionRuntimeContext?.browserState()?.sessionStatus === "active",
-        ...(input.conversationContinuationState === undefined ? {} : {
+        ...(input.executionCheckpoint === undefined ? {} : {
+          userRequest: input.executionCheckpoint.originalObjective,
+          connectors: input.executionCheckpoint.connectorIds.map((id) => ({ kind: "mcp" as const, id }))
+        }),
+        ...(input.executionCheckpoint !== undefined || input.conversationContinuationState === undefined ? {} : {
           userRequest: input.conversationContinuationState.userRequest,
           toolsets: input.conversationContinuationState.capabilityContext?.toolsets,
           connectors: input.conversationContinuationState.capabilityContext?.connectors
@@ -1805,6 +1858,20 @@ export class AgentLoop {
 
 
 
+}
+
+function checkpointRoutingText(
+  checkpoint: ForegroundExecutionCheckpoint,
+  currentUserText: string
+): string {
+  const correction = checkpoint.latestUserCorrection;
+  return [
+    checkpoint.originalObjective,
+    correction === undefined || correction === currentUserText
+      ? undefined
+      : `Current correction: ${correction}`,
+    `Follow-up: ${currentUserText}`
+  ].filter((line): line is string => line !== undefined).join("\n");
 }
 
 

@@ -33,6 +33,11 @@ export type ExecutionCheckpointControllerOptions = {
   createId?: () => string;
 };
 
+export type ExecutionCheckpointTurnPreparation = {
+  disposition: "none" | "continuation" | "correction" | "cancelled" | "superseded";
+  checkpoint?: ForegroundExecutionCheckpoint;
+};
+
 export class ExecutionCheckpointController implements ExecutionCheckpointReader {
   readonly #sessionId: () => string;
   readonly #profileId: string;
@@ -143,15 +148,17 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
     }));
   }
 
-  async prepareForTurn(userText: string): Promise<void> {
+  async prepareForTurn(userText: string): Promise<ExecutionCheckpointTurnPreparation> {
     const current = this.current();
-    if (current === undefined || isTerminalCheckpointStatus(current.status)) return;
+    if (current === undefined || isTerminalCheckpointStatus(current.status)) {
+      return { disposition: "none" };
+    }
     if (isExplicitCheckpointCancellation(userText)) {
-      await this.#close(current.revision, "cancelled", "cancelled");
-      return;
+      const checkpoint = await this.#close(current.revision, "cancelled", "cancelled");
+      return { disposition: "cancelled", ...(checkpoint === undefined ? {} : { checkpoint }) };
     }
     if (isCheckpointCorrection(userText, current)) {
-      await this.#transition(current.revision, "corrected", (checkpoint) => ({
+      const checkpoint = await this.#transition(current.revision, "corrected", (checkpoint) => ({
         ...checkpoint,
         revision: checkpoint.revision + 1,
         status: "active",
@@ -159,11 +166,16 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
         latestUserCorrection: sanitizeCheckpointText(userText, 2_000),
         updatedAt: this.#now()
       }));
-      return;
+      return { disposition: "correction", ...(checkpoint === undefined ? {} : { checkpoint }) };
+    }
+    if (isCheckpointBlockerResponse(userText, current)) {
+      return { disposition: "continuation", checkpoint: current };
     }
     if (!isAcknowledgementContinuation(userText) && isExplicitCheckpointSupersession(userText)) {
-      await this.#close(current.revision, "superseded", "superseded");
+      const checkpoint = await this.#close(current.revision, "superseded", "superseded");
+      return { disposition: "superseded", ...(checkpoint === undefined ? {} : { checkpoint }) };
     }
+    return { disposition: "continuation", checkpoint: current };
   }
 
   async #close(
@@ -254,8 +266,23 @@ function isExplicitCheckpointCancellation(text: string): boolean {
 
 function isExplicitCheckpointSupersession(text: string): boolean {
   const normalized = text.normalize("NFKC").trim();
-  return /^(?:(?:forget\s+that|never\s*mind\s+that|new\s+topic)|(?:(?:انس|انسى|دعك\s+من)\s+(?:ذلك|هذا)|موضوع\s+جديد))\s*[:.!،-]\s*[\p{L}\p{N}]/iu.test(normalized) ||
+  return /^\/[a-z0-9][a-z0-9_-]*(?:\s|$)/iu.test(normalized) ||
+    /^(?:(?:forget\s+that|never\s*mind\s+that|new\s+topic)|(?:(?:انس|انسى|دعك\s+من)\s+(?:ذلك|هذا)|موضوع\s+جديد))\s*[:.!،-]\s*[\p{L}\p{N}]/iu.test(normalized) ||
+    /^(?:ok(?:ay)?|yes|great|thanks?)[,!.، -]+(?:now\s+)?(?:can\s+you|please|tell\s+me|explain|review|implement|fix|write|create|show|summarize|search|run|update|change|add|remove)\b/iu.test(normalized) ||
     isExplicitNewRequest(normalized);
+}
+
+function isCheckpointBlockerResponse(
+  text: string,
+  checkpoint: ForegroundExecutionCheckpoint
+): boolean {
+  if (checkpoint.status !== "awaiting_user" || checkpoint.blocker?.kind !== "user_input_required") {
+    return false;
+  }
+  const normalized = text.normalize("NFKC").trim();
+  return /^(?:please\s+)?(?:continue|done|ready|approved|entered|submitted|sent|provided|i\s+(?:entered|submitted|sent|provided)|the\s+(?:code|otp)|(?:code|otp)\s+is)\b/iu.test(normalized) ||
+    /^\d{4,12}$/u.test(normalized) ||
+    /^(?:تابع|تم|جاهز|وافقت|أدخلت|أرسلت|قدمت|الرمز)/u.test(normalized);
 }
 
 function isCheckpointCorrection(

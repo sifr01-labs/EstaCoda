@@ -6,6 +6,8 @@ import type {
   ExecutionPlanWriteContext
 } from "../contracts/execution-plan.js";
 import { EXECUTION_PLAN_MAX_PROTECTED_PATHS } from "../contracts/execution-plan.js";
+import type { ForegroundExecutionCheckpoint } from "../contracts/execution-checkpoint.js";
+import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
 import type { RegisteredTool } from "../contracts/tool.js";
 import type { MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import type { ToolRegistry } from "../tools/tool-registry.js";
@@ -46,8 +48,22 @@ export type GovernedTransferPreflightResult =
       reasonCodes: readonly GovernedTransferPreflightReason[];
     };
 
+export type CheckpointResumeRequirementIssue = {
+  kind:
+    | "skill_unavailable"
+    | "toolset_unavailable"
+    | "connector_missing"
+    | "connector_unavailable"
+    | "operation_unavailable";
+  subject: string;
+};
+
+export type CheckpointResumeRequirementResult =
+  | { status: "ready" }
+  | { status: "blocked"; issues: CheckpointResumeRequirementIssue[] };
+
 /**
- * Assesses declared Mission requirements against the final, session-owned tool
+ * Assesses runtime capability requirements against the final, session-owned tool
  * registry. It only inspects declarations and availability; it never invokes a
  * tool, resolves approval, or claims remote account permissions.
  */
@@ -79,6 +95,108 @@ export class ExecutionCapabilityPreflight {
       })
     });
     return request === undefined ? undefined : await this.assessGovernedTransfer(request);
+  }
+
+  /**
+   * Revalidates persisted resumption hints against the current session registry
+   * and profile snapshot. It grants no authority and returns all missing
+   * requirements in one assessment.
+   */
+  async assessCheckpointResume(input: {
+    checkpoint: ForegroundExecutionCheckpoint;
+    selectedSkill?: LoadedSkill | SkillDefinition;
+  }): Promise<CheckpointResumeRequirementResult> {
+    const issues: CheckpointResumeRequirementIssue[] = [];
+    if (
+      input.checkpoint.selectedSkillName !== undefined &&
+      input.selectedSkill?.name !== input.checkpoint.selectedSkillName
+    ) {
+      issues.push({ kind: "skill_unavailable", subject: input.checkpoint.selectedSkillName });
+    }
+
+    const requiredToolsets = new Set(input.selectedSkill?.requiredToolsets ?? []);
+    const requiredConnectorIds = new Set(input.checkpoint.connectorIds.map(normalizeConnectorId));
+    const relevantDefinitions = this.#registry.list().filter((definition) => {
+      const connectorRelevant = definition.connector?.kind === "mcp" &&
+        requiredConnectorIds.has(normalizeConnectorId(definition.connector.id));
+      const toolsetRelevant = definition.toolsets.some((toolset) =>
+        requiredToolsets.has(toolset) &&
+        (toolset !== "mcp" || requiredConnectorIds.size === 0 || connectorRelevant)
+      );
+      return connectorRelevant || toolsetRelevant;
+    });
+    const availableTools: RegisteredTool[] = [];
+    for (const definition of relevantDefinitions) {
+      const registered = this.#registry.get(definition.name);
+      if (registered === undefined) continue;
+      try {
+        if (await registered.isAvailable()) availableTools.push(registered);
+      } catch {
+        // Current availability is fail-closed for checkpoint restoration.
+      }
+    }
+
+    for (const toolset of input.selectedSkill?.requiredToolsets ?? []) {
+      if (!availableTools.some((tool) => tool.toolsets.includes(toolset))) {
+        issues.push({ kind: "toolset_unavailable", subject: toolset });
+      }
+    }
+
+    const connectorTools: RegisteredTool[] = [];
+    for (const connectorId of input.checkpoint.connectorIds) {
+      const normalizedId = normalizeConnectorId(connectorId);
+      const descriptor = this.#configuredConnectors.find((candidate) =>
+        normalizeConnectorId(candidate.name) === normalizedId
+      );
+      const currentTools = availableTools.filter((tool) =>
+        tool.connector?.kind === "mcp" && normalizeConnectorId(tool.connector.id) === normalizedId
+      );
+      if (descriptor === undefined && currentTools.length === 0) {
+        issues.push({ kind: "connector_missing", subject: connectorId });
+        continue;
+      }
+      if (
+        currentTools.length === 0 ||
+        (descriptor !== undefined && (
+          !descriptor.configured || !descriptor.enabled || !descriptor.connected ||
+          !descriptor.schemasRegistered || !descriptor.available
+        ))
+      ) {
+        issues.push({ kind: "connector_unavailable", subject: connectorId });
+        continue;
+      }
+      connectorTools.push(...currentTools);
+    }
+
+    if (input.checkpoint.connectorIds.length > 0 && connectorTools.length > 0) {
+      const capabilities = connectorTools.flatMap((tool) => {
+        const resolution = resolveRegisteredToolCapability(tool);
+        return resolution.ok ? [resolution.capability] : [];
+      });
+      for (const requirement of input.checkpoint.requiredOperations) {
+        const satisfied = requirement === "read"
+          ? capabilities.some((capability) => capability.classification === "read")
+          : requirement === "mutation"
+            ? capabilities.some((capability) => capability.classification === "mutate")
+            : requirement === "verification"
+              ? capabilities.some((capability) => capability.verification !== undefined)
+              : requirement === "artifact_relay"
+                ? capabilities.some((capability) => capability.artifactInput !== undefined)
+                : capabilities.some((capability) =>
+                    capability.protectedInput?.sources.includes("browser") === true
+                  ) && capabilities.some((capability) => capability.resultRedaction !== undefined);
+        if (!satisfied) {
+          issues.push({ kind: "operation_unavailable", subject: requirement });
+        }
+      }
+    }
+
+    const uniqueIssues = [...new Map(
+      issues.map((issue) => [`${issue.kind}:${issue.subject}`, issue])
+    ).values()];
+    return uniqueIssues.length === 0
+      ? { status: "ready" }
+      : { status: "blocked", issues: uniqueIssues };
   }
 
   /**
@@ -316,6 +434,38 @@ export class ExecutionCapabilityPreflight {
       assessments
     };
   }
+}
+
+export function formatCheckpointResumeBlocker(input: {
+  result: Extract<CheckpointResumeRequirementResult, { status: "blocked" }>;
+  locale?: "en" | "ar";
+}): string {
+  const requirements = input.result.issues.map((issue) => {
+    const subject = `"${issue.subject}"`;
+    if (input.locale === "ar") {
+      switch (issue.kind) {
+        case "skill_unavailable": return `المهارة ${subject} غير متاحة`;
+        case "toolset_unavailable": return `مجموعة الأدوات ${subject} غير متاحة`;
+        case "connector_missing": return `الموصل ${subject} غير مهيأ`;
+        case "connector_unavailable": return `الموصل ${subject} غير متصل أو غير متاح`;
+        case "operation_unavailable": return `قدرة العملية ${subject} غير متاحة`;
+      }
+    }
+    switch (issue.kind) {
+      case "skill_unavailable": return `skill ${subject} is unavailable`;
+      case "toolset_unavailable": return `required toolset ${subject} is unavailable`;
+      case "connector_missing": return `connector ${subject} is not configured`;
+      case "connector_unavailable": return `connector ${subject} is disconnected or unavailable`;
+      case "operation_unavailable": return `required operation ${subject} is unavailable`;
+    }
+  });
+  return input.locale === "ar"
+    ? `لا يمكن استئناف العمل لأن المتطلبات الحالية التالية غير متاحة: ${requirements.join("؛ ")}. أصلح جميع المتطلبات المذكورة ثم أعد المحاولة.`
+    : `Execution cannot resume because these current requirements are unavailable: ${requirements.join("; ")}. Resolve all listed requirements and retry.`;
+}
+
+function normalizeConnectorId(value: string): string {
+  return value.normalize("NFKC").toLocaleLowerCase("en-US").trim();
 }
 
 type GovernedCapabilityEntry = {

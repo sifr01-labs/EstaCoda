@@ -43,6 +43,8 @@ export class RuntimeRouter {
     channel: ChannelKind;
     model?: ModelProfile;
     trustedWorkspace?: boolean;
+    /** Continuity hint only; resolution still uses the current session registry. */
+    checkpointSkillName?: string;
   }): RuntimeRouteResult {
     const attachments = normalizeAttachments(input.attachments);
     const attachmentFailureResponse = buildAttachmentFailureResponse(attachments);
@@ -68,7 +70,10 @@ export class RuntimeRouter {
       trustedWorkspace: input.trustedWorkspace ?? false
     });
 
-    const selectedSkill = intent.primarySkill ?? intent.suggestedSkills[0];
+    const resumedSkill = input.checkpointSkillName === undefined
+      ? undefined
+      : this.#intentRouter.resolveSkill(input.checkpointSkillName);
+    const selectedSkill = resumedSkill ?? intent.primarySkill ?? intent.suggestedSkills[0];
     const selectedSkillPromptContent =
       selectedSkill === undefined || !isLoadedSkill(selectedSkill)
         ? undefined
