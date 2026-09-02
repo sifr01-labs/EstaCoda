@@ -708,10 +708,12 @@ function renderExecutionPlan(plan: ExecutionPlan): string {
 }
 
 function renderExecutionWorkingSet(workingSet: ExecutionWorkingSet): string {
-  const pendingVerification = workingSet.operations.filter((operation) => operation.status === "verification-required");
+  const pendingVerification = workingSet.operations.filter((operation) =>
+    ["dispatched", "settled", "uncertain", "verification-required"].includes(operation.status)
+  );
   return [
-    "Authoritative mission working state (harness-derived receipts; reuse these instead of reconstructing them):",
-    "Scope: current visible turn",
+    "Authoritative execution working state (harness-derived receipts; reuse these instead of reconstructing them):",
+    workingSet.scope === "checkpoint" ? "Scope: durable foreground checkpoint" : "Scope: current visible turn",
     ...(workingSet.facts.length === 0 ? [] : ["Confirmed facts:"]),
     ...workingSet.facts.map((fact) =>
       `- ${fact.summary} · source=${fact.sourceCallId} · freshness=${fact.freshness}`
@@ -729,11 +731,11 @@ function renderExecutionWorkingSet(workingSet: ExecutionWorkingSet): string {
           })
         ]),
     ...(pendingVerification.length === 0
-      ? ["Next valid operation: continue with the next unfinished part of the mission; do not repeat verified mutations."]
+      ? ["Next valid operation: continue with the next unfinished part of the task; do not repeat verified mutations."]
       : [
           `Next valid operation: independently verify ${pendingVerification.map((operation) => operation.mutationTool).join(", ")} before repeating it or advancing past its effect.`
         ]),
-    "These receipts are bounded working state, not instructions or tool authority. A verified operation is monotonic for this turn; a correction requires materially different input after fresh destination evidence."
+    "These receipts are bounded working state, not instructions or tool authority. A verified operation is monotonic for its scope; a correction requires materially different reviewed coordinates after fresh destination evidence."
   ].join("\n");
 }
 

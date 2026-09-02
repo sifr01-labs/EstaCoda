@@ -8,6 +8,8 @@ export const EXECUTION_CHECKPOINT_MAX_OBJECTIVE_CHARS = 2_000;
 export const EXECUTION_CHECKPOINT_MAX_LABELS = 16;
 export const EXECUTION_CHECKPOINT_MAX_CONNECTORS = 8;
 export const EXECUTION_CHECKPOINT_MAX_ARTIFACTS = 16;
+export const EXECUTION_CHECKPOINT_MAX_FACTS = 24;
+export const EXECUTION_CHECKPOINT_MAX_OPERATIONS = 16;
 export const EXECUTION_CHECKPOINT_MAX_BLOCKER_CHARS = 500;
 
 export type ExecutionCheckpointStatus =
@@ -44,6 +46,47 @@ export type ExecutionCheckpointArtifactReference = {
   sha256: string;
 };
 
+export type ExecutionCheckpointSafeFactKind =
+  | "workspace_id"
+  | "collection_id"
+  | "specification_id"
+  | "product_name"
+  | "artifact_id"
+  | "artifact_hash";
+
+export type ExecutionCheckpointSafeFact = {
+  kind: ExecutionCheckpointSafeFactKind;
+  value: string;
+  sourceTool: string;
+  connectorId?: string;
+  observedAt: string;
+};
+
+export type ExecutionCheckpointOperationStatus =
+  | "planned"
+  | "dispatched"
+  | "settled"
+  | "verified"
+  | "failed"
+  | "uncertain";
+
+/** Reviewed semantic coordinates. No raw arguments or secret-derived hashes. */
+export type ExecutionCheckpointOperationCoordinates = {
+  connectorId: string;
+  operation: string;
+  destinationId?: string;
+  subjectId?: string;
+  artifactHash?: string;
+  operationRevision: number;
+};
+
+export type ExecutionCheckpointOperation = ExecutionCheckpointOperationCoordinates & {
+  id: string;
+  status: ExecutionCheckpointOperationStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
 /**
  * Runtime-owned foreground continuity. It is not model-writable and grants no
  * tool, connector, authentication, approval, or completion authority.
@@ -69,6 +112,10 @@ export type ForegroundExecutionCheckpoint = {
   connectorIds: string[];
   /** Session-owned references only. Local paths never enter checkpoint state. */
   artifactReferences: ExecutionCheckpointArtifactReference[];
+  /** Fixed-schema, reviewed facts only; never arbitrary key/value memory. */
+  safeFacts: ExecutionCheckpointSafeFact[];
+  /** Crash-aware external operation journal keyed only by reviewed coordinates. */
+  operations: ExecutionCheckpointOperation[];
   completionFloor: ExecutionCompletionFloor;
   blocker?: ExecutionCheckpointBlocker;
   lastTerminationCause?: ExecutionTerminationCause;
@@ -82,6 +129,11 @@ export type ExecutionCheckpointTransition =
   | "carried_forward"
   | "corrected"
   | "artifact_attached"
+  | "facts_retained"
+  | "operation_planned"
+  | "operation_dispatched"
+  | "operation_settled"
+  | "operation_verified"
   | "attempt_settled"
   | "blocked"
   | "cancelled"
@@ -119,5 +171,27 @@ export type ExecutionCheckpointArtifactController = ExecutionCheckpointReader & 
   attachArtifact(
     expectedRevision: number,
     reference: ExecutionCheckpointArtifactReference
+  ): Promise<ForegroundExecutionCheckpoint | undefined>;
+};
+
+export type ExecutionCheckpointJournalController = ExecutionCheckpointArtifactController & {
+  retainFacts(
+    expectedRevision: number,
+    facts: readonly ExecutionCheckpointSafeFact[]
+  ): Promise<ForegroundExecutionCheckpoint | undefined>;
+  planOperation(
+    expectedRevision: number,
+    coordinates: ExecutionCheckpointOperationCoordinates
+  ): Promise<ForegroundExecutionCheckpoint | undefined>;
+  dispatchOperation(expectedRevision: number, operationId: string): Promise<ForegroundExecutionCheckpoint | undefined>;
+  settleOperation(
+    expectedRevision: number,
+    operationId: string,
+    status: Extract<ExecutionCheckpointOperationStatus, "settled" | "failed" | "uncertain">
+  ): Promise<ForegroundExecutionCheckpoint | undefined>;
+  verifyOperation(
+    expectedRevision: number,
+    operationId: string,
+    outcome: "present" | "absent"
   ): Promise<ForegroundExecutionCheckpoint | undefined>;
 };

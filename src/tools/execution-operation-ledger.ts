@@ -5,7 +5,14 @@ import type { ToolExecutionRecord } from "./tool-executor.js";
 
 const MAX_OPERATIONS = 32;
 
-export type ExecutionOperationStatus = "verification-required" | "verified";
+export type ExecutionOperationStatus =
+  | "planned"
+  | "dispatched"
+  | "settled"
+  | "verification-required"
+  | "verified"
+  | "failed"
+  | "uncertain";
 
 export type ExecutionOperationReceipt = {
   operationId: string;

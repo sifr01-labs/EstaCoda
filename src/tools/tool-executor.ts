@@ -8,6 +8,7 @@ import {
   type SecurityPolicy
 } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
+import type { ExecutionCheckpointJournalController } from "../contracts/execution-checkpoint.js";
 import type { ToolApprovalHandler, ToolDefinition, ToolExecutionConcurrency, ToolExecutionContext, ToolExecutionEffect, ToolExecutionSettlement, ToolResult, ToolRiskClass, ToolSecurityResolution, ToolsetName } from "../contracts/tool.js";
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
@@ -32,6 +33,13 @@ import {
 } from "../security/protected-argument-path.js";
 import { createTimeoutSignal } from "../utils/timeout-signal.js";
 import { ExecutionOperationLedger, semanticMutationKey } from "./execution-operation-ledger.js";
+import {
+  checkpointOperationCoordinates,
+  checkpointSafeFactsFromResult,
+  checkpointVerificationMatch
+} from "../runtime/execution-checkpoint-journal.js";
+import { executionCheckpointOperationId } from "../runtime/execution-checkpoint-controller.js";
+import { isTerminalCheckpointStatus } from "../session/execution-checkpoint-state.js";
 
 const MAX_STORED_TOOL_RESULT_CHARS = 12_000;
 const MAX_CONTEXT_SUMMARY_CHARS = 500;
@@ -127,6 +135,7 @@ export type ToolExecutorOptions = {
   trajectoryRecorder: TrajectoryRecorder;
   workspaceRoot?: string;
   profileId?: string;
+  executionCheckpointController?: ExecutionCheckpointJournalController;
   defaultExecutionTimeoutMs?: number;
 };
 
@@ -137,6 +146,7 @@ export class ToolExecutor {
   readonly #trajectoryRecorder: TrajectoryRecorder;
   readonly #workspaceRoot: string;
   readonly #profileId: string | undefined;
+  readonly #executionCheckpointController: ExecutionCheckpointJournalController | undefined;
   readonly #defaultExecutionTimeoutMs: number;
   readonly #uncertainMutationKeys = new Set<string>();
   readonly #operationLedger = new ExecutionOperationLedger();
@@ -148,6 +158,7 @@ export class ToolExecutor {
     this.#trajectoryRecorder = options.trajectoryRecorder;
     this.#workspaceRoot = resolve(options.workspaceRoot ?? process.cwd());
     this.#profileId = options.profileId;
+    this.#executionCheckpointController = options.executionCheckpointController;
     this.#defaultExecutionTimeoutMs = positiveExecutionTimeout(
       options.defaultExecutionTimeoutMs,
       DEFAULT_TOOL_EXECUTION_TIMEOUT_MS
@@ -256,7 +267,50 @@ export class ToolExecutor {
 
     const targetKey = securityResolution?.targetKey ?? await this.#buildSecurityTargetKey(tool.name, request.input);
     const targetSummary = securityResolution?.targetSummary ?? summarizeSecurityTarget(tool.name, request.input);
-    const mutationReplayKey = executionEffect?.kind === "mutation"
+    const checkpointAtAdmission = this.#activeCheckpoint();
+    const durableJournalDeclared = checkpointAtAdmission !== undefined &&
+      executionEffect?.kind === "mutation" && executionEffect.connector !== undefined &&
+      tool.operationJournal !== undefined;
+    const durableCoordinates = checkpointAtAdmission === undefined
+      ? undefined
+      : checkpointOperationCoordinates({ tool, effect: executionEffect, value: request.input });
+    const durableOperationId = durableCoordinates === undefined
+      ? undefined
+      : executionCheckpointOperationId(durableCoordinates);
+    const durableOperation = durableOperationId === undefined
+      ? undefined
+      : checkpointAtAdmission?.operations.find((operation) => operation.id === durableOperationId);
+    if (
+      durableOperation !== undefined &&
+      (durableOperation.status === "dispatched" || durableOperation.status === "uncertain") &&
+      executionEffect !== undefined
+    ) {
+      return await this.#blockedUncertainMutationReplay(
+        request,
+        tool,
+        riskClass,
+        executionEffect,
+        targetKey,
+        targetSummary,
+        durableOperation.status
+      );
+    }
+    if (
+      durableOperation !== undefined &&
+      (durableOperation.status === "settled" || durableOperation.status === "verified") &&
+      executionEffect !== undefined
+    ) {
+      return await this.#blockedCompletedMutationReplay(
+        request,
+        tool,
+        riskClass,
+        executionEffect,
+        targetKey,
+        targetSummary,
+        durableOperation.status
+      );
+    }
+    const mutationReplayKey = !durableJournalDeclared && durableCoordinates === undefined && executionEffect?.kind === "mutation"
       ? uncertainMutationKey(tool.name, request.input)
       : undefined;
     if (
@@ -274,6 +328,7 @@ export class ToolExecutor {
       );
     }
     const completedMutation = (
+      durableCoordinates === undefined &&
       executionEffect?.kind === "mutation" &&
       executionEffect.connector !== undefined &&
       request.visibleTurnId !== undefined
@@ -284,7 +339,10 @@ export class ToolExecutor {
           scope: request.visibleTurnId
         })
       : undefined;
-    if (completedMutation !== undefined && executionEffect !== undefined) {
+    if (
+      completedMutation !== undefined && executionEffect !== undefined &&
+      (completedMutation.status === "verification-required" || completedMutation.status === "verified")
+    ) {
       return await this.#blockedCompletedMutationReplay(
         request,
         tool,
@@ -383,6 +441,41 @@ export class ToolExecutor {
       };
     }
 
+    if (durableJournalDeclared && durableCoordinates === undefined) {
+      return await this.#blockedUncertainMutationReplay(
+        request,
+        tool,
+        riskClass,
+        executionEffect!,
+        targetKey,
+        targetSummary,
+        "journal-unavailable"
+      );
+    }
+
+    if (durableCoordinates !== undefined && durableOperationId !== undefined) {
+      const current = this.#activeCheckpoint();
+      if (current !== undefined) {
+        let planned;
+        try {
+          planned = await this.#executionCheckpointController?.planOperation(current.revision, durableCoordinates);
+        } catch {
+          planned = undefined;
+        }
+        if (!planned?.operations.some((operation) => operation.id === durableOperationId && operation.status === "planned")) {
+          return await this.#blockedUncertainMutationReplay(
+            request,
+            tool,
+            riskClass,
+            executionEffect!,
+            targetKey,
+            targetSummary,
+            "journal-unavailable"
+          );
+        }
+      }
+    }
+
     await this.#sessionDb.appendEvent(request.sessionId, {
       kind: "tool-called",
       tool: tool.name,
@@ -446,7 +539,16 @@ export class ToolExecutor {
         onSecureInputRequest: request.onSecureInputRequest
       };
       const running = runToolWithProtectedArguments(tool, request.input, executionContext, {
-        beforeDispatch: () => {
+        beforeDispatch: async () => {
+          if (durableOperationId !== undefined) {
+            const current = this.#activeCheckpoint();
+            const dispatched = current === undefined
+              ? undefined
+              : await this.#executionCheckpointController?.dispatchOperation(current.revision, durableOperationId);
+            if (!dispatched?.operations.some((operation) =>
+              operation.id === durableOperationId && operation.status === "dispatched"
+            )) throw new Error("Durable operation dispatch could not be journaled.");
+          }
           dispatchState = "started";
         },
         afterDispatch: () => {
@@ -509,6 +611,47 @@ export class ToolExecutor {
       this.#uncertainMutationKeys.add(mutationReplayKey);
     }
 
+    if (durableOperationId !== undefined) {
+      const status = settlement.sideEffectState === "possible"
+        ? "uncertain" as const
+        : result.ok && settlement.dispatchState === "finished"
+          ? "settled" as const
+          : "failed" as const;
+      const current = this.#activeCheckpoint();
+      if (current !== undefined) {
+        await this.#executionCheckpointController?.settleOperation(current.revision, durableOperationId, status);
+      }
+    }
+
+    const checkpoint = this.#activeCheckpoint();
+    if (checkpoint !== undefined) {
+      const verification = checkpointVerificationMatch({
+        tool,
+        effect: executionEffect,
+        value: request.input,
+        result,
+        operations: checkpoint.operations
+      });
+      if (verification !== undefined) {
+        await this.#executionCheckpointController?.verifyOperation(
+          checkpoint.revision,
+          verification.operationId,
+          verification.outcome
+        ).catch(() => undefined);
+      }
+      const facts = checkpointSafeFactsFromResult({
+        tool,
+        result,
+        observedAt: new Date().toISOString()
+      });
+      if (facts.length > 0) {
+        const latest = this.#activeCheckpoint();
+        if (latest !== undefined) {
+          await this.#executionCheckpointController?.retainFacts(latest.revision, facts).catch(() => undefined);
+        }
+      }
+    }
+
     const storedResult = redactToolResultForPersistence(truncateToolResultForStorage(result));
     await this.#sessionDb.appendEvent(request.sessionId, {
       kind: "tool-result",
@@ -561,6 +704,13 @@ export class ToolExecutor {
       });
     }
     return execution;
+  }
+
+  #activeCheckpoint() {
+    const checkpoint = this.#executionCheckpointController?.current();
+    return checkpoint !== undefined && !isTerminalCheckpointStatus(checkpoint.status)
+      ? checkpoint
+      : undefined;
   }
 
   getToolDefinition(name: string): ToolDefinition | undefined {
@@ -738,15 +888,27 @@ export class ToolExecutor {
     riskClass: ToolRiskClass,
     executionEffect: ToolExecutionEffect,
     targetKey: string | undefined,
-    targetSummary: string | undefined
+    targetSummary: string | undefined,
+    operationStatus: "dispatched" | "uncertain" | "journal-unavailable" = "uncertain"
   ): Promise<ToolExecutionRecord> {
+    const unavailable = operationStatus === "journal-unavailable";
+    const verifierAvailable = !unavailable && await this.#hasReliableVerifier(tool.name, executionEffect);
     const result: ToolResult = {
       ok: false,
       content: [
-        `Tool execution blocked: ${tool.name} matches a mutation whose outcome is uncertain in this turn.`,
-        "Verify the destination state before attempting another mutation."
+        unavailable
+          ? `Tool execution blocked: ${tool.name} could not be recorded in the bounded operation journal.`
+          : `Tool execution blocked: ${tool.name} matches a mutation whose outcome is ${operationStatus}.`,
+        unavailable
+          ? "No external mutation was dispatched. Retry after durable checkpoint storage is available."
+          : verifierAvailable
+            ? "Verify the destination state with a registered verifier before attempting another mutation."
+            : "No reliable verifier or idempotency mechanism is registered. Do not retry this mutation automatically."
       ].join("\n"),
-      metadata: settlementMetadata("uncertain-mutation-replay", "not_started", "none")
+      metadata: {
+        ...settlementMetadata(unavailable ? "operation-journal-unavailable" : "uncertain-mutation-replay", "not_started", "none"),
+        operationStatus
+      }
     };
     const persistedCall = redactToolCallForPersistence(tool.name, request.input, request.providerNativeToolCall);
     const storedResult = redactToolResultForPersistence(result);
@@ -774,14 +936,15 @@ export class ToolExecutor {
         tool_call_name: request.toolCallName,
         provider_native_tool_call: persistedCall.providerNativeToolCall,
         ok: false,
-        reason: "uncertain-mutation-replay"
+        reason: unavailable ? "operation-journal-unavailable" : "uncertain-mutation-replay"
       }
     });
     this.#trajectoryRecorder.record("tool-gated", {
       tool: tool.name,
       decision: "deny",
       riskClass,
-      reason: "uncertain-mutation-replay"
+      reason: unavailable ? "operation-journal-unavailable" : "uncertain-mutation-replay",
+      operationStatus
     });
     return {
       tool: toDefinition(tool),
@@ -806,15 +969,18 @@ export class ToolExecutor {
     executionEffect: ToolExecutionEffect,
     targetKey: string | undefined,
     targetSummary: string | undefined,
-    operationStatus: "verification-required" | "verified"
+    operationStatus: "verification-required" | "settled" | "verified"
   ): Promise<ToolExecutionRecord> {
+    const verifierAvailable = operationStatus !== "verified" && await this.#hasReliableVerifier(tool.name, executionEffect);
     const nextAction = operationStatus === "verified"
       ? "Continue from the verified result instead of repeating the mutation."
-      : "Use a registered independent verification tool before deciding whether any corrective mutation is needed.";
+      : verifierAvailable
+        ? "Use a registered independent verification tool before deciding whether any corrective mutation is needed."
+        : "No reliable verifier or idempotency mechanism is registered. Do not repeat this mutation automatically.";
     const result: ToolResult = {
       ok: false,
       content: [
-        `Tool execution skipped: the equivalent ${tool.name} mutation already succeeded in this turn (${operationStatus}).`,
+        `Tool execution skipped: the equivalent ${tool.name} mutation is already journaled (${operationStatus}).`,
         nextAction
       ].join("\n"),
       metadata: {
@@ -875,6 +1041,24 @@ export class ToolExecutor {
     };
   }
 
+  async #hasReliableVerifier(mutationTool: string, effect: ToolExecutionEffect): Promise<boolean> {
+    if (effect.connector === undefined) return false;
+    for (const definition of this.#registry.list()) {
+      const candidate = this.#registry.get(definition.name);
+      if (
+        candidate?.connector?.id !== effect.connector.id ||
+        candidate.capabilityMetadata?.verification?.verifies.includes(mutationTool) !== true ||
+        candidate.operationJournal?.verify === undefined
+      ) continue;
+      try {
+        if (await candidate.isAvailable()) return true;
+      } catch {
+        // An unavailable or failing verifier cannot make a retry safe.
+      }
+    }
+    return false;
+  }
+
   async #blockedSecurityResolution(
     request: NamedToolExecutionRequest,
     tool: import("../contracts/tool.js").RegisteredTool,
@@ -927,7 +1111,7 @@ async function runToolWithProtectedArguments(
   input: Record<string, unknown>,
   context: ToolExecutionContext,
   lifecycle: {
-    beforeDispatch(): void;
+    beforeDispatch(): void | Promise<void>;
     afterDispatch(): void;
   }
 ): Promise<ToolResult> {
@@ -1092,12 +1276,12 @@ async function dispatchTool(
   input: Record<string, unknown>,
   context: ToolExecutionContext,
   lifecycle: {
-    beforeDispatch(): void;
+    beforeDispatch(): void | Promise<void>;
     afterDispatch(): void;
   }
 ): Promise<ToolResult> {
   throwIfAborted(context.signal);
-  lifecycle.beforeDispatch();
+  await lifecycle.beforeDispatch();
   try {
     return await tool.run(input, context);
   } finally {

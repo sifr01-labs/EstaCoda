@@ -250,6 +250,11 @@ function createMcpTool(
     connector: mcpConnector(serverName),
     progressLabel: `calling MCP ${serverName}`,
     maxResultSizeChars: 12_000,
+    ...(artifactConfig === undefined ? {} : {
+      operationJournal: {
+        identify: (input: Record<string, unknown>) => artifactOperationIdentity(input, artifactConfig)
+      }
+    }),
     protectedArguments: protectedProjection.paths.map((path) => ({
       path,
       handling: protectedConfig?.handling ?? { persistence: "unknown", sharing: "unknown" },
@@ -713,6 +718,33 @@ function parseArtifactInputDescriptor(value: Record<string, unknown>): {
     return undefined;
   }
   return { reference: value.reference, sha256: value.sha256, sourceOrigin: value.sourceOrigin };
+}
+
+function artifactOperationIdentity(
+  input: Record<string, unknown>,
+  declaration: NonNullable<MCPServerConfig["artifactToolArguments"]>[string]
+): import("../contracts/tool.js").ToolOperationIdentity | undefined {
+  const descriptors: Array<{ reference: string; sha256: string; sourceOrigin?: string }> = [];
+  for (const candidate of findArtifactArgumentEnvelopes(input)) {
+    const matches = declaration.paths.filter((path) =>
+      matchesArtifactArgumentPattern(path, candidate.pointer, input)
+    );
+    if (matches.length !== 1) return undefined;
+    const descriptor = parseArtifactInputDescriptor(candidate.envelope);
+    if (descriptor === undefined) return undefined;
+    descriptors.push(descriptor);
+  }
+  if (descriptors.length === 0) return undefined;
+  const hashes = [...new Set(descriptors.map((descriptor) => descriptor.sha256))].sort();
+  const artifactHash = hashes.length === 1
+    ? hashes[0]!
+    : createHash("sha256").update(hashes.join("\0")).digest("hex");
+  const references = [...new Set(descriptors.map((descriptor) => descriptor.reference.slice("artifact://".length)))];
+  return {
+    ...(references.length === 1 ? { subjectId: references[0] } : {}),
+    artifactHash,
+    operationRevision: 1
+  };
 }
 
 function findArtifactArgumentEnvelopes(root: unknown): readonly { pointer: string; envelope: Record<string, unknown> }[] {

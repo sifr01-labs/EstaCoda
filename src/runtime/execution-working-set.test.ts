@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { ForegroundExecutionCheckpoint } from "../contracts/execution-checkpoint.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { ExecutionWorkingSetController } from "./execution-working-set.js";
 
@@ -320,6 +321,26 @@ describe("ExecutionWorkingSetController", () => {
     expect(controller.snapshot("turn-next", "session-b")).toBeUndefined();
   });
 
+  it("hydrates checkpoint-scoped facts and operations but drops them after terminal closure", () => {
+    let checkpoint = checkpointFixture();
+    const controller = new ExecutionWorkingSetController({
+      profileId: "profile-a",
+      sessionId: "session-a",
+      checkpointReader: { current: () => structuredClone(checkpoint) }
+    });
+    controller.beginTurn(TURN);
+
+    expect(controller.snapshot(TURN)).toMatchObject({
+      scope: "checkpoint",
+      facts: [expect.objectContaining({ summary: "Workspace ID: workspace-456", freshness: "historical" })],
+      operations: [expect.objectContaining({ mutationTool: "mcp.postman.importSpec", status: "verified" })]
+    });
+
+    checkpoint = { ...checkpoint, status: "completed" };
+    controller.beginTurn("turn-after-completion");
+    expect(controller.snapshot("turn-after-completion")).toBeUndefined();
+  });
+
   it("keeps profile/session instances isolated and bounds the fact count", () => {
     const first = new ExecutionWorkingSetController({ profileId: "profile-a", sessionId: "session-a" });
     const second = new ExecutionWorkingSetController({ profileId: "profile-b", sessionId: "session-b" });
@@ -339,3 +360,46 @@ describe("ExecutionWorkingSetController", () => {
     expect(() => controller.beginTurn("  ")).toThrow("turn ID must be non-empty");
   });
 });
+
+function checkpointFixture(): ForegroundExecutionCheckpoint {
+  return {
+    version: 1,
+    id: "checkpoint:working-set",
+    sessionId: "session-a",
+    profileId: "profile-a",
+    originTurnId: TURN,
+    revision: 6,
+    progressRevision: 3,
+    originalObjective: "Import the API specification",
+    status: "active",
+    qualificationReasons: ["cross_system"],
+    selectedSkillName: "api-integration",
+    taskClass: "general",
+    intentLabels: ["api.integration"],
+    requiredOperations: ["mutation", "verification"],
+    connectorIds: ["postman"],
+    artifactReferences: [],
+    safeFacts: [{
+      kind: "workspace_id",
+      value: "workspace-456",
+      sourceTool: "mcp.postman.getWorkspaces",
+      connectorId: "postman",
+      observedAt: "2030-01-01T00:00:00.000Z"
+    }],
+    operations: [{
+      id: "operation:fixture",
+      connectorId: "postman",
+      operation: "mcp.postman.importSpec",
+      destinationId: "workspace-456",
+      subjectId: "loans-v2",
+      artifactHash: "a".repeat(64),
+      operationRevision: 1,
+      status: "verified",
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:01.000Z"
+    }],
+    completionFloor: "mutation_with_verification",
+    createdAt: "2030-01-01T00:00:00.000Z",
+    updatedAt: "2030-01-01T00:00:01.000Z"
+  };
+}

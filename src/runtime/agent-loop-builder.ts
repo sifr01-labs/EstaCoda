@@ -360,7 +360,8 @@ export class AgentLoopBuilder {
     const executionWorkingSet = ownsForegroundSupervision
       ? new ExecutionWorkingSetController({
           profileId: substrate.profileId,
-          sessionId: input.sessionId
+          sessionId: input.sessionId,
+          checkpointReader: executionCheckpointController
         })
       : undefined;
     if (executionPlanController !== undefined) {
@@ -535,7 +536,8 @@ export class AgentLoopBuilder {
       sessionDb: input.sessionDb,
       trajectoryRecorder: input.trajectoryRecorder,
       workspaceRoot: substrate.workspaceRoot,
-      profileId: substrate.profileId
+      profileId: substrate.profileId,
+      executionCheckpointController
     });
     let delegationVisibleTools: readonly ToolDefinition[] = [];
     const delegationService = input.delegationServiceFactory?.({

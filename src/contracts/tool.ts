@@ -206,6 +206,23 @@ export type ToolExecutionEffect =
       connector?: { kind: "mcp"; id: string };
     };
 
+/** Safe semantic coordinates produced by trusted tool registration code. */
+export type ToolOperationIdentity = {
+  destinationId?: string;
+  subjectId?: string;
+  artifactHash?: string;
+  operationRevision?: number;
+};
+
+export type ToolOperationVerification = ToolOperationIdentity & {
+  outcome: "present" | "absent";
+};
+
+export type RegisteredToolOperationJournal<TInput = any> = {
+  identify(input: TInput): ToolOperationIdentity | undefined;
+  verify?(input: TInput, result: ToolResult): ToolOperationVerification | undefined;
+};
+
 export type RegisteredTool<TInput = any> = ToolDefinition & {
   /** Runtime-only declaration; ToolRegistry intentionally omits it from ToolDefinition. */
   protectedArguments?: readonly ProtectedToolArgumentDeclaration[];
@@ -220,6 +237,8 @@ export type RegisteredTool<TInput = any> = ToolDefinition & {
    * exclusive execution resource is treated as unsettled.
    */
   executionAbortSettlementGraceMs?: number;
+  /** Runtime-only reviewed operation identity; never projected into provider schemas. */
+  operationJournal?: RegisteredToolOperationJournal<TInput>;
   isAvailable(): Promise<boolean> | boolean;
   resolveSecurity?(input: TInput, context: ToolSecurityResolverContext): Promise<ToolSecurityResolution | undefined> | ToolSecurityResolution | undefined;
   run: ToolHandler<TInput>;

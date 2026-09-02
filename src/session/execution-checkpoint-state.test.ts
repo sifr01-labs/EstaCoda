@@ -161,6 +161,57 @@ describe("execution checkpoint state", () => {
     })).toMatchObject({ revision: 1, status: "active" });
   });
 
+  it("does not allow creation, correction, or artifact transitions to smuggle journal state", () => {
+    const active = checkpoint();
+    const fact = {
+      kind: "workspace_id" as const,
+      value: "workspace-1",
+      sourceTool: "mcp.postman.getWorkspaces",
+      connectorId: "postman",
+      observedAt: "2030-01-01T00:00:00.000Z"
+    };
+    const operation = {
+      id: "operation:1",
+      connectorId: "postman",
+      operation: "mcp.postman.importSpec",
+      destinationId: "workspace-1",
+      operationRevision: 1,
+      status: "planned" as const,
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:00.000Z"
+    };
+    const forgedCreation = { ...active, safeFacts: [fact] };
+    const forgedCorrection = {
+      ...active,
+      revision: 2,
+      latestUserCorrection: "Use another workspace.",
+      operations: [operation]
+    };
+    const forgedArtifact = {
+      ...active,
+      revision: 2,
+      progressRevision: 1,
+      artifactReferences: [{ id: "artifact-1", sha256: "a".repeat(64) }],
+      safeFacts: [fact]
+    };
+
+    expect(hydratableExecutionCheckpoint({
+      events: [checkpointEvent("created", forgedCreation)],
+      sessionId: "session-1",
+      profileId: "profile-1"
+    })).toBeUndefined();
+    expect(hydratableExecutionCheckpoint({
+      events: [checkpointEvent("created", active), checkpointEvent("corrected", forgedCorrection)],
+      sessionId: "session-1",
+      profileId: "profile-1"
+    })).toMatchObject({ revision: 1, safeFacts: [], operations: [] });
+    expect(hydratableExecutionCheckpoint({
+      events: [checkpointEvent("created", active), checkpointEvent("artifact_attached", forgedArtifact)],
+      sessionId: "session-1",
+      profileId: "profile-1"
+    })).toMatchObject({ revision: 1, artifactReferences: [], safeFacts: [] });
+  });
+
   it("hydrates a coherent artifact attachment but rejects replacement or fabricated progress", () => {
     const active = checkpoint();
     const attached = {
@@ -211,6 +262,8 @@ function checkpoint(): ForegroundExecutionCheckpoint {
     requiredOperations: ["read", "mutation", "verification"],
     connectorIds: ["postman"],
     artifactReferences: [],
+    safeFacts: [],
+    operations: [],
     completionFloor: "mutation_with_verification",
     createdAt: "2030-01-01T00:00:00.000Z",
     updatedAt: "2030-01-01T00:00:00.000Z"

@@ -363,6 +363,8 @@ describe("SessionCompressionService", () => {
         requiredOperations: ["read", "mutation", "verification"],
         connectorIds: ["postman"],
         artifactReferences: [],
+        safeFacts: [],
+        operations: [],
         completionFloor: "mutation_with_verification",
         createdAt: "2030-01-01T00:00:00.000Z",
         updatedAt: "2030-01-01T00:00:00.000Z"
@@ -410,6 +412,8 @@ describe("SessionCompressionService", () => {
         requiredOperations: ["read", "mutation", "verification"],
         connectorIds: ["postman"],
         artifactReferences: [artifactReference],
+        safeFacts: [],
+        operations: [],
         completionFloor: "mutation_with_verification",
         createdAt: "2030-01-01T00:00:00.000Z",
         updatedAt: "2030-01-01T00:01:00.000Z"
@@ -435,6 +439,8 @@ describe("SessionCompressionService", () => {
         requiredOperations: ["read", "mutation", "verification"],
         connectorIds: ["postman"],
         artifactReferences: [artifactReference],
+        safeFacts: [],
+        operations: [],
         completionFloor: "mutation_with_verification",
         lastTerminationCause: "provider_failed",
         createdAt: "2030-01-01T00:00:00.000Z",

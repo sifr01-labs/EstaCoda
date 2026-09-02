@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ExecutionCheckpointLifecycleEvent } from "../contracts/execution-checkpoint.js";
 import type { ExecutionFinalOutcome } from "../contracts/execution-plan.js";
+import { hydratableExecutionCheckpoint } from "../session/execution-checkpoint-state.js";
 import { ExecutionCheckpointController, ExecutionCheckpointConflictError } from "./execution-checkpoint-controller.js";
 
 const now = "2030-01-01T00:00:00.000Z";
@@ -82,6 +84,83 @@ describe("ExecutionCheckpointController", () => {
     });
     expect(duplicate).toEqual(attached);
     expect(JSON.stringify(attached)).not.toContain("/");
+  });
+
+  it("hydrates reviewed facts and a coherent external-operation lifecycle", async () => {
+    const events: ExecutionCheckpointLifecycleEvent[] = [];
+    let tick = 0;
+    const controller = new ExecutionCheckpointController({
+      sessionId: "session-1",
+      profileId: "profile-1",
+      now: () => new Date(Date.parse(now) + tick++ * 1_000).toISOString(),
+      createId: () => "checkpoint:1",
+      record: async (event) => { events.push(event); }
+    });
+    const created = await controller.ensure(creation());
+    const facts = await controller.retainFacts(created.revision, [
+      { kind: "workspace_id", value: "workspace-1", sourceTool: "mcp.postman.getWorkspaces", connectorId: "postman", observedAt: now },
+      { kind: "collection_id", value: "collection-1", sourceTool: "mcp.postman.getCollection", connectorId: "postman", observedAt: now }
+    ]);
+    const coordinates = {
+      connectorId: "postman",
+      operation: "mcp.postman.importSpec",
+      destinationId: "workspace-1",
+      subjectId: "loans-v2",
+      artifactHash: "a".repeat(64),
+      operationRevision: 1
+    };
+    const planned = await controller.planOperation(facts!.revision, coordinates);
+    const operationId = planned!.operations[0]!.id;
+    const dispatched = await controller.dispatchOperation(planned!.revision, operationId);
+    const settled = await controller.settleOperation(dispatched!.revision, operationId, "settled");
+    const verified = await controller.verifyOperation(settled!.revision, operationId, "present");
+
+    expect(verified).toMatchObject({
+      revision: 6,
+      progressRevision: 3,
+      safeFacts: [
+        { kind: "workspace_id", value: "workspace-1" },
+        { kind: "collection_id", value: "collection-1" }
+      ],
+      operations: [{ status: "verified", destinationId: "workspace-1", subjectId: "loans-v2" }]
+    });
+    expect(events.map((event) => event.transition)).toEqual([
+      "created", "facts_retained", "operation_planned", "operation_dispatched", "operation_settled", "operation_verified"
+    ]);
+    expect(hydratableExecutionCheckpoint({
+      events,
+      sessionId: "session-1",
+      profileId: "profile-1"
+    })).toEqual(verified);
+  });
+
+  it("rejects secret-looking facts and semantic coordinates instead of persisting them", async () => {
+    const events: ExecutionCheckpointLifecycleEvent[] = [];
+    const controller = new ExecutionCheckpointController({
+      sessionId: "session-1",
+      profileId: "profile-1",
+      now: () => now,
+      createId: () => "checkpoint:1",
+      record: async (event) => { events.push(event); }
+    });
+    const created = await controller.ensure(creation());
+
+    await expect(controller.retainFacts(created.revision, [{
+      kind: "workspace_id",
+      value: "api_key=sk-secret-1234567890",
+      sourceTool: "mcp.postman.getWorkspaces",
+      observedAt: now
+    }])).rejects.toThrow("safeFacts.value is invalid");
+    await expect(controller.planOperation(created.revision, {
+      connectorId: "postman",
+      operation: "mcp.postman.importSpec",
+      destinationId: "password=hunter2",
+      operationRevision: 1
+    })).rejects.toThrow("sensitive content");
+
+    expect(events).toHaveLength(1);
+    expect(JSON.stringify(events)).not.toContain("sk-secret");
+    expect(JSON.stringify(events)).not.toContain("hunter2");
   });
 
   it("serializes writes and rejects a stale expected revision", async () => {

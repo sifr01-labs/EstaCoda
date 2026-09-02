@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ToolRiskClass } from "../contracts/tool.js";
+import type { ExecutionCheckpointReader } from "../contracts/execution-checkpoint.js";
+import { isTerminalCheckpointStatus } from "../session/execution-checkpoint-state.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import {
   ExecutionOperationLedger,
@@ -46,6 +48,7 @@ export type ExecutionWorkingFact = {
 
 export type ExecutionWorkingSet = {
   visibleTurnId: string;
+  scope?: "visible-turn" | "checkpoint";
   facts: ExecutionWorkingFact[];
   operations: ExecutionOperationReceipt[];
 };
@@ -61,17 +64,25 @@ export class ExecutionWorkingSetController {
   readonly #now: () => Date;
   readonly #facts = new Map<string, StoredFact>();
   readonly #operations = new ExecutionOperationLedger();
+  readonly #checkpointReader: ExecutionCheckpointReader | undefined;
   #sessionId: string;
   #visibleTurnId: string | undefined;
 
-  constructor(input: { profileId: string; sessionId: string; now?: () => Date }) {
+  constructor(input: {
+    profileId: string;
+    sessionId: string;
+    now?: () => Date;
+    checkpointReader?: ExecutionCheckpointReader;
+  }) {
     this.#profileId = input.profileId;
     this.#sessionId = input.sessionId;
     this.#now = input.now ?? (() => new Date());
+    this.#checkpointReader = input.checkpointReader;
   }
 
   beginTurn(visibleTurnId: string, sessionId = this.#sessionId): void {
     this.#syncScope(visibleTurnId, sessionId);
+    this.#hydrateCheckpointFacts();
     for (const stored of this.#facts.values()) {
       stored.fact.freshness = "historical";
     }
@@ -112,12 +123,27 @@ export class ExecutionWorkingSetController {
 
   snapshot(visibleTurnId: string, sessionId = this.#sessionId): ExecutionWorkingSet | undefined {
     this.#syncScope(visibleTurnId, sessionId);
-    const operations = this.#operations.snapshot();
+    const candidateCheckpoint = this.#checkpointReader?.current();
+    const checkpoint = candidateCheckpoint !== undefined && !isTerminalCheckpointStatus(candidateCheckpoint.status)
+      ? candidateCheckpoint
+      : undefined;
+    const durableOperations: ExecutionOperationReceipt[] = (checkpoint?.operations ?? []).map((operation) => ({
+      operationId: operation.id,
+      mutationTool: operation.operation,
+      mutationCallId: operation.id,
+      status: operation.status,
+      targetSummary: checkpointOperationSummary(operation)
+    }));
+    const operations = [...new Map([
+      ...this.#operations.snapshot(),
+      ...durableOperations
+    ].map((operation) => [operation.operationId, operation])).values()];
     if (this.#facts.size === 0 && operations.length === 0) {
       return undefined;
     }
     return {
       visibleTurnId,
+      scope: checkpoint === undefined ? "visible-turn" : "checkpoint",
       facts: [...this.#facts.values()].map(({ fact }) => ({ ...fact })),
       operations
     };
@@ -143,6 +169,25 @@ export class ExecutionWorkingSetController {
       this.clear();
     }
     this.#visibleTurnId = scopedTurnId;
+  }
+
+  #hydrateCheckpointFacts(): void {
+    const checkpoint = this.#checkpointReader?.current();
+    if (checkpoint === undefined || isTerminalCheckpointStatus(checkpoint.status)) return;
+    for (const fact of checkpoint.safeFacts) {
+      const key = `checkpoint:${fact.kind}:${fact.value}`;
+      this.#facts.set(key, {
+        fact: {
+          key,
+          summary: checkpointFactSummary(fact.kind, fact.value),
+          sourceCallId: `checkpoint:${checkpoint.id}`,
+          observedAt: fact.observedAt,
+          freshness: "historical"
+        },
+        namespace: fact.connectorId === undefined ? "checkpoint" : `mcp.${fact.connectorId}`,
+        identities: new Set([normalizeIdentity(fact.value)])
+      });
+    }
   }
 
   #invalidate(namespace: string, identities: Set<string>): void {
@@ -399,6 +444,30 @@ function humanizeField(field: string): string {
     .replace(/[_-]+/gu, " ")
     .trim();
   return words.replace(/\bid\b/giu, "ID").replace(/^./u, (character) => character.toLocaleUpperCase());
+}
+
+function checkpointFactSummary(kind: import("../contracts/execution-checkpoint.js").ExecutionCheckpointSafeFactKind, value: string): string {
+  const label: Record<typeof kind, string> = {
+    workspace_id: "Workspace ID",
+    collection_id: "Collection ID",
+    specification_id: "Specification ID",
+    product_name: "Product Name",
+    artifact_id: "Artifact ID",
+    artifact_hash: "Artifact Hash"
+  };
+  return `${label[kind]}: ${value}`;
+}
+
+function checkpointOperationSummary(
+  operation: import("../contracts/execution-checkpoint.js").ExecutionCheckpointOperation
+): string {
+  return [
+    `connector=${operation.connectorId}`,
+    operation.destinationId === undefined ? undefined : `destination=${operation.destinationId}`,
+    operation.subjectId === undefined ? undefined : `subject=${operation.subjectId}`,
+    operation.artifactHash === undefined ? undefined : `artifact=${operation.artifactHash}`,
+    `revision=${operation.operationRevision}`
+  ].filter((value): value is string => value !== undefined).join(" · ");
 }
 
 function normalizeIdentity(value: string): string {

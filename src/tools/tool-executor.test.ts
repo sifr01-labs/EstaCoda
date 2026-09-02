@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { capabilityFirstDefaults, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
+import type { ExecutionCheckpointJournalController } from "../contracts/execution-checkpoint.js";
 import type { RegisteredTool, ToolExecutionContext, ToolResult } from "../contracts/tool.js";
 import { DelegateCallBudget } from "../delegation/delegate-call-budget.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
@@ -13,6 +15,12 @@ import { summarizeSecurityTarget, ToolExecutor } from "./tool-executor.js";
 import { attachEphemeralVisionImages, ephemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 import { WorkspaceApprovalController, WorkspaceApprovalStore } from "../security/workspace-approval-controller.js";
 import { TurnMcpReadLedger } from "../runtime/turn-tool-feedback-ledger.js";
+import {
+  ExecutionCheckpointController,
+  executionCheckpointOperationId
+} from "../runtime/execution-checkpoint-controller.js";
+import { hydratableExecutionCheckpoint } from "../session/execution-checkpoint-state.js";
+import { semanticMutationKey } from "./execution-operation-ledger.js";
 import type { SecureInputTransferGroupConsumer, SecureInputTransferGroupRequest, SecureInputTransferRequestHandler } from "../contracts/secure-input.js";
 
 function createMockPolicy(decision: "allow" | "deny" = "allow"): SecurityPolicy {
@@ -125,12 +133,15 @@ async function setupExecutor(options: {
   policy?: SecurityPolicy;
   tools?: RegisteredTool[];
   defaultExecutionTimeoutMs?: number;
+  sessionDb?: SessionDB;
+  createSession?: boolean;
+  executionCheckpointController?: ExecutionCheckpointJournalController;
 }) {
   const registry = new ToolRegistry();
   for (const tool of options.tools ?? []) {
     registry.register(tool);
   }
-  const sessionDb: SessionDB = new InMemorySessionDB();
+  const sessionDb: SessionDB = options.sessionDb ?? new InMemorySessionDB();
   const trajectoryRecorder = new TrajectoryRecorder({
     profileId: "test",
     sessionId: "test-session",
@@ -142,10 +153,46 @@ async function setupExecutor(options: {
     sessionDb,
     trajectoryRecorder,
     workspaceRoot: process.cwd(),
+    executionCheckpointController: options.executionCheckpointController,
     defaultExecutionTimeoutMs: options.defaultExecutionTimeoutMs
   });
-  await sessionDb.createSession({ profileId: "test", id: "test-session" });
+  if (options.createSession !== false) {
+    await sessionDb.createSession({ profileId: "test", id: "test-session" });
+  }
   return { executor, sessionDb, trajectoryRecorder };
+}
+
+async function createCheckpointController(
+  sessionDb: SessionDB,
+  options: { hydrate?: boolean } = {}
+): Promise<ExecutionCheckpointController> {
+  const controller = new ExecutionCheckpointController({
+    sessionId: "test-session",
+    profileId: "test",
+    record: async (event) => { await sessionDb.appendEvent("test-session", event); }
+  });
+  if (options.hydrate === true) {
+    const checkpoint = hydratableExecutionCheckpoint({
+      events: await sessionDb.listEvents("test-session"),
+      sessionId: "test-session",
+      profileId: "test"
+    });
+    if (checkpoint === undefined) throw new Error("Expected a persisted execution checkpoint.");
+    controller.hydrate(checkpoint);
+  } else {
+    await controller.ensure({
+      originTurnId: "turn-one",
+      originalObjective: "Import and verify the API specification",
+      qualificationReasons: ["cross_system", "verified_mutation"],
+      selectedSkillName: "api-integration",
+      taskClass: "general",
+      intentLabels: ["api.integration"],
+      requiredOperations: ["mutation", "verification", "artifact_relay"],
+      connectorIds: ["postman"],
+      completionFloor: "mutation_with_verification"
+    });
+  }
+  return controller;
 }
 
 async function persistedExecutionState(
@@ -1144,6 +1191,345 @@ describe("ToolExecutor input redaction", () => {
 });
 
 describe("ToolExecutor tool-call metadata persistence", () => {
+  it("retains only reviewed safe facts across runtime recreation", async () => {
+    const sessionDb: SessionDB = new InMemorySessionDB();
+    await sessionDb.createSession({ profileId: "test", id: "test-session" });
+    const controller = await createCheckpointController(sessionDb);
+    const secret = "sk-fact-secret-1234567890";
+    const read: RegisteredTool = {
+      ...createEchoTool("mcp.postman.getWorkspaceAndCollection"),
+      riskClass: "read-only-network",
+      toolsets: ["mcp"],
+      connector: { kind: "mcp", id: "postman" },
+      run: async () => ({
+        ok: true,
+        content: "reviewed lookup complete",
+        metadata: {
+          _estacoda_continuity_facts: [
+            { field: "workspaceId", value: "workspace-1", kind: "identifier" },
+            { field: "collectionId", value: "collection-1", kind: "identifier" },
+            { field: "workspaceId", value: secret, kind: "identifier" },
+            { field: "arbitraryField", value: "must-not-be-retained", kind: "identifier" }
+          ]
+        }
+      })
+    };
+    const { executor } = await setupExecutor({
+      tools: [read],
+      sessionDb,
+      createSession: false,
+      executionCheckpointController: controller
+    });
+
+    await executor.executeTool({
+      tool: read.name,
+      input: {},
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      visibleTurnId: "turn-one",
+      toolCallId: "read-identifiers"
+    });
+    const resumed = await createCheckpointController(sessionDb, { hydrate: true });
+
+    expect(resumed.current()?.safeFacts).toEqual([
+      expect.objectContaining({ kind: "workspace_id", value: "workspace-1" }),
+      expect.objectContaining({ kind: "collection_id", value: "collection-1" })
+    ]);
+    const persistedEvents = await sessionDb.listEvents("test-session");
+    const persisted = JSON.stringify(persistedEvents);
+    const checkpointEvents = JSON.stringify(persistedEvents.filter((event) => event.kind === "execution-checkpoint-updated"));
+    expect(persisted).not.toContain(secret);
+    expect(checkpointEvents).not.toContain("must-not-be-retained");
+  });
+
+  it("persists dispatch before mutation, verifies uncertain recovery, and keeps different updates possible", async () => {
+    const sessionDb: SessionDB = new InMemorySessionDB();
+    await sessionDb.createSession({ profileId: "test", id: "test-session" });
+    const firstController = await createCheckpointController(sessionDb);
+    let retryAllowed = false;
+    let destinationPresent = false;
+    let observedDispatchedBeforeRun = false;
+    let activeController = firstController;
+    const secret = "sk-journal-secret-1234567890";
+    const secretHash = createHash("sha256").update(secret).digest("hex");
+    const runMutation = vi.fn(async (): Promise<ToolResult> => {
+      observedDispatchedBeforeRun = activeController.current()?.operations.some((operation) =>
+        operation.status === "dispatched"
+      ) === true;
+      if (!retryAllowed) return await new Promise<ToolResult>(() => undefined);
+      return { ok: true, content: "imported" };
+    });
+    const mutation: RegisteredTool = {
+      ...createEchoTool("mcp.postman.importSpec"),
+      riskClass: "external-side-effect",
+      toolsets: ["mcp"],
+      connector: { kind: "mcp", id: "postman" },
+      executionTimeoutMs: 10,
+      operationJournal: {
+        identify: (input) => ({
+          destinationId: String(input.workspaceId),
+          subjectId: String(input.productId),
+          artifactHash: String(input.artifactHash),
+          operationRevision: Number(input.operationRevision ?? 1)
+        })
+      },
+      run: runMutation
+    };
+    const verifier: RegisteredTool = {
+      ...createEchoTool("mcp.postman.getImportedSpec"),
+      riskClass: "read-only-network",
+      toolsets: ["mcp"],
+      connector: { kind: "mcp", id: "postman" },
+      capabilityMetadata: { verification: { verifies: [mutation.name] } },
+      operationJournal: {
+        identify: () => undefined,
+        verify: (input) => ({
+          destinationId: String(input.workspaceId),
+          subjectId: String(input.productId),
+          artifactHash: String(input.artifactHash),
+          operationRevision: Number(input.operationRevision ?? 1),
+          outcome: destinationPresent ? "present" : "absent"
+        })
+      },
+      run: async () => ({ ok: true, content: destinationPresent ? "present" : "absent" })
+    };
+    const first = await setupExecutor({
+      tools: [mutation, verifier],
+      sessionDb,
+      createSession: false,
+      executionCheckpointController: firstController
+    });
+    const input = {
+      workspaceId: "workspace-1",
+      productId: "loans-v2",
+      artifactHash: "a".repeat(64),
+      operationRevision: 1,
+      apiKey: secret
+    };
+
+    const interrupted = await first.executor.executeTool({
+      tool: mutation.name,
+      input,
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      visibleTurnId: "turn-one",
+      toolCallId: "import-interrupted"
+    });
+
+    expect(observedDispatchedBeforeRun).toBe(true);
+    expect(interrupted?.settlement).toMatchObject({ terminalStatus: "timed_out", sideEffectState: "possible" });
+    expect(firstController.current()?.operations).toEqual([
+      expect.objectContaining({ status: "uncertain", destinationId: "workspace-1", subjectId: "loans-v2" })
+    ]);
+    expect(firstController.current()?.operations[0]?.id).toBe(executionCheckpointOperationId({
+      connectorId: "postman",
+      operation: mutation.name,
+      destinationId: "workspace-1",
+      subjectId: "loans-v2",
+      artifactHash: "a".repeat(64),
+      operationRevision: 1
+    }));
+
+    const resumedController = await createCheckpointController(sessionDb, { hydrate: true });
+    activeController = resumedController;
+    const resumed = await setupExecutor({
+      tools: [mutation, verifier],
+      sessionDb,
+      createSession: false,
+      executionCheckpointController: resumedController
+    });
+    const replay = await resumed.executor.executeTool({
+      tool: mutation.name,
+      input,
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      visibleTurnId: "turn-two",
+      toolCallId: "import-replay"
+    });
+    expect(replay).toMatchObject({
+      decision: "deny",
+      result: { metadata: { reason: "uncertain-mutation-replay", operationStatus: "uncertain" } }
+    });
+
+    await resumed.executor.executeTool({
+      tool: verifier.name,
+      input,
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      visibleTurnId: "turn-two",
+      toolCallId: "verify-absent"
+    });
+    expect(resumedController.current()?.operations[0]?.status).toBe("failed");
+
+    retryAllowed = true;
+    const retried = await resumed.executor.executeTool({
+      tool: mutation.name,
+      input,
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      visibleTurnId: "turn-two",
+      toolCallId: "import-retry"
+    });
+    expect(retried).toMatchObject({ decision: "allow", result: { ok: true } });
+    expect(resumedController.current()?.operations[0]?.status).toBe("settled");
+
+    destinationPresent = true;
+    await resumed.executor.executeTool({
+      tool: verifier.name,
+      input,
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      visibleTurnId: "turn-two",
+      toolCallId: "verify-present"
+    });
+    expect(resumedController.current()?.operations[0]?.status).toBe("verified");
+    const verifiedReplay = await resumed.executor.executeTool({
+      tool: mutation.name,
+      input,
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      visibleTurnId: "turn-two",
+      toolCallId: "import-after-verification"
+    });
+    expect(verifiedReplay).toMatchObject({
+      decision: "deny",
+      result: { metadata: { reason: "completed-mutation-replay", operationStatus: "verified" } }
+    });
+
+    const differentUpdate = await resumed.executor.executeTool({
+      tool: mutation.name,
+      input: { ...input, productId: "payments-v1" },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      visibleTurnId: "turn-two",
+      toolCallId: "import-different-product"
+    });
+    expect(differentUpdate).toMatchObject({ decision: "allow", result: { ok: true } });
+    expect(runMutation).toHaveBeenCalledTimes(3);
+
+    const persisted = JSON.stringify(await sessionDb.listEvents("test-session"));
+    expect(persisted).not.toContain(secret);
+    expect(persisted).not.toContain(secretHash);
+    expect(persisted).not.toContain(semanticMutationKey(mutation.name, input));
+  });
+
+  it("returns one coherent blocker when an uncertain mutation has no reliable verifier", async () => {
+    const sessionDb: SessionDB = new InMemorySessionDB();
+    await sessionDb.createSession({ profileId: "test", id: "test-session" });
+    const firstController = await createCheckpointController(sessionDb);
+    const run = vi.fn(async (): Promise<ToolResult> => await new Promise<ToolResult>(() => undefined));
+    const mutation: RegisteredTool = {
+      ...createEchoTool("mcp.destination.publish"),
+      riskClass: "external-side-effect",
+      toolsets: ["mcp"],
+      connector: { kind: "mcp", id: "destination" },
+      executionTimeoutMs: 10,
+      operationJournal: {
+        identify: (input) => ({ destinationId: String(input.destinationId), subjectId: String(input.subjectId) })
+      },
+      run
+    };
+    const first = await setupExecutor({
+      tools: [mutation],
+      sessionDb,
+      createSession: false,
+      executionCheckpointController: firstController
+    });
+    const request = {
+      tool: mutation.name,
+      input: { destinationId: "workspace-1", subjectId: "loans-v2" },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      visibleTurnId: "turn-one"
+    } as const;
+    await first.executor.executeTool(request);
+
+    const resumedController = await createCheckpointController(sessionDb, { hydrate: true });
+    const resumed = await setupExecutor({
+      tools: [mutation],
+      sessionDb,
+      createSession: false,
+      executionCheckpointController: resumedController
+    });
+    const blocked = await resumed.executor.executeTool({ ...request, visibleTurnId: "turn-two" });
+
+    expect(blocked).toMatchObject({
+      decision: "deny",
+      result: { metadata: { reason: "uncertain-mutation-replay" } }
+    });
+    expect(blocked?.result?.content).toContain("No reliable verifier or idempotency mechanism is registered");
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("does not dispatch a checkpointed mutation when its declared journal identity is unsafe", async () => {
+    const sessionDb: SessionDB = new InMemorySessionDB();
+    await sessionDb.createSession({ profileId: "test", id: "test-session" });
+    const controller = await createCheckpointController(sessionDb);
+    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "must not run" }));
+    const mutation: RegisteredTool = {
+      ...createEchoTool("mcp.postman.importSpec"),
+      riskClass: "external-side-effect",
+      toolsets: ["mcp"],
+      connector: { kind: "mcp", id: "postman" },
+      operationJournal: { identify: () => ({ destinationId: "password=hunter2" }) },
+      run
+    };
+    const { executor } = await setupExecutor({
+      tools: [mutation],
+      sessionDb,
+      createSession: false,
+      executionCheckpointController: controller
+    });
+
+    const blocked = await executor.executeTool({
+      tool: mutation.name,
+      input: { workspaceId: "workspace-1" },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      visibleTurnId: "turn-one"
+    });
+
+    expect(blocked).toMatchObject({
+      decision: "deny",
+      result: { metadata: { reason: "operation-journal-unavailable" } }
+    });
+    expect(run).not.toHaveBeenCalled();
+    expect(controller.current()?.operations).toEqual([]);
+  });
+
+  it("does not let a terminal checkpoint govern later unrelated mutations", async () => {
+    const sessionDb: SessionDB = new InMemorySessionDB();
+    await sessionDb.createSession({ profileId: "test", id: "test-session" });
+    const controller = await createCheckpointController(sessionDb);
+    await controller.prepareForTurn("cancel");
+    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "updated" }));
+    const mutation: RegisteredTool = {
+      ...createEchoTool("mcp.postman.unrelatedUpdate"),
+      riskClass: "external-side-effect",
+      toolsets: ["mcp"],
+      connector: { kind: "mcp", id: "postman" },
+      operationJournal: { identify: () => ({ destinationId: "password=hunter2" }) },
+      run
+    };
+    const { executor } = await setupExecutor({
+      tools: [mutation],
+      sessionDb,
+      createSession: false,
+      executionCheckpointController: controller
+    });
+
+    const execution = await executor.executeTool({
+      tool: mutation.name,
+      input: { target: "unrelated" },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      visibleTurnId: "turn-after-cancel"
+    });
+
+    expect(execution).toMatchObject({ decision: "allow", result: { ok: true } });
+    expect(run).toHaveBeenCalledOnce();
+  });
+
   it("blocks equivalent successful mutations until verification and after verified completion", async () => {
     const runMutation = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "created" }));
     const mutation: RegisteredTool = {
@@ -1242,6 +1628,7 @@ describe("ToolExecutor tool-call metadata persistence", () => {
       riskClass: "external-side-effect",
       toolsets: ["mcp"],
       connector: { kind: "mcp", id: "postman" },
+      operationJournal: { identify: () => ({ subjectId: "collection-alpha" }) },
       resolveSecurity: () => ({
         riskClass: "external-side-effect",
         targetKey: "collection:alpha",
@@ -1301,6 +1688,7 @@ describe("ToolExecutor tool-call metadata persistence", () => {
     expect(executor.getToolDefinition(verifier.name)).not.toHaveProperty("capabilityMetadata");
     expect(executor.getToolDefinition(verifier.name)).not.toHaveProperty("executionConcurrency");
     expect(executor.getToolDefinition(verifier.name)).not.toHaveProperty("executionTimeoutMs");
+    expect(executor.getToolDefinition(mutation.name)).not.toHaveProperty("operationJournal");
     expect(executor.getToolExecutionConcurrency(verifier.name, {}, "test-session")).toEqual({
       mode: "exclusive",
       resourceKey: "postman:test-session"

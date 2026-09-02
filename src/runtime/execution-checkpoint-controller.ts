@@ -1,15 +1,22 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type {
   ExecutionCheckpointAttemptSettlement,
   ExecutionCheckpointBlocker,
   ExecutionCheckpointArtifactReference,
   ExecutionCheckpointCreationInput,
   ExecutionCheckpointLifecycleEvent,
+  ExecutionCheckpointOperationCoordinates,
+  ExecutionCheckpointOperationStatus,
+  ExecutionCheckpointSafeFact,
   ExecutionCheckpointReader,
   ExecutionCheckpointTransition,
   ForegroundExecutionCheckpoint
 } from "../contracts/execution-checkpoint.js";
-import { EXECUTION_CHECKPOINT_VERSION } from "../contracts/execution-checkpoint.js";
+import {
+  EXECUTION_CHECKPOINT_MAX_FACTS,
+  EXECUTION_CHECKPOINT_MAX_OPERATIONS,
+  EXECUTION_CHECKPOINT_VERSION
+} from "../contracts/execution-checkpoint.js";
 import {
   checkpointEvent,
   cloneExecutionCheckpoint,
@@ -98,6 +105,8 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
         requiredOperations: input.requiredOperations,
         connectorIds: input.connectorIds,
         artifactReferences: [],
+        safeFacts: [],
+        operations: [],
         completionFloor: input.completionFloor,
         createdAt: now,
         updatedAt: now
@@ -166,6 +175,87 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
     });
   }
 
+  async retainFacts(
+    expectedRevision: number,
+    facts: readonly ExecutionCheckpointSafeFact[]
+  ): Promise<ForegroundExecutionCheckpoint | undefined> {
+    return await this.#transition(expectedRevision, "facts_retained", (current) => {
+      const existing = new Set(current.safeFacts.map((fact) => `${fact.kind}\0${fact.value}`));
+      const additions = facts
+        .filter((fact) => !existing.has(`${fact.kind}\0${fact.value}`))
+        .slice(0, Math.max(0, EXECUTION_CHECKPOINT_MAX_FACTS - current.safeFacts.length));
+      if (additions.length === 0) return current;
+      return {
+        ...current,
+        revision: current.revision + 1,
+        progressRevision: current.progressRevision + 1,
+        safeFacts: [...current.safeFacts, ...additions.map((fact) => ({ ...fact }))],
+        updatedAt: this.#now()
+      };
+    });
+  }
+
+  async planOperation(
+    expectedRevision: number,
+    coordinates: ExecutionCheckpointOperationCoordinates
+  ): Promise<ForegroundExecutionCheckpoint | undefined> {
+    return await this.#transition(expectedRevision, "operation_planned", (current) => {
+      const id = executionCheckpointOperationId(coordinates);
+      const existingIndex = current.operations.findIndex((operation) => operation.id === id);
+      const now = this.#now();
+      if (existingIndex >= 0) {
+        const existing = current.operations[existingIndex]!;
+        if (existing.status !== "failed") return current;
+        const operations = current.operations.map((operation, index) => index === existingIndex
+          ? { ...operation, status: "planned" as const, updatedAt: now }
+          : operation);
+        return { ...current, revision: current.revision + 1, operations, updatedAt: now };
+      }
+      if (current.operations.length >= EXECUTION_CHECKPOINT_MAX_OPERATIONS) return current;
+      return {
+        ...current,
+        revision: current.revision + 1,
+        operations: [...current.operations, {
+          id,
+          ...coordinates,
+          status: "planned",
+          createdAt: now,
+          updatedAt: now
+        }],
+        updatedAt: now
+      };
+    });
+  }
+
+  async dispatchOperation(
+    expectedRevision: number,
+    operationId: string
+  ): Promise<ForegroundExecutionCheckpoint | undefined> {
+    return await this.#updateOperation(expectedRevision, operationId, "operation_dispatched", "dispatched", true);
+  }
+
+  async settleOperation(
+    expectedRevision: number,
+    operationId: string,
+    status: Extract<ExecutionCheckpointOperationStatus, "settled" | "failed" | "uncertain">
+  ): Promise<ForegroundExecutionCheckpoint | undefined> {
+    return await this.#updateOperation(expectedRevision, operationId, "operation_settled", status, false);
+  }
+
+  async verifyOperation(
+    expectedRevision: number,
+    operationId: string,
+    outcome: "present" | "absent"
+  ): Promise<ForegroundExecutionCheckpoint | undefined> {
+    return await this.#updateOperation(
+      expectedRevision,
+      operationId,
+      "operation_verified",
+      outcome === "present" ? "verified" : "failed",
+      true
+    );
+  }
+
   async prepareForTurn(userText: string): Promise<ExecutionCheckpointTurnPreparation> {
     const current = this.current();
     if (current === undefined || isTerminalCheckpointStatus(current.status)) {
@@ -211,6 +301,36 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
     }));
   }
 
+  async #updateOperation(
+    expectedRevision: number,
+    operationId: string,
+    transition: Extract<ExecutionCheckpointTransition,
+      "operation_dispatched" | "operation_settled" | "operation_verified">,
+    status: ExecutionCheckpointOperationStatus,
+    semanticProgress: boolean
+  ): Promise<ForegroundExecutionCheckpoint | undefined> {
+    return await this.#transition(expectedRevision, transition, (current) => {
+      const index = current.operations.findIndex((operation) => operation.id === operationId);
+      const existingStatus = current.operations[index]?.status;
+      const sourceAllowed = transition === "operation_dispatched"
+        ? existingStatus === "planned"
+        : transition === "operation_settled"
+          ? existingStatus === "dispatched"
+          : existingStatus !== undefined && ["dispatched", "settled", "uncertain"].includes(existingStatus);
+      if (index < 0 || existingStatus === status || !sourceAllowed) return current;
+      const now = this.#now();
+      return {
+        ...current,
+        revision: current.revision + 1,
+        progressRevision: current.progressRevision + (semanticProgress ? 1 : 0),
+        operations: current.operations.map((operation, candidateIndex) => candidateIndex === index
+          ? { ...operation, status, updatedAt: now }
+          : operation),
+        updatedAt: now
+      };
+    });
+  }
+
   async #transition(
     expectedRevision: number,
     transition: ExecutionCheckpointTransition,
@@ -245,6 +365,17 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
     this.#writeQueue = result.then(() => undefined, () => undefined);
     return await result;
   }
+}
+
+export function executionCheckpointOperationId(coordinates: ExecutionCheckpointOperationCoordinates): string {
+  return `operation:${createHash("sha256").update(JSON.stringify([
+    coordinates.connectorId,
+    coordinates.operation,
+    coordinates.destinationId ?? null,
+    coordinates.subjectId ?? null,
+    coordinates.artifactHash ?? null,
+    coordinates.operationRevision
+  ])).digest("hex").slice(0, 32)}`;
 }
 
 function settlementStatus(

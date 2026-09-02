@@ -105,6 +105,8 @@ export class RunRecorder {
         requiredOperations: [...event.checkpoint.requiredOperations],
         connectorIds: [...event.checkpoint.connectorIds],
         artifactReferences: event.checkpoint.artifactReferences.map((reference) => ({ ...reference })),
+        safeFacts: event.checkpoint.safeFacts.map((fact) => ({ ...fact })),
+        operations: event.checkpoint.operations.map((operation) => ({ ...operation })),
         ...(event.checkpoint.blocker === undefined ? {} : { blocker: { ...event.checkpoint.blocker } })
       }
     };

@@ -19,7 +19,7 @@ export type SessionToolContext = {
   childSessionId?: string;
   currentSessionId: () => string;
   executionPlanController?: import("./execution-plan.js").ExecutionPlanControllerApi;
-  executionCheckpointController?: import("./execution-checkpoint.js").ExecutionCheckpointArtifactController;
+  executionCheckpointController?: import("./execution-checkpoint.js").ExecutionCheckpointJournalController;
   sessionRuntimeContext?: {
     currentSessionId(): string;
     rotateSession(sessionId: string): void;

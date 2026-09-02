@@ -1,8 +1,10 @@
 import type {
   ExecutionCheckpointBlocker,
   ExecutionCheckpointLifecycleEvent,
+  ExecutionCheckpointOperation,
   ExecutionCheckpointOperationRequirement,
   ExecutionCheckpointQualificationReason,
+  ExecutionCheckpointSafeFact,
   ExecutionCheckpointStatus,
   ForegroundExecutionCheckpoint
 } from "../contracts/execution-checkpoint.js";
@@ -10,8 +12,10 @@ import {
   EXECUTION_CHECKPOINT_MAX_BLOCKER_CHARS,
   EXECUTION_CHECKPOINT_MAX_ARTIFACTS,
   EXECUTION_CHECKPOINT_MAX_CONNECTORS,
+  EXECUTION_CHECKPOINT_MAX_FACTS,
   EXECUTION_CHECKPOINT_MAX_LABELS,
   EXECUTION_CHECKPOINT_MAX_OBJECTIVE_CHARS,
+  EXECUTION_CHECKPOINT_MAX_OPERATIONS,
   EXECUTION_CHECKPOINT_MAX_SERIALIZED_BYTES,
   EXECUTION_CHECKPOINT_VERSION
 } from "../contracts/execution-checkpoint.js";
@@ -50,11 +54,18 @@ const CHECKPOINT_KEYS = new Set([
   "version", "id", "sessionId", "profileId", "originTurnId", "revision", "progressRevision",
   "originalObjective", "latestUserCorrection", "status", "qualificationReasons", "selectedSkillName", "taskClass",
   "intentLabels", "requiredOperations", "connectorIds", "completionFloor", "blocker",
-  "artifactReferences",
+  "artifactReferences", "safeFacts", "operations",
   "lastTerminationCause", "lastProviderFailureClass", "createdAt", "updatedAt"
 ]);
 const TRANSITIONS = new Set<ExecutionCheckpointLifecycleEvent["transition"]>([
-  "created", "carried_forward", "corrected", "artifact_attached", "attempt_settled", "blocked", "cancelled", "superseded"
+  "created", "carried_forward", "corrected", "artifact_attached", "facts_retained", "operation_planned",
+  "operation_dispatched", "operation_settled", "operation_verified", "attempt_settled", "blocked", "cancelled", "superseded"
+]);
+const SAFE_FACT_KINDS = new Set<ExecutionCheckpointSafeFact["kind"]>([
+  "workspace_id", "collection_id", "specification_id", "product_name", "artifact_id", "artifact_hash"
+]);
+const OPERATION_STATUSES = new Set<ExecutionCheckpointOperation["status"]>([
+  "planned", "dispatched", "settled", "verified", "failed", "uncertain"
 ]);
 
 export class ExecutionCheckpointValidationError extends Error {
@@ -74,6 +85,8 @@ export function cloneExecutionCheckpoint(
     requiredOperations: [...checkpoint.requiredOperations],
     connectorIds: [...checkpoint.connectorIds],
     artifactReferences: checkpoint.artifactReferences.map((reference) => ({ ...reference })),
+    safeFacts: checkpoint.safeFacts.map((fact) => ({ ...fact })),
+    operations: checkpoint.operations.map((operation) => ({ ...operation })),
     ...(checkpoint.blocker === undefined ? {} : { blocker: { ...checkpoint.blocker } })
   };
 }
@@ -123,7 +136,10 @@ export function hydratableExecutionCheckpoint(input: {
     if (current === undefined) {
       if (
         (event.transition !== "created" && event.transition !== "carried_forward") ||
-        (event.transition === "created" && (candidate.revision !== 1 || candidate.status !== "active")) ||
+        (event.transition === "created" && (
+          candidate.revision !== 1 || candidate.progressRevision !== 0 || candidate.status !== "active" ||
+          candidate.artifactReferences.length !== 0 || candidate.safeFacts.length !== 0 || candidate.operations.length !== 0
+        )) ||
         isTerminalCheckpointStatus(candidate.status)
       ) continue;
       current = candidate;
@@ -206,17 +222,54 @@ function isCoherentTransition(
   const progressDelta = candidate.progressRevision - current.progressRevision;
   if (transition === "corrected") {
     return candidate.status === "active" && progressDelta === 0 &&
-      candidate.latestUserCorrection !== undefined && !correctionUnchanged;
+      candidate.latestUserCorrection !== undefined && !correctionUnchanged &&
+      sameArtifactReferences(current.artifactReferences, candidate.artifactReferences) &&
+      sameSafeFacts(current.safeFacts, candidate.safeFacts) &&
+      sameOperations(current.operations, candidate.operations);
   }
   if (transition === "artifact_attached") {
     return candidate.status === current.status && correctionUnchanged && progressDelta === 1 &&
       candidate.artifactReferences.length === current.artifactReferences.length + 1 &&
+      sameSafeFacts(current.safeFacts, candidate.safeFacts) &&
+      sameOperations(current.operations, candidate.operations) &&
       current.artifactReferences.every((reference, index) =>
         sameArtifactReference(reference, candidate.artifactReferences[index])
       );
   }
+  if (transition === "facts_retained") {
+    return candidate.status === current.status && correctionUnchanged && progressDelta === 1 &&
+      sameArtifactReferences(current.artifactReferences, candidate.artifactReferences) &&
+      sameOperations(current.operations, candidate.operations) &&
+      safeFactsOnlyAdvance(current.safeFacts, candidate.safeFacts);
+  }
+  if (transition === "operation_planned") {
+    return candidate.status === current.status && correctionUnchanged && progressDelta === 0 &&
+      sameArtifactReferences(current.artifactReferences, candidate.artifactReferences) &&
+      sameSafeFacts(current.safeFacts, candidate.safeFacts) &&
+      operationTransitionIs(current.operations, candidate.operations, "planned");
+  }
+  if (transition === "operation_dispatched") {
+    return candidate.status === current.status && correctionUnchanged && progressDelta === 1 &&
+      sameArtifactReferences(current.artifactReferences, candidate.artifactReferences) &&
+      sameSafeFacts(current.safeFacts, candidate.safeFacts) &&
+      operationTransitionIs(current.operations, candidate.operations, "dispatched");
+  }
+  if (transition === "operation_settled") {
+    return candidate.status === current.status && correctionUnchanged && progressDelta === 0 &&
+      sameArtifactReferences(current.artifactReferences, candidate.artifactReferences) &&
+      sameSafeFacts(current.safeFacts, candidate.safeFacts) &&
+      operationTransitionIs(current.operations, candidate.operations, "settled", "failed", "uncertain");
+  }
+  if (transition === "operation_verified") {
+    return candidate.status === current.status && correctionUnchanged && progressDelta === 1 &&
+      sameArtifactReferences(current.artifactReferences, candidate.artifactReferences) &&
+      sameSafeFacts(current.safeFacts, candidate.safeFacts) &&
+      operationTransitionIs(current.operations, candidate.operations, "verified", "failed");
+  }
   if (!correctionUnchanged) return false;
   if (!sameArtifactReferences(current.artifactReferences, candidate.artifactReferences)) return false;
+  if (!sameSafeFacts(current.safeFacts, candidate.safeFacts)) return false;
+  if (!sameOperations(current.operations, candidate.operations)) return false;
   if (transition === "attempt_settled") {
     const statusAllowed = candidate.status === "awaiting_user" || candidate.status === "retryable" ||
       candidate.status === "blocked" || candidate.status === "completed";
@@ -316,6 +369,8 @@ export function validateExecutionCheckpoint(input: unknown): ForegroundExecution
     ),
     connectorIds: boundedTextArray(input.connectorIds, "connectorIds", EXECUTION_CHECKPOINT_MAX_CONNECTORS, 128),
     artifactReferences: artifactReferences(input.artifactReferences),
+    safeFacts: safeFacts(input.safeFacts),
+    operations: operations(input.operations),
     completionFloor: enumValue(input.completionFloor, COMPLETION_FLOORS, "completionFloor"),
     ...(input.blocker === undefined ? {} : { blocker: validateBlocker(input.blocker) }),
     ...(input.lastTerminationCause === undefined
@@ -384,6 +439,141 @@ function sameArtifactReference(
   right: ForegroundExecutionCheckpoint["artifactReferences"][number] | undefined
 ): boolean {
   return right !== undefined && left.id === right.id && left.sha256 === right.sha256;
+}
+
+function safeFacts(input: unknown): ExecutionCheckpointSafeFact[] {
+  if (input === undefined) return [];
+  if (!Array.isArray(input) || input.length > EXECUTION_CHECKPOINT_MAX_FACTS) {
+    throw new ExecutionCheckpointValidationError("safeFacts is not a bounded array.");
+  }
+  const facts = input.map((value) => {
+    if (!isRecord(value) || Object.keys(value).some((key) =>
+      !["kind", "value", "sourceTool", "connectorId", "observedAt"].includes(key)
+    )) throw new ExecutionCheckpointValidationError("safeFacts contains malformed state.");
+    const kind = enumValue(value.kind, SAFE_FACT_KINDS, "safeFacts.kind");
+    const factValue = kind === "artifact_hash"
+      ? sha256(value.value)
+      : kind === "product_name"
+        ? safePersistedText(value.value, "safeFacts.value", 160)
+        : token(value.value, "safeFacts.value", 200);
+    return {
+      kind,
+      value: factValue,
+      sourceTool: token(value.sourceTool, "safeFacts.sourceTool", 160),
+      ...(value.connectorId === undefined ? {} : { connectorId: token(value.connectorId, "safeFacts.connectorId", 128) }),
+      observedAt: timestamp(value.observedAt, "safeFacts.observedAt")
+    };
+  });
+  if (new Set(facts.map((fact) => `${fact.kind}\0${fact.value}`)).size !== facts.length) {
+    throw new ExecutionCheckpointValidationError("safeFacts contains duplicates.");
+  }
+  return facts;
+}
+
+function operations(input: unknown): ExecutionCheckpointOperation[] {
+  if (input === undefined) return [];
+  if (!Array.isArray(input) || input.length > EXECUTION_CHECKPOINT_MAX_OPERATIONS) {
+    throw new ExecutionCheckpointValidationError("operations is not a bounded array.");
+  }
+  const entries = input.map((value) => {
+    if (!isRecord(value) || Object.keys(value).some((key) => ![
+      "id", "connectorId", "operation", "destinationId", "subjectId", "artifactHash",
+      "operationRevision", "status", "createdAt", "updatedAt"
+    ].includes(key))) throw new ExecutionCheckpointValidationError("operations contains malformed state.");
+    const operation: ExecutionCheckpointOperation = {
+      id: token(value.id, "operations.id", 80),
+      connectorId: token(value.connectorId, "operations.connectorId", 128),
+      operation: token(value.operation, "operations.operation", 160),
+      ...(value.destinationId === undefined ? {} : {
+        destinationId: safePersistedText(value.destinationId, "operations.destinationId", 200)
+      }),
+      ...(value.subjectId === undefined ? {} : {
+        subjectId: safePersistedText(value.subjectId, "operations.subjectId", 200)
+      }),
+      ...(value.artifactHash === undefined ? {} : { artifactHash: sha256(value.artifactHash) }),
+      operationRevision: boundedPositiveInteger(value.operationRevision, "operations.operationRevision", 1_000_000),
+      status: enumValue(value.status, OPERATION_STATUSES, "operations.status"),
+      createdAt: timestamp(value.createdAt, "operations.createdAt"),
+      updatedAt: timestamp(value.updatedAt, "operations.updatedAt")
+    };
+    if (Date.parse(operation.updatedAt) < Date.parse(operation.createdAt)) {
+      throw new ExecutionCheckpointValidationError("Operation update precedes its creation.");
+    }
+    if (operation.destinationId === undefined && operation.subjectId === undefined && operation.artifactHash === undefined) {
+      throw new ExecutionCheckpointValidationError("Operation lacks reviewed semantic coordinates.");
+    }
+    return operation;
+  });
+  if (new Set(entries.map((operation) => operation.id)).size !== entries.length) {
+    throw new ExecutionCheckpointValidationError("operations contains duplicate IDs.");
+  }
+  return entries;
+}
+
+function sameSafeFacts(
+  left: readonly ExecutionCheckpointSafeFact[],
+  right: readonly ExecutionCheckpointSafeFact[]
+): boolean {
+  return left.length === right.length && left.every((fact, index) => {
+    const candidate = right[index];
+    return candidate !== undefined && fact.kind === candidate.kind && fact.value === candidate.value &&
+      fact.sourceTool === candidate.sourceTool && fact.connectorId === candidate.connectorId &&
+      fact.observedAt === candidate.observedAt;
+  });
+}
+
+function safeFactsOnlyAdvance(
+  current: readonly ExecutionCheckpointSafeFact[],
+  candidate: readonly ExecutionCheckpointSafeFact[]
+): boolean {
+  return candidate.length > current.length && current.every((fact, index) =>
+    sameSafeFacts([fact], candidate[index] === undefined ? [] : [candidate[index]])
+  );
+}
+
+function sameOperations(
+  left: readonly ExecutionCheckpointOperation[],
+  right: readonly ExecutionCheckpointOperation[]
+): boolean {
+  return left.length === right.length && left.every((operation, index) => {
+    const candidate = right[index];
+    return candidate !== undefined && sameOperationCore(operation, candidate) &&
+      operation.status === candidate.status && operation.updatedAt === candidate.updatedAt;
+  });
+}
+
+function operationTransitionIs(
+  current: readonly ExecutionCheckpointOperation[],
+  candidate: readonly ExecutionCheckpointOperation[],
+  ...allowedStatuses: ExecutionCheckpointOperation["status"][]
+): boolean {
+  if (allowedStatuses.length === 1 && allowedStatuses[0] === "planned" && candidate.length === current.length + 1) {
+    return sameOperations(current, candidate.slice(0, -1)) && candidate.at(-1)?.status === "planned";
+  }
+  if (candidate.length !== current.length) return false;
+  let changed = 0;
+  for (let index = 0; index < current.length; index += 1) {
+    const before = current[index]!;
+    const after = candidate[index]!;
+    if (!sameOperationCore(before, after)) return false;
+    if (before.status === after.status && before.updatedAt === after.updatedAt) continue;
+    changed += 1;
+    if (!allowedStatuses.includes(after.status)) return false;
+    if (after.status === "planned" && before.status !== "failed") return false;
+    if (after.status === "dispatched" && before.status !== "planned") return false;
+    if (["settled", "failed", "uncertain"].includes(after.status) &&
+      !allowedStatuses.includes("verified") && before.status !== "dispatched") return false;
+    if (after.status === "verified" && !["settled", "dispatched", "uncertain"].includes(before.status)) return false;
+    if (after.status === "failed" && allowedStatuses.includes("verified") && !["settled", "dispatched", "uncertain"].includes(before.status)) return false;
+  }
+  return changed === 1;
+}
+
+function sameOperationCore(left: ExecutionCheckpointOperation, right: ExecutionCheckpointOperation): boolean {
+  return left.id === right.id && left.connectorId === right.connectorId && left.operation === right.operation &&
+    left.destinationId === right.destinationId && left.subjectId === right.subjectId &&
+    left.artifactHash === right.artifactHash && left.operationRevision === right.operationRevision &&
+    left.createdAt === right.createdAt;
 }
 
 export function sanitizeCheckpointText(value: string, maxChars: number): string {
@@ -487,6 +677,12 @@ function positiveInteger(input: unknown, field: string): number {
     throw new ExecutionCheckpointValidationError(`${field} is invalid.`);
   }
   return input as number;
+}
+
+function boundedPositiveInteger(input: unknown, field: string, max: number): number {
+  const value = positiveInteger(input, field);
+  if (value > max) throw new ExecutionCheckpointValidationError(`${field} is invalid.`);
+  return value;
 }
 
 function nonNegativeInteger(input: unknown, field: string): number {

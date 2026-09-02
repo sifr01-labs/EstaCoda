@@ -752,6 +752,18 @@ describe("MCP governed artifact relay", () => {
       expect(server?.snapshot.capabilities.artifactRelayConfigured).toBe(true);
       expect(JSON.stringify(tool?.inputSchema)).toContain("artifactInput");
 
+      expect(tool?.operationJournal?.identify({
+        name: "Example",
+        files: [{
+          path: "openapi.json",
+          content: { artifactInput: { reference: "artifact://api-description", sha256 } }
+        }]
+      })).toEqual({
+        subjectId: "api-description",
+        artifactHash: sha256,
+        operationRevision: 1
+      });
+
       const result = await tool?.run({
         name: "Example",
         files: [{

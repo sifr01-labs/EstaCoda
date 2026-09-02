@@ -278,6 +278,8 @@ describe("AgentLoopBuilder", () => {
         requiredOperations: ["read", "mutation", "verification"],
         connectorIds: ["postman"],
         artifactReferences: [],
+        safeFacts: [],
+        operations: [],
         completionFloor: "mutation_with_verification",
         lastTerminationCause: "provider_failed",
         lastProviderFailureClass: "rate-limit",

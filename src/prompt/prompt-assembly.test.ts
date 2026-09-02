@@ -235,7 +235,7 @@ describe("assembleProviderPrompt", () => {
     }));
     const rendered = renderMessages(prompt.messages);
 
-    expect(rendered).toContain("Authoritative mission working state");
+    expect(rendered).toContain("Authoritative execution working state");
     expect(rendered).toContain("Scope: current visible turn");
     expect(rendered).not.toContain("turn-3");
     expect(rendered).toContain("Workspace ID: workspace-456");
