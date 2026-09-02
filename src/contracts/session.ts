@@ -20,6 +20,7 @@ import type { FailureRecord } from "./failure.js";
 import type { ProviderUsageEntry, ProviderUsageQuery } from "./provider-usage.js";
 import type { DelegateRole } from "./delegation.js";
 import type { ExecutionEvidenceRecord, ExecutionPlanLifecycleEvent } from "./execution-plan.js";
+import type { ExecutionCheckpointLifecycleEvent } from "./execution-checkpoint.js";
 import type { ProviderToolInventoryEvent } from "./runtime-event.js";
 import type {
   ModelProfile,
@@ -266,6 +267,7 @@ export type AuthenticationEvidenceAssessmentEvent = {
 
 export type SessionEvent =
   | ExecutionPlanLifecycleEvent
+  | ExecutionCheckpointLifecycleEvent
   | ProviderToolInventoryEvent
   | ExecutionEvidenceRecord
   | AuthenticationEvidenceAssessmentEvent

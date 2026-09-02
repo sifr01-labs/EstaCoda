@@ -23,6 +23,7 @@ import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolsetName, ToolRiskClass } from "../contracts/tool.js";
 import type { ProviderToolInventoryEvent, RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ExecutionEvidenceRecord, ExecutionFinalOutcome, ExecutionPlanLifecycleEvent } from "../contracts/execution-plan.js";
+import type { ExecutionCheckpointLifecycleEvent } from "../contracts/execution-checkpoint.js";
 import type { Trajectory } from "../contracts/trajectory.js";
 import type { TrajectoryStore } from "../contracts/trajectory-store.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
@@ -90,6 +91,27 @@ export class RunRecorder {
     } catch {
       // UI/event consumers are observational; persistence remains authoritative.
     }
+  }
+
+  async recordExecutionCheckpointTransition(
+    event: ExecutionCheckpointLifecycleEvent
+  ): Promise<void> {
+    const persistedEvent: ExecutionCheckpointLifecycleEvent = {
+      ...event,
+      checkpoint: {
+        ...event.checkpoint,
+        qualificationReasons: [...event.checkpoint.qualificationReasons],
+        intentLabels: [...event.checkpoint.intentLabels],
+        requiredOperations: [...event.checkpoint.requiredOperations],
+        connectorIds: [...event.checkpoint.connectorIds],
+        ...(event.checkpoint.blocker === undefined ? {} : { blocker: { ...event.checkpoint.blocker } })
+      }
+    };
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), persistedEvent);
+    this.#trajectoryRecorder.record(persistedEvent.kind, {
+      transition: persistedEvent.transition,
+      checkpoint: persistedEvent.checkpoint
+    });
   }
 
   async recordExecutionEvidence(record: ExecutionEvidenceRecord): Promise<void> {

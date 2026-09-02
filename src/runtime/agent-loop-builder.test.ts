@@ -89,6 +89,9 @@ describe("AgentLoopBuilder", () => {
     expect(first.executionPlanController).toBeDefined();
     expect(second.executionPlanController).toBeDefined();
     expect(first.executionPlanController).not.toBe(second.executionPlanController);
+    expect(first.executionCheckpointController).toBeDefined();
+    expect(second.executionCheckpointController).toBeDefined();
+    expect(first.executionCheckpointController).not.toBe(second.executionCheckpointController);
     expect(first.executionWorkingSet).toBeDefined();
     expect(second.executionWorkingSet).toBeDefined();
     expect(first.executionWorkingSet).not.toBe(second.executionWorkingSet);
@@ -119,6 +122,8 @@ describe("AgentLoopBuilder", () => {
 
     expect(delegatedChild.executionPlanController).toBeUndefined();
     expect(taskWorker.executionPlanController).toBeUndefined();
+    expect(delegatedChild.executionCheckpointController).toBeUndefined();
+    expect(taskWorker.executionCheckpointController).toBeUndefined();
     expect(delegatedChild.executionWorkingSet).toBeUndefined();
     expect(taskWorker.executionWorkingSet).toBeUndefined();
     expect(delegatedChild.toolRegistry.get("plan")).toBeUndefined();
@@ -247,6 +252,46 @@ describe("AgentLoopBuilder", () => {
       objective: "Resume API testing",
       originTurnId: "turn-origin",
       revision: 4
+    });
+  });
+
+  it("hydrates a profile-owned foreground execution checkpoint", async () => {
+    const harness = await createBuilderHarness();
+    await harness.sessionDb.createSession({ id: "checkpoint-session", profileId: "default" });
+    await harness.sessionDb.appendEvent("checkpoint-session", {
+      kind: "execution-checkpoint-updated",
+      transition: "carried_forward",
+      checkpoint: {
+        version: 1,
+        id: "checkpoint:resume",
+        sessionId: "checkpoint-session",
+        profileId: "default",
+        originTurnId: "turn-origin",
+        revision: 4,
+        progressRevision: 1,
+        originalObjective: "Import and verify APIs in Postman",
+        status: "retryable",
+        qualificationReasons: ["cross_system"],
+        selectedSkillName: "api-integration",
+        taskClass: "general",
+        intentLabels: ["api.integration"],
+        requiredOperations: ["read", "mutation", "verification"],
+        connectorIds: ["postman"],
+        completionFloor: "mutation_with_verification",
+        lastTerminationCause: "provider_failed",
+        lastProviderFailureClass: "rate-limit",
+        createdAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:05:00.000Z"
+      }
+    });
+
+    const built = await harness.build("checkpoint-session");
+
+    expect(built.executionCheckpointController?.current()).toMatchObject({
+      id: "checkpoint:resume",
+      revision: 4,
+      status: "retryable",
+      lastProviderFailureClass: "rate-limit"
     });
   });
 

@@ -191,12 +191,12 @@ describe("assembleProviderPrompt", () => {
     }));
     const rendered = renderMessages(prompt.messages);
 
-    expect(rendered).toContain("Optional Plan (foreground coordination state with runtime-owned evidence annotations):");
-    expect(rendered).toContain("Verified complete: build");
-    expect(rendered).toContain("- [in_progress] verify: Verify it · observed=postman.read (completion not verified)");
+    expect(rendered).toContain("Optional Plan (model-visible foreground coordination only):");
+    expect(rendered).not.toContain("Verified complete: build");
+    expect(rendered).toContain("- [in_progress] verify: Verify it");
     expect(rendered).not.toContain("- [completed] build: Build it");
-    expect(rendered).toContain("Runtime reconciliation required:");
-    expect(rendered).toContain("The Plan is optional and grants no tool authority.");
+    expect(rendered).not.toContain("Runtime reconciliation required:");
+    expect(rendered).toContain("grants no tool, evidence, authentication, continuation, or completion authority");
     expect(rendered).not.toContain("call-build");
     expect(rendered).not.toContain("call-ambiguous");
     expect(rendered).not.toContain("postman.update");

@@ -14,6 +14,7 @@ import { stripInlineReasoning } from "../providers/provider-reasoning.js";
 import { SessionCompressionLock } from "../session/session-compression-lock.js";
 import { reconstructSessionCompressionState } from "../session/session-compression-state.js";
 import { executionPlanCarryForwardEvent } from "../session/execution-plan-state.js";
+import { executionCheckpointCarryForwardEvent } from "../session/execution-checkpoint-state.js";
 import { executionEvidenceCarryForwardEvents } from "../session/execution-evidence-state.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import {
@@ -144,7 +145,7 @@ export class SessionCompressionService {
         const written = await this.#sessionDb.rewriteTranscript({
           sessionId: childSession.id,
           messages: compressed.messages.map(toChildTranscriptMessage),
-          events: childCompactionEvents(sessionEvents)
+          events: childCompactionEvents(sessionEvents, parentSession.id, childSession.id, parentSession.profileId)
         });
         await this.#sessionDb.endSession(parentSession.id, "compression");
         const eventWarnings = [
@@ -369,14 +370,26 @@ export class SessionCompressionService {
   }
 }
 
-function childCompactionEvents(events: readonly SessionEvent[]): SessionEvent[] {
+function childCompactionEvents(
+  events: readonly SessionEvent[],
+  sourceSessionId: string,
+  childSessionId: string,
+  profileId: string
+): SessionEvent[] {
   const carriedPlan = executionPlanCarryForwardEvent(events);
   const carriedEvidence = executionEvidenceCarryForwardEvents(events);
+  const carriedCheckpoint = executionCheckpointCarryForwardEvent({
+    events,
+    sourceSessionId,
+    sessionId: childSessionId,
+    profileId
+  });
   return [
     {
       kind: "context-window-usage-invalidated",
       reason: "compaction"
     },
+    ...(carriedCheckpoint === undefined ? [] : [carriedCheckpoint]),
     ...carriedEvidence,
     ...(carriedPlan === undefined ? [] : [carriedPlan])
   ];

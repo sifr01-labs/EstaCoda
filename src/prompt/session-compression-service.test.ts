@@ -341,6 +341,84 @@ describe("SessionCompressionService", () => {
     expect(JSON.stringify(carried)).not.toContain("tool-result");
   });
 
+  it("carries a bounded active checkpoint into the compacted child session", async () => {
+    const { db, sessionId } = await sessionDbWithMessages(8);
+    await db.appendEvent(sessionId, {
+      kind: "execution-checkpoint-updated",
+      transition: "created",
+      checkpoint: {
+        version: 1,
+        id: "checkpoint:compact",
+        sessionId,
+        profileId: "profile",
+        originTurnId: "turn-origin",
+        revision: 1,
+        progressRevision: 0,
+        originalObjective: "Import and verify APIs in Postman",
+        status: "active",
+        qualificationReasons: ["cross_system"],
+        selectedSkillName: "api-integration",
+        taskClass: "general",
+        intentLabels: ["api.integration"],
+        requiredOperations: ["read", "mutation", "verification"],
+        connectorIds: ["postman"],
+        completionFloor: "mutation_with_verification",
+        createdAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:00.000Z"
+      }
+    });
+    await db.appendEvent(sessionId, {
+      kind: "execution-checkpoint-updated",
+      transition: "attempt_settled",
+      checkpoint: {
+        version: 1,
+        id: "checkpoint:compact",
+        sessionId,
+        profileId: "profile",
+        originTurnId: "turn-origin",
+        revision: 2,
+        progressRevision: 0,
+        originalObjective: "Import and verify APIs in Postman",
+        status: "retryable",
+        qualificationReasons: ["cross_system"],
+        selectedSkillName: "api-integration",
+        taskClass: "general",
+        intentLabels: ["api.integration"],
+        requiredOperations: ["read", "mutation", "verification"],
+        connectorIds: ["postman"],
+        completionFloor: "mutation_with_verification",
+        lastTerminationCause: "provider_failed",
+        createdAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:05:00.000Z"
+      }
+    });
+    const service = new SessionCompressionService({
+      sessionDb: db,
+      config: normalizeSessionCompressionConfig({ enabled: false, protectFirstN: 1, protectLastN: 2 }),
+      ...auxiliaryHarness("checkpoint-aware summary")
+    });
+
+    const result = await service.compactNow({
+      profileId: "profile",
+      sessionId,
+      preserveTranscript: true
+    });
+    const carried = (await db.listEvents(result.activeSessionId)).filter((event) =>
+      event.kind === "execution-checkpoint-updated"
+    );
+
+    expect(carried).toHaveLength(1);
+    expect(carried[0]).toMatchObject({
+      transition: "carried_forward",
+      checkpoint: {
+        id: "checkpoint:compact",
+        sessionId: result.activeSessionId,
+        revision: 2,
+        status: "retryable"
+      }
+    });
+  });
+
   it("carries bounded evidence receipts without copying raw tool results", async () => {
     const { db, sessionId } = await sessionDbWithMessages(8);
     await db.appendEvent(sessionId, {

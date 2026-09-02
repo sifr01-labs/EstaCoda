@@ -350,7 +350,7 @@ export type ExecutionPlanControllerApi = ExecutionPlanReader & {
     context?: ExecutionPlanWriteContext
   ): Promise<ExecutionPlan>;
   merge(input: ExecutionPlanMergeInput, sink?: ExecutionPlanEventSink): Promise<ExecutionPlan>;
-  /** Associates already-indexed runtime receipts with active Plan items. */
+  /** @deprecated Compatibility no-op. Runtime evidence belongs to the execution checkpoint. */
   synchronizeEvidence(
     toolCallIds: readonly string[],
     sink?: ExecutionPlanEventSink

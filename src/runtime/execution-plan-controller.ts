@@ -35,13 +35,12 @@ import type { ToolRiskClass } from "../contracts/tool.js";
 import { isProtectedArgumentPattern } from "../security/protected-argument-path.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import { isAcknowledgementContinuation, isExplicitNewRequest } from "./conversation-continuation-state.js";
-import { ExecutionEvidenceError, ExecutionEvidenceIndex } from "./execution-evidence-index.js";
+import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 import {
   ExecutionCapabilityPreflight,
   formatExecutionCapabilityBlocker
 } from "./execution-capability-preflight.js";
 import { ExecutionPlanStore } from "./execution-plan-store.js";
-import { synchronizeExecutionPlanEvidence } from "./execution-plan-evidence-synchronizer.js";
 
 const ITEM_STATUSES = new Set<ExecutionPlanItemStatus>([
   "pending",
@@ -111,10 +110,7 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
   evidenceCandidates(itemId: string, visibleTurnId: string): ExecutionEvidenceCandidate[] {
     const current = this.#store.current();
     if (current === undefined || !current.items.some((item) => item.id === itemId)) return [];
-    const preferredTools = current.requirements
-      ?.filter((requirement) => requirement.itemId === itemId)
-      .map((requirement) => requirement.tool);
-    return this.#evidenceIndex.candidatesForTurn({ visibleTurnId, preferredTools });
+    return this.#evidenceIndex.candidatesForTurn({ visibleTurnId });
   }
 
   async write(
@@ -205,15 +201,7 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
         content: rawPatch.content ?? existing.content,
         status: normalizeLegacyItemStatus(rawPatch.status ?? existing.status)
       });
-      const preserveVerifiedCompletion = existing.runtimeProgress?.status === "verified";
-      const contentChanged = !preserveVerifiedCompletion && lightweight.content !== existing.content;
-      items[index] = {
-        ...lightweight,
-        ...(preserveVerifiedCompletion ? { content: existing.content, status: "completed" as const } : {}),
-        ...(!contentChanged && existing.runtimeProgress !== undefined
-          ? { runtimeProgress: cloneRuntimeProgress(existing.runtimeProgress) }
-          : {})
-      };
+      items[index] = lightweight;
     }
 
     const plan = validatePlan({
@@ -223,68 +211,21 @@ export class ExecutionPlanController implements ExecutionPlanControllerApi {
         : boundedText(input.objective, "objective", EXECUTION_PLAN_MAX_OBJECTIVE_CHARS),
       revision: current.revision + 1,
       status: "active",
-      items,
-      runtimeSynchronization: { status: "current" }
+      items
     });
     await this.#recordTransition({ kind: eventKindForPlan(plan), plan }, sink);
     return this.#store.replace(plan);
   }
 
   async synchronizeEvidence(
-    toolCallIds: readonly string[],
-    sink?: ExecutionPlanEventSink
+    _toolCallIds: readonly string[],
+    _sink?: ExecutionPlanEventSink
   ): Promise<ExecutionPlan | undefined> {
-    const current = this.#store.current();
-    if (current === undefined || current.status !== "active" || toolCallIds.length === 0) return current;
-    const records = this.#evidenceIndex.recordsForCallIds(toolCallIds);
-    const synchronized = synchronizeExecutionPlanEvidence({
-      plan: current,
-      records,
-      resolveEvidence: (callIds) => this.#evidenceIndex.resolve(callIds)
-    });
-    if (!synchronized.changed) return current;
-    const plan = validatePlan(synchronized.plan);
-    await this.#recordTransition({ kind: eventKindForPlan(plan), plan }, sink);
-    return this.#store.replace(plan);
-  }
-
-  #validateCompletion(item: ExecutionPlanItem): ExecutionPlanItem {
-    if (item.status !== "completed") {
-      return {
-        ...item,
-        evidence: undefined
-      };
-    }
-    if (item.completionKind === "reasoning") {
-      if (item.evidenceCallIds !== undefined && item.evidenceCallIds.length > 0) {
-        throw new ExecutionPlanValidationError(
-          `Completed reasoning item ${item.id} must not include evidence call IDs.`
-        );
-      }
-      return { ...item, evidenceCallIds: undefined, evidence: undefined };
-    }
-    if (item.evidenceCallIds === undefined || item.evidenceCallIds.length === 0) {
-      throw new ExecutionPlanValidationError(
-        `Completed item ${item.id} requires successful evidenceCallIds or completionKind=reasoning.`,
-        { code: "completion-evidence-required", itemId: item.id }
-      );
-    }
-    try {
-      return {
-        ...item,
-        completionKind: undefined,
-        evidence: this.#evidenceIndex.resolve(item.evidenceCallIds)
-      };
-    } catch (error) {
-      if (error instanceof ExecutionEvidenceError) {
-        throw new ExecutionPlanValidationError(error.message);
-      }
-      throw error;
-    }
+    return this.#store.current();
   }
 
   hydrate(plan: ExecutionPlan): ExecutionPlan {
-    const hydrated = this.#store.hydrate(validateHydratedPlan(plan, this.#evidenceIndex));
+    const hydrated = this.#store.hydrate(validateHydratedPlan(plan));
     this.#awaitingResumeDecision = true;
     return hydrated;
   }
@@ -441,10 +382,7 @@ function lifecyclePlan(plan: ExecutionPlan, status: "transferred" | "abandoned")
   return { ...plan, revision: plan.revision + 1, status };
 }
 
-function validateHydratedPlan(
-  input: ExecutionPlan,
-  evidenceIndex: ExecutionEvidenceIndex
-): ExecutionPlan {
+function validateHydratedPlan(input: ExecutionPlan): ExecutionPlan {
   if (!isRecord(input) || !Array.isArray(input.items)) {
     throw new ExecutionPlanValidationError("Persisted execution plan is malformed.");
   }
@@ -461,20 +399,14 @@ function validateHydratedPlan(
       content: item.content,
       status: normalizeLegacyItemStatus(item.status)
     });
-    const runtimeProgress = validateRuntimeProgress(item.runtimeProgress, lightweight.id, evidenceIndex);
-    return {
-      ...lightweight,
-      ...(runtimeProgress === undefined ? {} : { runtimeProgress })
-    };
+    return lightweight;
   });
-  const runtimeSynchronization = validateRuntimeSynchronization(input.runtimeSynchronization);
   const validated = validatePlan({
     objective: boundedText(input.objective, "objective", EXECUTION_PLAN_MAX_OBJECTIVE_CHARS),
     originTurnId: stableId(input.originTurnId, "originTurnId", 256),
     revision: input.revision,
     status: "active",
-    items,
-    ...(runtimeSynchronization === undefined ? {} : { runtimeSynchronization })
+    items
   });
   const plan = input.status === "transferred" || input.status === "abandoned"
     ? { ...validated, status: input.status }

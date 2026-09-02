@@ -20,7 +20,6 @@ import { DelegateCallBudget } from "../delegation/delegate-call-budget.js";
 import type { RunRecorder } from "./run-recorder.js";
 import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import type { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
-import type { ExecutionPlanControllerApi } from "../contracts/execution-plan.js";
 import { emit } from "../utils/runtime-helpers.js";
 
 export type ToolPlanRunnerOptions = {
@@ -32,7 +31,6 @@ export type ToolPlanRunnerOptions = {
   maxConcurrentSafeTools: number;
   delegateTaskCallLimit?: number;
   executionEvidenceIndex?: ExecutionEvidenceIndex;
-  executionPlanController?: Pick<ExecutionPlanControllerApi, "synchronizeEvidence">;
 };
 
 export class ToolPlanRunner {
@@ -44,7 +42,6 @@ export class ToolPlanRunner {
   readonly #maxConcurrentSafeTools: number;
   readonly #delegateCallBudget: DelegateCallBudget | undefined;
   readonly #executionEvidenceIndex: ExecutionEvidenceIndex | undefined;
-  readonly #executionPlanController: Pick<ExecutionPlanControllerApi, "synchronizeEvidence"> | undefined;
   readonly #unsettledExecutionResources = new Set<string>();
 
   constructor(options: ToolPlanRunnerOptions) {
@@ -58,7 +55,6 @@ export class ToolPlanRunner {
       ? undefined
       : new DelegateCallBudget(options.delegateTaskCallLimit);
     this.#executionEvidenceIndex = options.executionEvidenceIndex;
-    this.#executionPlanController = options.executionPlanController;
   }
 
   resetPerTurnBudgets(): void {
@@ -344,11 +340,6 @@ export class ToolPlanRunner {
     const evidenceRecord = this.#executionEvidenceIndex?.record(execution, input.visibleTurnId);
     if (evidenceRecord !== undefined) {
       await this.#runRecorder.recordExecutionEvidence(evidenceRecord);
-      try {
-        await this.#executionPlanController?.synchronizeEvidence([evidenceRecord.toolCallId], input.onEvent);
-      } catch {
-        // Optional Plan projection must never change the authoritative tool receipt.
-      }
     }
 
     return execution;

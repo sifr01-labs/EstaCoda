@@ -38,6 +38,7 @@ import type { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import type { ProviderUsageTaskAttribution } from "../providers/provider-usage-ledger.js";
 import { loadSessionContextWindowUsage } from "../session/session-context-window-usage.js";
 import { hydratableExecutionPlanSnapshot } from "../session/execution-plan-state.js";
+import { hydratableExecutionCheckpoint } from "../session/execution-checkpoint-state.js";
 import type { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import type { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import type { SkillLearningManager } from "../skills/skill-learning.js";
@@ -69,6 +70,7 @@ import { ExecutionPlanStore } from "./execution-plan-store.js";
 import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 import { ExecutionCapabilityPreflight } from "./execution-capability-preflight.js";
 import { ExecutionWorkingSetController } from "./execution-working-set.js";
+import { ExecutionCheckpointController } from "./execution-checkpoint-controller.js";
 import { LlmSkillRouteShadowReranker } from "./skill-route-reranker.js";
 import { createSessionRuntimeContext, type SessionRuntimeContext } from "./session-runtime-context.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
@@ -252,6 +254,7 @@ export type AgentLoopSessionInput = {
 export type BuiltAgentLoopSession = {
   sessionRuntimeContext: SessionRuntimeContext;
   executionPlanController?: ExecutionPlanController;
+  executionCheckpointController?: ExecutionCheckpointController;
   executionWorkingSet?: ExecutionWorkingSetController;
   toolRegistry: ToolRegistry;
   toolExecutor: ToolExecutor;
@@ -340,6 +343,13 @@ export class AgentLoopBuilder {
           (record) => runRecorder.recordExecutionEvidence(record)
         )
       : undefined;
+    const executionCheckpointController = ownsForegroundSupervision
+      ? new ExecutionCheckpointController({
+          sessionId: () => sessionRuntimeContext.currentSessionId(),
+          profileId: substrate.profileId,
+          record: (event) => runRecorder.recordExecutionCheckpointTransition(event)
+        })
+      : undefined;
     const executionWorkingSet = ownsForegroundSupervision
       ? new ExecutionWorkingSetController({
           profileId: substrate.profileId,
@@ -353,6 +363,20 @@ export class AgentLoopBuilder {
           executionPlanController.hydrate(persistedPlan);
         } catch {
           // Malformed persisted working state is ignored rather than entering the provider prompt.
+        }
+      }
+    }
+    if (executionCheckpointController !== undefined) {
+      const persistedCheckpoint = hydratableExecutionCheckpoint({
+        events: persistedSessionEvents,
+        sessionId: input.sessionId,
+        profileId: substrate.profileId
+      });
+      if (persistedCheckpoint !== undefined) {
+        try {
+          executionCheckpointController.hydrate(persistedCheckpoint);
+        } catch {
+          // Invalid persisted checkpoint state never enters the foreground runtime.
         }
       }
     }
@@ -587,8 +611,7 @@ export class AgentLoopBuilder {
       sessionRuntimeContext,
       maxConcurrentSafeTools: 4,
       delegateTaskCallLimit: (substrate.delegationConfig ?? DEFAULT_DELEGATION_CONFIG).maxDelegateCallsPerTurn,
-      executionEvidenceIndex,
-      executionPlanController
+      executionEvidenceIndex
     });
     const providerTurnLoop = (this.#factories.providerTurnLoop ?? ((options) => new ProviderTurnLoop(options)))({
       providerExecutor: substrate.providerExecutor,
@@ -687,6 +710,7 @@ export class AgentLoopBuilder {
       taskExecution: input.taskExecution,
       executionPlanReader: executionPlanController,
       executionPlanController,
+      executionCheckpointController,
       executionCapabilityPreflight,
       executionEvidenceIndex,
       ui: input.ui,
@@ -696,6 +720,7 @@ export class AgentLoopBuilder {
     return {
       sessionRuntimeContext,
       executionPlanController,
+      executionCheckpointController,
       executionWorkingSet,
       toolRegistry,
       toolExecutor,

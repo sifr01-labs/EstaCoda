@@ -32,6 +32,8 @@ import { RunRecorder } from "./run-recorder.js";
 import { AgentLoop } from "./agent-loop.js";
 import { ExecutionPlanController } from "./execution-plan-controller.js";
 import { ExecutionPlanStore } from "./execution-plan-store.js";
+import { ExecutionCheckpointController } from "./execution-checkpoint-controller.js";
+import { hydratableExecutionCheckpoint } from "../session/execution-checkpoint-state.js";
 import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 import type { ExecutionCompletionCapability } from "./execution-outcome.js";
 import type { SkillLearningManager } from "../skills/skill-learning.js";
@@ -378,6 +380,7 @@ async function createAgentLoop(input: {
   executionPlanReader?: ExecutionPlanReader;
   executionPlanController?: ExecutionPlanController;
   executionCapabilityPreflight?: ExecutionCapabilityPreflight;
+  enableExecutionCheckpoint?: boolean;
 }) {
   const sessionDb = new InMemorySessionDB();
   const sessionId = `agent-loop-test-${Date.now()}-${Math.random()}`;
@@ -419,6 +422,14 @@ async function createAgentLoop(input: {
     trajectoryStore: input.trajectoryStore,
     profileId: "default"
   });
+  const executionCheckpointController = input.enableExecutionCheckpoint === true
+    ? new ExecutionCheckpointController({
+        sessionId: () => sessionRuntimeContext.currentSessionId(),
+        profileId: "default",
+        createId: () => "checkpoint:test",
+        record: (event) => runRecorder.recordExecutionCheckpointTransition(event)
+      })
+    : undefined;
   const memoryRecallOrchestrator = new MemoryRecallOrchestrator({
     builder: new MemoryPromptContextBuilder({ store: new MemoryStore() }),
     sessionRecallService: input.sessionRecallService,
@@ -545,6 +556,7 @@ async function createAgentLoop(input: {
     agentEvolutionPolicy: input.agentEvolutionPolicy ?? deriveAgentEvolutionPolicy("suggest"),
     executionPlanReader: input.executionPlanController ?? input.executionPlanReader,
     executionPlanController: input.executionPlanController,
+    executionCheckpointController,
     executionCapabilityPreflight: input.executionCapabilityPreflight,
     executionEvidenceIndex
   });
@@ -558,9 +570,141 @@ async function createAgentLoop(input: {
     sessionId,
     sessionRuntimeContext,
     trajectoryRecorder,
-    nativeToolExecutor
+    nativeToolExecutor,
+    executionCheckpointController
   };
 }
+
+describe("AgentLoop execution checkpoints", () => {
+  it("does not create a checkpoint for ordinary conversation", async () => {
+    const conversationalIntent: IntentRoute = {
+      ...intent,
+      taskClass: "conversation",
+      labels: ["conversation"],
+      suggestedToolsets: [],
+      suggestedSkills: []
+    };
+    const { loop, executionCheckpointController, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("It is a lightweight rain jacket."),
+      routeIntent: conversationalIntent,
+      selectedSkill: null,
+      enableExecutionCheckpoint: true
+    });
+
+    await loop.handle({
+      text: "What is a rain jacket and when should I wear one?",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(executionCheckpointController?.current()).toBeUndefined();
+    expect((await sessionDb.listEvents(sessionId)).some((event) =>
+      event.kind === "execution-checkpoint-updated"
+    )).toBe(false);
+  });
+
+  it("persists a retryable checkpoint when a qualifying provider attempt fails", async () => {
+    const apiSkill: SkillDefinition = {
+      ...selectedSkill,
+      name: "api-integration",
+      requiredToolsets: ["browser", "mcp"]
+    };
+    const apiIntent: IntentRoute = {
+      ...intent,
+      labels: ["api.integration"],
+      suggestedToolsets: ["browser", "mcp"],
+      suggestedSkills: [apiSkill],
+      primarySkill: apiSkill
+    };
+    const { loop, executionCheckpointController, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: failedProviderExecution(),
+      routeIntent: apiIntent,
+      selectedSkill: apiSkill,
+      executionCompletionCapabilities: [{
+        tool: "mcp.postman.updateCollection",
+        kind: "mutation",
+        connector: { kind: "mcp", id: "postman" }
+      }, {
+        tool: "mcp.postman.getCollection",
+        kind: "verification",
+        verifies: ["mcp.postman.updateCollection"],
+        connector: { kind: "mcp", id: "postman" }
+      }],
+      enableExecutionCheckpoint: true
+    });
+
+    await loop.handle({
+      text: "Import all six Swagger APIs into Postman and verify the update.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(executionCheckpointController?.current()).toMatchObject({
+      status: "retryable",
+      completionFloor: "mutation_with_verification",
+      lastTerminationCause: "provider_failed",
+      lastProviderFailureClass: "network"
+    });
+    expect((await sessionDb.listEvents(sessionId)).filter((event) =>
+      event.kind === "execution-checkpoint-updated"
+    )).toHaveLength(2);
+  });
+
+  it("closes a checkpoint only from a receipt-derived completed outcome", async () => {
+    const apiSkill: SkillDefinition = {
+      ...selectedSkill,
+      name: "api-integration",
+      requiredToolsets: ["browser", "mcp"]
+    };
+    const apiIntent: IntentRoute = {
+      ...intent,
+      labels: ["api.integration"],
+      suggestedToolsets: ["browser", "mcp"],
+      suggestedSkills: [apiSkill],
+      primarySkill: apiSkill
+    };
+    const { loop, executionCheckpointController, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("Imported and verified."),
+      providerLoopToolExecutions: [postmanMutation(), postmanVerification()],
+      routeIntent: apiIntent,
+      selectedSkill: apiSkill,
+      executionCompletionCapabilities: [{
+        tool: "mcp.postman.updateCollection",
+        kind: "mutation",
+        connector: { kind: "mcp", id: "postman" }
+      }, {
+        tool: "mcp.postman.getCollection",
+        kind: "verification",
+        verifies: ["mcp.postman.updateCollection"],
+        connector: { kind: "mcp", id: "postman" }
+      }],
+      enableExecutionCheckpoint: true
+    });
+
+    const response = await loop.handle({
+      text: "Update the Postman collection and verify the update.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(response.finalOutcome?.status).toBe("completed");
+    expect(executionCheckpointController?.current()).toMatchObject({
+      status: "completed",
+      progressRevision: 1
+    });
+    expect(hydratableExecutionCheckpoint({
+      events: await sessionDb.listEvents(sessionId),
+      sessionId,
+      profileId: "default"
+    })).toMatchObject({ status: "completed", progressRevision: 1 });
+  });
+});
 
 describe("AgentLoop provider availability gating", () => {
   it("returns a routed governed-transfer blocker before browser, playbook, or provider work", async () => {

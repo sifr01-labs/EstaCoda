@@ -4,6 +4,7 @@ import type { ContextExpansionResult, ProjectContextSnapshot } from "../contract
 import type { IntentRoute } from "../contracts/intent.js";
 import type { ExecutionFinalOutcome, ExecutionPlan, ExecutionPlanReader } from "../contracts/execution-plan.js";
 import type { ExecutionPlanController } from "./execution-plan-controller.js";
+import type { ExecutionCheckpointController } from "./execution-checkpoint-controller.js";
 import type { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 import type { MemoryConclusion, MemoryFileKind, MemoryProvider, MemoryPromptContext, SkillOutcome } from "../contracts/memory.js";
 import type { PromptBudgetReport, PromptSemanticCompressionReport } from "../contracts/prompt.js";
@@ -82,6 +83,7 @@ import {
   type ExecutionCompletionCapability
 } from "./execution-outcome.js";
 import {
+  namedConnectorIdsForRequest,
   selectProviderToolsForTurn,
   type ProviderToolSelection
 } from "./provider-tool-narrowing.js";
@@ -89,6 +91,7 @@ import {
   ExecutionCapabilityPreflight,
   formatGovernedTransferBlocker
 } from "./execution-capability-preflight.js";
+import { qualifyForegroundExecution } from "./execution-checkpoint-qualification.js";
 
 export type AgentLoopInput = {
   text: string;
@@ -191,6 +194,7 @@ export type AgentLoopOptions = {
   taskExecution?: ProviderUsageTaskAttribution;
   executionPlanReader?: ExecutionPlanReader;
   executionPlanController?: ExecutionPlanController;
+  executionCheckpointController?: ExecutionCheckpointController;
   executionCapabilityPreflight?: ExecutionCapabilityPreflight;
   executionEvidenceIndex: ExecutionEvidenceIndex;
 };
@@ -278,6 +282,7 @@ export class AgentLoop {
   readonly #taskExecution: ProviderUsageTaskAttribution | undefined;
   readonly #executionPlanReader: ExecutionPlanReader | undefined;
   readonly #executionPlanController: ExecutionPlanController | undefined;
+  readonly #executionCheckpointController: ExecutionCheckpointController | undefined;
   readonly #executionCapabilityPreflight: ExecutionCapabilityPreflight | undefined;
   readonly #executionEvidenceIndex: ExecutionEvidenceIndex;
 
@@ -296,6 +301,7 @@ export class AgentLoop {
     this.#taskExecution = options.taskExecution;
     this.#executionPlanReader = options.executionPlanReader;
     this.#executionPlanController = options.executionPlanController;
+    this.#executionCheckpointController = options.executionCheckpointController;
     this.#executionCapabilityPreflight = options.executionCapabilityPreflight;
     this.#executionEvidenceIndex = options.executionEvidenceIndex;
     this.#toolExecutor = options.toolExecutor;
@@ -340,6 +346,7 @@ export class AgentLoop {
 
   async handle(input: AgentLoopInput): Promise<AgentLoopResponse> {
     await this.#runRecorder.beginTurn();
+    await this.#executionCheckpointController?.prepareForTurn(input.text).catch(() => undefined);
     await this.#executionPlanController?.prepareForTurn(input.text, input.onEvent);
     const latestResumeNote = await this.#runRecorder.latestResumeNote();
     const effectiveText = isResumeRequest(input.text) && latestResumeNote !== undefined
@@ -564,6 +571,10 @@ export class AgentLoop {
     const selectedSkillInstructions = route.selectedSkillInstructions;
     const selectedSkillResources = route.selectedSkillResources;
     const selectedSkillSetup = route.selectedSkillSetup;
+    const turnCompletionFloor = deriveExecutionCompletionFloor({
+      userText: effectiveText,
+      capabilities: this.#executionCompletionCapabilities
+    });
 
     await this.#sessionDb.appendEvent(this.#currentSessionId(), {
       kind: "intent-routed",
@@ -642,6 +653,24 @@ export class AgentLoop {
       });
     }
 
+    const checkpointInput = qualifyForegroundExecution({
+      originTurnId: visibleTurn.id,
+      userText: effectiveText,
+      intent,
+      selectedSkill,
+      completionFloor: turnCompletionFloor,
+      connectorIds: this.#providerToolSchemaCatalog === undefined
+        ? []
+        : namedConnectorIdsForRequest({
+            tools: this.#providerToolSchemaCatalog.entries.map((entry) => entry.tool),
+            configuredConnectors: this.#mcpServerSnapshots,
+            userText: routedText
+          })
+    });
+    if (checkpointInput !== undefined) {
+      await this.#executionCheckpointController?.ensure(checkpointInput).catch(() => undefined);
+    }
+
     const governedTransferPreflight = await this.#executionCapabilityPreflight?.assessRoutedGovernedTransfer({
       userText: routedText,
       selectedSkillName: selectedSkill?.name
@@ -658,6 +687,13 @@ export class AgentLoop {
         result: governedTransferPreflight,
         locale
       });
+      const activeCheckpoint = this.#executionCheckpointController?.current();
+      if (activeCheckpoint !== undefined) {
+        await this.#executionCheckpointController?.block(activeCheckpoint.revision, {
+          kind: "missing_capability",
+          summary: blocker
+        }).catch(() => undefined);
+      }
       const text = locale === "ar"
         ? `${blocker} لم يُنفذ أي إجراء في المتصفح أو نظام الوجهة.`
         : `${blocker} No browser or destination action was performed.`;
@@ -798,11 +834,6 @@ export class AgentLoop {
       const evidenceRecord = this.#executionEvidenceIndex.record(execution, visibleTurn.id);
       if (evidenceRecord !== undefined) {
         await this.#runRecorder.recordExecutionEvidence(evidenceRecord);
-        try {
-          await this.#executionPlanController?.synchronizeEvidence([evidenceRecord.toolCallId], input.onEvent);
-        } catch {
-          // Optional Plan projection must never change the authoritative tool receipt.
-        }
       }
     }
     await this.#emitLiveContextUsageEstimate({
@@ -1025,10 +1056,7 @@ export class AgentLoop {
       toolExecutions,
       providerExecution: providerSummary
     });
-    const completionFloor = deriveExecutionCompletionFloor({
-      userText: effectiveText,
-      capabilities: this.#executionCompletionCapabilities
-    });
+    const completionFloor = turnCompletionFloor;
     const finalOutcome = deriveExecutionFinalOutcome({
       providerExecution: providerLoop.delegatedAnswerOwnership === undefined ? effectiveProviderExecution : undefined,
       toolExecutions,
@@ -1730,6 +1758,14 @@ export class AgentLoop {
       confirmedActions: outcome.confirmedActions ?? [],
       uncertainActions: outcome.uncertainActions ?? []
     };
+    const activeCheckpoint = this.#executionCheckpointController?.current();
+    if (activeCheckpoint !== undefined) {
+      const providerFailureClass = latestProviderFailureClass(response.providerExecution);
+      await this.#executionCheckpointController?.settleAttempt(activeCheckpoint.revision, {
+        outcome: finalOutcome,
+        ...(providerFailureClass === undefined ? {} : { providerFailureClass })
+      }).catch(() => undefined);
+    }
     const projectedResponse = {
       ...response,
       finalOutcome,
@@ -1995,6 +2031,14 @@ function noLearningPolicy(): AgentEvolutionPolicy {
 
 function isResumeRequest(text: string): boolean {
   return /^(resume|resume that|continue|continue that|pick up where we left off)\b/iu.test(text.trim());
+}
+
+function latestProviderFailureClass(execution: ProviderExecutionResult | undefined): string | undefined {
+  for (let index = (execution?.attempts.length ?? 0) - 1; index >= 0; index -= 1) {
+    const attempt = execution?.attempts[index];
+    if (attempt?.ok === false && attempt.errorClass !== undefined) return attempt.errorClass;
+  }
+  return undefined;
 }
 
 function errorMessage(error: unknown): string {
