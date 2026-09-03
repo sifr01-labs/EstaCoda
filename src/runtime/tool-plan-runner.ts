@@ -11,7 +11,8 @@ import type {
   ToolExecutor,
   ToolExecutionRecord,
   ToolReadLedger,
-  ToolReadLedgerScope
+  ToolReadLedgerScope,
+  RuntimeToolAdmissionGuard
 } from "../tools/tool-executor.js";
 import { summarizeSecurityTarget } from "../tools/tool-executor.js";
 import { buildToolDisplayPreview } from "../tools/tool-target-summary.js";
@@ -78,6 +79,8 @@ export class ToolPlanRunner {
     onSecureInputRequest?: SecureInputRequestHandler;
     readLedger?: ToolReadLedger;
     readLedgerScope?: ToolReadLedgerScope;
+    runtimeAdmissionGuard?: RuntimeToolAdmissionGuard;
+    onExecution?: (execution: ToolExecutionRecord) => void | Promise<void>;
   }): Promise<{
     executions: ToolExecutionRecord[];
     maxObservedRisk: ToolRiskClass;
@@ -162,7 +165,8 @@ export class ToolPlanRunner {
             onApprovalRequest: input.onApprovalRequest,
             onSecureInputRequest: input.onSecureInputRequest,
             readLedger: input.readLedger,
-            readLedgerScope: input.readLedgerScope
+            readLedgerScope: input.readLedgerScope,
+            runtimeAdmissionGuard: input.runtimeAdmissionGuard
           });
         }));
 
@@ -184,6 +188,7 @@ export class ToolPlanRunner {
           this.#observeExecutionResourceSettlement(entry.concurrency, execution);
         }
         executions.push(...completed);
+        for (const execution of completed) await input.onExecution?.(execution);
         const dynamicRisk = maxRiskClass(completed.map((execution) => execution.riskClass));
         if (riskRank(dynamicRisk) > riskRank(maxObservedRisk)) {
           await this.#runRecorder.recordSecurityRiskEscalation({
@@ -214,7 +219,8 @@ export class ToolPlanRunner {
             onApprovalRequest: input.onApprovalRequest,
             onSecureInputRequest: input.onSecureInputRequest,
             readLedger: input.readLedger,
-            readLedgerScope: input.readLedgerScope
+            readLedgerScope: input.readLedgerScope,
+            runtimeAdmissionGuard: input.runtimeAdmissionGuard
           });
         } catch {
           execution = await this.#settleRejectedProviderToolPlan(
@@ -225,6 +231,7 @@ export class ToolPlanRunner {
         if (execution !== undefined) {
           this.#observeExecutionResourceSettlement(concurrency, execution);
           executions.push(execution);
+          await input.onExecution?.(execution);
           if (riskRank(execution.riskClass) > riskRank(maxObservedRisk)) {
             await this.#runRecorder.recordSecurityRiskEscalation({
               from: maxObservedRisk,
@@ -243,6 +250,77 @@ export class ToolPlanRunner {
     };
   }
 
+  /** Executes one runtime-authored recovery action through normal validation, security, and receipts. */
+  async executeInternalTool(input: {
+    id: string;
+    tool: string;
+    value: Record<string, unknown>;
+    toolPlans: ToolCallPlan[];
+    trustedWorkspace: boolean;
+    riskBaseline: ToolRiskClass;
+    visibleTurnId?: string;
+    providerUsageLineage?: ProviderUsageLineage;
+    signal?: AbortSignal;
+    onEvent?: RuntimeEventSink;
+    onApprovalRequest?: ToolApprovalHandler;
+    onSecureInputRequest?: SecureInputRequestHandler;
+    runtimeAdmissionGuard?: RuntimeToolAdmissionGuard;
+    onExecution?: (execution: ToolExecutionRecord) => void | Promise<void>;
+  }): Promise<{ execution?: ToolExecutionRecord; maxObservedRisk: ToolRiskClass }> {
+    const definition = this.#toolExecutor.getToolDefinition(input.tool);
+    const concurrency = this.#toolExecutor.getToolExecutionConcurrency?.(
+      input.tool,
+      input.value,
+      this.#currentSessionId()
+    );
+    const plan: ToolCallPlan = {
+      id: input.id,
+      tool: input.tool,
+      input: input.value,
+      source: "internal",
+      status: definition === undefined ? "unavailable" : "planned",
+      ...(definition === undefined ? {} : { riskClass: definition.riskClass })
+    };
+    input.toolPlans.push(plan);
+    await this.#runRecorder.recordToolPlan(plan);
+    if (definition === undefined) return { maxObservedRisk: input.riskBaseline };
+    if (this.#isExecutionResourceUnsettled(concurrency)) {
+      await this.#settleUnsettledExecutionResourcePlan(plan, input.onEvent);
+      return { maxObservedRisk: input.riskBaseline };
+    }
+    let execution: ToolExecutionRecord | undefined;
+    try {
+      execution = await this.#executeProviderToolPlan({
+        plan,
+        trustedWorkspace: input.trustedWorkspace,
+        visibleTurnId: input.visibleTurnId,
+        providerUsageLineage: input.providerUsageLineage,
+        signal: input.signal,
+        onEvent: input.onEvent,
+        onApprovalRequest: input.onApprovalRequest,
+        onSecureInputRequest: input.onSecureInputRequest,
+        runtimeAdmissionGuard: input.runtimeAdmissionGuard
+      });
+    } catch {
+      execution = await this.#settleRejectedProviderToolPlan({ plan, definition, concurrency }, input.onEvent);
+    }
+    if (execution !== undefined) this.#observeExecutionResourceSettlement(concurrency, execution);
+    if (execution !== undefined) await input.onExecution?.(execution);
+    if (execution !== undefined && riskRank(execution.riskClass) > riskRank(input.riskBaseline)) {
+      await this.#runRecorder.recordSecurityRiskEscalation({
+        from: input.riskBaseline,
+        to: execution.riskClass,
+        onEvent: input.onEvent
+      });
+    }
+    return {
+      ...(execution === undefined ? {} : { execution }),
+      maxObservedRisk: execution !== undefined && riskRank(execution.riskClass) > riskRank(input.riskBaseline)
+        ? execution.riskClass
+        : input.riskBaseline
+    };
+  }
+
   async #executeProviderToolPlan(input: {
     plan: ToolCallPlan;
     trustedWorkspace: boolean;
@@ -255,6 +333,7 @@ export class ToolPlanRunner {
     onSecureInputRequest?: SecureInputRequestHandler;
     readLedger?: ToolReadLedger;
     readLedgerScope?: ToolReadLedgerScope;
+    runtimeAdmissionGuard?: RuntimeToolAdmissionGuard;
   }): Promise<ToolExecutionRecord | undefined> {
     const plan = input.plan;
 
@@ -283,7 +362,8 @@ export class ToolPlanRunner {
       onSecureInputRequest: input.onSecureInputRequest,
       delegateCallBudget: this.#delegateCallBudget,
       readLedger: input.readLedger,
-      readLedgerScope: input.readLedgerScope
+      readLedgerScope: input.readLedgerScope,
+      runtimeAdmissionGuard: input.runtimeAdmissionGuard
     });
 
     if (execution === undefined) {

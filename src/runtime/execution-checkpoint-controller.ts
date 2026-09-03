@@ -3,6 +3,7 @@ import type {
   ExecutionCheckpointAttemptSettlement,
   ExecutionCheckpointBlocker,
   ExecutionCheckpointArtifactReference,
+  ExecutionCheckpointAuthenticationStage,
   ExecutionCheckpointCreationInput,
   ExecutionCheckpointLifecycleEvent,
   ExecutionCheckpointOperationCoordinates,
@@ -256,6 +257,25 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
     );
   }
 
+  async updateAuthenticationRecoveryStage(
+    expectedRevision: number,
+    stage: ExecutionCheckpointAuthenticationStage | undefined
+  ): Promise<ForegroundExecutionCheckpoint | undefined> {
+    return await this.#transition(expectedRevision, "authentication_stage_updated", (current) => {
+      if (current.authenticationRecoveryStage === stage) return current;
+      const semanticProgress = authenticationStageAdvanced(current.authenticationRecoveryStage, stage);
+      return {
+        ...current,
+        revision: current.revision + 1,
+        progressRevision: current.progressRevision + (semanticProgress ? 1 : 0),
+        ...(stage === undefined
+          ? { authenticationRecoveryStage: undefined }
+          : { authenticationRecoveryStage: stage }),
+        updatedAt: this.#now()
+      };
+    });
+  }
+
   async prepareForTurn(userText: string): Promise<ExecutionCheckpointTurnPreparation> {
     const current = this.current();
     if (current === undefined || isTerminalCheckpointStatus(current.status)) {
@@ -365,6 +385,20 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
     this.#writeQueue = result.then(() => undefined, () => undefined);
     return await result;
   }
+}
+
+function authenticationStageAdvanced(
+  current: ExecutionCheckpointAuthenticationStage | undefined,
+  next: ExecutionCheckpointAuthenticationStage | undefined
+): boolean {
+  if (current !== undefined && next === undefined) return true;
+  const rank: Record<ExecutionCheckpointAuthenticationStage, number> = {
+    credentials_submitted: 1,
+    challenge_required: 2,
+    challenge_submitted: 3,
+    authentication_revalidation_required: 4
+  };
+  return next !== undefined && rank[next] > (current === undefined ? 0 : rank[current]);
 }
 
 export function executionCheckpointOperationId(coordinates: ExecutionCheckpointOperationCoordinates): string {

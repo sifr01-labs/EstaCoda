@@ -91,7 +91,15 @@ export type NamedToolExecutionRequest = {
   delegateCallBudget?: DelegateCallBudget;
   readLedger?: ToolReadLedger;
   readLedgerScope?: ToolReadLedgerScope;
+  /** Runtime-owned live-state gate; provider input cannot define or bypass it. */
+  runtimeAdmissionGuard?: RuntimeToolAdmissionGuard;
 };
+
+export type RuntimeToolAdmissionGuard = (input: {
+  tool: ToolDefinition;
+  input: Readonly<Record<string, unknown>>;
+  executionEffect: ToolExecutionEffect | undefined;
+}) => { reason: string; code: string } | undefined;
 
 export type ToolReadLedgerScope = {
   profileId: string;
@@ -439,6 +447,23 @@ export class ToolExecutor {
         toolCallName: request.toolCallName,
         providerNativeToolCall: request.providerNativeToolCall
       };
+    }
+
+    const runtimeBlocker = request.runtimeAdmissionGuard?.({
+      tool: toDefinition(tool),
+      input: request.input,
+      executionEffect
+    });
+    if (runtimeBlocker !== undefined) {
+      return await this.#blockedRuntimeAdmission(
+        request,
+        tool,
+        riskClass,
+        executionEffect,
+        targetKey,
+        targetSummary,
+        runtimeBlocker
+      );
     }
 
     if (durableJournalDeclared && durableCoordinates === undefined) {
@@ -949,6 +974,74 @@ export class ToolExecutor {
     return {
       tool: toDefinition(tool),
       executionEffect,
+      settlement: notStartedSettlement("failed"),
+      input: request.input,
+      decision: "deny",
+      riskClass,
+      targetKey,
+      targetSummary,
+      result,
+      toolCallId: request.toolCallId,
+      toolCallName: request.toolCallName,
+      providerNativeToolCall: request.providerNativeToolCall
+    };
+  }
+
+  async #blockedRuntimeAdmission(
+    request: NamedToolExecutionRequest,
+    tool: import("../contracts/tool.js").RegisteredTool,
+    riskClass: ToolRiskClass,
+    executionEffect: ToolExecutionEffect | undefined,
+    targetKey: string | undefined,
+    targetSummary: string | undefined,
+    blocker: { reason: string; code: string }
+  ): Promise<ToolExecutionRecord> {
+    const result: ToolResult = {
+      ok: false,
+      content: blocker.reason,
+      metadata: {
+        ...settlementMetadata(blocker.code, "not_started", "none"),
+        runtimeAdmissionBlocked: true
+      }
+    };
+    const persistedCall = redactToolCallForPersistence(tool.name, request.input, request.providerNativeToolCall);
+    const storedResult = redactToolResultForPersistence(result);
+    await this.#sessionDb.appendEvent(request.sessionId, {
+      kind: "tool-gated",
+      tool: tool.name,
+      decision: "deny",
+      riskClass
+    });
+    await this.#sessionDb.appendEvent(request.sessionId, {
+      kind: "tool-result",
+      tool: tool.name,
+      result: storedResult,
+      toolCallId: request.toolCallId,
+      toolCallName: request.toolCallName,
+      providerNativeToolCall: persistedCall.providerNativeToolCall
+    });
+    await this.#sessionDb.appendMessage({
+      sessionId: request.sessionId,
+      role: "tool",
+      content: storedResult.content,
+      metadata: {
+        tool: tool.name,
+        tool_call_id: request.toolCallId,
+        tool_call_name: request.toolCallName,
+        provider_native_tool_call: persistedCall.providerNativeToolCall,
+        ok: false,
+        reason: blocker.code
+      }
+    });
+    this.#trajectoryRecorder.record("tool-gated", {
+      tool: tool.name,
+      decision: "deny",
+      riskClass,
+      reason: blocker.code
+    });
+    return {
+      tool: toDefinition(tool),
+      ...(executionEffect === undefined ? {} : { executionEffect }),
       settlement: notStartedSettlement("failed"),
       input: request.input,
       decision: "deny",

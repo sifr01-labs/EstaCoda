@@ -54,8 +54,18 @@ describe("execution checkpoint state", () => {
   });
 
   it("carries only non-terminal state into a compacted child session", () => {
+    const active = checkpoint();
+    const challenged = {
+      ...active,
+      revision: 2,
+      progressRevision: 1,
+      authenticationRecoveryStage: "challenge_required" as const
+    };
     const carried = executionCheckpointCarryForwardEvent({
-      events: [checkpointEvent("created", checkpoint())],
+      events: [
+        checkpointEvent("created", active),
+        checkpointEvent("authentication_stage_updated", challenged)
+      ],
       sourceSessionId: "session-1",
       sessionId: "session-child",
       profileId: "profile-1"
@@ -66,8 +76,9 @@ describe("execution checkpoint state", () => {
       checkpoint: {
         id: "checkpoint:1",
         sessionId: "session-child",
-        revision: 1,
-        status: "active"
+        revision: 2,
+        status: "active",
+        authenticationRecoveryStage: "challenge_required"
       }
     });
     expect(executionCheckpointCarryForwardEvent({
@@ -180,12 +191,13 @@ describe("execution checkpoint state", () => {
       createdAt: "2030-01-01T00:00:00.000Z",
       updatedAt: "2030-01-01T00:00:00.000Z"
     };
-    const forgedCreation = { ...active, safeFacts: [fact] };
+    const forgedCreation = { ...active, safeFacts: [fact], authenticationRecoveryStage: "challenge_required" as const };
     const forgedCorrection = {
       ...active,
       revision: 2,
       latestUserCorrection: "Use another workspace.",
-      operations: [operation]
+      operations: [operation],
+      authenticationRecoveryStage: "challenge_required" as const
     };
     const forgedArtifact = {
       ...active,

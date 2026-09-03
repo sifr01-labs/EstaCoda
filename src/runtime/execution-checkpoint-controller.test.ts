@@ -134,6 +134,51 @@ describe("ExecutionCheckpointController", () => {
     })).toEqual(verified);
   });
 
+  it("persists only safe authentication recovery stages and counts semantic advancement", async () => {
+    const events: ExecutionCheckpointLifecycleEvent[] = [];
+    const controller = new ExecutionCheckpointController({
+      sessionId: "session-1",
+      profileId: "profile-1",
+      now: () => now,
+      createId: () => "checkpoint:1",
+      record: async (event) => { events.push(event); }
+    });
+    const created = await controller.ensure(creation());
+    const credentials = await controller.updateAuthenticationRecoveryStage(
+      created.revision,
+      "credentials_submitted"
+    );
+    const challenge = await controller.updateAuthenticationRecoveryStage(
+      credentials!.revision,
+      "challenge_required"
+    );
+    const repeated = await controller.updateAuthenticationRecoveryStage(
+      challenge!.revision,
+      "challenge_required"
+    );
+    const submitted = await controller.updateAuthenticationRecoveryStage(
+      repeated!.revision,
+      "challenge_submitted"
+    );
+    const verified = await controller.updateAuthenticationRecoveryStage(submitted!.revision, undefined);
+
+    expect(verified).toMatchObject({ revision: 5, progressRevision: 4 });
+    expect(verified).not.toHaveProperty("authenticationRecoveryStage");
+    expect(events.map((event) => event.transition)).toEqual([
+      "created",
+      "authentication_stage_updated",
+      "authentication_stage_updated",
+      "authentication_stage_updated",
+      "authentication_stage_updated"
+    ]);
+    expect(hydratableExecutionCheckpoint({
+      events,
+      sessionId: "session-1",
+      profileId: "profile-1"
+    })).toEqual(verified);
+    expect(JSON.stringify(events)).not.toMatch(/otp|credential.*value|password/iu);
+  });
+
   it("rejects secret-looking facts and semantic coordinates instead of persisting them", async () => {
     const events: ExecutionCheckpointLifecycleEvent[] = [];
     const controller = new ExecutionCheckpointController({

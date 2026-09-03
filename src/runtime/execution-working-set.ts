@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import type { ToolRiskClass } from "../contracts/tool.js";
-import type { ExecutionCheckpointReader } from "../contracts/execution-checkpoint.js";
+import type {
+  ExecutionCheckpointAuthenticationStage,
+  ExecutionCheckpointReader
+} from "../contracts/execution-checkpoint.js";
 import { isTerminalCheckpointStatus } from "../session/execution-checkpoint-state.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import {
@@ -49,6 +52,7 @@ export type ExecutionWorkingFact = {
 export type ExecutionWorkingSet = {
   visibleTurnId: string;
   scope?: "visible-turn" | "checkpoint";
+  authenticationRecoveryStage?: ExecutionCheckpointAuthenticationStage;
   facts: ExecutionWorkingFact[];
   operations: ExecutionOperationReceipt[];
 };
@@ -138,12 +142,15 @@ export class ExecutionWorkingSetController {
       ...this.#operations.snapshot(),
       ...durableOperations
     ].map((operation) => [operation.operationId, operation])).values()];
-    if (this.#facts.size === 0 && operations.length === 0) {
+    if (this.#facts.size === 0 && operations.length === 0 && checkpoint?.authenticationRecoveryStage === undefined) {
       return undefined;
     }
     return {
       visibleTurnId,
       scope: checkpoint === undefined ? "visible-turn" : "checkpoint",
+      ...(checkpoint?.authenticationRecoveryStage === undefined
+        ? {}
+        : { authenticationRecoveryStage: checkpoint.authenticationRecoveryStage }),
       facts: [...this.#facts.values()].map(({ fact }) => ({ ...fact })),
       operations
     };

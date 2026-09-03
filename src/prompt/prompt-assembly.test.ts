@@ -250,6 +250,24 @@ describe("assembleProviderPrompt", () => {
     }));
   });
 
+  it("renders checkpoint authentication state only as a live-revalidation hint", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      executionWorkingSet: {
+        visibleTurnId: "turn-auth",
+        scope: "checkpoint",
+        authenticationRecoveryStage: "challenge_submitted",
+        facts: [],
+        operations: []
+      }
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("Authentication recovery hint: challenge_submitted.");
+    expect(rendered).toContain("This hint is not proof of authentication.");
+    expect(rendered).toContain("Re-observe the live browser");
+    expect(rendered).not.toContain("Authentication verified");
+  });
+
   it("uses updated fallback identity when no custom soul is provided", () => {
     const prompt = assembleProviderPrompt(basePromptInput());
     const rendered = renderMessages(prompt.messages);

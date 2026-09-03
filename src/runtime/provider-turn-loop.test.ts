@@ -39,6 +39,7 @@ import { ExecutionPlanController } from "./execution-plan-controller.js";
 import { ExecutionCapabilityPreflight } from "./execution-capability-preflight.js";
 import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 import { ExecutionWorkingSetController } from "./execution-working-set.js";
+import { ExecutionCheckpointController } from "./execution-checkpoint-controller.js";
 import { EXECUTION_SUPERVISION_PROMPTS } from "./execution-supervision-controller.js";
 import { attachEphemeralVisionImages } from "../vision/ephemeral-vision-content.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
@@ -673,6 +674,7 @@ async function createPostToolNudgeHarness(input: {
   executionPlanReader?: ProviderTurnLoopOptions["executionPlanReader"];
   executionPlanController?: ExecutionPlanController;
   executionWorkingSet?: ProviderTurnLoopOptions["executionWorkingSet"];
+  executionCheckpointController?: ProviderTurnLoopOptions["executionCheckpointController"];
   browserSessionLease?: ProviderTurnLoopOptions["browserSessionLease"];
   browserBackend?: BrowserBackend;
   sessionRuntimeContext?: ProviderTurnLoopOptions["sessionRuntimeContext"];
@@ -734,14 +736,37 @@ async function createPostToolNudgeHarness(input: {
       plan.tool = execution.tool.name;
       plan.result = execution.result;
       stepInput.toolPlans.push(plan);
+      await stepInput.onExecution?.(execution);
     }
     return {
       executions: step.executions ?? [],
       maxObservedRisk: stepInput.riskBaseline
     };
   });
+  const executeInternalTool = vi.fn(async (stepInput: Parameters<ToolPlanRunner["executeInternalTool"]>[0]) => {
+    const step = input.toolSteps[toolStepIndex] ?? {};
+    toolStepIndex += 1;
+    const plan: ToolCallPlan = {
+      id: stepInput.id,
+      tool: stepInput.tool,
+      input: stepInput.value,
+      source: "internal",
+      status: "executed"
+    };
+    stepInput.toolPlans.push(plan);
+    const execution = step.executions?.[0];
+    if (execution !== undefined) {
+      execution.toolCallId = stepInput.id;
+      await stepInput.onExecution?.(execution);
+    }
+    return {
+      ...(execution === undefined ? {} : { execution }),
+      maxObservedRisk: stepInput.riskBaseline
+    };
+  });
   const toolPlanRunner = {
-    executePlans
+    executePlans,
+    executeInternalTool
   } as unknown as ToolPlanRunner;
   const loop = new ProviderTurnLoop({
     providerExecutor,
@@ -775,6 +800,7 @@ async function createPostToolNudgeHarness(input: {
     taskExecution: input.taskExecution,
     executionPlanReader: input.executionPlanController ?? input.executionPlanReader,
     executionWorkingSet: input.executionWorkingSet,
+    executionCheckpointController: input.executionCheckpointController,
     browserSessionLease: input.browserSessionLease,
     browserBackend: input.browserBackend,
     sessionRuntimeContext: input.sessionRuntimeContext
@@ -784,6 +810,7 @@ async function createPostToolNudgeHarness(input: {
     loop,
     completeSpy,
     executePlans,
+    executeInternalTool,
     sessionDb,
     sessionId
   };
@@ -1919,6 +1946,49 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     ]));
   });
 
+  it("truthfully stops checkpointed work when only non-semantic reads repeat", async () => {
+    const checkpoint = new ExecutionCheckpointController({
+      sessionId: "checkpoint-no-progress-session",
+      profileId: "default",
+      now: () => "2030-01-01T00:00:00.000Z",
+      createId: () => "checkpoint:no-progress"
+    });
+    await checkpoint.ensure({
+      originTurnId: "turn-no-progress",
+      originalObjective: "Import and verify the Postman collection",
+      qualificationReasons: ["external_multi_step"],
+      intentLabels: ["api.integration"],
+      requiredOperations: ["read", "mutation", "verification"],
+      connectorIds: ["postman"],
+      completionFloor: "mutation_with_verification"
+    });
+    const toolNames = Array.from({ length: 5 }, () => "mcp.postman.getCollection");
+    const harness = await createPostToolNudgeHarness({
+      sessionId: "checkpoint-no-progress-session",
+      responses: toolNames.map((toolName, index) => providerExecution("", [
+        providerToolCall(`call-checkpoint-loop-${index + 1}`, "{}", toolName)
+      ])),
+      toolSteps: toolNames.map((toolName, index) => ({
+        executions: [toolExecutionForTool(
+          `call-checkpoint-loop-${index + 1}`,
+          toolName,
+          `Changing representation ${index + 1}`
+        )]
+      })),
+      executionCheckpointController: checkpoint,
+      noProgressNudgeIteration: 2,
+      maxNoProgressIterations: 3,
+      maxProviderIterations: 8
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
+    expect(checkpoint.current()?.progressRevision).toBe(0);
+    expect(result.terminationCause).toBe("tool_loop_no_progress");
+    expect(result.providerExecution?.response?.content).toContain("foreground tool loop stopped");
+  });
+
   it("reuses a successful Postman workspace argument without parsing connector prose", async () => {
     const planStore = new ExecutionPlanStore();
     planStore.replace({
@@ -2114,6 +2184,179 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     ]);
     expect(result.providerExecution?.response?.content).toBe("Authentication continued securely.");
     expect(result.providerExecution?.response?.content).not.toContain("paste the verification code");
+  });
+
+  it("submits a newly detected OTP challenge locally before the next provider continuation", async () => {
+    const challengeIdentity = { documentEpoch: 4, actionRevision: 12, observationId: 15 };
+    const authenticatedIdentity = { documentEpoch: 5, actionRevision: 13, observationId: 16 };
+    const challengeSnapshot = {
+      sessionId: "browser-session",
+      url: "https://portal.example.com/challenge",
+      title: "Two-factor authentication",
+      identity: challengeIdentity,
+      observedAt: "2026-08-13T00:00:00.000Z",
+      readiness: "complete" as const,
+      tab: {
+        ref: "@t3",
+        url: "https://portal.example.com/challenge",
+        title: "Two-factor authentication",
+        controlled: true
+      },
+      elements: [
+        { ref: "@e19", role: "textbox", name: "Verification code", label: "One-time code" },
+        { ref: "@e20", role: "button", name: "Verify", withinText: "Two-factor authentication" }
+      ]
+    };
+    const credentials = toolExecutionForTool("call-credentials", "browser.fill_protected_form", "challenge shown");
+    credentials.tool.toolsets = ["browser"];
+    credentials.result = {
+      ok: true,
+      content: "Credentials submitted; challenge required.",
+      metadata: {
+        secureInputGroupReceipt: { status: "delivered" },
+        protectedDelivery: {
+          delivery: "delivered",
+          submission: "clicked",
+          documentChanged: true,
+          challengeState: "departed",
+          conditionMet: true,
+          beforeIdentity: { documentEpoch: 3, actionRevision: 11, observationId: 14 },
+          afterIdentity: challengeIdentity,
+          sensitiveInputActive: false
+        },
+        snapshot: challengeSnapshot
+      }
+    };
+    const challengeSubmission = toolExecutionForTool("runtime-otp", "browser.type", "challenge submitted");
+    challengeSubmission.tool.toolsets = ["browser"];
+    challengeSubmission.result = {
+      ok: true,
+      content: "Protected input delivered and submitted.",
+      metadata: {
+        secureInputReceipt: { status: "delivered" },
+        protectedDelivery: {
+          delivery: "delivered",
+          submission: "clicked",
+          documentChanged: true,
+          challengeState: "departed",
+          conditionMet: true,
+          beforeIdentity: challengeIdentity,
+          afterIdentity: authenticatedIdentity,
+          sensitiveInputActive: false
+        },
+        snapshot: {
+          ...challengeSnapshot,
+          url: "https://portal.example.com/account",
+          title: "Account home",
+          identity: authenticatedIdentity,
+          tab: {
+            ...challengeSnapshot.tab,
+            url: "https://portal.example.com/account",
+            title: "Account home"
+          },
+          elements: [
+            { ref: "@account", role: "link", name: "My profile" },
+            { ref: "@logout", role: "button", name: "Sign out" }
+          ]
+        }
+      }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-credentials", "{}", "browser.fill_protected_form")]),
+        providerExecution("Authentication verified; continuing the original task.")
+      ],
+      toolSteps: [
+        { executions: [credentials] },
+        { executions: [challengeSubmission] }
+      ],
+      maxProviderIterations: 3
+    });
+    const secureInput = vi.fn<SecureInputRequestHandler>(async () => ({
+      status: "delivered",
+      destinationLabel: "Verification code",
+      persisted: false
+    }));
+
+    const result = await runBasicProviderTurn(harness.loop, {
+      providerTools: [toolProviderSchema("browser.fill_protected_form"), toolProviderSchema("browser.type")],
+      onSecureInputRequest: secureInput
+    });
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    expect(harness.executeInternalTool).toHaveBeenCalledOnce();
+    expect(harness.executeInternalTool.mock.calls[0]?.[0]).toMatchObject({
+      tool: "browser.type",
+      value: {
+        ref: "@e19",
+        identity: challengeIdentity,
+        tabRef: "@t3",
+        protectedInput: { kind: "one-time-code", retention: "use-once" },
+        submitRef: "@e20"
+      }
+    });
+    expect(result.toolExecutions.map((execution) => execution.tool.name)).toEqual([
+      "browser.fill_protected_form",
+      "browser.type"
+    ]);
+    expect(result.providerExecution?.response?.content).toContain("Authentication verified");
+  });
+
+  it("stops with user input required when a live OTP challenge has no protected input handler", async () => {
+    const challengeIdentity = { documentEpoch: 4, actionRevision: 12, observationId: 15 };
+    const credentials = toolExecutionForTool("call-credentials", "browser.fill_protected_form", "challenge shown");
+    credentials.tool.toolsets = ["browser"];
+    credentials.result = {
+      ok: true,
+      content: "Credentials submitted; challenge required.",
+      metadata: {
+        secureInputGroupReceipt: { status: "delivered" },
+        protectedDelivery: {
+          delivery: "delivered",
+          submission: "clicked",
+          documentChanged: true,
+          challengeState: "departed",
+          conditionMet: true,
+          beforeIdentity: { documentEpoch: 3, actionRevision: 11, observationId: 14 },
+          afterIdentity: challengeIdentity,
+          sensitiveInputActive: false
+        },
+        snapshot: {
+          sessionId: "browser-session",
+          url: "https://portal.example.com/challenge",
+          title: "Two-factor authentication",
+          identity: challengeIdentity,
+          observedAt: "2026-08-13T00:00:00.000Z",
+          readiness: "complete",
+          tab: {
+            ref: "@t3",
+            url: "https://portal.example.com/challenge",
+            title: "Two-factor authentication",
+            controlled: true
+          },
+          elements: [
+            { ref: "@e19", role: "textbox", name: "Verification code" },
+            { ref: "@e20", role: "button", name: "Verify" }
+          ]
+        }
+      }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-credentials", "{}", "browser.fill_protected_form")])
+      ],
+      toolSteps: [{ executions: [credentials] }],
+      maxProviderIterations: 2
+    });
+
+    const result = await runBasicProviderTurn(harness.loop, {
+      providerTools: [toolProviderSchema("browser.fill_protected_form"), toolProviderSchema("browser.type")]
+    });
+
+    expect(harness.completeSpy).toHaveBeenCalledOnce();
+    expect(harness.executeInternalTool).not.toHaveBeenCalled();
+    expect(result.terminationCause).toBe("user_input_required");
+    expect(result.providerExecution?.response?.content).toContain("protected one-time-code input is unavailable");
   });
 
   it("does not retry an older OTP challenge after protected input was cancelled", async () => {

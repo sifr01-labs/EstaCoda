@@ -1,7 +1,12 @@
 import type { ProviderResponse } from "../contracts/provider.js";
 import type { ExecutionTerminationCause } from "../contracts/execution-plan.js";
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
-import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import type { BrowserSnapshot, BrowserStateIdentity } from "../contracts/browser.js";
+import type {
+  ExecutionCheckpointAuthenticationStage,
+  ExecutionCheckpointSupervisionController
+} from "../contracts/execution-checkpoint.js";
+import type { RuntimeToolAdmissionGuard, ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import { BrowserObservationGuard, type BrowserObservationAssessment } from "./browser-observation-guard.js";
 import {
@@ -39,6 +44,14 @@ export type ExecutionSupervisionAssessment = {
   >;
 };
 
+export type ProtectedAuthenticationChallenge = {
+  sessionId: string;
+  identity: BrowserStateIdentity;
+  tabRef: string;
+  fieldRef: string;
+  submitRef: string;
+};
+
 export type ExecutionSupervisionControllerOptions = {
   foregroundTurnId: string;
   existingExecutions: readonly ToolExecutionRecord[];
@@ -48,6 +61,7 @@ export type ExecutionSupervisionControllerOptions = {
   noProgressNudgeIteration: number;
   maxNoProgressIterations: number;
   executionWorkingSet?: ExecutionWorkingSetController;
+  executionCheckpointController?: ExecutionCheckpointSupervisionController;
   runRecorder: Pick<RunRecorder, "recordAuthenticationEvidenceAssessment">;
   onEvent?: RuntimeEventSink;
 };
@@ -66,6 +80,7 @@ export class ExecutionSupervisionController {
   readonly #noProgressNudgeIteration: number;
   readonly #maxNoProgressIterations: number;
   readonly #executionWorkingSet: ExecutionWorkingSetController | undefined;
+  readonly #executionCheckpointController: ExecutionCheckpointSupervisionController | undefined;
   readonly #runRecorder: Pick<RunRecorder, "recordAuthenticationEvidenceAssessment">;
   readonly #onEvent: RuntimeEventSink | undefined;
   readonly #existingExecutions: readonly ToolExecutionRecord[];
@@ -78,6 +93,8 @@ export class ExecutionSupervisionController {
   #suppressedBrowserTools: string[] = [];
   #pendingToolLoopProgressNudge = false;
   #runtimeUserInputBlocker: { summary: string } | undefined;
+  #authenticationGateState: "challenge-required" | "revalidation-required" | "blocked" | undefined;
+  #pendingProtectedChallenge: ProtectedAuthenticationChallenge | undefined;
   #initialized = false;
 
   constructor(options: ExecutionSupervisionControllerOptions) {
@@ -87,6 +104,7 @@ export class ExecutionSupervisionController {
     this.#noProgressNudgeIteration = options.noProgressNudgeIteration;
     this.#maxNoProgressIterations = options.maxNoProgressIterations;
     this.#executionWorkingSet = options.executionWorkingSet;
+    this.#executionCheckpointController = options.executionCheckpointController;
     this.#runRecorder = options.runRecorder;
     this.#onEvent = options.onEvent;
     this.#existingExecutions = options.existingExecutions;
@@ -94,9 +112,12 @@ export class ExecutionSupervisionController {
     this.#toolLoopProgressGuard = new ToolLoopProgressGuard({
       existingExecutions: options.existingExecutions,
       noProgressNudgeIteration: options.noProgressNudgeIteration,
-      maxNoProgressIterations: options.maxNoProgressIterations
+      maxNoProgressIterations: options.maxNoProgressIterations,
+      checkpointReader: options.executionCheckpointController
     });
-    this.#authenticationEvidenceTracker = new AuthenticationEvidenceTracker(options.existingExecutions);
+    const recoveryStage = options.executionCheckpointController?.current()?.authenticationRecoveryStage;
+    this.#authenticationEvidenceTracker = new AuthenticationEvidenceTracker(options.existingExecutions, recoveryStage);
+    this.#authenticationGateState = recoveryStage === undefined ? undefined : "revalidation-required";
   }
 
   async initialize(): Promise<void> {
@@ -105,7 +126,8 @@ export class ExecutionSupervisionController {
     this.#toolLoopProgressGuard = new ToolLoopProgressGuard({
       existingExecutions: this.#existingExecutions,
       noProgressNudgeIteration: this.#noProgressNudgeIteration,
-      maxNoProgressIterations: this.#maxNoProgressIterations
+      maxNoProgressIterations: this.#maxNoProgressIterations,
+      checkpointReader: this.#executionCheckpointController
     });
     this.#executionWorkingSet?.beginTurn(this.#foregroundTurnId, this.#currentSessionId());
     this.#executionWorkingSet?.observe(
@@ -146,9 +168,54 @@ export class ExecutionSupervisionController {
       await this.#runRecorder.recordAuthenticationEvidenceAssessment(assessment);
     }
     await emitAuthenticationLifecycleEvents(this.#onEvent, authenticationObservation.effects);
-    this.#runtimeUserInputBlocker = authenticationObservation.effects
+    await this.#applyAuthenticationCheckpointEffects(authenticationObservation.effects);
+    this.#updateAuthenticationGate(authenticationObservation.effects);
+    const userInputBlocker = authenticationObservation.effects
       .find((effect) => effect.blocker?.kind === "user_input_required")
       ?.blocker;
+    if (userInputBlocker !== undefined) {
+      this.#runtimeUserInputBlocker = userInputBlocker;
+    } else if (authenticationObservation.effects.length > 0) {
+      this.#runtimeUserInputBlocker = undefined;
+    }
+    const challenge = authenticationObservation.effects.find((effect) =>
+      effect.effect === "challenge-required" && effect.blocker === undefined
+    );
+    if (challenge !== undefined) {
+      this.#pendingProtectedChallenge = visibleProtectedChallenge(input.executions);
+    } else if (authenticationObservation.effects.some((effect) =>
+      effect.effect === "challenge-submitted" ||
+      effect.effect === "authentication-verified" ||
+      effect.effect === "authentication-blocked" ||
+      effect.effect === "credentials-required"
+    )) {
+      this.#pendingProtectedChallenge = undefined;
+    }
+  }
+
+  runtimeAdmissionGuard(): RuntimeToolAdmissionGuard {
+    return ({ tool, input, executionEffect }) => {
+      if (executionEffect?.kind !== "mutation" || this.#authenticationGateState === undefined) return undefined;
+      if (isProtectedAuthenticationMutation(tool.name, input)) return undefined;
+      return {
+        code: "authentication-live-state-required",
+        reason: this.#authenticationGateState === "challenge-required"
+          ? "Tool execution blocked: complete and verify the live authentication challenge before unrelated mutations."
+          : "Tool execution blocked: re-observe and verify the live authentication state before unrelated mutations."
+      };
+    };
+  }
+
+  takeProtectedAuthenticationChallenge(): ProtectedAuthenticationChallenge | undefined {
+    const challenge = this.#pendingProtectedChallenge;
+    this.#pendingProtectedChallenge = undefined;
+    return challenge;
+  }
+
+  requireProtectedChallengeInput(): void {
+    this.#runtimeUserInputBlocker = {
+      summary: "The authentication challenge is visible, but protected one-time-code input is unavailable."
+    };
   }
 
   assessProgress(executions: ToolExecutionRecord[]): ExecutionSupervisionAssessment {
@@ -219,6 +286,117 @@ export class ExecutionSupervisionController {
       ? "توقّف بدء عمل جديد عند بلوغ مهلة الطوارئ، مع الحفاظ على وقت لإظهار نتيجة موثوقة."
       : "New work stopped at the emergency deadline reserve so the runtime could return a truthful local result.");
   }
+
+  async #applyAuthenticationCheckpointEffects(
+    effects: readonly AuthenticationExecutionEffectReceipt[]
+  ): Promise<void> {
+    for (const effect of effects) {
+      const stage = checkpointAuthenticationStage(effect);
+      if (stage === "unchanged") continue;
+      const current = this.#executionCheckpointController?.current();
+      if (current === undefined) continue;
+      await this.#executionCheckpointController
+        ?.updateAuthenticationRecoveryStage(current.revision, stage)
+        .catch(() => undefined);
+    }
+  }
+
+  #updateAuthenticationGate(effects: readonly AuthenticationExecutionEffectReceipt[]): void {
+    for (const effect of effects) {
+      if (effect.effect === "authentication-verified") {
+        this.#authenticationGateState = undefined;
+      } else if (effect.effect === "challenge-required") {
+        this.#authenticationGateState = "challenge-required";
+      } else if (
+        effect.effect === "credentials-submitted" ||
+        effect.effect === "challenge-submitted" ||
+        effect.effect === "authentication-candidate"
+      ) {
+        this.#authenticationGateState = "revalidation-required";
+      } else if (effect.effect === "credentials-required" || effect.effect === "authentication-blocked") {
+        this.#authenticationGateState = "blocked";
+      }
+    }
+  }
+}
+
+function isProtectedAuthenticationMutation(
+  toolName: string,
+  input: Readonly<Record<string, unknown>>
+): boolean {
+  if (toolName === "browser.type") {
+    const protectedInput = record(input.protectedInput);
+    return protectedInput?.kind === "one-time-code" || protectedInput?.kind === "recovery-code";
+  }
+  if (toolName !== "browser.fill_protected_form" || !Array.isArray(input.fields) || input.fields.length === 0) {
+    return false;
+  }
+  return input.fields.every((field) => {
+    const kind = record(field)?.kind;
+    return kind === "account-identifier" || kind === "password" ||
+      kind === "one-time-code" || kind === "recovery-code";
+  });
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function checkpointAuthenticationStage(
+  effect: AuthenticationExecutionEffectReceipt
+): ExecutionCheckpointAuthenticationStage | undefined | "unchanged" {
+  if (effect.effect === "credentials-submitted") return "credentials_submitted";
+  if (effect.effect === "challenge-required") return "challenge_required";
+  if (effect.effect === "challenge-submitted") return "challenge_submitted";
+  if (effect.effect === "authentication-candidate") return "authentication_revalidation_required";
+  if (effect.effect === "authentication-verified") return undefined;
+  return "unchanged";
+}
+
+function visibleProtectedChallenge(
+  executions: readonly ToolExecutionRecord[]
+): ProtectedAuthenticationChallenge | undefined {
+  for (let index = executions.length - 1; index >= 0; index -= 1) {
+    const execution = executions[index]!;
+    if (!execution.tool.toolsets.includes("browser")) continue;
+    const snapshot = browserSnapshot(execution.result?.metadata?.snapshot);
+    if (snapshot === undefined || snapshot.sensitiveInputActive === true || snapshot.tab?.ref === undefined) return undefined;
+    const elements = snapshot.elements ?? [];
+    const codeFields = elements.filter((element) =>
+      typeof element.ref === "string" &&
+      (element.role === "textbox" || element.role === "searchbox" || element.role === "combobox") &&
+      /one[-\s]?time|otp|mfa|verification\s+code|security\s+code|authentication\s+code|رمز التحقق|رمز الأمان/iu
+        .test([element.name, element.label, element.withinText].filter(Boolean).join(" "))
+    );
+    const submitControls = elements.filter((element) =>
+      typeof element.ref === "string" && element.role === "button" &&
+      /verify|submit|continue|confirm|next|authenticat(?:e|ion)|sign\s*in|log\s*in|تحقق|تأكيد|متابعة|مصادقة|دخول/iu
+        .test([element.name, element.label, element.withinText].filter(Boolean).join(" "))
+    );
+    if (codeFields.length !== 1 || submitControls.length !== 1) return undefined;
+    return {
+      sessionId: snapshot.sessionId,
+      identity: { ...snapshot.identity },
+      tabRef: snapshot.tab.ref,
+      fieldRef: codeFields[0]!.ref!,
+      submitRef: submitControls[0]!.ref!
+    };
+  }
+  return undefined;
+}
+
+function browserSnapshot(value: unknown): BrowserSnapshot | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const snapshot = value as Partial<BrowserSnapshot>;
+  if (
+    typeof snapshot.sessionId !== "string" ||
+    typeof snapshot.url !== "string" ||
+    typeof snapshot.observedAt !== "string" ||
+    typeof snapshot.identity !== "object" || snapshot.identity === null
+  ) return undefined;
+  return snapshot as BrowserSnapshot;
 }
 
 async function emitAuthenticationLifecycleEvents(

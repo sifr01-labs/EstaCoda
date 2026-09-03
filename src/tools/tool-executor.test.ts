@@ -1497,6 +1497,39 @@ describe("ToolExecutor tool-call metadata persistence", () => {
     expect(controller.current()?.operations).toEqual([]);
   });
 
+  it("applies a runtime-owned live authentication gate after security without dispatching a mutation", async () => {
+    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "must not run" }));
+    const mutation: RegisteredTool = {
+      ...createEchoTool("mcp.postman.updateCollection"),
+      riskClass: "external-side-effect",
+      toolsets: ["mcp"],
+      connector: { kind: "mcp", id: "postman" },
+      run
+    };
+    const { executor, sessionDb } = await setupExecutor({ tools: [mutation] });
+
+    const execution = await executor.executeTool({
+      tool: mutation.name,
+      input: { collectionId: "collection-1" },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      runtimeAdmissionGuard: ({ executionEffect }) => executionEffect?.kind === "mutation"
+        ? {
+            code: "authentication-live-state-required",
+            reason: "Complete and verify the live authentication challenge first."
+          }
+        : undefined
+    });
+
+    expect(execution).toMatchObject({
+      decision: "deny",
+      settlement: { dispatchState: "not_started", sideEffectState: "none" },
+      result: { metadata: { reason: "authentication-live-state-required", runtimeAdmissionBlocked: true } }
+    });
+    expect(run).not.toHaveBeenCalled();
+    expect(JSON.stringify(await sessionDb.listEvents("test-session"))).toContain("authentication-live-state-required");
+  });
+
   it("does not let a terminal checkpoint govern later unrelated mutations", async () => {
     const sessionDb: SessionDB = new InMemorySessionDB();
     await sessionDb.createSession({ profileId: "test", id: "test-session" });

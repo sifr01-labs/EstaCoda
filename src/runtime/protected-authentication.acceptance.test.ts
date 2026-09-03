@@ -536,6 +536,12 @@ async function createAcceptanceHarness(scenario: AcceptanceScenario) {
     showOtpChallengePage(socket);
     socket.snapshot.url = `${PORTAL_ORIGIN}/challenge`;
     socket.documentCurrent = false;
+    // The credential settlement must first observe that its old document
+    // departed. Resolving `document` for the immediately following local OTP
+    // action then binds the fake CDP session to the new challenge document.
+    socket.onRuntimeEvaluate = (expression) => {
+      if (expression.trim() === "document") socket.documentCurrent = true;
+    };
     socket.onProtectedDelivery = () => {
       timeline.push("otp-delivery");
       if ((scenario.otpMode ?? "manual") === "automatic") {

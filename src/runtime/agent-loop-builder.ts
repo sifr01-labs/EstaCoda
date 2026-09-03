@@ -651,6 +651,7 @@ export class AgentLoopBuilder {
       taskExecution: input.taskExecution,
       executionPlanReader: executionPlanController,
       executionWorkingSet,
+      executionCheckpointController,
       browserSessionLease: ownsForegroundSupervision ? substrate.browserSessionLease : undefined,
       browserBackend: substrate.browserBackend
     });

@@ -341,6 +341,29 @@ describe("ExecutionWorkingSetController", () => {
     expect(controller.snapshot("turn-after-completion")).toBeUndefined();
   });
 
+  it("surfaces a checkpoint authentication stage as a recovery hint even without facts", () => {
+    const checkpoint = {
+      ...checkpointFixture(),
+      authenticationRecoveryStage: "challenge_submitted" as const,
+      safeFacts: [],
+      operations: []
+    };
+    const controller = new ExecutionWorkingSetController({
+      profileId: "profile-a",
+      sessionId: "session-a",
+      checkpointReader: { current: () => structuredClone(checkpoint) }
+    });
+    controller.beginTurn(TURN);
+
+    expect(controller.snapshot(TURN)).toEqual({
+      visibleTurnId: TURN,
+      scope: "checkpoint",
+      authenticationRecoveryStage: "challenge_submitted",
+      facts: [],
+      operations: []
+    });
+  });
+
   it("keeps profile/session instances isolated and bounds the fact count", () => {
     const first = new ExecutionWorkingSetController({ profileId: "profile-a", sessionId: "session-a" });
     const second = new ExecutionWorkingSetController({ profileId: "profile-b", sessionId: "session-b" });

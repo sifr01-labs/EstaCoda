@@ -88,6 +88,16 @@ export type ExecutionCheckpointOperation = ExecutionCheckpointOperationCoordinat
 };
 
 /**
+ * Restart-safe authentication recovery hint. Live browser evidence remains the
+ * only authority for whether authentication has actually completed.
+ */
+export type ExecutionCheckpointAuthenticationStage =
+  | "credentials_submitted"
+  | "challenge_required"
+  | "challenge_submitted"
+  | "authentication_revalidation_required";
+
+/**
  * Runtime-owned foreground continuity. It is not model-writable and grants no
  * tool, connector, authentication, approval, or completion authority.
  */
@@ -116,6 +126,8 @@ export type ForegroundExecutionCheckpoint = {
   safeFacts: ExecutionCheckpointSafeFact[];
   /** Crash-aware external operation journal keyed only by reviewed coordinates. */
   operations: ExecutionCheckpointOperation[];
+  /** Safe recovery hint only; never an authenticated-state assertion. */
+  authenticationRecoveryStage?: ExecutionCheckpointAuthenticationStage;
   completionFloor: ExecutionCompletionFloor;
   blocker?: ExecutionCheckpointBlocker;
   lastTerminationCause?: ExecutionTerminationCause;
@@ -134,6 +146,7 @@ export type ExecutionCheckpointTransition =
   | "operation_dispatched"
   | "operation_settled"
   | "operation_verified"
+  | "authentication_stage_updated"
   | "attempt_settled"
   | "blocked"
   | "cancelled"
@@ -193,5 +206,12 @@ export type ExecutionCheckpointJournalController = ExecutionCheckpointArtifactCo
     expectedRevision: number,
     operationId: string,
     outcome: "present" | "absent"
+  ): Promise<ForegroundExecutionCheckpoint | undefined>;
+};
+
+export type ExecutionCheckpointSupervisionController = ExecutionCheckpointJournalController & {
+  updateAuthenticationRecoveryStage(
+    expectedRevision: number,
+    stage: ExecutionCheckpointAuthenticationStage | undefined
   ): Promise<ForegroundExecutionCheckpoint | undefined>;
 };

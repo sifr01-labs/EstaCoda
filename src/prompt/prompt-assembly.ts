@@ -714,6 +714,12 @@ function renderExecutionWorkingSet(workingSet: ExecutionWorkingSet): string {
   return [
     "Authoritative execution working state (harness-derived receipts; reuse these instead of reconstructing them):",
     workingSet.scope === "checkpoint" ? "Scope: durable foreground checkpoint" : "Scope: current visible turn",
+    ...(workingSet.authenticationRecoveryStage === undefined
+      ? []
+      : [
+          `Authentication recovery hint: ${workingSet.authenticationRecoveryStage}.`,
+          "This hint is not proof of authentication. Re-observe the live browser and rely on current authentication evidence before unrelated mutations."
+        ]),
     ...(workingSet.facts.length === 0 ? [] : ["Confirmed facts:"]),
     ...workingSet.facts.map((fact) =>
       `- ${fact.summary} · source=${fact.sourceCallId} · freshness=${fact.freshness}`

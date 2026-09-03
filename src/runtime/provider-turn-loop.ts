@@ -28,6 +28,7 @@ import type {
 import type { LoadedSkill, SelectedSkillPromptContent, SkillDefinition, SkillCatalogEntry } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
+import type { ExecutionCheckpointSupervisionController } from "../contracts/execution-checkpoint.js";
 import type { GroupedSecureInputRequestHandler, SecureInputRequestHandler, SecureInputTransferRequestHandler } from "../contracts/secure-input.js";
 import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import { PromptCache } from "../prompt/prompt-cache.js";
@@ -89,7 +90,8 @@ import {
 } from "./execution-supervision-controller.js";
 import {
   createProviderToolCallNamespace,
-  namespaceProviderToolCalls
+  namespaceProviderToolCalls,
+  runtimeProviderToolCallId
 } from "./provider-tool-call-identity.js";
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
@@ -158,6 +160,7 @@ export type ProviderTurnLoopOptions = {
   taskExecution?: ProviderUsageTaskAttribution;
   executionPlanReader?: ExecutionPlanReader;
   executionWorkingSet?: ExecutionWorkingSetController;
+  executionCheckpointController?: ExecutionCheckpointSupervisionController;
   browserSessionLease?: BrowserSessionLease;
   browserBackend?: BrowserBackend;
 };
@@ -185,6 +188,7 @@ export class ProviderTurnLoop {
   readonly #taskExecution: ProviderUsageTaskAttribution | undefined;
   readonly #executionPlanReader: ExecutionPlanReader | undefined;
   readonly #executionWorkingSet: ExecutionWorkingSetController | undefined;
+  readonly #executionCheckpointController: ExecutionCheckpointSupervisionController | undefined;
   readonly #browserSessionLease: BrowserSessionLease | undefined;
   readonly #browserBackend: BrowserBackend | undefined;
   #activeBrowserLease: { sessionId: string; owner: string } | undefined;
@@ -230,6 +234,7 @@ export class ProviderTurnLoop {
     this.#taskExecution = options.taskExecution;
     this.#executionPlanReader = options.executionPlanReader;
     this.#executionWorkingSet = options.executionWorkingSet;
+    this.#executionCheckpointController = options.executionCheckpointController;
     this.#browserSessionLease = options.browserSessionLease;
     this.#browserBackend = options.browserBackend;
     this.#lastActualPromptTokens = options.initialContextWindowUsage?.usedTokens;
@@ -329,6 +334,7 @@ export class ProviderTurnLoop {
       noProgressNudgeIteration: this.#budgets.noProgressNudgeIteration,
       maxNoProgressIterations: this.#budgets.maxNoProgressIterations,
       executionWorkingSet: this.#executionWorkingSet,
+      executionCheckpointController: this.#executionCheckpointController,
       runRecorder: this.#runRecorder,
       onEvent: input.onEvent
     });
@@ -635,11 +641,56 @@ export class ProviderTurnLoop {
         readLedgerScope: {
           profileId: this.#profileId,
           sessionId: this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId
+        },
+        runtimeAdmissionGuard: executionSupervision.runtimeAdmissionGuard(),
+        onExecution: async (toolExecution) => {
+          await executionSupervision.applyRuntimeEffects({ executions: [toolExecution] });
         }
       });
-      const loopToolExecutions = loopToolExecutionResult.executions;
-      await executionSupervision.applyRuntimeEffects({ executions: loopToolExecutions });
+      const loopToolExecutions = [...loopToolExecutionResult.executions];
       maxObservedRisk = loopToolExecutionResult.maxObservedRisk;
+      const protectedChallenge = executionSupervision.takeProtectedAuthenticationChallenge();
+      if (protectedChallenge !== undefined) {
+        if (onSecureInputRequest === undefined) {
+          executionSupervision.requireProtectedChallengeInput();
+        } else if (providerToolExecutions.length + loopToolExecutions.length < this.#budgets.maxProviderToolCalls) {
+          const recovery = await this.#toolPlanRunner.executeInternalTool({
+            id: runtimeProviderToolCallId({
+              namespace: providerToolCallNamespace,
+              providerIteration: iteration,
+              callOrdinal: execution.toolCalls.length
+            }),
+            tool: "browser.type",
+            value: {
+              ref: protectedChallenge.fieldRef,
+              sessionId: protectedChallenge.sessionId,
+              identity: protectedChallenge.identity,
+              tabRef: protectedChallenge.tabRef,
+              protectedInput: {
+                kind: "one-time-code",
+                purpose: "Complete the current authentication challenge",
+                retention: "use-once"
+              },
+              submitRef: protectedChallenge.submitRef
+            },
+            toolPlans: input.toolPlans,
+            trustedWorkspace: input.trustedWorkspace,
+            riskBaseline: maxObservedRisk,
+            visibleTurnId: input.visibleTurnId,
+            providerUsageLineage: await this.#providerUsageLineage(input.visibleTurnId),
+            signal: input.signal,
+            onEvent: input.onEvent,
+            onApprovalRequest: input.onApprovalRequest,
+            onSecureInputRequest,
+            runtimeAdmissionGuard: executionSupervision.runtimeAdmissionGuard(),
+            onExecution: async (toolExecution) => {
+              await executionSupervision.applyRuntimeEffects({ executions: [toolExecution] });
+            }
+          });
+          if (recovery.execution !== undefined) loopToolExecutions.push(recovery.execution);
+          maxObservedRisk = recovery.maxObservedRisk;
+        }
+      }
       providerToolExecutions.push(...loopToolExecutions);
       delegatedAnswerOwnership = pendingDelegatedAnswerOwnership(loopToolExecutions) ?? delegatedAnswerOwnership;
       if (loopToolExecutions.some((execution) => !isHousekeepingToolName(execution.tool.name))) {

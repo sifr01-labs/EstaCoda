@@ -1,5 +1,6 @@
 import type {
   ExecutionCheckpointBlocker,
+  ExecutionCheckpointAuthenticationStage,
   ExecutionCheckpointLifecycleEvent,
   ExecutionCheckpointOperation,
   ExecutionCheckpointOperationRequirement,
@@ -54,18 +55,25 @@ const CHECKPOINT_KEYS = new Set([
   "version", "id", "sessionId", "profileId", "originTurnId", "revision", "progressRevision",
   "originalObjective", "latestUserCorrection", "status", "qualificationReasons", "selectedSkillName", "taskClass",
   "intentLabels", "requiredOperations", "connectorIds", "completionFloor", "blocker",
-  "artifactReferences", "safeFacts", "operations",
+  "artifactReferences", "safeFacts", "operations", "authenticationRecoveryStage",
   "lastTerminationCause", "lastProviderFailureClass", "createdAt", "updatedAt"
 ]);
 const TRANSITIONS = new Set<ExecutionCheckpointLifecycleEvent["transition"]>([
   "created", "carried_forward", "corrected", "artifact_attached", "facts_retained", "operation_planned",
-  "operation_dispatched", "operation_settled", "operation_verified", "attempt_settled", "blocked", "cancelled", "superseded"
+  "operation_dispatched", "operation_settled", "operation_verified", "authentication_stage_updated",
+  "attempt_settled", "blocked", "cancelled", "superseded"
 ]);
 const SAFE_FACT_KINDS = new Set<ExecutionCheckpointSafeFact["kind"]>([
   "workspace_id", "collection_id", "specification_id", "product_name", "artifact_id", "artifact_hash"
 ]);
 const OPERATION_STATUSES = new Set<ExecutionCheckpointOperation["status"]>([
   "planned", "dispatched", "settled", "verified", "failed", "uncertain"
+]);
+const AUTHENTICATION_RECOVERY_STAGES = new Set<ExecutionCheckpointAuthenticationStage>([
+  "credentials_submitted",
+  "challenge_required",
+  "challenge_submitted",
+  "authentication_revalidation_required"
 ]);
 
 export class ExecutionCheckpointValidationError extends Error {
@@ -138,7 +146,8 @@ export function hydratableExecutionCheckpoint(input: {
         (event.transition !== "created" && event.transition !== "carried_forward") ||
         (event.transition === "created" && (
           candidate.revision !== 1 || candidate.progressRevision !== 0 || candidate.status !== "active" ||
-          candidate.artifactReferences.length !== 0 || candidate.safeFacts.length !== 0 || candidate.operations.length !== 0
+          candidate.artifactReferences.length !== 0 || candidate.safeFacts.length !== 0 || candidate.operations.length !== 0 ||
+          candidate.authenticationRecoveryStage !== undefined
         )) ||
         isTerminalCheckpointStatus(candidate.status)
       ) continue;
@@ -225,13 +234,15 @@ function isCoherentTransition(
       candidate.latestUserCorrection !== undefined && !correctionUnchanged &&
       sameArtifactReferences(current.artifactReferences, candidate.artifactReferences) &&
       sameSafeFacts(current.safeFacts, candidate.safeFacts) &&
-      sameOperations(current.operations, candidate.operations);
+      sameOperations(current.operations, candidate.operations) &&
+      current.authenticationRecoveryStage === candidate.authenticationRecoveryStage;
   }
   if (transition === "artifact_attached") {
     return candidate.status === current.status && correctionUnchanged && progressDelta === 1 &&
       candidate.artifactReferences.length === current.artifactReferences.length + 1 &&
       sameSafeFacts(current.safeFacts, candidate.safeFacts) &&
       sameOperations(current.operations, candidate.operations) &&
+      current.authenticationRecoveryStage === candidate.authenticationRecoveryStage &&
       current.artifactReferences.every((reference, index) =>
         sameArtifactReference(reference, candidate.artifactReferences[index])
       );
@@ -240,36 +251,53 @@ function isCoherentTransition(
     return candidate.status === current.status && correctionUnchanged && progressDelta === 1 &&
       sameArtifactReferences(current.artifactReferences, candidate.artifactReferences) &&
       sameOperations(current.operations, candidate.operations) &&
+      current.authenticationRecoveryStage === candidate.authenticationRecoveryStage &&
       safeFactsOnlyAdvance(current.safeFacts, candidate.safeFacts);
   }
   if (transition === "operation_planned") {
     return candidate.status === current.status && correctionUnchanged && progressDelta === 0 &&
       sameArtifactReferences(current.artifactReferences, candidate.artifactReferences) &&
       sameSafeFacts(current.safeFacts, candidate.safeFacts) &&
-      operationTransitionIs(current.operations, candidate.operations, "planned");
+      operationTransitionIs(current.operations, candidate.operations, "planned") &&
+      current.authenticationRecoveryStage === candidate.authenticationRecoveryStage;
   }
   if (transition === "operation_dispatched") {
     return candidate.status === current.status && correctionUnchanged && progressDelta === 1 &&
       sameArtifactReferences(current.artifactReferences, candidate.artifactReferences) &&
       sameSafeFacts(current.safeFacts, candidate.safeFacts) &&
-      operationTransitionIs(current.operations, candidate.operations, "dispatched");
+      operationTransitionIs(current.operations, candidate.operations, "dispatched") &&
+      current.authenticationRecoveryStage === candidate.authenticationRecoveryStage;
   }
   if (transition === "operation_settled") {
     return candidate.status === current.status && correctionUnchanged && progressDelta === 0 &&
       sameArtifactReferences(current.artifactReferences, candidate.artifactReferences) &&
       sameSafeFacts(current.safeFacts, candidate.safeFacts) &&
-      operationTransitionIs(current.operations, candidate.operations, "settled", "failed", "uncertain");
+      operationTransitionIs(current.operations, candidate.operations, "settled", "failed", "uncertain") &&
+      current.authenticationRecoveryStage === candidate.authenticationRecoveryStage;
   }
   if (transition === "operation_verified") {
     return candidate.status === current.status && correctionUnchanged && progressDelta === 1 &&
       sameArtifactReferences(current.artifactReferences, candidate.artifactReferences) &&
       sameSafeFacts(current.safeFacts, candidate.safeFacts) &&
-      operationTransitionIs(current.operations, candidate.operations, "verified", "failed");
+      operationTransitionIs(current.operations, candidate.operations, "verified", "failed") &&
+      current.authenticationRecoveryStage === candidate.authenticationRecoveryStage;
+  }
+  if (transition === "authentication_stage_updated") {
+    return candidate.status === current.status && correctionUnchanged &&
+      sameArtifactReferences(current.artifactReferences, candidate.artifactReferences) &&
+      sameSafeFacts(current.safeFacts, candidate.safeFacts) &&
+      sameOperations(current.operations, candidate.operations) &&
+      candidate.authenticationRecoveryStage !== current.authenticationRecoveryStage &&
+      progressDelta === (authenticationStageAdvanced(
+        current.authenticationRecoveryStage,
+        candidate.authenticationRecoveryStage
+      ) ? 1 : 0);
   }
   if (!correctionUnchanged) return false;
   if (!sameArtifactReferences(current.artifactReferences, candidate.artifactReferences)) return false;
   if (!sameSafeFacts(current.safeFacts, candidate.safeFacts)) return false;
   if (!sameOperations(current.operations, candidate.operations)) return false;
+  if (current.authenticationRecoveryStage !== candidate.authenticationRecoveryStage) return false;
   if (transition === "attempt_settled") {
     const statusAllowed = candidate.status === "awaiting_user" || candidate.status === "retryable" ||
       candidate.status === "blocked" || candidate.status === "completed";
@@ -371,6 +399,15 @@ export function validateExecutionCheckpoint(input: unknown): ForegroundExecution
     artifactReferences: artifactReferences(input.artifactReferences),
     safeFacts: safeFacts(input.safeFacts),
     operations: operations(input.operations),
+    ...(input.authenticationRecoveryStage === undefined
+      ? {}
+      : {
+          authenticationRecoveryStage: enumValue(
+            input.authenticationRecoveryStage,
+            AUTHENTICATION_RECOVERY_STAGES,
+            "authenticationRecoveryStage"
+          )
+        }),
     completionFloor: enumValue(input.completionFloor, COMPLETION_FLOORS, "completionFloor"),
     ...(input.blocker === undefined ? {} : { blocker: validateBlocker(input.blocker) }),
     ...(input.lastTerminationCause === undefined
@@ -398,6 +435,20 @@ export function validateExecutionCheckpoint(input: unknown): ForegroundExecution
     throw new ExecutionCheckpointValidationError("Checkpoint exceeds its serialized size limit.");
   }
   return checkpoint;
+}
+
+function authenticationStageAdvanced(
+  current: ExecutionCheckpointAuthenticationStage | undefined,
+  next: ExecutionCheckpointAuthenticationStage | undefined
+): boolean {
+  if (current !== undefined && next === undefined) return true;
+  const rank: Record<ExecutionCheckpointAuthenticationStage, number> = {
+    credentials_submitted: 1,
+    challenge_required: 2,
+    challenge_submitted: 3,
+    authentication_revalidation_required: 4
+  };
+  return next !== undefined && rank[next] > (current === undefined ? 0 : rank[current]);
 }
 
 function artifactReferences(input: unknown): ForegroundExecutionCheckpoint["artifactReferences"] {

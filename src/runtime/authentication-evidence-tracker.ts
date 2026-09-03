@@ -1,5 +1,6 @@
 import type { BrowserSnapshot, BrowserStateIdentity } from "../contracts/browser.js";
 import type { AuthenticationEvidenceAssessmentEvent } from "../contracts/session.js";
+import type { ExecutionCheckpointAuthenticationStage } from "../contracts/execution-checkpoint.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { isBrowserSnapshotElementInteractable } from "../browser/browser-interactability.js";
 import {
@@ -88,8 +89,13 @@ export class AuthenticationEvidenceTracker {
   readonly #snapshots: RememberedSnapshot[] = [];
   #pending: PendingAuthenticationEvidence | undefined;
   #verified: VerifiedAuthenticationEvidence | undefined;
+  #recoveryStage: ExecutionCheckpointAuthenticationStage | undefined;
 
-  constructor(existingExecutions: readonly ToolExecutionRecord[] = []) {
+  constructor(
+    existingExecutions: readonly ToolExecutionRecord[] = [],
+    recoveryStage?: ExecutionCheckpointAuthenticationStage
+  ) {
+    this.#recoveryStage = recoveryStage;
     for (const execution of existingExecutions) this.#rememberExecutionSnapshot(execution);
   }
 
@@ -100,6 +106,16 @@ export class AuthenticationEvidenceTracker {
     for (const execution of executions) {
       const baseEffects = deriveAuthenticationExecutionEffects([execution]);
       const protectedReceipt = protectedDeliveryReceipt(execution);
+
+      if (this.#recoveryStage !== undefined) {
+        const recovery = this.#observeRecoverySnapshot(execution);
+        if (recovery !== undefined) {
+          effects.push(...recovery.effects);
+          assessments.push(...recovery.assessments);
+          this.#rememberExecutionSnapshot(execution);
+          continue;
+        }
+      }
 
       if (this.#verified !== undefined) {
         const observation = this.#observeAfterVerification(execution, baseEffects);
@@ -171,6 +187,94 @@ export class AuthenticationEvidenceTracker {
     }
 
     return { effects: prioritizeAuthenticationExecutionEffects(effects), assessments };
+  }
+
+  #observeRecoverySnapshot(execution: ToolExecutionRecord): AuthenticationEvidenceObservation | undefined {
+    const snapshot = executionSnapshot(execution);
+    const evidenceToolCallId = requiredToolCallId(execution);
+    if (snapshot === undefined || evidenceToolCallId === undefined || snapshot.sensitiveInputActive === true) {
+      return undefined;
+    }
+    const recoveryStage = this.#recoveryStage;
+    if (recoveryStage === undefined) return undefined;
+    const signals = authenticatedEvidenceSignals(snapshot);
+    const pending: PendingAuthenticationEvidence = {
+      submissionToolCallId: `checkpoint-${recoveryStage}`,
+      stage: recoveryStage === "challenge_required" || recoveryStage === "challenge_submitted"
+        ? "challenge"
+        : "verification",
+      scope: snapshotScope(snapshot, execution),
+      afterIdentity: snapshot.identity,
+      baselineSignals: signals,
+      challengeDeparted: !snapshotRequiresAuthenticationChallenge(snapshot),
+      stateTransitionObserved: false,
+    };
+
+    if (snapshotReportsAuthenticationError(snapshot) || snapshotReportsSignedOut(snapshot)) {
+      const reason = snapshotReportsAuthenticationError(snapshot) ? "authentication-error" as const : "signed-out" as const;
+      this.#recoveryStage = undefined;
+      this.#pending = undefined;
+      return {
+        effects: [blockedVerificationEffect(
+          evidenceToolCallId,
+          reason === "authentication-error"
+            ? "The re-observed authentication state reached an explicit error page."
+            : "The re-observed browser state is signed out.",
+          reason
+        )],
+        assessments: [assessmentEvent({
+          pending,
+          outcome: "blocked",
+          reason,
+          evidenceToolCallId,
+        })],
+      };
+    }
+
+    if (snapshotRequiresAuthenticationChallenge(snapshot)) {
+      this.#recoveryStage = undefined;
+      this.#pending = { ...pending, stage: "challenge", challengeDeparted: false };
+      return {
+        effects: [{ effect: "challenge-required", stage: "challenge", toolCallId: evidenceToolCallId }],
+        assessments: [assessmentEvent({
+          pending: this.#pending,
+          outcome: "candidate",
+          reason: "challenge-required",
+          evidenceToolCallId,
+          postSubmitEvidence: signals.size > 0,
+        })],
+      };
+    }
+
+    if (signals.size > 0) {
+      this.#recoveryStage = undefined;
+      this.#pending = undefined;
+      this.#verified = { pending, identity: snapshot.identity };
+      return {
+        effects: [{
+          effect: "authentication-verified",
+          stage: "verification",
+          toolCallId: evidenceToolCallId,
+        }],
+        assessments: [assessmentEvent({
+          pending,
+          outcome: "verified",
+          reason: "authenticated-evidence-observed",
+          evidenceToolCallId,
+          postSubmitEvidence: true,
+        })],
+      };
+    }
+
+    return {
+      effects: [{ effect: "authentication-candidate", stage: "verification", toolCallId: evidenceToolCallId }],
+      assessments: [assessmentEvent({
+        pending,
+        outcome: "inconclusive",
+        reason: "challenge-departed-without-authenticated-evidence",
+        evidenceToolCallId,
+      })],
+    };
   }
 
   #observeProtectedSubmission(

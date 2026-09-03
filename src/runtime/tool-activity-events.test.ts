@@ -79,6 +79,67 @@ function providerExecution(): ProviderExecutionResult {
 }
 
 describe("runtime tool activity events", () => {
+  it("runs runtime-authored recovery tools through the ordinary executor and receipt path", async () => {
+    const recorder = runRecorder();
+    const executeTool = vi.fn(async (request: {
+      tool: string;
+      toolCallId: string;
+      onSecureInputRequest?: unknown;
+      runtimeAdmissionGuard?: unknown;
+    }) => execution({
+      tool: { ...fileReadTool, name: request.tool, toolsets: ["browser"] },
+      toolCallId: request.toolCallId,
+      input: {},
+      result: { ok: true, content: "challenge submitted" }
+    }));
+    const runner = new ToolPlanRunner({
+      toolCallPlanner: undefined,
+      toolExecutor: {
+        getToolDefinition: (name: string) => ({ ...fileReadTool, name, toolsets: ["browser"] }),
+        getToolExecutionConcurrency: () => ({ mode: "exclusive", resourceKey: "browser:session-1" }),
+        executeTool
+      } as never,
+      runRecorder: recorder as never,
+      sessionId: "s1",
+      maxConcurrentSafeTools: 4
+    });
+    const plans: import("../contracts/tool-plan.js").ToolCallPlan[] = [];
+    const onSecureInputRequest = vi.fn();
+    const runtimeAdmissionGuard = vi.fn();
+    const onExecution = vi.fn();
+
+    const result = await runner.executeInternalTool({
+      id: "runtime-otp-1",
+      tool: "browser.type",
+      value: {
+        ref: "@otp",
+        protectedInput: { kind: "one-time-code", retention: "use-once" },
+        submitRef: "@verify"
+      },
+      toolPlans: plans,
+      trustedWorkspace: true,
+      riskBaseline: "read-only-local",
+      onSecureInputRequest,
+      runtimeAdmissionGuard,
+      onExecution
+    });
+
+    expect(plans).toEqual([expect.objectContaining({
+      id: "runtime-otp-1",
+      tool: "browser.type",
+      source: "internal",
+      status: "executed"
+    })]);
+    expect(recorder.recordToolPlan).toHaveBeenCalled();
+    expect(executeTool).toHaveBeenCalledWith(expect.objectContaining({
+      tool: "browser.type",
+      toolCallId: "runtime-otp-1",
+      onSecureInputRequest,
+      runtimeAdmissionGuard
+    }));
+    expect(onExecution).toHaveBeenCalledWith(result.execution);
+  });
+
   it("keeps plan updates sequential with evidence-producing tool calls", () => {
     const entries = [
       { plan: { id: "read", tool: "file.read" } as never, definition: fileReadTool },

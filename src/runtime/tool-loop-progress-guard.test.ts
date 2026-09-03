@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import type { ForegroundExecutionCheckpoint } from "../contracts/execution-checkpoint.js";
+import { ExecutionCheckpointController } from "./execution-checkpoint-controller.js";
 import { ToolLoopProgressGuard } from "./tool-loop-progress-guard.js";
 
 function execution(overrides: Partial<ToolExecutionRecord> = {}): ToolExecutionRecord {
@@ -122,5 +124,96 @@ describe("ToolLoopProgressGuard", () => {
     const planCall = execution({ tool: { ...execution().tool, name: "plan" } });
 
     expect(guard.observe([planCall])).toMatchObject({ active: false, noProgressIterations: 0 });
+  });
+
+  it("uses checkpoint semantic progress instead of treating changing snapshots as progress", () => {
+    let progressRevision = 0;
+    const reader = {
+      current: (): ForegroundExecutionCheckpoint => ({
+        version: 1,
+        id: "checkpoint:1",
+        sessionId: "session-1",
+        profileId: "profile-1",
+        originTurnId: "turn-1",
+        revision: progressRevision + 1,
+        progressRevision,
+        originalObjective: "Complete an external workflow",
+        status: "active",
+        qualificationReasons: ["external_multi_step"],
+        intentLabels: ["browser-control"],
+        requiredOperations: ["read", "mutation"],
+        connectorIds: ["postman"],
+        artifactReferences: [],
+        safeFacts: [],
+        operations: [],
+        completionFloor: "mutation_with_verification",
+        createdAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:00.000Z"
+      })
+    };
+    const guard = new ToolLoopProgressGuard({
+      checkpointReader: reader,
+      noProgressNudgeIteration: 2,
+      maxNoProgressIterations: 3
+    });
+
+    expect(guard.observe([execution({
+      tool: { ...execution().tool, name: "browser.snapshot", toolsets: ["browser"] },
+      input: {},
+      result: { ok: true, content: "snapshot revision one" }
+    })])).toMatchObject({ materialProgress: false, noProgressIterations: 1 });
+    expect(guard.observe([execution({
+      tool: { ...execution().tool, name: "browser.snapshot", toolsets: ["browser"] },
+      input: {},
+      result: { ok: true, content: "snapshot revision two" }
+    })])).toMatchObject({ materialProgress: false, noProgressIterations: 2, shouldNudge: true });
+
+    progressRevision = 1;
+    expect(guard.observe([])).toMatchObject({
+      materialProgress: true,
+      progressKinds: ["checkpoint-semantic-progress"],
+      noProgressIterations: 0
+    });
+  });
+
+  it("resets no-progress accounting when the checkpoint records a durable artifact", async () => {
+    const checkpoint = new ExecutionCheckpointController({
+      sessionId: "session-1",
+      profileId: "profile-1",
+      now: () => "2030-01-01T00:00:00.000Z",
+      createId: () => "checkpoint:artifact"
+    });
+    await checkpoint.ensure({
+      originTurnId: "turn-1",
+      originalObjective: "Import an API specification",
+      qualificationReasons: ["external_multi_step"],
+      intentLabels: ["api.integration"],
+      requiredOperations: ["artifact_relay", "mutation"],
+      connectorIds: ["postman"],
+      completionFloor: "mutation"
+    });
+    const guard = new ToolLoopProgressGuard({
+      checkpointReader: checkpoint,
+      noProgressNudgeIteration: 1,
+      maxNoProgressIterations: 3
+    });
+
+    expect(guard.observe([execution({
+      tool: { ...execution().tool, name: "browser.snapshot", toolsets: ["browser"] },
+      input: {},
+      result: { ok: true, content: "same browser state" }
+    })])).toMatchObject({ materialProgress: false, noProgressIterations: 1, shouldNudge: true });
+
+    const current = checkpoint.current()!;
+    await checkpoint.attachArtifact(current.revision, {
+      id: "artifact:swagger",
+      sha256: "a".repeat(64)
+    });
+
+    expect(guard.observe([])).toMatchObject({
+      materialProgress: true,
+      progressKinds: ["checkpoint-semantic-progress"],
+      noProgressIterations: 0
+    });
   });
 });

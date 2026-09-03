@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import type { ExecutionCheckpointReader } from "../contracts/execution-checkpoint.js";
+import { isTerminalCheckpointStatus } from "../session/execution-checkpoint-state.js";
 import { executionEvidenceStatus } from "./execution-evidence-index.js";
 
 const INELIGIBLE_TOOLS = new Set(["plan", "delegate_task"]);
@@ -8,6 +10,7 @@ export type ToolLoopProgressKind =
   | "new-tool-result"
   | "target-mutation"
   | "verification"
+  | "checkpoint-semantic-progress"
   | "repeated-tool-call"
   | "no-tool-activity";
 
@@ -34,17 +37,22 @@ export class ToolLoopProgressGuard {
   #active = false;
   #nudged = false;
   #noProgressIterations = 0;
+  readonly #checkpointReader: ExecutionCheckpointReader | undefined;
+  #checkpointProgressRevision: number | undefined;
 
   constructor(input: {
     existingExecutions?: readonly ToolExecutionRecord[];
     noProgressNudgeIteration: number;
     maxNoProgressIterations: number;
+    checkpointReader?: ExecutionCheckpointReader;
   }) {
     this.#stopIteration = normalizeStopIteration(input.maxNoProgressIterations);
     this.#nudgeIteration = normalizeNudgeIteration(
       input.noProgressNudgeIteration,
       this.#stopIteration
     );
+    this.#checkpointReader = input.checkpointReader;
+    this.#checkpointProgressRevision = activeCheckpointProgressRevision(input.checkpointReader);
     this.#seed(input.existingExecutions ?? []);
   }
 
@@ -63,6 +71,16 @@ export class ToolLoopProgressGuard {
     if (eligible.length > 0) this.#active = true;
     const progressKinds = new Set<ToolLoopProgressKind>();
     let materialProgress = false;
+    const currentCheckpointRevision = activeCheckpointProgressRevision(this.#checkpointReader);
+    const checkpointControlsProgress = currentCheckpointRevision !== undefined;
+    if (
+      currentCheckpointRevision !== undefined &&
+      currentCheckpointRevision > (this.#checkpointProgressRevision ?? 0)
+    ) {
+      materialProgress = true;
+      progressKinds.add("checkpoint-semantic-progress");
+    }
+    this.#checkpointProgressRevision = currentCheckpointRevision;
 
     for (const execution of eligible) {
       const status = executionEvidenceStatus(execution);
@@ -81,12 +99,12 @@ export class ToolLoopProgressGuard {
         continue;
       }
 
-      if (execution.executionEffect?.kind === "mutation") {
+      if (!checkpointControlsProgress && execution.executionEffect?.kind === "mutation") {
         materialProgress = true;
         progressKinds.add("target-mutation");
         continue;
       }
-      if (execution.executionEffect?.kind === "verification") {
+      if (!checkpointControlsProgress && execution.executionEffect?.kind === "verification") {
         materialProgress = true;
         progressKinds.add("verification");
         continue;
@@ -104,8 +122,10 @@ export class ToolLoopProgressGuard {
         progressKinds.add("repeated-tool-call");
         continue;
       }
-      materialProgress = true;
-      progressKinds.add("new-tool-result");
+      if (!checkpointControlsProgress) {
+        materialProgress = true;
+        progressKinds.add("new-tool-result");
+      }
     }
 
     if (!materialProgress && progressKinds.size === 0) {
@@ -158,13 +178,21 @@ function assessment(input: {
   return {
     active: input.active,
     materialProgress: progressKinds.some((kind) =>
-      kind === "new-tool-result" || kind === "target-mutation" || kind === "verification"
+      kind === "new-tool-result" || kind === "target-mutation" || kind === "verification" ||
+      kind === "checkpoint-semantic-progress"
     ),
     progressKinds,
     noProgressIterations: input.noProgressIterations,
     shouldNudge: input.shouldNudge,
     shouldStop: input.shouldStop
   };
+}
+
+function activeCheckpointProgressRevision(reader: ExecutionCheckpointReader | undefined): number | undefined {
+  const checkpoint = reader?.current();
+  return checkpoint === undefined || isTerminalCheckpointStatus(checkpoint.status)
+    ? undefined
+    : checkpoint.progressRevision;
 }
 
 function normalizeStopIteration(value: number): number {

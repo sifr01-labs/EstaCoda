@@ -6,6 +6,7 @@ import type { ToolDefinition } from "../contracts/tool.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import { ExecutionSupervisionController } from "./execution-supervision-controller.js";
+import { ExecutionCheckpointController } from "./execution-checkpoint-controller.js";
 
 describe("ExecutionSupervisionController", () => {
   it("initializes supervision without creating or requiring an execution plan", async () => {
@@ -212,6 +213,108 @@ describe("ExecutionSupervisionController", () => {
     );
   });
 
+  it("treats checkpointed authentication as a revalidation hint and gates mutations until fresh evidence", async () => {
+    const checkpoint = new ExecutionCheckpointController({
+      sessionId: "session-test",
+      profileId: "profile-test",
+      record: async () => undefined,
+      now: () => "2030-01-01T00:00:00.000Z",
+      createId: () => "checkpoint:auth"
+    });
+    const created = await checkpoint.ensure({
+      originTurnId: "turn-1",
+      originalObjective: "Sign in and update the external workspace",
+      qualificationReasons: ["user_input_interruption"],
+      intentLabels: ["authentication"],
+      requiredOperations: ["mutation"],
+      connectorIds: ["postman"],
+      completionFloor: "mutation_with_verification"
+    });
+    await checkpoint.updateAuthenticationRecoveryStage(created.revision, "challenge_submitted");
+    const { supervision } = createSupervision({ executionCheckpointController: checkpoint });
+
+    const guard = supervision.runtimeAdmissionGuard();
+    expect(guard({
+      tool: toolDefinition("mcp.postman.updateCollection"),
+      input: { collectionId: "collection-1" },
+      executionEffect: { kind: "mutation", connector: { kind: "mcp", id: "postman" } }
+    })).toMatchObject({ code: "authentication-live-state-required" });
+    expect(guard({
+      tool: toolDefinition("browser.snapshot"),
+      input: {},
+      executionEffect: { kind: "read" }
+    })).toBeUndefined();
+    expect(guard({
+      tool: toolDefinition("browser.type"),
+      input: { protectedInput: { kind: "one-time-code" } },
+      executionEffect: { kind: "mutation" }
+    })).toBeUndefined();
+    expect(guard({
+      tool: toolDefinition("browser.fill_protected_form"),
+      input: { fields: [{ kind: "account-identifier" }, { kind: "password" }] },
+      executionEffect: { kind: "mutation" }
+    })).toBeUndefined();
+    expect(guard({
+      tool: toolDefinition("browser.type"),
+      input: { text: "unrelated value" },
+      executionEffect: { kind: "mutation" }
+    })).toMatchObject({ code: "authentication-live-state-required" });
+
+    await supervision.applyRuntimeEffects({
+      executions: [snapshotExecution("fresh-auth", pageSnapshot(identity(7, 7, 7), "Account home", [
+        { ref: "@e1", role: "button", name: "Sign out" }
+      ]))]
+    });
+
+    expect(checkpoint.current()?.authenticationRecoveryStage).toBeUndefined();
+    expect(guard({
+      tool: toolDefinition("mcp.postman.updateCollection"),
+      input: { collectionId: "collection-1" },
+      executionEffect: { kind: "mutation", connector: { kind: "mcp", id: "postman" } }
+    })).toBeUndefined();
+  });
+
+  it("extracts one uniquely grounded live OTP challenge for local protected submission", async () => {
+    const checkpoint = new ExecutionCheckpointController({
+      sessionId: "session-test",
+      profileId: "profile-test",
+      record: async () => undefined,
+      now: () => "2030-01-01T00:00:00.000Z",
+      createId: () => "checkpoint:auth"
+    });
+    await checkpoint.ensure({
+      originTurnId: "turn-1",
+      originalObjective: "Sign in and continue",
+      qualificationReasons: ["user_input_interruption"],
+      intentLabels: ["authentication"],
+      requiredOperations: ["protected_transfer"],
+      connectorIds: [],
+      completionFloor: "mutation"
+    });
+    const { supervision } = createSupervision({ executionCheckpointController: checkpoint });
+    const challenge = pageSnapshot(identity(8, 8, 8), "Two-factor authentication", [
+      { ref: "@code", role: "textbox", name: "Verification code" },
+      { ref: "@verify", role: "button", name: "Verify" }
+    ]);
+
+    await supervision.applyRuntimeEffects({
+      executions: [protectedExecution("submit-auth", identity(7, 7, 7), challenge.identity, challenge)]
+    });
+
+    expect(supervision.takeProtectedAuthenticationChallenge()).toEqual({
+      sessionId: "browser-session",
+      identity: challenge.identity,
+      tabRef: "@t1",
+      fieldRef: "@code",
+      submitRef: "@verify"
+    });
+    expect(checkpoint.current()).toMatchObject({
+      authenticationRecoveryStage: "challenge_required",
+      progressRevision: 2
+    });
+    expect(supervision.takeProtectedAuthenticationChallenge()).toBeUndefined();
+  });
+
   it("uses a plan-independent deadline receipt", async () => {
     const { supervision } = createSupervision();
     const deadline = supervision.emergencyDeadlineReceipt(providerExecution());
@@ -228,6 +331,7 @@ function createSupervision(input: {
   maxNoProgressIterations?: number;
   locale?: "en" | "ar";
   onEvent?: RuntimeEventSink;
+  executionCheckpointController?: ExecutionCheckpointController;
 } = {}) {
   const recordAuthenticationEvidenceAssessment = vi.fn(async () => undefined);
   return {
@@ -240,6 +344,7 @@ function createSupervision(input: {
       maxRepeatedBrowserObservations: input.maxRepeatedBrowserObservations ?? 3,
       noProgressNudgeIteration: input.noProgressNudgeIteration ?? 3,
       maxNoProgressIterations: input.maxNoProgressIterations ?? 6,
+      executionCheckpointController: input.executionCheckpointController,
       runRecorder: { recordAuthenticationEvidenceAssessment },
       onEvent: input.onEvent,
     })
@@ -284,7 +389,8 @@ function readExecution(toolCallId: string): ToolExecutionRecord {
 function protectedExecution(
   toolCallId: string,
   before: BrowserStateIdentity,
-  after: BrowserStateIdentity
+  after: BrowserStateIdentity,
+  snapshot: BrowserSnapshot = authenticatedSnapshot(after)
 ): ToolExecutionRecord {
   return {
     tool: toolDefinition("browser.fill_protected_form"),
@@ -307,7 +413,7 @@ function protectedExecution(
           afterIdentity: after,
           sensitiveInputActive: false
         },
-        snapshot: authenticatedSnapshot(after)
+        snapshot
       }
     }
   };

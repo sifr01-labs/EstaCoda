@@ -5,6 +5,48 @@ import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { AuthenticationEvidenceTracker } from "./authentication-evidence-tracker.js";
 
 describe("authentication evidence tracker", () => {
+  it("re-observes a checkpointed challenge instead of trusting the recovery hint", () => {
+    const tracker = new AuthenticationEvidenceTracker([], "challenge_required");
+    const challenge = pageSnapshot(identity(4, 4, 4), "Two-factor authentication", [
+      { ref: "@e1", role: "textbox", name: "Verification code" },
+      { ref: "@e2", role: "button", name: "Verify" },
+    ]);
+
+    expect(tracker.observe([])).toEqual({ effects: [], assessments: [] });
+    const observation = tracker.observe([snapshotExecution("fresh-challenge", challenge)]);
+
+    expect(observation.effects).toEqual([
+      { effect: "challenge-required", stage: "challenge", toolCallId: "fresh-challenge" }
+    ]);
+    expect(observation.assessments).toEqual([
+      expect.objectContaining({
+        outcome: "candidate",
+        reason: "challenge-required",
+        evidenceToolCallId: "fresh-challenge"
+      })
+    ]);
+  });
+
+  it("requires a fresh authenticated browser observation before completing recovery", () => {
+    const tracker = new AuthenticationEvidenceTracker([], "challenge_submitted");
+
+    expect(tracker.observe([]).effects).toEqual([]);
+    const observation = tracker.observe([
+      snapshotExecution("fresh-account", authenticatedSnapshot(identity(5, 5, 5)))
+    ]);
+
+    expect(observation.effects).toEqual([
+      { effect: "authentication-verified", stage: "verification", toolCallId: "fresh-account" }
+    ]);
+    expect(observation.assessments).toEqual([
+      expect.objectContaining({
+        outcome: "verified",
+        reason: "authenticated-evidence-observed",
+        evidenceToolCallId: "fresh-account"
+      })
+    ]);
+  });
+
   it("verifies newly observed authenticated-only evidence after a protected submission", () => {
     const tracker = new AuthenticationEvidenceTracker();
     tracker.observe([snapshotExecution("before", loginSnapshot(identity(1, 1, 1)))]);
