@@ -1187,7 +1187,7 @@ function extractReviewedContinuityFacts(
   if (paths.length === 0) return [];
   const facts: RuntimeContinuityFact[] = [];
   const seen = new Set<string>();
-  for (const payload of structuredMcpContinuityPayloads(result)) {
+  for (const payload of structuredMcpContinuityPayloads(result, paths)) {
     for (const path of paths) {
       const segments = parseProtectedArgumentPattern(path);
       if (segments === undefined) continue;
@@ -1207,10 +1207,10 @@ function extractReviewedContinuityFacts(
   return facts;
 }
 
-function structuredMcpContinuityPayloads(result: unknown): unknown[] {
+function structuredMcpContinuityPayloads(result: unknown, paths: readonly string[]): unknown[] {
   if (typeof result === "string") {
     const parsed = parseStructuredMcpText(result);
-    return parsed === undefined ? [] : [parsed];
+    return parsed === undefined ? reviewedMarkdownContinuityPayloads(result, paths) : [parsed];
   }
   if (!isRecord(result)) return [];
   if (result.structuredContent !== undefined) return [result.structuredContent];
@@ -1220,6 +1220,7 @@ function structuredMcpContinuityPayloads(result: unknown): unknown[] {
       if (!isRecord(part) || part.type !== "text" || typeof part.text !== "string") continue;
       const parsed = parseStructuredMcpText(part.text);
       if (parsed !== undefined) payloads.push(parsed);
+      else payloads.push(...reviewedMarkdownContinuityPayloads(part.text, paths));
     }
   }
   if (payloads.length === 0) payloads.push(result);
@@ -1232,6 +1233,86 @@ function parseStructuredMcpText(text: string): unknown | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Some reviewed connectors render list results as Markdown tables rather than
+ * JSON. Recover only direct collection-wildcard-field paths whose collection
+ * heading and table columns both match the reviewed continuity declaration.
+ */
+function reviewedMarkdownContinuityPayloads(text: string, paths: readonly string[]): unknown[] {
+  const groups = new Map<string, Set<string>>();
+  for (const path of paths) {
+    const segments = parseProtectedArgumentPattern(path);
+    if (
+      segments === undefined || segments.length !== 3 || segments[1] !== "*" ||
+      !/^[A-Za-z_][A-Za-z0-9_-]*$/u.test(segments[0]!) ||
+      !/^[A-Za-z_][A-Za-z0-9_-]*$/u.test(segments[2]!)
+    ) continue;
+    const fields = groups.get(segments[0]!) ?? new Set<string>();
+    fields.add(segments[2]!);
+    groups.set(segments[0]!, fields);
+  }
+  if (groups.size === 0) return [];
+
+  const lines = text.split(/\r?\n/u).slice(0, 500);
+  const headings: string[] = [];
+  const payloads: unknown[] = [];
+  for (let index = 0; index < lines.length - 1; index += 1) {
+    const heading = /^(#{1,6})\s+(.+?)\s*$/u.exec(lines[index]!);
+    if (heading !== null) {
+      const level = heading[1]!.length;
+      headings[level - 1] = heading[2]!;
+      headings.length = level;
+      continue;
+    }
+    const headers = markdownTableCells(lines[index]!);
+    const separator = markdownTableCells(lines[index + 1]!);
+    if (
+      headers === undefined || separator === undefined || headers.length !== separator.length ||
+      !separator.every((cell) => /^:?-{3,}:?$/u.test(cell))
+    ) continue;
+
+    for (const [root, fields] of groups) {
+      if (!headings.some((candidate) => markdownName(candidate) === markdownName(root))) continue;
+      const headerIndexes = new Map(
+        headers.map((headerName, headerIndex) => [markdownName(headerName), headerIndex])
+      );
+      const selected = [...fields].flatMap((field) => {
+        const fieldIndex = headerIndexes.get(markdownName(field));
+        return fieldIndex === undefined ? [] : [{ field, fieldIndex }];
+      });
+      if (selected.length === 0) continue;
+      const rows: Record<string, string>[] = [];
+      for (
+        let rowIndex = index + 2;
+        rowIndex < lines.length && rows.length < MAX_MCP_CONTINUITY_FACTS;
+        rowIndex += 1
+      ) {
+        const cells = markdownTableCells(lines[rowIndex]!);
+        if (cells === undefined || cells.length !== headers.length) break;
+        const row: Record<string, string> = {};
+        for (const { field, fieldIndex } of selected) row[field] = cells[fieldIndex]!;
+        rows.push(row);
+      }
+      if (rows.length > 0) payloads.push({ [root]: rows });
+    }
+  }
+  return payloads;
+}
+
+function markdownTableCells(line: string): string[] | undefined {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) return undefined;
+  const cells = trimmed
+    .slice(1, -1)
+    .split("|")
+    .map((cell) => cell.trim().replace(/^`|`$/gu, ""));
+  return cells.length === 0 ? undefined : cells;
+}
+
+function markdownName(value: string): string {
+  return value.normalize("NFKC").toLowerCase().replace(/[^a-z0-9_-]+/gu, "");
 }
 
 function valuesAtContinuityPath(current: unknown, segments: readonly string[], index: number): unknown[] {

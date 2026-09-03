@@ -1461,6 +1461,46 @@ describe("ToolExecutor tool-call metadata persistence", () => {
     expect(run).toHaveBeenCalledOnce();
   });
 
+  it("journals and dispatches an artifact mutation identified by an opaque UUID", async () => {
+    const sessionDb: SessionDB = new InMemorySessionDB();
+    await sessionDb.createSession({ profileId: "test", id: "test-session" });
+    const controller = await createCheckpointController(sessionDb);
+    const artifactId = "1274c0c6-6a48-440d-a707-9198d9fa5c35";
+    const artifactHash = "a".repeat(64);
+    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "spec created" }));
+    const mutation: RegisteredTool = {
+      ...createEchoTool("mcp.postman.createSpec"),
+      riskClass: "external-side-effect",
+      toolsets: ["mcp"],
+      connector: { kind: "mcp", id: "postman" },
+      operationJournal: {
+        identify: () => ({ subjectId: artifactId, artifactHash, operationRevision: 1 })
+      },
+      run
+    };
+    const { executor } = await setupExecutor({
+      tools: [mutation],
+      sessionDb,
+      createSession: false,
+      executionCheckpointController: controller
+    });
+
+    const execution = await executor.executeTool({
+      tool: mutation.name,
+      input: { artifact: { reference: `artifact://${artifactId}`, sha256: artifactHash } },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      visibleTurnId: "turn-one",
+      toolCallId: "create-spec"
+    });
+
+    expect(execution).toMatchObject({ decision: "allow", result: { ok: true } });
+    expect(run).toHaveBeenCalledOnce();
+    expect(controller.current()?.operations).toEqual([
+      expect.objectContaining({ subjectId: artifactId, artifactHash, status: "settled" })
+    ]);
+  });
+
   it("does not dispatch a checkpointed mutation when its declared journal identity is unsafe", async () => {
     const sessionDb: SessionDB = new InMemorySessionDB();
     await sessionDb.createSession({ profileId: "test", id: "test-session" });

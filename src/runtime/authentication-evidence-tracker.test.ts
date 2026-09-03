@@ -221,6 +221,37 @@ describe("authentication evidence tracker", () => {
     ]);
   });
 
+  it("treats an MTN 2FA success notice without challenge controls as completed", () => {
+    const tracker = new AuthenticationEvidenceTracker();
+    const challenge = pageSnapshot(identity(1, 1, 1), "MTN Developer Portal", [
+      { ref: "@code", role: "textbox", name: "Enter authenticator code" },
+      { ref: "@submit", role: "button", name: "Authenticate" }
+    ]);
+    tracker.observe([snapshotExecution("challenge", challenge)]);
+    const authenticated = {
+      ...authenticatedSnapshot(identity(2, 2, 2)),
+      title: "My apps",
+      text: "My apps Dashboard Success! 2FA has been verified."
+    };
+
+    const observation = tracker.observe([
+      protectedExecution("browser.type", "accepted-code", {
+        before: challenge.identity,
+        after: authenticated.identity,
+        snapshot: authenticated
+      })
+    ]);
+
+    expect(observation.effects.map((effect) => effect.effect)).toEqual([
+      "challenge-submitted",
+      "authentication-candidate",
+      "authentication-verified"
+    ]);
+    expect(observation.assessments).toEqual([
+      expect.objectContaining({ outcome: "verified", reason: "authenticated-evidence-observed" })
+    ]);
+  });
+
   it("accepts a supervised user's causal completion of an active challenge", () => {
     const tracker = pendingApprovalChallengeTracker();
     const observation = tracker.observe([

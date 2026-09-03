@@ -143,6 +143,37 @@ describe("MCP structural summaries", () => {
 
     expect(result.metadata).not.toHaveProperty("_estacoda_continuity_facts");
   });
+
+  it("extracts only configured continuity fields from a connector Markdown table", () => {
+    const result = normalizeMcpResult({
+      content: [{
+        type: "text",
+        text: [
+          "# Workspaces",
+          "",
+          "## Meta",
+          "",
+          "| id | name | about |",
+          "|---|---|---|",
+          "| 065bef6d-e09b-49d6-8702-543f375a2fcb | Insert Disks Workspace | |",
+          "| sk-secret1234567890abcdef | Visible safe label | ignored |",
+          "",
+          "# Unrelated",
+          "| id | name |",
+          "|---|---|",
+          "| unrelated-id | Wrong table |"
+        ].join("\n")
+      }]
+    }, [], ["/workspaces/*/id", "/workspaces/*/name"]);
+
+    expect(result.metadata?._estacoda_continuity_facts).toEqual([
+      { field: "workspaceId", value: "065bef6d-e09b-49d6-8702-543f375a2fcb", kind: "identifier" },
+      { field: "workspaceName", value: "Insert Disks Workspace", kind: "label" },
+      { field: "workspaceName", value: "Visible safe label", kind: "label" }
+    ]);
+    expect(JSON.stringify(result.metadata?._estacoda_continuity_facts)).not.toContain("sk-secret");
+    expect(JSON.stringify(result.metadata?._estacoda_continuity_facts)).not.toContain("unrelated-id");
+  });
 });
 
 describe("resolveMcpEnvironment", () => {

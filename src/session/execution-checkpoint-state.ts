@@ -536,10 +536,10 @@ function operations(input: unknown): ExecutionCheckpointOperation[] {
       connectorId: token(value.connectorId, "operations.connectorId", 128),
       operation: token(value.operation, "operations.operation", 160),
       ...(value.destinationId === undefined ? {} : {
-        destinationId: safePersistedText(value.destinationId, "operations.destinationId", 200)
+        destinationId: operationCoordinate(value.destinationId, "operations.destinationId")
       }),
       ...(value.subjectId === undefined ? {} : {
-        subjectId: safePersistedText(value.subjectId, "operations.subjectId", 200)
+        subjectId: operationCoordinate(value.subjectId, "operations.subjectId")
       }),
       ...(value.artifactHash === undefined ? {} : { artifactHash: sha256(value.artifactHash) }),
       operationRevision: boundedPositiveInteger(value.operationRevision, "operations.operationRevision", 1_000_000),
@@ -673,6 +673,23 @@ function safePersistedText(input: unknown, field: string, maxChars: number): str
   const normalized = normalizeText(input, maxChars);
   if (sanitizeCheckpointText(normalized, maxChars) !== normalized) {
     throw new ExecutionCheckpointValidationError(`${field} contains sensitive content.`);
+  }
+  return normalized;
+}
+
+/**
+ * Operation coordinates are typed opaque identifiers supplied by reviewed tool
+ * metadata. They must retain UUIDs and hashes that strict free-text entropy
+ * filtering would otherwise mistake for credentials.
+ */
+function operationCoordinate(input: unknown, field: string): string {
+  if (typeof input !== "string") throw new ExecutionCheckpointValidationError(`${field} must be text.`);
+  const normalized = normalizeText(input, 200);
+  if (redactString(normalized) !== normalized) {
+    throw new ExecutionCheckpointValidationError(`${field} contains sensitive content.`);
+  }
+  if (!SAFE_TOKEN.test(normalized)) {
+    throw new ExecutionCheckpointValidationError(`${field} is not a safe opaque identifier.`);
   }
   return normalized;
 }

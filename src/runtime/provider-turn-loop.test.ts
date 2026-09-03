@@ -2203,8 +2203,8 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
         controlled: true
       },
       elements: [
-        { ref: "@e19", role: "textbox", name: "Verification code", label: "One-time code" },
-        { ref: "@e20", role: "button", name: "Verify", withinText: "Two-factor authentication" }
+        { ref: "@e19", role: "textbox", name: "Enter authenticator code" },
+        { ref: "@e20", role: "button", name: "Authenticate", withinText: "Two-factor authentication" }
       ]
     };
     const credentials = toolExecutionForTool("call-credentials", "browser.fill_protected_form", "challenge shown");

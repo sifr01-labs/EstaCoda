@@ -292,9 +292,9 @@ describe("ExecutionSupervisionController", () => {
       completionFloor: "mutation"
     });
     const { supervision } = createSupervision({ executionCheckpointController: checkpoint });
-    const challenge = pageSnapshot(identity(8, 8, 8), "Two-factor authentication", [
-      { ref: "@code", role: "textbox", name: "Verification code" },
-      { ref: "@verify", role: "button", name: "Verify" }
+    const challenge = pageSnapshot(identity(8, 8, 8), "MTN Developer Portal", [
+      { ref: "@code", role: "textbox", name: "Enter authenticator code" },
+      { ref: "@verify", role: "button", name: "Authenticate" }
     ]);
 
     await supervision.applyRuntimeEffects({

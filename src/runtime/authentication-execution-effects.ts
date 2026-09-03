@@ -32,6 +32,7 @@ const GENERAL_VERIFY_TERMS = /\b(?:verify|confirm|check|validation)\b|(?:تحق�
 const POST_LOGIN_SEQUENCE = /\b(?:and then|then|after(?:wards)?|once)\b|(?:ثم|بعد ذلك|بعد تسجيل الدخول)/iu;
 const POST_LOGIN_CONJUNCTIVE_ACTION = /\band\b.{0,160}\b(?:add|apply|build|change|configure|create|delete|deploy|edit|inspect|publish|remove|send|set[ -]?up|test|update|upload|verify|write)\b|(?:و|،\s*و).{0,160}(?:أنشئ|انشئ|غيّر|غير|حدّث|حدث|عدّل|عدل|احذف|تحقق|راجع|هيّئ|هيئ)/iu;
 const AUTHENTICATION_ERROR_TERMS = /\b(?:access denied|account locked|auth(?:entication)? (?:error|failed)|authentication service unavailable|incorrect (?:code|credentials?|password)|(?:code|credentials?|password) (?:is|are) incorrect|invalid (?:code|credentials?|password)|login failed|sign[ -]?in failed|unauthorized)\b|(?:بيانات الاعتماد غير صحيحة|رمز غير صحيح|فشل تسجيل الدخول|فشلت المصادقة|خطأ في المصادقة|خدمة المصادقة غير متاحة|غير مصرح|تم قفل الحساب)/iu;
+const AUTHENTICATION_SUCCESS_TERMS = /\b(?:2fa|mfa|authentication|verification)\s+(?:has\s+been\s+)?verified\b|\b(?:authentication|verification)\s+(?:complete|completed|successful|succeeded)\b/iu;
 
 export type AuthenticationExecutionStage = "credentials" | "challenge" | "verification";
 
@@ -518,22 +519,24 @@ export function snapshotRequiresAuthenticationChallenge(value: unknown): boolean
   const snapshot = record(value);
   if (snapshot === undefined) return false;
   const elements = Array.isArray(snapshot.elements) ? snapshot.elements : [];
-  const evidence = [
+  const interactiveEvidence = elements.slice(0, 64).flatMap((element) => {
+    const candidate = record(element);
+    if (
+      candidate === undefined ||
+      candidate.hidden === true ||
+      candidate.disabled === true ||
+      candidate.interactable === false
+    ) return [];
+    return [candidate.role, candidate.name, candidate.label, candidate.text]
+      .filter((entry): entry is string => typeof entry === "string");
+  }).join(" ");
+  if (CHALLENGE_TERMS.test(interactiveEvidence)) return true;
+  const pageEvidence = [
     typeof snapshot.title === "string" ? snapshot.title : "",
-    typeof snapshot.text === "string" ? snapshot.text.slice(0, 4_000) : "",
-    ...elements.slice(0, 64).flatMap((element) => {
-      const candidate = record(element);
-      if (
-        candidate === undefined ||
-        candidate.hidden === true ||
-        candidate.disabled === true ||
-        candidate.interactable === false
-      ) return [];
-      return [candidate.role, candidate.name, candidate.label, candidate.text]
-        .filter((entry): entry is string => typeof entry === "string");
-    }),
+    typeof snapshot.text === "string" ? snapshot.text.slice(0, 4_000) : ""
   ].join(" ");
-  return CHALLENGE_TERMS.test(evidence);
+  if (AUTHENTICATION_SUCCESS_TERMS.test(pageEvidence)) return false;
+  return CHALLENGE_TERMS.test(pageEvidence);
 }
 
 export function snapshotReportsAuthenticationError(value: unknown): boolean {

@@ -367,7 +367,7 @@ function visibleProtectedChallenge(
     const codeFields = elements.filter((element) =>
       typeof element.ref === "string" &&
       (element.role === "textbox" || element.role === "searchbox" || element.role === "combobox") &&
-      /one[-\s]?time|otp|mfa|verification\s+code|security\s+code|authentication\s+code|رمز التحقق|رمز الأمان/iu
+      /one[-\s]?time|otp|mfa|verification\s+code|security\s+code|authenticat(?:ion|or)\s+code|رمز التحقق|رمز الأمان/iu
         .test([element.name, element.label, element.withinText].filter(Boolean).join(" "))
     );
     const submitControls = elements.filter((element) =>

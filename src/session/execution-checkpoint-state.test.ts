@@ -224,6 +224,37 @@ describe("execution checkpoint state", () => {
     })).toMatchObject({ revision: 1, artifactReferences: [], safeFacts: [] });
   });
 
+  it("accepts reviewed opaque operation UUIDs without accepting secret-shaped coordinates", () => {
+    const active = checkpoint();
+    const operation = {
+      id: "operation:uuid",
+      connectorId: "postman",
+      operation: "mcp.postman.createSpec",
+      subjectId: "1274c0c6-6a48-440d-a707-9198d9fa5c35",
+      artifactHash: "a".repeat(64),
+      operationRevision: 1,
+      status: "planned" as const,
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:00.000Z"
+    };
+    const planned = { ...active, revision: 2, operations: [operation] };
+    const unsafe = {
+      ...planned,
+      operations: [{ ...operation, subjectId: "sk-secret1234567890abcdef" }]
+    };
+
+    expect(hydratableExecutionCheckpoint({
+      events: [checkpointEvent("created", active), checkpointEvent("operation_planned", planned)],
+      sessionId: "session-1",
+      profileId: "profile-1"
+    })).toMatchObject({ revision: 2, operations: [{ subjectId: operation.subjectId }] });
+    expect(hydratableExecutionCheckpoint({
+      events: [checkpointEvent("created", active), checkpointEvent("operation_planned", unsafe)],
+      sessionId: "session-1",
+      profileId: "profile-1"
+    })).toMatchObject({ revision: 1, operations: [] });
+  });
+
   it("hydrates a coherent artifact attachment but rejects replacement or fabricated progress", () => {
     const active = checkpoint();
     const attached = {
