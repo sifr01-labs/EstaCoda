@@ -86,28 +86,34 @@ export function checkpointVerificationMatch(input: {
   result: ToolResult;
   operations: readonly ExecutionCheckpointOperation[];
 }): { operationId: string; outcome: "present" | "absent" } | undefined {
+  const connector = input.effect?.connector;
   if (
     input.effect?.kind !== "verification" ||
-    input.effect.connector === undefined ||
-    input.tool.operationJournal?.verify === undefined
+    connector === undefined ||
+    !input.result.ok
   ) return undefined;
   const effect = input.effect;
-  const connectorId = effect.connector!.id;
+  const connectorId = connector.id;
+  const compatible = input.operations.filter((operation) =>
+    operation.connectorId === connectorId &&
+    effect.verifies.includes(operation.operation) &&
+    ["dispatched", "settled", "uncertain"].includes(operation.status)
+  );
+  if (input.tool.operationJournal?.verify === undefined) {
+    return compatible.length === 1
+      ? { operationId: compatible[0]!.id, outcome: "present" }
+      : undefined;
+  }
   let verification: ToolOperationVerification | undefined;
   try {
     verification = input.tool.operationJournal.verify(input.value, input.result);
   } catch {
     return undefined;
   }
-  if (verification === undefined || !input.result.ok) return undefined;
+  if (verification === undefined) return undefined;
   const normalized = normalizeIdentity(verification);
   if (normalized === undefined) return undefined;
-  const candidates = input.operations.filter((operation) =>
-    operation.connectorId === connectorId &&
-    effect.verifies.includes(operation.operation) &&
-    ["dispatched", "settled", "uncertain"].includes(operation.status) &&
-    coordinatesMatch(operation, normalized)
-  );
+  const candidates = compatible.filter((operation) => coordinatesMatch(operation, normalized));
   return candidates.length === 1 ? { operationId: candidates[0]!.id, outcome: verification.outcome } : undefined;
 }
 

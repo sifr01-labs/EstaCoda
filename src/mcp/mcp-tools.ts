@@ -308,7 +308,8 @@ function createMcpTool(
       const normalized = normalizeMcpResult(
         redactRelayedArtifactValue(result, relayedContents),
         redactedResultPaths,
-        continuityResultPaths
+        continuityResultPaths,
+        tool.name
       );
       if (relay.artifacts.length === 0) return normalized;
       const redacted = redactRelayedArtifactContent(normalized, relayedContents);
@@ -1101,7 +1102,8 @@ function promptsEnabled(config: MCPServerConfig): boolean {
 export function normalizeMcpResult(
   result: unknown,
   redactedPaths: readonly string[] = [],
-  continuityPaths: readonly string[] = []
+  continuityPaths: readonly string[] = [],
+  toolName?: string
 ): ToolResult {
   const protectedResult = redactedPaths.length === 0
     ? result
@@ -1114,7 +1116,7 @@ export function normalizeMcpResult(
     };
   }
   result = protectedResult;
-  const continuityFacts = extractReviewedContinuityFacts(result, continuityPaths);
+  const continuityFacts = extractReviewedContinuityFacts(result, continuityPaths, toolName);
   if (typeof result === "string") {
     return {
       ok: true,
@@ -1182,7 +1184,8 @@ function mergeContinuityFacts(
 
 function extractReviewedContinuityFacts(
   result: unknown,
-  paths: readonly string[]
+  paths: readonly string[],
+  toolName?: string
 ): RuntimeContinuityFact[] {
   if (paths.length === 0) return [];
   const facts: RuntimeContinuityFact[] = [];
@@ -1191,7 +1194,7 @@ function extractReviewedContinuityFacts(
     for (const path of paths) {
       const segments = parseProtectedArgumentPattern(path);
       if (segments === undefined) continue;
-      const field = continuityField(segments);
+      const field = continuityField(segments, toolName);
       const kind = continuityKind(field);
       for (const candidate of valuesAtContinuityPath(payload, segments, 0)) {
         const value = safeContinuityScalar(candidate);
@@ -1343,11 +1346,11 @@ function safeContinuityScalar(value: unknown): string | undefined {
   return redacted === normalized ? normalized : undefined;
 }
 
-function continuityField(segments: readonly string[]): string {
+function continuityField(segments: readonly string[], toolName?: string): string {
   const named = segments.filter((segment) => segment !== "*");
   const leaf = named.at(-1) ?? "value";
   const normalizedLeaf = leaf.replace(/[_-]+/gu, "").toLocaleLowerCase();
-  const parent = named.at(-2);
+  const parent = named.at(-2) ?? rootContinuityEntity(toolName, normalizedLeaf);
   if (parent === undefined || !/^(?:id|identifier|uid|uuid|name|label|title|hash|sha256|ref|reference)$/u.test(normalizedLeaf)) {
     return leaf;
   }
@@ -1355,6 +1358,16 @@ function continuityField(segments: readonly string[]): string {
     ? `${parent.slice(0, -3)}y`
     : parent.endsWith("s") ? parent.slice(0, -1) : parent;
   return `${singularParent}${leaf.slice(0, 1).toLocaleUpperCase()}${leaf.slice(1)}`;
+}
+
+function rootContinuityEntity(toolName: string | undefined, leaf: string): string | undefined {
+  if (toolName === undefined || !/^(?:id|identifier|uid|uuid|name|label|title)$/u.test(leaf)) return undefined;
+  const entity = toolName
+    .replace(/^(?:get|list|find|search|read|retrieve|fetch)/u, "")
+    .replace(/[^A-Za-z0-9_-]+/gu, "")
+    .replace(/^[_-]+|[_-]+$/gu, "");
+  if (entity.length === 0 || entity.length > 80) return undefined;
+  return `${entity.slice(0, 1).toLocaleLowerCase()}${entity.slice(1)}`;
 }
 
 function continuityKind(field: string): RuntimeContinuityFact["kind"] {

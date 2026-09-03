@@ -1989,6 +1989,93 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(result.providerExecution?.response?.content).toContain("foreground tool loop stopped");
   });
 
+  it("does not stop checkpointed work while new connector mutations and declared verification advance it", async () => {
+    const checkpoint = new ExecutionCheckpointController({
+      sessionId: "checkpoint-connector-progress-session",
+      profileId: "default",
+      now: () => "2030-01-01T00:00:00.000Z",
+      createId: () => "checkpoint:connector-progress"
+    });
+    await checkpoint.ensure({
+      originTurnId: "turn-connector-progress",
+      originalObjective: "Import and verify the Postman collection",
+      qualificationReasons: ["external_multi_step"],
+      intentLabels: ["api.integration"],
+      requiredOperations: ["read", "mutation", "verification"],
+      connectorIds: ["postman"],
+      completionFloor: "mutation_with_verification"
+    });
+    const postmanExecution = (input: {
+      id: string;
+      tool: string;
+      effect: NonNullable<ToolExecutionRecord["executionEffect"]>;
+      riskClass?: ToolExecutionRecord["riskClass"];
+    }): ToolExecutionRecord => {
+      const record = toolExecutionForTool(input.id, input.tool, `${input.tool} completed`);
+      record.tool.toolsets = ["mcp"];
+      record.tool.riskClass = input.riskClass ?? "read-only-network";
+      record.riskClass = record.tool.riskClass;
+      record.executionEffect = input.effect;
+      return record;
+    };
+    const steps = [
+      postmanExecution({
+        id: "call-create-spec",
+        tool: "mcp.postman.createSpec",
+        riskClass: "external-side-effect",
+        effect: { kind: "mutation", connector: { kind: "mcp", id: "postman" } }
+      }),
+      postmanExecution({
+        id: "call-get-spec",
+        tool: "mcp.postman.getSpec",
+        effect: {
+          kind: "verification",
+          verifies: ["mcp.postman.createSpec"],
+          connector: { kind: "mcp", id: "postman" }
+        }
+      }),
+      postmanExecution({
+        id: "call-generate-collection",
+        tool: "mcp.postman.generateCollection",
+        riskClass: "external-side-effect",
+        effect: { kind: "mutation", connector: { kind: "mcp", id: "postman" } }
+      }),
+      postmanExecution({
+        id: "call-get-spec-collections",
+        tool: "mcp.postman.getSpecCollections",
+        effect: {
+          kind: "verification",
+          verifies: ["mcp.postman.generateCollection"],
+          connector: { kind: "mcp", id: "postman" }
+        }
+      }),
+      toolExecutionForTool("call-browser-navigate", "browser.navigate", "product page opened"),
+      toolExecutionForTool("call-browser-snapshot", "browser.snapshot", "product page inspected")
+    ];
+    const harness = await createPostToolNudgeHarness({
+      sessionId: "checkpoint-connector-progress-session",
+      responses: [
+        ...steps.map((execution) => providerExecution("", [providerToolCall(
+          execution.toolCallId!,
+          "{}",
+          execution.tool.name
+        )])),
+        providerExecution("Imported and verified the collection, then continued to the next product.")
+      ],
+      toolSteps: steps.map((execution) => ({ executions: [execution] })),
+      executionCheckpointController: checkpoint,
+      noProgressNudgeIteration: 2,
+      maxNoProgressIterations: 4,
+      maxProviderIterations: 8
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(7);
+    expect(result.terminationCause).toBe("normal");
+    expect(result.providerExecution?.response?.content).toContain("Imported and verified");
+  });
+
   it("reuses a successful Postman workspace argument without parsing connector prose", async () => {
     const planStore = new ExecutionPlanStore();
     planStore.replace({

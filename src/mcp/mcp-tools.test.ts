@@ -144,6 +144,27 @@ describe("MCP structural summaries", () => {
     expect(result.metadata).not.toHaveProperty("_estacoda_continuity_facts");
   });
 
+  it("qualifies reviewed root identifiers with the MCP tool entity", () => {
+    const spec = normalizeMcpResult({
+      content: [{ type: "text", text: JSON.stringify({ id: "specification-fixture", name: "Loans v2" }) }]
+    }, [], ["/id", "/name"], "getSpec");
+    const collections = normalizeMcpResult({
+      content: [{
+        type: "text",
+        text: JSON.stringify({ collections: [{ id: "collection-fixture", name: "Loans v2" }] })
+      }]
+    }, [], ["/collections/*/id", "/collections/*/name"], "getSpecCollections");
+
+    expect(spec.metadata?._estacoda_continuity_facts).toEqual([
+      { field: "specId", value: "specification-fixture", kind: "identifier" },
+      { field: "specName", value: "Loans v2", kind: "label" }
+    ]);
+    expect(collections.metadata?._estacoda_continuity_facts).toEqual([
+      { field: "collectionId", value: "collection-fixture", kind: "identifier" },
+      { field: "collectionName", value: "Loans v2", kind: "label" }
+    ]);
+  });
+
   it("extracts only configured continuity fields from a connector Markdown table", () => {
     const result = normalizeMcpResult({
       content: [{
@@ -576,6 +597,17 @@ describe("MCP protected argument declarations", () => {
       { field: "workspaceName", value: "Developer Workspace", kind: "label" },
     ]);
     expect(JSON.stringify(workspaces?.metadata?._estacoda_continuity_facts)).not.toContain("unreviewed");
+    const spec = await server?.tools.find((tool) => tool.name === "mcp.postman.getSpec")
+      ?.run({ specId: "specification-fixture" });
+    expect(spec?.metadata?._estacoda_continuity_facts).toEqual([
+      { field: "specId", value: "specification-fixture", kind: "identifier" },
+    ]);
+    const specCollections = await server?.tools.find((tool) => tool.name === "mcp.postman.getSpecCollections")
+      ?.run({ specId: "specification-fixture" });
+    expect(specCollections?.metadata?._estacoda_continuity_facts).toEqual([
+      { field: "collectionId", value: "collection-fixture", kind: "identifier" },
+      { field: "collectionName", value: "Loans v2", kind: "label" },
+    ]);
     const readBack = await server?.tools.find((tool) => tool.name === "mcp.postman.getEnvironment")
       ?.run({ environmentId: "environment-fixture" });
     expect(readBack).toMatchObject({
@@ -1005,7 +1037,8 @@ const postmanProtectedTransferConfig = {
     getWorkspaces: ["/workspaces/*/id", "/workspaces/*/name"],
     getCollection: ["/collection/id", "/collection/name"],
     getEnvironment: ["/environment/id", "/environment/name"],
-    getSpec: ["/spec/id"],
+    getSpec: ["/id"],
+    getSpecCollections: ["/collections/*/id", "/collections/*/name"],
   },
   toolVerificationRelationships: {
     getEnvironment: ["createEnvironment", "putEnvironment"],
@@ -1052,6 +1085,22 @@ function createPostmanCapabilityFetch(options: { omitEnvironmentValue?: boolean;
                       value: POSTMAN_READ_BACK_SECRET,
                     }],
                   },
+                }),
+              }],
+            }
+          : payload.method === "tools/call" && payload.params?.name === "getSpec"
+          ? {
+              content: [{
+                type: "text",
+                text: JSON.stringify({ id: "specification-fixture", name: "Loans v2" }),
+              }],
+            }
+          : payload.method === "tools/call" && payload.params?.name === "getSpecCollections"
+          ? {
+              content: [{
+                type: "text",
+                text: JSON.stringify({
+                  collections: [{ id: "collection-fixture", name: "Loans v2" }],
                 }),
               }],
             }

@@ -131,4 +131,50 @@ describe("execution checkpoint journal", () => {
       operations: [operation]
     })).toBeUndefined();
   });
+
+  it("uses a successful declared connector verifier only for one unambiguous pending operation", () => {
+    const operation: ExecutionCheckpointOperation = {
+      id: "operation:generic",
+      connectorId: "postman",
+      operation: "mcp.postman.createSpec",
+      subjectId: "artifact-loans-v2",
+      artifactHash: "a".repeat(64),
+      operationRevision: 1,
+      status: "settled",
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:01.000Z"
+    };
+    const verifier = tool({
+      name: "mcp.postman.getSpec",
+      riskClass: "read-only-network",
+      capabilityMetadata: { verification: { verifies: [operation.operation] } }
+    });
+    const effect = {
+      kind: "verification" as const,
+      verifies: [operation.operation],
+      connector: { kind: "mcp" as const, id: "postman" }
+    };
+
+    expect(checkpointVerificationMatch({
+      tool: verifier,
+      effect,
+      value: { specId: "spec-loans-v2" },
+      result: { ok: true, content: "specification exists" },
+      operations: [operation]
+    })).toEqual({ operationId: operation.id, outcome: "present" });
+    expect(checkpointVerificationMatch({
+      tool: verifier,
+      effect,
+      value: { specId: "spec-loans-v2" },
+      result: { ok: true, content: "ambiguous" },
+      operations: [operation, { ...operation, id: "operation:second" }]
+    })).toBeUndefined();
+    expect(checkpointVerificationMatch({
+      tool: verifier,
+      effect,
+      value: { specId: "spec-loans-v2" },
+      result: { ok: false, content: "lookup failed" },
+      operations: [operation]
+    })).toBeUndefined();
+  });
 });

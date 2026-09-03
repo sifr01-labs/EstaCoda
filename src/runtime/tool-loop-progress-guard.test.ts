@@ -176,6 +176,102 @@ describe("ToolLoopProgressGuard", () => {
     });
   });
 
+  it("counts new connector mutations and their declared verifiers when checkpoint progress lags", () => {
+    const reader = {
+      current: (): ForegroundExecutionCheckpoint => ({
+        version: 1,
+        id: "checkpoint:connector-progress",
+        sessionId: "session-1",
+        profileId: "profile-1",
+        originTurnId: "turn-1",
+        revision: 1,
+        progressRevision: 0,
+        originalObjective: "Import an API specification",
+        status: "active",
+        qualificationReasons: ["external_multi_step"],
+        intentLabels: ["api.integration"],
+        requiredOperations: ["mutation", "verification"],
+        connectorIds: ["postman"],
+        artifactReferences: [],
+        safeFacts: [],
+        operations: [],
+        completionFloor: "mutation_with_verification",
+        createdAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:00.000Z"
+      })
+    };
+    const guard = new ToolLoopProgressGuard({
+      checkpointReader: reader,
+      noProgressNudgeIteration: 2,
+      maxNoProgressIterations: 3
+    });
+
+    expect(guard.observe([execution({
+      tool: { ...execution().tool, name: "mcp.postman.createSpec", riskClass: "external-side-effect" },
+      input: { workspaceId: "workspace-1", artifact: "artifact-1" },
+      riskClass: "external-side-effect",
+      executionEffect: { kind: "mutation", connector: { kind: "mcp", id: "postman" } },
+      result: { ok: true, content: "created" }
+    })])).toMatchObject({
+      materialProgress: true,
+      progressKinds: ["target-mutation"],
+      noProgressIterations: 0
+    });
+
+    expect(guard.observe([execution({
+      tool: { ...execution().tool, name: "mcp.postman.getSpec" },
+      input: { specId: "spec-1" },
+      toolCallId: "call-verify",
+      executionEffect: {
+        kind: "verification",
+        verifies: ["mcp.postman.createSpec"],
+        connector: { kind: "mcp", id: "postman" }
+      },
+      result: { ok: true, content: "specification exists" }
+    })])).toMatchObject({
+      materialProgress: true,
+      progressKinds: ["verification"],
+      noProgressIterations: 0
+    });
+
+    expect(guard.observe([execution({
+      tool: { ...execution().tool, name: "mcp.other.getSpec" },
+      input: { specId: "spec-1" },
+      toolCallId: "call-wrong-connector",
+      executionEffect: {
+        kind: "verification",
+        verifies: ["mcp.postman.createSpec"],
+        connector: { kind: "mcp", id: "other" }
+      },
+      result: { ok: true, content: "unrelated result" }
+    })])).toMatchObject({ materialProgress: false, noProgressIterations: 1 });
+
+    expect(guard.observe([execution({
+      tool: { ...execution().tool, name: "mcp.postman.getSpec" },
+      input: { specId: "different-spec" },
+      toolCallId: "call-extra-verifier",
+      executionEffect: {
+        kind: "verification",
+        verifies: ["mcp.postman.createSpec"],
+        connector: { kind: "mcp", id: "postman" }
+      },
+      result: { ok: true, content: "another specification exists" }
+    })])).toMatchObject({ materialProgress: false, noProgressIterations: 2, shouldNudge: true });
+
+    expect(guard.observe([execution({
+      tool: { ...execution().tool, name: "browser.click", toolsets: ["browser"], riskClass: "external-side-effect" },
+      input: { ref: "download" },
+      toolCallId: "call-browser-mutation",
+      riskClass: "external-side-effect",
+      executionEffect: { kind: "mutation" },
+      result: { ok: true, content: "clicked" }
+    })])).toMatchObject({
+      materialProgress: false,
+      noProgressIterations: 3,
+      shouldStop: true
+    });
+  });
+
   it("resets no-progress accounting when the checkpoint records a durable artifact", async () => {
     const checkpoint = new ExecutionCheckpointController({
       sessionId: "session-1",

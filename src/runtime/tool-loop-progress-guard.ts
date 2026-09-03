@@ -34,6 +34,8 @@ export class ToolLoopProgressGuard {
   readonly #stopIteration: number;
   readonly #seenCallFingerprints = new Set<string>();
   readonly #seenResultFingerprints = new Set<string>();
+  readonly #successfulConnectorMutations = new Map<string, number>();
+  readonly #verifiedConnectorMutations = new Map<string, number>();
   #active = false;
   #nudged = false;
   #noProgressIterations = 0;
@@ -73,10 +75,10 @@ export class ToolLoopProgressGuard {
     let materialProgress = false;
     const currentCheckpointRevision = activeCheckpointProgressRevision(this.#checkpointReader);
     const checkpointControlsProgress = currentCheckpointRevision !== undefined;
-    if (
+    const checkpointAdvanced =
       currentCheckpointRevision !== undefined &&
-      currentCheckpointRevision > (this.#checkpointProgressRevision ?? 0)
-    ) {
+      currentCheckpointRevision > (this.#checkpointProgressRevision ?? 0);
+    if (checkpointAdvanced) {
       materialProgress = true;
       progressKinds.add("checkpoint-semantic-progress");
     }
@@ -99,12 +101,29 @@ export class ToolLoopProgressGuard {
         continue;
       }
 
-      if (!checkpointControlsProgress && execution.executionEffect?.kind === "mutation") {
+      const connectorMutation = successfulConnectorMutationKey(execution);
+      if (connectorMutation !== undefined) increment(this.#successfulConnectorMutations, connectorMutation);
+      const verifiedConnectorMutation = execution.executionEffect?.kind === "verification" &&
+        consumeConnectorMutationVerification(
+          execution.executionEffect,
+          this.#successfulConnectorMutations,
+          this.#verifiedConnectorMutations
+        );
+      if (
+        execution.executionEffect?.kind === "mutation" &&
+        (!checkpointControlsProgress || (!checkpointAdvanced && connectorMutation !== undefined))
+      ) {
         materialProgress = true;
         progressKinds.add("target-mutation");
         continue;
       }
-      if (!checkpointControlsProgress && execution.executionEffect?.kind === "verification") {
+      if (
+        execution.executionEffect?.kind === "verification" &&
+        (
+          !checkpointControlsProgress ||
+          (!checkpointAdvanced && verifiedConnectorMutation)
+        )
+      ) {
         materialProgress = true;
         progressKinds.add("verification");
         continue;
@@ -163,8 +182,47 @@ export class ToolLoopProgressGuard {
         content: execution.result?.content,
         structuredContent: execution.result?.metadata?.structuredContent
       }));
+      const connectorMutation = successfulConnectorMutationKey(execution);
+      if (connectorMutation !== undefined) increment(this.#successfulConnectorMutations, connectorMutation);
+      if (execution.executionEffect?.kind === "verification") {
+        consumeConnectorMutationVerification(
+          execution.executionEffect,
+          this.#successfulConnectorMutations,
+          this.#verifiedConnectorMutations
+        );
+      }
     }
   }
+}
+
+function successfulConnectorMutationKey(execution: ToolExecutionRecord): string | undefined {
+  const effect = execution.executionEffect;
+  if (effect?.kind !== "mutation" || effect.connector === undefined) return undefined;
+  return connectorMutationKey(effect.connector.kind, effect.connector.id, execution.tool.name);
+}
+
+function consumeConnectorMutationVerification(
+  effect: Extract<NonNullable<ToolExecutionRecord["executionEffect"]>, { kind: "verification" }>,
+  successfulMutations: ReadonlyMap<string, number>,
+  verifiedMutations: Map<string, number>
+): boolean {
+  const connector = effect.connector;
+  if (connector === undefined) return false;
+  for (const tool of effect.verifies) {
+    const key = connectorMutationKey(connector.kind, connector.id, tool);
+    if ((successfulMutations.get(key) ?? 0) <= (verifiedMutations.get(key) ?? 0)) continue;
+    increment(verifiedMutations, key);
+    return true;
+  }
+  return false;
+}
+
+function connectorMutationKey(kind: string, id: string, tool: string): string {
+  return `${kind}\0${id}\0${tool}`;
+}
+
+function increment(counts: Map<string, number>, key: string): void {
+  counts.set(key, (counts.get(key) ?? 0) + 1);
 }
 
 function assessment(input: {
