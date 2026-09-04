@@ -12,6 +12,20 @@ describe("deriveSessionHistoryBudget", () => {
 });
 
 describe("packSessionHistory", () => {
+  it("withholds plaintext credential submissions and redacts prior assistant echoes", () => {
+    const apiKey = "fake-consumer-key-123456789";
+    const clientSecret = "fake-consumer-secret-987654321";
+    const packed = packSessionHistory([
+      { role: "user", content: `key\n${apiKey}\nand secret\n${clientSecret}` },
+      { role: "agent", content: `| consumer key | ${apiKey} |\n| client secret | ${clientSecret} |` }
+    ]);
+
+    expect(JSON.stringify(packed.messages)).not.toContain(apiKey);
+    expect(JSON.stringify(packed.messages)).not.toContain(clientSecret);
+    expect(packed.messages[0]?.content).toContain("withheld from provider history");
+    expect(packed.messages[1]?.content).toContain("[REDACTED]");
+  });
+
   it("includes image attachment metadata in estimated history tokens", () => {
     const textOnly = packSessionHistory([
       {

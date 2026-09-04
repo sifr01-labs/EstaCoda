@@ -57,6 +57,7 @@ export function isAcknowledgementContinuation(userText: string): boolean {
   const text = normalizeUserText(userText);
   return /^(?:ok|okay|yes|go on|continue|do that|carry on|retry|try again)$/u.test(text) ||
     /^(?:let'?s do (?:it|this)|please continue|why not try again)(?:\b|$)/u.test(text) ||
+    /^(?:(?:ok(?:ay)?|please)\s+)?(?:can\s+you\s+)?(?:pick\s+u(?:p)?|resume|continue)(?:\s+where)?\s+(?:we|you)\s+left(?:\s*o)?\s*f{1,2}[/.!?]*$/u.test(text) ||
     /^(?:أعد المحاولة|حاول مرة أخرى)$/u.test(text);
 }
 

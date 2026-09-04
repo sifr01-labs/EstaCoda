@@ -2,6 +2,7 @@ import type { SessionMessage } from "../contracts/session.js";
 import { stripInlineReasoning } from "../providers/provider-reasoning.js";
 import { estimateMessageTokensRough, estimateMessagesTokensRough } from "./token-estimator.js";
 import { sanitizeProviderExecutionMetadata } from "./provider-execution-history.js";
+import { inspectPlaintextCredentials } from "../security/plaintext-credential-guard.js";
 
 export const DEFAULT_HISTORY_CONTEXT_WINDOW = 128_000;
 export const HISTORY_BUDGET_RATIO = 0.12;
@@ -66,10 +67,11 @@ export function packSessionHistory(
   const maxSummaryChars = options.maxSummaryChars ?? 1_400;
   const maxMessageChars = options.maxMessageChars ?? 900;
   const maxEstimatedTokens = options.maxEstimatedTokens ?? deriveSessionHistoryBudget(undefined);
-  const conversational = messages.filter((message) =>
+  const sanitizedMessages = sanitizeSessionHistoryCredentials(messages);
+  const conversational = sanitizedMessages.filter((message) =>
     message.role === "user" || message.role === "agent" || message.role === "tool"
   );
-  const semanticSummary = latestSemanticCompressionSummary(messages);
+  const semanticSummary = latestSemanticCompressionSummary(sanitizedMessages);
   const protectedStart = findProtectedStart(conversational, maxProtectedMessages);
   const pinnedIndexes = pinnedConversationalIndexes(conversational, protectedStart);
   const older = conversational.slice(0, protectedStart);
@@ -108,6 +110,19 @@ export function packSessionHistory(
     protectedToolPairCount: countProtectedToolPairs(recent),
     estimatedTokens: estimateTokens(packedMessages)
   };
+}
+
+export function sanitizeSessionHistoryCredentials<T extends PackableSessionMessage>(messages: readonly T[]): T[] {
+  return messages.map((message) => {
+    const inspection = inspectPlaintextCredentials(message.content);
+    if (!inspection.detected) return { ...message };
+    if (message.role !== "user") return { ...message, content: inspection.redactedText };
+    const labels = inspection.kinds.join(", ");
+    return {
+      ...message,
+      content: `A plaintext credential submission (${labels}) was withheld from provider history. Request the values again through protected input if they are still required.`
+    };
+  });
 }
 
 function latestSemanticCompressionSummary(messages: PackableSessionMessage[]): PackableSessionMessage | undefined {

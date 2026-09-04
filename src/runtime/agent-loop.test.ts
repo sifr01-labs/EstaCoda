@@ -701,7 +701,7 @@ describe("AgentLoop execution checkpoints", () => {
       },
       { ...tool, name: "file.write", toolsets: ["files"], riskClass: "workspace-write" }
     ];
-    const { loop, runtimeRouter, providerTurnLoop, executionCheckpointController } = await createAgentLoop({
+    const { loop, runtimeRouter, providerTurnLoop, executionCheckpointController, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: true,
       runSkillPlaybook: vi.fn(async () => []),
       providerExecution: failedProviderExecution(),
@@ -723,14 +723,15 @@ describe("AgentLoop execution checkpoints", () => {
 
     const objective = "Import all six Swagger APIs into Postman and verify the update.";
     await loop.handle({ text: objective, channel: "cli", trustedWorkspace: true });
-    const retry = await loop.handle({ text: "try again", channel: "cli", trustedWorkspace: true });
+    const retryText = "Okay can you pick u where we lefto ff/";
+    const retry = await loop.handle({ text: retryText, channel: "cli", trustedWorkspace: true });
 
     expect(vi.mocked(runtimeRouter.route).mock.calls[1]?.[0]).toMatchObject({
-      text: `${objective}\nFollow-up: try again`,
+      text: `${objective}\nFollow-up: ${retryText}`,
       checkpointSkillName: "api-integration"
     });
     const resumedProviderInput = vi.mocked(providerTurnLoop.run).mock.calls[1]?.[0];
-    expect(resumedProviderInput.routedText).toBe(`${objective}\nFollow-up: try again`);
+    expect(resumedProviderInput.routedText).toBe(`${objective}\nFollow-up: ${retryText}`);
     expect(resumedProviderInput.providerTools.map((entry) => entry.function.name)).toEqual([
       "browser_snapshot",
       "browser_click",
@@ -746,12 +747,33 @@ describe("AgentLoop execution checkpoints", () => {
       completionFloor: "mutation_with_verification"
     });
 
+    const apiKey = "fake-consumer-key-123456789";
+    const clientSecret = "fake-consumer-secret-987654321";
+    await loop.handle({
+      text: `key\n${apiKey}\nand secret\n${clientSecret}`,
+      channel: "cli",
+      trustedWorkspace: true
+    });
+    const protectedProviderInput = vi.mocked(providerTurnLoop.run).mock.calls[2]?.[0];
+    expect(protectedProviderInput.routedText).toContain(objective);
+    expect(protectedProviderInput.routedText).toContain("withheld the values");
+    expect(protectedProviderInput.providerTools.map((entry) => entry.function.name)).toContain("mcp_postman_updateCollection");
+    expect(JSON.stringify(protectedProviderInput)).not.toContain(apiKey);
+    expect(JSON.stringify(protectedProviderInput)).not.toContain(clientSecret);
+    expect(JSON.stringify(await sessionDb.listMessages(sessionId))).not.toContain(apiKey);
+    expect(JSON.stringify(await sessionDb.listMessages(sessionId))).not.toContain(clientSecret);
+    expect(await sessionDb.listEvents(sessionId)).toContainEqual({
+      kind: "plaintext-credential-intercepted",
+      credentialKinds: ["api-key", "generic-secret"],
+      disposition: "withheld-before-persistence"
+    });
+
     await loop.handle({
       text: "Use the other Postman workspace instead.",
       channel: "cli",
       trustedWorkspace: true
     });
-    expect(vi.mocked(runtimeRouter.route).mock.calls[2]?.[0]).toMatchObject({
+    expect(vi.mocked(runtimeRouter.route).mock.calls[3]?.[0]).toMatchObject({
       text: `${objective}\nFollow-up: Use the other Postman workspace instead.`,
       checkpointSkillName: "api-integration"
     });

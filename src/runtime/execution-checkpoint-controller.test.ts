@@ -293,6 +293,9 @@ describe("ExecutionCheckpointController", () => {
       disposition: "continuation",
       checkpoint
     });
+    await expect(controller.prepareForTurn("Okay can you pick u where we lefto ff/"))
+      .resolves.toEqual({ disposition: "continuation", checkpoint });
+    expect(controller.current()).toEqual(checkpoint);
 
     const waiting = await controller.settleAttempt(checkpoint.revision, {
       outcome: outcome("failed", "user_input_required")

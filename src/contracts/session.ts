@@ -271,6 +271,11 @@ export type SessionEvent =
       failureStage?: "configuration" | "connection" | "schema-registration" | "availability";
       error?: string;
     }> }
+  | {
+      kind: "plaintext-credential-intercepted";
+      credentialKinds: Array<"api-key" | "client-secret" | "access-token" | "password" | "private-key" | "generic-secret">;
+      disposition: "withheld-before-persistence";
+    }
   | ExecutionPlanLifecycleEvent
   | ExecutionCheckpointLifecycleEvent
   | ProviderToolInventoryEvent

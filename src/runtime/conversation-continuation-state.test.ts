@@ -33,7 +33,10 @@ describe("conversation continuation state", () => {
     expect(isAcknowledgementContinuation("go on")).toBe(true);
     expect(isAcknowledgementContinuation("let's do this [pasted text]")).toBe(true);
     expect(isAcknowledgementContinuation("why not try again")).toBe(true);
+    expect(isAcknowledgementContinuation("Okay can you pick u where we lefto ff/")).toBe(true);
+    expect(isAcknowledgementContinuation("Please resume where you left off.")).toBe(true);
     expect(isAcknowledgementContinuation("okay thanks")).toBe(false);
+    expect(isAcknowledgementContinuation("Can you review the README?")).toBe(false);
   });
 
   it("creates bounded continuation for a governed connector blocker", () => {

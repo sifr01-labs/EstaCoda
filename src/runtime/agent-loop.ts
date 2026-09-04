@@ -95,6 +95,7 @@ import {
   formatGovernedTransferBlocker
 } from "./execution-capability-preflight.js";
 import { qualifyForegroundExecution } from "./execution-checkpoint-qualification.js";
+import { interceptPlaintextCredentialInput } from "../security/plaintext-credential-guard.js";
 
 export type AgentLoopInput = {
   text: string;
@@ -349,24 +350,33 @@ export class AgentLoop {
 
   async handle(input: AgentLoopInput): Promise<AgentLoopResponse> {
     await this.#runRecorder.beginTurn();
+    const credentialInterception = interceptPlaintextCredentialInput(input.text);
+    const turnText = credentialInterception?.projectedText ?? input.text;
+    if (credentialInterception !== undefined) {
+      await this.#sessionDb.appendEvent(this.#currentSessionId(), {
+        kind: "plaintext-credential-intercepted",
+        credentialKinds: credentialInterception.kinds,
+        disposition: "withheld-before-persistence"
+      }).catch(() => undefined);
+    }
     const checkpointPreparation = await this.#executionCheckpointController
-      ?.prepareForTurn(input.text)
+      ?.prepareForTurn(turnText)
       .catch(() => undefined);
     const resumedCheckpoint = checkpointPreparation?.disposition === "continuation" ||
       checkpointPreparation?.disposition === "recovery" ||
       checkpointPreparation?.disposition === "correction"
       ? checkpointPreparation.checkpoint
       : undefined;
-    await this.#executionPlanController?.prepareForTurn(input.text, input.onEvent);
+    await this.#executionPlanController?.prepareForTurn(turnText, input.onEvent);
     const latestResumeNote = await this.#runRecorder.latestResumeNote();
-    const effectiveText = isResumeRequest(input.text) && latestResumeNote !== undefined
+    const effectiveText = isResumeRequest(turnText) && latestResumeNote !== undefined
       ? [
-          input.text,
+          turnText,
           "",
           "Latest interrupted-turn resume note:",
           latestResumeNote
         ].join("\n")
-      : input.text;
+      : turnText;
     await emit(input.onEvent, {
       kind: "agent-start",
       sessionId: this.#currentSessionId(),
@@ -432,6 +442,12 @@ export class AgentLoop {
       channel: input.channel,
       metadata: {
         ...input.inputMetadata,
+        ...(credentialInterception === undefined ? {} : {
+          plaintextCredentialInput: {
+            withheld: true,
+            kinds: credentialInterception.kinds
+          }
+        }),
         attachments: summarizeAttachments(attachments),
         contextReferences: context?.references.map((reference) => reference.raw) ?? [],
         projectContextFiles: this.#projectContext?.files.map((file) => file.source) ?? []
@@ -1376,7 +1392,7 @@ export class AgentLoop {
       text: response.text
     });
 
-    await this.#promoteRepeatedPreferences(input.text, userInputEvent.id);
+    await this.#promoteRepeatedPreferences(turnText, userInputEvent.id);
     await this.#memoryCurationService?.observeCompletedTurn({
       signal: input.signal,
       onEvent: input.onEvent

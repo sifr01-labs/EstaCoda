@@ -39,7 +39,7 @@ import {
   assembleProviderPrompt,
   type ProviderPromptAssembly
 } from "../prompt/prompt-assembly.js";
-import { deriveSessionHistoryBudget, packSessionHistory } from "../prompt/history-packer.js";
+import { deriveSessionHistoryBudget, packSessionHistory, sanitizeSessionHistoryCredentials } from "../prompt/history-packer.js";
 import type { CompactResult } from "../prompt/session-compression-service.js";
 import { SUMMARY_FORMAT_VERSION } from "../prompt/semantic-compressor.js";
 import type { ConversationContinuationState } from "./conversation-continuation-state.js";
@@ -1749,7 +1749,7 @@ export class ProviderTurnLoop {
     compression?: PromptSemanticCompressionReport;
   }> {
     const sourceMessages = await this.#sessionDb.listMessages(this.#currentSessionId());
-    const messages = sourceMessages;
+    const messages = sanitizeSessionHistoryCredentials(sourceMessages);
     const packed = packSessionHistory(messages, {
       maxEstimatedTokens: deriveSessionHistoryBudget(this.#model?.contextWindowTokens)
     });
