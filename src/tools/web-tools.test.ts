@@ -3363,6 +3363,21 @@ describe("web and browser tools baselines", () => {
     });
   });
 
+  it("renders an exact role alternative without telling the model to escalate to vision", async () => {
+    const backend: BrowserBackend = { ...createMockBrowserBackend(), find: async () => ({
+      sessionId: "runtime-session:main", identity: browserIdentity(4), tabRef: "@t2", status: "not-found", candidates: [],
+      alternative: { reason: "role-mismatch", requestedRole: "link", candidate: {
+        ref: "@e28", identity: browserIdentity(4), tabRef: "@t2", role: "button", name: "Example app"
+      } }
+    }) };
+    const result = await tool("browser.find", createTestWebTools({ browserBackend: backend })).run({ locator: { role: "link", text: "Example app" } });
+    expect(result.content).toContain("Exact text matched one current button");
+    expect(result.content).toContain("Use this alternative only if it is the intended control");
+    expect(result.content).toContain("@e28");
+    expect(result.content).not.toContain("browser.vision");
+    expect(result.metadata).toHaveProperty("alternative.reason", "role-mismatch");
+  });
+
   it("surfaces stale and ambiguous browser targets as structured failures", async () => {
     const backend: BrowserBackend = {
       ...createMockBrowserBackend(),

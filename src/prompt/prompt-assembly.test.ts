@@ -211,6 +211,11 @@ describe("assembleProviderPrompt", () => {
     const prompt = assembleProviderPrompt(basePromptInput({
       executionWorkingSet: {
         visibleTurnId: "turn-3",
+        resources: [{
+          id: "resource:one", name: "Example service", sourceUrl: "https://portal.example.com/catalog/actual-20#/v2",
+          sourceTool: "browser.extract", artifactReferences: [{ id: "artifact-one", sha256: "a".repeat(64) }],
+          destinationFacts: [], operationIds: []
+        }],
         facts: [{
           key: "workspace-id",
           summary: "Workspace ID: workspace-456",
@@ -236,6 +241,8 @@ describe("assembleProviderPrompt", () => {
     const rendered = renderMessages(prompt.messages);
 
     expect(rendered).toContain("Authoritative execution working state");
+    expect(rendered).toContain("https://portal.example.com/catalog/actual-20#/v2");
+    expect(rendered).toContain("relationships are receipts");
     expect(rendered).toContain("Scope: current visible turn");
     expect(rendered).not.toContain("turn-3");
     expect(rendered).toContain("Workspace ID: workspace-456");

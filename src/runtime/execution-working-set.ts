@@ -55,6 +55,7 @@ export type ExecutionWorkingSet = {
   authenticationRecoveryStage?: ExecutionCheckpointAuthenticationStage;
   facts: ExecutionWorkingFact[];
   operations: ExecutionOperationReceipt[];
+  resources?: import("../contracts/execution-checkpoint.js").ExecutionCheckpointResource[];
 };
 
 type StoredFact = {
@@ -142,7 +143,7 @@ export class ExecutionWorkingSetController {
       ...this.#operations.snapshot(),
       ...durableOperations
     ].map((operation) => [operation.operationId, operation])).values()];
-    if (this.#facts.size === 0 && operations.length === 0 && checkpoint?.authenticationRecoveryStage === undefined) {
+    if (this.#facts.size === 0 && operations.length === 0 && (checkpoint?.resources?.length ?? 0) === 0 && checkpoint?.authenticationRecoveryStage === undefined) {
       return undefined;
     }
     return {
@@ -152,7 +153,8 @@ export class ExecutionWorkingSetController {
         ? {}
         : { authenticationRecoveryStage: checkpoint.authenticationRecoveryStage }),
       facts: [...this.#facts.values()].map(({ fact }) => ({ ...fact })),
-      operations
+      operations,
+      ...(checkpoint?.resources === undefined ? {} : { resources: structuredClone(checkpoint.resources) })
     };
   }
 
@@ -455,6 +457,7 @@ function humanizeField(field: string): string {
 
 function checkpointFactSummary(kind: import("../contracts/execution-checkpoint.js").ExecutionCheckpointSafeFactKind, value: string): string {
   const label: Record<typeof kind, string> = {
+    resource_id: "Resource ID",
     workspace_id: "Workspace ID",
     collection_id: "Collection ID",
     specification_id: "Specification ID",

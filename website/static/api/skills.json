@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-23T15:21:37.815Z",
+  "generatedAt": "2026-09-04T09:35:59.979Z",
   "skills": [
     {
       "id": "official.api-integration",
@@ -24,7 +24,7 @@
         "web",
         "files"
       ],
-      "playbookSteps": 4,
+      "playbookSteps": 5,
       "evaluationCount": 11,
       "routing": {
         "confirmation": "policy"

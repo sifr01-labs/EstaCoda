@@ -941,7 +941,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       if (result.status === "ambiguous") {
         return { ...result, visualEscalation: { reason: "semantic-match-ambiguous" as const } };
       }
-      if (result.status === "not-found") {
+      if (result.status === "not-found" && result.alternative === undefined) {
         return {
           ...result,
           visualEscalation: {
@@ -1347,6 +1347,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         localPath,
         suggestedFilename: event.suggestedFilename ?? basename(localPath),
         sourceUrl: event.url,
+        pageUrl: snapshot.url,
         sizeBytes: file.size
       };
     },

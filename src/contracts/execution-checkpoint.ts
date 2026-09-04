@@ -3,12 +3,15 @@ import type { IntentTaskClass } from "./intent.js";
 import type { ProviderErrorClass } from "./provider.js";
 
 export const EXECUTION_CHECKPOINT_VERSION = 1 as const;
-export const EXECUTION_CHECKPOINT_MAX_SERIALIZED_BYTES = 16 * 1024;
+// Resource continuity has its own allowance; it must not crowd out the operation journal.
+export const EXECUTION_CHECKPOINT_MAX_SERIALIZED_BYTES = 24 * 1024;
+export const EXECUTION_CHECKPOINT_MAX_RESOURCE_BYTES = 8 * 1024;
 export const EXECUTION_CHECKPOINT_MAX_OBJECTIVE_CHARS = 2_000;
 export const EXECUTION_CHECKPOINT_MAX_LABELS = 16;
 export const EXECUTION_CHECKPOINT_MAX_CONNECTORS = 8;
 export const EXECUTION_CHECKPOINT_MAX_ARTIFACTS = 16;
 export const EXECUTION_CHECKPOINT_MAX_FACTS = 24;
+export const EXECUTION_CHECKPOINT_MAX_RESOURCES = 16;
 export const EXECUTION_CHECKPOINT_MAX_OPERATIONS = 16;
 export const EXECUTION_CHECKPOINT_MAX_BLOCKER_CHARS = 500;
 
@@ -47,6 +50,7 @@ export type ExecutionCheckpointArtifactReference = {
 };
 
 export type ExecutionCheckpointSafeFactKind =
+  | "resource_id"
   | "workspace_id"
   | "collection_id"
   | "specification_id"
@@ -60,6 +64,17 @@ export type ExecutionCheckpointSafeFact = {
   sourceTool: string;
   connectorId?: string;
   observedAt: string;
+};
+
+/** Grounded source identity and related receipts. No workflow stage or completion authority. */
+export type ExecutionCheckpointResource = {
+  id: string;
+  name: string;
+  sourceUrl: string;
+  sourceTool: "browser.extract" | "browser.download";
+  artifactReferences: ExecutionCheckpointArtifactReference[];
+  destinationFacts: ExecutionCheckpointSafeFact[];
+  operationIds: string[];
 };
 
 export type ExecutionCheckpointOperationStatus =
@@ -124,6 +139,8 @@ export type ForegroundExecutionCheckpoint = {
   artifactReferences: ExecutionCheckpointArtifactReference[];
   /** Fixed-schema, reviewed facts only; never arbitrary key/value memory. */
   safeFacts: ExecutionCheckpointSafeFact[];
+  /** Optional for version-1 compatibility. Runtime-owned, bounded relational continuity. */
+  resources?: ExecutionCheckpointResource[];
   /** Crash-aware external operation journal keyed only by reviewed coordinates. */
   operations: ExecutionCheckpointOperation[];
   /** Safe recovery hint only; never an authenticated-state assertion. */
@@ -142,6 +159,7 @@ export type ExecutionCheckpointTransition =
   | "corrected"
   | "artifact_attached"
   | "facts_retained"
+  | "resources_retained"
   | "operation_planned"
   | "operation_dispatched"
   | "operation_settled"
@@ -188,6 +206,10 @@ export type ExecutionCheckpointArtifactController = ExecutionCheckpointReader & 
 };
 
 export type ExecutionCheckpointJournalController = ExecutionCheckpointArtifactController & {
+  retainResources(
+    expectedRevision: number,
+    resources: readonly ExecutionCheckpointResource[]
+  ): Promise<ForegroundExecutionCheckpoint | undefined>;
   retainFacts(
     expectedRevision: number,
     facts: readonly ExecutionCheckpointSafeFact[]

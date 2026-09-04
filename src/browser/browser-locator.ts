@@ -81,12 +81,24 @@ export function findBrowserLocator(snapshot: BrowserSnapshot, locator: BrowserLo
   const nearbyCandidates = exactCandidates.length === 0
     ? nearbyBrowserLocatorCandidates(available, normalized, snapshot.identity, tabRef)
     : [];
+  const roleAlternatives = exactCandidates.length === 0 && normalized.role !== undefined
+    ? available.filter((element) => element.role !== normalized.role &&
+        locatorMatches(element, { ...normalized, role: undefined }) &&
+        directlyNamesRequestedTarget(element, normalized))
+    : [];
   return {
     sessionId: snapshot.sessionId,
     identity: { ...snapshot.identity },
     tabRef,
     status: exactCandidates.length === 0 ? "not-found" : exactCandidates.length === 1 ? "found" : "ambiguous",
     candidates: exactCandidates,
+    ...(roleAlternatives.length !== 1 ? {} : {
+      alternative: {
+        reason: "role-mismatch" as const,
+        requestedRole: normalized.role!,
+        candidate: locatorCandidate(roleAlternatives[0]!, snapshot.identity, tabRef)
+      }
+    }),
     ...(nearbyCandidates.length === 0 ? {} : { nearbyCandidates })
   };
 }

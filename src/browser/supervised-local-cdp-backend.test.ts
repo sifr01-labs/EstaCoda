@@ -219,7 +219,9 @@ describe("supervised local CDP backend", () => {
         outcome: "download-completed",
         localPath: join(root, "guid-download"),
         suggestedFilename: "openapi.json",
-        sourceUrl: "https://developer.example.test/openapi.json"
+        sourceUrl: "https://developer.example.test/openapi.json",
+        // The fixture redirects: retain the observed source page, not the requested URL.
+        pageUrl: navigation.snapshot.url
       });
       expect(socket.sent).toEqual(expect.arrayContaining([
         expect.objectContaining({ method: "Input.dispatchMouseEvent", params: expect.objectContaining({ type: "mouseReleased" }) }),
@@ -750,6 +752,9 @@ describe("supervised local CDP backend", () => {
     });
 
     const navigation = await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+    const alternative = await backend.find?.({ sessionId: "session-1", locator: { role: "link", name: "Open" } });
+    expect(alternative).toMatchObject({ status: "not-found", alternative: { reason: "role-mismatch", candidate: { role: "button", name: "Open" } } });
+    expect(alternative).not.toHaveProperty("visualEscalation");
     await expect(backend.click?.({
       sessionId: "session-1",
       ref: "@e1",

@@ -309,7 +309,35 @@ describe("BrowserObservationGuard", () => {
   it("treats controlled new-tab and same-tab navigation as progress", () => {
     const guard = new BrowserObservationGuard(3);
     expect(guard.observe([action({ disposition: "new-tab" }, "new-tab-opened")])).toBeUndefined();
-    expect(guard.observe([action({ ref: "@e1" }, "same-tab-navigation")])).toBeUndefined();
+    const navigation = action({ ref: "@e1" }, "same-tab-navigation");
+    (navigation.result!.metadata!.snapshot as Record<string, unknown>).url = "https://example.com/product";
+    expect(guard.observe([navigation])).toBeUndefined();
+  });
+
+  it("does not reset no-progress on equivalent reloads with new document and element identities", () => {
+    const guard = new BrowserObservationGuard(3);
+    const reload = (revision: number, name = "Open app") => execution({
+      tool: "browser.navigate",
+      toolInput: { url: "https://example.com/apps" },
+      metadata: { snapshot: {
+        ...snapshot(revision, [{ ref: `@e${revision}`, role: "button", name }]),
+        identity: { documentEpoch: revision, actionRevision: revision, observationId: revision },
+        regions: [{ ref: `@r${revision}`, text: name, actionRefs: [`@e${revision}`], links: [] }],
+        actionDelta: { outcome: "same-tab-navigation", url: { changed: false, after: "https://example.com/apps" } }
+      } }
+    });
+    expect(guard.observe([reload(1)])).toBeUndefined();
+    expect(guard.observe([reload(2)])).toMatchObject({ shouldNudge: true, shouldStop: false, evidenceAdvanced: false });
+    expect(guard.observe([reload(3)])).toMatchObject({ shouldStop: true, evidenceAdvanced: false });
+    expect(guard.observe([reload(4, "Authenticated app expanded")])).toBeUndefined();
+    expect(guard.observe([reload(5, "Authenticated app expanded")])).toMatchObject({ shouldNudge: true, shouldStop: false });
+  });
+
+  it("keeps terminal destination memory after useful navigation", () => {
+    const guard = new BrowserObservationGuard(3);
+    expect(guard.observe([terminalNavigation("https://example.com/wrong", 404, 1)])).toMatchObject({ shouldStop: false });
+    expect(guard.observe([action({ ref: "@e2" }, "changed")])).toBeUndefined();
+    expect(guard.observe([terminalNavigation("https://example.com/wrong", 404, 99)])).toMatchObject({ shouldStop: true });
   });
 
   it("treats a completed download as progress and bounds repeated identical blocked downloads", () => {

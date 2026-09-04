@@ -9,6 +9,7 @@ import {
 } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
 import type { ExecutionCheckpointJournalController } from "../contracts/execution-checkpoint.js";
+import { checkpointResourcesFromResult } from "../runtime/execution-checkpoint-resources.js";
 import type { ToolApprovalHandler, ToolDefinition, ToolExecutionConcurrency, ToolExecutionContext, ToolExecutionEffect, ToolExecutionSettlement, ToolResult, ToolRiskClass, ToolSecurityResolution, ToolsetName } from "../contracts/tool.js";
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
@@ -38,7 +39,7 @@ import {
   checkpointSafeFactsFromResult,
   checkpointVerificationMatch
 } from "../runtime/execution-checkpoint-journal.js";
-import { executionCheckpointOperationId } from "../runtime/execution-checkpoint-controller.js";
+import { ExecutionCheckpointConflictError, executionCheckpointOperationId } from "../runtime/execution-checkpoint-controller.js";
 import { isTerminalCheckpointStatus } from "../session/execution-checkpoint-state.js";
 
 const MAX_STORED_TOOL_RESULT_CHARS = 12_000;
@@ -673,6 +674,20 @@ export class ToolExecutor {
         const latest = this.#activeCheckpoint();
         if (latest !== undefined) {
           await this.#executionCheckpointController?.retainFacts(latest.revision, facts).catch(() => undefined);
+        }
+      }
+      // Parallel connector results can advance the journal while this receipt is
+      // being retained. Rebase only the evidence; never redispatch the tool.
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const latest = this.#activeCheckpoint();
+        if (latest === undefined) break;
+        try {
+          await this.#executionCheckpointController?.retainResources(latest.revision, checkpointResourcesFromResult({
+            checkpoint: latest, tool, result, observedAt: new Date().toISOString(), operationId: durableOperationId
+          }));
+          break;
+        } catch (error) {
+          if (!(error instanceof ExecutionCheckpointConflictError)) break;
         }
       }
     }

@@ -28,12 +28,17 @@
   "playbook": [
     {
       "id": "discover-api-source",
-      "description": "Inspect the current visible API product or documentation region. When a grounded OpenAPI, Swagger, AsyncAPI, RAML, GraphQL, protobuf, Smithy, or equivalent export is available and comprehensive structure is needed, prefer browser.download over manually collecting endpoint pages. For a multi-product request, first retain the bounded product list and, when a Plan would help, use one item per product so partial completion remains explicit. This is a preference, not a forced action.",
+      "description": "Inspect the current visible API product or documentation region. For a multi-product request, use browser.extract on the grounded list region to retain names and exact hrefs together before leaving it. Names are display labels, never URL templates. Prefer complete bounded discovery first, but an unavailable item must not prevent safe progress on grounded items; report it separately. When a Plan would help, use one item per product. When comprehensive API structure is needed, prefer a grounded machine-readable export over collecting endpoint pages.",
       "toolsets": ["browser", "web"]
     },
     {
+      "id": "reconcile-destination",
+      "description": "Before creating destination resources, inspect the requested destination and its existing resources using configured read tools. Match source resources to existing destination identities; do not assume that setup means recreate. Choose create, update, verify, or skip per item based on the user-requested outcome and observed differences. Reuse existing structure where appropriate, and consult specifications only as needed. A missing or incomplete read is not proof that the destination is empty. Keep ambiguous matches explicit and clarify only when a consequential destination choice cannot be grounded.",
+      "toolsets": ["mcp"]
+    },
+    {
       "id": "import-description",
-      "description": "Use the governed download receipt and a destination connector's reviewed artifact argument to import the machine-readable description without copying its full content through model context. Prefer the destination's native spec-import or collection-generation operation. For multiple products, finish the download, destination import, and read-back verification for one product before downloading the next; do not accumulate unimported downloads. Reuse a retained complete receipt on retry, and download again only when the runtime reports that the artifact is stale, invalid, or unavailable. If no machine-readable description or reviewed import exists, extract only the documentation needed for the requested integration.",
+      "description": "Execute the reconciled action for one resource at a time and verify its effect before moving on. If an import or new resource is actually needed, use the governed download receipt and the destination connector's reviewed artifact argument without copying full content through model context; prefer native import/generation operations. Do not re-import merely to verify or correct an existing resource. Reuse retained complete receipts on retry; download again only when the artifact is stale, invalid, or unavailable. If no machine-readable description or reviewed import exists, extract only documentation needed for the requested integration. Preserve completed items and continue with unfinished ones after interruption.",
       "toolsets": ["browser", "mcp"]
     },
     {

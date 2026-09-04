@@ -1191,6 +1191,46 @@ describe("ToolExecutor input redaction", () => {
 });
 
 describe("ToolExecutor tool-call metadata persistence", () => {
+  it("retains grounded resource relationships from actual tool results before a runtime restart", async () => {
+    const sessionDb: SessionDB = new InMemorySessionDB();
+    await sessionDb.createSession({ profileId: "test", id: "test-session" });
+    const controller = await createCheckpointController(sessionDb);
+    const pageUrl = "https://catalog.example.com/exact-route-73#/v2";
+    const sha256 = "b".repeat(64);
+    const receipts: Array<[string, Record<string, unknown>]> = [
+      ["browser.extract", { links: [{ text: "Product B", href: pageUrl }, { text: "Product C", href: "https://catalog.example.com/other-90" }] }],
+      ["browser.download", { outcome: "download-completed", pageUrl, artifactId: "artifact-b", sha256 }],
+      ["mcp.catalog.import", { _estacoda_continuity_facts: [
+        { field: "artifactId", value: "artifact-b", kind: "identifier" },
+        { field: "artifactHash", value: sha256, kind: "identifier" },
+        { field: "resourceId", value: "destination-b", kind: "identifier" }
+      ] }]
+    ];
+    const tools: RegisteredTool[] = receipts.map(([name, metadata]) => ({
+      ...createEchoTool(name), riskClass: "read-only-network",
+      toolsets: name.startsWith("browser.") ? ["browser"] : ["mcp"],
+      ...(name.startsWith("mcp.") ? { connector: { kind: "mcp" as const, id: "catalog" } } : {}),
+      run: async () => ({ ok: true, content: "bounded receipt", metadata })
+    }));
+    const { executor } = await setupExecutor({ sessionDb, createSession: false, tools, executionCheckpointController: controller });
+    const retain = controller.retainResources.bind(controller);
+    vi.spyOn(controller, "retainResources").mockImplementationOnce(async (revision, rows) => {
+      // Another completed read wins the revision while a source receipt is being saved.
+      await controller.retainFacts(revision, [{ kind: "workspace_id", value: "concurrent-workspace",
+        sourceTool: "mcp.catalog.read", connectorId: "catalog", observedAt: new Date().toISOString() }]);
+      return await retain(revision, rows);
+    });
+    for (const tool of tools) {
+      const record = await executor.executeTool({ tool: tool.name, input: {}, trustedWorkspace: true, sessionId: "test-session" });
+      expect(record?.result?.ok).toBe(true);
+    }
+    const resumed = await createCheckpointController(sessionDb, { hydrate: true });
+    expect(resumed.current()!.safeFacts).toEqual(expect.arrayContaining([expect.objectContaining({ value: "concurrent-workspace" })]));
+    expect(resumed.current()!.resources).toMatchObject([
+      { name: "Product B", sourceUrl: pageUrl, artifactReferences: [{ id: "artifact-b", sha256 }], destinationFacts: [{ kind: "resource_id", value: "destination-b", connectorId: "catalog" }] },
+      { name: "Product C", artifactReferences: [], destinationFacts: [] }
+    ]);
+  });
   it("retains only reviewed safe facts across runtime recreation", async () => {
     const sessionDb: SessionDB = new InMemorySessionDB();
     await sessionDb.createSession({ profileId: "test", id: "test-session" });

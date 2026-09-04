@@ -77,6 +77,7 @@ export class BrowserObservationGuard {
   readonly #ineffectiveActionSignatures = new Set<string>();
   readonly #targetFailureSignatures = new Set<string>();
   readonly #terminalStrategySignatures = new Set<string>();
+  readonly #semanticPages = new Map<string, string>();
   #noProgressCount = 0;
   #retargetUsed = false;
 
@@ -93,7 +94,24 @@ export class BrowserObservationGuard {
     const terminalStrategies = browserExecutions.filter(isTerminalBrowserStrategyFailure);
     if (terminalStrategies.length > 0) return this.#observeTerminalStrategies(terminalStrategies);
 
-    const changedAction = browserExecutions.find(isStateChangingBrowserAction);
+    // Document revisions prove freshness, not useful progress. Compare the actual
+    // page before the successful-action fast paths can reset the loop budget.
+    const unchangedNavigations = new Set<ToolExecutionRecord>();
+    for (const execution of browserExecutions) {
+      const snapshot = asRecord(execution.result?.metadata?.snapshot);
+      if (execution.result?.ok !== true || snapshot === undefined) continue;
+      const key = stableSerialize([snapshot.sessionId, asRecord(snapshot.tab)?.ref]);
+      const evidence = fingerprint(stableBrowserSnapshot(snapshot));
+      if (isNavigationAction(execution) && this.#semanticPages.get(key) === evidence) {
+        unchangedNavigations.add(execution);
+      }
+      if (!this.#semanticPages.has(key) && this.#semanticPages.size >= 16) {
+        this.#semanticPages.delete(this.#semanticPages.keys().next().value!);
+      }
+      this.#semanticPages.set(key, evidence);
+    }
+    const changedAction = browserExecutions.find((execution) =>
+      !unchangedNavigations.has(execution) && isStateChangingBrowserAction(execution));
     if (changedAction !== undefined) {
       this.#resetAfterProgress();
       return undefined;
@@ -102,11 +120,12 @@ export class BrowserObservationGuard {
     const targetFailures = browserExecutions.filter(isTargetResolutionFailure);
     if (targetFailures.length > 0) return this.#observeTargetFailures(targetFailures);
 
-    const ineffectiveActions = browserExecutions.filter(isIneffectiveDispatchedAction);
+    const ineffectiveActions = browserExecutions.filter((execution) =>
+      unchangedNavigations.has(execution) || isIneffectiveDispatchedAction(execution));
     if (ineffectiveActions.length > 0) return this.#observeIneffectiveActions(ineffectiveActions);
 
     const successfulAction = browserExecutions.find((execution) =>
-      BROWSER_ACTION_TOOLS.has(execution.tool.name) && execution.result?.ok === true
+      !unchangedNavigations.has(execution) && BROWSER_ACTION_TOOLS.has(execution.tool.name) && execution.result?.ok === true
     );
     if (successfulAction !== undefined) {
       this.#resetAfterProgress();
@@ -189,7 +208,7 @@ export class BrowserObservationGuard {
       shouldRetarget: false,
       shouldStop,
       suppressedTools: [...this.#suppressedTools].sort(),
-      visualEscalationReason: shouldStop ? undefined : "native-action-no-change"
+      visualEscalationReason: shouldStop || executions.every(isNavigationAction) ? undefined : "native-action-no-change"
     });
   }
 
@@ -280,6 +299,11 @@ function isStateChangingBrowserAction(execution: ToolExecutionRecord): boolean {
   return outcome === undefined;
 }
 
+function isNavigationAction(execution: ToolExecutionRecord): boolean {
+  return execution.tool.name === "browser.navigate" || execution.tool.name === "browser.back" ||
+    browserActionOutcome(execution) === "same-tab-navigation";
+}
+
 function isIneffectiveDispatchedAction(execution: ToolExecutionRecord): boolean {
   if (!BROWSER_ACTION_TOOLS.has(execution.tool.name)) return false;
   if (execution.tool.name === "browser.download") {
@@ -363,7 +387,7 @@ function browserEvidenceFingerprint(execution: ToolExecutionRecord): string | un
       status: metadata.status,
       candidates: stableBrowserCandidates(metadata.candidates),
       nearbyCandidates: stableBrowserCandidates(metadata.nearbyCandidates),
-      state: stableBrowserIdentity(metadata.identity),
+      alternative: stableBrowserCandidates([asRecord(metadata.alternative)?.candidate]),
       tabRef: metadata.tabRef
     });
   }
@@ -394,30 +418,40 @@ function stableBrowserSnapshot(value: unknown): unknown {
     url: snapshot.url,
     title: snapshot.title,
     readiness: snapshot.readiness,
+    sensitiveInputActive: snapshot.sensitiveInputActive,
     tab: snapshot.tab,
-    identity: stableBrowserIdentity(snapshot.identity),
-    text: snapshot.text,
+    text: stableBrowserText(snapshot.text),
+    mainDocument: asRecord(snapshot.mainDocument)?.status,
     elements,
     regions: Array.isArray(snapshot.regions)
       ? snapshot.regions.map(stableBrowserRegion).sort((left, right) => stableSerialize(left).localeCompare(stableSerialize(right)))
       : undefined,
     pendingDialogs: snapshot.pendingDialogs,
-    frameTree: snapshot.frameTree
+    frameTree: Array.isArray(snapshot.frameTree)
+      ? snapshot.frameTree.map((frame) => ({ url: asRecord(frame)?.url, origin: asRecord(frame)?.origin }))
+      : undefined
   };
 }
 
 function stableBrowserRegion(value: unknown): unknown {
   const region = asRecord(value);
   if (region === undefined) return value;
-  const { ref: _ref, ...stable } = region;
-  return stable;
+  const { ref: _ref, actionRefs: _actionRefs, ...stable } = region;
+  return { ...stable, text: stableBrowserText(stable.text) };
 }
 
 function stableBrowserElement(value: unknown): unknown {
   const element = asRecord(value);
   if (element === undefined) return value;
   const { ref: _ref, ...stable } = element;
-  return stable;
+  return { ...stable, text: stableBrowserText(stable.text) };
+}
+
+function stableBrowserText(value: unknown): unknown {
+  // Only explicit clock timestamps are volatile; preserve business values and dates.
+  return typeof value === "string"
+    ? value.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b/gu, "[timestamp]")
+    : value;
 }
 
 function stableBrowserCandidates(value: unknown): unknown[] {
@@ -437,6 +471,11 @@ function stableBrowserIdentity(value: unknown): unknown {
 }
 
 function browserCallSignature(execution: ToolExecutionRecord): string {
+  if (isNavigationAction(execution)) {
+    const snapshot = asRecord(execution.result?.metadata?.snapshot);
+    return fingerprint({ kind: "navigation", session: snapshot?.sessionId, tab: asRecord(snapshot?.tab)?.ref,
+      url: snapshot?.url, evidence: stableBrowserSnapshot(snapshot) });
+  }
   if (execution.tool.name === "browser.download") {
     return fingerprint({
       kind: "browser-download",

@@ -6,6 +6,7 @@ import type {
   ExecutionCheckpointOperationRequirement,
   ExecutionCheckpointQualificationReason,
   ExecutionCheckpointSafeFact,
+  ExecutionCheckpointResource,
   ExecutionCheckpointStatus,
   ForegroundExecutionCheckpoint
 } from "../contracts/execution-checkpoint.js";
@@ -14,6 +15,8 @@ import {
   EXECUTION_CHECKPOINT_MAX_ARTIFACTS,
   EXECUTION_CHECKPOINT_MAX_CONNECTORS,
   EXECUTION_CHECKPOINT_MAX_FACTS,
+  EXECUTION_CHECKPOINT_MAX_RESOURCES,
+  EXECUTION_CHECKPOINT_MAX_RESOURCE_BYTES,
   EXECUTION_CHECKPOINT_MAX_LABELS,
   EXECUTION_CHECKPOINT_MAX_OBJECTIVE_CHARS,
   EXECUTION_CHECKPOINT_MAX_OPERATIONS,
@@ -28,6 +31,7 @@ import type {
 import type { IntentTaskClass } from "../contracts/intent.js";
 import type { SessionEvent } from "../contracts/session.js";
 import { redactString, redactValue } from "../utils/redaction.js";
+import { browserContinuityUrl } from "../browser/continuity-url.js";
 
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/u;
 const STATUSES = new Set<ExecutionCheckpointStatus>([
@@ -55,15 +59,16 @@ const CHECKPOINT_KEYS = new Set([
   "version", "id", "sessionId", "profileId", "originTurnId", "revision", "progressRevision",
   "originalObjective", "latestUserCorrection", "status", "qualificationReasons", "selectedSkillName", "taskClass",
   "intentLabels", "requiredOperations", "connectorIds", "completionFloor", "blocker",
-  "artifactReferences", "safeFacts", "operations", "authenticationRecoveryStage",
+  "artifactReferences", "safeFacts", "resources", "operations", "authenticationRecoveryStage",
   "lastTerminationCause", "lastProviderFailureClass", "createdAt", "updatedAt"
 ]);
 const TRANSITIONS = new Set<ExecutionCheckpointLifecycleEvent["transition"]>([
-  "created", "carried_forward", "corrected", "artifact_attached", "facts_retained", "operation_planned",
+  "created", "carried_forward", "corrected", "artifact_attached", "facts_retained", "resources_retained", "operation_planned",
   "operation_dispatched", "operation_settled", "operation_verified", "authentication_stage_updated",
   "attempt_settled", "blocked", "cancelled", "superseded"
 ]);
 const SAFE_FACT_KINDS = new Set<ExecutionCheckpointSafeFact["kind"]>([
+  "resource_id",
   "workspace_id", "collection_id", "specification_id", "product_name", "artifact_id", "artifact_hash"
 ]);
 const OPERATION_STATUSES = new Set<ExecutionCheckpointOperation["status"]>([
@@ -94,6 +99,7 @@ export function cloneExecutionCheckpoint(
     connectorIds: [...checkpoint.connectorIds],
     artifactReferences: checkpoint.artifactReferences.map((reference) => ({ ...reference })),
     safeFacts: checkpoint.safeFacts.map((fact) => ({ ...fact })),
+    ...(checkpoint.resources === undefined ? {} : { resources: structuredClone(checkpoint.resources) }),
     operations: checkpoint.operations.map((operation) => ({ ...operation })),
     ...(checkpoint.blocker === undefined ? {} : { blocker: { ...checkpoint.blocker } })
   };
@@ -147,6 +153,7 @@ export function hydratableExecutionCheckpoint(input: {
         (event.transition === "created" && (
           candidate.revision !== 1 || candidate.progressRevision !== 0 || candidate.status !== "active" ||
           candidate.artifactReferences.length !== 0 || candidate.safeFacts.length !== 0 || candidate.operations.length !== 0 ||
+          (candidate.resources?.length ?? 0) !== 0 ||
           candidate.authenticationRecoveryStage !== undefined
         )) ||
         isTerminalCheckpointStatus(candidate.status)
@@ -171,6 +178,7 @@ export function hydratableExecutionCheckpoint(input: {
       !isTerminalCheckpointStatus(current.status) ||
       event.transition !== "created" ||
       candidate.revision !== 1 ||
+      (candidate.resources?.length ?? 0) !== 0 ||
       candidate.status !== "active"
     ) continue;
     current = candidate;
@@ -229,6 +237,14 @@ function isCoherentTransition(
   if (Date.parse(candidate.updatedAt) < Date.parse(current.updatedAt)) return false;
   const correctionUnchanged = candidate.latestUserCorrection === current.latestUserCorrection;
   const progressDelta = candidate.progressRevision - current.progressRevision;
+  if (transition === "resources_retained") {
+    return candidate.status === current.status && correctionUnchanged && progressDelta === 1 &&
+      sameArtifactReferences(current.artifactReferences, candidate.artifactReferences) &&
+      sameSafeFacts(current.safeFacts, candidate.safeFacts) && sameOperations(current.operations, candidate.operations) &&
+      current.authenticationRecoveryStage === candidate.authenticationRecoveryStage &&
+      checkpointResourcesOnlyAdvance(current.resources ?? [], candidate.resources ?? []);
+  }
+  if (JSON.stringify(current.resources ?? []) !== JSON.stringify(candidate.resources ?? [])) return false;
   if (transition === "corrected") {
     return candidate.status === "active" && progressDelta === 0 &&
       candidate.latestUserCorrection !== undefined && !correctionUnchanged &&
@@ -398,6 +414,7 @@ export function validateExecutionCheckpoint(input: unknown): ForegroundExecution
     connectorIds: boundedTextArray(input.connectorIds, "connectorIds", EXECUTION_CHECKPOINT_MAX_CONNECTORS, 128),
     artifactReferences: artifactReferences(input.artifactReferences),
     safeFacts: safeFacts(input.safeFacts),
+    ...(input.resources === undefined ? {} : { resources: checkpointResources(input.resources) }),
     operations: operations(input.operations),
     ...(input.authenticationRecoveryStage === undefined
       ? {}
@@ -433,6 +450,11 @@ export function validateExecutionCheckpoint(input: unknown): ForegroundExecution
   }
   if (Buffer.byteLength(JSON.stringify(checkpoint), "utf8") > EXECUTION_CHECKPOINT_MAX_SERIALIZED_BYTES) {
     throw new ExecutionCheckpointValidationError("Checkpoint exceeds its serialized size limit.");
+  }
+  const { resources: resourceRows, ...baseState } = checkpoint;
+  if (Buffer.byteLength(JSON.stringify(baseState), "utf8") > EXECUTION_CHECKPOINT_MAX_SERIALIZED_BYTES - EXECUTION_CHECKPOINT_MAX_RESOURCE_BYTES ||
+    Buffer.byteLength(JSON.stringify(resourceRows ?? []), "utf8") > EXECUTION_CHECKPOINT_MAX_RESOURCE_BYTES) {
+    throw new ExecutionCheckpointValidationError("Checkpoint exceeds its independent state or resource size limit.");
   }
   return checkpoint;
 }
@@ -492,7 +514,7 @@ function sameArtifactReference(
   return right !== undefined && left.id === right.id && left.sha256 === right.sha256;
 }
 
-function safeFacts(input: unknown): ExecutionCheckpointSafeFact[] {
+function safeFacts(input: unknown, connectorScoped = false): ExecutionCheckpointSafeFact[] {
   if (input === undefined) return [];
   if (!Array.isArray(input) || input.length > EXECUTION_CHECKPOINT_MAX_FACTS) {
     throw new ExecutionCheckpointValidationError("safeFacts is not a bounded array.");
@@ -515,7 +537,7 @@ function safeFacts(input: unknown): ExecutionCheckpointSafeFact[] {
       observedAt: timestamp(value.observedAt, "safeFacts.observedAt")
     };
   });
-  if (new Set(facts.map((fact) => `${fact.kind}\0${fact.value}`)).size !== facts.length) {
+  if (new Set(facts.map((fact) => `${connectorScoped ? fact.connectorId ?? "" : ""}\0${fact.kind}\0${fact.value}`)).size !== facts.length) {
     throw new ExecutionCheckpointValidationError("safeFacts contains duplicates.");
   }
   return facts;
@@ -580,6 +602,56 @@ function safeFactsOnlyAdvance(
   return candidate.length > current.length && current.every((fact, index) =>
     sameSafeFacts([fact], candidate[index] === undefined ? [] : [candidate[index]])
   );
+}
+
+function checkpointResources(input: unknown): ExecutionCheckpointResource[] {
+  if (!Array.isArray(input) || input.length > EXECUTION_CHECKPOINT_MAX_RESOURCES) {
+    throw new ExecutionCheckpointValidationError("resources is not a bounded array.");
+  }
+  const entries = input.map((value): ExecutionCheckpointResource => {
+    if (!isRecord(value) || Object.keys(value).some((key) => ![
+      "id", "name", "sourceUrl", "sourceTool", "artifactReferences", "destinationFacts", "operationIds"
+    ].includes(key))) throw new ExecutionCheckpointValidationError("resources contains malformed state.");
+    const sourceUrl = browserContinuityUrl(value.sourceUrl);
+    if (sourceUrl === undefined || sourceUrl !== value.sourceUrl) {
+      throw new ExecutionCheckpointValidationError("resources contains an unsafe source locator.");
+    }
+    const artifacts = artifactReferences(value.artifactReferences);
+    const facts = safeFacts(value.destinationFacts, true);
+    if (artifacts.length > 4 || facts.length > 8 || facts.some((fact) =>
+      fact.connectorId === undefined || !["specification_id", "collection_id", "resource_id"].includes(fact.kind))) {
+      throw new ExecutionCheckpointValidationError("resources contains invalid related receipts.");
+    }
+    return {
+      id: token(value.id, "resources.id", 80),
+      name: safePersistedText(value.name, "resources.name", 160),
+      sourceUrl,
+      sourceTool: enumValue(value.sourceTool, new Set(["browser.extract", "browser.download"] as const), "resources.sourceTool"),
+      artifactReferences: artifacts,
+      destinationFacts: facts,
+      operationIds: boundedTextArray(value.operationIds, "resources.operationIds", 8, 80)
+    };
+  });
+  if (new Set(entries.map((entry) => entry.id)).size !== entries.length ||
+    new Set(entries.map((entry) => entry.sourceUrl)).size !== entries.length) {
+    throw new ExecutionCheckpointValidationError("resources contains duplicate identities.");
+  }
+  return entries;
+}
+
+/** Existing identity and evidence cannot be overwritten by a later result. */
+export function checkpointResourcesOnlyAdvance(
+  current: readonly ExecutionCheckpointResource[], candidate: readonly ExecutionCheckpointResource[]
+): boolean {
+  if (candidate.length < current.length || JSON.stringify(current) === JSON.stringify(candidate)) return false;
+  return current.every((before, index) => {
+    const after = candidate[index];
+    return after !== undefined && before.id === after.id && before.name === after.name &&
+      before.sourceUrl === after.sourceUrl && before.sourceTool === after.sourceTool &&
+      sameArtifactReferences(before.artifactReferences, after.artifactReferences.slice(0, before.artifactReferences.length)) &&
+      sameSafeFacts(before.destinationFacts, after.destinationFacts.slice(0, before.destinationFacts.length)) &&
+      before.operationIds.every((id, i) => after.operationIds[i] === id);
+  });
 }
 
 function sameOperations(

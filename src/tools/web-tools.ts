@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { browserContinuityUrl } from "../browser/continuity-url.js";
 import { chmod, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
@@ -2382,6 +2383,7 @@ function createBrowserDownloadTool(
           ...(artifact.metadata === undefined ? {} : { metadata: artifact.metadata })
         };
         const receipt = {
+          ...(browserContinuityUrl(capture.pageUrl) === undefined ? {} : { pageUrl: browserContinuityUrl(capture.pageUrl) }),
           artifactId: artifact.id,
           filename,
           mimeType: inspection.mimeType,
@@ -2691,6 +2693,13 @@ function renderDeltaElement(element: BrowserActionDeltaElement): string {
 function renderBrowserFindResult(result: BrowserFindResult): string {
   if (result.status === "not-found") {
     const heading = `No visible, enabled browser element matched exactly at ${renderBrowserIdentity(result.identity)} on tab ${result.tabRef}.`;
+    if (result.alternative !== undefined) {
+      return [
+        heading,
+        `Exact text matched one current ${result.alternative.candidate.role ?? "element"}, but the requested role was ${JSON.stringify(result.alternative.requestedRole)}. Use this alternative only if it is the intended control:`,
+        renderBrowserLocatorCandidate(result.alternative.candidate)
+      ].join("\n");
+    }
     const escalation = renderVisualEscalation(result.visualEscalation?.reason);
     if ((result.nearbyCandidates?.length ?? 0) === 0) return [heading, escalation].filter(Boolean).join("\n");
     return [

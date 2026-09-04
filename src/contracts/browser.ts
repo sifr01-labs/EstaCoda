@@ -119,6 +119,12 @@ export type BrowserFindResult = {
   candidates: BrowserLocatorCandidate[];
   /** Structurally grounded current-document candidates; never treated as exact matches. */
   nearbyCandidates?: BrowserLocatorCandidate[];
+  /** Exact label at a different role; advisory only, never an exact locator match. */
+  alternative?: {
+    reason: "role-mismatch";
+    requestedRole: string;
+    candidate: BrowserLocatorCandidate;
+  };
   visualEscalation?: {
     reason: "semantic-match-ambiguous" | "visible-text-without-grounded-action" | "grounded-target-not-found";
   };
@@ -370,6 +376,8 @@ export type BrowserDownloadCaptureResult = {
   localPath?: string;
   suggestedFilename?: string;
   sourceUrl?: string;
+  /** Grounded page owning the download control, not the potentially signed download URL. */
+  pageUrl?: string;
   sizeBytes?: number;
   reason?: string;
 };

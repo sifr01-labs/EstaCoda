@@ -14,6 +14,18 @@ description: "Browser backend, CDP integration, and structured browser tools."
 | `src/browser/cdp-supervisor.ts` | CDP page supervisor, AX snapshots, dialogs, console history, screenshots |
 | `src/tools/web-tools.ts` | Browser tool schemas, session-key derivation, snapshot rendering, and summarization |
 
+## Grounded resource continuity and recovery
+
+For a qualifying foreground checkpoint, successful `browser.extract` results retain a bounded set of exact source links and labels. The API integration playbook requests extraction of the source-list region before leaving it, followed by inspection of existing destination resources and a per-item create/update/verify/skip decision. This is guidance, not a new execution gate: incomplete discovery does not prevent safe progress on other items.
+
+The checkpoint relates a resource's source URL to completed download receipts and reviewed connector identifiers. The supervised browser supplies the page owning the download control separately from its download URL; only a bounded, non-secret page locator is retained. Signed download URLs and transient element references are not persisted in this ledger. Connector associations require a matching artifact ID plus hash, or an unambiguous already-retained destination identifier from the same connector. Names, shared workspace IDs, raw result text and model-authored arguments cannot establish a relationship. Bulk results without unambiguous per-resource identity remain unassociated. Configured continuity fields `resourceId`, `specificationId`/`specId`, and `collectionId` support destination identity; `resourceId` is the generic connector-independent option.
+
+Resource rows survive restart and checkpoint carry-forward after context compression and are projected into the protected execution working-state layer. Rows contain independent receipts, not a linear workflow stage or completion claim. The existing operation journal remains the authority for operation verification. Old version-1 checkpoints without rows still load. Limits are 16 resources, 4 artifacts, 8 destination facts and 8 operation references per row, plus an 8 KiB resource allowance separate from the original 16 KiB checkpoint-state allowance. Oversized or unsafe observations are not admitted; absence from this bounded ledger is not proof that a resource does not exist.
+
+Successful reloads no longer automatically reset no-progress tracking when the same tab has equivalent semantic page evidence. Document/action revisions, observation IDs and renumbered element/region references are excluded from that comparison. Changed page content, controls, authentication state or destinations can still count as progress. Previously terminal destination failures remain remembered. Browser lookup also returns an advisory `role-mismatch` alternative when one current actionable element exactly matches the requested label at another role; the mismatched locator is not authorized automatically, and the supervised backend does not immediately suggest vision for that case.
+
+Security note: this adds no tool, permission, native-dialog access, provider-specific branch or connector-specific execution authority. URLs are still checked against current navigation policy before use. Source labels remain untrusted data. Artifact ownership, protected transfer, approvals, profile isolation and read-back verification remain enforced by their existing paths. Backend support for source-page download provenance is currently implemented on the supervised CDP path; other backends without that evidence do not invent the association.
+
 ## Backends
 
 | Backend | Status | Evidence |

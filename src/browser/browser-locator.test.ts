@@ -16,6 +16,23 @@ function snapshot(elements: BrowserSnapshot["elements"], overrides: Partial<Brow
 }
 
 describe("semantic browser locators", () => {
+  it("offers a unique exact-text role alternative without authorizing the mismatched locator", () => {
+    const current = snapshot([{ ref: "@e1", role: "button", name: "Example application" }]);
+    const locator = { role: "link", text: "Example application" };
+    expect(findBrowserLocator(current, locator)).toMatchObject({
+      status: "not-found", candidates: [],
+      alternative: { reason: "role-mismatch", requestedRole: "link", candidate: { ref: "@e1", role: "button" } }
+    });
+    expect(() => resolveBrowserTarget(current, { locator })).toThrowError(expect.objectContaining({ reason: "browser-target-not-found" }));
+    expect(findBrowserLocator(snapshot([
+      { ref: "@e1", role: "button", name: "Example application" },
+      { ref: "@e2", role: "button", name: "Example application" }
+    ]), locator)).not.toHaveProperty("alternative");
+    expect(findBrowserLocator(current, { ...locator, withinText: "Other section" })).not.toHaveProperty("alternative");
+    expect(findBrowserLocator(snapshot([{ ref: "@e1", role: "button", name: "Example application", disabled: true }]), locator))
+      .not.toHaveProperty("alternative");
+    expect(findBrowserLocator(current, { role: "link", text: "Example" })).not.toHaveProperty("alternative");
+  });
   it("selects a card-scoped button", () => {
     const current = snapshot([
       { ref: "@e1", role: "button", name: "View product", withinText: "Loans V2 View product" },

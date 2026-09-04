@@ -14,6 +14,7 @@ import type {
 import { redactSensitiveText } from "../utils/redaction.js";
 
 const SAFE_FACT_FIELDS = new Map<string, ExecutionCheckpointSafeFactKind>([
+  ["resourceid", "resource_id"],
   ["workspaceid", "workspace_id"],
   ["collectionid", "collection_id"],
   ["specificationid", "specification_id"],

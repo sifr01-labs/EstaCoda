@@ -19,6 +19,15 @@ function route(prompt: string) {
 }
 
 describe("bundled api-integration skill routing", () => {
+  it("plans source discovery and destination reconciliation before import without an all-items gate", () => {
+    const steps = apiIntegrationSkill.playbook;
+    expect(steps.slice(0, 3).map((step) => step.id)).toEqual(["discover-api-source", "reconcile-destination", "import-description"]);
+    expect(steps[0]?.description).toContain("browser.extract");
+    expect(steps[0]?.description).toContain("exact hrefs");
+    expect(steps[0]?.description).toContain("must not prevent safe progress");
+    expect(steps[1]?.description).toContain("create, update, verify, or skip");
+    expect(steps[2]?.description).toContain("Do not re-import merely to verify");
+  });
   it.each([
     "Set up these products in our Postman collection.",
     "Add these APIs to my Postman workspace.",

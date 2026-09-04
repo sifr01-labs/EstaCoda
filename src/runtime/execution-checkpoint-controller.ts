@@ -9,6 +9,7 @@ import type {
   ExecutionCheckpointOperationCoordinates,
   ExecutionCheckpointOperationStatus,
   ExecutionCheckpointSafeFact,
+  ExecutionCheckpointResource,
   ExecutionCheckpointReader,
   ExecutionCheckpointTransition,
   ForegroundExecutionCheckpoint
@@ -20,6 +21,7 @@ import {
 } from "../contracts/execution-checkpoint.js";
 import {
   checkpointEvent,
+  checkpointResourcesOnlyAdvance,
   cloneExecutionCheckpoint,
   isTerminalCheckpointStatus,
   sanitizeCheckpointText,
@@ -191,6 +193,22 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
         revision: current.revision + 1,
         progressRevision: current.progressRevision + 1,
         safeFacts: [...current.safeFacts, ...additions.map((fact) => ({ ...fact }))],
+        updatedAt: this.#now()
+      };
+    });
+  }
+
+  async retainResources(
+    expectedRevision: number,
+    resources: readonly ExecutionCheckpointResource[]
+  ): Promise<ForegroundExecutionCheckpoint | undefined> {
+    return await this.#transition(expectedRevision, "resources_retained", (current) => {
+      if (!checkpointResourcesOnlyAdvance(current.resources ?? [], resources)) return current;
+      return {
+        ...current,
+        revision: current.revision + 1,
+        progressRevision: current.progressRevision + 1,
+        resources: structuredClone([...resources]),
         updatedAt: this.#now()
       };
     });

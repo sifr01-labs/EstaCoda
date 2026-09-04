@@ -19,6 +19,19 @@ afterEach(async () => {
 });
 
 describe("browser.download", () => {
+  it("omits credential-bearing source-page locators while retaining the safe download receipt", async () => {
+    const root = await temporaryRoot();
+    const backend = downloadBackend(async (input) => {
+      const localPath = join(input.destinationDirectory, "safe-description");
+      await writeFile(localPath, '{"openapi":"3.1.0","paths":{}}', { mode: 0o600 });
+      return { outcome: "download-completed", localPath, suggestedFilename: "description.json",
+        sourceUrl: "https://developer.example.test/export", pageUrl: "https://developer.example.test/callback?code=private-value" };
+    });
+    const result = await browserDownloadTool(backend, root, new ArtifactStore()).run(groundedInput());
+    expect(result.ok).toBe(true);
+    expect(result.metadata).not.toHaveProperty("pageUrl");
+    expect(JSON.stringify(result)).not.toContain("private-value");
+  });
   it("captures a grounded Swagger artifact into constrained storage with a metadata-only receipt", async () => {
     const root = await temporaryRoot();
     const artifactStore = new ArtifactStore({
@@ -37,6 +50,7 @@ describe("browser.download", () => {
         localPath,
         suggestedFilename: "../../openapi.json",
         sourceUrl: "https://developer.example.test/session/export",
+        pageUrl: "https://developer.example.test/products/original#/v2",
         sizeBytes: (await stat(localPath)).size
       };
     });
@@ -48,6 +62,7 @@ describe("browser.download", () => {
 
     expect(result.ok).toBe(true);
     expect(result.metadata).toEqual({
+      pageUrl: "https://developer.example.test/products/original#/v2",
       artifactId: "artifact-1",
       filename: "openapi.json",
       mimeType: "application/json",
