@@ -359,6 +359,7 @@ async function appendProviderToolHistory(db: InMemorySessionDB, sessionId: strin
 async function runBasicProviderTurn(
   loop: ProviderTurnLoop,
   callbacks: {
+    diagnosticOnly?: boolean;
     onEvent?: (event: RuntimeEvent) => void;
     onDelta?: (text: string) => void;
     onSegmentBreak?: (reason?: string) => void | Promise<void>;
@@ -377,6 +378,7 @@ async function runBasicProviderTurn(
   } = {}
 ): Promise<Awaited<ReturnType<ProviderTurnLoop["run"]>>> {
   return await loop.run({
+    diagnosticOnly: callbacks.diagnosticOnly,
     visibleTurnId: callbacks.visibleTurnId,
     userText: callbacks.userText ?? "current user request",
     routedText: callbacks.userText ?? "current user request",
@@ -6277,6 +6279,19 @@ describe("ProviderTurnLoop truncated tool-call safety", () => {
 });
 
 describe("ProviderTurnLoop explicit route propagation", () => {
+  it("answers connector diagnostics once without executing even unsolicited tool calls", async () => {
+    const registry = new ProviderRegistry();
+    registry.register(createMockAdapter());
+    const executor = new ProviderExecutor({ registry, allowUnenforcedAttributedSpend: true });
+    const complete = vi.spyOn(executor, "complete").mockResolvedValue(providerExecution("I will reconnect", [{
+      id: "unexpected", name: "terminal.run", argumentsText: '{"command":"echo forbidden"}'
+    }]));
+    const loop = await createProviderTurnLoopForTest({ providerExecutor: executor });
+    const result = await runBasicProviderTurn(loop, { diagnosticOnly: true, userText: "Why is the connector unavailable?" });
+    expect(complete).toHaveBeenCalledOnce();
+    expect(result.toolExecutions).toEqual([]);
+    expect(complete.mock.calls[0]?.[0].tools ?? []).toEqual([]);
+  });
   it("uses the per-turn memory prompt context when assembling provider prompts", async () => {
     const registry = new ProviderRegistry();
     registry.register(createMockAdapter());

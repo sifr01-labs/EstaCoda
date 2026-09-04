@@ -6,6 +6,7 @@ import type { RegisteredTool, RuntimeContinuityFact, ToolResult, ToolRiskClass }
 import { parseProtectedArgumentPattern } from "../security/protected-argument-path.js";
 import { redactObject, redactSensitiveText } from "../utils/redaction.js";
 import { MCPClient, type MCPFetchLike, type MCPPromptDescriptor, type MCPResourceDescriptor, type MCPToolDescriptor } from "./mcp-client.js";
+import { sanitizeMcpDiagnostic } from "./mcp-diagnostics.js";
 
 export type MCPServerSnapshot = {
   name: string;
@@ -141,7 +142,9 @@ export async function loadMcpServers(input: {
       loaded.push(unavailableServer(
         name,
         config,
-        error instanceof Error ? error.message : String(error),
+        sanitizeMcpDiagnostic(error instanceof Error ? error.message : String(error), [
+          ...Object.values(resolvedEnvironment.env ?? {}), ...Object.values(config.headers ?? {})
+        ]),
         {
           connected,
           failureStage: connected ? "schema-registration" : "connection"

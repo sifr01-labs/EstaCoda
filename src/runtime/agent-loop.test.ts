@@ -855,14 +855,14 @@ describe("AgentLoop execution checkpoints", () => {
       suggestedSkills: [apiSkill],
       primarySkill: apiSkill
     };
-    const assessCheckpointResume = vi.fn(async () => ({
+    const assessCheckpointResume = vi.fn<ExecutionCapabilityPreflight["assessCheckpointResume"]>(async () => ({
       status: "blocked" as const,
       issues: [
         { kind: "toolset_unavailable" as const, subject: "browser" },
         { kind: "connector_unavailable" as const, subject: "postman" }
       ]
     }));
-    const { loop, providerTurnLoop, nativeToolExecutor } = await createAgentLoop({
+    const { loop, providerTurnLoop, nativeToolExecutor, executionCheckpointController } = await createAgentLoop({
       canRunProvider: true,
       runSkillPlaybook: vi.fn(async () => []),
       providerExecution: failedProviderExecution(),
@@ -902,9 +902,29 @@ describe("AgentLoop execution checkpoints", () => {
     expect(response.text).toContain('required toolset "browser" is unavailable');
     expect(response.text).toContain('connector "postman" is disconnected or unavailable');
     expect(response.finalOutcome?.completionFloor).toBe("mutation_with_verification");
-    expect(providerTurnLoop.run).toHaveBeenCalledOnce();
+    expect(providerTurnLoop.run).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(providerTurnLoop.run).mock.calls[1]?.[0]).toMatchObject({ diagnosticOnly: true, providerTools: [], toolExpansionCandidates: [] });
     expect(nativeToolExecutor.executeDeterministicNativeTools).toHaveBeenCalledOnce();
     expect(assessCheckpointResume).toHaveBeenCalledOnce();
+    const saved = executionCheckpointController?.current();
+    for (const text of ["ok", "why?", "Explain why the connector is unavailable"]) {
+      await loop.handle({ text, channel: "cli", trustedWorkspace: true });
+      expect(executionCheckpointController?.current()).toMatchObject({
+        id: saved!.id, status: "blocked", originalObjective: saved!.originalObjective,
+        operations: saved!.operations, artifactReferences: saved!.artifactReferences
+      });
+    }
+    expect(nativeToolExecutor.executeDeterministicNativeTools).toHaveBeenCalledOnce();
+    // A fresh registry becoming ready must not turn a diagnostic question into execution.
+    assessCheckpointResume.mockResolvedValue({ status: "ready" });
+    const beforeQuestion = executionCheckpointController?.current();
+    await loop.handle({ text: "Explain why the connection failed", channel: "cli", trustedWorkspace: true });
+    expect(executionCheckpointController?.current()).toEqual(beforeQuestion);
+    expect(vi.mocked(providerTurnLoop.run).mock.lastCall?.[0]).toMatchObject({ diagnosticOnly: true });
+    expect(nativeToolExecutor.executeDeterministicNativeTools).toHaveBeenCalledOnce();
+    await loop.handle({ text: "continue", channel: "cli", trustedWorkspace: true });
+    expect(vi.mocked(providerTurnLoop.run).mock.lastCall?.[0]).not.toHaveProperty("diagnosticOnly");
+    expect(executionCheckpointController?.current()?.id).toBe(saved!.id);
   });
 
   it("closes a checkpoint only from a receipt-derived completed outcome", async () => {

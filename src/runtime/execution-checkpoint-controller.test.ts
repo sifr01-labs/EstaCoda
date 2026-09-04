@@ -304,6 +304,19 @@ describe("ExecutionCheckpointController", () => {
     expect(controller.current()?.revision).toBe(waiting?.revision);
   });
 
+  it("keeps connector recovery questions attached without superseding or correcting the saved task", async () => {
+    const controller = target();
+    const checkpoint = await controller.ensure(creation());
+    await controller.block(checkpoint.revision, { kind: "missing_capability", summary: "Connector unavailable" });
+    const saved = controller.current();
+    await expect(controller.prepareForTurn("ok")).resolves.toMatchObject({ disposition: "continuation" });
+    for (const text of ["why?", "Explain why the connector is unavailable", "How should we change the connection?", "لماذا؟", "اشرح لماذا الموصل غير متاح"]) {
+      await expect(controller.prepareForTurn(text)).resolves.toMatchObject({ disposition: "recovery" });
+      expect(controller.current()).toEqual(saved);
+    }
+    await expect(controller.prepareForTurn("Explain what a rain jacket is?")).resolves.toMatchObject({ disposition: "superseded" });
+  });
+
   it("does not allow a model-facing Plan update to mutate checkpoint state", async () => {
     const controller = target();
     const checkpoint = await controller.ensure(creation());

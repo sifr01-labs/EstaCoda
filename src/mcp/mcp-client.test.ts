@@ -45,6 +45,26 @@ async function withHomeEnv<T>(
 }
 
 describe("MCPClient stdio lifecycle", () => {
+  it("includes redacted server diagnostics on initialization timeout", async () => {
+    const client = new MCPClient({
+      name: "stalled", command: process.execPath,
+      args: ["-e", "process.stderr.write('startup problem '+process.env.TEST_SECRET);setInterval(()=>{},1000)"],
+      env: { TEST_SECRET: "opaque-test-credential" }, connectTimeoutMs: 500
+    });
+    try {
+      await expect(client.start()).rejects.toThrow("startup problem [REDACTED]");
+    } finally { await client.stop(); }
+  });
+  it("does not expose a credential fragment when stderr exceeds its buffer limit", async () => {
+    const client = new MCPClient({
+      name: "noisy", command: process.execPath,
+      args: ["-e", "process.stderr.write('x'.repeat(16380)+process.env.TEST_SECRET);setInterval(()=>{},1000)"],
+      env: { TEST_SECRET: "opaque-test-credential" }, connectTimeoutMs: 500
+    });
+    try {
+      await expect(client.start()).rejects.toThrow("stderr exceeded diagnostic limit");
+    } finally { await client.stop(); }
+  });
   it("allows cold stdio connector startup without widening normal request timeouts", () => {
     expect(__defaultMcpConnectTimeoutMsForTest("stdio", 10_000, "npx")).toBe(30_000);
     expect(__defaultMcpConnectTimeoutMsForTest("stdio", 45_000, "npx")).toBe(45_000);
@@ -99,6 +119,24 @@ describe("MCPClient stdio lifecycle", () => {
 });
 
 describe("npx cache lookup", () => {
+  it("resolves exact scoped pins without substituting another version or treating tags as paths", async () => {
+    const root = await mkdtemp(join(tmpdir(), "estacoda-mcp-pinned-cache-"));
+    try {
+      await withHomeEnv({ HOME: root }, async () => {
+        const cacheRoot = join(root, ".npm", "_npx", "cached");
+        const packageRoot = join(cacheRoot, "node_modules", "@example", "connector");
+        const binary = join(cacheRoot, "node_modules", ".bin", "connector");
+        await mkdir(packageRoot, { recursive: true });
+        await mkdir(join(cacheRoot, "node_modules", ".bin"), { recursive: true });
+        await writeFile(join(packageRoot, "package.json"), JSON.stringify({ name: "@example/connector", version: "2.11.2", bin: "dist/index.js" }));
+        await writeFile(binary, "");
+        await expect(__resolveNpxCachedBinaryForTest("@example/connector@2.11.2")).resolves.toBe(binary);
+        for (const spec of ["@example/connector@2.11.3", "@example/connector@latest", "@example/connector@^2", "../connector", "https://example.com/package.tgz"]) {
+          await expect(__resolveNpxCachedBinaryForTest(spec)).resolves.toBeUndefined();
+        }
+      });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
   it("uses OS home, not ESTACODA_HOME, for user cache lookup", async () => {
     const prodHome = await mkdtemp(join(tmpdir(), "estacoda-mcp-prod-home-"));
     const devHome = await mkdtemp(join(tmpdir(), "estacoda-mcp-dev-home-"));

@@ -266,6 +266,11 @@ export type AuthenticationEvidenceAssessmentEvent = {
 };
 
 export type SessionEvent =
+  | { kind: "mcp-connection-status"; connectors: Array<{
+      name: string; connected: boolean; available: boolean; schemasRegistered: boolean;
+      failureStage?: "configuration" | "connection" | "schema-registration" | "availability";
+      error?: string;
+    }> }
   | ExecutionPlanLifecycleEvent
   | ExecutionCheckpointLifecycleEvent
   | ProviderToolInventoryEvent

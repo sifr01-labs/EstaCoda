@@ -34,6 +34,16 @@ Normal MCP requests retain the 10-second default timeout. Package-runner-backed 
 
 Naming a configured but unavailable connector does not expose tools. It lets routing and governed-transfer preflight diagnose the connector outage together with all missing reviewed artifact, protected-input, result-redaction, and verification configuration. Reload or repair remains explicit.
 
+## Connection failures and recovery
+
+Runtime creation and `/reload-mcp` persist a bounded, redacted `mcp-connection-status` event with each connector's failure stage and error. Stdio exit and timeout errors include bounded server diagnostics with configured environment values redacted. Runtime summaries report degraded status when enabled connectors are unavailable.
+
+For `npx` connectors, an already-cached exact package version can be launched directly. Scoped package names and version pins are parsed separately and the cached package's name/version must match; ranges, tags, and URLs use the package runner rather than an arbitrary cached version. Subprocess HOME remains isolated and only explicitly configured credentials are forwarded.
+
+In an interactive CLI session, `/reload-mcp status` shows the current snapshot without starting a process. `/reload-mcp` makes one explicit refresh attempt through the existing session-preserving runtime refresh path. It reports failures rather than treating a configuration reload as a successful connection. It never replays destination writes; after successful discovery, ask to continue so the saved checkpoint is revalidated against the fresh registry.
+
+A connector-blocked checkpoint can answer follow-up questions in a tool-free recovery turn instead of repeating only a preflight refusal. The saved task remains blocked; diagnostic model output cannot execute tools, reconnect, change credentials, or mark the task complete. The first blocker and recovery replies offer the explicit reload action. Missing credentials/configuration still require secure profile setup, not secrets pasted into chat. There is no automatic retry loop or implicit authorization change. Recovery questions remain conversational even after reconnection; an explicit continuation resumes execution.
+
 ## Credentials
 
 - `env` supplies literal, non-secret values to stdio servers.

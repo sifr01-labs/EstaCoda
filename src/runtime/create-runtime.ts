@@ -40,6 +40,7 @@ import { createExternalMemoryProvidersFromConfig } from "../memory/external-memo
 import { MemoryPromotionStore } from "../memory/memory-promotion-store.js";
 import { normalizeExternalMemoryConfig, normalizeSessionCompressionConfig, type AgentProfileMode, type AgentResponseLanguage, type EstaCodaConfig, type LoadedRuntimeConfig, type MCPServerConfig, type UiFlavor, type UiLanguage } from "../config/runtime-config.js";
 import { loadMcpServers, type MCPServerSnapshot } from "../mcp/mcp-tools.js";
+import { mcpFailureDiagnostics, sanitizeMcpDiagnostic } from "../mcp/mcp-diagnostics.js";
 import { ProcessManager } from "../process/process-manager.js";
 import { createProtectedProcessEnvironmentTransport, createProtectedProcessStdinTransport } from "../process/protected-process-transports.js";
 import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolver.js";
@@ -785,6 +786,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     kind: "trajectory-linked",
     trajectoryId: trajectoryRecorder.snapshot().id
   });
+  await sessionDb.appendEvent(sessionId, {
+    kind: "mcp-connection-status",
+    connectors: loadedMcpServers.map(({ snapshot }) => ({
+      name: sanitizeMcpDiagnostic(snapshot.name),
+      connected: snapshot.connected,
+      available: snapshot.available,
+      schemasRegistered: snapshot.schemasRegistered,
+      ...(snapshot.failureStage === undefined ? {} : { failureStage: snapshot.failureStage }),
+      ...(snapshot.error === undefined ? {} : { error: sanitizeMcpDiagnostic(snapshot.error) })
+    }))
+  });
 
   const configuredSecurityMode = options.securityMode ?? "adaptive";
   let activeSecurityMode: SecurityApprovalMode = configuredSecurityMode;
@@ -1420,8 +1432,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     },
     describe() {
+      const failures = mcpFailureDiagnostics(loadedMcpServers.map((server) => server.snapshot));
       return [
-        `${runtimeBranding.responseLabel} is ready`,
+        `${runtimeBranding.responseLabel} is ready${failures.length === 0 ? "" : " with unavailable connectors"}`,
         `model: ${options.model.provider}/${options.model.id}`,
         `profile: ${options.profileId}`,
         `security: ${activeSecurityMode}${activeSecurityMode === "open" ? " (YOLO)" : ""}`,
@@ -1429,7 +1442,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         `tools: ${toolRegistry.list().length}`,
         `mcp: ${loadedMcpServers.filter((server) => server.snapshot.available).length}/${loadedMcpServers.filter((server) => server.snapshot.enabled).length}`,
         skillLoadWarnings.length === 0 ? undefined : `skill load warnings: ${skillLoadWarnings.length}`,
-        "status: ready"
+        ...failures,
+        failures.length === 0 ? "status: ready" : "status: degraded (connector recovery required)"
       ].filter((line) => line !== undefined).join("\n");
     },
     getStatus() {

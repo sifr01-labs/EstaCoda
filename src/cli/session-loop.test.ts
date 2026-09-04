@@ -449,6 +449,39 @@ function approvalAnswerKeypresses(answer: string): readonly string[] {
 }
 
 describe("runSessionLoop — user prompt rail behavior", () => {
+  it("shows MCP failure diagnostics without reconnecting when status is requested", async () => {
+    const chunks: string[] = [];
+    const refreshRuntime = vi.fn();
+    const runtime = createMockRuntime({ describe: () => "status: degraded\nexample: connection: initialize timed out" });
+    const result = await handleSlashCommand({
+      text: "/reload-mcp status", runtime, refreshRuntime,
+      output: { write: (chunk: string) => { chunks.push(chunk); return true; } } as NodeJS.WritableStream,
+      renderer: { render: renderPlain, capabilities: interactiveCaps() }
+    });
+    expect(result).toBe(false);
+    expect(refreshRuntime).not.toHaveBeenCalled();
+    expect(chunks.join("")).toContain("initialize timed out");
+  });
+
+  it.each([false, true])("makes one session-preserving MCP refresh and reports readiness: %s", async (available) => {
+    const refreshed = createMockRuntime({
+      describe: () => available ? "status: ready" : "status: degraded\nexample: connection: initialize timed out",
+      inspectMcpServers: () => [{ enabled: true, available }] as ReturnType<Runtime["inspectMcpServers"]>
+    });
+    const refreshRuntime = vi.fn(async () => refreshed);
+    const result = await handleSlashCommand({
+      text: "/reload-mcp", runtime: createMockRuntime(), refreshRuntime,
+      output: { write: () => true } as unknown as NodeJS.WritableStream,
+      renderer: { render: renderPlain, capabilities: interactiveCaps() }
+    });
+    expect(refreshRuntime).toHaveBeenCalledExactlyOnceWith({ preserveSession: true });
+    expect(typeof result).toBe("object");
+    if (typeof result === "object") {
+      const notice = result.notice(refreshed);
+      expect(notice).toContain(`MCP servers ready: ${available ? 1 : 0}/1`);
+      expect(notice).toContain(available ? "reload does not replay actions" : "initialize timed out");
+    }
+  });
   it("queues idle SIGINT as a session boundary", async () => {
     const enqueueSessionFinalization = vi.fn();
     let rejectPrompt: ((error: Error) => void) | undefined;

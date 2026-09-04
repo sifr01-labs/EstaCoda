@@ -45,7 +45,7 @@ export type ExecutionCheckpointControllerOptions = {
 };
 
 export type ExecutionCheckpointTurnPreparation = {
-  disposition: "none" | "continuation" | "correction" | "cancelled" | "superseded";
+  disposition: "none" | "continuation" | "recovery" | "correction" | "cancelled" | "superseded";
   checkpoint?: ForegroundExecutionCheckpoint;
 };
 
@@ -303,6 +303,10 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
       const checkpoint = await this.#close(current.revision, "cancelled", "cancelled");
       return { disposition: "cancelled", ...(checkpoint === undefined ? {} : { checkpoint }) };
     }
+    if (current.status === "blocked" && current.blocker?.kind === "missing_capability" &&
+      isConnectorRecoveryQuestion(userText, current.connectorIds)) {
+      return { disposition: "recovery", checkpoint: current };
+    }
     if (isCheckpointCorrection(userText, current)) {
       const checkpoint = await this.#transition(current.revision, "corrected", (checkpoint) => ({
         ...checkpoint,
@@ -463,6 +467,16 @@ function settlementBlocker(
 
 function isExplicitCheckpointCancellation(text: string): boolean {
   return /^(?:(?:stop|never\s*mind|nevermind|cancel|drop\s+it|cancel\s+that|forget\s+that)|(?:توقف|ألغ\s+ذلك|الغ\s+ذلك|دعك\s+من\s+ذلك))(?:[.!…]+)?$/iu.test(text.normalize("NFKC").trim());
+}
+
+function isConnectorRecoveryQuestion(text: string, connectorIds: readonly string[]): boolean {
+  const normalized = text.normalize("NFKC").toLocaleLowerCase("en-US").trim();
+  if (/^(?:why|what happened|what now|what should (?:i|we) do|لماذا|ماذا حدث)[?؟.!\s]*$/u.test(normalized)) return true;
+  const question = /^(?:why|what|how|explain|tell me|can you (?:explain|diagnose|check))\b/iu.test(normalized) ||
+    /^(?:لماذا|كيف|اشرح|ما سبب)(?:\s|$)/u.test(normalized);
+  return question && (/\b(?:connector|mcp|connect|connection|reconnect|unavailable|blocked|reload)\b/iu.test(normalized) ||
+    /(?:الموصل|الاتصال|غير متاح)/u.test(normalized) ||
+    connectorIds.some((id) => normalized.includes(id.toLocaleLowerCase("en-US"))));
 }
 
 function isExplicitCheckpointSupersession(text: string): boolean {

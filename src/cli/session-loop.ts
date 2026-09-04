@@ -1807,6 +1807,10 @@ export async function handleSlashCommand(input: {
       input.output.write(`${input.renderer.render(buildSkillsMenuViewModel(input.runtime, args.join(" ")))}\n\n`);
       return false;
     case "reload-mcp":
+      if (args[0] === "status") {
+        input.output.write(`${input.runtime.describe()}\n\n`);
+        return false;
+      }
       if (input.refreshRuntime === undefined) {
         input.output.write("This session cannot reload MCP configuration here.\n\n");
         return false;
@@ -1823,6 +1827,9 @@ export async function handleSlashCommand(input: {
             configured === 0
               ? "No MCP servers are configured."
               : `MCP servers ready: ${ready}/${configured}.`,
+            configured > ready
+              ? "Reconnection did not restore every connector. Review the errors below before retrying; your task remains saved."
+              : "Ask to continue your saved task when ready; reload does not replay actions.",
             "",
             runtime.describe()
           ].join("\n");

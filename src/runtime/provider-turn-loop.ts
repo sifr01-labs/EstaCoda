@@ -247,6 +247,8 @@ export class ProviderTurnLoop {
   }
 
   async run(input: {
+    /** Explain a blocked task without executing tools or supervising its checkpoint. */
+    diagnosticOnly?: boolean;
     visibleTurnId?: string;
     userText: string;
     routedText: string;
@@ -283,6 +285,26 @@ export class ProviderTurnLoop {
     try {
     this.#providerRequestSequence = 0;
     this.#toolPlanRunner.resetPerTurnBudgets?.();
+    if (input.diagnosticOnly === true) {
+      const execution = await this.#completeWithProvider({
+        ...input,
+        diagnosticOnly: true,
+        foregroundTurnId: runtimeForegroundTurnId(input.visibleTurnId, this.#sessionId, ++this.#foregroundTurnSequence),
+        providerToolCallNamespace: createProviderToolCallNamespace(),
+        providerTools: [],
+        toolExecutions: [],
+        toolPlans: [],
+        iteration: 0,
+        loopStartedAt: Date.now()
+      });
+      // Even a hallucinated tool call cannot reach the runner in diagnostic mode.
+      return {
+        providerExecution: execution,
+        toolExecutions: [],
+        iterations: execution === undefined ? 0 : providerIterationCost(execution),
+        terminationCause: input.signal?.aborted ? "cancelled" : execution?.ok ? "normal" : "provider_failed"
+      };
+    }
     const providerToolExecutions: ToolExecutionRecord[] = [];
     let effectiveProviderExecution: ProviderExecutionResult | undefined;
     let previousProviderExecution: ProviderExecutionResult | undefined;
@@ -1076,6 +1098,7 @@ export class ProviderTurnLoop {
   }
 
   async #completeWithProvider(input: {
+    diagnosticOnly?: boolean;
     foregroundTurnId: string;
     providerToolCallNamespace: string;
     visibleTurnId?: string;
@@ -1112,7 +1135,7 @@ export class ProviderTurnLoop {
     }
 
     const sessionHistory = await this.#providerSessionHistory();
-    const browserState = await this.#browserStateForPrompt({
+    const browserState = input.diagnosticOnly ? undefined : await this.#browserStateForPrompt({
       intent: input.intent,
       executions: input.toolExecutions,
       signal: input.signal
@@ -1136,8 +1159,8 @@ export class ProviderTurnLoop {
       attachments: input.attachments,
       ui: this.#ui,
       agentProfile: this.#agentProfile,
-      executionPlan: this.#executionPlanReader?.current(),
-      executionWorkingSet: this.#executionWorkingSet?.snapshot(
+      executionPlan: input.diagnosticOnly ? undefined : this.#executionPlanReader?.current(),
+      executionWorkingSet: input.diagnosticOnly ? undefined : this.#executionWorkingSet?.snapshot(
         input.foregroundTurnId,
         this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId
       ),

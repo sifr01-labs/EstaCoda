@@ -3610,6 +3610,13 @@ describe("createRuntime MCP trust gating", () => {
     const servers = runtime.inspectMcpServers();
     expect(servers.length).toBe(1);
     expect(servers[0].name).toBe("echo");
+    expect(runtime.describe()).toContain("status: degraded");
+    expect(runtime.describe()).not.toContain("status: ready");
+    expect(await runtime.sessionDb.listEvents(runtime.sessionId)).toContainEqual(expect.objectContaining({
+      kind: "mcp-connection-status",
+      connectors: [expect.objectContaining({ name: "echo", available: false, failureStage: "connection" })]
+    }));
+    await runtime.dispose();
   });
 });
 
