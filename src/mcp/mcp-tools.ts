@@ -314,6 +314,23 @@ function createMcpTool(
         continuityResultPaths,
         tool.name
       );
+      if (verificationTargets !== undefined) {
+        const unfinished = structuredMcpContinuityPayloads(result, []).some((payload) => hasUnfinishedVerificationState(payload));
+        normalized.metadata = {
+          ...normalized.metadata,
+          // A 200 response (including an empty list) is not proof of an effect.
+          // Use only the operator-reviewed, redacted result projection here.
+          _estacoda_verification_evidence: normalized.ok &&
+            !unfinished &&
+            (normalized.metadata?._estacoda_continuity_facts ?? []).some((fact) => fact.kind === "identifier")
+        };
+        if (normalized.ok && !normalized.metadata._estacoda_verification_evidence) {
+          const reason = unfinished ? "the result reports unfinished or unsuccessful state"
+            : (continuityResultPaths?.length ?? 0) === 0 ? "this verifier has no reviewed result-identifier mapping"
+            : "no reviewed resource identifier was returned";
+          normalized.content += `\n\nVerification remains pending: ${reason}. This does not block independent work. Inspect job status or the destination readback before repeating a mutation.`;
+        }
+      }
       if (relay.artifacts.length === 0) return normalized;
       const redacted = redactRelayedArtifactContent(normalized, relayedContents);
       const artifactContinuityFacts = relay.artifacts.flatMap(({ id, sha256 }) => [
@@ -1151,6 +1168,7 @@ export function normalizeMcpResult(
     content: _rawContent,
     _estacoda_context_summary: _untrustedContextSummary,
     _estacoda_continuity_facts: _untrustedContinuityFacts,
+    _estacoda_verification_evidence: _untrustedVerificationEvidence,
     ...boundedMetadata
   } = record;
 
@@ -1176,6 +1194,18 @@ export function normalizeMcpResult(
 
 const MAX_MCP_CONTINUITY_FACTS = 24;
 const MAX_MCP_CONTINUITY_SCALAR_CHARS = 160;
+
+function hasUnfinishedVerificationState(value: unknown, depth = 0): boolean {
+  if (depth > 6 || value === null || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.slice(0, 128).some((entry) => hasUnfinishedVerificationState(entry, depth + 1));
+  return Object.entries(value).slice(0, 128).some(([key, entry]) => {
+    const field = key.replace(/[_-]/gu, "").toLowerCase();
+    if (["status", "state"].includes(field) && typeof entry === "string" &&
+      /^(?:pending|queued|running|processing|in[ _-]?progress|accepted|failed|error|cancelled|canceled)$/iu.test(entry)) return true;
+    if (["partial", "incomplete", "truncated", "hasmore"].includes(field) && entry === true) return true;
+    return hasUnfinishedVerificationState(entry, depth + 1);
+  });
+}
 
 function mergeContinuityFacts(
   left: readonly RuntimeContinuityFact[] | undefined,
@@ -1366,7 +1396,7 @@ function continuityField(segments: readonly string[], toolName?: string): string
 function rootContinuityEntity(toolName: string | undefined, leaf: string): string | undefined {
   if (toolName === undefined || !/^(?:id|identifier|uid|uuid|name|label|title)$/u.test(leaf)) return undefined;
   const entity = toolName
-    .replace(/^(?:get|list|find|search|read|retrieve|fetch)/u, "")
+    .replace(/^(?:get|list|find|search|read|retrieve|fetch|create|import|update|put)/u, "")
     .replace(/[^A-Za-z0-9_-]+/gu, "")
     .replace(/^[_-]+|[_-]+$/gu, "");
   if (entity.length === 0 || entity.length > 80) return undefined;

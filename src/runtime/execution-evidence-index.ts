@@ -210,6 +210,7 @@ export class ExecutionEvidenceIndex {
     effect: Extract<ToolExecutionEffect, { kind: "verification" }>;
   }): { toolCallId: string; tool: string } | undefined {
     if (input.visibleTurnId === undefined) return undefined;
+    if (input.execution.result?.metadata?._estacoda_verification_evidence === false) return undefined;
     const verifierTargetKey = safeTargetKey(input.execution.targetKey);
     const candidates = [...this.#byCallId.values()].reverse();
     for (const candidate of candidates) {

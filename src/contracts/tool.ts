@@ -56,6 +56,8 @@ export type ToolResultMetadata = Record<string, unknown> & {
   _estacoda_context_summary?: string;
   /** Runtime-owned, reviewed scalar facts retained for foreground-turn continuity. */
   _estacoda_continuity_facts?: RuntimeContinuityFact[];
+  /** Set by the MCP adapter from reviewed result identifiers, never input IDs. */
+  _estacoda_verification_evidence?: boolean;
 };
 
 export type RuntimeContinuityFact = {

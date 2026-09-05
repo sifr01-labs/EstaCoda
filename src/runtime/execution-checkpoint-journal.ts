@@ -19,6 +19,8 @@ const SAFE_FACT_FIELDS = new Map<string, ExecutionCheckpointSafeFactKind>([
   ["collectionid", "collection_id"],
   ["specificationid", "specification_id"],
   ["specid", "specification_id"],
+  ["taskid", "task_id"],
+  ["jobid", "task_id"],
   ["productname", "product_name"],
   ["artifactid", "artifact_id"],
   ["artifactreference", "artifact_id"],
@@ -101,6 +103,7 @@ export function checkpointVerificationMatch(input: {
     ["dispatched", "settled", "uncertain"].includes(operation.status)
   );
   if (input.tool.operationJournal?.verify === undefined) {
+    if (input.result.metadata?._estacoda_verification_evidence === false) return undefined;
     return compatible.length === 1
       ? { operationId: compatible[0]!.id, outcome: "present" }
       : undefined;

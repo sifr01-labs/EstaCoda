@@ -34,6 +34,30 @@ async function setup() {
 }
 
 describe("grounded resource continuity", () => {
+  it("keeps a returned async task paired with its grounded source through checkpoint persistence", async () => {
+    const { controller, events, observe } = await setup();
+    await observe("browser.extract", { links });
+    await controller.attachArtifact(controller.current()!.revision, { id: "artifact-one", sha256 });
+    await observe("browser.download", { outcome: "download-completed", pageUrl: links[0]!.href, filename: "description.json", artifactId: "artifact-one", sha256 });
+    await observe("mcp.catalog.createSpec", { _estacoda_continuity_facts: [fact("artifactId", "artifact-one"), fact("artifactHash", sha256), fact("specId", "spec-one")] });
+    const checkpoint = controller.current()!;
+    const result = { ok: true, content: "accepted", metadata: { _estacoda_continuity_facts: [fact("taskId", "remote-task-one")] } } as ToolResult;
+    const resources = checkpointResourcesFromResult({ checkpoint, tool: tool("mcp.catalog.generate"), result,
+      observedAt: now, acceptedInput: { specId: "spec-one" } });
+    await controller.retainResources(checkpoint.revision, resources);
+    const hydrated = hydratableExecutionCheckpoint({ events, sessionId: "session-1", profileId: "profile-1" })!;
+    expect(hydrated.resources![0]!.destinationFacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "specification_id", value: "spec-one" }),
+      expect.objectContaining({ kind: "task_id", value: "remote-task-one" })
+    ]));
+    expect(hydrated.resources!.slice(1).every((resource) => resource.destinationFacts.length === 0)).toBe(true);
+    for (const [acceptedInput, connector] of [[{ specId: "unknown" }, "catalog"], [{ specId: "spec-one" }, "other"]] as const) {
+      expect(checkpointResourcesFromResult({ checkpoint, tool: tool("mcp.catalog.generate", connector), result, observedAt: now, acceptedInput }))
+        .toEqual(checkpoint.resources);
+    }
+    expect(checkpointResourcesFromResult({ checkpoint, tool: tool("mcp.catalog.generate"), result: { ...result, ok: false }, observedAt: now, acceptedInput: { specId: "spec-one" } }))
+      .toEqual(checkpoint.resources);
+  });
   it("retains six exact locators and their independent receipts through restart and compaction carry-forward", async () => {
     const { controller, events, observe } = await setup();
     await observe("browser.extract", { links });

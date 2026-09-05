@@ -1826,7 +1826,7 @@ describe("ToolExecutor tool-call metadata persistence", () => {
     });
   });
 
-  it("injects one declared protected argument immediately before dispatch and scrubs tool echoes", async () => {
+  it.each(["envelope", "plaintext"])("collects a declared protected argument from %s input and scrubs tool echoes", async (mode) => {
     const sentinel = "declared-tool-sentinel-secret";
     const observed: unknown[] = [];
     const tool: RegisteredTool = {
@@ -1843,7 +1843,7 @@ describe("ToolExecutor tool-call metadata persistence", () => {
       tool: tool.name,
       input: {
         auth: {
-          token: { protectedInput: { kind: "access-token", purpose: "Authenticate trusted API" } }
+          token: mode === "plaintext" ? "discarded-model-literal" : { protectedInput: { kind: "access-token", purpose: "Authenticate trusted API" } }
         }
       },
       trustedWorkspace: true,
@@ -1872,6 +1872,8 @@ describe("ToolExecutor tool-call metadata persistence", () => {
       metadata: { echoed: "[PROTECTED_INPUT]" }
     });
     expect(await persistedExecutionState(sessionDb, trajectoryRecorder)).not.toContain(sentinel);
+    expect(await persistedExecutionState(sessionDb, trajectoryRecorder)).not.toContain("discarded-model-literal");
+    expect(JSON.stringify(execution)).not.toContain("discarded-model-literal");
   });
 
   it("dispatches a protected argument from browser source metadata without invoking ordinary collection", async () => {

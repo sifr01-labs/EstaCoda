@@ -7,13 +7,15 @@ import { sanitizeCheckpointText, validateExecutionCheckpoint } from "../session/
 import { checkpointSafeFactsFromResult } from "./execution-checkpoint-journal.js";
 
 /** Relate only runtime-observed source locators and reviewed connector receipts.
- * No model arguments, name matching, current-tab guesses or generic result scraping. */
+ * No unexecuted arguments, name matching, current-tab guesses or generic result scraping. */
 export function checkpointResourcesFromResult(input: {
   checkpoint: ForegroundExecutionCheckpoint;
   tool: RegisteredTool;
   result: ToolResult;
   observedAt: string;
   operationId?: string;
+  /** Input of the successful connector call, used only to anchor returned task IDs. */
+  acceptedInput?: Record<string, unknown>;
 }): ExecutionCheckpointResource[] {
   const resources = structuredClone(input.checkpoint.resources ?? []);
   if (!input.result.ok) return resources;
@@ -48,7 +50,7 @@ export function checkpointResourcesFromResult(input: {
   }
   if (input.tool.connector === undefined) return resources;
   const facts = checkpointSafeFactsFromResult(input);
-  const destinations = facts.filter((fact) => ["specification_id", "collection_id", "resource_id"].includes(fact.kind));
+  const destinations = facts.filter((fact) => ["specification_id", "collection_id", "resource_id", "task_id"].includes(fact.kind));
   // Bulk results without per-item provenance must not be cross-wired into a row.
   if (destinations.some((fact) => destinations.filter((other) => other.kind === fact.kind).length > 1)) return resources;
   const artifactIds = facts.filter((fact) => fact.kind === "artifact_id");
@@ -62,6 +64,16 @@ export function checkpointResourcesFromResult(input: {
     const anchors = destinations.map((fact) => resources.filter((resource) => resource.destinationFacts.some((known) =>
       known.kind === fact.kind && known.value === fact.value && known.connectorId === fact.connectorId)))
       .filter((matches) => matches.length > 0);
+    // A returned task handle belongs to the exact, already-grounded destination
+    // used by this successful call. Never associate by a label or workspace.
+    if (destinations.some((fact) => fact.kind === "task_id")) {
+      for (const [field, kind] of Object.entries({ specId: "specification_id", specificationId: "specification_id", collectionId: "collection_id", resourceId: "resource_id" })) {
+        const value = input.acceptedInput?.[field];
+        if (typeof value !== "string") continue;
+        anchors.push(resources.filter((resource) => resource.destinationFacts.some((known) =>
+          known.kind === kind && known.value === value && known.connectorId === input.tool.connector!.id)));
+      }
+    }
     candidates = anchors.length === 0 ? [] : resources.filter((resource) => anchors.every((matches) => matches.includes(resource)));
   }
   if (candidates.length !== 1) return resources;

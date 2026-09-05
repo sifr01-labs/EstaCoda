@@ -22,6 +22,7 @@ import type {
   SecureInputTransferRequestHandler,
 } from "../contracts/secure-input.js";
 import { assessCommandSafety } from "../security/command-safety.js";
+import { protectPlaintextToolArguments } from "../security/plaintext-credential-guard.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { ToolRegistry } from "./tool-registry.js";
 import type { DelegateCallBudget } from "../delegation/delegate-call-budget.js";
@@ -212,6 +213,12 @@ export class ToolExecutor {
 
     if (tool === undefined || !(await tool.isAvailable())) {
       return undefined;
+    }
+
+    const protectedInput = protectPlaintextToolArguments(request.input, (tool.protectedArguments ?? []).map((entry) => entry.path));
+    if (protectedInput !== undefined) {
+      // Drop the native copy too: it can contain the same plaintext arguments.
+      request = { ...request, input: protectedInput, providerNativeToolCall: undefined };
     }
 
     const environmentType = request.environmentType ?? DEFAULT_ENVIRONMENT_TYPE;
@@ -683,7 +690,8 @@ export class ToolExecutor {
         if (latest === undefined) break;
         try {
           await this.#executionCheckpointController?.retainResources(latest.revision, checkpointResourcesFromResult({
-            checkpoint: latest, tool, result, observedAt: new Date().toISOString(), operationId: durableOperationId
+            checkpoint: latest, tool, result, observedAt: new Date().toISOString(), operationId: durableOperationId,
+            acceptedInput: request.input
           }));
           break;
         } catch (error) {

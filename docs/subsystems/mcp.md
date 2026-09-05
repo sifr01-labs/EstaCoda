@@ -111,7 +111,7 @@ Postman is configured through the same generic MCP entry as any other connector.
       "enabled": true,
       "transport": "stdio",
       "command": "npx",
-      "args": ["--yes", "@postman/postman-mcp-server@2.11.2"],
+      "args": ["--yes", "@postman/postman-mcp-server@2.11.2", "--full"],
       "envRefs": {
         "POSTMAN_API_KEY": "POSTMAN_API_KEY"
       },
@@ -130,6 +130,7 @@ Postman is configured through the same generic MCP entry as any other connector.
         "createSpec",
         "getSpec",
         "generateCollection",
+        "getAsyncSpecTaskStatus",
         "getSpecCollections"
       ],
       "toolRiskClasses": {
@@ -146,6 +147,7 @@ Postman is configured through the same generic MCP entry as any other connector.
         "createSpec": "external-side-effect",
         "getSpec": "read-only-network",
         "generateCollection": "external-side-effect",
+        "getAsyncSpecTaskStatus": "read-only-network",
         "getSpecCollections": "read-only-network"
       },
       "artifactToolArguments": {
@@ -180,9 +182,11 @@ Postman is configured through the same generic MCP entry as any other connector.
       },
       "continuityToolResultPaths": {
         "getWorkspaces": ["/workspaces/*/id", "/workspaces/*/name"],
-        "getCollection": ["/collection/id", "/collection/name"],
+        "getCollection": ["/collection/id", "/collection/name", "/collection/info/_postman_id", "/collection/info/name"],
         "getEnvironment": ["/environment/id", "/environment/name"],
         "getSpec": ["/id"],
+        "createSpec": ["/id", "/name"],
+        "generateCollection": ["/taskId"],
         "getSpecCollections": ["/collections/*/id", "/collections/*/name"]
       },
       "toolVerificationRelationships": {
@@ -198,7 +202,9 @@ Postman is configured through the same generic MCP entry as any other connector.
 
 Store the Postman API key only in the selected profile's `.env`; the committed or reviewed config contains the environment-variable reference only. Use a dedicated Postman environment and create its related variables in one `createEnvironment` call. Each variable should use `type: "secret"`, and all two to eight protected values in that call are authorized as one group and dispatched once only after every source remains valid. A collection should contain references such as `{{service_client_id}}` and `{{service_client_secret}}`, never copied credential values.
 
-When the source portal exposes OpenAPI or Swagger, capture it with `browser.download` and pass its receipt to `createSpec.files[*].content` through the artifact envelope. EstaCoda injects the validated text directly; do not paste the specification into a model-authored argument. Then use `generateCollection` and verify with `getSpec`, `getSpecCollections`, and `getCollection`. This is a generic artifact-to-MCP relay configured for Postman's inspected schema, not a Postman runtime branch.
+When the source portal exposes OpenAPI or Swagger, capture it with `browser.download` and pass its receipt to `createSpec.files[*].content` through the artifact envelope. EstaCoda injects the validated text directly; do not paste the specification into a model-authored argument. Verify the specification with `getSpec`. `generateCollection` accepts an asynchronous job: retain its task ID and poll `getAsyncSpecTaskStatus` with `elementType: "specs"`, the original spec ID as `elementId`, and the returned `taskId`. Read the task's actual status before retrying generation; an empty collection list does not diagnose a queue failure. After completion, verify with `getSpecCollections` and `getCollection`. This is a generic artifact-to-MCP relay configured for Postman's inspected schema, not a Postman runtime branch.
+
+The start and status tools form a complete task-relevant toolbox. Postman's `--full` flag is needed to advertise the async status tool; EstaCoda still exposes only the 15 tools in this recipe's `includeTools`, not the full upstream catalog. Existing profiles must apply the updated recipe (including launch arguments, `includeTools`, risk classes, and continuity paths) through MCP setup and reload their live session; documentation changes do not mutate local profiles. Do not automatically override explicit tool exclusions.
 
 Read back the environment with `getEnvironment` and the collection with `getCollection`. The output rule removes every environment variable value while preserving the environment name, variable keys, enabled state, and type for verification. `putEnvironment` replaces environment state; read the existing dedicated environment first and preserve all intended fields rather than using it as a partial patch.
 
@@ -209,6 +215,12 @@ At execution time, the runtime copies only the validated connector and verificat
 The reviewed configuration tool accepts these structured fields directly. The CLI accepts `--protected-tool-arguments-json`, `--artifact-tool-arguments-json`, `--redacted-tool-result-paths-json`, and `--tool-verification-relationships-json`. `mcp status` reports only yes/no capability summaries; it never prints reviewed paths, artifact contents, or credential values.
 
 ## Read Reuse
+
+Reviewed verification calls require a non-secret identifier from `continuityToolResultPaths` in the redacted **result**, not just a successful response or an input identifier. Empty or inconclusive reads leave the mutation pending; they do not stop independent work or grant permission to repeat creation. Readback of an environment proves resource presence, not functioning authentication. Connectors without reviewed result identifiers remain callable, but do not produce automatic verification evidence.
+
+Task/job status tools and pending structured results are read live, as are verification reads without positive evidence. They do not reuse unchanged-read receipts. This prevents an earlier pending/empty response from hiding externally completed work. Ordinary stable reads retain their existing reuse behavior.
+
+The working set merges bounded historical checkpoint identifiers on every provider iteration, separately from its 24 live facts. Successful reviewed remote task/job IDs can enter the checkpoint as `task_id` facts. When the successful call targets an exact specification, collection, or resource ID already associated with one grounded source row on that connector, the returned task ID is retained in that row too. Failed, ungrounded, ambiguous, or cross-connector calls do not create that relationship. Historical locators survive live-fact invalidation and eviction but are not claims of current existence; terminal checkpoints are no longer projected.
 
 - Successful, complete read-only MCP results are reusable only within the current provider turn, selected profile, and Session.
 - The key combines the tool name, normalized input hash, and current target revision. Raw inputs and raw results are not stored in the read ledger.

@@ -4,6 +4,8 @@ EstaCoda is agent infrastructure with local file access, terminal execution, bro
 
 This document defines how to report vulnerabilities, the trust model EstaCoda claims, which boundaries are security-relevant, and how dependency alerts are triaged.
 
+Explicit credential submissions, including labelled values and introduced terminal paste blocks, are intercepted before agent-loop persistence and provider dispatch. This is bounded format recognition, not a guarantee of detecting every arbitrary secret. At reviewed protected tool destinations, clearly secret literals are discarded and recollected through the existing protected-input flow; ordinary variables, empty values, and references remain usable. This does not remove credentials already present in historical sessions.
+
 ---
 
 ## Supported Versions

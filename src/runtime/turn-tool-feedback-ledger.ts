@@ -103,7 +103,7 @@ export class TurnMcpReadLedger implements ToolReadLedger {
     toolCallId?: string;
   }): ToolResult | undefined {
     this.#adoptScope(input.scope);
-    if (!isMcpReadTool(input.tool)) return undefined;
+    if (!isMcpReadTool(input.tool) || isTaskStatusRead(input.tool)) return undefined;
     const key = this.#key(input.tool.name, input.input);
     const receipt = this.#receipts.get(key);
     if (receipt === undefined) return undefined;
@@ -137,7 +137,7 @@ export class TurnMcpReadLedger implements ToolReadLedger {
       this.#receipts.clear();
       return;
     }
-    if (!isAuthoritativeRead(execution.result) || isReusedMcpRead(execution)) return;
+    if (isTaskStatusRead(execution.tool) || !isAuthoritativeRead(execution.result) || isReusedMcpRead(execution)) return;
     this.#receipts.set(this.#key(execution.tool.name, execution.input ?? {}), {
       revision: this.#revision,
       sourceToolCallId: execution.toolCallId,
@@ -167,6 +167,7 @@ function isMcpReadTool(tool: ToolDefinition): boolean {
 
 function isAuthoritativeRead(result: ToolResult | undefined): result is ToolResult {
   if (result?.ok !== true) return false;
+  if (result.metadata?._estacoda_verification_evidence === false) return false;
   if (containsPartialResultMarker(result.metadata, 0, new Set())) return false;
   const rawContent = result.content.includes("\nFull MCP response:\n")
     ? result.content.split("\nFull MCP response:\n", 2)[1]
@@ -178,6 +179,12 @@ function isAuthoritativeRead(result: ToolResult | undefined): result is ToolResu
   }
 }
 
+function isTaskStatusRead(tool: ToolDefinition): boolean {
+  // Status polling observes externally changing state; it is never an
+  // unchanged-read shortcut, even when the previous response was complete.
+  return /(?:task|job).*status|status.*(?:task|job)/iu.test(tool.name);
+}
+
 function containsPartialResultMarker(value: unknown, depth: number, seen: Set<object>): boolean {
   if (depth > 6 || typeof value !== "object" || value === null) return false;
   if (seen.has(value)) return false;
@@ -187,6 +194,8 @@ function containsPartialResultMarker(value: unknown, depth: number, seen: Set<ob
   }
   for (const [key, entry] of Object.entries(value)) {
     const normalized = key.replace(/[_-]/gu, "").toLowerCase();
+    if (["status", "state"].includes(normalized) && typeof entry === "string" &&
+      /^(?:pending|queued|running|processing|in[ _-]?progress|accepted)$/iu.test(entry)) return true;
     if (["partial", "ispartial", "incomplete", "truncated", "hasmore"].includes(normalized) && entry === true) {
       return true;
     }

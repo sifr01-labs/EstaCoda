@@ -43,7 +43,7 @@
     },
     {
       "id": "configure-protected-values",
-      "description": "Transfer credentials separately through the protected-input path. Never place credential values inside API descriptions, collections, ordinary MCP arguments, or model-authored text.",
+      "description": "Transfer credentials separately through the protected-input path. Never place credential values inside API descriptions, collections, ordinary MCP arguments, or model-authored text. If credential labels or their authentication roles are unclear, clarify the labels together; never split, concatenate, or assign roles based on value length. Use the configured protected argument envelopes to collect values, not ordinary chat.",
       "toolsets": ["browser", "mcp"]
     },
     {
@@ -132,3 +132,5 @@ Keep the two data paths separate:
 For a multi-product transfer, keep progress monotonic: retain the discovered product list, then download, import, and verify one product before starting the next. A complete governed receipt already contains the reference, filename, hash, and source origin needed for relay; reuse it unless the runtime rejects it. If work stops partway through, report the verified products and resume from the first unfinished product rather than repeating completed discovery or downloads.
 
 After import or generation, use the destination connector's read tools to verify the resulting API resource, collection, environment, or equivalent state. Reuse fresh action receipts and confirmed reads instead of taking redundant snapshots or repeating unchanged connector queries.
+
+An accepted asynchronous operation is not a completed resource. Retain its job/task ID together with the source resource ID and use the connector's status tool with a reasonable polling interval before retrying creation. Report pending, failed, and completed separately; an empty list proves neither job failure nor queue failure. If status inspection is unavailable, name that missing capability and continue independent items without claiming a cause. After completion, read back the actual destination resource. Historical checkpoint identifiers remain useful locators, not proof that a resource still exists or is correctly configured.

@@ -1,4 +1,5 @@
 import { redactSensitiveText } from "../utils/redaction.js";
+import { parseProtectedArgumentPattern } from "./protected-argument-path.js";
 
 export type PlaintextCredentialKind =
   | "api-key"
@@ -40,8 +41,23 @@ export function inspectPlaintextCredentials(input: string): PlaintextCredentialI
     collectKindsFromText(input, kinds);
   }
 
-  const originalLines = input.split(/\r?\n/u);
-  const redactedLines = baseline.split(/\r?\n/u);
+  const originalLines = input.split(/\r\n|[\r\n]/u);
+  const redactedLines = baseline.split(/\r\n|[\r\n]/u);
+  // Terminal paste blocks may contain CR-only line endings and no per-value
+  // labels. Require an explicit submission cue, not merely credential prose.
+  const submission = originalLines.findIndex((line) =>
+    /\b(?:here (?:are|is)|these are|this is) (?:the |my |our )?(?:(?:api|client|consumer) )?(?:key|secret|token|password|credentials?)\b/iu.test(line)
+  );
+  if (submission >= 0) {
+    for (let index = submission + 1; index < originalLines.length; index += 1) {
+      const line = originalLines[index]!.trim();
+      if (line === "" || /^\[Pasted text(?:\s+\d+)?\]$/iu.test(line) || /^```\w*$/u.test(line)) continue;
+      if (!looksLikeSubmittedValue(line)) break;
+      detected = true;
+      kinds.add("generic-secret");
+      redactedLines[index] = "[REDACTED]";
+    }
+  }
   for (let index = 0; index < originalLines.length; index += 1) {
     const originalLine = originalLines[index] ?? "";
     const inline = INLINE_LABEL_PATTERN.exec(originalLine);
@@ -97,6 +113,53 @@ export function interceptPlaintextCredentialInput(input: string): PlaintextCrede
   };
 }
 
+/** Recollect clearly secret literals at reviewed destinations, without guessing
+ * their meaning or passing the model's value to the secure-input callback.
+ * Ordinary variables and references remain valid string arguments. */
+export function protectPlaintextToolArguments(
+  input: Record<string, unknown>,
+  declaredPaths: readonly string[]
+): Record<string, unknown> | undefined {
+  if (declaredPaths.length === 0) return undefined;
+  const replacements: Array<{ segments: string[]; envelope: Record<string, unknown> }> = [];
+  const visit = (value: unknown, pattern: readonly string[], segments: string[], parent?: Record<string, unknown>): void => {
+    if (pattern.length === 0 && typeof value === "string") {
+      const field = segments.at(-1) ?? "";
+      const label = [field, parent?.key, parent?.name].filter((entry) => typeof entry === "string").join(" ")
+        .replace(/([a-z])([A-Z])/gu, "$1 $2");
+      const secret = parent?.type === "secret" ||
+        /(?:^|[\s_-])(?:key|secret|token|password|passwd|passcode|credential)(?:$|[\s_-])/iu.test(label);
+      if (!secret || value.trim() === "" || PLACEHOLDER_PATTERN.test(value.trim()) || /^\{\{[^{}]+\}\}$/u.test(value.trim())) return;
+      const name = [parent?.key, parent?.name, field].find((entry) =>
+        typeof entry === "string" && /^[A-Za-z_][A-Za-z0-9_-]{0,79}$/u.test(entry)
+      );
+      replacements.push({ segments, envelope: { protectedInput: { kind: "generic-secret", purpose: `Provide the protected value for ${name ?? "this destination"}. Confirm its meaning; do not infer it from pasted text.` } } });
+      return;
+    }
+    if (pattern.length === 0 || value === null || typeof value !== "object") return;
+    const [next, ...rest] = pattern;
+    if (Array.isArray(value)) {
+      if (next === "*") value.forEach((entry, index) => visit(entry, rest, [...segments, String(index)]));
+      return;
+    }
+    const record = value as Record<string, unknown>;
+    if (next !== "*" && Object.hasOwn(record, next!)) visit(record[next!], rest, [...segments, next!], record);
+  };
+  // Walk only reviewed destinations, not arbitrary tool payloads or artifacts.
+  for (const path of declaredPaths) {
+    const pattern = parseProtectedArgumentPattern(path);
+    if (pattern !== undefined) visit(input, pattern, []);
+  }
+  if (replacements.length === 0) return undefined;
+  const projected = structuredClone(input);
+  for (const { segments, envelope } of replacements) {
+    let parent = projected;
+    for (const segment of segments.slice(0, -1)) parent = parent[segment] as Record<string, unknown>;
+    parent[segments.at(-1)!] = envelope;
+  }
+  return projected;
+}
+
 function collectKindsFromText(text: string, kinds: Set<PlaintextCredentialKind>): void {
   const labels = text.match(new RegExp(CREDENTIAL_LABEL, "giu")) ?? [];
   for (const label of labels) kinds.add(kindForLabel(label));
@@ -138,7 +201,7 @@ function looksLikeSubmittedValue(value: string): boolean {
 }
 
 function containsOnlyPlaceholderAssignments(input: string): boolean {
-  const lines = input.split(/\r?\n/u).filter((line) => line.trim().length > 0);
+  const lines = input.split(/\r\n|[\r\n]/u).filter((line) => line.trim().length > 0);
   if (lines.length === 0) return false;
   return lines.every((line) => {
     const assignment = INLINE_LABEL_PATTERN.exec(line);

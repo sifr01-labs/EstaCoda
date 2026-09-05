@@ -750,7 +750,7 @@ describe("AgentLoop execution checkpoints", () => {
     const apiKey = "fake-consumer-key-123456789";
     const clientSecret = "fake-consumer-secret-987654321";
     await loop.handle({
-      text: `key\n${apiKey}\nand secret\n${clientSecret}`,
+      text: `okay here are the key and secret - you can also retry any blocker\n[Pasted text 1]\n${apiKey}\r${clientSecret}`,
       channel: "cli",
       trustedWorkspace: true
     });
@@ -764,7 +764,7 @@ describe("AgentLoop execution checkpoints", () => {
     expect(JSON.stringify(await sessionDb.listMessages(sessionId))).not.toContain(clientSecret);
     expect(await sessionDb.listEvents(sessionId)).toContainEqual({
       kind: "plaintext-credential-intercepted",
-      credentialKinds: ["api-key", "generic-secret"],
+      credentialKinds: ["generic-secret"],
       disposition: "withheld-before-persistence"
     });
 

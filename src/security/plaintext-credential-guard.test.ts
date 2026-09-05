@@ -1,10 +1,53 @@
 import { describe, expect, it } from "vitest";
 import {
   inspectPlaintextCredentials,
-  interceptPlaintextCredentialInput
+  interceptPlaintextCredentialInput,
+  protectPlaintextToolArguments
 } from "./plaintext-credential-guard.js";
 
 describe("plaintext credential guard", () => {
+  it.each(["\r", "\n", "\r\n"])("intercepts explicitly introduced terminal paste blocks with %j separators", (separator) => {
+    const values = ["A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6", "Q7r8S9t0U1v2W3x4"];
+    const text = `okay here are the key and secret - you can also retry any blocker\n[Pasted text 1]\n${values.join(separator)}`;
+    const inspected = inspectPlaintextCredentials(text);
+    expect(inspected.detected).toBe(true);
+    for (const value of values) expect(inspected.redactedText).not.toContain(value);
+    expect(interceptPlaintextCredentialInput(text)?.projectedText).toContain("protected-input");
+  });
+
+  it("leaves ordinary identifiers, credential discussions, and example placeholders alone", () => {
+    for (const text of [
+      "Explain the key and secret fields\ncollection-12345678",
+      "Here are the workspace IDs\nworkspace-12345678",
+      "Here are the credentials\nYOUR_API_KEY\nYOUR_API_SECRET",
+      "Use this reference\nA1b2C3d4E5f6G7h8I9j0"
+    ]) expect(inspectPlaintextCredentials(text).detected).toBe(false);
+  });
+
+  it("recollects only secret literals at declared destinations, preserving non-secret variables", () => {
+    const input = { environment: { values: [
+      { key: "subscription_key", value: "opaque-literal" },
+      { key: "opaque", type: "secret", value: "another-literal" },
+      { key: "base_url", value: "https://example.test" },
+      { key: "client_secret", value: "{{secret_reference}}" },
+      { key: "client_secret", value: "" }
+    ] } };
+    expect(protectPlaintextToolArguments(input, [])).toBeUndefined();
+    const projected = protectPlaintextToolArguments(input, ["/environment/values/*/value"]);
+    expect(JSON.stringify(projected)).not.toContain("opaque-literal");
+    expect(JSON.stringify(projected)).not.toContain("another-literal");
+    expect(projected).toMatchObject({ environment: { values: [
+      { value: { protectedInput: { kind: "generic-secret" } } },
+      { value: { protectedInput: { kind: "generic-secret" } } },
+      input.environment.values[2], input.environment.values[3], input.environment.values[4]
+    ] } });
+    expect(input.environment.values[0]?.value).toBe("opaque-literal");
+  });
+
+  it("recognizes camel-case secret fields even beside unrelated envelope metadata", () => {
+    expect(protectPlaintextToolArguments({ protectedInput: "unrelated", auth: { apiKey: "opaque-literal" } }, ["/auth/apiKey"]))
+      .toMatchObject({ protectedInput: "unrelated", auth: { apiKey: { protectedInput: { kind: "generic-secret" } } } });
+  });
   it("intercepts labelled multiline credential submissions without retaining their values", () => {
     const apiKey = "fake-consumer-key-123456789";
     const clientSecret = "fake-consumer-secret-987654321";

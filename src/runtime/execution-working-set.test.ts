@@ -341,6 +341,32 @@ describe("ExecutionWorkingSetController", () => {
     expect(controller.snapshot("turn-after-completion")).toBeUndefined();
   });
 
+  it("projects new durable identifiers during the same turn despite mutation invalidation and live eviction", () => {
+    const checkpoint = checkpointFixture();
+    const controller = new ExecutionWorkingSetController({
+      profileId: "profile-a", sessionId: "session-a",
+      checkpointReader: { current: () => structuredClone(checkpoint) }
+    });
+    controller.beginTurn(TURN);
+    checkpoint.safeFacts.push({ kind: "task_id", value: "job-123", sourceTool: "mcp.service.startJob", observedAt: checkpoint.createdAt });
+    controller.observe([execution({
+      tool: { ...execution().tool, riskClass: "external-side-effect" },
+      riskClass: "external-side-effect", input: {}, result: { ok: true, content: "changed" }
+    })], TURN);
+    controller.observe(Array.from({ length: 40 }, (_, index) => execution({
+      input: { collectionId: `collection-${index}` }, toolCallId: `read-${index}`,
+      result: { ok: true, content: "read" }
+    })), TURN);
+    const facts = controller.snapshot(TURN)?.facts ?? [];
+    expect(facts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ summary: "Workspace ID: workspace-456", freshness: "historical" }),
+      expect.objectContaining({ summary: "Remote Task ID: job-123", freshness: "historical" })
+    ]));
+    expect(facts.length).toBeLessThanOrEqual(48);
+    checkpoint.status = "completed";
+    expect(controller.snapshot(TURN)?.facts.some((fact) => fact.key.startsWith("checkpoint:"))).toBe(false);
+  });
+
   it("surfaces a checkpoint authentication stage as a recovery hint even without facts", () => {
     const checkpoint = {
       ...checkpointFixture(),

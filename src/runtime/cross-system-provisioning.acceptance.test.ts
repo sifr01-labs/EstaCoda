@@ -462,6 +462,7 @@ async function createJourneyHarness(scenario: JourneyScenario) {
         toolVerificationRelationships: {
           verifyState: ["updateState"],
         },
+        continuityToolResultPaths: { verifyState: ["/targetId"] },
       },
     },
     workspaceTrusted: true,

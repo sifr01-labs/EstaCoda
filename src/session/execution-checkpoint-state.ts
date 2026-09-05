@@ -69,7 +69,7 @@ const TRANSITIONS = new Set<ExecutionCheckpointLifecycleEvent["transition"]>([
 ]);
 const SAFE_FACT_KINDS = new Set<ExecutionCheckpointSafeFact["kind"]>([
   "resource_id",
-  "workspace_id", "collection_id", "specification_id", "product_name", "artifact_id", "artifact_hash"
+  "workspace_id", "collection_id", "specification_id", "task_id", "product_name", "artifact_id", "artifact_hash"
 ]);
 const OPERATION_STATUSES = new Set<ExecutionCheckpointOperation["status"]>([
   "planned", "dispatched", "settled", "verified", "failed", "uncertain"
@@ -619,7 +619,7 @@ function checkpointResources(input: unknown): ExecutionCheckpointResource[] {
     const artifacts = artifactReferences(value.artifactReferences);
     const facts = safeFacts(value.destinationFacts, true);
     if (artifacts.length > 4 || facts.length > 8 || facts.some((fact) =>
-      fact.connectorId === undefined || !["specification_id", "collection_id", "resource_id"].includes(fact.kind))) {
+      fact.connectorId === undefined || !["specification_id", "collection_id", "resource_id", "task_id"].includes(fact.kind))) {
       throw new ExecutionCheckpointValidationError("resources contains invalid related receipts.");
     }
     return {

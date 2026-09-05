@@ -87,7 +87,6 @@ export class ExecutionWorkingSetController {
 
   beginTurn(visibleTurnId: string, sessionId = this.#sessionId): void {
     this.#syncScope(visibleTurnId, sessionId);
-    this.#hydrateCheckpointFacts();
     for (const stored of this.#facts.values()) {
       stored.fact.freshness = "historical";
     }
@@ -132,6 +131,23 @@ export class ExecutionWorkingSetController {
     const checkpoint = candidateCheckpoint !== undefined && !isTerminalCheckpointStatus(candidateCheckpoint.status)
       ? candidateCheckpoint
       : undefined;
+    // Checkpoint locators are historical receipts, not cached current state.
+    // Merge them on every provider iteration so unrelated writes and live-fact
+    // eviction cannot hide them until the next user turn.
+    const facts = [...this.#facts.values()].map(({ fact }) => ({ ...fact }));
+    const summaries = new Set(facts.map((fact) => fact.summary));
+    for (const fact of checkpoint?.safeFacts ?? []) {
+      const summary = checkpointFactSummary(fact.kind, fact.value);
+      if (summaries.has(summary)) continue;
+      summaries.add(summary);
+      facts.push({
+        key: `checkpoint:${fact.kind}:${fact.value}`,
+        summary,
+        sourceCallId: `checkpoint:${checkpoint!.id}`,
+        observedAt: fact.observedAt,
+        freshness: "historical"
+      });
+    }
     const durableOperations: ExecutionOperationReceipt[] = (checkpoint?.operations ?? []).map((operation) => ({
       operationId: operation.id,
       mutationTool: operation.operation,
@@ -143,7 +159,7 @@ export class ExecutionWorkingSetController {
       ...this.#operations.snapshot(),
       ...durableOperations
     ].map((operation) => [operation.operationId, operation])).values()];
-    if (this.#facts.size === 0 && operations.length === 0 && (checkpoint?.resources?.length ?? 0) === 0 && checkpoint?.authenticationRecoveryStage === undefined) {
+    if (facts.length === 0 && operations.length === 0 && (checkpoint?.resources?.length ?? 0) === 0 && checkpoint?.authenticationRecoveryStage === undefined) {
       return undefined;
     }
     return {
@@ -152,7 +168,7 @@ export class ExecutionWorkingSetController {
       ...(checkpoint?.authenticationRecoveryStage === undefined
         ? {}
         : { authenticationRecoveryStage: checkpoint.authenticationRecoveryStage }),
-      facts: [...this.#facts.values()].map(({ fact }) => ({ ...fact })),
+      facts,
       operations,
       ...(checkpoint?.resources === undefined ? {} : { resources: structuredClone(checkpoint.resources) })
     };
@@ -178,25 +194,6 @@ export class ExecutionWorkingSetController {
       this.clear();
     }
     this.#visibleTurnId = scopedTurnId;
-  }
-
-  #hydrateCheckpointFacts(): void {
-    const checkpoint = this.#checkpointReader?.current();
-    if (checkpoint === undefined || isTerminalCheckpointStatus(checkpoint.status)) return;
-    for (const fact of checkpoint.safeFacts) {
-      const key = `checkpoint:${fact.kind}:${fact.value}`;
-      this.#facts.set(key, {
-        fact: {
-          key,
-          summary: checkpointFactSummary(fact.kind, fact.value),
-          sourceCallId: `checkpoint:${checkpoint.id}`,
-          observedAt: fact.observedAt,
-          freshness: "historical"
-        },
-        namespace: fact.connectorId === undefined ? "checkpoint" : `mcp.${fact.connectorId}`,
-        identities: new Set([normalizeIdentity(fact.value)])
-      });
-    }
   }
 
   #invalidate(namespace: string, identities: Set<string>): void {
@@ -461,6 +458,7 @@ function checkpointFactSummary(kind: import("../contracts/execution-checkpoint.j
     workspace_id: "Workspace ID",
     collection_id: "Collection ID",
     specification_id: "Specification ID",
+    task_id: "Remote Task ID",
     product_name: "Product Name",
     artifact_id: "Artifact ID",
     artifact_hash: "Artifact Hash"

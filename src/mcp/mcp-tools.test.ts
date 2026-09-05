@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -13,6 +13,25 @@ import {
 } from "./mcp-tools.js";
 
 describe("MCP per-tool risk classification", () => {
+  it("keeps the documented Postman generation toolbox complete and preserves job handles", async () => {
+    const documentation = await readFile(new URL("../../docs/subsystems/mcp.md", import.meta.url), "utf8");
+    const recipe = [...documentation.matchAll(/```json\n([\s\S]*?)\n```/gu)]
+      .map((match) => JSON.parse(match[1]!)).find((value) => value.mcpServers?.postman)?.mcpServers.postman;
+    expect(recipe).toBeDefined();
+    expect(recipe.args).toContain("--full");
+    expect(recipe.includeTools).toContain("getAsyncSpecTaskStatus");
+    expect(recipe.toolRiskClasses.getAsyncSpecTaskStatus).toBe("read-only-network");
+    const [server] = await loadMcpServers({
+      servers: { postman: { ...recipe, transport: "http", url: "https://fixture.example.test", envRefs: undefined } },
+      fetch: createPostmanCapabilityFetch()
+    });
+    try {
+      expect(server?.snapshot.available).toBe(true);
+      expect(server?.tools.map((tool) => tool.name)).toContain("mcp.postman.getAsyncSpecTaskStatus");
+      const result = normalizeMcpResult({ taskId: "remote-task-fixture" }, [], recipe.continuityToolResultPaths.generateCollection, "generateCollection");
+      expect(result.metadata?._estacoda_continuity_facts).toEqual([{ field: "taskId", kind: "identifier", value: "remote-task-fixture" }]);
+    } finally { await server?.stop(); }
+  });
   const postmanRiskClasses = {
     getAuthenticatedUser: "read-only-network",
     getWorkspaces: "read-only-network",
@@ -144,10 +163,10 @@ describe("MCP structural summaries", () => {
     expect(result.metadata).not.toHaveProperty("_estacoda_continuity_facts");
   });
 
-  it("qualifies reviewed root identifiers with the MCP tool entity", () => {
+  it.each(["getSpec", "createSpec"])("qualifies reviewed root identifiers with the %s entity", (toolName) => {
     const spec = normalizeMcpResult({
       content: [{ type: "text", text: JSON.stringify({ id: "specification-fixture", name: "Loans v2" }) }]
-    }, [], ["/id", "/name"], "getSpec");
+    }, [], ["/id", "/name"], toolName);
     const collections = normalizeMcpResult({
       content: [{
         type: "text",
@@ -1178,6 +1197,7 @@ function postmanTools(options: { omitEnvironmentValue?: boolean; omitSpecContent
     },
     getSpec: { type: "object", properties: { specId: { type: "string" } }, required: ["specId"] },
     generateCollection: { type: "object", properties: { specId: { type: "string" }, name: { type: "string" } }, required: ["specId", "name"] },
+    getAsyncSpecTaskStatus: { type: "object", properties: { elementType: { type: "string" }, elementId: { type: "string" }, taskId: { type: "string" } }, required: ["elementType", "elementId", "taskId"] },
     getSpecCollections: { type: "object", properties: { specId: { type: "string" } }, required: ["specId"] },
   };
   return Object.entries(schemas).map(([name, inputSchema]) => ({

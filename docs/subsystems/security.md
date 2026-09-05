@@ -7,6 +7,8 @@ description: "Security model: policy, approvals, trust, channel allowlists, hand
 
 EstaCoda uses a capability-first security model where tool risk classes, approval modes, workspace trust, and channel allowlists work together to bound agent behavior across all surfaces.
 
+Explicit credential paste recognition normalizes LF, CRLF, and CR-only terminal input. An introductory submission cue followed by opaque value lines (optionally behind a pasted-text marker) routes the turn to protected recollection before agent-loop persistence and model dispatch; ordinary discussion and unrelated identifiers are not intercepted. At declared protected tool destinations, a nonempty literal identified by a secret field label or a variable's `type: "secret"` is replaced with a protected-input request before executor persistence and dispatch. Empty strings, placeholders, ordinary variables, and template references remain supported. The dispatcher still requires the existing approvals and secure-input capability; this correction adds no automatic authority and never guesses credential splits or reuses the discarded literal. Recognition remains bounded, and historical plaintext is not retroactively cleaned.
+
 ## Files
 
 | File | Role |

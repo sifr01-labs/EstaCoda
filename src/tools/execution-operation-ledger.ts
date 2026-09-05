@@ -119,6 +119,7 @@ export class ExecutionOperationLedger {
     execution: ToolExecutionRecord,
     effect: Extract<ToolExecutionEffect, { kind: "verification" }>
   ): void {
+    if (execution.result?.metadata?._estacoda_verification_evidence === false) return;
     const verifierTargetKey = safeOptionalText(execution.targetKey, 512);
     const verifierIdentities = executionIdentities(execution);
     const candidates = [...this.#operations.values()].reverse();

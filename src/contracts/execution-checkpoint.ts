@@ -54,6 +54,7 @@ export type ExecutionCheckpointSafeFactKind =
   | "workspace_id"
   | "collection_id"
   | "specification_id"
+  | "task_id"
   | "product_name"
   | "artifact_id"
   | "artifact_hash";
