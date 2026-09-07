@@ -2251,7 +2251,7 @@ function createBrowserDownloadTool(
     riskClass: "read-only-network",
     toolsets: ["browser", "web", "research"],
     progressLabel: "capturing browser download",
-    maxResultSizeChars: 3_000,
+    maxResultSizeChars: 9_000,
     isAvailable: async () => browserBackend.capabilities.downloads &&
       browserBackend.download !== undefined &&
       await browserBackend.isAvailable(),
@@ -2282,13 +2282,29 @@ function createBrowserDownloadTool(
         await rm(captureDirectory, { recursive: true, force: true });
         const targetFailure = browserTargetFailureMetadata(error);
         if (targetFailure !== undefined) {
+          // Refresh evidence, never replay the action or substitute a new target.
+          // Do not follow an error into a different session or controlled tab.
+          const sameTargetScope = targetFailure.reason === "stale-browser-ref" &&
+            targetFailure.currentSessionId === browserInput.sessionId &&
+            targetFailure.currentTabRef === browserInput.tabRef;
+          const recovery = sameTargetScope && browserBackend.capabilities.snapshots && !context?.signal?.aborted
+            ? await createBrowserSnapshotTool(browserBackend, deriveBrowserInput).run({
+                sessionId: browserInput.sessionId, tabRef: browserInput.tabRef
+              }, context).catch(() => undefined)
+            : undefined;
+          const recoverySnapshot = recovery?.metadata?.snapshot as BrowserSnapshot | undefined;
+          const usableRecovery = recovery?.ok && recoverySnapshot?.sessionId === browserInput.sessionId &&
+            recoverySnapshot.tab?.ref === browserInput.tabRef;
           return {
             ok: false,
-            content: "The grounded browser download target is no longer current. Use the returned current browser evidence to retarget once.",
+            content: usableRecovery
+              ? `No download was dispatched. The old reference is stale. Select the download control from this fresh snapshot and use its identity and tab; do not repeat the old arguments.\n${recovery.content}`
+              : "No download was dispatched. The browser target is no longer current. Call browser.snapshot in the intended session/tab to obtain fresh element refs and identity before retrying. If this item remains blocked, continue independent work and report it separately.",
             metadata: {
               backend: browserBackend.kind,
               outcome: "download-blocked",
-              ...targetFailure
+              ...targetFailure,
+              ...(usableRecovery ? { recoverySnapshot } : {})
             }
           };
         }

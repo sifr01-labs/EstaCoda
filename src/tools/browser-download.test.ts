@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
 import { createMockBrowserBackend } from "../browser/browser-backend.js";
 import { BrowserTargetError } from "../browser/browser-locator.js";
@@ -19,6 +19,63 @@ afterEach(async () => {
 });
 
 describe("browser.download", () => {
+  it("returns fresh same-tab refs on staleness without replaying the download", async () => {
+    const root = await temporaryRoot();
+    const currentIdentity = { documentEpoch: 21, actionRevision: 61, observationId: 140 };
+    const snapshot = vi.fn(async () => ({
+      sessionId: "browser-session:main", url: "https://developer.example.test/product", title: "Product",
+      identity: currentIdentity, observedAt: "2026-09-07T00:00:00.000Z",
+      tab: { ref: "@t1", url: "https://developer.example.test/product", controlled: true },
+      elements: [{ ref: "@e18", role: "link", name: "Download Swagger" }]
+    }));
+    const download = vi.fn<NonNullable<BrowserBackend["download"]>>(async (input) => {
+      if (input.ref !== "@e18") throw new BrowserTargetError({
+        reason: "stale-browser-ref", message: "stale", currentSessionId: "browser-session:main",
+        currentTabRef: "@t1", currentIdentity
+      });
+      expect(input.identity).toEqual(currentIdentity);
+      const localPath = join(input.destinationDirectory, "spec.json");
+      await writeFile(localPath, '{"swagger":"2.0","paths":{}}');
+      return { outcome: "download-completed", localPath, suggestedFilename: "spec.json",
+        sourceUrl: "https://developer.example.test/export" };
+    });
+    const backend = { ...downloadBackend(download), snapshot };
+    const tool = browserDownloadTool(backend, root, new ArtifactStore());
+    const failed = await tool.run(groundedInput());
+    expect(download).toHaveBeenCalledTimes(1);
+    expect(snapshot).toHaveBeenCalledWith({ sessionId: "browser-session:main", tabRef: "@t1" });
+    expect(failed).toMatchObject({ ok: false, metadata: {
+      actionDispatched: false, recoverySnapshot: { identity: currentIdentity, elements: [{ ref: "@e18" }] }
+    } });
+    expect(failed.content).toContain("@e18");
+    expect(failed.content).toContain("actionRevision=61");
+    expect(failed.content.length).toBeLessThan(tool.maxResultSizeChars);
+    const completed = await tool.run({ ...groundedInput(), ref: "@e18", identity: currentIdentity });
+    expect(completed.ok).toBe(true);
+    expect(download).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["other-session", "snapshot-failed", "changed-tab", "cancelled"])("does not expose unrelated recovery evidence: %s", async (scenario) => {
+    const root = await temporaryRoot();
+    const snapshot = vi.fn(async () => {
+      if (scenario === "snapshot-failed") throw new Error("private backend diagnostic");
+      return { sessionId: "browser-session:main", identity: { documentEpoch: 1, actionRevision: 1, observationId: 1 },
+        observedAt: "2026-09-07T00:00:00.000Z", url: "https://example.test", title: "unrelated-page",
+        tab: { ref: "@t99", url: "https://example.test", controlled: true }, elements: [] };
+    });
+    const backend = { ...downloadBackend(async () => { throw new BrowserTargetError({
+      reason: "stale-browser-ref", message: "stale", currentSessionId: scenario === "other-session" ? "other" : "browser-session:main",
+      currentTabRef: "@t1", currentIdentity: { documentEpoch: 1, actionRevision: 1, observationId: 1 }
+    }); }), snapshot };
+    const result = await browserDownloadTool(backend, root, new ArtifactStore()).run(groundedInput(), {
+      ...(scenario === "cancelled" ? { signal: AbortSignal.abort() } : {})
+    });
+    expect(result.ok).toBe(false);
+    expect(result.content).toContain("Call browser.snapshot");
+    expect(result.metadata).not.toHaveProperty("recoverySnapshot");
+    expect(JSON.stringify(result)).not.toMatch(/unrelated-page|private backend diagnostic/);
+    expect(snapshot).toHaveBeenCalledTimes(scenario === "other-session" || scenario === "cancelled" ? 0 : 1);
+  });
   it("omits credential-bearing source-page locators while retaining the safe download receipt", async () => {
     const root = await temporaryRoot();
     const backend = downloadBackend(async (input) => {

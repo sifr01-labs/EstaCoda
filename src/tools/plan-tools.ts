@@ -11,7 +11,7 @@ export function createPlanTools(options: {
   return [{
     name: "plan",
     description:
-      "Optionally create, read, or refine a lightweight Plan for genuinely long or branching work. Ordinary execution does not require a Plan, and updates are only useful when material progress changes the steps. Use write when no Plan exists and merge to replace or add steps by id. A Plan is only a user-facing checklist: it grants no tool or evidence authority and does not govern authentication, continuation, retries, or final outcomes.",
+      "Optionally create, read, or refine a lightweight Plan for genuinely long or branching work. Ordinary execution does not require a Plan, and updates are only useful when material progress changes the steps. Use write when no Plan exists and merge to replace or add steps by id. Independent steps may both be in_progress. Preserve per-item reuse/create decisions and mark completed work when updating. A Plan is only a user-facing checklist: it grants no tool or evidence authority and does not govern authentication, continuation, retries, or final outcomes.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

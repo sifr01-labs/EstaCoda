@@ -9,6 +9,36 @@ import { ExecutionSupervisionController } from "./execution-supervision-controll
 import { ExecutionCheckpointController } from "./execution-checkpoint-controller.js";
 
 describe("ExecutionSupervisionController", () => {
+  it("lets independent work proceed after stale no-dispatch failures but still bounds an idle retry loop", () => {
+    const { supervision } = createSupervision({ maxNoProgressIterations: 3 });
+    const stale: ToolExecutionRecord = {
+      tool: toolDefinition("browser.download"), input: { ref: "@e17", identity: identity(21, 60, 138), tabRef: "@t7" },
+      decision: "allow", riskClass: "read-only-network",
+      result: { ok: false, content: "Stale reference", metadata: {
+        reason: "stale-browser-ref", actionDispatched: false, currentIdentity: identity(21, 61, 139)
+      } }
+    };
+    expect(supervision.assessProgress([stale]).terminationCause).toBeUndefined();
+    const next = supervision.assessProgress([stale, readExecution("verify-independent")]);
+    expect(next.terminationCause).toBeUndefined();
+    expect(next.toolLoopProgress.materialProgress).toBe(true);
+    expect(supervision.consumePromptState().browserRetargetNudge).toBe(true);
+    expect(supervision.runtimeAdmissionGuard()({ tool: toolDefinition("browser.snapshot"), input: {}, executionEffect: undefined })).toBeUndefined();
+    expect(supervision.assessProgress([stale]).terminationCause).toBeUndefined();
+    expect(supervision.assessProgress([stale]).terminationCause).toBeUndefined();
+    expect(supervision.assessProgress([stale]).terminationCause).toBe("tool_loop_no_progress");
+  });
+
+  it("does not relax stopping for dispatched or uncertain browser failures", () => {
+    const { supervision } = createSupervision();
+    const failure: ToolExecutionRecord = {
+      tool: toolDefinition("browser.download"), input: { ref: "@e17" },
+      decision: "allow", riskClass: "read-only-network",
+      result: { ok: false, content: "Failed", metadata: { reason: "stale-browser-ref" } }
+    };
+    supervision.assessProgress([failure]);
+    expect(supervision.assessProgress([failure]).terminationCause).toBe("browser_no_progress");
+  });
   it("initializes supervision without creating or requiring an execution plan", async () => {
     const supervision = createSupervision({ foregroundTurnId: "turn-runtime" }).supervision;
 

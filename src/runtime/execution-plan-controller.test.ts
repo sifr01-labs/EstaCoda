@@ -37,6 +37,20 @@ function execution(input: {
 }
 
 describe("ExecutionPlanController", () => {
+  it("preserves parallel work and completed reconciliation decisions through merge and hydration", async () => {
+    const target = controller();
+    await target.write({ items: [
+      { id: "reconcile", content: "Reuse existing verified resource A", status: "completed" },
+      { id: "download", content: "Download resource B", status: "in_progress" },
+      { id: "credentials", content: "Collect protected credentials", status: "pending" }
+    ] }, "turn-1");
+    const merged = await target.merge({ items: [
+      { id: "credentials", content: "Collect protected credentials", status: "in_progress" }
+    ] });
+    expect(merged.items.filter((item) => item.status === "in_progress")).toHaveLength(2);
+    expect(merged.items[0]).toMatchObject({ content: "Reuse existing verified resource A", status: "completed" });
+    expect(controller().hydrate(merged)).toMatchObject({ items: merged.items, status: "active", revision: 2 });
+  });
   it("writes a bounded lightweight Plan and derives its objective when omitted", async () => {
     const target = controller();
     const plan = await target.write({

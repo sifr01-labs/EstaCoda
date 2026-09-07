@@ -1403,7 +1403,7 @@ describe("createRuntime MCP trust gating", () => {
             ],
           },
           {
-            "maxResultSizeChars": 3000,
+            "maxResultSizeChars": 9000,
             "name": "browser.download",
             "orderIndex": 25,
             "providerKind": "session",

@@ -20,7 +20,7 @@ import type { RunRecorder } from "./run-recorder.js";
 
 export const EXECUTION_SUPERVISION_PROMPTS = {
   browserEvidence: "The last browser strategy repeated evidence, produced no effective change, or reached a terminal page such as HTTP 4xx/5xx. Do not repeat the same strategy and semantic outcome even if the document revision changed. Use a genuinely different grounded strategy: inspect a visible region, dismiss a blocker, scroll or reveal content, use a different exact href, switch tabs, or use a runtime-grounded region click. If popup-blocked reports a safe destination, browser.navigate with disposition=new-tab may open it without changing Chrome permissions. If no grounded alternative exists, return the truthful incomplete result.",
-  browserRetarget: "The last browser target could not be resolved, so no action was dispatched. Use this bounded retargeting opportunity with current document and tab identity and a different grounded element, visible region, blocker dismissal, scroll/reveal action, or exact href. Do not retry the same missing target.",
+  browserRetarget: "The last browser target could not be resolved, so no action was dispatched. Use the returned recovery snapshot, or call browser.snapshot for fresh refs and identity in the intended session/tab before retrying. Never copy the old identity onto a new ref. If the item remains blocked, set it aside and continue independent work such as destination readback or protected user-input setup; report unfinished items separately. Do not repeat identical failed arguments. The whole-task no-progress budget still applies.",
   browserVisual: "Browser semantic evidence is ambiguous, missing a grounded action, conflicting with the observed result, or a native action produced no change. Use browser.vision once for a sanitized current-viewport inspection if visual layout can resolve the uncertainty. Prefer semantic labels; use a returned screenshot-bound visual target only when it resolves to a grounded current control. Do not repeat the exhausted search or infer masked values.",
   browserVisualRepeatedMatch: "This search returned the same incidental match. Try a different visible control or request browser.vision once for sanitized current-viewport inspection. Do not repeat the same query or infer masked values.",
   toolLoopProgress: "The foreground tool loop has repeated the same calls or results without material progress. Change approach before continuing the original request. Use a different relevant action, surface a concrete runtime blocker, or return the truthful result already established."
@@ -219,7 +219,18 @@ export class ExecutionSupervisionController {
   }
 
   assessProgress(executions: ToolExecutionRecord[]): ExecutionSupervisionAssessment {
-    const browserObservation = this.#browserObservationGuard.observe(executions);
+    let browserObservation = this.#browserObservationGuard.observe(executions);
+    const browserExecutions = executions.filter((execution) => execution.tool.name.startsWith("browser."));
+    const onlyStaleUndispatchedTargets = browserExecutions.length > 0 && browserExecutions.every((execution) =>
+      execution.result?.ok === false && execution.result.metadata?.reason === "stale-browser-ref" &&
+      execution.result.metadata.actionDispatched === false
+    );
+    if (browserObservation?.shouldStop && onlyStaleUndispatchedTargets) {
+      // Stale locators are local validation failures, not exhausted execution
+      // authority. Leave independent work available; the global progress guard
+      // still bounds repeated failures even if observation identities churn.
+      browserObservation = { ...browserObservation, shouldStop: false, shouldNudge: true, shouldRetarget: true };
+    }
     const toolLoopProgress = this.#toolLoopProgressGuard.observe(executions);
     this.#executionWorkingSet?.observe(
       executions,

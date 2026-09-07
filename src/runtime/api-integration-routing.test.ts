@@ -24,9 +24,19 @@ describe("bundled api-integration skill routing", () => {
     expect(steps.slice(0, 3).map((step) => step.id)).toEqual(["discover-api-source", "reconcile-destination", "import-description"]);
     expect(steps[0]?.description).toContain("browser.extract");
     expect(steps[0]?.description).toContain("exact hrefs");
-    expect(steps[0]?.description).toContain("must not prevent safe progress");
-    expect(steps[1]?.description).toContain("create, update, verify, or skip");
+    expect(steps[0]?.description).toContain("must not prevent independent work");
+    expect(steps[1]?.description).toContain("reuse, update, or create");
+    expect(steps[1]?.description).toContain("read plausible matches by exact ID");
+    expect(steps[1]?.description).toContain("not a new approval requirement");
+    expect(steps[3]?.description).toContain("one grouped write");
     expect(steps[2]?.description).toContain("Do not re-import merely to verify");
+  });
+  it("teaches fresh-target recovery and polling from the originating resource rather than the generated output", () => {
+    const text = readFileSync(skillUrl, "utf8");
+    expect(text).toContain("originating resource type");
+    expect(text).toContain("not the type of resource being generated");
+    expect(text).toContain("never infer roles from value length");
+    expect(text).toContain("Never repeat old arguments");
   });
   it.each([
     "Set up these products in our Postman collection.",

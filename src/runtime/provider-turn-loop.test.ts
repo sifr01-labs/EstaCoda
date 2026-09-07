@@ -3804,7 +3804,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(afterNoChangeTools).toEqual(providerTools.map((tool) => tool.function.name));
     expect(afterTargetFailureTools).toEqual(providerTools.map((tool) => tool.function.name));
     expect(JSON.stringify(requests[3]!.messages)).toContain("same strategy and semantic outcome");
-    expect(JSON.stringify(requests[4]!.messages)).toContain("different grounded element, visible region");
+    expect(JSON.stringify(requests[4]!.messages)).toContain("call browser.snapshot for fresh refs");
     expect(harness.executePlans.mock.calls[4]?.[0].onApprovalRequest).toBe(onApprovalRequest);
     expect(harness.executePlans.mock.calls[4]?.[0].providerExecution?.toolCalls[0]?.argumentsText).toBe(
       JSON.stringify({ ref: "@e7", tabRef: "@t1" })
@@ -3942,11 +3942,47 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
 
     expect(harness.completeSpy).toHaveBeenCalledTimes(2);
-    expect(JSON.stringify(requests[1]!.messages)).toContain("different grounded element, visible region");
+    expect(JSON.stringify(requests[1]!.messages)).toContain("call browser.snapshot for fresh refs");
     expect((requests[1]!.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name))
       .toEqual(providerTools.map((tool) => tool.function.name));
     expect(result.terminationCause).toBe("browser_no_progress");
     expect(result.providerExecution?.response?.content).toContain("ineffective target was repeated");
+  });
+
+  it("continues independent connector work after two stale undispatched downloads", async () => {
+    const input = { ref: "@e17", tabRef: "@t7", identity: { documentEpoch: 21, actionRevision: 60, observationId: 138 } };
+    const stale = (id: string): ToolExecutionRecord => ({
+      ...toolExecutionForTool(id, "browser.download", "Stale download reference."), input,
+      result: { ok: false, content: "No download dispatched. Refresh refs before retrying.", metadata: {
+        reason: "stale-browser-ref", actionDispatched: false,
+        currentIdentity: { documentEpoch: 21, actionRevision: 61, observationId: 139 }
+      } }
+    });
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("stale-1", JSON.stringify(input), "browser.download")]),
+        providerExecution("", [providerToolCall("stale-2", JSON.stringify(input), "browser.download")]),
+        providerExecution("I will finish independent readback.", [providerToolCall("read-independent", "{}", "mcp.destination.getEnvironment")]),
+        providerExecution("Destination readback completed. One product download remains unfinished.")
+      ],
+      toolSteps: [
+        { executions: [stale("stale-1")] },
+        { executions: [stale("stale-2")] },
+        { executions: [toolExecutionForTool("read-independent", "mcp.destination.getEnvironment", "Environment metadata verified.")] }
+      ],
+      maxProviderIterations: 5
+    });
+    const result = await runBasicProviderTurn(harness.loop, { providerTools: [
+      toolProviderSchema("browser_download"), toolProviderSchema("browser_snapshot"),
+      toolProviderSchema("mcp_destination_getEnvironment")
+    ] });
+    expect(harness.completeSpy).toHaveBeenCalledTimes(4);
+    expect(result.terminationCause).toBe("normal");
+    expect(result.providerExecution?.response?.content).toContain("remains unfinished");
+    const request = harness.completeSpy.mock.calls[2]![0] as ProviderRequest;
+    expect(JSON.stringify(request.messages)).toContain("continue independent work");
+    expect((request.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name))
+      .toContain("mcp_destination_getEnvironment");
   });
 
   it("stops before a substitute continuation when a delegated Task owns the answer", async () => {

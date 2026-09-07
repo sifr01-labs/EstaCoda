@@ -566,16 +566,11 @@ function validatePlan(input: ExecutionPlan): ExecutionPlan {
     throw new ExecutionPlanValidationError(`Execution plans support at most ${EXECUTION_PLAN_MAX_ITEMS} items.`);
   }
   const ids = new Set<string>();
-  let inProgress = 0;
   for (const item of input.items) {
     if (ids.has(item.id)) {
       throw new ExecutionPlanValidationError(`Duplicate item id: ${item.id}`);
     }
     ids.add(item.id);
-    if (item.status === "in_progress") inProgress += 1;
-  }
-  if (inProgress > 1) {
-    throw new ExecutionPlanValidationError("Only one plan item may be in_progress.");
   }
 
   const plan = {
