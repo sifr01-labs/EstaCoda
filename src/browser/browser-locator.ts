@@ -212,6 +212,14 @@ function tokenizeLocatorText(value: string): string[] {
     .filter((token) => token.length >= 2))];
 }
 
+/** Only region-capable operations may accept a region ref through the generic ref field. */
+export function normalizeBrowserRegionTarget(input: BrowserActionInput): BrowserActionInput {
+  if (input.ref === undefined || !/^@r\d+$/u.test(input.ref) ||
+      input.regionRef !== undefined || input.locator !== undefined || input.visualTarget !== undefined) return input;
+  const { ref, ...rest } = input;
+  return { ...rest, regionRef: ref };
+}
+
 export function resolveBrowserTarget(snapshot: BrowserSnapshot, input: BrowserActionInput): BrowserLocatorCandidate {
   const tabRef = requireSnapshotTab(snapshot);
   const hasElementRef = input.ref !== undefined;
@@ -283,6 +291,11 @@ export function resolveBrowserTarget(snapshot: BrowserSnapshot, input: BrowserAc
   }
   const element = (snapshot.elements ?? []).find((candidate) => candidate.ref === input.ref);
   if (element === undefined) {
+    if ((snapshot.regions ?? []).some((candidate) => candidate.ref === input.ref)) {
+      throw targetError("invalid-browser-target",
+        `Browser ref ${input.ref} identifies a visible region, not an element. Use regionRef with browser.extract or browser.click; other actions require a current element ref from that region's actions.`,
+        snapshot, tabRef);
+    }
     throw targetError("browser-target-not-found", `Browser element ref not found: ${input.ref}`, snapshot, tabRef);
   }
   if (element.hidden === true) {

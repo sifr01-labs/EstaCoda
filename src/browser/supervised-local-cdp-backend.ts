@@ -41,6 +41,7 @@ import {
   assertBrowserTargetContext,
   BrowserTargetError,
   findBrowserLocator,
+  normalizeBrowserRegionTarget,
   resolveBrowserTarget
 } from "./browser-locator.js";
 import { findChromiumExecutable, type ChromiumFinderOptions, type ChromiumFinderResult } from "./chromium-finder.js";
@@ -954,6 +955,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       return result;
     },
     preflightAction: async (action, input) => {
+      if (action === "click") input = normalizeBrowserRegionTarget(input);
       const session = await getSession(input);
       if (action === "dialog") {
         const snapshot = latestSnapshots.get(session.key) ?? await captureSessionSnapshot(session);
@@ -993,6 +995,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       });
     },
     click: async (input) => {
+      input = normalizeBrowserRegionTarget(input);
       normalizeBrowserActionSettlementInput(input);
       let session = await getSession(input);
       const targetState = await captureSafeTargetSnapshot(session, input);
@@ -1121,6 +1124,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       return settleAction({ session, before, actionInput: input, target, full: targetState.full, actionDispatched: true });
     },
     extract: async (input): Promise<BrowserExtractResult> => {
+      input = normalizeBrowserRegionTarget(input);
       const session = await getSession(input);
       const { snapshot } = await captureSafeTargetSnapshot(session, input);
       protectedFields.assertContentObservationAllowed(session.key);

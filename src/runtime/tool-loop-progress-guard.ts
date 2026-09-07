@@ -3,6 +3,7 @@ import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { ExecutionCheckpointReader } from "../contracts/execution-checkpoint.js";
 import { isTerminalCheckpointStatus } from "../session/execution-checkpoint-state.js";
 import { executionEvidenceStatus } from "./execution-evidence-index.js";
+import { browserDiscoveryFingerprint } from "./browser-observation-guard.js";
 
 const INELIGIBLE_TOOLS = new Set(["plan", "delegate_task"]);
 
@@ -34,6 +35,7 @@ export class ToolLoopProgressGuard {
   readonly #stopIteration: number;
   readonly #seenCallFingerprints = new Set<string>();
   readonly #seenResultFingerprints = new Set<string>();
+  readonly #seenDiscoveryFingerprints = new Set<string>();
   readonly #successfulConnectorMutations = new Map<string, number>();
   readonly #verifiedConnectorMutations = new Map<string, number>();
   #active = false;
@@ -86,7 +88,7 @@ export class ToolLoopProgressGuard {
 
     for (const execution of eligible) {
       const status = executionEvidenceStatus(execution);
-      if (status !== "success") continue;
+      if (status !== "success" || execution.result?.metadata?.mcpReadReuse === true) continue;
 
       const callFingerprint = fingerprint({
         tool: execution.tool.name,
@@ -95,8 +97,14 @@ export class ToolLoopProgressGuard {
       });
       const callIsNew = !this.#seenCallFingerprints.has(callFingerprint);
       this.#seenCallFingerprints.add(callFingerprint);
+      const browserDiscovery = browserDiscoveryFingerprint(execution);
+      const discovery = browserDiscovery ?? connectorDiscoveryFingerprint(execution);
+      const discoveryIsNew = discovery !== undefined && !this.#seenDiscoveryFingerprints.has(discovery);
+      if (discovery !== undefined) this.#seenDiscoveryFingerprints.add(discovery);
 
-      if (!callIsNew) {
+      // A snapshot can reveal newly expanded controls with exactly the same input.
+      // Connector rereads, however, must not reset the counter through payload churn.
+      if (!callIsNew && !(browserDiscovery !== undefined && discoveryIsNew)) {
         progressKinds.add("repeated-tool-call");
         continue;
       }
@@ -104,6 +112,7 @@ export class ToolLoopProgressGuard {
       const connectorMutation = successfulConnectorMutationKey(execution);
       if (connectorMutation !== undefined) increment(this.#successfulConnectorMutations, connectorMutation);
       const verifiedConnectorMutation = execution.executionEffect?.kind === "verification" &&
+        execution.result?.metadata?._estacoda_verification_evidence !== false &&
         consumeConnectorMutationVerification(
           execution.executionEffect,
           this.#successfulConnectorMutations,
@@ -119,6 +128,7 @@ export class ToolLoopProgressGuard {
       }
       if (
         execution.executionEffect?.kind === "verification" &&
+        execution.result?.metadata?._estacoda_verification_evidence !== false &&
         (
           !checkpointControlsProgress ||
           (!checkpointAdvanced && verifiedConnectorMutation)
@@ -126,6 +136,12 @@ export class ToolLoopProgressGuard {
       ) {
         materialProgress = true;
         progressKinds.add("verification");
+        continue;
+      }
+
+      if (checkpointControlsProgress && discoveryIsNew) {
+        materialProgress = true;
+        progressKinds.add("new-tool-result");
         continue;
       }
 
@@ -168,9 +184,12 @@ export class ToolLoopProgressGuard {
     for (const execution of executions) {
       if (
         INELIGIBLE_TOOLS.has(execution.tool.name) ||
-        executionEvidenceStatus(execution) !== "success"
+        executionEvidenceStatus(execution) !== "success" ||
+        execution.result?.metadata?.mcpReadReuse === true
       ) continue;
       this.#active = true;
+      const discovery = browserDiscoveryFingerprint(execution) ?? connectorDiscoveryFingerprint(execution);
+      if (discovery !== undefined) this.#seenDiscoveryFingerprints.add(discovery);
       this.#seenCallFingerprints.add(fingerprint({
         tool: execution.tool.name,
         input: execution.input,
@@ -184,7 +203,7 @@ export class ToolLoopProgressGuard {
       }));
       const connectorMutation = successfulConnectorMutationKey(execution);
       if (connectorMutation !== undefined) increment(this.#successfulConnectorMutations, connectorMutation);
-      if (execution.executionEffect?.kind === "verification") {
+      if (execution.executionEffect?.kind === "verification" && execution.result?.metadata?._estacoda_verification_evidence !== false) {
         consumeConnectorMutationVerification(
           execution.executionEffect,
           this.#successfulConnectorMutations,
@@ -193,6 +212,21 @@ export class ToolLoopProgressGuard {
       }
     }
   }
+}
+
+function connectorDiscoveryFingerprint(execution: ToolExecutionRecord): string | undefined {
+  const effect = execution.executionEffect;
+  if ((effect?.kind !== "read" && effect?.kind !== "verification") || effect.connector?.kind !== "mcp" ||
+      execution.riskClass !== "read-only-network" || execution.result?.metadata?.mcpReadReuse === true) return undefined;
+  let evidence: unknown = execution.result?.metadata?.structuredContent;
+  if (evidence === undefined) {
+    const content = execution.result?.content.trim();
+    if (!content) return undefined;
+    try { evidence = JSON.parse(content); } catch { evidence = content; }
+  }
+  // Discovery is not verification authority. Markdown and JSON reads both matter;
+  // transport metadata, tool-call IDs and explicit clocks do not create new evidence.
+  return fingerprint({ connector: effect.connector, evidence }, true);
 }
 
 function successfulConnectorMutationKey(execution: ToolExecutionRecord): string | undefined {
@@ -262,17 +296,22 @@ function normalizeNudgeIteration(value: number, stopIteration: number): number {
   return Math.min(normalized, stopIteration);
 }
 
-function fingerprint(value: unknown): string {
-  return createHash("sha256").update(stableStringify(value)).digest("hex");
+function fingerprint(value: unknown, ignoreClocks = false): string {
+  return createHash("sha256").update(stableStringify(value, ignoreClocks)).digest("hex");
 }
 
-function stableStringify(value: unknown): string {
+function stableStringify(value: unknown, ignoreClocks = false): string {
   const seen = new WeakSet<object>();
   let visited = 0;
   const visit = (entry: unknown, depth: number): string => {
     if (visited >= 256 || depth > 6) return JSON.stringify("[TRUNCATED]");
     visited += 1;
-    if (typeof entry === "string") return JSON.stringify([...entry].slice(0, 2_000).join(""));
+    if (typeof entry === "string") {
+      const bounded = [...entry].slice(0, 2_000).join("");
+      return JSON.stringify(ignoreClocks
+        ? bounded.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b/gu, "[timestamp]")
+        : bounded);
+    }
     if (entry === null || typeof entry !== "object") return JSON.stringify(entry) ?? "undefined";
     if (seen.has(entry)) return JSON.stringify("[CIRCULAR]");
     seen.add(entry);

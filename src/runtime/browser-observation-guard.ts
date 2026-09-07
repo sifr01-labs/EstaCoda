@@ -407,6 +407,27 @@ function browserEvidenceFingerprint(execution: ToolExecutionRecord): string | un
   });
 }
 
+/** Shared semantic evidence for loop progress; never export raw page content or persist this hash. */
+export function browserDiscoveryFingerprint(execution: ToolExecutionRecord): string | undefined {
+  if (!BROWSER_OBSERVATION_TOOLS.has(execution.tool.name) && !BROWSER_ACTION_TOOLS.has(execution.tool.name)) return undefined;
+  const metadata = execution.result?.metadata;
+  if (metadata?.snapshot !== undefined) {
+    return fingerprint({ kind: "snapshot", evidence: stableBrowserSnapshot(metadata.snapshot) });
+  }
+  if (execution.tool.name === "browser.find" && metadata?.status === "found") {
+    return browserEvidenceFingerprint(execution);
+  }
+  if (execution.tool.name === "browser.extract" && asRecord(metadata?.target) !== undefined) {
+    return fingerprint({
+      kind: "extract", sessionId: metadata?.sessionId, tabRef: metadata?.tabRef,
+      target: stableBrowserCandidates([metadata?.target]),
+      text: stableBrowserText(metadata?.text), links: metadata?.links,
+      actions: stableBrowserCandidates(metadata?.actions)
+    });
+  }
+  return undefined;
+}
+
 function stableBrowserSnapshot(value: unknown): unknown {
   const snapshot = asRecord(value);
   if (snapshot === undefined) return value;

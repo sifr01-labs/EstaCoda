@@ -29,7 +29,7 @@ import { resolveGlobalStateHome, resolveProfileStateHome } from "../config/profi
 import { createBrowserDebugSession, type BrowserDebugSession } from "../browser/browser-debug.js";
 import { createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
 import { browserSessionStateReason } from "../browser/session-state.js";
-import { BrowserTargetError, browserTargetFailureMetadata, isBrowserStateIdentity } from "../browser/browser-locator.js";
+import { BrowserTargetError, browserTargetFailureMetadata, isBrowserStateIdentity, normalizeBrowserRegionTarget } from "../browser/browser-locator.js";
 import { isBrowserSnapshotElementInteractable } from "../browser/browser-interactability.js";
 import { isActionableBrowserRole } from "../browser/snapshot-state.js";
 import { deriveBrowserSessionKey } from "../browser/session-key.js";
@@ -1447,6 +1447,9 @@ function createBrowserActionTool(input: {
         return unsupportedBrowserTool(input.browserBackend, input.name);
       }
       let browserInput: BrowserActionInput = input.deriveBrowserInput(toolInput);
+      if (input.method === "click" && input.browserBackend.capabilities.visibleRegionActions) {
+        browserInput = normalizeBrowserRegionTarget(browserInput);
+      }
       if (securityAction !== undefined && context?.securityResolution !== undefined) {
         const reviewed = reviewedBrowserAction(context.securityResolution);
         if (reviewed === undefined || reviewed.action !== securityAction ||
@@ -1512,7 +1515,8 @@ async function resolveBrowserActionSecurity(
   browserBackend: BrowserBackend,
   deriveBrowserInput: DeriveBrowserInput
 ): Promise<BrowserActionSecurityResult> {
-  const browserInput = deriveBrowserInput(toolInput);
+  const browserInput = deriveBrowserInput(action === "click" && browserBackend.capabilities.visibleRegionActions
+    ? normalizeBrowserRegionTarget(toolInput) : toolInput);
   const key = browserActionSecurityKey(action, toolInput);
   if ((action === "press" && key !== undefined && SAFE_BROWSER_KEYS.has(key)) ||
       (action === "dialog" && key === "dismiss")) {
@@ -2138,7 +2142,7 @@ function createBrowserExtractTool(
     isAvailable: async () => browserBackend.capabilities.semanticActions && browserBackend.extract !== undefined && await browserBackend.isAvailable(),
     run: async (input: BrowserActionInput) => {
       if (browserBackend.extract === undefined) return unsupportedBrowserTool(browserBackend, "browser.extract");
-      const result = await browserBackend.extract(deriveBrowserInput(input)).catch((error: unknown) => ({ error }));
+      const result = await browserBackend.extract(deriveBrowserInput(normalizeBrowserRegionTarget(input))).catch((error: unknown) => ({ error }));
       if ("error" in result) {
         return {
           ok: false,
@@ -2805,7 +2809,9 @@ function browserLocatorSchema(): Record<string, unknown> {
 
 function browserTargetInputProperties(options: { allowRegion?: boolean; allowVisual?: boolean } = {}): Record<string, unknown> {
   return {
-    ref: { type: "string", description: "Element ref from a snapshot; canonical identity and tabRef are required with refs." },
+    ref: { type: "string", description: options.allowRegion === true
+      ? "Current element ref (@e1) or visible region ref (@r1, alias for regionRef); canonical identity and tabRef are required."
+      : "Element ref (@e1) from a snapshot, not a region ref (@r1); canonical identity and tabRef are required with refs." },
     ...(options.allowRegion === true ? {
       regionRef: { type: "string", description: "Runtime-grounded visible region ref from browser.find/snapshot; canonical identity and tabRef are required." }
     } : {}),

@@ -806,17 +806,19 @@ describe("supervised local CDP backend", () => {
     });
 
     const navigation = await backend.navigate({ url: "https://example.com/apps", sessionId: "session-region" });
-    await expect(backend.extract?.({
-      sessionId: "session-region",
-      regionRef: "@r1",
-      identity: navigation.snapshot.identity,
-      tabRef: navigation.snapshot.tab!.ref
-    })).resolves.toMatchObject({
-      links: [{ text: "Callback URL", href: "https://example.com/callback" }]
-    });
+    for (const target of [{ regionRef: "@r1" }, { ref: "@r1" }]) {
+      await expect(backend.extract?.({
+        sessionId: "session-region", ...target,
+        identity: navigation.snapshot.identity,
+        tabRef: navigation.snapshot.tab!.ref
+      })).resolves.toMatchObject({
+        target: { ref: "@r1", kind: "region" },
+        links: [{ text: "Callback URL", href: "https://example.com/callback" }]
+      });
+    }
     const clicked = await backend.click!({
       sessionId: "session-region",
-      regionRef: "@r1",
+      ref: "@r1",
       identity: navigation.snapshot.identity,
       tabRef: navigation.snapshot.tab!.ref
     });

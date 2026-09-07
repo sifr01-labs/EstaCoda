@@ -25,7 +25,121 @@ function execution(overrides: Partial<ToolExecutionRecord> = {}): ToolExecutionR
   };
 }
 
+async function discoveryGuard(existingExecutions: ToolExecutionRecord[] = []): Promise<ToolLoopProgressGuard> {
+  const checkpoint = new ExecutionCheckpointController({ sessionId: "session-1", profileId: "profile-1" });
+  await checkpoint.ensure({
+    originTurnId: "turn-1", originalObjective: "Import selected API products",
+    qualificationReasons: ["external_multi_step"], intentLabels: ["api.integration"],
+    requiredOperations: ["mutation", "verification"], connectorIds: ["postman"], completionFloor: "mutation_with_verification"
+  });
+  return new ToolLoopProgressGuard({ checkpointReader: checkpoint, existingExecutions,
+    noProgressNudgeIteration: 3, maxNoProgressIterations: 6 });
+}
+
+function browserDiscovery(text: string, observationId = 1): ToolExecutionRecord {
+  return execution({
+    tool: { ...execution().tool, name: "browser.snapshot", toolsets: ["browser"] }, input: {},
+    executionEffect: { kind: "read" },
+    result: { ok: true, content: text, metadata: { snapshot: {
+      sessionId: "session-1:main", url: "https://example.com/apps", text,
+      identity: { documentEpoch: 3, actionRevision: 8, observationId },
+      observedAt: `2030-01-01T00:00:0${observationId}.000Z`,
+      tab: { ref: "@t1", url: "https://example.com/apps", controlled: true },
+      regions: [{ ref: `@r${observationId}`, text, links: [], actionRefs: [], hitTestable: true }]
+    } } }
+  });
+}
+
 describe("ToolLoopProgressGuard", () => {
+  it("credits the discovery sequence before counting repeated failed extractions and cached reads", async () => {
+    const guard = await discoveryGuard();
+    const snapshot = browserDiscovery("Application products");
+    const expanded = browserDiscovery("Product A Product B Product C Product D Product E Product F", 2);
+    const environment = execution({ input: { environmentId: "env-1" },
+      result: { ok: true, content: JSON.stringify({ environment: { id: "env-1", values: [] } }) } });
+    const failure = execution({ tool: { ...snapshot.tool, name: "browser.extract" },
+      input: { ref: "@r19", tabRef: "@t1", identity: { documentEpoch: 3, actionRevision: 8, observationId: 23 } },
+      executionEffect: { kind: "read" },
+      result: { ok: false, content: "Browser element ref not found: @r19", metadata: { actionDispatched: false } } });
+    const batches = [
+      [snapshot],
+      [{ ...expanded, tool: { ...expanded.tool, name: "browser.click" }, input: { ref: "@e1" }, executionEffect: { kind: "mutation" as const } }],
+      [expanded, execution({ input: { workspaceId: "workspace-1" }, result: { ok: true, content: "| ID | Name |\n| --- | --- |\n| col-1 | Product A |" } })],
+      [execution({ input: { workspaceId: "workspace-1", type: "environments" }, result: { ok: true, content: '{"environments":[{"id":"env-1"}]}' } })],
+      [failure, environment]
+    ];
+    for (const batch of batches) {
+      expect(guard.observe(batch)).toMatchObject({ materialProgress: true, noProgressIterations: 0, shouldStop: false });
+    }
+    for (let iteration = 1; iteration <= 6; iteration++) {
+      expect(guard.observe([
+        failure,
+        { ...environment, result: { ...environment.result!, metadata: { mcpReadReuse: true } } },
+        execution({ tool: { ...execution().tool, name: "plan" }, input: { revision: iteration } })
+      ])).toMatchObject({ materialProgress: false, noProgressIterations: iteration,
+        shouldNudge: iteration === 3, shouldStop: iteration === 6 });
+    }
+  });
+
+  it("ignores browser identity/ref/clock churn but credits a new same-input observation", async () => {
+    const guard = await discoveryGuard();
+    expect(guard.observe([browserDiscovery("Products")]).materialProgress).toBe(true);
+    expect(guard.observe([browserDiscovery("Products", 2)]).materialProgress).toBe(false);
+    expect(guard.observe([browserDiscovery("Products expanded with six links", 3)]).materialProgress).toBe(true);
+    expect(guard.observe([browserDiscovery("Products", 4)]).materialProgress).toBe(false);
+  });
+
+  it("treats fresh pending connector reads as discovery, never as completed verification", async () => {
+    const guard = await discoveryGuard();
+    const mutation = execution({ tool: { ...execution().tool, name: "mcp.postman.createCollection" },
+      executionEffect: { kind: "mutation", connector: { kind: "mcp", id: "postman" } },
+      result: { ok: true, content: "accepted" } });
+    const pending = execution({ input: { taskId: "task-1" },
+      executionEffect: { kind: "verification", connector: { kind: "mcp", id: "postman" }, verifies: [mutation.tool.name] },
+      result: { ok: true, content: '{"status":"pending"}', metadata: { _estacoda_verification_evidence: false } } });
+    expect(guard.observe([mutation]).progressKinds).toEqual(["target-mutation"]);
+    expect(guard.observe([pending]).progressKinds).toEqual(["new-tool-result"]);
+    expect(guard.observe([pending]).materialProgress).toBe(false);
+    expect(guard.observe([{ ...pending, input: { taskId: "cache" }, result: {
+      ok: true, content: "cached", metadata: { mcpReadReuse: true }
+    } }]).materialProgress).toBe(false);
+    expect(guard.observe([{ ...pending, input: { collectionId: "col-1" }, result: {
+      ok: true, content: '{"id":"col-1"}', metadata: { _estacoda_verification_evidence: true }
+    } }]).progressKinds).toEqual(["verification"]);
+  });
+
+  it("deduplicates extracted region content across transient target references", async () => {
+    const guard = await discoveryGuard();
+    const extract = (ref: string, text: string) => execution({
+      tool: { ...execution().tool, name: "browser.extract", toolsets: ["browser"] },
+      input: { regionRef: ref }, executionEffect: { kind: "read" },
+      result: { ok: true, content: text, metadata: {
+        sessionId: "session-1:main", tabRef: "@t1", text,
+        target: { ref, kind: "region", identity: { documentEpoch: 3, actionRevision: 8, observationId: ref }, text },
+        links: [{ text: "API", href: "https://example.com/api" }]
+      } }
+    });
+    expect(guard.observe([extract("@r19", "Product APIs")]).materialProgress).toBe(true);
+    expect(guard.observe([extract("@r20", "Product APIs")]).materialProgress).toBe(false);
+    expect(guard.observe([extract("@r21", "More product APIs")]).materialProgress).toBe(true);
+  });
+
+  it("seeds discovery, rejects cached/failed reads and deduplicates equivalent result data", async () => {
+    const prior = execution({ result: { ok: true, content: '{"id":"env-1","observedAt":"2030-01-01T00:00:00Z"}' } });
+    const guard = await discoveryGuard([prior, browserDiscovery("Products")]);
+    expect(guard.observe([browserDiscovery("Products", 2)]).materialProgress).toBe(false);
+    expect(guard.observe([execution({ input: { scope: "changed" }, result: {
+      ok: true, content: '{"observedAt":"2030-01-01T00:01:00Z", "id":"env-1"}'
+    } })]).materialProgress).toBe(false);
+    expect(guard.observe([execution({ input: { id: "cache" }, result: {
+      ok: true, content: '{"id":"env-cache"}', metadata: { mcpReadReuse: true }
+    } })]).materialProgress).toBe(false);
+    expect(guard.observe([execution({ result: { ok: false, content: '{"id":"failed"}' } })]).materialProgress).toBe(false);
+    expect(guard.observe([execution({ decision: "deny", result: { ok: true, content: '{"id":"denied"}' } })]).materialProgress).toBe(false);
+    expect(guard.observe([execution({ input: { id: "new" }, result: { ok: true, content: '{"id":"env-new"}' } })]))
+      .toMatchObject({ materialProgress: true, progressKinds: ["new-tool-result"], noProgressIterations: 0 });
+  });
+
   it("is inactive before substantive tool activity and does not depend on a plan", () => {
     const guard = new ToolLoopProgressGuard({
       noProgressNudgeIteration: 2,
@@ -160,12 +274,14 @@ describe("ToolLoopProgressGuard", () => {
     expect(guard.observe([execution({
       tool: { ...execution().tool, name: "browser.snapshot", toolsets: ["browser"] },
       input: {},
-      result: { ok: true, content: "snapshot revision one" }
+      result: { ok: true, content: "snapshot revision one" },
+      executionEffect: { kind: "read" }
     })])).toMatchObject({ materialProgress: false, noProgressIterations: 1 });
     expect(guard.observe([execution({
       tool: { ...execution().tool, name: "browser.snapshot", toolsets: ["browser"] },
       input: {},
-      result: { ok: true, content: "snapshot revision two" }
+      result: { ok: true, content: "snapshot revision two" },
+      executionEffect: { kind: "read" }
     })])).toMatchObject({ materialProgress: false, noProgressIterations: 2, shouldNudge: true });
 
     progressRevision = 1;
@@ -244,7 +360,7 @@ describe("ToolLoopProgressGuard", () => {
         connector: { kind: "mcp", id: "other" }
       },
       result: { ok: true, content: "unrelated result" }
-    })])).toMatchObject({ materialProgress: false, noProgressIterations: 1 });
+    })])).toMatchObject({ materialProgress: true, progressKinds: ["new-tool-result"], noProgressIterations: 0 });
 
     expect(guard.observe([execution({
       tool: { ...execution().tool, name: "mcp.postman.getSpec" },
@@ -255,8 +371,8 @@ describe("ToolLoopProgressGuard", () => {
         verifies: ["mcp.postman.createSpec"],
         connector: { kind: "mcp", id: "postman" }
       },
-      result: { ok: true, content: "another specification exists" }
-    })])).toMatchObject({ materialProgress: false, noProgressIterations: 2, shouldNudge: true });
+      result: { ok: true, content: "specification exists" }
+    })])).toMatchObject({ materialProgress: false, noProgressIterations: 1, shouldNudge: false });
 
     expect(guard.observe([execution({
       tool: { ...execution().tool, name: "browser.click", toolsets: ["browser"], riskClass: "external-side-effect" },
@@ -266,6 +382,11 @@ describe("ToolLoopProgressGuard", () => {
       executionEffect: { kind: "mutation" },
       result: { ok: true, content: "clicked" }
     })])).toMatchObject({
+      materialProgress: false,
+      noProgressIterations: 2,
+      shouldStop: false
+    });
+    expect(guard.observe([])).toMatchObject({
       materialProgress: false,
       noProgressIterations: 3,
       shouldStop: true
@@ -297,7 +418,8 @@ describe("ToolLoopProgressGuard", () => {
     expect(guard.observe([execution({
       tool: { ...execution().tool, name: "browser.snapshot", toolsets: ["browser"] },
       input: {},
-      result: { ok: true, content: "same browser state" }
+      result: { ok: true, content: "same browser state" },
+      executionEffect: { kind: "read" }
     })])).toMatchObject({ materialProgress: false, noProgressIterations: 1, shouldNudge: true });
 
     const current = checkpoint.current()!;

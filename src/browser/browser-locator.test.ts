@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BrowserSnapshot } from "../contracts/browser.js";
-import { BrowserTargetError, findBrowserLocator, resolveBrowserTarget } from "./browser-locator.js";
+import { BrowserTargetError, findBrowserLocator, normalizeBrowserRegionTarget, resolveBrowserTarget } from "./browser-locator.js";
 
 function snapshot(elements: BrowserSnapshot["elements"], overrides: Partial<BrowserSnapshot> = {}): BrowserSnapshot {
   return {
@@ -16,6 +16,36 @@ function snapshot(elements: BrowserSnapshot["elements"], overrides: Partial<Brow
 }
 
 describe("semantic browser locators", () => {
+  it("normalizes region aliases without inventing targets or weakening state binding", () => {
+    const current = snapshot([], { regions: [{
+      ref: "@r19", text: "Products", actionRefs: [], links: [], hitTestable: true
+    }] });
+    const input = { sessionId: current.sessionId, identity: current.identity, tabRef: current.tab!.ref, ref: "@r19" };
+    expect(normalizeBrowserRegionTarget(input)).toEqual({
+      sessionId: current.sessionId, identity: current.identity, tabRef: current.tab!.ref, regionRef: "@r19"
+    });
+    expect(input.ref).toBe("@r19");
+    expect(resolveBrowserTarget(current, normalizeBrowserRegionTarget(input))).toMatchObject({ kind: "region", ref: "@r19" });
+    expect(() => resolveBrowserTarget(current, input)).toThrow("Use regionRef with browser.extract or browser.click");
+    for (const [override, reason] of [
+      [{ sessionId: "other" }, "browser-ref-wrong-session"],
+      [{ tabRef: "@t9" }, "browser-ref-wrong-tab"],
+      [{ identity: { ...current.identity, actionRevision: 1 } }, "stale-browser-ref"],
+      [{ identity: { ...current.identity, documentEpoch: 1 } }, "stale-browser-ref"],
+      [{ identity: undefined }, "invalid-browser-target"],
+      [{ ref: "@r20" }, "browser-target-not-found"],
+      [{ regionRef: "@r19" }, "invalid-browser-target"],
+      [{ locator: { text: "Products" } }, "invalid-browser-target"]
+    ] as const) {
+      expect(() => resolveBrowserTarget(current, normalizeBrowserRegionTarget({ ...input, ...override })))
+        .toThrowError(expect.objectContaining({ reason }));
+    }
+    const visual = { ...input, visualTarget: { screenshotId: "shot", x: 1, y: 1 } };
+    expect(normalizeBrowserRegionTarget(visual)).toBe(visual);
+    expect(() => resolveBrowserTarget({ ...current, regions: [{ ...current.regions![0]!, hitTestable: false }] },
+      normalizeBrowserRegionTarget(input))).toThrowError(expect.objectContaining({ reason: "browser-target-not-interactable" }));
+  });
+
   it("offers a unique exact-text role alternative without authorizing the mismatched locator", () => {
     const current = snapshot([{ ref: "@e1", role: "button", name: "Example application" }]);
     const locator = { role: "link", text: "Example application" };

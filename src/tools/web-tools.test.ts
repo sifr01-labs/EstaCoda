@@ -1544,7 +1544,7 @@ describe("web and browser tools baselines", () => {
     }
   });
 
-  it("security-binds a grounded region without converting it to an element or raw coordinates", async () => {
+  it.each(["ref", "regionRef"] as const)("security-binds a grounded %s region without converting it to an element or raw coordinates", async (field) => {
     const current = browserIdentity(5);
     const clickMethod = vi.fn(async (input: BrowserActionInput) => {
       expect(input).toMatchObject({
@@ -1573,11 +1573,13 @@ describe("web and browser tools baselines", () => {
       }
     }));
     const click = tool("browser.click", createTestWebTools({
-      browserBackend: { ...createSessionRecordingBrowserBackend(), click: clickMethod, preflightAction }
+      browserBackend: { ...createSessionRecordingBrowserBackend(),
+        capabilities: browserCapabilities({ snapshots: true, semanticActions: true, visibleRegionActions: true }),
+        click: clickMethod, preflightAction }
     }));
     const input = {
       sessionId: "runtime:main",
-      regionRef: "@r2",
+      [field]: "@r2",
       identity: current,
       tabRef: "@t1"
     };
@@ -1590,6 +1592,8 @@ describe("web and browser tools baselines", () => {
     });
     await expect(click.run(input, { securityResolution: approved })).resolves.toMatchObject({ ok: true });
     expect(preflightAction).toHaveBeenCalledOnce();
+    expect(preflightAction).toHaveBeenCalledWith("click", expect.objectContaining({ regionRef: "@r2" }));
+    expect(preflightAction.mock.calls[0]![1].ref).toBeUndefined();
     expect(clickMethod).toHaveBeenCalledOnce();
   });
 
@@ -3293,6 +3297,17 @@ describe("web and browser tools baselines", () => {
       expect.objectContaining({ method: "select", input: expect.objectContaining({ locator: { label: "Environment" }, value: "Sandbox" }) }),
       expect.objectContaining({ method: "extract", input: expect.objectContaining({ locator: { role: "button", name: "Recorded Button" } }) })
     ]));
+  });
+
+  it("canonicalizes region aliases at the extraction tool boundary", async () => {
+    const calls: Array<{ method: string; input: BrowserActionInput | BrowserNavigateInput }> = [];
+    const tools = createTestWebTools({ browserBackend: createSessionRecordingBrowserBackend(calls), currentSessionId: () => "runtime-session" });
+    const input = { ref: "@r19", identity: browserIdentity(8), tabRef: "@t1" };
+    await tool("browser.extract", tools).run(input);
+    expect(calls).toContainEqual({ method: "extract", input: {
+      sessionId: "runtime-session:main", regionRef: "@r19", identity: input.identity, tabRef: input.tabRef
+    } });
+    expect(input.ref).toBe("@r19");
   });
 
   it("renders matching page regions with their grounded actions before incidental text", async () => {
