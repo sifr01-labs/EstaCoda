@@ -158,6 +158,7 @@ export type SecureInputProtectedSourceFailure = {
 /** One independently verified destination within a single operator input flow. */
 export type SecureInputGroupItem = {
   id: string;
+  handling?: SecureInputDestinationHandling;
   request: SecureInputRequest;
   consume: SecureInputConsumer;
 };
@@ -232,6 +233,11 @@ export type SecureInputTransferGroupRequest = {
   }[];
 };
 
+export type SecureInputCollectionGroupRequest = {
+  purpose: string;
+  items: readonly Omit<SecureInputTransferGroupRequest["items"][number], "source">[];
+};
+
 export type SecureInputTransferGroupValue = {
   id: string;
   value: Uint8Array;
@@ -243,6 +249,10 @@ export type SecureInputTransferGroupConsumer = (
 ) => void | Promise<void>;
 
 export type SecureInputTransferRequestHandler = GroupedSecureInputRequestHandler & {
+  collectGroup: (
+    group: SecureInputCollectionGroupRequest,
+    consume: SecureInputTransferGroupConsumer
+  ) => Promise<SecureInputGroupReceipt>;
   transfer: (
     transfer: SecureInputTransferRequest,
     consume: SecureInputConsumer

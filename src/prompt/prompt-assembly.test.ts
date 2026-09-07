@@ -145,6 +145,40 @@ describe("assembleProviderPrompt", () => {
     }));
   });
 
+  it("keeps four reuse decisions visible while the two missing products and credentials advance", () => {
+    const existing = ["Loans", "OAuth", "Payments", "Usage"];
+    const plan = { objective: "Set up six products and credentials", originTurnId: "turn-1", revision: 3,
+      status: "active" as const, items: [
+        ...existing.map((name) => ({ id: name, content: `Reuse existing ${name} collection; inspected`, status: "completed" as const })),
+        { id: "Offering", content: "Create and verify Offering", status: "completed" as const },
+        { id: "Subscriptions", content: "Create and verify Subscriptions", status: "completed" as const },
+        { id: "credentials", content: "Collect key and secret securely, then verify", status: "in_progress" as const }
+      ] };
+    const rendered = renderMessages(assembleProviderContinuationPrompt(baseContinuationInput({ executionPlan: plan })).messages);
+    for (const name of existing) expect(rendered).toContain(`Reuse existing ${name} collection; inspected`);
+    expect(rendered).toContain("Collect key and secret securely, then verify");
+    expect(rendered).toContain("context only; not verified execution evidence");
+  });
+
+  it("projects successful OTP departure over an old challenge without claiming login", () => {
+    const before = { documentEpoch: 2, actionRevision: 3, observationId: 4 };
+    const after = { documentEpoch: 3, actionRevision: 5, observationId: 6 };
+    const record = (metadata: Record<string, unknown>) => {
+      const execution = toolExecution({ content: "historical challenge observation", metadata });
+      execution.tool = { ...execution.tool, name: "browser.type", toolsets: ["browser"] };
+      return execution;
+    };
+    const old = record({ snapshot: { sessionId: "browser-1", identity: before, tab: { ref: "@t1" } } });
+    const submitted = record({ protectedDelivery: { delivery: "delivered", challengeState: "departed", afterIdentity: after },
+      snapshot: { sessionId: "browser-1", identity: after, tab: { ref: "@t1" } } });
+    const prompt = assembleProviderPrompt(basePromptInput({ toolExecutions: [old, submitted] }));
+    expect(renderMessages(prompt.messages)).toContain("Do not request or submit its OTP again");
+    expect(renderMessages(prompt.messages)).toContain("alone is not proof of login");
+    const newChallenge = record({ snapshot: { sessionId: "browser-1", identity: { ...after, actionRevision: 6 }, tab: { ref: "@t1" } } });
+    const next = assembleProviderPrompt(basePromptInput({ toolExecutions: [old, submitted, newChallenge] }));
+    expect(next.budget.layers.some((layer) => layer.name === "authentication-state")).toBe(false);
+  });
+
   it("renders active execution-plan state as a protected non-cacheable layer", () => {
     const prompt = assembleProviderPrompt(basePromptInput({
       executionPlan: {
@@ -194,7 +228,8 @@ describe("assembleProviderPrompt", () => {
     expect(rendered).toContain("Optional Plan (model-visible foreground coordination only):");
     expect(rendered).not.toContain("Verified complete: build");
     expect(rendered).toContain("- [in_progress] verify: Verify it");
-    expect(rendered).not.toContain("- [completed] build: Build it");
+    expect(rendered).toContain("- [completed] build: Build it");
+    expect(rendered).toContain("context only; not verified execution evidence");
     expect(rendered).not.toContain("Runtime reconciliation required:");
     expect(rendered).toContain("grants no tool, evidence, authentication, continuation, or completion authority");
     expect(rendered).not.toContain("call-build");
@@ -1355,6 +1390,7 @@ describe("assembleProviderContinuationPrompt", () => {
       mimeType: "application/yaml",
       metadata: {
         filename: "loans-v2.yaml",
+        apiDescription: { format: "Swagger", version: "2.0" },
         sha256,
         sourceOrigin: "https://developer.example.test",
         source: "browser.download",
@@ -1392,6 +1428,7 @@ describe("assembleProviderContinuationPrompt", () => {
     expect(rendered).toContain("application/yaml");
     expect(rendered).toContain('filename: "loans-v2.yaml"');
     expect(rendered).toContain('reference: "artifact://artifact-swagger"');
+    expect(rendered).toContain("API description: Swagger 2.0");
     expect(rendered).toContain(`sha256: "${sha256}"`);
     expect(rendered).toContain('sourceOrigin: "https://developer.example.test"');
     expect(rendered).not.toContain("Filename: loans-v2.yaml");

@@ -1278,10 +1278,12 @@ async function runToolWithProtectedArguments(
     if (!protectedCapability.groupedDelivery) {
       return protectedArgumentFailure("Grouped protected tool argument delivery is not supported by this tool.");
     }
-    if (prepared.some((entry) => entry.descriptor!.source === undefined)) {
-      return protectedArgumentFailure("Grouped protected tool arguments require verified sources for atomic delivery.");
+    const sourceCount = prepared.filter((entry) => entry.descriptor!.source !== undefined).length;
+    if (sourceCount !== 0 && sourceCount !== prepared.length) {
+      return protectedArgumentFailure("Use either user input for every grouped value or verified browser sources for every value; mixed groups are not supported.");
     }
-    const transferGroup = (context.onSecureInputRequest as Partial<SecureInputTransferRequestHandler>).transferGroup;
+    const handler = context.onSecureInputRequest as Partial<SecureInputTransferRequestHandler>;
+    const transferGroup = sourceCount === 0 ? handler.collectGroup : handler.transferGroup;
     if (transferGroup === undefined) {
       return protectedArgumentFailure("Grouped protected tool argument delivery is unavailable on this runtime.");
     }
@@ -1327,12 +1329,20 @@ async function runToolWithProtectedArguments(
           : `Protected tool argument group ${receipt.status}: ${receipt.reason ?? "delivery did not complete."}`,
       receipt?.failure);
     }
+    // Keep only the reviewed receipt projection. Arbitrary destination echoes
+    // may contain transformations of credentials that exact redaction cannot identify.
+    const facts = dispatchedResult.metadata?._estacoda_continuity_facts
+      ?.filter((fact) => !fact.value.includes("[PROTECTED_INPUT]")).slice(0, 24);
+    const content = dispatchedResult.ok
+      ? `${prepared.length} protected values transferred atomically. Verify the destination state with a separate read.${facts?.length ? `\nDestination receipt: ${JSON.stringify(facts)}` : ""}`
+      : "The protected destination reported that the grouped transfer did not complete.";
     return {
       ok: dispatchedResult.ok,
-      content: dispatchedResult.ok
-        ? `${prepared.length} protected values transferred atomically. Verify the destination state with a separate read.`
-        : "The protected destination reported that the grouped transfer did not complete.",
-      metadata: { protectedTransfer: true, protectedValueCount: prepared.length },
+      content,
+      metadata: { protectedTransfer: true, protectedValueCount: prepared.length,
+        ...(facts?.length ? { _estacoda_continuity_facts: facts } : {}),
+        _estacoda_context_summary: content
+      },
     };
   }
 
@@ -1484,7 +1494,11 @@ function redactExactSecret(result: ToolResult, secret: string): ToolResult {
 }
 
 function redactExactSecrets(result: ToolResult, secrets: readonly string[]): ToolResult {
-  return secrets.reduce((current, secret) => redactExactSecret(current, secret), result);
+  return secrets.reduce((current, secret) => {
+    const variants = new Set([secret, Buffer.from(secret).toString("base64"), Buffer.from(secret).toString("base64url"),
+      Buffer.from(secret).toString("hex"), encodeURIComponent(secret)]);
+    return [...variants].reduce((value, variant) => redactExactSecret(value, variant), current);
+  }, result);
 }
 
 function replaceExactSecret(value: unknown, secret: string): unknown {

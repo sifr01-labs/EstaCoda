@@ -1,3 +1,4 @@
+import { parsePollingCoordinates } from "../contracts/execution-checkpoint.js";
 import type {
   ExecutionCheckpointOperation,
   ExecutionCheckpointOperationCoordinates,
@@ -15,6 +16,8 @@ import { redactSensitiveText } from "../utils/redaction.js";
 
 const SAFE_FACT_FIELDS = new Map<string, ExecutionCheckpointSafeFactKind>([
   ["resourceid", "resource_id"],
+  ["environmentid", "environment_id"],
+  ["pollingcoordinates", "polling_coordinates"],
   ["workspaceid", "workspace_id"],
   ["collectionid", "collection_id"],
   ["specificationid", "specification_id"],
@@ -156,6 +159,7 @@ function safeFactValue(kind: ExecutionCheckpointSafeFactKind, input: string): st
   let normalized = input.normalize("NFKC").replace(/[\u0000-\u001f\u007f]+/gu, " ").replace(/\s+/gu, " ").trim();
   if (kind === "artifact_id" && normalized.startsWith("artifact://")) normalized = normalized.slice("artifact://".length);
   if (kind === "artifact_hash") return /^[a-f0-9]{64}$/u.test(normalized) ? normalized : undefined;
+  if (kind === "polling_coordinates" && parsePollingCoordinates(normalized) === undefined) return undefined;
   const max = kind === "product_name" ? 160 : 200;
   if (normalized.length === 0 || normalized.length > max) return undefined;
   if (redactSensitiveText(normalized) !== normalized) return undefined;

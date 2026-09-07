@@ -2408,6 +2408,11 @@ function timeSecureInputHandler(
       return await timedCall(async () => await transfer(request, consume));
     };
   }
+  const collectGroup = transferHandler.collectGroup;
+  if (collectGroup !== undefined) {
+    (timed as SecureInputTransferRequestHandler).collectGroup = async (request, consume) =>
+      await timedCall(async () => await collectGroup(request, consume));
+  }
   const transferGroup = transferHandler.transferGroup;
   if (transferGroup !== undefined) {
     (timed as SecureInputTransferRequestHandler).transferGroup = async (request, consume) => {

@@ -380,3 +380,7 @@ Execution plans are optional coordination state. The runtime does not classify r
 | ProjectContextLoader | `src/context/project-context-loader.ts` | Load project context files |
 | TrajectoryRecorder | `src/trajectory/trajectory-recorder.ts` | Record active-session trajectory events before persistence through the session DB |
 | ArtifactStore | `src/artifacts/artifact-store.ts` | Store prompt-safe artifact references in memory |
+
+Completed Plan items remain in a bounded projection alongside unfinished items so reconciliation decisions such as reusing an existing product remain visible. These are model-authored planning context, not verified receipts or execution restrictions. A later correction or new evidence may change them. The current protected authentication receipt supersedes an earlier challenge observation for the same browser state; challenge departure asks for authentication verification and does not itself prove sign-in.
+
+Durable artifact registrations preserve inspected API format/version. Restoration rederives that metadata from hash-verified bytes, including older registrations. Checkpoint resources retain connector-scoped task polling coordinates and collection readbacks anchored to the exact specification argument. Environment IDs are accepted as typed locators. Redundant artifact IDs/hashes may leave the bounded flat fact list only when their exact immutable artifact receipts remain; destination facts and execution limits are unchanged.

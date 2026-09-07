@@ -5,6 +5,8 @@ import { ExecutionCheckpointController } from "./execution-checkpoint-controller
 import { checkpointResourcesFromResult } from "./execution-checkpoint-resources.js";
 import { ExecutionWorkingSetController } from "./execution-working-set.js";
 import { executionCheckpointCarryForwardEvent, hydratableExecutionCheckpoint, validateExecutionCheckpoint } from "../session/execution-checkpoint-state.js";
+import { normalizeMcpResult } from "../mcp/mcp-tools.js";
+import { checkpointSafeFactsFromResult } from "./execution-checkpoint-journal.js";
 import { browserContinuityUrl } from "../browser/continuity-url.js";
 
 const now = "2030-01-01T00:00:00.000Z";
@@ -58,6 +60,44 @@ describe("grounded resource continuity", () => {
     expect(checkpointResourcesFromResult({ checkpoint, tool: tool("mcp.catalog.generate"), result: { ...result, ok: false }, observedAt: now, acceptedInput: { specId: "spec-one" } }))
       .toEqual(checkpoint.resources);
   });
+  it("preserves six products, late collection receipts and polling coordinates through restart", async () => {
+    const { controller, events, observe } = await setup();
+    await observe("browser.extract", { links });
+    for (let i = 0; i < 6; i++) {
+      const id = `artifact-${i}`;
+      const hash = i.toString(16).repeat(64);
+      await controller.attachArtifact(controller.current()!.revision, { id, sha256: hash });
+      await observe("browser.download", { outcome: "download-completed", pageUrl: links[i]!.href,
+        filename: "api.json", artifactId: id, sha256: hash });
+      await observe("mcp.catalog.createSpec", { _estacoda_continuity_facts: [
+        fact("artifactId", id), fact("artifactHash", hash), fact("specId", `spec-${i}`)
+      ] });
+      const result = normalizeMcpResult({ taskId: `job-${i}`, url: `/specs/spec-${i}/tasks/job-${i}` }, [], ["/taskId", "/url"]);
+      const startTool = tool("mcp.catalog.generate");
+      await controller.retainFacts(controller.current()!.revision, checkpointSafeFactsFromResult({ tool: startTool, result, observedAt: now }));
+      await controller.retainResources(controller.current()!.revision, checkpointResourcesFromResult({
+        checkpoint: controller.current()!, tool: startTool, result, observedAt: now, acceptedInput: { specId: `spec-${i}` }
+      }));
+      const readback = { ok: true, content: "in-sync", metadata: { _estacoda_continuity_facts: [fact("collectionId", `collection-${i}`)] } } as ToolResult;
+      await controller.retainResources(controller.current()!.revision, checkpointResourcesFromResult({
+        checkpoint: controller.current()!, tool: tool("mcp.catalog.getSpecCollections"), result: readback,
+        observedAt: now, acceptedInput: { specId: `spec-${i}` }
+      }));
+    }
+    await controller.retainFacts(controller.current()!.revision, [{ kind: "environment_id", value: "environment-1",
+      sourceTool: "mcp.catalog.createEnvironment", connectorId: "catalog", observedAt: now }]);
+    const restored = hydratableExecutionCheckpoint({ events, sessionId: "session-1", profileId: "profile-1" })!;
+    for (let i = 0; i < 6; i++) expect(restored.resources![i]!.destinationFacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "collection_id", value: `collection-${i}` }),
+      expect.objectContaining({ kind: "polling_coordinates", value: `specs:spec-${i}:job-${i}`, connectorId: "catalog" })
+    ]));
+    const working = new ExecutionWorkingSetController({ sessionId: "session-1", profileId: "profile-1", checkpointReader: { current: () => restored } });
+    const summary = JSON.stringify(working.snapshot("resumed"));
+    expect(summary).toContain("Environment ID: environment-1");
+    expect(summary).toContain("Task status arguments");
+    expect(summary).toContain("specs");
+  });
+
   it("retains six exact locators and their independent receipts through restart and compaction carry-forward", async () => {
     const { controller, events, observe } = await setup();
     await observe("browser.extract", { links });

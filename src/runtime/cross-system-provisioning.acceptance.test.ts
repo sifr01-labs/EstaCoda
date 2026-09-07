@@ -69,6 +69,7 @@ const route: ResolvedModelRoute = {
 
 type JourneyScenario = {
   name: string;
+  userInput?: boolean;
   approval?: "approved" | "denied";
   changeSourceAfterApproval?: boolean;
   undeclaredDestination?: boolean;
@@ -85,6 +86,18 @@ type JourneyScenario = {
 };
 
 const scenarios: JourneyScenario[] = [
+  {
+    name: "grouped user credentials complete through the runtime without entering provider context",
+    userInput: true,
+    expectCompleted: true,
+    expectedFinalOutcome: "completed",
+    expectedMutationCalls: 1,
+    expectedVerificationCalls: 1,
+    expectedTimeline: ["destination-read", "destination-mutation", "destination-verification"],
+    expectedProviderRequests: 5,
+    expectedToolExecutions: 4,
+    expectedPlanExecutions: 0,
+  },
   {
     name: "provisions two protected values and verifies the independently read state",
     expectCompleted: true,
@@ -312,8 +325,8 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
       }
 
       if (scenario.expectCompleted) {
-        expect(harness.authorizationRequests).toHaveLength(1);
-        expect(harness.authorizationRequests[0]).toMatchObject({
+        expect(harness.authorizationRequests).toHaveLength(scenario.userInput ? 0 : 1);
+        if (!scenario.userInput) expect(harness.authorizationRequests[0]).toMatchObject({
           transferGroup: { items: [{}, {}] },
         });
         expect(toolNames.filter((name) => name === MUTATION_TOOL)).toHaveLength(1);
@@ -477,8 +490,12 @@ async function createJourneyHarness(scenario: JourneyScenario) {
       },
     },
   });
+  let collected = 0;
   const secureInputHandler = runtime.createSecureInputRequestHandler!({
-    collect: async () => { throw new Error("The protected browser-source journey must not ask for plaintext input."); },
+    collect: async () => {
+      if (!scenario.userInput) throw new Error("The protected browser-source journey must not ask for plaintext input.");
+      return { status: "provided", value: new TextEncoder().encode([FIRST_PROTECTED_VALUE, SECOND_PROTECTED_VALUE][collected++]!) };
+    },
     authorize: async (request) => {
       authorizationRequests.push(structuredClone(request));
       if (scenario.changeSourceAfterApproval) {
@@ -526,7 +543,7 @@ function createProviderScript(input: {
         response = call("browser.navigate", { url: FAKE_DEVELOPER_PORTAL_URL });
         break;
       case 2:
-        response = call(MUTATION_TOOL, mutationInput(request, input.sessionId, input.scenario.undeclaredDestination === true));
+        response = call(MUTATION_TOOL, mutationInput(request, input.sessionId, input.scenario.undeclaredDestination === true, input.scenario.userInput === true));
         break;
       case 3:
         if (input.scenario.approval === "denied" || input.scenario.changeSourceAfterApproval === true ||
@@ -550,6 +567,7 @@ function mutationInput(
   request: ProviderRequest,
   sessionId: string,
   undeclaredDestination: boolean,
+  userInput = false,
 ): Record<string, unknown> {
   const identity = latestIdentity(request);
   const source = (ref: "@e1" | "@e2") => ({
@@ -566,7 +584,7 @@ function mutationInput(
       kind,
       purpose: "Provision one protected value into the managed destination",
       retention: "use-once",
-      source: source(ref),
+      ...(userInput ? {} : { source: source(ref) }),
     },
   });
   return {

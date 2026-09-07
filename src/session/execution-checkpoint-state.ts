@@ -1,3 +1,4 @@
+import { checkpointFactHasArtifactReceipt, parsePollingCoordinates } from "../contracts/execution-checkpoint.js";
 import type {
   ExecutionCheckpointBlocker,
   ExecutionCheckpointAuthenticationStage,
@@ -68,7 +69,7 @@ const TRANSITIONS = new Set<ExecutionCheckpointLifecycleEvent["transition"]>([
   "attempt_settled", "blocked", "cancelled", "superseded"
 ]);
 const SAFE_FACT_KINDS = new Set<ExecutionCheckpointSafeFact["kind"]>([
-  "resource_id",
+  "resource_id", "environment_id", "polling_coordinates",
   "workspace_id", "collection_id", "specification_id", "task_id", "product_name", "artifact_id", "artifact_hash"
 ]);
 const OPERATION_STATUSES = new Set<ExecutionCheckpointOperation["status"]>([
@@ -268,7 +269,7 @@ function isCoherentTransition(
       sameArtifactReferences(current.artifactReferences, candidate.artifactReferences) &&
       sameOperations(current.operations, candidate.operations) &&
       current.authenticationRecoveryStage === candidate.authenticationRecoveryStage &&
-      safeFactsOnlyAdvance(current.safeFacts, candidate.safeFacts);
+      safeFactsOnlyAdvance(current.safeFacts, candidate.safeFacts, current.artifactReferences);
   }
   if (transition === "operation_planned") {
     return candidate.status === current.status && correctionUnchanged && progressDelta === 0 &&
@@ -524,6 +525,9 @@ function safeFacts(input: unknown, connectorScoped = false): ExecutionCheckpoint
       !["kind", "value", "sourceTool", "connectorId", "observedAt"].includes(key)
     )) throw new ExecutionCheckpointValidationError("safeFacts contains malformed state.");
     const kind = enumValue(value.kind, SAFE_FACT_KINDS, "safeFacts.kind");
+    if (kind === "polling_coordinates" && parsePollingCoordinates(value.value) === undefined) {
+      throw new ExecutionCheckpointValidationError("Invalid task polling coordinates.");
+    }
     const factValue = kind === "artifact_hash"
       ? sha256(value.value)
       : kind === "product_name"
@@ -597,11 +601,15 @@ function sameSafeFacts(
 
 function safeFactsOnlyAdvance(
   current: readonly ExecutionCheckpointSafeFact[],
-  candidate: readonly ExecutionCheckpointSafeFact[]
+  candidate: readonly ExecutionCheckpointSafeFact[],
+  artifacts: readonly ForegroundExecutionCheckpoint["artifactReferences"][number][]
 ): boolean {
-  return candidate.length > current.length && current.every((fact, index) =>
-    sameSafeFacts([fact], candidate[index] === undefined ? [] : [candidate[index]])
-  );
+  const advances = (prior: readonly ExecutionCheckpointSafeFact[]) =>
+    candidate.length > prior.length && prior.every((fact, index) =>
+      sameSafeFacts([fact], candidate[index] === undefined ? [] : [candidate[index]]));
+  // Only duplicate artifact locators may move out of the flat list. Their exact
+  // immutable receipts remain in artifactReferences; no destination fact is lost.
+  return advances(current) || advances(current.filter((fact) => !checkpointFactHasArtifactReceipt(fact, artifacts)));
 }
 
 function checkpointResources(input: unknown): ExecutionCheckpointResource[] {
@@ -619,7 +627,7 @@ function checkpointResources(input: unknown): ExecutionCheckpointResource[] {
     const artifacts = artifactReferences(value.artifactReferences);
     const facts = safeFacts(value.destinationFacts, true);
     if (artifacts.length > 4 || facts.length > 8 || facts.some((fact) =>
-      fact.connectorId === undefined || !["specification_id", "collection_id", "resource_id", "task_id"].includes(fact.kind))) {
+      fact.connectorId === undefined || !["specification_id", "collection_id", "resource_id", "task_id", "polling_coordinates"].includes(fact.kind))) {
       throw new ExecutionCheckpointValidationError("resources contains invalid related receipts.");
     }
     return {

@@ -35,6 +35,7 @@ describe("ArtifactStore durable session artifacts", () => {
     expect(registration).toMatchObject({
       id: "artifact-1",
       storageKey: "objects/object-1",
+      apiDescription: { format: "OpenAPI", version: "3.1.0" },
       sessionId: "session-1",
       profileId: "profile-1"
     });
@@ -45,6 +46,8 @@ describe("ArtifactStore durable session artifacts", () => {
     expect(first.get(retained.id, { ...scope(), profileId: "profile-2" })).toBeUndefined();
     expect(first.get(retained.id)).toBeUndefined();
 
+    // Older or altered format metadata cannot override inspection of verified bytes.
+    registration!.apiDescription = { format: "Swagger", version: "2.0" };
     const recreated = store(root);
     await expect(recreated.hydrateSessionArtifacts({
       events: [{ kind: "session-artifact-registered", artifact: registration }],
@@ -53,7 +56,7 @@ describe("ArtifactStore durable session artifacts", () => {
     expect(recreated.get("artifact://artifact-1", scope())).toMatchObject({
       path: "artifact://artifact-1",
       mimeType: "application/json",
-      metadata: { sha256, source: "browser.download" }
+      metadata: { sha256, source: "browser.download", apiDescription: { format: "OpenAPI", version: "3.1.0" } }
     });
 
     await recreated.hydrateSessionArtifacts({

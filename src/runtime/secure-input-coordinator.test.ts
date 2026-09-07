@@ -983,6 +983,72 @@ describe("SecureInputCoordinator", () => {
   });
 });
 
+describe("atomic grouped user credential collection", () => {
+  it.each(["approved", "denied"] as const)("honors one coordinated %s policy decision before collecting", async (decision) => {
+    const broker = brokerWithStableIds();
+    const registry = new SecureInputTransportRegistry();
+    registry.register(browserTransport({ destinationTypes: ["tool-argument"],
+      verificationStrength: "declared-target", requiresApproval: true }));
+    const authorize = vi.fn<NonNullable<ConstructorParameters<typeof SecureInputCoordinator>[0]["authorize"]>>(async () => decision);
+    const collect = vi.fn(async () => ({ status: "provided" as const, value: new TextEncoder().encode("fixture-secret") }));
+    const consume = vi.fn();
+    const coordinator = new SecureInputCoordinator({ broker, transports: registry, authorize, collect });
+    const result = await coordinator.createRequestHandler(scope).collectGroup({
+      purpose: "Configure credentials",
+      items: [0, 1].map((index) => ({ id: `argument-${index}`, request: { ...toolRequest,
+        destination: { type: "tool-argument", toolName: "trusted.updateRecords", argumentPath: `/values/${index}/value` }
+      } }))
+    }, consume);
+    expect(authorize).toHaveBeenCalledOnce();
+    expect(authorize).toHaveBeenCalledWith(expect.objectContaining({ assessment: { decision: "ask", reason: "transport-requires-approval" },
+      transferGroup: expect.objectContaining({ items: expect.any(Array) }) }));
+    expect(authorize.mock.calls[0]?.[0].transferGroup?.items).toHaveLength(2);
+    expect(collect).toHaveBeenCalledTimes(decision === "approved" ? 2 : 0);
+    expect(consume).toHaveBeenCalledTimes(decision === "approved" ? 1 : 0);
+    expect(result.status).toBe(decision === "approved" ? "delivered" : "failed");
+    broker.dispose();
+  });
+
+  it.each(["success", "cancel", "dispatch-failure", "abort"])("handles %s without early destination writes or retained secrets", async (outcome) => {
+    const broker = brokerWithStableIds();
+    const registry = new SecureInputTransportRegistry();
+    registry.register(browserTransport({ destinationTypes: ["tool-argument"], verificationStrength: "declared-target" }));
+    const values = [new TextEncoder().encode("fixture-key"), new TextEncoder().encode("fixture-secret")];
+    const controller = new AbortController();
+    const delivered: Uint8Array[] = [];
+    let collected = 0;
+    const consume = vi.fn(async (group: readonly { value: Uint8Array }[]) => {
+      expect(collected).toBe(2);
+      delivered.push(...group.map((entry) => entry.value));
+      expect(group.map((entry) => new TextDecoder().decode(entry.value))).toEqual(["fixture-key", "fixture-secret"]);
+      if (outcome === "dispatch-failure") throw new Error("fixture-key must never escape");
+    });
+    const coordinator = new SecureInputCoordinator({ broker, transports: registry,
+      authorize: async () => "approved",
+      collect: async (_request, _signal, context) => {
+        expect(consume).not.toHaveBeenCalled();
+        expect(context.group).toMatchObject({ index: collected + 1, total: 2 });
+        const value = values[collected++]!;
+        if (collected === 2 && outcome === "cancel") return { status: "cancelled" };
+        if (collected === 2 && outcome === "abort") controller.abort();
+        return { status: "provided", value };
+      }
+    });
+    const result = await coordinator.createRequestHandler(scope, controller.signal).collectGroup({
+      purpose: "Configure related credentials",
+      items: [0, 1].map((index) => ({ id: `argument-${index}`, request: { ...toolRequest,
+        destination: { type: "tool-argument", toolName: "trusted.updateRecords", argumentPath: `/values/${index}/value` }
+      } }))
+    }, consume);
+    expect(result.status).toBe(outcome === "success" ? "delivered" : outcome === "dispatch-failure" ? "failed" : "cancelled");
+    expect(consume).toHaveBeenCalledTimes(outcome === "success" || outcome === "dispatch-failure" ? 1 : 0);
+    expect(values[0]!.every((byte) => byte === 0)).toBe(true);
+    expect(delivered.every((value) => value.every((byte) => byte === 0))).toBe(true);
+    expect(JSON.stringify(result)).not.toMatch(/fixture-key|fixture-secret/);
+    broker.dispose();
+  });
+});
+
 function brokerWithStableIds(): EphemeralSecretBroker {
   let next = 0;
   return new EphemeralSecretBroker({ idFactory: () => `request-${++next}` });

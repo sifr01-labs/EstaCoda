@@ -1952,11 +1952,12 @@ describe("ToolExecutor tool-call metadata persistence", () => {
     expect(await persistedExecutionState(sessionDb, trajectoryRecorder)).not.toContain(sentinel);
   });
 
-  it("dispatches a Postman environment with two protected values in one atomic tool call", async () => {
+  it.each(["browser", "user"])("dispatches two protected %s values once and preserves the sanitized destination receipt", async (sourceMode) => {
     const secrets = ["grouped-key-sentinel", "grouped-secret-sentinel"];
     const run = vi.fn(async (input: Record<string, unknown>): Promise<ToolResult> => ({
       ok: true,
-      content: `stored ${JSON.stringify(input)}`,
+      content: JSON.stringify({ environment: { id: "environment-fixture" }, echoed: input }),
+      metadata: { _estacoda_continuity_facts: [{ field: "environmentId", value: "environment-fixture", kind: "identifier" }] },
     }));
     const tool: RegisteredTool = {
       ...createEchoTool("mcp.postman.createEnvironment"),
@@ -2001,6 +2002,7 @@ describe("ToolExecutor tool-call metadata persistence", () => {
         })),
       };
     });
+    handler.collectGroup = handler.transferGroup as SecureInputTransferRequestHandler["collectGroup"];
     const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({ tools: [tool] });
     const browserSource = (ref: string) => ({
       type: "browser-field" as const,
@@ -2021,13 +2023,13 @@ describe("ToolExecutor tool-call metadata persistence", () => {
               enabled: true,
               key: "service_client_id",
               type: "secret",
-              value: { protectedInput: { kind: "api-key", source: browserSource("@e1") } },
+              value: { protectedInput: { kind: "api-key", ...(sourceMode === "browser" ? { source: browserSource("@e1") } : {}) } },
             },
             {
               enabled: true,
               key: "service_client_secret",
               type: "secret",
-              value: { protectedInput: { kind: "client-secret", source: browserSource("@e2") } },
+              value: { protectedInput: { kind: "client-secret", ...(sourceMode === "browser" ? { source: browserSource("@e2") } : {}) } },
             },
           ],
         },
@@ -2048,10 +2050,11 @@ describe("ToolExecutor tool-call metadata persistence", () => {
         ],
       },
     }, expect.objectContaining({ onSecureInputRequest: undefined }));
-    expect(execution?.result).toEqual({
+    expect(execution?.result).toMatchObject({
       ok: true,
-      content: "2 protected values transferred atomically. Verify the destination state with a separate read.",
-      metadata: { protectedTransfer: true, protectedValueCount: 2 },
+      content: expect.stringContaining("environment-fixture"),
+      metadata: { protectedTransfer: true, protectedValueCount: 2,
+        _estacoda_continuity_facts: [{ field: "environmentId", value: "environment-fixture", kind: "identifier" }] },
     });
     expect(await persistedExecutionState(sessionDb, trajectoryRecorder)).not.toContain(secrets[0]);
     expect(await persistedExecutionState(sessionDb, trajectoryRecorder)).not.toContain(secrets[1]);

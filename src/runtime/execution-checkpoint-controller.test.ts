@@ -86,6 +86,31 @@ describe("ExecutionCheckpointController", () => {
     expect(JSON.stringify(attached)).not.toContain("/");
   });
 
+  it("reclaims only redundant artifact facts from a full checkpoint before retaining the environment", async () => {
+    const events: ExecutionCheckpointLifecycleEvent[] = [];
+    const controller = new ExecutionCheckpointController({ sessionId: "session-1", profileId: "profile-1",
+      now: () => now, record: async (event) => { events.push(event); } });
+    await controller.ensure(creation());
+    for (let i = 0; i < 8; i++) {
+      await controller.retainFacts(controller.current()!.revision, [
+        { kind: "artifact_id", value: `artifact-${i}`, sourceTool: "browser.download", observedAt: now },
+        { kind: "artifact_hash", value: i.toString(16).repeat(64), sourceTool: "browser.download", observedAt: now },
+        { kind: "specification_id", value: `spec-${i}`, sourceTool: "mcp.catalog.createSpec", connectorId: "catalog", observedAt: now }
+      ]);
+    }
+    expect(controller.current()!.safeFacts).toHaveLength(24);
+    for (let i = 0; i < 8; i++) await controller.attachArtifact(controller.current()!.revision,
+      { id: `artifact-${i}`, sha256: i.toString(16).repeat(64) });
+    await controller.retainFacts(controller.current()!.revision, [
+      { kind: "environment_id", value: "environment-1", sourceTool: "mcp.catalog.createEnvironment", connectorId: "catalog", observedAt: now }
+    ]);
+    expect(controller.current()!.safeFacts).toHaveLength(9);
+    expect(controller.current()!.safeFacts.filter((fact) => fact.kind === "specification_id")).toHaveLength(8);
+    expect(controller.current()!.artifactReferences).toHaveLength(8);
+    expect(hydratableExecutionCheckpoint({ events, sessionId: "session-1", profileId: "profile-1" }))
+      .toEqual(controller.current());
+  });
+
   it("hydrates reviewed facts and a coherent external-operation lifecycle", async () => {
     const events: ExecutionCheckpointLifecycleEvent[] = [];
     let tick = 0;

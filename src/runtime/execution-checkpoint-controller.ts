@@ -15,6 +15,8 @@ import type {
   ForegroundExecutionCheckpoint
 } from "../contracts/execution-checkpoint.js";
 import {
+  checkpointFactHasArtifactReceipt,
+  parsePollingCoordinates,
   EXECUTION_CHECKPOINT_MAX_FACTS,
   EXECUTION_CHECKPOINT_MAX_OPERATIONS,
   EXECUTION_CHECKPOINT_VERSION
@@ -184,15 +186,21 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
   ): Promise<ForegroundExecutionCheckpoint | undefined> {
     return await this.#transition(expectedRevision, "facts_retained", (current) => {
       const existing = new Set(current.safeFacts.map((fact) => `${fact.kind}\0${fact.value}`));
+      // Artifact receipts already live in artifactReferences/resources. Preserve
+      // scarce flat locator slots for destinations and outstanding jobs.
+      const retained = current.safeFacts.filter((fact) => !checkpointFactHasArtifactReceipt(fact, current.artifactReferences));
       const additions = facts
+        .filter((fact) => !checkpointFactHasArtifactReceipt(fact, current.artifactReferences) &&
+          !(fact.kind === "task_id" && facts.some((other) => other.kind === "polling_coordinates" &&
+            other.connectorId === fact.connectorId && parsePollingCoordinates(other.value)?.taskId === fact.value)))
         .filter((fact) => !existing.has(`${fact.kind}\0${fact.value}`))
-        .slice(0, Math.max(0, EXECUTION_CHECKPOINT_MAX_FACTS - current.safeFacts.length));
+        .slice(0, Math.max(0, EXECUTION_CHECKPOINT_MAX_FACTS - retained.length));
       if (additions.length === 0) return current;
       return {
         ...current,
         revision: current.revision + 1,
         progressRevision: current.progressRevision + 1,
-        safeFacts: [...current.safeFacts, ...additions.map((fact) => ({ ...fact }))],
+        safeFacts: [...retained, ...additions.map((fact) => ({ ...fact }))],
         updatedAt: this.#now()
       };
     });

@@ -50,7 +50,7 @@ export function checkpointResourcesFromResult(input: {
   }
   if (input.tool.connector === undefined) return resources;
   const facts = checkpointSafeFactsFromResult(input);
-  const destinations = facts.filter((fact) => ["specification_id", "collection_id", "resource_id", "task_id"].includes(fact.kind));
+  const destinations = facts.filter((fact) => ["specification_id", "collection_id", "resource_id", "task_id", "polling_coordinates"].includes(fact.kind));
   // Bulk results without per-item provenance must not be cross-wired into a row.
   if (destinations.some((fact) => destinations.filter((other) => other.kind === fact.kind).length > 1)) return resources;
   const artifactIds = facts.filter((fact) => fact.kind === "artifact_id");
@@ -64,9 +64,9 @@ export function checkpointResourcesFromResult(input: {
     const anchors = destinations.map((fact) => resources.filter((resource) => resource.destinationFacts.some((known) =>
       known.kind === fact.kind && known.value === fact.value && known.connectorId === fact.connectorId)))
       .filter((matches) => matches.length > 0);
-    // A returned task handle belongs to the exact, already-grounded destination
+    // A returned receipt belongs to the exact, already-grounded destination
     // used by this successful call. Never associate by a label or workspace.
-    if (destinations.some((fact) => fact.kind === "task_id")) {
+    if (destinations.length > 0) {
       for (const [field, kind] of Object.entries({ specId: "specification_id", specificationId: "specification_id", collectionId: "collection_id", resourceId: "resource_id" })) {
         const value = input.acceptedInput?.[field];
         if (typeof value !== "string") continue;

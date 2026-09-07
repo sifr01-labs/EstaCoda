@@ -80,6 +80,7 @@ describe("browser.download", () => {
         summary: "Governed browser download captured from a current grounded page target.",
         mimeType: "application/json",
         metadata: {
+          apiDescription: { format: "OpenAPI", version: "3.1.0" },
           filename: "openapi.json",
           sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
           sourceOrigin: "https://developer.example.test",

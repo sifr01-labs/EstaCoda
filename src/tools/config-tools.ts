@@ -544,7 +544,12 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
               properties: {
                 paths: { type: "array", minItems: 1, maxItems: 8, items: { type: "string" } },
                 allowedMimeTypes: { type: "array", minItems: 1, maxItems: 8, items: { type: "string" } },
-                maxBytes: { type: "integer", minimum: 1, maximum: 25 * 1024 * 1024 }
+                maxBytes: { type: "integer", minimum: 1, maximum: 25 * 1024 * 1024 },
+                typeMapping: {
+                  type: "object", additionalProperties: false,
+                  properties: { argument: { type: "string" }, values: { type: "object", additionalProperties: { type: "string" } } },
+                  required: ["argument", "values"]
+                }
               },
               required: ["paths", "allowedMimeTypes", "maxBytes"]
             }

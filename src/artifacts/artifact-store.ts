@@ -1,3 +1,4 @@
+import { reviewedApiDescription } from "../contracts/artifact.js";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, link, lstat, mkdir, readFile, realpath, unlink } from "node:fs/promises";
 import { isAbsolute, resolve, sep } from "node:path";
@@ -133,7 +134,8 @@ export class ArtifactStore {
       mimeType: input.mimeType,
       sha256: input.sha256,
       createdAt: this.#now().toISOString(),
-      source
+      source,
+      ...(reviewedApiDescription(inspection.apiDescription) === undefined ? {} : { apiDescription: reviewedApiDescription(inspection.apiDescription) })
     };
 
     // The file is authoritative first. If persistence fails it remains an inert,
@@ -172,6 +174,8 @@ export class ArtifactStore {
           inspection.mimeType !== registration.mimeType ||
           createHash("sha256").update(content).digest("hex") !== registration.sha256
         ) continue;
+        // Recompute from hash-verified bytes, including registrations from older versions.
+        registration.apiDescription = reviewedApiDescription(inspection.apiDescription);
       } catch {
         continue;
       }
@@ -239,6 +243,7 @@ function artifactFromRegistration(
       sha256: registration.sha256,
       sourceOrigin: registration.source.origin,
       source: registration.source.kind,
+      ...(registration.apiDescription === undefined ? {} : { apiDescription: registration.apiDescription }),
       outcome: "download-completed"
     }
   };
@@ -246,7 +251,7 @@ function artifactFromRegistration(
 
 function parseRegistration(value: unknown): SessionArtifactRegistration | undefined {
   if (!isRecord(value) || Object.keys(value).some((key) => ![
-    "version", "id", "sessionId", "profileId", "storageKey", "kind", "bytes", "mimeType", "sha256", "createdAt", "source"
+    "version", "id", "sessionId", "profileId", "storageKey", "kind", "bytes", "mimeType", "sha256", "createdAt", "source", "apiDescription"
   ].includes(key))) return undefined;
   if (
     value.version !== SESSION_ARTIFACT_VERSION ||
@@ -276,7 +281,8 @@ function parseRegistration(value: unknown): SessionArtifactRegistration | undefi
     mimeType: value.mimeType,
     sha256: value.sha256,
     createdAt: value.createdAt,
-    source
+    source,
+    ...(reviewedApiDescription(value.apiDescription) === undefined ? {} : { apiDescription: reviewedApiDescription(value.apiDescription) })
   };
 }
 

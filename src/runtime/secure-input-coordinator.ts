@@ -1,5 +1,6 @@
 import type {
   SecureInputCollector,
+  SecureInputCollectionGroupRequest,
   SecureInputConsumer,
   SecureInputGroupReceipt,
   SecureInputGroupRequest,
@@ -109,6 +110,15 @@ export class SecureInputCoordinator {
       group: request,
       signal
     });
+    handler.collectGroup = async (group, consume) => {
+      validateTransferGroup(group);
+      return await this.requestGroup({
+        scope: boundScope,
+        group: { ...group, items: group.items.map((item) => ({ ...item, consume: () => undefined })) },
+        consumeTogether: consume,
+        signal
+      });
+    };
     handler.transfer = async (transfer, consume) => await this.transfer({
       scope: boundScope,
       transfer,
@@ -415,9 +425,11 @@ export class SecureInputCoordinator {
   async requestGroup(input: {
     scope: SecureInputScope;
     group: SecureInputGroupRequest;
+    consumeTogether?: SecureInputTransferGroupConsumer;
     signal?: AbortSignal;
   }): Promise<SecureInputGroupReceipt> {
     validateGroup(input.group);
+    if (input.consumeTogether !== undefined) validateTransferGroup(input.group);
     const controller = linkedAbortController(input.signal);
     const entries: Array<{
       id: string;
@@ -447,7 +459,7 @@ export class SecureInputCoordinator {
         if (assessment.decision === "deny") {
           throw new Error("The requested retention is not supported by this destination.");
         }
-        if (assessment.decision === "ask") {
+        if (assessment.decision === "ask" && input.consumeTogether === undefined) {
           const decision = this.#authorize === undefined
             ? "denied"
             : await this.#authorize({
@@ -460,6 +472,24 @@ export class SecureInputCoordinator {
             throw new Error("Protected input delivery was not authorized.");
           }
         }
+      }
+
+      const authorizationEntry = entries.find((entry) =>
+        assessSecureInputPolicy(entry.request, entry.selection.policy).decision === "ask");
+      if (input.consumeTogether !== undefined && authorizationEntry !== undefined) {
+        const first = authorizationEntry;
+        const decision = await this.#authorize?.({
+          request: structuredClone(first.request), transportId: first.selection.transport.id,
+          destinationLabel: `${entries.length} protected destinations`,
+          assessment: assessSecureInputPolicy(first.request, first.selection.policy),
+          transferGroup: { purpose: input.group.purpose, items: entries.map((entry, index) => ({
+            sourceLabel: "Protected user input", credentialLabel: secureInputKindLabel(entry.request.kind),
+            destinationLabel: entry.selection.verifiedDestination.label,
+            persistence: input.group.items[index]?.handling?.persistence ?? "unknown",
+            sharing: input.group.items[index]?.handling?.sharing ?? "unknown"
+          })) }
+        });
+        if (decision !== "approved" || controller.signal.aborted) throw new Error("Protected input delivery was not authorized.");
       }
 
       for (const entry of entries) {
@@ -491,6 +521,7 @@ export class SecureInputCoordinator {
           }
         );
         if (collected.status === "cancelled" || controller.signal.aborted) {
+          if (collected.status === "provided") collected.value.fill(0);
           for (const candidate of entries) {
             if (candidate.snapshot !== undefined) {
               cancelPending(this.#broker, candidate.snapshot.id, input.scope);
@@ -529,8 +560,16 @@ export class SecureInputCoordinator {
         });
       }
 
+      if (input.consumeTogether !== undefined) {
+        await this.#deliverTransferGroup({
+          scope: input.scope,
+          entries: entries.map((entry) => ({ ...entry, snapshot: entry.snapshot! })),
+          consume: input.consumeTogether,
+          signal: controller.signal
+        });
+      }
       for (const entry of entries) {
-        await this.#deliver({
+        if (input.consumeTogether === undefined) await this.#deliver({
           scope: input.scope,
           request: entry.request,
           consume: entry.consume,
@@ -842,7 +881,7 @@ function validateGroup(group: SecureInputGroupRequest): void {
   }
 }
 
-function validateTransferGroup(group: SecureInputTransferGroupRequest): void {
+function validateTransferGroup(group: SecureInputCollectionGroupRequest): void {
   if (typeof group.purpose !== "string" || group.purpose.trim().length === 0 || group.purpose.length > 500) {
     throw new Error("A protected-transfer group requires a bounded purpose.");
   }

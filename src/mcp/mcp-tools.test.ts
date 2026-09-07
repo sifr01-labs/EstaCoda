@@ -32,6 +32,17 @@ describe("MCP per-tool risk classification", () => {
       expect(result.metadata?._estacoda_continuity_facts).toEqual([{ field: "taskId", kind: "identifier", value: "remote-task-fixture" }]);
     } finally { await server?.stop(); }
   });
+  it("retains exact polling coordinates only from reviewed, matching relative task paths", () => {
+    const facts = (url: string, taskId = "job-1", paths = ["/taskId", "/url"]) =>
+      normalizeMcpResult({ url, taskId }, [], paths, "generateCollection").metadata?._estacoda_continuity_facts;
+    expect(facts("/specs/spec-1/tasks/job-1")).toEqual(expect.arrayContaining([
+      { field: "pollingCoordinates", value: "specs:spec-1:job-1", kind: "identifier" }
+    ]));
+    for (const url of ["https://evil.example/specs/spec-1/tasks/job-1", "/specs/../tasks/job-1", "/specs/spec-1/tasks/job-2", "/specs/spec-1/tasks/job-1?token=secret"]) {
+      expect(facts(url)?.some((fact) => fact.field === "pollingCoordinates")).toBe(false);
+    }
+    expect(facts("/specs/spec-1/tasks/job-1", "job-1", ["/taskId"])?.some((fact) => fact.field === "pollingCoordinates")).toBe(false);
+  });
   const postmanRiskClasses = {
     getAuthenticatedUser: "read-only-network",
     getWorkspaces: "read-only-network",
@@ -719,7 +730,7 @@ describe("MCP governed artifact relay", () => {
   it("reuses a hydrated session artifact after runtime recreation without another download", async () => {
     const root = await mkdtemp(join(tmpdir(), "estacoda-mcp-artifact-resume-"));
     try {
-      const content = JSON.stringify({ openapi: "3.1.0", paths: {} });
+      const content = JSON.stringify({ swagger: "2.0", paths: {} });
       const sha256 = createHash("sha256").update(content).digest("hex");
       const capturePath = join(root, "capture.json");
       await writeFile(capturePath, content, { mode: 0o600 });
@@ -763,7 +774,8 @@ describe("MCP governed artifact relay", () => {
               importSpec: {
                 paths: ["/files/*/content"],
                 allowedMimeTypes: ["application/json"],
-                maxBytes: 1024
+                maxBytes: 1024,
+                typeMapping: { argument: "type", values: { "Swagger:2.0": "OPENAPI:2.0" } }
               }
             }
           }
@@ -772,7 +784,13 @@ describe("MCP governed artifact relay", () => {
         fetch: artifactRelayFetch((args) => { dispatched = args; })
       });
       const tool = server?.tools.find((candidate) => candidate.name === "mcp.destination.importSpec");
-      const result = await tool?.run({ files: [{ path: "openapi.json", content: {
+      const wrongType = await tool?.run({ type: "OPENAPI:3.0", files: [{ path: "openapi.json", content: {
+        artifactInput: { reference: "artifact://resumed-api-description", sha256 }
+      } }] }, { sessionId: "session-1", profileId: "profile-1" });
+      expect(wrongType).toMatchObject({ ok: false, metadata: { reason: "artifact-type-declaration-mismatch" } });
+      expect(wrongType?.content).toContain('"OPENAPI:2.0"');
+      expect(dispatched).toBeUndefined();
+      const result = await tool?.run({ type: "OPENAPI:2.0", files: [{ path: "openapi.json", content: {
         artifactInput: { reference: "artifact://resumed-api-description", sha256 }
       } }] }, { sessionId: "session-1", profileId: "profile-1" });
 
@@ -964,6 +982,7 @@ function artifactRelayFetch(
                 type: "object",
                 properties: {
                   name: { type: "string" },
+                  type: { type: "string" },
                   files: {
                     type: "array",
                     items: {

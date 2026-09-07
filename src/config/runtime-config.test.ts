@@ -228,6 +228,16 @@ describe("setupMcpConfig capability validation", () => {
           toolVerificationRelationships: { verify: ["update"] }
         }
       })).rejects.toThrow(/Invalid verification relationship/u);
+      await expect(setupMcpConfig({
+        ...base,
+        input: {
+          name: "records", command: "records-mcp",
+          artifactToolArguments: { importSpec: {
+            paths: ["/files/*/content"], allowedMimeTypes: ["application/yaml"], maxBytes: 1024,
+            typeMapping: { argument: "../type", values: { "Swagger:2.0": "OPENAPI:2.0" } }
+          } }
+        }
+      })).rejects.toThrow(/Invalid artifact type mapping/u);
       await expect(readFile(profileConfigPath(homeDir), "utf8")).rejects.toThrow();
     } finally {
       await rm(homeDir, { recursive: true, force: true });
@@ -3461,7 +3471,8 @@ describe("loadRuntimeConfig profile loading", () => {
             importSpec: {
               paths: ["/files/*/content"],
               allowedMimeTypes: ["application/json", "application/yaml"],
-              maxBytes: 12 * 1024 * 1024
+              maxBytes: 12 * 1024 * 1024,
+              typeMapping: { argument: "type", values: { "Swagger:2.0": "OPENAPI:2.0" } }
             }
           }
         }
@@ -3494,7 +3505,8 @@ describe("loadRuntimeConfig profile loading", () => {
       importSpec: {
         paths: ["/files/*/content"],
         allowedMimeTypes: ["application/json", "application/yaml"],
-        maxBytes: 12 * 1024 * 1024
+        maxBytes: 12 * 1024 * 1024,
+        typeMapping: { argument: "type", values: { "Swagger:2.0": "OPENAPI:2.0" } }
       }
     });
     await rm(workspace, { recursive: true, force: true });

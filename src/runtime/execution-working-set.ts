@@ -1,3 +1,4 @@
+import { parsePollingCoordinates } from "../contracts/execution-checkpoint.js";
 import { createHash } from "node:crypto";
 import type { ToolRiskClass } from "../contracts/tool.js";
 import type {
@@ -137,7 +138,7 @@ export class ExecutionWorkingSetController {
     const facts = [...this.#facts.values()].map(({ fact }) => ({ ...fact }));
     const summaries = new Set(facts.map((fact) => fact.summary));
     for (const fact of checkpoint?.safeFacts ?? []) {
-      const summary = checkpointFactSummary(fact.kind, fact.value);
+      const summary = `${fact.kind !== "polling_coordinates" || fact.connectorId === undefined ? "" : `${fact.connectorId}: `}${checkpointFactSummary(fact.kind, fact.value)}`;
       if (summaries.has(summary)) continue;
       summaries.add(summary);
       facts.push({
@@ -316,6 +317,7 @@ function collectReviewedContinuityScalars(value: unknown): SafeScalar[] {
 
 function reviewedContinuityKind(field: string): "identifier" | "label" | undefined {
   const normalized = field.replace(/[_-]+/gu, "").toLocaleLowerCase();
+  if (normalized === "pollingcoordinates") return "identifier";
   if (INELIGIBLE_IDENTIFIER_FIELDS.has(normalized)) return undefined;
   if (/(?:^id$|id$|identifier$|uid$|uuid$|hash$|sha256$|ref$|reference$)/u.test(normalized)) return "identifier";
   if (/(?:^name$|name$|label$|title$)/u.test(normalized)) return "label";
@@ -453,7 +455,9 @@ function humanizeField(field: string): string {
 }
 
 function checkpointFactSummary(kind: import("../contracts/execution-checkpoint.js").ExecutionCheckpointSafeFactKind, value: string): string {
-  const label: Record<typeof kind, string> = {
+  if (kind === "polling_coordinates") return `Task status arguments: ${JSON.stringify(parsePollingCoordinates(value))}`;
+  const label: Record<Exclude<typeof kind, "polling_coordinates">, string> = {
+    environment_id: "Environment ID",
     resource_id: "Resource ID",
     workspace_id: "Workspace ID",
     collection_id: "Collection ID",

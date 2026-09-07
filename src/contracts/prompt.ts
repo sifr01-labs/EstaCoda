@@ -22,6 +22,7 @@ export type PromptLayerName =
   | "memory"
   | "session-recall"
   | "external-recall"
+  | "authentication-state"
   | "native-tools"
   | "tool-results"
   | "artifacts"

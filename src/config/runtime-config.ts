@@ -78,7 +78,22 @@ export type MCPProtectedToolArgumentsConfig = {
   /** Whether protected values may be relayed from a verified browser field. */
   browserRelay?: boolean;
 };
+export type MCPArtifactTypeMapping = { argument: string; values: Record<string, string> };
+
+export function isMcpArtifactTypeMapping(value: unknown): value is MCPArtifactTypeMapping {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const mapping = value as MCPArtifactTypeMapping;
+  return typeof mapping.argument === "string" && /^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(mapping.argument) &&
+    mapping.values !== null && typeof mapping.values === "object" && !Array.isArray(mapping.values) &&
+    Object.keys(mapping.values).length > 0 && Object.keys(mapping.values).length <= 16 &&
+    Object.entries(mapping.values).every(([key, entry]) =>
+      /^(?:Swagger|OpenAPI|AsyncAPI|RAML|GraphQL|Smithy)(?::\d{1,3}(?:\.\d{1,3}){0,2})?$/u.test(key) &&
+      typeof entry === "string" && /^[A-Za-z0-9][A-Za-z0-9:._-]{0,63}$/u.test(entry));
+}
+
 export type MCPArtifactToolArgumentsConfig = {
+  /** Reviewed mapping from detected format:version to a destination string argument. */
+  typeMapping?: MCPArtifactTypeMapping;
   /** Reviewed JSON Pointer patterns whose string value may come from a session artifact. */
   paths: string[];
   /** Exact textual MIME types accepted by the connector destination. */
@@ -2460,13 +2475,15 @@ function normalizeArtifactToolArguments(value: unknown): Record<string, MCPArtif
     if (!Array.isArray(record.paths) || record.paths.length === 0 || record.paths.some((path) => typeof path !== "string") ||
         !Array.isArray(record.allowedMimeTypes) || record.allowedMimeTypes.length === 0 ||
         record.allowedMimeTypes.some((mimeType) => typeof mimeType !== "string") ||
-        typeof record.maxBytes !== "number") {
+        typeof record.maxBytes !== "number" ||
+        (record.typeMapping !== undefined && !isMcpArtifactTypeMapping(record.typeMapping))) {
       throw new Error(`Invalid MCP artifact argument configuration for tool ${toolName.slice(0, 160)}`);
     }
     return [toolName, {
       paths: record.paths as string[],
       allowedMimeTypes: record.allowedMimeTypes as string[],
-      maxBytes: record.maxBytes
+      maxBytes: record.maxBytes,
+      ...(record.typeMapping === undefined ? {} : { typeMapping: record.typeMapping as MCPArtifactTypeMapping })
     }] as [string, MCPArtifactToolArgumentsConfig];
   });
   return entries.length === 0 ? undefined : Object.fromEntries(entries);
@@ -3936,6 +3953,9 @@ function validateMcpSetupInput(input: MCPSetupInput): void {
   }
   for (const [toolName, declaration] of Object.entries(input.artifactToolArguments ?? {})) {
     requireNonEmpty(toolName, "MCP artifact argument tool name");
+    if (declaration.typeMapping !== undefined && !isMcpArtifactTypeMapping(declaration.typeMapping)) {
+      throw new Error(`Invalid artifact type mapping for MCP tool ${toolName}`);
+    }
     if (!Array.isArray(declaration.paths) || declaration.paths.length === 0 || declaration.paths.length > 8 ||
         declaration.paths.some((path) => !isProtectedArgumentPattern(path)) ||
         new Set(declaration.paths).size !== declaration.paths.length ||
@@ -4018,6 +4038,7 @@ function isMutationRiskClass(value: ToolRiskClass): boolean {
 }
 
 function isContinuityResultPattern(path: string): boolean {
+  if (path === "/url") return true; // Result normalization admits only bounded, relative task coordinates.
   const segments = parseProtectedArgumentPattern(path);
   if (segments === undefined) return false;
   const namedSegments = segments.filter((segment) => segment !== "*");

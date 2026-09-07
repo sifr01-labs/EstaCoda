@@ -154,7 +154,11 @@ Postman is configured through the same generic MCP entry as any other connector.
         "createSpec": {
           "paths": ["/files/*/content"],
           "allowedMimeTypes": ["application/json", "application/yaml"],
-          "maxBytes": 12582912
+          "maxBytes": 12582912,
+          "typeMapping": {
+            "argument": "type",
+            "values": { "Swagger:2.0": "OPENAPI:2.0", "OpenAPI:3.0": "OPENAPI:3.0", "OpenAPI:3.1": "OPENAPI:3.1" }
+          }
         }
       },
       "protectedToolArguments": {
@@ -184,9 +188,11 @@ Postman is configured through the same generic MCP entry as any other connector.
         "getWorkspaces": ["/workspaces/*/id", "/workspaces/*/name"],
         "getCollection": ["/collection/id", "/collection/name", "/collection/info/_postman_id", "/collection/info/name"],
         "getEnvironment": ["/environment/id", "/environment/name"],
+        "createEnvironment": ["/environment/id", "/environment/name"],
+        "getEnvironments": ["/environments/*/id", "/environments/*/name"],
         "getSpec": ["/id"],
         "createSpec": ["/id", "/name"],
-        "generateCollection": ["/taskId"],
+        "generateCollection": ["/taskId", "/url"],
         "getSpecCollections": ["/collections/*/id", "/collections/*/name"]
       },
       "toolVerificationRelationships": {
@@ -200,7 +206,7 @@ Postman is configured through the same generic MCP entry as any other connector.
 }
 ```
 
-Store the Postman API key only in the selected profile's `.env`; the committed or reviewed config contains the environment-variable reference only. Use a dedicated Postman environment and create its related variables in one `createEnvironment` call. Each variable should use `type: "secret"`, and all two to eight protected values in that call are authorized as one group and dispatched once only after every source remains valid. A collection should contain references such as `{{service_client_id}}` and `{{service_client_secret}}`, never copied credential values.
+Store the Postman API key only in the selected profile's `.env`; the committed or reviewed config contains the environment-variable reference only. Use a dedicated Postman environment and create its related variables in one `createEnvironment` call. Each variable should use `type: "secret"`, and two to eight protected values can be collected from the operator in one coordinated protected-input flow, or transferred together from verified browser sources. Mixed user/browser groups are rejected. Every destination is bound before collection; required protected-input authorization is grouped, and dispatch happens once only after all values are available and all destinations remain valid. Cancellation before dispatch writes nothing to the destination. After dispatch, upstream failure may leave an uncertain outcome and requires readback before retry. A collection should contain references such as `{{service_client_id}}` and `{{service_client_secret}}`, never copied credential values.
 
 When the source portal exposes OpenAPI or Swagger, capture it with `browser.download` and pass its receipt to `createSpec.files[*].content` through the artifact envelope. EstaCoda injects the validated text directly; do not paste the specification into a model-authored argument. Verify the specification with `getSpec`. `generateCollection` accepts an asynchronous job: retain its task ID and poll `getAsyncSpecTaskStatus` with `elementType: "specs"`, the original spec ID as `elementId`, and the returned `taskId`. Read the task's actual status before retrying generation; an empty collection list does not diagnose a queue failure. After completion, verify with `getSpecCollections` and `getCollection`. This is a generic artifact-to-MCP relay configured for Postman's inspected schema, not a Postman runtime branch.
 
@@ -213,6 +219,12 @@ After applying the recipe, reload MCP discovery and inspect `mcp status`. It sho
 At execution time, the runtime copies only the validated connector and verification relationship into its bounded effect receipt. A successful verifier is associated with the most recent compatible successful mutation from the same visible turn, using target identity when both calls provide one. When a durable operation has no connector-specific verification parser, that reviewed relationship may verify it only when exactly one compatible pending operation exists; failed or ambiguous reads do not. MCP results and model-authored plan text cannot create or override that relationship.
 
 The reviewed configuration tool accepts these structured fields directly. The CLI accepts `--protected-tool-arguments-json`, `--artifact-tool-arguments-json`, `--redacted-tool-result-paths-json`, and `--tool-verification-relationships-json`. `mcp status` reports only yes/no capability summaries; it never prints reviewed paths, artifact contents, or credential values.
+
+Workflow continuity retains reviewed environment identifiers and bounded task polling coordinates across turns. A reviewed `/url` continuity path accepts only a relative `/<resource-type>/<resource-id>/tasks/<task-id>` path paired with the matching reviewed `/taskId`. It never grants URL-fetch authority. Use the connector's registered status tool with those coordinates. A 403 establishes that the specific request was forbidden; verify its coordinates before claiming a connector-wide permission problem.
+
+The optional artifact `typeMapping` in the recipe binds detected API format/version to the destination's string argument. The relay re-inspects hash-verified artifact bytes and refuses a known contradictory declaration with the required correction, without conversion or a connector request. Unknown/unmapped formats keep the existing relay behavior. Applying this mapping and the expanded continuity paths to an existing profile requires the reviewed MCP setup/apply path and a session reload; editing this recipe does not mutate a live profile.
+
+Grouped protected writes return only a sanitized reviewed receipt projection (including configured continuity identifiers), not arbitrary upstream echoes. Configure `createEnvironment` continuity paths as well as the readback paths so the destination ID survives the protected write. Credential values and echoed transformations are not returned to the provider.
 
 ## Read Reuse
 

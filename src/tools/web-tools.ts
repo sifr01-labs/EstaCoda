@@ -2372,6 +2372,7 @@ function createBrowserDownloadTool(
                     sha256,
                     sourceOrigin,
                     source: "browser.download",
+                    ...(inspection.apiDescription === undefined ? {} : { apiDescription: inspection.apiDescription }),
                     outcome: "download-completed"
                   }
                 }));

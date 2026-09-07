@@ -1,3 +1,6 @@
+import { parsePollingCoordinates } from "../contracts/execution-checkpoint.js";
+import { isMcpArtifactTypeMapping } from "../config/runtime-config.js";
+import { inspectBrowserDownload } from "../artifacts/browser-download-validation.js";
 import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
@@ -331,6 +334,16 @@ function createMcpTool(
           normalized.content += `\n\nVerification remains pending: ${reason}. This does not block independent work. Inspect job status or the destination readback before repeating a mutation.`;
         }
       }
+      const polling = normalized.metadata?._estacoda_continuity_facts?.find((fact) => fact.field === "pollingCoordinates");
+      const coordinates = parsePollingCoordinates(polling?.value);
+      if (coordinates !== undefined) {
+        const hint = `Grounded task status arguments for this connector: ${JSON.stringify(coordinates)}. Use its registered status tool; this is not authorization to fetch a URL.`;
+        normalized.content += `\n\n${hint}`;
+        normalized.metadata = { ...normalized.metadata, _estacoda_context_summary: hint };
+      }
+      if (!normalized.ok && /\b403\b/u.test(normalized.content)) {
+        normalized.content += "\nThis particular request was forbidden. Check its resource type and IDs against the originating receipt before diagnosing connector-wide permissions. Do not repeat identical failed arguments; continue independent work.";
+      }
       if (relay.artifacts.length === 0) return normalized;
       const redacted = redactRelayedArtifactContent(normalized, relayedContents);
       const artifactContinuityFacts = relay.artifacts.flatMap(({ id, sha256 }) => [
@@ -420,6 +433,10 @@ export function validateMcpCapabilityConfiguration(
     if (declaration.paths.some((path) => !schemaAcceptsProtectedString(tool.inputSchema, path))) {
       return `MCP artifact argument mapping does not match the input schema for tool ${boundedToolName(toolName)}.`;
     }
+    if (declaration.typeMapping !== undefined && (
+      !isMcpArtifactTypeMapping(declaration.typeMapping) ||
+      !schemaAcceptsProtectedString(tool.inputSchema, `/${declaration.typeMapping.argument}`)
+    )) return `MCP artifact type mapping does not match the input schema for tool ${boundedToolName(toolName)}.`;
     const protectedPaths = config.protectedToolArguments?.[toolName]?.paths ?? [];
     const combinedPaths = [...protectedPaths, ...declaration.paths];
     if (new Set(combinedPaths).size !== combinedPaths.length || protectedPatternsOverlap(combinedPaths)) {
@@ -702,6 +719,22 @@ async function resolveArtifactArguments(
     const sha256 = createHash("sha256").update(fileBytes).digest("hex");
     if (sha256 !== metadata.sha256 || sha256 !== descriptor.sha256) {
       return artifactRelayFailure("artifact-hash-mismatch");
+    }
+    const mapping = declaration.typeMapping;
+    if (mapping !== undefined && typeof metadata.filename === "string") {
+      const inspection = inspectBrowserDownload(metadata.filename, fileBytes);
+      const api = inspection.allowed ? inspection.apiDescription : undefined;
+      if (api !== undefined) {
+        const formatVersion = `${api.format}${api.version === undefined ? "" : `:${api.version}`}`;
+        const expected = mapping.values[formatVersion] ?? (api.version === undefined ? undefined
+          : mapping.values[`${api.format}:${api.version.split(".").slice(0, 2).join(".")}`]);
+        if (expected !== undefined && input[mapping.argument] !== expected) {
+          return { ok: false, result: { ok: false,
+            content: `Artifact format is ${formatVersion}. Set ${mapping.argument} to ${JSON.stringify(expected)} before retrying this import. No destination request was dispatched; independent work may continue.`,
+            metadata: { reason: "artifact-type-declaration-mismatch" }
+          } };
+        }
+      }
     }
     let content: string;
     try {
@@ -1227,6 +1260,19 @@ function extractReviewedContinuityFacts(
     for (const path of paths) {
       const segments = parseProtectedArgumentPattern(path);
       if (segments === undefined) continue;
+      if (path === "/url") {
+        // Only a reviewed relative task path paired with its reviewed task ID is admitted.
+        // Absolute URLs, queries, fragments, traversal, and unmatched handles are excluded.
+        if (!paths.includes("/taskId") || !isRecord(payload) || typeof payload.url !== "string") continue;
+        const match = /^\/([^/]+)\/([^/]+)\/tasks\/([^/]+)$/u.exec(payload.url);
+        const value = match === null ? undefined : `${match[1]}:${match[2]}:${match[3]}`;
+        const coordinates = parsePollingCoordinates(value);
+        if (coordinates !== undefined && coordinates.taskId === payload.taskId && safeContinuityScalar(value) !== undefined) {
+          const key = `pollingCoordinates\0${value}`;
+          if (!seen.has(key)) { seen.add(key); facts.push({ field: "pollingCoordinates", value: value!, kind: "identifier" }); }
+        }
+        continue;
+      }
       const field = continuityField(segments, toolName);
       const kind = continuityKind(field);
       for (const candidate of valuesAtContinuityPath(payload, segments, 0)) {
@@ -1409,6 +1455,7 @@ function continuityKind(field: string): RuntimeContinuityFact["kind"] {
 }
 
 function isContinuityResultPattern(path: string): boolean {
+  if (path === "/url") return true; // Only validated task coordinates are retained from this path.
   const segments = parseProtectedArgumentPattern(path);
   if (segments === undefined) return false;
   const namedSegments = segments.filter((segment) => segment !== "*");

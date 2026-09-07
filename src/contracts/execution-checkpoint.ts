@@ -50,6 +50,8 @@ export type ExecutionCheckpointArtifactReference = {
 };
 
 export type ExecutionCheckpointSafeFactKind =
+  | "environment_id"
+  | "polling_coordinates"
   | "resource_id"
   | "workspace_id"
   | "collection_id"
@@ -238,3 +240,19 @@ export type ExecutionCheckpointSupervisionController = ExecutionCheckpointJourna
     stage: ExecutionCheckpointAuthenticationStage | undefined
   ): Promise<ForegroundExecutionCheckpoint | undefined>;
 };
+
+/** Coordinates are locators only; they confer no connector or network authority. */
+export function parsePollingCoordinates(value: unknown): { elementType: string; elementId: string; taskId: string } | undefined {
+  if (typeof value !== "string") return undefined;
+  const match = /^([A-Za-z][A-Za-z0-9_-]{0,31}):([A-Za-z0-9][A-Za-z0-9_.-]{0,79}):([A-Za-z0-9][A-Za-z0-9_.-]{0,79})$/u.exec(value);
+  return match === null ? undefined : { elementType: match[1]!, elementId: match[2]!, taskId: match[3]! };
+}
+
+export function checkpointFactHasArtifactReceipt(
+  fact: ExecutionCheckpointSafeFact,
+  artifacts: readonly ExecutionCheckpointArtifactReference[]
+): boolean {
+  return artifacts.some((artifact) =>
+    (fact.kind === "artifact_id" && fact.value === artifact.id) ||
+    (fact.kind === "artifact_hash" && fact.value === artifact.sha256));
+}
