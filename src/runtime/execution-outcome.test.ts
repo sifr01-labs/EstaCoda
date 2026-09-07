@@ -128,6 +128,42 @@ function completedPlan(): ExecutionPlan {
   };
 }
 
+describe("successful mutation replay recovery", () => {
+  const duplicate = () => unsuccessfulReceipt("blocked", { completedReplayOf: "call-update" });
+  const outcome = (receipts: ExecutionEvidenceRecord[], openContinuation = false) => deriveExecutionFinalOutcome({
+    toolExecutions: [], executionReceipts: receipts, openContinuation,
+    completionFloor: "mutation_with_verification"
+  });
+
+  it("retains errors but completes an expired attempt followed by a successful write, skipped duplicate and matching readback", () => {
+    expect(outcome([
+      unsuccessfulReceipt("failed"), successfulReceipt(), duplicate(), verificationReceipt()
+    ]).status).toBe("completed_with_recovered_errors");
+    expect(outcome([successfulReceipt(), verificationReceipt(), duplicate()]).status)
+      .toBe("completed_with_recovered_errors");
+  });
+
+  it.each([
+    ["missing verification", [successfulReceipt(), duplicate()]],
+    ["ordinary denial", [successfulReceipt(), unsuccessfulReceipt("blocked"), verificationReceipt()]],
+    ["missing original", [duplicate(), verificationReceipt()]],
+    ["failed verification", [successfulReceipt(), duplicate(), unsuccessfulReceipt("failed", { tool: "mcp.postman.getCollection" })]],
+    ["unrelated verification", [successfulReceipt(), duplicate(), verificationReceipt({ verifiedMutation: { toolCallId: "another-write", tool: "mcp.postman.updateCollection" } })]],
+    ["different turn", [successfulReceipt(), duplicate(), verificationReceipt({ visibleTurnId: "other-turn" })]],
+    ["unknown verification turn", [successfulReceipt(), duplicate(), verificationReceipt({ visibleTurnId: undefined })]],
+    ["different connector", [successfulReceipt(), duplicate(), verificationReceipt({ executionEffect: { kind: "verification", verifies: ["mcp.postman.updateCollection"], connector: { kind: "mcp", id: "other" } } })]],
+    ["unrelated blocked work", [successfulReceipt(), duplicate(), verificationReceipt(), unsuccessfulReceipt("unavailable", { toolCallId: "unavailable-other" })]]
+  ] as const)("does not clear %s", (_name, receipts) => {
+    expect(outcome([...receipts]).status).not.toMatch(/^completed/u);
+  });
+
+  it("keeps open work and unmet completion floors ahead of recovered error classification", () => {
+    expect(outcome([unsuccessfulReceipt("failed"), successfulReceipt()]).status).toBe("partially_completed");
+    expect(outcome([unsuccessfulReceipt("failed"), successfulReceipt(), duplicate(), verificationReceipt()], true).status)
+      .toBe("partially_completed");
+  });
+});
+
 function activePlan(): ExecutionPlan {
   return {
     objective: "Update and verify Postman",

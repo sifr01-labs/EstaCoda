@@ -21,6 +21,8 @@ import {
 } from "../runtime/execution-checkpoint-controller.js";
 import { hydratableExecutionCheckpoint } from "../session/execution-checkpoint-state.js";
 import { semanticMutationKey } from "./execution-operation-ledger.js";
+import { ExecutionEvidenceIndex } from "../runtime/execution-evidence-index.js";
+import { deriveExecutionFinalOutcome } from "../runtime/execution-outcome.js";
 import type { SecureInputTransferGroupConsumer, SecureInputTransferGroupRequest, SecureInputTransferRequestHandler } from "../contracts/secure-input.js";
 
 function createMockPolicy(decision: "allow" | "deny" = "allow"): SecurityPolicy {
@@ -1693,14 +1695,29 @@ describe("ToolExecutor tool-call metadata persistence", () => {
     expect(created).toMatchObject({ decision: "allow", result: { ok: true } });
     expect(pendingReplay).toMatchObject({
       decision: "deny",
+      completedReplayOf: "call-create",
       result: { metadata: { reason: "completed-mutation-replay", operationStatus: "verification-required" } }
     });
+    expect(pendingReplay?.result?.content).toContain("already succeeded");
+    expect(pendingReplay?.result?.content).toContain("registered independent verification tool");
     expect(verified).toMatchObject({ decision: "allow", result: { ok: true } });
     expect(verifiedReplay).toMatchObject({
       decision: "deny",
       result: { metadata: { reason: "completed-mutation-replay", operationStatus: "verified" } }
     });
     expect(runMutation).toHaveBeenCalledTimes(1);
+
+    const evidence = new ExecutionEvidenceIndex();
+    for (const record of [created, pendingReplay, verified, verifiedReplay]) {
+      expect(record).toBeDefined();
+      if (record !== undefined) evidence.record(record, "turn-one");
+    }
+    const restored = new ExecutionEvidenceIndex();
+    restored.hydrate(evidence.recordsForTurn("turn-one"));
+    expect(deriveExecutionFinalOutcome({
+      toolExecutions: [], executionReceipts: restored.recordsForTurn("turn-one"),
+      completionFloor: "mutation_with_verification"
+    }).status).toBe("completed_with_recovered_errors");
 
     await executor.executeTool({
       ...request,

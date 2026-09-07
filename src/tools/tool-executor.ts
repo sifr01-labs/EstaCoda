@@ -122,6 +122,8 @@ export type ToolReadLedger = {
 };
 
 export type ToolExecutionRecord = {
+  /** Executor-owned link to a successful equivalent call; never tool-result metadata. */
+  completedReplayOf?: string;
   tool: ToolDefinition;
   /** Runtime-derived from trusted registration metadata; never provider input. */
   executionEffect?: ToolExecutionEffect;
@@ -366,7 +368,8 @@ export class ToolExecutor {
         executionEffect,
         targetKey,
         targetSummary,
-        completedMutation.status
+        completedMutation.status,
+        completedMutation.mutationCallId
       );
     }
     const persistedTargetKey = redactPersistedString(targetKey);
@@ -1085,18 +1088,19 @@ export class ToolExecutor {
     executionEffect: ToolExecutionEffect,
     targetKey: string | undefined,
     targetSummary: string | undefined,
-    operationStatus: "verification-required" | "settled" | "verified"
+    operationStatus: "verification-required" | "settled" | "verified",
+    completedReplayOf?: string
   ): Promise<ToolExecutionRecord> {
-    const verifierAvailable = operationStatus !== "verified" && await this.#hasReliableVerifier(tool.name, executionEffect);
+    const verifierAvailable = operationStatus !== "verified" && await this.#hasReliableVerifier(tool.name, executionEffect, false);
     const nextAction = operationStatus === "verified"
       ? "Continue from the verified result instead of repeating the mutation."
       : verifierAvailable
         ? "Use a registered independent verification tool before deciding whether any corrective mutation is needed."
-        : "No reliable verifier or idempotency mechanism is registered. Do not repeat this mutation automatically.";
+        : "No available readback tool with a reviewed verification relationship was found. Do not repeat this successful mutation automatically; report the missing verification separately.";
     const result: ToolResult = {
       ok: false,
       content: [
-        `Tool execution skipped: the equivalent ${tool.name} mutation is already journaled (${operationStatus}).`,
+        `Tool execution skipped: the equivalent ${tool.name} mutation already succeeded (${operationStatus}). No new write was dispatched.`,
         nextAction
       ].join("\n"),
       metadata: {
@@ -1144,6 +1148,7 @@ export class ToolExecutor {
     return {
       tool: toDefinition(tool),
       executionEffect,
+      ...(completedReplayOf === undefined ? {} : { completedReplayOf }),
       settlement: notStartedSettlement("failed"),
       input: request.input,
       decision: "deny",
@@ -1157,14 +1162,15 @@ export class ToolExecutor {
     };
   }
 
-  async #hasReliableVerifier(mutationTool: string, effect: ToolExecutionEffect): Promise<boolean> {
+  async #hasReliableVerifier(mutationTool: string, effect: ToolExecutionEffect, requireJournalParser = true): Promise<boolean> {
     if (effect.connector === undefined) return false;
     for (const definition of this.#registry.list()) {
       const candidate = this.#registry.get(definition.name);
       if (
         candidate?.connector?.id !== effect.connector.id ||
+        candidate.connector.kind !== effect.connector.kind ||
         candidate.capabilityMetadata?.verification?.verifies.includes(mutationTool) !== true ||
-        candidate.operationJournal?.verify === undefined
+        (requireJournalParser && candidate.operationJournal?.verify === undefined)
       ) continue;
       try {
         if (await candidate.isAvailable()) return true;

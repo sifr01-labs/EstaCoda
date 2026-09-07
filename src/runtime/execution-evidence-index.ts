@@ -8,6 +8,7 @@ import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { SessionEvent } from "../contracts/session.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import { normalizeExecutionEvidenceRecord } from "../session/execution-evidence-state.js";
+import { executionIdentities } from "../tools/execution-operation-ledger.js";
 
 const INELIGIBLE_EVIDENCE_TOOLS = new Set(["plan", "delegate_task"]);
 const MAX_EVIDENCE_TARGET_CHARS = 240;
@@ -21,6 +22,7 @@ type IndexedExecutionEvidence =
       record: ExecutionEvidenceRecord;
       visibleTurnId?: string;
       targetKey?: string;
+      identities?: ReadonlySet<string>;
       executionEffect?: ToolExecutionEffect;
     }
   | {
@@ -73,6 +75,8 @@ export class ExecutionEvidenceIndex {
           toolCallId,
           tool,
           status,
+          ...(status === "blocked" && execution.completedReplayOf !== undefined
+            ? { completedReplayOf: execution.completedReplayOf } : {}),
           riskClass: execution.riskClass,
           ...(targetSummary === undefined ? {} : { targetSummary }),
           ...(safeTurnId === undefined ? {} : { visibleTurnId: safeTurnId }),
@@ -80,7 +84,7 @@ export class ExecutionEvidenceIndex {
         };
     const normalized = normalizeExecutionEvidenceRecord(record);
     if (normalized === undefined) return undefined;
-    this.#indexRecord(normalized, execution.targetKey);
+    this.#indexRecord(normalized, execution.targetKey, executionIdentities(execution));
     return normalized;
   }
 
@@ -175,7 +179,7 @@ export class ExecutionEvidenceIndex {
     }
   }
 
-  #indexRecord(record: ExecutionEvidenceRecord, targetKey?: string): void {
+  #indexRecord(record: ExecutionEvidenceRecord, targetKey?: string, identities?: ReadonlySet<string>): void {
     const safeTurnId = safeVisibleTurnId(record.visibleTurnId);
     const safeKey = safeTargetKey(targetKey);
     if (record.status !== "success") {
@@ -199,6 +203,7 @@ export class ExecutionEvidenceIndex {
       },
       record,
       ...(safeKey === undefined ? {} : { targetKey: safeKey }),
+      ...(identities === undefined ? {} : { identities }),
       ...(record.executionEffect === undefined ? {} : { executionEffect: cloneExecutionEffect(record.executionEffect) }),
       ...(safeTurnId === undefined ? {} : { visibleTurnId: safeTurnId })
     });
@@ -212,6 +217,7 @@ export class ExecutionEvidenceIndex {
     if (input.visibleTurnId === undefined) return undefined;
     if (input.execution.result?.metadata?._estacoda_verification_evidence === false) return undefined;
     const verifierTargetKey = safeTargetKey(input.execution.targetKey);
+    const verifierIdentities = executionIdentities(input.execution);
     const candidates = [...this.#byCallId.values()].reverse();
     for (const candidate of candidates) {
       if (
@@ -226,6 +232,8 @@ export class ExecutionEvidenceIndex {
         candidate.targetKey !== undefined &&
         verifierTargetKey !== candidate.targetKey
       ) continue;
+      // A shared workspace is not proof that two different resources are the same.
+      if (identitiesConflict(verifierIdentities, candidate.identities)) continue;
       return {
         toolCallId: candidate.evidence.toolCallId,
         tool: candidate.evidence.tool
@@ -233,6 +241,17 @@ export class ExecutionEvidenceIndex {
     }
     return undefined;
   }
+}
+
+function identitiesConflict(left: ReadonlySet<string>, right: ReadonlySet<string> | undefined): boolean {
+  if (right === undefined) return false;
+  const fields = new Set([...left].map((identity) => identity.slice(0, identity.indexOf(":"))));
+  for (const field of fields) {
+    const prefix = `${field}:`;
+    const otherValues = [...right].filter((identity) => identity.startsWith(prefix));
+    if (otherValues.length > 0 && !otherValues.some((identity) => left.has(identity))) return true;
+  }
+  return false;
 }
 
 export class ExecutionEvidenceError extends Error {

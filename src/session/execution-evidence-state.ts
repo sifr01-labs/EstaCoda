@@ -54,11 +54,14 @@ export function normalizeExecutionEvidenceRecord(
       ...(verifiedMutation === undefined ? {} : { verifiedMutation })
     };
   }
+  const replay = record.status === "blocked" && executionEffect?.kind === "mutation"
+    ? boundedIdentifier(record.completedReplayOf) : undefined;
   return {
     kind: "execution-evidence-recorded",
     toolCallId,
     tool,
     status: record.status,
+    ...(replay === undefined || replay === toolCallId ? {} : { completedReplayOf: replay }),
     ...(isToolRiskClass(record.riskClass) ? { riskClass: record.riskClass } : {}),
     ...(targetSummary === undefined ? {} : { targetSummary }),
     ...(visibleTurnId === undefined ? {} : { visibleTurnId }),

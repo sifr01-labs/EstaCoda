@@ -242,6 +242,8 @@ export type ExecutionEvidenceRecord =
       toolCallId: string;
       tool: string;
       status: "failed" | "blocked" | "unavailable" | "ineligible";
+      /** Executor-owned successful duplicate link, not a permission denial override. */
+      completedReplayOf?: string;
       riskClass?: import("./tool.js").ToolRiskClass;
       targetSummary?: string;
       visibleTurnId?: string;

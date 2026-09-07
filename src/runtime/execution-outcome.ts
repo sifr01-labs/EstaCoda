@@ -252,6 +252,7 @@ function verifiedMutationCallIds(receipts: readonly ExecutionEvidenceRecord[]): 
       mutation === undefined ||
       mutation.tool !== receipt.verifiedMutation.tool ||
       !receipt.executionEffect.verifies.includes(mutation.tool) ||
+      !connectorsCompatible(receipt.executionEffect.connector, mutation.executionEffect?.connector) ||
       !sameVisibleTurn(receipt.visibleTurnId, mutation.visibleTurnId)
     ) continue;
     verified.add(mutation.toolCallId);
@@ -261,6 +262,27 @@ function verifiedMutationCallIds(receipts: readonly ExecutionEvidenceRecord[]): 
 
 function sameVisibleTurn(left: string | undefined, right: string | undefined): boolean {
   return left === undefined || right === undefined || left === right;
+}
+
+function recoveredReplayCallIds(receipts: readonly ExecutionEvidenceRecord[]): ReadonlySet<string> {
+  const verified = verifiedMutationCallIds(receipts.filter((receipt) => receipt.visibleTurnId !== undefined));
+  const mutations = new Map<string, ExecutionEvidenceRecord>();
+  const recovered = new Set<string>();
+  for (const receipt of receipts) {
+    if (receipt.status === "success" && receipt.executionEffect?.kind === "mutation") {
+      mutations.set(receipt.toolCallId, receipt);
+    }
+    if (receipt.status !== "blocked" || receipt.completedReplayOf === undefined) continue;
+    const original = mutations.get(receipt.completedReplayOf);
+    if (
+      original === undefined || !verified.has(original.toolCallId) ||
+      receipt.tool !== original.tool || receipt.executionEffect?.kind !== "mutation" ||
+      receipt.visibleTurnId === undefined || receipt.visibleTurnId !== original.visibleTurnId ||
+      !connectorsCompatible(receipt.executionEffect.connector, original.executionEffect?.connector)
+    ) continue;
+    recovered.add(receipt.toolCallId);
+  }
+  return recovered;
 }
 
 function classifyFinalStatus(input: {
@@ -281,6 +303,7 @@ function classifyFinalStatus(input: {
   const successfulIndexes: number[] = [];
   const failedIndexes: number[] = [];
   const authoritativeReceipts = input.executionReceipts.filter((receipt) => receipt.status !== "ineligible");
+  const recoveredReplays = recoveredReplayCallIds(authoritativeReceipts);
   for (const [index, receipt] of authoritativeReceipts.entries()) {
     if (receipt.status === "success") successfulIndexes.push(index);
     if (receipt.status === "failed") failedIndexes.push(index);
@@ -288,7 +311,7 @@ function classifyFinalStatus(input: {
   const succeeded = successfulIndexes.length;
   const failed = failedIndexes.length;
   const blocked = authoritativeReceipts.some((receipt) =>
-    receipt.status === "blocked" || receipt.status === "unavailable"
+    (receipt.status === "blocked" && !recoveredReplays.has(receipt.toolCallId)) || receipt.status === "unavailable"
   );
   const hasConfirmedWork = input.confirmedActions.length > 0 || succeeded > 0;
   const hasUsefulEvidence = hasConfirmedWork || input.uncertainActions.length > 0;
@@ -307,7 +330,7 @@ function classifyFinalStatus(input: {
     input.uncertainActions.length === 0 &&
     !unresolvedToolPlans &&
     !blocked &&
-    failed === 0
+    failed === 0 && recoveredReplays.size === 0
   ) {
     return "completed";
   }
@@ -335,6 +358,9 @@ function classifyFinalStatus(input: {
   if (input.terminationCause === "provider_failed" || input.providerExecution?.ok === false) {
     return hasConfirmedWork ? "partially_completed" : "failed";
   }
+  if (input.openContinuation === true || !completionFloorSatisfied) {
+    return hasUsefulEvidence ? "partially_completed" : "blocked";
+  }
   if (failed > 0) {
     if (succeeded === 0) return "failed";
     const lastSuccessIndex = successfulIndexes.at(-1) ?? -1;
@@ -343,16 +369,13 @@ function classifyFinalStatus(input: {
       ? "completed_with_recovered_errors"
       : "partially_completed";
   }
-  if (input.openContinuation === true || !completionFloorSatisfied) {
-    return hasUsefulEvidence ? "partially_completed" : "blocked";
-  }
   if (
     input.providerExecution?.ok === true &&
     (input.providerExecution.response?.content ?? "").trim().length === 0
   ) {
     return hasConfirmedWork ? "partially_completed" : "failed";
   }
-  return "completed";
+  return recoveredReplays.size > 0 ? "completed_with_recovered_errors" : "completed";
 }
 
 function settlesCompletionFloor(

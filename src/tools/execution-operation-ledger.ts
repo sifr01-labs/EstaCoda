@@ -187,7 +187,7 @@ function targetCompatibilityScore(
   return verifier !== undefined && mutation !== undefined ? -1 : 0;
 }
 
-function executionIdentities(execution: ToolExecutionRecord): Set<string> {
+export function executionIdentities(execution: ToolExecutionRecord): Set<string> {
   const identities = new Set<string>();
   collectInputIdentities(execution.input, identities);
   const continuity = execution.result?.metadata?._estacoda_continuity_facts;

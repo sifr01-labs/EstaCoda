@@ -19,6 +19,18 @@ function route(prompt: string) {
 }
 
 describe("bundled api-integration skill routing", () => {
+  it("checks effective configuration without implying authorization for live API testing", () => {
+    const verification = apiIntegrationSkill.playbook.find((step) => step.id === "verify-destination")?.description;
+    expect(verification).toContain("effective request URL");
+    expect(verification).toContain("variable scope precedence");
+    expect(verification).toContain("authentication/body variable references");
+    expect(verification).toContain("user authorization");
+    expect(verification).toContain("Continue independent products");
+    const text = readFileSync(skillUrl, "utf8");
+    expect(text).toContain("field-level or request-specific update");
+    expect(text).toContain("write schema can express its existing nested fields");
+    expect(text).toContain("preservation of unrelated content");
+  });
   it("plans source discovery and destination reconciliation before import without an all-items gate", () => {
     const steps = apiIntegrationSkill.playbook;
     expect(steps.slice(0, 3).map((step) => step.id)).toEqual(["discover-api-source", "reconcile-destination", "import-description"]);

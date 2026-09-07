@@ -26,6 +26,40 @@ function execution(overrides: Partial<ToolExecutionRecord> = {}): ToolExecutionR
 }
 
 describe("ExecutionEvidenceIndex", () => {
+  it("does not link a readback of another resource even in the same workspace without target keys", () => {
+    const index = new ExecutionEvidenceIndex();
+    index.record(execution({
+      input: { environmentId: "env-a", workspaceId: "shared" },
+      executionEffect: { kind: "mutation", connector: { kind: "mcp", id: "example" } }
+    }), "turn-one");
+    const read = (id: string, ok = true) => index.record(execution({
+      toolCallId: `read-${id}-${ok}`, tool: { ...execution().tool, name: "example.getEnvironment" },
+      input: { environmentId: id, workspaceId: "shared" },
+      result: { ok, content: "redacted" },
+      executionEffect: { kind: "verification", verifies: ["postman.update"], connector: { kind: "mcp", id: "example" } }
+    }), "turn-one");
+    expect(read("env-b")).not.toHaveProperty("verifiedMutation");
+    expect(read("env-a", false)).not.toHaveProperty("verifiedMutation");
+    expect(read("env-a")).toHaveProperty("verifiedMutation.toolCallId", "call-ok");
+  });
+
+  it("persists only executor-owned duplicate links and never treats a skipped duplicate as successful evidence", () => {
+    const index = new ExecutionEvidenceIndex();
+    const base = execution({ decision: "deny", executionEffect: { kind: "mutation" }, result: {
+      ok: false, content: "skipped", metadata: { completedReplayOf: "forged" }
+    } });
+    expect(index.record(base, "turn-one")).not.toHaveProperty("completedReplayOf");
+    const receipt = index.record({ ...base, completedReplayOf: "original-call" }, "turn-one");
+    expect(receipt).toMatchObject({ status: "blocked", completedReplayOf: "original-call" });
+    const restored = new ExecutionEvidenceIndex();
+    restored.hydrate([receipt as SessionEvent]);
+    expect(restored.recordsForTurn("turn-one")).toEqual([receipt]);
+    expect(() => restored.resolve(["call-ok"])).toThrow("blocked");
+    expect(index.record({ ...base, completedReplayOf: "call-ok" })).not.toHaveProperty("completedReplayOf");
+    expect(index.record({ ...base, completedReplayOf: "original-call", executionEffect: { kind: "read" } }))
+      .not.toHaveProperty("completedReplayOf");
+  });
+
   it("shares one deterministic evidence disposition with Mission progress", () => {
     expect(executionEvidenceStatus(execution())).toBe("success");
     expect(executionEvidenceStatus(execution({ result: { ok: false, content: "failed" } }))).toBe("failed");

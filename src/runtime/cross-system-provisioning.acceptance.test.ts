@@ -75,6 +75,7 @@ type JourneyScenario = {
   undeclaredDestination?: boolean;
   exposeMutation?: boolean;
   failVerification?: boolean;
+  repeatSuccessfulMutation?: boolean;
   expectCompleted: boolean;
   expectedFinalOutcome: ExecutionFinalOutcomeStatus;
   expectedMutationCalls: number;
@@ -86,6 +87,33 @@ type JourneyScenario = {
 };
 
 const scenarios: JourneyScenario[] = [
+  {
+    name: "a skipped duplicate with failed protected-state readback remains incomplete",
+    userInput: true,
+    repeatSuccessfulMutation: true,
+    failVerification: true,
+    expectCompleted: false,
+    expectedFinalOutcome: "partially_completed",
+    expectedMutationCalls: 1,
+    expectedVerificationCalls: 1,
+    expectedTimeline: ["destination-read", "destination-mutation", "destination-verification"],
+    expectedProviderRequests: 6,
+    expectedToolExecutions: 5,
+    expectedPlanExecutions: 0,
+  },
+  {
+    name: "a repeated successful protected write is skipped and matching readback completes with recovered errors",
+    userInput: true,
+    repeatSuccessfulMutation: true,
+    expectCompleted: true,
+    expectedFinalOutcome: "completed_with_recovered_errors",
+    expectedMutationCalls: 1,
+    expectedVerificationCalls: 1,
+    expectedTimeline: ["destination-read", "destination-mutation", "destination-verification"],
+    expectedProviderRequests: 6,
+    expectedToolExecutions: 5,
+    expectedPlanExecutions: 0,
+  },
   {
     name: "grouped user credentials complete through the runtime without entering provider context",
     userInput: true,
@@ -329,13 +357,14 @@ describe.sequential("governed cross-system provisioning acceptance", () => {
         if (!scenario.userInput) expect(harness.authorizationRequests[0]).toMatchObject({
           transferGroup: { items: [{}, {}] },
         });
-        expect(toolNames.filter((name) => name === MUTATION_TOOL)).toHaveLength(1);
+        expect(toolNames.filter((name) => name === MUTATION_TOOL)).toHaveLength(scenario.repeatSuccessfulMutation ? 2 : 1);
         expect(toolNames.filter((name) => name === VERIFY_TOOL)).toHaveLength(1);
         expect(toolNames.filter((name) => name === "browser.snapshot")).toHaveLength(0);
         expect(toolNames.filter((name) => name !== "plan")).toEqual([
           READ_TOOL,
           "browser.navigate",
           MUTATION_TOOL,
+          ...(scenario.repeatSuccessfulMutation ? [MUTATION_TOOL] : []),
           VERIFY_TOOL,
         ]);
         expect(response!.finalOutcome?.confirmedActions).toEqual([
@@ -527,6 +556,7 @@ function createProviderScript(input: {
 }) {
   let phase = 0;
   let nextCallId = 1;
+  let successfulMutationInput: Record<string, unknown> | undefined;
   return (request: ProviderRequest): ProviderResponse => {
     input.providerRequests.push(structuredClone(request));
     const call = (name: string, args: Record<string, unknown>) => toolCallResponse(
@@ -543,10 +573,13 @@ function createProviderScript(input: {
         response = call("browser.navigate", { url: FAKE_DEVELOPER_PORTAL_URL });
         break;
       case 2:
-        response = call(MUTATION_TOOL, mutationInput(request, input.sessionId, input.scenario.undeclaredDestination === true, input.scenario.userInput === true));
+        successfulMutationInput = mutationInput(request, input.sessionId, input.scenario.undeclaredDestination === true, input.scenario.userInput === true);
+        response = call(MUTATION_TOOL, successfulMutationInput);
         break;
       case 3:
-        if (input.scenario.approval === "denied" || input.scenario.changeSourceAfterApproval === true ||
+        if (input.scenario.repeatSuccessfulMutation) {
+          response = call(MUTATION_TOOL, successfulMutationInput!);
+        } else if (input.scenario.approval === "denied" || input.scenario.changeSourceAfterApproval === true ||
             input.scenario.undeclaredDestination === true || input.scenario.exposeMutation === false) {
           response = finalResponse("Provisioning could not safely complete.");
         } else {
@@ -554,6 +587,10 @@ function createProviderScript(input: {
         }
         break;
       default:
+        if (phase === 5 && input.scenario.repeatSuccessfulMutation) {
+          response = call(VERIFY_TOOL, { targetId: TARGET_ID });
+          break;
+        }
         response = finalResponse(input.scenario.failVerification === true
           ? "The mutation could not be independently verified."
           : "Provisioning completed and independently verified.");
