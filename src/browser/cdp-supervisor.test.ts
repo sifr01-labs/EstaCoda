@@ -1,3 +1,4 @@
+import { Script } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { CDPSupervisor, parseCdpSnapshot, snapshotExpression } from "./cdp-supervisor.js";
 import type { CdpWebSocketEvent, CdpWebSocketLike } from "./cdp-client.js";
@@ -119,7 +120,8 @@ describe("CDPSupervisor", () => {
   it("keeps the browser-side structured snapshot expression syntactically valid", () => {
     const expression = snapshotExpression();
 
-    expect(() => new Function(`return ${expression};`)).not.toThrow();
+    // Compile the generated expression for syntax validation without executing it.
+    expect(() => new Script(`(${expression});`)).not.toThrow();
     expect(expression).toContain("collectScriptedControls");
     expect(expression).toContain("style.cursor !== 'pointer'");
     expect(expression).toContain("estacodaVisibleText");
