@@ -1,5 +1,7 @@
 overrides:
   esbuild: 0.28.1
+  # Patch Vitest's vulnerable Vite 8.0.x resolutions without changing its major.
+  'vite@>=8.0.0 <8.0.16': 8.0.16
 
 allowBuilds:
   '@whiskeysockets/baileys': false
